@@ -1,0 +1,109 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "setuptools_scm[toml]>=6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nvitk"
+version = "0.1.0"
+description = "Neuro-Vascular Imaging ToolKit"
+authors = [
+  { name = "Ignacio Marcos Serrano", email = "imarcoss@cnic.es" }
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["3D", "biomedical", "mesh", "imaging", "neuroimaging", "vascular", "mri", "ct", "pet"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "License :: Open Source"
+]
+dependencies = [
+  # General dependencies
+  "numpy>=2.3.3",
+  "scipy>=1.15.3",
+  "click>=8.2.1",
+  "openpyxl>=3.1.5",
+  "seaborn>=0.13.2",
+  "pandas>=2.3.2",
+  "pyarrow>=21.0.0",
+  "debugpy>=1.8.16",
+  "jupyter>=1.1.1",
+
+  # Image processing
+  "nibabel>=5.3.2",
+  "tifffile>=2025.5.26",
+  "pillow>=11.0.0",
+  "imageio>=2.37.0",
+  "nd2>=0.10.3",
+  "antspyx>=0.6.1",
+  "dicom2nifti>=2.6.1",
+  "pydicom>=3.0.1",
+  "pylibjpeg>=2.0.1",
+  "vtk>=9.3.1",
+  "pyradiomics>=3.0.1",
+  "SimpleITK>=2.5.2",
+  "scikit-image>=0.25.2",
+  "opencv-python>=4.11",
+
+  "totalsegmentator>=2.11.0",
+  "nnunetv2>=2.6.2",
+
+  # Mesh processing
+  # "trimesh>=4.7.4",
+  #  "open3d>=0.19.0",
+  #'pymeshlab>=',
+
+  # GUI and visualization
+  "rich>=14.1.0",
+  "lazy-loader>=0.4",
+  "networkx>=3.3",
+  "ipywidgets>=8.1.5",
+  "matplotlib>=3.8.0",
+  "plotly>=6.3.0",
+  "kaleido>=1.0.0",
+
+  # Experimental dependencies
+   "scikit-learn>=1.7.1",
+
+  # MATLAB dependencies
+#   "matlabengine==25.2.2", # For MATLAB version 2025b
+]
+
+[project.optional-dependencies]
+gpu = [
+  "cupy>=13.6.0",
+  "pytorch>=2.8.0", # +cu129
+  "torchvision>=0.23.0", # +cu129
+]
+test = [
+  "pytest>=8.3.5",
+]
+conda-packages = [
+  # These packages require conda-forge
+  # Install with: conda install -c channel_name pck_name
+  "freeimage>=3.18.0", # -c conda-forge
+  "mrtrix3>=3.0.8", # -c MRtrix3
+  "libstdcxx-ng>=15.2.0", # -c conda-forge
+]
+full = ["nvitk[gpu,test]"]
+
+[project.scripts]
+# General imaging and mesh processing scripts
+# dcm2nii = "conversion.dcm2nii:main"
+# stl2nifti = "conversion.stl2nifti:main"
+# nikon2nifti = "conversion.nikon2nifti:main"
+
+[project.gui-scripts]
+# Nvitk-GUI = "gui.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]  # Ensures subpackages are found
+
+[tool.poetry]
+packages = [
+  { include = "scripts", from = "src" },
+  { include = "scripts.*", from = "src" },
+]
