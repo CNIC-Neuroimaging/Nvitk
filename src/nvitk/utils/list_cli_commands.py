@@ -162,9 +162,6 @@ def list_cli_commands():
     print(f"   {Colors.WHITE}• --backend numpy  (CPU processing){Colors.RESET}")
     print(f"   {Colors.WHITE}• --backend cupy   (GPU processing){Colors.RESET}")
     print(f"   {Colors.WHITE}[• --backend gpu    (GPU processing alias for some commands){Colors.RESET}]")
-    print(f"\n{Colors.BOLD}Logging Options:{Colors.RESET}")
-    print(f"   {Colors.WHITE}• --log-level DEBUG   (Detailed debugging){Colors.RESET}")
-    print(f"   {Colors.WHITE}• --log-level INFO    (General information){Colors.RESET}")
     print("=" * 100)
 
 
