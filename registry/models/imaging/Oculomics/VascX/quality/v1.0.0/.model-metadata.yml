@@ -1,0 +1,51 @@
+name: vascx-quality
+version: "1.0.0"
+display_name: "VascX Quality"
+
+type: classification
+framework: pytorch
+domain: oculomics
+
+description: >
+  TBA
+
+weights:
+  location: /run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/quality/v1.0.0
+  files:
+    - quality.pt
+  config_files: []
+  size_mb: unknown
+
+compatible_containers:
+  - unknown
+
+source:
+  type: unknown
+  origin: unknown
+  url: unknown
+  license: unknown
+
+usage:
+  command_example: |
+    TBA
+  input_format: unknown
+  output_format: unknown
+
+maintainers:
+  - name: BioImaging Team
+    email: imarcoss@cnic.es
+
+tags:
+  - image-quality
+  - oculomics
+
+performance:
+  metrics: unknown
+  gpu_memory_mb: unknown
+  inference_time_ms: unknown
+
+training:
+  dataset: unknown
+  framework_version: unknown
+
+notes: TBA

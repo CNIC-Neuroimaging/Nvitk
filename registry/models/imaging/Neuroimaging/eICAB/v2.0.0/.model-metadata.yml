@@ -1,0 +1,64 @@
+name: eicab
+version: "2.0.0"
+display_name: "eICAB v2 - Circle of Willis Segmentation"
+
+type: segmentation
+framework: pytorch
+domain: neuroimaging
+
+description: >
+  Express Intracranial Arteries Breakdown (eICAB) v2 for automated segmentation
+  of Circle of Willis from MR angiography (MRA) images. Improved version with
+  ensemble of 4 models trained on 236 subjects (compared to 116 in v1.0.0).
+
+weights:
+  location: /run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/eICAB/v2.0.0
+  files:
+    - eICAB_0_236.pt
+    - eICAB_1_236.pt
+    - eICAB_2_236.pt
+    - eICAB_3_236.pt
+  config_files: []
+  size_mb: unknown
+
+compatible_containers:
+  - eICAB:v2023.4.17
+
+source:
+  type: external
+  origin: "eICAB project (Snail Lab)"
+  url: "https://gitlab.com/FelixDumais/vessel_segmentation_snaillab"
+  license: "CC Attribution-NC-ND 4.0 International"
+
+usage:
+  command_example: |
+    # Usage via eICAB container
+    singularity exec --nv eICAB.sif eicab_cmd --input mra.nii.gz --output segmentation.nii.gz
+  
+  input_format: "MR angiography (MRA) images in NIfTI format"
+  output_format: "Circle of Willis segmentation mask (NIfTI format)"
+
+maintainers:
+  - name: BioImaging Team
+    email: djimenez@cnic.es
+
+tags:
+  - vascular-segmentation
+  - circle-of-willis
+  - neuroimaging
+  - mra
+  - ensemble
+
+performance:
+  metrics: unknown
+  gpu_memory_mb: unknown
+  inference_time_ms: unknown
+
+training:
+  dataset: "236 subjects"
+  framework_version: unknown
+
+notes: |
+  This is an ensemble model using 4 separate models. Trained on 236 subjects (double 
+  the training data of v1.0.0).Designed specifically for Circle of Willis segmentation
+  from MRA scans.

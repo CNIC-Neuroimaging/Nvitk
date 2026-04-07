@@ -1,0 +1,60 @@
+name: topcow-arg
+version: "1.0.0"
+display_name: "TopCoW ARG"
+
+type: segmentation
+framework: nnunet
+domain: neuroimaging
+
+description: >
+  TBA
+
+weights:
+  location: /run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/TopCoW/ARG/v1.0.0
+  structure: nnunet
+  files:
+    - fold_0/checkpoint_best.pth
+    - fold_1/checkpoint_best.pth
+    - fold_2/checkpoint_best.pth
+    - fold_3/checkpoint_best.pth
+    - fold_4/checkpoint_best.pth
+  config_files:
+    - dataset.json
+    - dataset_fingerprint.json
+    - plans.json
+  size_mb: unknown
+
+compatible_containers:
+  - TopCoW-ARG:v2025.10.14
+
+source:
+  type: unknown
+  origin: unknown
+  url: unknown
+  license: unknown
+
+usage:
+  command_example: |
+    TBA
+  input_format: unknown
+  output_format: unknown
+
+maintainers:
+  - name: BioImaging Team
+    email: imarcoss@cnic.es
+
+tags:
+  - circle-of-willis
+  - neuroimaging
+  - nnunet
+
+performance:
+  metrics: unknown
+  gpu_memory_mb: unknown
+  inference_time_ms: unknown
+
+training:
+  dataset: unknown
+  framework_version: unknown
+
+notes: TBA

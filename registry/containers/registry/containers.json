@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2025-10-16T14:12:41.797567Z",
+  "infrastructure": {
+    "container_storage": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers"
+  },
+  "containers": {
+    "base": {
+      "gpu-base": {
+        "latest": "v2025.10.15",
+        "versions": {
+          "v2025.5.13": {
+            "git_tag": null,
+            "git_commit": null,
+            "built_date": "2025-05-13T00:00:00Z",
+            "built_by": "imarcoss",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/base/gpu-base/gpu-base_v2025.5.13.sif",
+            "sif_sha256": "ae5194cc12839719c91c8b4ff098c80b21acc985dd688cf091e5a79bf2a1c38a",
+            "size_mb": 16100,
+            "metadata": {
+              "gpu_required": true,
+              "cuda_version": "12.8",
+              "python_version": "3.11",
+              "pytorch_version": "2.x",
+              "cupy_version": "cuda12x"
+            },
+            "dependencies": {}
+          },
+          "v2025.10.15": {
+            "git_tag": "gpu-base-v2025.10.15",
+            "git_commit": "91967ce",
+            "built_date": "2025-10-16T14:12:41Z",
+            "built_by": "ignacio-ms",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/base/gpu-base/gpu-base_v2025.10.15.sif",
+            "sif_sha256": "06404bb9b5b3b7f974a5f541a2eb0dc747c7bab50af4da84d46ac9b2519c86c4",
+            "size_mb": 17428,
+            "metadata": {},
+            "dependencies": {}
+          }
+        }
+      }
+    },
+    "projects": {
+      "pesa-fat": {
+        "latest": "v2025.5.27",
+        "versions": {
+          "v2025.5.27": {
+            "git_tag": null,
+            "git_commit": null,
+            "built_date": "2025-05-27T00:00:00Z",
+            "built_by": "imarcoss",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/projects/pesa-fat/gpu-pesa-fat_v2025.5.27.sif",
+            "sif_sha256": "c9b55b3b1cbb77d9cc2bd437a43e63946aec007f3ecf0f7932bfa1fe0f1a8296",
+            "size_mb": 16700,
+            "metadata": {
+              "gpu_required": true,
+              "cuda_version": "12.8",
+              "python_version": "3.11",
+              "pytorch_version": "2.x",
+              "cupy_version": "cuda12x"
+            },
+            "dependencies": {
+              "base_container": "gpu-base:v2025.5.13"
+            }
+          }
+        }
+      },
+      "eICAB": {
+        "latest": "v2023.4.17",
+        "versions": {
+          "v2022.10.15": {
+            "built_date": "2022-10-15T00:00:00Z",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/projects/neuroimaging/eICAB/eICAB_v2022.10.15.sif",
+            "sif_sha256": "4b92bc49d16c18267d0469c69d15948828e78204e720acc6510b128dd35cdfd6",
+            "size_mb": 6800,
+            "external": true,
+            "metadata": {
+              "description": "eICAB brain extraction and parcellation tool",
+              "source": "External (pre-built container)",
+              "gpu_required": false
+            },
+            "dependencies": {}
+          },
+          "v2023.4.17": {
+            "built_date": "2023-04-17T00:00:00Z",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/projects/neuroimaging/eICAB/eICAB_v2023.4.17.sif",
+            "sif_sha256": "d110203fd73acce97cf0c3b9e04ff87030e3eec215fb2a7815cf4ffff93930ef",
+            "size_mb": 14200,
+            "external": true,
+            "metadata": {
+              "description": "eICAB brain extraction and parcellation tool",
+              "source": "External (pre-built container)",
+              "gpu_required": false
+            },
+            "dependencies": {}
+          }
+        }
+      },
+      "TopCoW-ARG": {
+        "latest": "v2025.10.23",
+        "versions": {
+          "v2025.10.23": {
+            "built_date": "2025-10-23T00:00:00Z",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/projects/neuroimaging/TopCoW/TopCoW-ARG/TowCoW-ARG_v2025.10.23.sif",
+            "sif_sha256": "cdc19614e778ff787bded0ca28fe4473e7a682c1f45f680eb475c0d91947f165",
+            "size_mb": 5700,
+            "external": true,
+            "metadata": {
+              "description": "TopCoW Circle of Willis segmentation - ARG variant",
+              "source": "External (pre-built container)",
+              "gpu_required": true
+            },
+            "dependencies": {}
+          }
+        }
+      },
+      "TopCoW-CLAIM": {
+        "latest": "v2025.10.10",
+        "versions": {
+          "v2025.10.10": {
+            "built_date": "2025-10-10T00:00:00Z",
+            "sif_path": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/containers/projects/neuroimaging/TopCoW/TopCoW-CLAIM/TowCoW-CLAIM_v2025.10.10.sif",
+            "sif_sha256": "389bee8cfcc063fe525e5b13ef24c6f549da9d327ed1f2c8c7fa30e4963f4c85",
+            "size_mb": 7600,
+            "external": true,
+            "metadata": {
+              "description": "TopCoW Circle of Willis segmentation - CLAIM variant",
+              "source": "External (pre-built container)",
+              "gpu_required": true
+            },
+            "dependencies": {}
+          }
+        }
+      }
+    }
+  }
+}

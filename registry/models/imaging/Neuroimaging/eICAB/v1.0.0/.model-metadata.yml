@@ -1,0 +1,65 @@
+name: eicab
+version: "1.0.0"
+display_name: "eICAB v1 - Circle of Willis Segmentation"
+
+type: segmentation
+framework: pytorch
+domain: neuroimaging
+
+description: >
+  Express Intracranial Arteries Breakdown (eICAB) v1 for automated segmentation
+  of Circle of Willis from MR angiography (MRA) images. Original version with 
+  the exact weights presented in the eICAB paper, trained on 116 subjects. 
+  Deprecated in favor of v2.0.0.
+
+weights:
+  location: /run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/eICAB/v1.0.0
+  files:
+    - eICAB_0.pt
+    - eICAB_1.pt
+    - eICAB_2.pt
+    - eICAB_3.pt
+  config_files: []
+  size_mb: 96
+
+compatible_containers:
+  - eICAB:v2023.4.17
+
+source:
+  type: external
+  origin: "eICAB project (Snail Lab)"
+  url: "https://gitlab.com/FelixDumais/vessel_segmentation_snaillab"
+  license: "CC Attribution-NC-ND 4.0 International"
+
+usage:
+  command_example: |
+    # Deprecated - use v2.0.0 instead
+    # Previous usage via eICAB container
+  
+  input_format: "MR angiography (MRA) images in NIfTI format"
+  output_format: "Circle of Willis segmentation mask"
+
+maintainers:
+  - name: BioImaging Team
+    email: djimenez@cnic.es
+
+tags:
+  - vascular-segmentation
+  - circle-of-willis
+  - neuroimaging
+  - deprecated
+
+performance:
+  metrics: unknown
+  gpu_memory_mb: unknown
+  inference_time_ms: unknown
+
+training:
+  dataset: unknown
+  framework_version: unknown
+
+notes: |
+  DEPRECATED: This version is deprecated. Use eICAB v2.0.0 instead.
+  
+  v1.0.0 uses original architecture with the exact weights presented in the eICAB 
+  paper, trained on 116 subjects. v2.0.0 the network trained with 236 subjects.

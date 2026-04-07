@@ -1,0 +1,14 @@
+name: nvitk
+channels:
+  - conda-forge
+  - mrtrix3
+dependencies:
+  - python=3.11
+  - pip
+  # Conda-only / non-PyPI dependencies
+  - freeimage>=3.18.0
+  - mrtrix3>=3.0.8
+  - libstdcxx-ng>=15.2.0
+  # Install the Python package from this repo via pip
+  - pip:
+      - -e .

@@ -1,0 +1,25 @@
+name: nvitk-gpu
+channels:
+  - morpheme
+  - mosaic
+  - nvidia
+  - pytorch
+  - conda-forge
+  - mrtrix3
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  # Conda-only / non-PyPI dependencies
+  - freeimage>=3.18.0
+  - mrtrix3>=3.0.8
+  - libstdcxx-ng>=15.2.0
+  - pip:
+      # CUDA-enabled PyTorch wheels
+      - --extra-index-url https://download.pytorch.org/whl/cu129
+      - torch==2.8.0+cu129
+      - torchvision==0.23.0+cu129
+      - cupy-cuda12x==13.6.0
+      # Install the Python package from this repo
+      - -e .

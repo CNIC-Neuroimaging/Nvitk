@@ -1,0 +1,64 @@
+name: cellposesam
+version: "1.0.0"
+display_name: "CellposeSAM - Cell Segmentation with SAM"
+
+type: segmentation
+framework: pytorch
+domain: microscopy
+
+description: >
+  CellposeSAM combines Cellpose with Meta's Segment Anything Model (SAM)
+  for enhanced cell segmentation capabilities. Leverages foundation model
+  features for improved generalization.
+
+weights:
+  location: /run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Microscopy/Cellpose/CellposeSAM/v1.0.0
+  files:
+    - cpsam
+  config_files: []
+  size_mb: 1200
+
+compatible_containers:
+  - unknown
+
+source:
+  type: pretrained
+  origin: "Cellpose-SAM official"
+  url: "https://cellpose.readthedocs.io/en/latest/models.html"
+  license: "CC-BY-NC 4.0 International license"
+
+usage:
+  command_example: |
+    from cellpose import models
+    model = models.CellposeModel(gpu=True, model_type='cpsam')
+    masks, flows, styles = model.eval(imgs)
+  
+  input_format: "2D/3D microscopy images (grayscale or RGB)"
+  output_format: "Integer segmentation masks (0=background, 1,2,3...=cells)"
+
+maintainers:
+  - name: BioImaging Team
+    email: imarcoss@cnic.es
+
+tags:
+  - instance-segmentation
+  - cell-segmentation
+  - microscopy
+  - cellpose
+  - sam
+  - foundation-model
+
+performance:
+  metrics: unknown
+  gpu_memory_mb: unknown
+  inference_time_ms: unknown
+
+training:
+  dataset: "Cellpose + SAM training datasets"
+  framework_version: unknown
+
+notes: |
+  Combines Cellpose architecture with SAM (Segment Anything Model) features.
+  May offer better generalization than standard Cellpose models (v3.x versions).
+  Larger model size due to SAM integration.
+

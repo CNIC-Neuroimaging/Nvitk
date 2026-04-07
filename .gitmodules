@@ -1,6 +1,6 @@
-[submodule "registry_models"]
-	path = registry_models
+[submodule "registry/models"]
+	path = registry/models
 	url = git@bioinfo-git.cnic.es:imarcoss/bioimaging-models.git
-[submodule "registry_containers"]
-	path = registry_containers
+[submodule "registry/containers"]
+	path = registry/containers
 	url = git@bioinfo-git.cnic.es:imarcoss/bioimaging-containers.git

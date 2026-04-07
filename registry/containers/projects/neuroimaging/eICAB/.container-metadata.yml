@@ -1,0 +1,65 @@
+name: eICAB
+display_name: "eICAB - Brain Extraction and Parcellation"
+type: project
+external: true
+description: |
+  eICAB (Express Intracranial Arteries Breakdown) is a tool for automated segmentation
+  and labeling of the main intracranial arteries on MR angiography images.
+  
+  This is an externally-built & modifyed container (no source .def file available).
+
+maintainers:
+  - name: Ignacio Marcos Serrano
+    email: imarcoss@cnic.es
+  - name: Daniel Jimenez Carretero
+    email: djimenez@cnic.es
+
+source:
+  type: external
+  origin: "Pre-built container from external source"
+  available_versions:
+    - v2022.10.15
+    - v2023.4.17
+
+base_image: unknown
+gpu_required: false
+min_gpu_memory_gb: unknown
+
+capabilities:
+  - Circle of Willis segmentation from MRA
+
+runtime:
+  bind_mounts:
+    - source: /data
+      target: /data
+      required: true
+      description: "Input MRI data directory"
+    
+    - source: /results
+      target: /results
+      required: false
+      description: "Output directory"
+  
+  env_vars: {}
+
+usage:
+  examples:
+    - description: "Run eICAB brain extraction"
+      command: |
+        TBA
+
+notes: |
+  This is an external container without source definition files.
+  For detailed usage, refer to eICAB documentation.
+  
+  Container versions available:
+  - v2022.10.15 (older version)
+  - v2023.4.17 (latest)
+
+tags:
+  - neuroimaging
+  - vascular-segmentation
+  - circle-of-willis
+  - mra
+  - external
+

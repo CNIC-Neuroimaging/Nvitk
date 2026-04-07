@@ -1,0 +1,79 @@
+Bootstrap: localimage
+From: ${CONTAINER_STORAGE}/base/gpu-base/gpu-base_${BASE_VERSION}.sif
+
+%files
+    ${REPO_ROOT}/projects/pesa-fat/requirements/conda_requirements.txt /conda_req.txt
+    ${REPO_ROOT}/projects/pesa-fat/requirements/pip_requirements.txt /pip_req.txt
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export CONTAINER_VERSION="${CONTAINER_VERSION}"
+    export CONTAINER_NAME="pesa-fat"
+    export MODEL_REGISTRY="/models"
+    
+    # Model paths (models are bind-mounted from /ia_models to /models)
+    export TOTALSEG_HOME_DIR="/models/imaging/totalsegmentator/totalsegmentator-v2"
+
+%post
+    . /opt/conda/bin/activate
+    
+    # Install conda requirements
+    conda install --file /conda_req.txt -y
+    
+    # Install pip requirements
+    pip3 install -r /pip_req.txt
+    
+    # Export final environment
+    conda env export > /opt/pesa-fat-environment.yml
+    
+    # Record build metadata
+    cat > /BUILD_INFO << EOF
+Built: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Version: ${CONTAINER_VERSION}
+Base: gpu-base_${BASE_VERSION}
+Git Commit: ${GIT_COMMIT}
+Git Tag: pesa-fat-${CONTAINER_VERSION}
+EOF
+    
+    # Cleanup
+    conda clean -afy
+    pip cache purge
+
+%runscript
+    echo "PESA-FAT Container ${CONTAINER_VERSION}"
+    echo "Base: gpu-base ${BASE_VERSION}"
+    echo ""
+    echo "Models directory: /models (bind /ia_models)"
+    echo ""
+    exec "$@"
+
+%labels
+    Version ${CONTAINER_VERSION}
+    BaseImage gpu-base_${BASE_VERSION}
+    Project pesa-fat
+    GPU true
+    Maintainer imarcoss@cnic.esapptainer run --nv --bind /ia_models:/models pesa-fat.sif
+apptainer exec --nv \
+            --bind /ia_models:/models \
+            --bind /data:/data \
+            pesa-fat.sif \
+            python analysis.py --input /data/sample.nii.gz
+
+%help
+    PESA-FAT Analysis Pipeline Container
+    
+    Container version: ${CONTAINER_VERSION}
+    Base image: gpu-base ${BASE_VERSION}
+    
+    Required models (bind /ia_models to /models):
+    - TotalSegmentator v2
+    
+    Usage:
+        TBA
+        
+    Example:
+        TBA
+    
+    Build info:
+        cat /BUILD_INFO
+

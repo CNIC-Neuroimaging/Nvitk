@@ -1,0 +1,68 @@
+name: TopCoW-ARG
+display_name: "TopCoW Circle of Willis Segmentation - ARG"
+type: project
+external: true
+description: |
+  TopCoW (Topology-preserving anatomical segmentation of the Circle of Willis) 
+  for automated segmentation of the Circle of Willis from MR angiography.
+  
+  This is the ARG Team variant.
+  
+  This is an externally-built container (no source .def file available).
+
+maintainers:
+  - name: BioImaging Team
+    email: imarcoss@cnic.es
+
+source:
+  type: external
+  origin: "Pre-built container from TopCoW challenge"
+  variant: "ARG Team"
+  available_versions:
+    - v2025.10.23
+
+base_image: unknown
+gpu_required: true
+min_gpu_memory_gb: unknown
+
+capabilities:
+  - Circle of Willis segmentation
+  - Vascular segmentation from MRA
+  - Topology-preserving segmentation
+
+runtime:
+  bind_mounts:
+    - source: /data
+      target: /data
+      required: true
+      description: "Input MRA data directory"
+    
+    - source: /results
+      target: /results
+      required: false
+      description: "Output directory"
+  
+  env_vars: {}
+
+usage:
+  examples:
+    - description: "Run TopCoW-ARG segmentation"
+      command: |
+        TBA
+
+notes: |
+  This is an external container without source definition files.
+  
+  TopCoW-ARG uses ARG Team for improved segmentation
+  of Circle of Willis vasculature.
+  
+  Requires GPU for optimal performance.
+
+tags:
+  - neuroimaging
+  - vascular-segmentation
+  - circle-of-willis
+  - mra
+  - external
+  - gpu
+

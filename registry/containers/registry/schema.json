@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BioImaging Container Registry Schema",
+  "type": "object",
+  "required": ["schema_version", "last_updated", "infrastructure", "containers"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for this registry format"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp (ISO 8601)"
+    },
+    "infrastructure": {
+      "type": "object",
+      "required": ["container_storage"],
+      "properties": {
+        "container_storage": {
+          "type": "string",
+          "description": "Root path for container storage on server"
+        }
+      }
+    },
+    "containers": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "type": "object",
+          "description": "Base containers",
+          "additionalProperties": {
+            "$ref": "#/definitions/container_group"
+          }
+        },
+        "projects": {
+          "type": "object",
+          "description": "Project-specific containers",
+          "additionalProperties": {
+            "$ref": "#/definitions/container_group"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "container_group": {
+      "type": "object",
+      "required": ["latest", "versions"],
+      "properties": {
+        "latest": {
+          "type": "string",
+          "description": "Version identifier for the latest stable version"
+        },
+        "versions": {
+          "type": "object",
+          "description": "All available versions",
+          "additionalProperties": {
+            "$ref": "#/definitions/container_version"
+          }
+        }
+      }
+    },
+    "container_version": {
+      "type": "object",
+      "required": ["built_date", "sif_path", "sif_sha256", "size_mb"],
+      "properties": {
+        "git_tag": {
+          "type": "string",
+          "description": "Git tag for this version (if available)"
+        },
+        "git_commit": {
+          "type": "string",
+          "description": "Git commit hash (if available)"
+        },
+        "built_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Build date (ISO 8601)"
+        },
+        "built_by": {
+          "type": "string",
+          "description": "Builder identifier"
+        },
+        "sif_path": {
+          "type": "string",
+          "description": "Absolute path to .sif file on server"
+        },
+        "sif_sha256": {
+          "type": "string",
+          "description": "SHA256 checksum of .sif file"
+        },
+        "size_mb": {
+          "type": "number",
+          "description": "File size in megabytes"
+        },
+        "external": {
+          "type": "boolean",
+          "description": "True if container built externally (no .def available)"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Container-specific metadata"
+        },
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "base_container": {
+              "type": "string",
+              "description": "Base container dependency (name:version)"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Required models"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

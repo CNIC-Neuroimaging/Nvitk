@@ -1,0 +1,65 @@
+name: gpu-base
+display_name: "GPU Base Container"
+type: base
+description: |
+  General-purpose GPU-enabled base container for scientific computing and deep learning.
+  Includes CUDA 12.9, PyTorch, CuPy, and scientific computing libraries.
+
+maintainers:
+  - name: Ignacio Marcos Serrano
+    email: imarcoss@cnic.es
+
+base_image: condaforge/miniforge3
+gpu_required: true
+min_gpu_memory_gb: unknown
+
+system:
+  os: Ubuntu 22.04
+  conda: miniforge3
+  python: "3.11"
+
+cuda:
+  version: "12.9"
+  cudnn: "9"
+  nccl: "2.26.5"
+  cutensor: "2.2.0"
+  libraries:
+    - libcusparse-12-9
+
+frameworks:
+  pytorch:
+    version: "2.8.0 (cu129)"
+    index_url: "https://download.pytorch.org/whl/cu129"
+  
+packages:
+  - torch==2.8.0+cu129
+  - torchvision==0.23.0+cu129
+  - cupy-cuda12x==13.6.0
+  - scipy==1.15.3
+
+dependencies:
+  models: []
+  base_container: null
+
+runtime:
+  bind_mounts: []
+  env_vars: {}
+  
+usage:
+  examples:
+    - description: "Interactive shell with GPU support"
+      command: "singularity shell --nv gpu-base.sif"
+    
+    - description: "Run Python script with GPU"
+      command: "singularity exec --nv gpu-base.sif python script.py"
+    
+    - description: "Check CUDA availability"
+      command: "singularity exec --nv gpu-base.sif python -c 'import torch; print(torch.cuda.is_available())'"
+
+tags:
+  - gpu
+  - cuda
+  - cupy
+  - pytorch
+  - deep-learning
+

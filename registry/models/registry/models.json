@@ -1,0 +1,267 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2025-10-14T00:00:00Z",
+  "infrastructure": {
+    "model_storage": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models"
+  },
+  "models": {
+    "cellpose3-cyto3": {
+      "category": "imaging/Microscopy/Cellpose/Cellpose3",
+      "type": "segmentation",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "cellpose3-cyto3-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Microscopy/Cellpose/Cellpose3/cyto3/v1.0.0",
+          "files": ["cyto3"],
+          "config_files": [],
+          "size_mb": 26,
+          "source": "pretrained",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "cellposesam": {
+      "category": "imaging/Microscopy/Cellpose",
+      "type": "segmentation",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "cellposesam-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Microscopy/Cellpose/CellposeSAM/v1.0.0",
+          "files": ["cpsam"],
+          "config_files": [],
+          "size_mb": 1200,
+          "source": "pretrained",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "eicab": {
+      "category": "imaging/Neuroimaging",
+      "type": "segmentation",
+      "latest": "2.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "eicab-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/eICAB/v1.0.0",
+          "files": ["eICAB_0.pt", "eICAB_1.pt", "eICAB_2.pt", "eICAB_3.pt"],
+          "config_files": [],
+          "size_mb": 96,
+          "source": "external",
+          "compatible_containers": ["eICAB:v2023.4.17"],
+          "deprecated": true,
+          "deprecation_reason": "Use v2.0.0 with improved 236-subject training"
+        },
+        "2.0.0": {
+          "git_tag": "eicab-v2.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/eICAB/v2.0.0",
+          "files": ["eICAB_0_236.pt", "eICAB_1_236.pt", "eICAB_2_236.pt", "eICAB_3_236.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "external",
+          "compatible_containers": ["eICAB:v2023.4.17"]
+        }
+      }
+    },
+    "topcow-arg": {
+      "category": "imaging/Neuroimaging/TopCoW",
+      "type": "segmentation",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "topcow-arg-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/TopCoW/ARG/v1.0.0",
+          "structure": "nnunet",
+          "files": [
+            "fold_0/checkpoint_best.pth",
+            "fold_1/checkpoint_best.pth",
+            "fold_2/checkpoint_best.pth",
+            "fold_3/checkpoint_best.pth",
+            "fold_4/checkpoint_best.pth"
+          ],
+          "config_files": ["dataset.json", "dataset_fingerprint.json", "plans.json"],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["TopCoW-ARG:v2025.10.14"]
+        }
+      }
+    },
+    "topcow-claim": {
+      "category": "imaging/Neuroimaging/TopCoW",
+      "type": "segmentation",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "topcow-claim-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Neuroimaging/TopCoW/CLAIM/v1.0.0",
+          "structure": "hybrid_nnunet_yolo",
+          "files": [
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/fold_0/checkpoint_best.pth",
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/fold_1/checkpoint_best.pth",
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/fold_2/checkpoint_best.pth",
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/fold_3/checkpoint_best.pth",
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/fold_4/checkpoint_best.pth",
+            "yolo_best.pt"
+          ],
+          "config_files": [
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/dataset.json",
+            "ID_6_SUBMISSION_nnUNetTrainerSkeletonRecall_NoMirroring__nnUNetResEncUNetMPlans__3d_fullres/plans.json"
+          ],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["TopCoW-CLAIM:v2025.10.14"]
+        }
+      }
+    },
+    "retfound": {
+      "category": "imaging/Oculomics",
+      "type": "classification",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "retfound-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/RETFound/v1.0.0",
+          "files": [
+            "APTOS2019_checkpoint-best.pth",
+            "Glaucoma_fundus_checkpoint-best.pth",
+            "IDRID_checkpoint-best.pth",
+            "JSIEC_checkpoint-best.pth",
+            "MESSIDOR2_checkpoint-best.pth",
+            "OCTID_checkpoint-best.pth",
+            "PAPILA_checkpoint-best.pth",
+            "Retina_checkpoint-best.pth"
+          ],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "vascx-vessels": {
+      "category": "imaging/Oculomics/VascX",
+      "type": "segmentation",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "vascx-vessels-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/vessels/v1.0.0",
+          "files": ["vessels_july24.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "vascx-artery_vein": {
+      "category": "imaging/Oculomics/VascX",
+      "type": "classification",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "vascx-artery_vein-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/artery_vein/v1.0.0",
+          "files": ["av_july24.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "vascx-disc": {
+      "category": "imaging/Oculomics/VascX",
+      "type": "detection",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "vascx-disc-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/disc/v1.0.0",
+          "files": ["disc_july24.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "vascx-fovea": {
+      "category": "imaging/Oculomics/VascX",
+      "type": "detection",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "vascx-fovea-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/fovea/v1.0.0",
+          "files": ["fovea_july24.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "vascx-quality": {
+      "category": "imaging/Oculomics/VascX",
+      "type": "classification",
+      "latest": "1.0.0",
+      "versions": {
+        "1.0.0": {
+          "git_tag": "vascx-quality-v1.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/Oculomics/VascX/quality/v1.0.0",
+          "files": ["quality.pt"],
+          "config_files": [],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["unknown"]
+        }
+      }
+    },
+    "totalsegmentator": {
+      "category": "imaging/TotalSegmentator",
+      "type": "segmentation",
+      "latest": "2.0.0",
+      "versions": {
+        "2.0.0": {
+          "git_tag": "totalsegmentator-v2.0.0",
+          "git_commit": "unknown",
+          "added_date": "2025-10-14T00:00:00Z",
+          "location": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_FSC/LAB/PERSONAL/imarcoss/ai_models/imaging/TotalSegmentator/v2.0.0",
+          "structure": "nnunet_results",
+          "files": ["nnunet/results/Dataset*/*/fold_0/checkpoint_final.pth"],
+          "config_files": ["config.json", "nnunet/results/Dataset*/dataset.json", "nnunet/results/Dataset*/plans.json"],
+          "size_mb": "unknown",
+          "source": "unknown",
+          "compatible_containers": ["pesa-fat:v2025.10.14"],
+          "notes": "Contains 40+ nnU-Net datasets for comprehensive anatomical segmentation"
+        }
+      }
+    }
+  }
+}

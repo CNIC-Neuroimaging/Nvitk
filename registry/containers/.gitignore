@@ -1,0 +1,56 @@
+# Apptainer/Singularity built containers
+*.sif
+*.simg
+*.img
+
+# Build artifacts and caches
+.singularity/
+.apptainer/
+singularity-cache/
+apptainer-cache/
+
+# Build directories
+build/
+sandbox/
+overlay/
+
+# Logs
+*.log
+*.err
+*.out
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Local testing scripts (unless versioned)
+test_local*.sh
+build_local*.sh
+
+# Environment-specific paths
+*_local.def
+local_*.def
+
+# (project-specific)
+docs/
+test/
