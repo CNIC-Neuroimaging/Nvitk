@@ -94,6 +94,10 @@ full = ["nvitk[gpu,test]"]
 # dcm2nii = "conversion.dcm2nii:main"
 # stl2nifti = "conversion.stl2nifti:main"
 # nikon2nifti = "conversion.nikon2nifti:main"
+# v-phase2volume = "util.conversion.v_phase2volume:main"
+
+# Miscellaneous scripts
+pyhelp = "util.list_cli_commands:main"
 
 [project.gui-scripts]
 # Nvitk-GUI = "gui.main:main"
