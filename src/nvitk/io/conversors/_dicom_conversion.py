@@ -1701,7 +1701,7 @@ def run_dicom2nifti(
     additional_tags: list[str] | None = None,
     compress: bool = False,
     rescale_type: str = "DV",
-    series_uid: str | None = None,
+    series_number: str | None = None,
     series_index: int | None = None,
     include_private_tags: bool = False,
     skip_existing: bool = False,
@@ -1716,16 +1716,17 @@ def run_dicom2nifti(
     if not series_all:
         raise ValidationError(f"No valid DICOM image series found at: {input_path}")
 
-    if series_uid is not None:
+    if series_number is not None:
         filtered = [
             (ds_list, md)
             for ds_list, md in zip(series_all, metas)
-            if str(md.get("SeriesInstanceUID", "")) == str(series_uid)
+            if str(md.get("SeriesNumber", "")) == str(series_number)
         ]
         if not filtered:
-            raise ValidationError(f"series_uid={series_uid!r} not found.")
+            raise ValidationError(f"series_number={series_number!r} not found.")
         series_all = [item[0] for item in filtered]
         metas = [item[1] for item in filtered]
+        _info(f"Selected series number: {series_number}")
     elif series_index is not None:
         if not (0 <= series_index < len(series_all)):
             raise ValidationError(f"series_index={series_index} out of range for {len(series_all)} series.")
