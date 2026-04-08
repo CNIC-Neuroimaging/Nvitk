@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .converters import dcm2nii, nikon2nifti
+from .conversors import dcm2nii, nikon2nifti
 from .imageio import convert_image, imread, imsave, imshow, swapaxes
 
 __all__ = [

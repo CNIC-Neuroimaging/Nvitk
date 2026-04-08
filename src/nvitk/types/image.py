@@ -17,39 +17,43 @@ def _is_array_like(value: Any) -> bool:
     return isinstance(ndim, int) and ndim > 0
 
 
-PET_METADATA_KEYS = (
-    "Modality",
-    "(0008,0060)",
-    "RadiopharmaceuticalStartTime",
-    "(0018,1072)",
-    "RadionuclideHalfLife",
-    "(0018,1075)",
-    "RadionuclideTotalDose",
-    "(0018,1074)",
-    "DecayCorrection",
-    "(0054,1102)",
-    "DecayFactor",
-    "(0054,1321)",
-    "FrameReferenceTime",
-    "(0054,1300)",
-    "DoseUnits",
-    "(0054,1004)",
-    "Units",
-    "(0054,1001)",
-    "ScaleSlope",
-    "(2005,100e)",
-)
+_NON_DICOM_METADATA_KEYS = {
+    "axes",
+    "shape",
+    "affine",
+    "spacing",
+    "origin",
+    "direction",
+    "x_res",
+    "y_res",
+    "z_res",
+    "t_res",
+    "temporal_resolution",
+    "series_uid",
+    "series_description",
+    "series_number",
+    "filename",
+    "dtype",
+    "mode",
+    "tiff_tags",
+}
 
-DIXON_TAG_HINTS = (
-    "dixon",
-    "fat",
-    "water",
-    "inphase",
-    "outphase",
-    "echo",
-    "repetition",
-    "flip",
-)
+
+def _is_dicom_tag_key(key: str) -> bool:
+    if key in _NON_DICOM_METADATA_KEYS:
+        return False
+
+    if key.startswith("(") and key.endswith(")") and "," in key:
+        body = key[1:-1]
+        group, element = body.split(",", 1)
+        group = group.strip()
+        element = element.strip()
+        hexdigits = set("0123456789abcdefABCDEF")
+        return len(group) == 4 and len(element) == 4 and all(ch in hexdigits for ch in (group + element))
+
+    if "_" in key:
+        return False
+    return bool(key) and key[0].isupper()
 
 
 @dataclass
@@ -200,17 +204,12 @@ class Image:
         return float(val)
 
     @property
-    def pet_tags(self) -> dict[str, Any]:
-        return {k: self.metadata[k] for k in PET_METADATA_KEYS if k in self.metadata}
-
-    @property
-    def dixon_tags(self) -> dict[str, Any]:
+    def dicom_tags(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, value in self.metadata.items():
             if not isinstance(key, str):
                 continue
-            key_l = key.lower()
-            if any(h in key_l for h in DIXON_TAG_HINTS):
+            if _is_dicom_tag_key(key):
                 out[key] = value
         return out
 
