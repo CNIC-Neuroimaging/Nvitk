@@ -7,6 +7,17 @@ try:
 except Exception:
     click = None
 
+
+def _cli_decorator(*args, **kwargs):
+    def decorator(func):
+        return func
+
+    return decorator
+
+
+_click_command = click.command if click is not None else _cli_decorator
+_click_option = click.option if click is not None else _cli_decorator
+
 from nvitk.core.exceptions import BackendUnavailableError
 from ._dicom_conversion import run_dicom2nifti
 
@@ -64,23 +75,23 @@ def dcm2nii(
         return outputs[0]
     return outputs
 
-@click.command()
-@click.option("-i", "--input", "input_path", type=click.Path(exists=True, path_type=Path), required=True, help="Path to DICOM directory or file.")
-@click.option("-o", "--output", "output_path", type=click.Path(path_type=Path), required=True, help="Output directory, or .nii/.nii.gz for single-series explicit output.")
-@click.option("--naming", type=str, default=None, help='Custom naming with DICOM tags split by underscore (e.g. "AccessionNumber_Modality").')
-@click.option("--multifile", is_flag=True, help="Process each direct input subdirectory as a separate case.")
-@click.option("--force-ras", is_flag=True, help="Force canonical RAS orientation.")
-@click.option("--log-level", "--log_level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Logging level.")
-@click.option("--log-path", "--log_path", type=click.Path(path_type=Path), default=None, help="Log directory (reserved).")
-@click.option("--debug", is_flag=True, help="Raise full traceback on failure.")
-@click.option("--process-rtstruct", is_flag=True, help="Process RTStruct files into mask NIfTI outputs.")
-@click.option("--revert-scaling", is_flag=True, help="Revert scanner-applied scaling to raw counts.")
-@click.option("--save-metadata", is_flag=True, help="Save metadata as a JSON sidecar alongside NIfTI outputs.")
-@click.option("--additional-tags", type=str, default=None, help='Comma-separated extra metadata tags (e.g. "ProtocolName,SequenceName").')
-@click.option("--compress", is_flag=True, help="When output is a directory, write compressed .nii.gz files.")
-@click.option("--skip-existing", is_flag=True, help="Skip already-existing outputs.")
-@click.option("--rescale-type", type=click.Choice(["DV", "FP"], case_sensitive=False), default="DV", help="Rescale type for scaling conversion: DV or FP.")
-@click.option("--tmp-dir", type=click.Path(path_type=Path), default=None, help="Temporary directory for intermediate files.")
+@_click_command()
+@_click_option("-i", "--input", "input_path", type=click.Path(exists=True, path_type=Path) if click is not None else None, required=True, help="Path to DICOM directory or file.")
+@_click_option("-o", "--output", "output_path", type=click.Path(path_type=Path) if click is not None else None, required=True, help="Output directory, or .nii/.nii.gz for single-series explicit output.")
+@_click_option("--naming", type=str, default=None, help='Custom naming with DICOM tags split by underscore (e.g. "AccessionNumber_Modality").')
+@_click_option("--multifile", is_flag=True, help="Process each direct input subdirectory as a separate case.")
+@_click_option("--force-ras", is_flag=True, help="Force canonical RAS orientation.")
+@_click_option("--log-level", "--log_level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False) if click is not None else None, default="INFO", help="Logging level.")
+@_click_option("--log-path", "--log_path", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Log directory (reserved).")
+@_click_option("--debug", is_flag=True, help="Raise full traceback on failure.")
+@_click_option("--process-rtstruct", is_flag=True, help="Process RTStruct files into mask NIfTI outputs.")
+@_click_option("--revert-scaling", is_flag=True, help="Revert scanner-applied scaling to raw counts.")
+@_click_option("--save-metadata", is_flag=True, help="Save metadata as a JSON sidecar alongside NIfTI outputs.")
+@_click_option("--additional-tags", type=str, default=None, help='Comma-separated extra metadata tags (e.g. "ProtocolName,SequenceName").')
+@_click_option("--compress", is_flag=True, help="When output is a directory, write compressed .nii.gz files.")
+@_click_option("--skip-existing", is_flag=True, help="Skip already-existing outputs.")
+@_click_option("--rescale-type", type=click.Choice(["DV", "FP"], case_sensitive=False) if click is not None else None, default="DV", help="Rescale type for scaling conversion: DV or FP.")
+@_click_option("--tmp-dir", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Temporary directory for intermediate files.")
 def main(
     input_path: Path,
     output_path: Path,
@@ -99,6 +110,8 @@ def main(
     rescale_type: str,
     tmp_dir: Path | None,
 ) -> None:
+    if click is None:
+        raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     _ = (log_level, log_path)
     tags = [item.strip() for item in additional_tags.split(",") if item.strip()] if additional_tags else None
 

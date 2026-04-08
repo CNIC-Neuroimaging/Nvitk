@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
+from .._common import default_nifti_axes, reorder_axes
 
 from ._dicom_rtstructs import integrate_rtstruct_processing
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
@@ -51,6 +52,7 @@ warnings.filterwarnings(
 )
 
 __all__ = [
+    "load_dicom_series",
     "run_dicom2nifti",
 ]
 
@@ -73,6 +75,10 @@ METADATA_TO_SAVE = [
     "(0008,0031)",
     "SeriesInstanceUID",
     "(0020,000E)",
+    "SeriesDescription",
+    "(0008,103E)",
+    "SeriesNumber",
+    "(0020,0011)",
     "AccessionNumber",
     "(0008,0050)",
     "Modality",
@@ -123,6 +129,8 @@ METADATA_TO_SAVE = [
     "(0020,0060)",
     "ImageLaterality",
     "(0020,0062)",
+    "submodality",
+    "rescale_type",
 ]
 
 OP_SOP_CLASS_UIDS = {
@@ -185,6 +193,142 @@ def _sanitize_filename(filename: str) -> str:
     while "__" in cleaned:
         cleaned = cleaned.replace("__", "_")
     return cleaned
+
+
+def _normalize_dicom_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if pydicom is not None and isinstance(value, pydicom.multival.MultiValue):
+        value = value[0] if value else ""
+    return str(value).strip("\x00").strip()
+
+
+def _normalize_series_uid(uid: Any) -> str:
+    if pydicom is not None and isinstance(uid, pydicom.multival.MultiValue):
+        uid = uid[0] if uid else ""
+    return _normalize_dicom_text(uid)
+
+
+def _iter_candidate_file_paths(path: str) -> list[str]:
+    if os.path.isdir(path):
+        fpaths: list[str] = []
+        for dp, _, fns in os.walk(path):
+            for fn in fns:
+                fpaths.append(os.path.join(dp, fn))
+        return fpaths
+    if os.path.isfile(path):
+        return [path]
+    raise FileNotFoundError(f"Invalid path provided: {path}")
+
+
+def _select_candidate_file_paths(
+    fpaths: list[str],
+    *,
+    series_number: str | None = None,
+) -> list[str]:
+    if series_number is None:
+        return fpaths
+
+    target_number = str(series_number)
+    header_rows: list[tuple[str, str, str]] = []
+    target_uids: set[str] = set()
+
+    for fp in fpaths:
+        try:
+            ds = pydicom.dcmread(
+                fp,
+                stop_before_pixels=True,
+                force=True,
+                specific_tags=["SeriesNumber", "SeriesInstanceUID"],
+            )
+        except Exception:
+            continue
+
+        uid = _normalize_series_uid(getattr(ds, "SeriesInstanceUID", None))
+        sn = _normalize_dicom_text(getattr(ds, "SeriesNumber", None))
+        header_rows.append((fp, uid, sn))
+        if sn == target_number and uid:
+            target_uids.add(uid)
+
+    if target_uids:
+        selected = [fp for fp, uid, sn in header_rows if sn == target_number or (uid and uid in target_uids)]
+    else:
+        selected = [fp for fp, _, sn in header_rows if sn == target_number]
+
+    if selected:
+        _info(
+            f"Series-number header scan kept {len(selected)}/{len(fpaths)} candidate files for "
+            f"series_number={series_number}"
+        )
+    return selected
+
+
+def _ensure_output_metadata_fields(
+    md: dict[str, Any],
+    *,
+    rescale_type: str | None = None,
+) -> dict[str, Any]:
+    series_uid = _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid")))
+    if series_uid:
+        md["series_uid"] = series_uid
+        md.setdefault("SeriesInstanceUID", series_uid)
+
+    series_number = md.get("SeriesNumber", md.get("series_number"))
+    if series_number not in (None, ""):
+        md["series_number"] = series_number
+
+    series_description = _normalize_dicom_text(md.get("SeriesDescription", md.get("series_description")))
+    if series_description:
+        md["series_description"] = series_description
+        md.setdefault("SeriesDescription", series_description)
+        md["submodality"] = series_description
+
+    modality = _normalize_dicom_text(md.get("Modality", md.get("(0008,0060)")))
+    if modality:
+        md["Modality"] = modality
+        md["(0008,0060)"] = modality
+
+    if rescale_type is not None:
+        md["rescale_type"] = str(rescale_type).upper()
+    else:
+        md.setdefault("rescale_type", "DV")
+    return md
+
+
+def _strip_array_values(value: Any, _seen: set[int] | None = None) -> tuple[bool, Any]:
+    if _seen is None:
+        _seen = set()
+
+    if isinstance(value, np.ndarray):
+        return False, None
+    if pydicom is not None and isinstance(value, pydicom.dataset.Dataset):
+        return False, None
+    if isinstance(value, (bytes, bytearray)):
+        return True, _convert_dicom_value(bytes(value))
+
+    if isinstance(value, (dict, list, tuple)):
+        obj_id = id(value)
+        if obj_id in _seen:
+            return False, None
+        _seen.add(obj_id)
+
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            keep, item_clean = _strip_array_values(item, _seen)
+            if keep:
+                cleaned[key] = item_clean
+        return True, cleaned
+
+    if isinstance(value, (list, tuple)):
+        cleaned_items = []
+        for item in value:
+            keep, item_clean = _strip_array_values(item, _seen)
+            if keep:
+                cleaned_items.append(item_clean)
+        return True, cleaned_items
+
+    return True, value
 
 
 def _create_ras_oriented_nifti(pixel_arrays: list[np.ndarray], output_path: str) -> bool:
@@ -497,27 +641,9 @@ def _get_nifti_extension(compress: bool = False) -> str:
 def _save_metadata_json(nifti_path: str, metadata: dict[str, Any]) -> None:
     try:
         json_path = nifti_path.replace(".nii.gz", ".json").replace(".nii", ".json")
-        clean_metadata: dict[str, Any] = {}
-        for key, value in metadata.items():
-            if pydicom is not None and isinstance(value, (np.ndarray, pydicom.dataset.Dataset)):
-                continue
-            if isinstance(value, dict):
-                if "_type" in value and value.get("_type") == "bytes":
-                    clean_metadata[key] = value
-                else:
-                    try:
-                        clean_metadata[key] = {
-                            k: v
-                            for k, v in value.items()
-                            if not (
-                                isinstance(v, np.ndarray)
-                                or (pydicom is not None and isinstance(v, pydicom.dataset.Dataset))
-                            )
-                        }
-                    except Exception:
-                        continue
-            else:
-                clean_metadata[key] = value
+        keep, clean_metadata = _strip_array_values(metadata)
+        if not keep or not isinstance(clean_metadata, dict):
+            clean_metadata = {}
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(clean_metadata, f, indent=2)
     except Exception as exc:
@@ -711,15 +837,23 @@ def _has_pixel_data(ds: Any) -> bool:
     return False
 
 
-def _convert_dicom_value(value: Any, max_bytes_preview: int = 256) -> Any:
+def _convert_dicom_value(
+    value: Any,
+    max_bytes_preview: int = 256,
+    *,
+    include_private_tags: bool = True,
+) -> Any:
     if pydicom is not None and isinstance(value, (pydicom.dataset.Dataset, pydicom.sequence.Sequence)):
-        return _pydicom_dataset_to_dict(value)
+        return _pydicom_dataset_to_dict(value, include_private_tags=include_private_tags)
     if pydicom is not None and isinstance(value, pydicom.valuerep.DSfloat):
         return float(value)
     if pydicom is not None and isinstance(value, pydicom.valuerep.IS):
         return int(value)
     if pydicom is not None and isinstance(value, pydicom.multival.MultiValue):
-        return [_convert_dicom_value(v, max_bytes_preview) for v in value]
+        return [
+            _convert_dicom_value(v, max_bytes_preview, include_private_tags=include_private_tags)
+            for v in value
+        ]
     if pydicom is not None and isinstance(value, pydicom.uid.UID):
         return str(value).strip("\x00").strip()
     if isinstance(value, bytes):
@@ -737,16 +871,21 @@ def _convert_dicom_value(value: Any, max_bytes_preview: int = 256) -> Any:
     return str(value).strip("\x00").strip()
 
 
-def _pydicom_dataset_to_dict(ds: Any) -> dict[str, Any]:
+def _pydicom_dataset_to_dict(ds: Any, *, include_private_tags: bool = True) -> dict[str, Any]:
     metadata_dict: dict[str, Any] = {}
     for elem in ds:
+        if elem.tag.is_private and not include_private_tags:
+            continue
         tag_str = f"({elem.tag.group:04X},{elem.tag.element:04X})"
         key = elem.keyword or tag_str
         try:
             if elem.VR == "SQ":
-                val = [_pydicom_dataset_to_dict(item) for item in elem.value]
+                val = [
+                    _pydicom_dataset_to_dict(item, include_private_tags=include_private_tags)
+                    for item in elem.value
+                ]
             else:
-                val = _convert_dicom_value(elem.value)
+                val = _convert_dicom_value(elem.value, include_private_tags=include_private_tags)
         except Exception as exc:
             val = f"<unserializable: {exc}>"
         metadata_dict[key] = val
@@ -762,11 +901,9 @@ def _save_image_with_metadata(
 ) -> None:
     try:
         md_filtered = _filter_metadata_for_nifti(md, additional_tags)
-        md_clean = {
-            k: v
-            for k, v in md_filtered.items()
-            if not (pydicom is not None and isinstance(v, pydicom.dataset.Dataset))
-        }
+        keep, md_clean = _strip_array_values(md_filtered)
+        if not keep or not isinstance(md_clean, dict):
+            md_clean = {}
     except Exception:
         md_clean = md
     try:
@@ -821,6 +958,7 @@ def _save_basic_fallback(
         volume = _pixel_arrays_to_basic_volume(pixel_arrays)
         image = nib.Nifti1Image(volume, np.eye(4))
         if md:
+            _ensure_output_metadata_fields(md, rescale_type="DV")
             md_clean = {
                 k: v
                 for k, v in md.items()
@@ -875,12 +1013,12 @@ def _apply_fp_rescale_to_nifti(
     rescale_intercepts: list[float],
     scale_slopes: list[float | None],
     ds_list: list[Any] | None = None,
-) -> Any:
+) -> tuple[Any, bool]:
     try:
         data = nifti_image.get_fdata().copy()
         if data.ndim < 3:
             _warn(f"Expected at least 3D data, got {data.ndim}D. Skipping FP rescale correction.")
-            return nifti_image
+            return nifti_image, False
         z_axis = 2
         n_slices = data.shape[z_axis]
         if len(rescale_slopes) > n_slices or len(rescale_intercepts) > n_slices or len(scale_slopes) > n_slices:
@@ -894,7 +1032,7 @@ def _apply_fp_rescale_to_nifti(
         has_scale_slope = any(ss is not None and ss != 0.0 for ss in scale_slopes if ss is not None)
         if not has_scale_slope:
             _warn("ScaleSlope not found or all values are None/zero. Cannot apply FP rescaling. Using DV values.")
-            return nifti_image
+            return nifti_image, False
         if len(rescale_slopes) != n_slices or len(rescale_intercepts) != n_slices or len(scale_slopes) != n_slices:
             _warn(
                 f"Mismatch: {n_slices} slices but {len(rescale_slopes)} slopes, "
@@ -914,7 +1052,7 @@ def _apply_fp_rescale_to_nifti(
         valid_scale_slopes = [ss for ss in scale_slopes if ss is not None and ss != 0.0]
         if not valid_scale_slopes:
             _warn("No valid ScaleSlope values found. Cannot apply FP rescaling.")
-            return nifti_image
+            return nifti_image, False
         unique_rs = len(set(rescale_slopes)) == 1
         unique_ri = len(set(rescale_intercepts)) == 1
         unique_ss = len(set([ss for ss in scale_slopes if ss is not None])) == 1
@@ -925,9 +1063,10 @@ def _apply_fp_rescale_to_nifti(
             denominator = rs * ss
             if denominator == 0.0:
                 _warn("RescaleSlope * ScaleSlope is 0, cannot apply FP rescaling")
-                return nifti_image
+                return nifti_image, False
             data = data / denominator
             _info(f"Applied FP rescaling using constant factors (RS={rs}, RI={ri}, SS={ss}) to {n_slices} slices")
+            return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header), True
         else:
             _info(f"Scaling factors vary across slices. Applying per-slice FP rescaling to {n_slices} slices")
             corrected_count = 0
@@ -951,12 +1090,13 @@ def _apply_fp_rescale_to_nifti(
                     _warn(f"Slice {z}: RescaleSlope * ScaleSlope is 0, skipping FP rescaling")
             if corrected_count > 0:
                 _info(f"Applied FP rescaling on {corrected_count}/{n_slices} slices using ScaleSlope")
+                return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header), True
             else:
                 _warn("No slices were corrected with FP rescaling")
-        return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header)
+                return nifti_image, False
     except Exception as exc:
         _warn(f"Failed to apply FP rescaling on NIfTI: {exc}")
-        return nifti_image
+        return nifti_image, False
 
 
 def _apply_rescale_to_nifti(
@@ -964,12 +1104,12 @@ def _apply_rescale_to_nifti(
     rescale_slopes: list[float],
     rescale_intercepts: list[float],
     ds_list: list[Any] | None = None,
-) -> Any:
+) -> tuple[Any, bool]:
     try:
         data = nifti_image.get_fdata().copy()
         if data.ndim < 3:
             _warn(f"Expected at least 3D data, got {data.ndim}D. Skipping rescale correction.")
-            return nifti_image
+            return nifti_image, False
         z_axis = 2
         n_slices = data.shape[z_axis]
         if len(rescale_slopes) > n_slices or len(rescale_intercepts) > n_slices:
@@ -1000,14 +1140,16 @@ def _apply_rescale_to_nifti(
             if slope != 1.0 or intercept != 0.0:
                 if slope == 0.0:
                     _warn("RescaleSlope is 0, cannot revert scaling")
-                    return nifti_image
+                    return nifti_image, False
                 data = (data - intercept) / slope
                 _info(
                     f"Reverted scanner scaling using constant factors (slope={slope}, "
                     f"intercept={intercept}) on {n_slices} slices"
                 )
+                return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header), True
             else:
                 _info("Scaling factors are identity (slope=1.0, intercept=0.0). No rescaling needed.")
+                return nifti_image, False
         else:
             _info(f"Scaling factors vary across slices. Applying per-slice rescaling to {n_slices} slices")
             corrected_count = 0
@@ -1029,12 +1171,13 @@ def _apply_rescale_to_nifti(
                     corrected_count += 1
             if corrected_count > 0:
                 _info(f"Reverted scanner scaling on {corrected_count}/{n_slices} slices to obtain raw pixel values")
+                return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header), True
             else:
                 _warn("No slices were corrected with rescaling")
-        return nib.Nifti1Image(data, nifti_image.affine, nifti_image.header)
+                return nifti_image, False
     except Exception as exc:
         _warn(f"Failed to revert scanner scaling on NIfTI: {exc}")
-        return nifti_image
+        return nifti_image, False
 
 
 def _collect_rescale_metadata(ds_list: list[Any]) -> dict[str, list[float]]:
@@ -1085,21 +1228,21 @@ def _collect_scale_slope_metadata(ds_list: list[Any]) -> dict[str, list[float | 
     return scale_slope_metadata
 
 
-def _read_dicom_conversion(path: str):
+def _read_dicom_conversion(
+    path: str,
+    *,
+    series_number: str | None = None,
+    include_private_tags: bool = True,
+):
     assert pydicom is not None, "Pydicom is not installed."
-    fpaths = []
-    if os.path.isdir(path):
-        for dp, _, fns in os.walk(path):
-            for fn in fns:
-                candidate = os.path.join(dp, fn)
-                if _is_dicom_file(candidate):
-                    fpaths.append(candidate)
-    elif os.path.isfile(path) and _is_dicom_file(path):
-        fpaths = [path]
-    else:
-        raise FileNotFoundError(f"Invalid path provided: {path}")
+
+    fpaths = _iter_candidate_file_paths(path)
     if not fpaths:
         _warn(f"No DICOM files could be found in {path}")
+        return [], []
+
+    fpaths = _select_candidate_file_paths(fpaths, series_number=series_number)
+    if series_number is not None and not fpaths:
         return [], []
 
     series: dict[Any, list[Any]] = {}
@@ -1110,10 +1253,10 @@ def _read_dicom_conversion(path: str):
             ds = _sanitize_dicom_dataset(ds)
             if not _is_custom_imaging_dicom(ds):
                 continue
-            uid = getattr(ds, "SeriesInstanceUID", "no_series")
-            if isinstance(uid, pydicom.multival.MultiValue):
-                _warn(f"File {fp} has a multi-valued UID. Using first value: {uid[0]}")
-                uid = uid[0]
+            uid_raw = getattr(ds, "SeriesInstanceUID", "no_series")
+            if isinstance(uid_raw, pydicom.multival.MultiValue):
+                _warn(f"File {fp} has a multi-valued UID. Using first value: {uid_raw[0]}")
+            uid = _normalize_series_uid(uid_raw) or "no_series"
             series.setdefault(uid, []).append(ds)
             if uid not in meta:
                 meta[uid] = ds
@@ -1132,10 +1275,519 @@ def _read_dicom_conversion(path: str):
         except Exception:
             pass
         ds_lists.append(dsl)
-        base_md = _pydicom_dataset_to_dict(meta[uid])
+        base_md = _pydicom_dataset_to_dict(meta[uid], include_private_tags=include_private_tags)
         base_md.update(_collect_rescale_metadata(dsl))
+        _ensure_output_metadata_fields(base_md, rescale_type="DV")
         mds.append(base_md)
     return ds_lists, mds
+
+
+def _force_ras_nifti(image: Any) -> Any:
+    ornt_from = nib.orientations.io_orientation(image.affine)
+    ornt_to = nib.orientations.axcodes2ornt(("R", "A", "S"))
+    xfm = nib.orientations.ornt_transform(ornt_from, ornt_to)
+    _info(f"Forcing canonical RAS reorientation with transform:\n {xfm}")
+    if xfm.size:
+        data_ras = nib.orientations.apply_orientation(image.get_fdata(), xfm)
+        aff_ras = image.affine @ nib.orientations.inv_ornt_aff(xfm, image.shape)
+        image = nib.Nifti1Image(data_ras, aff_ras, header=image.header.copy())
+        image.set_sform(aff_ras, code=1)
+        image.set_qform(aff_ras, code=1)
+    return image
+
+
+def _basic_fallback_image(ds_list: list[Any]) -> Any | None:
+    pixel_arrays = []
+    for ds in ds_list:
+        try:
+            if hasattr(ds, "pixel_array"):
+                pixel_arrays.append(ds.pixel_array)
+        except Exception:
+            continue
+    if not pixel_arrays:
+        return None
+    volume = _pixel_arrays_to_basic_volume(pixel_arrays)
+    return nib.Nifti1Image(volume, np.eye(4))
+
+
+def _apply_requested_rescale(
+    image: Any,
+    *,
+    md: dict[str, Any] | None,
+    ds_list: list[Any],
+    revert_scaling: bool = False,
+    rescale_type: str = "DV",
+) -> tuple[Any, str]:
+    actual_rescale_type = "DV"
+    if md is None:
+        return image, actual_rescale_type
+
+    if revert_scaling:
+        rescale_slopes = md.get("RescaleSlope", [])
+        rescale_intercepts = md.get("RescaleIntercept", [])
+        if isinstance(rescale_slopes, list) and isinstance(rescale_intercepts, list):
+            if len(rescale_slopes) > 0 and len(rescale_intercepts) > 0:
+                _info(
+                    "Reverting scanner scaling to obtain raw pixel values "
+                    "(revert_scaling takes priority over rescale_type)"
+                )
+                image, applied = _apply_rescale_to_nifti(image, rescale_slopes, rescale_intercepts, ds_list)
+                if applied:
+                    actual_rescale_type = "REVERTED"
+        return image, actual_rescale_type
+
+    if rescale_type.upper() == "FP":
+        rescale_slopes = md.get("RescaleSlope", [])
+        rescale_intercepts = md.get("RescaleIntercept", [])
+        scale_slopes = md.get("ScaleSlope", [])
+        if not scale_slopes or all(ss is None for ss in scale_slopes):
+            scale_slope_md = _collect_scale_slope_metadata(ds_list)
+            scale_slopes = scale_slope_md.get("ScaleSlope", [])
+            md["ScaleSlope"] = scale_slopes
+        if (
+            isinstance(rescale_slopes, list)
+            and isinstance(rescale_intercepts, list)
+            and isinstance(scale_slopes, list)
+            and len(rescale_slopes) > 0
+            and len(rescale_intercepts) > 0
+            and len(scale_slopes) > 0
+        ):
+            _info("Applying FP rescaling using ScaleSlope")
+            image, applied = _apply_fp_rescale_to_nifti(
+                image,
+                rescale_slopes,
+                rescale_intercepts,
+                scale_slopes,
+                ds_list,
+            )
+            if applied:
+                actual_rescale_type = "FP"
+    return image, actual_rescale_type
+
+
+def _convert_ds_list_to_nifti_image(
+    ds_list: list[Any],
+    *,
+    force_ras: bool = False,
+    md: dict[str, Any] | None = None,
+    revert_scaling: bool = False,
+    rescale_type: str = "DV",
+    tmp_dir: Path | None = None,
+) -> tuple[Any, str] | None:
+    temp_nifti_path = None
+    used_basic_fallback = False
+    try:
+        if _dicom2nifti is None:
+            image = _basic_fallback_image(ds_list)
+            used_basic_fallback = True
+            if image is None:
+                return None
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".nii", delete=False, dir=tmp_dir) as tf:
+                temp_nifti_path = tf.name
+
+            try:
+                res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
+                    ds_list,
+                    temp_nifti_path,
+                    reorient_nifti=False,
+                )
+            except Exception as exc:
+                error_str = str(exc)
+                if any(err_type in error_str for err_type in ["TOO_FEW_SLICES", "LOCALIZER"]):
+                    _warn(f"Detected {error_str} error, attempting to process as single-slice or localizer...")
+                    image = _basic_fallback_image(ds_list)
+                    used_basic_fallback = True
+                elif "IMAGE_ORIENTATION_INCONSISTENT" in error_str:
+                    _warn(
+                        f"IMAGE_ORIENTATION_INCONSISTENT detected, attempting to fix orientation "
+                        f"inconsistencies: {exc}"
+                    )
+                    try:
+                        fixed_ds_list, corrections_count = _fix_orientation_inconsistencies(ds_list)
+                        if corrections_count > 0:
+                            _warn(
+                                f"Orientation fixing applied ({corrections_count} slices corrected), "
+                                "retrying conversion..."
+                            )
+                            try:
+                                res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
+                                    fixed_ds_list,
+                                    temp_nifti_path,
+                                    reorient_nifti=False,
+                                )
+                            except Exception as fix_exc:
+                                fix_error_str = str(fix_exc)
+                                if any(
+                                    token in fix_error_str.lower()
+                                    for token in ["invalid value encountered", "nan", "orthogonality check failed"]
+                                ) or any(token in fix_error_str for token in ["NON_CUBICAL_IMAGE", "GANTRY_TILT"]):
+                                    _warn(
+                                        f"Detected {fix_error_str} after orientation fixing, "
+                                        "attempting to clean and retry..."
+                                    )
+                                    cleaned_fixed_ds_list = _clean_nan_values(fixed_ds_list)
+                                    try:
+                                        res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
+                                            cleaned_fixed_ds_list,
+                                            temp_nifti_path,
+                                            reorient_nifti=False,
+                                        )
+                                    except Exception:
+                                        image = _basic_fallback_image(ds_list)
+                                        used_basic_fallback = True
+                                else:
+                                    raise
+                        else:
+                            image = _basic_fallback_image(ds_list)
+                            used_basic_fallback = True
+                    except Exception:
+                        image = _basic_fallback_image(ds_list)
+                        used_basic_fallback = True
+                elif any(
+                    err_type in error_str
+                    for err_type in ["NON_CUBICAL_IMAGE", "GANTRY_TILT", "ConversionValidationError"]
+                ):
+                    _warn(f"Detected {error_str} error, trying reorientation first...")
+                    try:
+                        res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
+                            ds_list,
+                            temp_nifti_path,
+                            reorient_nifti=True,
+                        )
+                    except Exception:
+                        image = _basic_fallback_image(ds_list)
+                        used_basic_fallback = True
+                elif "NON_IMAGING_DICOM_FILES" in error_str:
+                    image = _basic_fallback_image(ds_list)
+                    used_basic_fallback = True
+                else:
+                    raise
+
+            if not used_basic_fallback:
+                image = res["NII"]
+
+        if image is None:
+            return None
+
+        actual_rescale_type = "DV"
+        if not used_basic_fallback:
+            image, actual_rescale_type = _apply_requested_rescale(
+                image,
+                md=md,
+                ds_list=ds_list,
+                revert_scaling=revert_scaling,
+                rescale_type=rescale_type,
+            )
+            if force_ras:
+                image = _force_ras_nifti(image)
+
+        return image, actual_rescale_type
+    except Exception as exc:
+        _warn(f"Standard conversion with fallbacks failed: {exc}")
+        return None
+    finally:
+        try:
+            if temp_nifti_path and os.path.exists(temp_nifti_path):
+                os.remove(temp_nifti_path)
+        except Exception:
+            pass
+
+
+def _prepare_array_output(
+    data: Any,
+    md: dict[str, Any],
+    *,
+    axes: str | None = None,
+    affine: Any | None = None,
+    rescale_type: str = "DV",
+    extra_metadata: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    arr = np.asarray(data)
+    md_out = dict(md)
+    if extra_metadata:
+        md_out.update(extra_metadata)
+    _ensure_output_metadata_fields(md_out, rescale_type=rescale_type)
+    axes_out = axes or default_nifti_axes(arr.ndim)
+    md_out["axes"] = axes_out
+    md_out["shape"] = tuple(arr.shape)
+    if affine is not None:
+        affine_arr = np.asarray(affine, dtype=float)
+        md_out["affine"] = affine_arr
+        spatial_dims = min(3, sum(1 for axis_name in axes_out if axis_name in {"X", "Y", "Z"}))
+        spacing_values = [float(np.linalg.norm(affine_arr[:3, axis])) for axis in range(spatial_dims)]
+        if len(spacing_values) > 0:
+            md_out["x_res"] = spacing_values[0]
+        if len(spacing_values) > 1:
+            md_out["y_res"] = spacing_values[1]
+        if len(spacing_values) > 2:
+            md_out["z_res"] = spacing_values[2]
+    elif md_out.get("affine") is not None:
+        md_out["affine"] = np.asarray(md_out["affine"], dtype=float)
+
+    frame_time = md_out.get("FrameTime")
+    if frame_time is not None and "t_res" not in md_out:
+        try:
+            md_out["t_res"] = float(frame_time) / 1000.0
+            md_out["temporal_resolution"] = md_out["t_res"]
+        except Exception:
+            pass
+    if "x_res" in md_out or "y_res" in md_out or "z_res" in md_out:
+        md_out["spacing"] = (
+            md_out.get("x_res"),
+            md_out.get("y_res"),
+            md_out.get("z_res"),
+        )
+    return arr, md_out
+
+
+def _load_op_series_arrays(
+    ds_list: list[Any],
+    md: dict[str, Any],
+) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
+    for idx, ds in enumerate(ds_list):
+        pixel_array_yxc = ds.pixel_array
+        pixel_array_xyc = pixel_array_yxc.transpose(1, 0, 2) if pixel_array_yxc.ndim == 3 else pixel_array_yxc.T
+        md_one = dict(md)
+        for key in ("InstanceNumber", "ImageLaterality", "Laterality"):
+            value = ds.get(key)
+            if value is not None:
+                md_one[key] = _convert_dicom_value(value)
+        axes = "XYC" if pixel_array_xyc.ndim == 3 else default_nifti_axes(pixel_array_xyc.ndim)
+        outputs.append(
+            _prepare_array_output(
+                pixel_array_xyc,
+                md_one,
+                axes=axes,
+                affine=np.eye(4),
+                rescale_type="DV",
+                extra_metadata={"instance_index": idx},
+            )
+        )
+    return outputs
+
+
+def _load_zeiss_series_arrays(
+    ds_list: list[Any],
+    md: dict[str, Any],
+    *,
+    force_ras: bool,
+) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    try:
+        vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
+        image = nib.Nifti1Image(vol, affine)
+        if force_ras:
+            image = _force_ras_nifti(image)
+        data = np.asanyarray(image.dataobj)
+        return [
+            _prepare_array_output(
+                data,
+                md,
+                affine=image.affine,
+                rescale_type="DV",
+                extra_metadata=extra,
+            )
+        ]
+    except Exception as exc:
+        _err(f"Error extracting Zeiss OCT data: {exc}")
+        return []
+
+
+def _load_standard_series_arrays(
+    ds_list: list[Any],
+    md: dict[str, Any],
+    *,
+    force_ras: bool,
+    revert_scaling: bool,
+    rescale_type: str,
+    tmp_dir: Path | None = None,
+) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    converted = _convert_ds_list_to_nifti_image(
+        ds_list,
+        force_ras=force_ras,
+        md=md,
+        revert_scaling=revert_scaling,
+        rescale_type=rescale_type,
+        tmp_dir=tmp_dir,
+    )
+    if converted is None:
+        return []
+    image, actual_rescale_type = converted
+    data = np.asanyarray(image.dataobj)
+    return [_prepare_array_output(data, md, affine=image.affine, rescale_type=actual_rescale_type)]
+
+
+def _load_one_series_arrays(
+    ds_list: list[Any],
+    md: dict[str, Any],
+    mod: str,
+    first_ds: Any,
+    *,
+    force_ras: bool,
+    revert_scaling: bool = False,
+    rescale_type: str = "DV",
+    tmp_dir: Path | None = None,
+) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    if mod in ["OP", "OT"]:
+        out = _load_op_series_arrays(ds_list, md)
+        if out:
+            return out
+
+    if is_tissue_segmentation(first_ds):
+        pass
+
+    if is_zeiss_raw_storage(ds_list[0]):
+        out = _load_zeiss_series_arrays(ds_list, md, force_ras=force_ras)
+        if out:
+            return out
+
+    if mod in ["CT", "PT", "OCT", "OPT"]:
+        for ds in ds_list:
+            if not hasattr(ds, "RepetitionTime"):
+                ds.RepetitionTime = 0
+            if not hasattr(ds, "EchoTime"):
+                ds.EchoTime = 0
+
+    return _load_standard_series_arrays(
+        ds_list,
+        md,
+        force_ras=force_ras,
+        revert_scaling=revert_scaling,
+        rescale_type=rescale_type,
+        tmp_dir=tmp_dir,
+    )
+
+
+def load_dicom_series(
+    input_path: str,
+    *,
+    axes: str | None = None,
+    series_number: str | None = None,
+    series_uid: str | None = None,
+    series_index: int | None = None,
+    return_all_series: bool = False,
+    include_private_tags: bool = False,
+    force_ras: bool = False,
+    revert_scaling: bool = False,
+    rescale_type: str = "DV",
+    tmp_dir: Path | None = None,
+):
+    _require_deps()
+
+    series_all, metas = _read_dicom_conversion(
+        input_path,
+        series_number=series_number,
+        include_private_tags=True,
+    )
+    if not series_all:
+        if series_number is not None:
+            raise ValidationError(f"series_number={series_number!r} not found.")
+        raise ValidationError(f"No valid DICOM image series found at: {input_path}")
+
+    if series_uid is not None:
+        filtered = [
+            (ds_list, md)
+            for ds_list, md in zip(series_all, metas)
+            if _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid")))
+            == _normalize_series_uid(series_uid)
+        ]
+        if not filtered:
+            raise ValidationError(f"series_uid={series_uid!r} not found.")
+        series_all = [item[0] for item in filtered]
+        metas = [item[1] for item in filtered]
+    elif series_index is not None:
+        if not (0 <= series_index < len(series_all)):
+            raise ValidationError(f"series_index={series_index} out of range for {len(series_all)} series.")
+        series_all = [series_all[series_index]]
+        metas = [metas[series_index]]
+
+    outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
+    for ds_list, md in zip(series_all, metas):
+        if not ds_list:
+            _warn(f"Skipping empty series (UID: {md.get('SeriesInstanceUID', 'N/A')}).")
+            continue
+
+        readable_ds_list = []
+        for ds in ds_list:
+            try:
+                if _has_pixel_data(ds):
+                    readable_ds_list.append(ds)
+            except Exception as exc:
+                _debug(
+                    "Skipping unreadable DICOM file: "
+                    f"{getattr(ds, 'filename', 'in-memory')}. Reason: {exc}"
+                )
+        if not readable_ds_list:
+            _warn(f"Series {md.get('SeriesInstanceUID', 'N/A')} had no readable images after filtering. Skipping.")
+            continue
+
+        ds_list = readable_ds_list
+        first_ds = ds_list[0]
+        try:
+            buckets: dict[tuple[str, ...], list[Any]] = {}
+            for ds in ds_list:
+                sig = _image_type_signature(_extract_image_type_tokens(ds))
+                buckets.setdefault(sig, []).append(ds)
+            if len(buckets) > 1:
+                _info(f"[info]Splitting series into {len(buckets)} subseries by ImageType[/info]")
+                for _, sub in buckets.items():
+                    md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=include_private_tags)
+                    md_sub.update(_collect_rescale_metadata(sub))
+                    _ensure_output_metadata_fields(md_sub, rescale_type="DV")
+                    if rescale_type.upper() == "FP":
+                        md_sub.update(_collect_scale_slope_metadata(sub))
+                    mod = md_sub.get("Modality", "UNK")
+                    outputs.extend(
+                        _load_one_series_arrays(
+                            sub,
+                            md_sub,
+                            mod,
+                            sub[0],
+                            force_ras=force_ras,
+                            revert_scaling=revert_scaling,
+                            rescale_type=rescale_type,
+                            tmp_dir=tmp_dir,
+                        )
+                    )
+                continue
+        except Exception as exc:
+            _warn(f"ImageType split failed or not applicable: {exc}")
+
+        if rescale_type.upper() == "FP":
+            md.update(_collect_scale_slope_metadata(ds_list))
+        _ensure_output_metadata_fields(md, rescale_type="DV")
+        mod = md.get("Modality", "UNK")
+        outputs.extend(
+            _load_one_series_arrays(
+                ds_list,
+                md,
+                mod,
+                first_ds,
+                force_ras=force_ras,
+                revert_scaling=revert_scaling,
+                rescale_type=rescale_type,
+                tmp_dir=tmp_dir,
+            )
+        )
+
+    if not outputs:
+        raise ValidationError(f"No readable DICOM image series found at: {input_path}")
+
+    if axes:
+        reordered_outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
+        for data, md in outputs:
+            axes_prev = md.get("axes", default_nifti_axes(np.asarray(data).ndim))
+            data_new = reorder_axes(data, axes_prev, axes)
+            md_new = dict(md)
+            md_new["axes"] = axes
+            md_new["shape"] = tuple(np.asarray(data_new).shape)
+            reordered_outputs.append((np.asarray(data_new), md_new))
+        outputs = reordered_outputs
+
+    if return_all_series or len(outputs) != 1:
+        return outputs
+    return outputs[0]
 
 
 def _fallback_save_pixel_arrays(
@@ -1150,164 +1802,27 @@ def _fallback_save_pixel_arrays(
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
 ) -> str | None:
-    temp_nifti_path = None
-    try:
-        if _dicom2nifti is None:
-            return _save_basic_fallback(
-                ds_list,
-                final_output_path,
-                message="Saved basic NIfTI fallback",
-                md=md,
-                save_metadata=save_metadata,
-            )
-
-        with tempfile.NamedTemporaryFile(suffix=".nii", delete=False, dir=tmp_dir) as tf:
-            temp_nifti_path = tf.name
-
-        try:
-            res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(ds_list, temp_nifti_path, reorient_nifti=False)
-        except Exception as exc:
-            error_str = str(exc)
-            if any(err_type in error_str for err_type in ["TOO_FEW_SLICES", "LOCALIZER"]):
-                _warn(f"Detected {error_str} error, attempting to process as single-slice or localizer...")
-                return _save_basic_fallback(
-                    ds_list,
-                    final_output_path,
-                    message="Saved localizer/single-slice NIfTI",
-                    md=md,
-                    save_metadata=save_metadata,
-                )
-            if "IMAGE_ORIENTATION_INCONSISTENT" in error_str:
-                _warn(f"IMAGE_ORIENTATION_INCONSISTENT detected, attempting to fix orientation inconsistencies: {exc}")
-                try:
-                    fixed_ds_list, corrections_count = _fix_orientation_inconsistencies(ds_list)
-                    if corrections_count > 0:
-                        _warn(f"Orientation fixing applied ({corrections_count} slices corrected), retrying conversion...")
-                        try:
-                            res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
-                                fixed_ds_list,
-                                temp_nifti_path,
-                                reorient_nifti=False,
-                            )
-                        except Exception as fix_exc:
-                            fix_error_str = str(fix_exc)
-                            if any(
-                                token in fix_error_str.lower()
-                                for token in ["invalid value encountered", "nan", "orthogonality check failed"]
-                            ) or any(token in fix_error_str for token in ["NON_CUBICAL_IMAGE", "GANTRY_TILT"]):
-                                _warn(f"Detected {fix_error_str} after orientation fixing, attempting to clean and retry...")
-                                cleaned_fixed_ds_list = _clean_nan_values(fixed_ds_list)
-                                try:
-                                    res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(
-                                        cleaned_fixed_ds_list,
-                                        temp_nifti_path,
-                                        reorient_nifti=False,
-                                    )
-                                except Exception:
-                                    return _save_basic_fallback(
-                                        ds_list,
-                                        final_output_path,
-                                        message="Saved basic NIfTI fallback mode",
-                                        md=md,
-                                        save_metadata=save_metadata,
-                                    )
-                            else:
-                                raise
-                    else:
-                        return _save_basic_fallback(
-                            ds_list,
-                            final_output_path,
-                            message="Saved basic NIfTI fallback mode",
-                            md=md,
-                            save_metadata=save_metadata,
-                        )
-                except Exception:
-                    return _save_basic_fallback(
-                        ds_list,
-                        final_output_path,
-                        message="Saved basic NIfTI fallback mode",
-                        md=md,
-                        save_metadata=save_metadata,
-                    )
-            elif any(err_type in error_str for err_type in ["NON_CUBICAL_IMAGE", "GANTRY_TILT", "ConversionValidationError"]):
-                _warn(f"Detected {error_str} error, trying reorientation first...")
-                try:
-                    res = _dicom2nifti.convert_dicom.dicom_array_to_nifti(ds_list, temp_nifti_path, reorient_nifti=True)
-                except Exception:
-                    return _save_basic_fallback(
-                        ds_list,
-                        final_output_path,
-                        message="Saved basic NIfTI fallback mode",
-                        md=md,
-                        save_metadata=save_metadata,
-                    )
-            elif "NON_IMAGING_DICOM_FILES" in error_str:
-                return _save_basic_fallback(
-                    ds_list,
-                    final_output_path,
-                    message="Saved basic NIfTI fallback mode",
-                    md=md,
-                    save_metadata=save_metadata,
-                )
-            else:
-                raise
-
-        image = res["NII"]
-        if revert_scaling and md:
-            rescale_slopes = md.get("RescaleSlope", [])
-            rescale_intercepts = md.get("RescaleIntercept", [])
-            if isinstance(rescale_slopes, list) and isinstance(rescale_intercepts, list):
-                if len(rescale_slopes) > 0 and len(rescale_intercepts) > 0:
-                    _info("Reverting scanner scaling to obtain raw pixel values (revert_scaling takes priority over rescale_type)")
-                    image = _apply_rescale_to_nifti(image, rescale_slopes, rescale_intercepts, ds_list)
-        elif rescale_type.upper() == "FP" and md:
-            rescale_slopes = md.get("RescaleSlope", [])
-            rescale_intercepts = md.get("RescaleIntercept", [])
-            scale_slopes = md.get("ScaleSlope", [])
-            if not scale_slopes or all(ss is None for ss in scale_slopes):
-                scale_slope_md = _collect_scale_slope_metadata(ds_list)
-                scale_slopes = scale_slope_md.get("ScaleSlope", [])
-                md["ScaleSlope"] = scale_slopes
-            if (
-                isinstance(rescale_slopes, list)
-                and isinstance(rescale_intercepts, list)
-                and isinstance(scale_slopes, list)
-                and len(rescale_slopes) > 0
-                and len(rescale_intercepts) > 0
-                and len(scale_slopes) > 0
-            ):
-                _info("Applying FP rescaling using ScaleSlope")
-                image = _apply_fp_rescale_to_nifti(image, rescale_slopes, rescale_intercepts, scale_slopes, ds_list)
-
-        if force_ras:
-            ornt_from = nib.orientations.io_orientation(image.affine)
-            ornt_to = nib.orientations.axcodes2ornt(("R", "A", "S"))
-            xfm = nib.orientations.ornt_transform(ornt_from, ornt_to)
-            _info(f"Forcing canonical RAS reorientation with transform:\n {xfm}")
-            if xfm.size:
-                data_ras = nib.orientations.apply_orientation(image.get_fdata(), xfm)
-                aff_ras = image.affine @ nib.orientations.inv_ornt_aff(xfm, image.shape)
-                image = nib.Nifti1Image(data_ras, aff_ras, header=image.header.copy())
-                image.set_sform(aff_ras, code=1)
-                image.set_qform(aff_ras, code=1)
-
-        if md is not None:
-            _save_image_with_metadata(image, final_output_path, md, additional_tags)
-        else:
-            nib.save(image, final_output_path)
-        _info(f"Saved {final_output_path}")
-        if save_metadata and md:
-            _save_metadata_json(final_output_path, md)
-        return final_output_path
-    except Exception as exc:
-        _warn(f"Standard conversion with fallbacks failed: {exc}")
+    converted = _convert_ds_list_to_nifti_image(
+        ds_list,
+        force_ras=force_ras,
+        md=md,
+        revert_scaling=revert_scaling,
+        rescale_type=rescale_type,
+        tmp_dir=tmp_dir,
+    )
+    if converted is None:
         return None
-    finally:
-        try:
-            if temp_nifti_path and os.path.exists(temp_nifti_path):
-                os.remove(temp_nifti_path)
-        except Exception:
-            pass
+
+    image, actual_rescale_type = converted
+    if md is not None:
+        _ensure_output_metadata_fields(md, rescale_type=actual_rescale_type)
+        _save_image_with_metadata(image, final_output_path, md, additional_tags)
+    else:
+        nib.save(image, final_output_path)
+    _info(f"Saved {final_output_path}")
+    if save_metadata and md:
+        _save_metadata_json(final_output_path, md)
+    return final_output_path
 
 
 def _build_output_filename(
@@ -1412,9 +1927,15 @@ def _process_op_series(
             pixel_array_yxc = ds.pixel_array
             pixel_array_xyc = pixel_array_yxc.transpose(1, 0, 2) if pixel_array_yxc.ndim == 3 else pixel_array_yxc.T
             image = nib.Nifti1Image(pixel_array_xyc, np.eye(4))
-            _save_image_with_metadata(image, final_output_path, md, additional_tags)
+            md_save = dict(md)
+            for key in ("InstanceNumber", "ImageLaterality", "Laterality"):
+                value = ds.get(key)
+                if value is not None:
+                    md_save[key] = _convert_dicom_value(value)
+            _ensure_output_metadata_fields(md_save, rescale_type="DV")
+            _save_image_with_metadata(image, final_output_path, md_save, additional_tags)
             if save_metadata:
-                _save_metadata_json(final_output_path, md)
+                _save_metadata_json(final_output_path, md_save)
             _info(f"Saved OP image to {final_output_path}")
             outputs.append(final_output_path)
         return outputs
@@ -1488,6 +2009,8 @@ def _process_tissue_series(
             md_header = md.copy()
             md_header["segmentation_type"] = "TISSUE"
             md_header["extracted_shape"] = shape_info
+            _ensure_output_metadata_fields(md_full, rescale_type="DV")
+            _ensure_output_metadata_fields(md_header, rescale_type="DV")
             _save_image_with_metadata(image, final_output_path, md_header, additional_tags)
             if save_metadata:
                 _save_metadata_json(final_output_path, md_full)
@@ -1536,6 +2059,8 @@ def _process_zeiss_series(
         md_full.update(extra)
         md_header = md.copy()
         md_header.update(extra)
+        _ensure_output_metadata_fields(md_full, rescale_type="DV")
+        _ensure_output_metadata_fields(md_header, rescale_type="DV")
 
         if explicit_output_path:
             final_output_path = explicit_output_path
@@ -1708,24 +2233,20 @@ def run_dicom2nifti(
     tmp_dir: Path | None = None,
     explicit_output_path: str | None = None,
 ) -> list[str]:
-    _ = include_private_tags
     _require_deps()
     os.makedirs(output_folder, exist_ok=True)
 
-    series_all, metas = _read_dicom_conversion(input_path)
+    series_all, metas = _read_dicom_conversion(
+        input_path,
+        series_number=series_number,
+        include_private_tags=include_private_tags,
+    )
     if not series_all:
+        if series_number is not None:
+            raise ValidationError(f"series_number={series_number!r} not found.")
         raise ValidationError(f"No valid DICOM image series found at: {input_path}")
 
     if series_number is not None:
-        filtered = [
-            (ds_list, md)
-            for ds_list, md in zip(series_all, metas)
-            if str(md.get("SeriesNumber", "")) == str(series_number)
-        ]
-        if not filtered:
-            raise ValidationError(f"series_number={series_number!r} not found.")
-        series_all = [item[0] for item in filtered]
-        metas = [item[1] for item in filtered]
         _info(f"Selected series number: {series_number}")
     elif series_index is not None:
         if not (0 <= series_index < len(series_all)):
@@ -1775,8 +2296,9 @@ def run_dicom2nifti(
                         raise ValidationError("Explicit output file cannot be used when a series splits into multiple subseries.")
                     _info(f"[info]Splitting series into {len(buckets)} subseries by ImageType[/info]")
                     for sig, sub in buckets.items():
-                        md_sub = _pydicom_dataset_to_dict(sub[0])
+                        md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=True)
                         md_sub.update(_collect_rescale_metadata(sub))
+                        _ensure_output_metadata_fields(md_sub, rescale_type="DV")
                         if rescale_type.upper() == "FP":
                             md_sub.update(_collect_scale_slope_metadata(sub))
                         mod = md_sub.get("Modality", "UNK")
@@ -1806,6 +2328,7 @@ def run_dicom2nifti(
 
             if rescale_type.upper() == "FP":
                 md.update(_collect_scale_slope_metadata(ds_list))
+            _ensure_output_metadata_fields(md, rescale_type="DV")
             mod = md.get("Modality", "UNK")
             outputs.extend(
                 _process_one_series(

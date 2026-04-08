@@ -32,6 +32,8 @@ _NON_DICOM_METADATA_KEYS = {
     "series_uid",
     "series_description",
     "series_number",
+    "submodality",
+    "rescale_type",
     "filename",
     "dtype",
     "mode",
@@ -113,6 +115,17 @@ class Image:
                 )
             self.metadata["axes"] = self.axes
 
+        series_description = (
+            self.metadata.get("submodality")
+            or self.metadata.get("SeriesDescription")
+            or self.metadata.get("(0008,103E)")
+            or self.metadata.get("series_description")
+        )
+        if series_description not in (None, ""):
+            self.metadata["submodality"] = series_description
+            self.metadata.setdefault("series_description", series_description)
+
+        self.metadata.setdefault("rescale_type", "DV")
         self.metadata["shape"] = tuple(getattr(self.data, "shape", ()))
 
     @property
@@ -122,6 +135,20 @@ class Image:
     @property
     def modality(self) -> str | None:
         return self.metadata.get("Modality") or self.metadata.get("(0008,0060)")
+
+    @property
+    def submodality(self) -> str | None:
+        return (
+            self.metadata.get("submodality")
+            or self.metadata.get("SeriesDescription")
+            or self.metadata.get("(0008,103E)")
+            or self.metadata.get("series_description")
+        )
+
+    @property
+    def rescale_type(self) -> str:
+        value = self.metadata.get("rescale_type", "DV")
+        return str(value).upper()
 
     @property
     def is_pet(self) -> bool:
@@ -216,7 +243,8 @@ class Image:
     def __repr__(self) -> str:
         return (
             f"Image(shape={self.shape}, dtype={self.dtype}, backend={self.backend}, "
-            f"axes={self.axes!r}, name={self.name!r}, modality={self.modality!r})"
+            f"axes={self.axes!r}, name={self.name!r}, modality={self.modality!r}, "
+            f"submodality={self.submodality!r}, rescale_type={self.rescale_type!r})"
         )
 
     def __len__(self) -> int:
