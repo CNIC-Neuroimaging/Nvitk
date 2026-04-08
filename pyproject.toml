@@ -91,8 +91,8 @@ full = ["nvitk[gpu,test]"]
 
 [project.scripts]
 # General imaging and mesh processing scripts
-dcm2nii = "nvitk.io.converters.dicom_conversion:main"
-# stl2nifti = "conversion.stl2nifti:main"
+dcm2nii = "nvitk.io.conversors.dcm2nii:main"
+stl2nifti = "nvitk.io.conversors.stl2nifti:main"
 # nikon2nifti = "conversion.nikon2nifti:main"
 # v-phase2volume = "util.conversion.v_phase2volume:main"
 
