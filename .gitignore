@@ -11,6 +11,8 @@ data/
 
 test/
 tests/
+!tests/
+!tests/**/*.py
 docs/
 
 src/nvitk.egg-info/
@@ -90,6 +92,8 @@ htmlcov/
 data/
 results/
 outputs/
+dataset/cache/*
+!dataset/cache/.gitkeep
 
 # Large microscopy / imaging files (edit extensions as needed)
 *.tif

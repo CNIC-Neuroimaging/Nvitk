@@ -1,0 +1,200 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-04-09T00:00:00+00:00",
+  "tables": {
+    "subjects": {
+      "path": "tables/subjects.parquet",
+      "kind": "entities",
+      "description": "Canonical subject-level rows used across tabular and image assets.",
+      "key_columns": ["subject_uid"],
+      "index_columns": ["subject_uid", "primary_patient_id", "primary_seqn"],
+      "columns": {
+        "subject_uid": "string",
+        "primary_patient_id": "string",
+        "primary_seqn": "string",
+        "sex": "string",
+        "birth_date": "datetime64[ns]",
+        "notes": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "subject_ids": {
+      "path": "tables/subject_ids.parquet",
+      "kind": "identifier_mapping",
+      "description": "Mappings between subject_uid and external identifiers such as patient_id, seqn, and XNAT labels.",
+      "key_columns": ["subject_uid", "id_namespace", "id_value"],
+      "index_columns": ["subject_uid", "id_namespace", "id_value"],
+      "columns": {
+        "subject_uid": "string",
+        "id_namespace": "string",
+        "id_value": "string",
+        "id_source": "string",
+        "is_primary": "boolean",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "sessions": {
+      "path": "tables/sessions.parquet",
+      "kind": "image_inventory",
+      "description": "Imaging sessions or experiments associated with each subject.",
+      "key_columns": ["session_uid"],
+      "index_columns": ["session_uid", "subject_uid", "experiment_label"],
+      "columns": {
+        "session_uid": "string",
+        "subject_uid": "string",
+        "project_id": "string",
+        "experiment_label": "string",
+        "modality": "string",
+        "visit_label": "string",
+        "scanner": "string",
+        "available_scans": "string",
+        "acquired_at": "datetime64[ns]",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "scans": {
+      "path": "tables/scans.parquet",
+      "kind": "image_inventory",
+      "description": "XNAT scan inventory with sequence classification and optional local cache locations.",
+      "key_columns": ["scan_uid"],
+      "index_columns": ["scan_uid", "session_uid", "subject_uid", "scan_id", "modality", "orientation"],
+      "columns": {
+        "scan_uid": "string",
+        "session_uid": "string",
+        "subject_uid": "string",
+        "scan_id": "string",
+        "scan_label": "string",
+        "series_description": "string",
+        "quality": "string",
+        "modality": "string",
+        "orientation": "string",
+        "resource_label": "string",
+        "local_cache_path": "string",
+        "xnat_uri": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "clinical_measurements": {
+      "path": "tables/clinical_measurements.parquet",
+      "kind": "measurements",
+      "description": "Long-form clinical variables linked to subjects and optional visits.",
+      "key_columns": ["subject_uid", "visit_id", "variable_id", "source_file", "source_sheet", "source_column"],
+      "index_columns": ["subject_uid", "visit_id", "variable_id", "source_file", "source_sheet", "source_column"],
+      "wide_index_columns": ["subject_uid", "visit_id"],
+      "wide_key_columns": ["variable_id"],
+      "value_columns": ["value_num", "value_text"],
+      "columns": {
+        "subject_uid": "string",
+        "visit_id": "string",
+        "variable_id": "string",
+        "value_num": "float64",
+        "value_text": "string",
+        "unit": "string",
+        "value_kind": "string",
+        "source_table": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_column": "string",
+        "source_batch_id": "string",
+        "measured_at": "datetime64[ns]"
+      }
+    },
+    "image_measurements": {
+      "path": "tables/image_measurements.parquet",
+      "kind": "measurements",
+      "description": "Long-form image-derived variables linked to sessions, modalities, and regions when available.",
+      "key_columns": ["subject_uid", "session_id", "modality", "region_id", "frame_index", "variable_id", "source_file", "source_sheet", "source_column"],
+      "index_columns": ["subject_uid", "session_id", "modality", "region_id", "frame_index", "variable_id", "source_file", "source_sheet", "source_column"],
+      "wide_index_columns": ["subject_uid", "session_id"],
+      "wide_key_columns": ["modality", "region_id", "frame_index", "variable_id"],
+      "value_columns": ["value_num", "value_text"],
+      "columns": {
+        "subject_uid": "string",
+        "session_id": "string",
+        "modality": "string",
+        "region_id": "string",
+        "region_label": "string",
+        "frame_index": "int64",
+        "variable_id": "string",
+        "value_num": "float64",
+        "value_text": "string",
+        "unit": "string",
+        "value_kind": "string",
+        "pipeline_name": "string",
+        "pipeline_version": "string",
+        "qc_status": "string",
+        "source_asset": "string",
+        "source_table": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_column": "string",
+        "source_batch_id": "string",
+        "measured_at": "datetime64[ns]"
+      }
+    },
+    "assets": {
+      "path": "tables/assets.parquet",
+      "kind": "assets",
+      "description": "Local files associated with raw caches or derived pipelines.",
+      "key_columns": ["asset_uid"],
+      "index_columns": ["asset_uid", "subject_uid", "session_uid", "modality", "asset_type"],
+      "columns": {
+        "asset_uid": "string",
+        "subject_uid": "string",
+        "session_uid": "string",
+        "modality": "string",
+        "asset_type": "string",
+        "asset_path": "string",
+        "resource_label": "string",
+        "source": "string",
+        "pipeline_name": "string",
+        "pipeline_version": "string",
+        "exists_locally": "boolean",
+        "metadata_json": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "cohort_membership": {
+      "path": "tables/cohort_membership.parquet",
+      "kind": "cohorts",
+      "description": "Named subject subsets such as processed cohorts or modality-specific availability.",
+      "key_columns": ["cohort_id", "subject_uid"],
+      "index_columns": ["cohort_id", "subject_uid"],
+      "columns": {
+        "cohort_id": "string",
+        "subject_uid": "string",
+        "membership_source": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    },
+    "source_tables": {
+      "path": "tables/source_tables.parquet",
+      "kind": "metadata",
+      "description": "Inventory of imported workbook sheets, their layouts, and original columns.",
+      "key_columns": ["source_uid"],
+      "index_columns": ["source_file", "source_sheet", "source_kind", "domain", "modality"],
+      "columns": {
+        "source_uid": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_kind": "string",
+        "domain": "string",
+        "modality": "string",
+        "layout": "string",
+        "n_rows": "int64",
+        "n_columns": "int64",
+        "columns_json": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      }
+    }
+  }
+}

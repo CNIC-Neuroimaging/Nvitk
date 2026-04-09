@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .conversors import dcm2nii, nikon2nifti, stl2nifti
+from .conversors import dcm2nii, nikon2nifti, phase2volume, stl2nifti
 from .imageio import convert_image, imread, imsave, imshow, swapaxes
 
 __all__ = [
@@ -11,5 +11,6 @@ __all__ = [
     "convert_image",
     "dcm2nii",
     "nikon2nifti",
+    "phase2volume",
     "stl2nifti",
 ]

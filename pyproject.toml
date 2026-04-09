@@ -39,7 +39,7 @@ dependencies = [
   "nd2>=0.10.3",
   "antspyx>=0.6.1",
   "dicom2nifti>=2.6.1",
-  "pydicom>=3.0.1",
+  "pydicom>=2.4.5,<3",
   "pylibjpeg>=2.0.1",
   "vtk>=9.3.1",
   "pyradiomics>=3.0.1",
@@ -80,6 +80,9 @@ gpu = [
 test = [
   "pytest>=8.3.5",
 ]
+xnat = [
+  "xnat>=0.7.2",
+]
 conda-packages = [
   # NOTE: pip extras cannot express "install from conda channels".
   # Use the repo's `environment.yml` to install these conda-only deps:
@@ -87,17 +90,19 @@ conda-packages = [
   # - mrtrix3>=3.0.8 (mrtrix3)
   # - libstdcxx-ng>=15.2.0 (conda-forge)
 ]
-full = ["nvitk[gpu,test]"]
+full = ["nvitk[gpu,test,xnat]"]
 
 [project.scripts]
 # General imaging and mesh processing scripts
 dcm2nii = "nvitk.io.conversors.dcm2nii:main"
 stl2nifti = "nvitk.io.conversors.stl2nifti:main"
-# nikon2nifti = "conversion.nikon2nifti:main"
-# v-phase2volume = "util.conversion.v_phase2volume:main"
+phase2volume = "nvitk.io.conversors.phase2volume:main"
 
 # Miscellaneous scripts
 pyhelp = "nvitk.utils.list_cli_commands:main"
+nvitk-build-sqlite-index = "nvitk.db.sqlite_index:main"
+nvitk-import-study-data = "nvitk.db.importers:main"
+nvitk-sync-xnat = "nvitk.db.xnat:main"
 
 [project.gui-scripts]
 # Nvitk-GUI = "gui.main:main"

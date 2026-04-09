@@ -24,3 +24,4 @@ CUDA installation cannot be auto-detected from env file, so the above installati
   - `gpu-base.yml`: a smaller base GPU environment if `environment-gpu.yml` does not work (does not install `nvitk`, you'll have to then manually install the specific conda requirements under `environment.yml` and isntall `nvitk` as `pip install -e .`)
 - **pip extras**:
   - `pip install -e ".[gpu]"` installs `cupy-cuda12x` and `torch`/`torchvision` (pip approach if you cannot configure CuPy's or PyTorch’s CUDA index with the cuda-recommended approach).
+  

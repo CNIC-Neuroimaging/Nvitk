@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NVITK Study Dataset Tables Manifest",
+  "type": "object",
+  "required": ["schema_version", "tables"],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "last_updated": {
+      "type": "string"
+    },
+    "tables": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path", "kind", "columns"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "key_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "index_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wide_index_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "wide_key_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "value_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "columns": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "row_count": {
+            "type": "integer"
+          },
+          "last_updated": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}
