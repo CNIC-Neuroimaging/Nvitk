@@ -9,12 +9,17 @@ from .importers import (
     import_subject_ids_from_source,
     list_pesabrain_sources,
 )
-from .repo import DataRepo
+from .asl_atlases import ASL_ATLAS_REGIONS, regions_for_atlas
+from .repo import PIPELINE_VERSION_V1, PIPELINE_VERSION_V2, DataRepo
 from .sqlite_index import SQLiteIndex
 from .xnat import XnatConnectionConfig, classify_scan, connect_xnat, sync_xnat_project
 
 __all__ = [
+    "ASL_ATLAS_REGIONS",
     "DataRepo",
+    "PIPELINE_VERSION_V1",
+    "PIPELINE_VERSION_V2",
+    "regions_for_atlas",
     "DatasetCatalog",
     "TableDefinition",
     "SQLiteIndex",

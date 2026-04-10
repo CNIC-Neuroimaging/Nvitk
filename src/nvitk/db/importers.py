@@ -16,7 +16,7 @@ except Exception:
 
 from nvitk.core.exceptions import BackendUnavailableError
 
-from .repo import DataRepo
+from .repo import PIPELINE_VERSION_V2, DataRepo
 from .storage import json_dumps, normalize_string, normalize_variable_id, utc_now_iso
 
 
@@ -200,8 +200,14 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
     "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx": [
         SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
+    "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx": [
+        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+    ],
     "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx": [
         SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+    ],
+    "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx": [
+        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
 }
 
@@ -617,7 +623,7 @@ def _clinical_frame(
     frame = pd.DataFrame(
         {
             "subject_uid": raw["subject_uid"].astype("string").where(raw["subject_uid"].notna(), pd.NA),
-            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([default_visit_label if default_visit_label else pd.NA] * len(raw), dtype="string"),
+            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([DEFAULT_VISIT_LABEL] * len(raw), dtype="string"),
             "variable_id": variable_id or normalize_variable_id(column),
             "value_num": value_num,
             "value_text": value_text,
@@ -631,6 +637,8 @@ def _clinical_frame(
             "measured_at": _parse_datetime_series(raw[date_column]) if date_column else pd.Series([pd.NaT] * len(raw), dtype="datetime64[ns]"),
         }
     )
+    if frame['visit_id'].isna().any():
+        frame['visit_id'] = pd.Series([DEFAULT_VISIT_LABEL] * len(frame), dtype="string")
     frame = frame[(frame["value_num"].notna()) | (frame["value_text"].notna())]
     return frame, variable
 
@@ -650,6 +658,7 @@ def _image_frame(
     region_label: str | None,
     frame_index: pd.Series | None = None,
     unit: str | None = None,
+    pipeline_version: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     value_num, value_text, value_kind = _series_value_payload(raw[column])
     variable = _variable_entry(
@@ -667,6 +676,7 @@ def _image_frame(
     frame = pd.DataFrame(
         {
             "subject_uid": raw["subject_uid"].astype("string").where(raw["subject_uid"].notna(), pd.NA),
+            "session_id": _image_measurement_session_id_series(raw).astype("string").fillna(""),
             "modality": modality,
             "region_id": pd.Series([region_id if region_id else pd.NA] * len(raw), dtype="string"),
             "region_label": pd.Series([region_label if region_label else pd.NA] * len(raw), dtype="string"),
@@ -677,7 +687,11 @@ def _image_frame(
             "unit": pd.Series([unit if unit else pd.NA] * len(raw), dtype="string"),
             "value_kind": value_kind,
             "pipeline_name": source_path.stem,
-            "pipeline_version": pd.Series([pd.NA] * len(raw), dtype="string"),
+            "pipeline_version": (
+                pd.Series([pipeline_version] * len(raw), dtype="string")
+                if pipeline_version is not None
+                else pd.Series([pd.NA] * len(raw), dtype="string")
+            ),
             "qc_status": pd.Series([pd.NA] * len(raw), dtype="string"),
             "source_asset": pd.Series([pd.NA] * len(raw), dtype="string"),
             "source_table": _source_table_name(source_path, sheet_name),
@@ -754,6 +768,8 @@ def _parse_image_wide_column(source_name: str, column: str) -> tuple[str, str | 
         return "mean_cbf", _region_id(column), column
     if source_name == "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx":
         return "mean_cbf", _region_id(column), column
+    if source_name == "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx":
+        return "cov_cbf", _region_id(column), column
     return normalize_variable_id(column), None, None
 
 
@@ -799,6 +815,7 @@ def _parse_generic_image_wide(
             variable_id=variable_id,
             region_id=region_id,
             region_label=region_label,
+            pipeline_version=PIPELINE_VERSION_V2 if modality == "4dflow" else None,
         )
         if not frame.empty:
             measurements.append(frame)
@@ -830,6 +847,7 @@ def _parse_image_timeseries_long(
 
     measurements: list[pd.DataFrame] = []
     variables: list[dict[str, Any]] = []
+    _pv = PIPELINE_VERSION_V2 if modality == "4dflow" else None
     mapping = {
         "flow": "flow_tseries",
         "phase": "phase_fraction",
@@ -841,6 +859,7 @@ def _parse_image_timeseries_long(
         frame = pd.DataFrame(
             {
                 "subject_uid": raw["subject_uid"].astype("string"),
+                "session_id": _image_measurement_session_id_series(raw).astype("string").fillna(""),
                 "modality": modality,
                 "region_id": region_id.astype("string"),
                 "region_label": region_label,
@@ -851,7 +870,11 @@ def _parse_image_timeseries_long(
                 "unit": pd.Series([pd.NA] * len(raw), dtype="string"),
                 "value_kind": value_kind,
                 "pipeline_name": source_path.stem,
-                "pipeline_version": pd.Series([pd.NA] * len(raw), dtype="string"),
+                "pipeline_version": (
+                    pd.Series([_pv] * len(raw), dtype="string")
+                    if _pv is not None
+                    else pd.Series([pd.NA] * len(raw), dtype="string")
+                ),
                 "qc_status": pd.Series([pd.NA] * len(raw), dtype="string"),
                 "source_asset": pd.Series([pd.NA] * len(raw), dtype="string"),
                 "source_table": _source_table_name(source_path, sheet_name),
@@ -914,9 +937,13 @@ def _parse_image_timeseries_wide(
     )
     melted["frame"] = pd.to_numeric(melted["frame"], errors="coerce").astype("Int64")
     value_num, value_text, value_kind = _series_value_payload(melted["flow_value"])
+    _pv = PIPELINE_VERSION_V2 if modality == "4dflow" else None
+    _sid = _image_measurement_session_id_series(wide).astype("string").fillna("")
+    session_expanded = np.repeat(_sid.to_numpy(), len(frame_columns))
     df = pd.DataFrame(
         {
             "subject_uid": melted["subject_uid"].astype("string"),
+            "session_id": pd.Series(session_expanded, dtype="string"),
             "modality": modality,
             "region_id": melted["vessel_code"].astype("string").map(_region_id),
             "region_label": melted["vessel"].astype("string"),
@@ -927,7 +954,11 @@ def _parse_image_timeseries_wide(
             "unit": pd.Series([pd.NA] * len(melted), dtype="string"),
             "value_kind": value_kind,
             "pipeline_name": source_path.stem,
-            "pipeline_version": pd.Series([pd.NA] * len(melted), dtype="string"),
+            "pipeline_version": (
+                pd.Series([_pv] * len(melted), dtype="string")
+                if _pv is not None
+                else pd.Series([pd.NA] * len(melted), dtype="string")
+            ),
             "qc_status": pd.Series([pd.NA] * len(melted), dtype="string"),
             "source_asset": pd.Series([pd.NA] * len(melted), dtype="string"),
             "source_table": _source_table_name(source_path, sheet_name),
@@ -1021,6 +1052,7 @@ def _parse_hybrid_hemodynamic(
                 variable_id=variable_id,
                 region_id=region,
                 region_label=region.upper(),
+                pipeline_version=PIPELINE_VERSION_V2,
             )
             if not frame.empty:
                 image_frames.append(frame)
@@ -1062,6 +1094,7 @@ def _parse_hybrid_hemodynamic(
                 variable_id=normalized,
                 region_id=None,
                 region_label=None,
+                pipeline_version=PIPELINE_VERSION_V2,
             )
             if not frame.empty:
                 image_frames.append(frame)

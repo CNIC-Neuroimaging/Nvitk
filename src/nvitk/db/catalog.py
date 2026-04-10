@@ -265,6 +265,20 @@ class DatasetCatalog:
         write_json(self.tables_manifest_path, self.tables_manifest)
         self.refresh()
 
+    def clear_table(self, name: str) -> None:
+        """Delete the Parquet file for ``name`` if present and set ``row_count`` to 0 in the manifest."""
+        payload = self.tables_manifest.setdefault("tables", {}).get(name)
+        if payload is None:
+            raise TableNotFoundError(f"Unknown dataset table: {name}")
+        path = self.root / payload["path"]
+        if path.exists():
+            path.unlink()
+        payload["row_count"] = 0
+        payload["last_updated"] = utc_now_iso()
+        self.tables_manifest["last_updated"] = utc_now_iso()
+        write_json(self.tables_manifest_path, self.tables_manifest)
+        self.refresh()
+
     def validate_repository_manifest(self, payload: dict[str, Any]) -> None:
         missing = sorted(self.REQUIRED_REPOSITORY_KEYS - payload.keys())
         if missing:
