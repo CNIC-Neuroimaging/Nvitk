@@ -10,7 +10,7 @@ import pandas as pd
 from nvitk.core.exceptions import ValidationError
 
 from .exceptions import ManifestError, TableNotFoundError
-from .storage import infer_manifest_dtypes, read_json, utc_now_iso, write_json
+from .storage import infer_manifest_dtypes, normalize_variable_id, read_json, utc_now_iso, write_json
 
 
 @dataclass(frozen=True)
@@ -145,22 +145,47 @@ class DatasetCatalog:
 
         entries = self.variable_entries(domain=domain)
         alias_map: dict[str, str] = {}
+
+        def register_alias(token: str | None, canonical: str) -> None:
+            if token is None:
+                return
+            text = str(token).strip()
+            if not text:
+                return
+            alias_map[text] = canonical
+            alias_map[text.lower()] = canonical
+            normalized = normalize_variable_id(text)
+            if normalized:
+                alias_map[normalized] = canonical
+
         for entry in entries:
             canonical = str(entry["variable_id"])
-            alias_map[canonical] = canonical
-            alias_map[canonical.lower()] = canonical
+            register_alias(canonical, canonical)
             source_column = entry.get("source_column")
             if source_column:
-                alias_map[str(source_column)] = canonical
-                alias_map[str(source_column).lower()] = canonical
+                register_alias(str(source_column), canonical)
             for alias in entry.get("aliases", []):
-                alias_map[str(alias)] = canonical
-                alias_map[str(alias).lower()] = canonical
+                register_alias(str(alias), canonical)
+            label = entry.get("label")
+            if label:
+                register_alias(str(label), canonical)
+            for meta_key in ("export_name", "original_name"):
+                meta = entry.get(meta_key)
+                if meta:
+                    register_alias(str(meta), canonical)
 
         resolved: list[str] = []
         for item in values:
-            text = str(item)
-            resolved.append(alias_map.get(text, alias_map.get(text.lower(), text)))
+            text = str(item).strip()
+            if not text:
+                resolved.append(text)
+                continue
+            candidate = (
+                alias_map.get(text)
+                or alias_map.get(text.lower())
+                or alias_map.get(normalize_variable_id(text))
+            )
+            resolved.append(candidate if candidate is not None else text)
         return resolved
 
     def register_variables(self, entries: list[dict[str, Any]], *, merge: bool = True) -> None:

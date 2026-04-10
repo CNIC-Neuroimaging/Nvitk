@@ -23,7 +23,6 @@ __all__ = [
     "connect_xnat",
     "import_measurements_from_source",
     "import_pesabrain_curated_tables",
-    "import_pesabrain_db_directory",
     "import_pesabrain_source",
     "import_subject_ids_from_source",
     "list_pesabrain_sources",

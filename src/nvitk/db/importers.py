@@ -17,7 +17,7 @@ except Exception:
 from nvitk.core.exceptions import BackendUnavailableError
 
 from .repo import DataRepo
-from .storage import json_dumps, normalize_string, utc_now_iso
+from .storage import json_dumps, normalize_string, normalize_variable_id, utc_now_iso
 
 
 def _cli_decorator(*args, **kwargs):
@@ -242,13 +242,6 @@ def _matching_pesabrain_specs(
 
 def _default_pesabrain_batch_id() -> str:
     return f"pesabrain_{utc_now_iso().replace(':', '').replace('-', '').replace('+00:00', 'z')}"
-
-
-def normalize_variable_id(value: str) -> str:
-    text = value.strip()
-    text = re.sub(r"[^0-9A-Za-z]+", "_", text)
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_").lower()
 
 
 def _is_identifier_column(column: str) -> bool:
@@ -833,7 +826,6 @@ def _parse_image_timeseries_long(
     frame_index = pd.to_numeric(raw.get("frame"), errors="coerce").astype("Int64")
     region_label = raw.get("vessel", pd.Series([pd.NA] * len(raw), dtype="string")).astype("string")
     region_id = raw.get("vessel_code", region_label).astype("string").map(_region_id)
-    session_id_series = _image_measurement_session_id_series(raw)
     date_column = _first_matching_column(raw, DATE_CANDIDATES)
 
     measurements: list[pd.DataFrame] = []
@@ -873,19 +865,19 @@ def _parse_image_timeseries_long(
         frame = frame[(frame["value_num"].notna()) | (frame["value_text"].notna())]
         if not frame.empty:
             measurements.append(frame)
-        variables.append(
-            _variable_entry(
-                variable_id=variable_id,
-                source_column=source_column,
-                domain="image",
-                table="image_measurements",
-                modality=modality,
-                label=source_column,
-                value_kind=value_kind,
-                source_file=source_path.name,
-                source_sheet=sheet_name,
-            )
+        ts_var = _variable_entry(
+            variable_id=variable_id,
+            source_column=source_column,
+            domain="image",
+            table="image_measurements",
+            modality=modality,
+            label=source_column,
+            value_kind=value_kind,
+            source_file=source_path.name,
+            source_sheet=sheet_name,
         )
+        ts_var["aliases"] = list(dict.fromkeys([ts_var["source_column"], variable_id]))
+        variables.append(ts_var)
 
     df = pd.concat(measurements, ignore_index=True) if measurements else pd.DataFrame()
     _upsert_measurements(repo, "image_measurements", df)
@@ -948,22 +940,31 @@ def _parse_image_timeseries_wide(
     )
     df = df[df["value_num"].notna() | df["value_text"].notna()]
     _upsert_measurements(repo, "image_measurements", df)
-    _register_variables(
-        repo,
-        [
-            _variable_entry(
-                variable_id="flow_tseries",
-                source_column="wide_frame",
-                domain="image",
-                table="image_measurements",
-                modality=modality,
-                label="Flow time series",
-                value_kind=value_kind,
-                source_file=source_path.name,
-                source_sheet=sheet_name,
-            )
-        ],
+    wide_var = _variable_entry(
+        variable_id="flow_tseries",
+        source_column="wide_frame",
+        domain="image",
+        table="image_measurements",
+        modality=modality,
+        label="Flow time series",
+        value_kind=value_kind,
+        source_file=source_path.name,
+        source_sheet=sheet_name,
     )
+    # Wide sheets only expose per-frame columns; keep the same aliases as long ``flow`` so
+    # ``repo.image(variables=[\"flow\"])`` resolves after wide-only imports.
+    wide_var["aliases"] = list(
+        dict.fromkeys(
+            [
+                wide_var["source_column"],
+                "flow",
+                "flow_tseries",
+                str(wide_var.get("label") or ""),
+            ]
+        )
+    )
+    wide_var["aliases"] = [a for a in wide_var["aliases"] if a]
+    _register_variables(repo, [wide_var])
     return df
 
 

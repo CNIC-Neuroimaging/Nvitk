@@ -23,6 +23,31 @@ def test_repo_clinical_alias_resolution_and_wide_access(sample_repo: DataRepo):
     assert wide.loc[0, "bmi"] == 26.5
 
 
+def test_catalog_resolve_variable_ids_normalized_and_labels(tmp_path):
+    root = tmp_path / "dataset"
+    DatasetCatalog.create_scaffold(root)
+    catalog = DatasetCatalog(root)
+    catalog.register_variables(
+        [
+            {
+                "variable_id": "flow_tseries",
+                "source_column": "wide_frame",
+                "aliases": ["wide_frame", "flow", "flow_tseries"],
+                "domain": "image",
+                "table": "image_measurements",
+                "label": "Flow time series",
+            }
+        ],
+        merge=False,
+    )
+    catalog.refresh()
+    out = catalog.resolve_variable_ids(
+        ["flow", "FLOW_TSERIES", "Flow time series", "wide_frame", "unknown_x"],
+        domain="image",
+    )
+    assert out == ["flow_tseries", "flow_tseries", "flow_tseries", "flow_tseries", "unknown_x"]
+
+
 def test_repo_generic_filters_support_range_conditions(sample_repo: DataRepo):
     filtered = sample_repo.get(
         "clinical_measurements",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,14 @@ def coerce_bool(value: Any) -> bool:
     if isinstance(value, (int, np.integer)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def normalize_variable_id(value: str) -> str:
+    """Lowercase snake_case token for matching column names, export names, and UI labels."""
+    text = str(value).strip()
+    text = re.sub(r"[^0-9A-Za-z]+", "_", text)
+    text = re.sub(r"_+", "_", text)
+    return text.strip("_").lower()
 
 
 def normalize_string(value: Any) -> str | None:
