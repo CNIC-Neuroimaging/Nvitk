@@ -183,3 +183,51 @@ def test_import_single_pesabrain_source_supports_stepwise_loading(tmp_path) -> N
     assert len(repo.get("subject_ids")) == 3
     assert "age_at_mri" in set(repo.get("clinical_measurements")["variable_id"])
     assert "PESA001" in set(repo.get("subjects")["subject_uid"])
+
+
+def test_image_timeseries_wide_empty_session_stable_keys_no_extra_grain(tmp_path) -> None:
+    """Wide timeseries sheets are subject-only; session_id must be '' so upserts do not duplicate rows."""
+    dataset_root = tmp_path / "dataset"
+    source_root = tmp_path / "db"
+    source_root.mkdir()
+
+    wide = pd.DataFrame(
+        {
+            "patient_id": ["PESA001"],
+            "subject_uid": ["PESA001"],
+            "vessel": ["Left ICA"],
+            "vessel_code": ["LICA"],
+            0: [10.0],
+            1: [20.0],
+        }
+    )
+    _write_workbook(
+        source_root / "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx",
+        {"Datos": wide},
+    )
+    repo = DataRepo(dataset_root, auto_scaffold=True)
+    import_pesabrain_source(
+        repo,
+        source_root,
+        "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx",
+        sheet="Datos",
+        source_kind="image_timeseries_wide",
+        source_batch_id="wide_ts",
+        rebuild_subjects=False,
+    )
+    img = repo.get("image_measurements")
+    assert len(img) == 2
+    assert img["session_id"].astype("string").tolist() == ["", ""]
+    assert set(img["frame_index"].tolist()) == {0, 1}
+
+    import_pesabrain_source(
+        repo,
+        source_root,
+        "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx",
+        sheet="Datos",
+        source_kind="image_timeseries_wide",
+        source_batch_id="wide_ts_repeat",
+        rebuild_subjects=False,
+    )
+    img2 = repo.get("image_measurements")
+    assert len(img2) == 2

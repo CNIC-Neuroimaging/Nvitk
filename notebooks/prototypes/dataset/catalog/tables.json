@@ -1,30 +1,50 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-09T00:00:00+00:00",
+  "last_updated": "2026-04-10T16:53:39+00:00",
   "tables": {
     "subjects": {
       "path": "tables/subjects.parquet",
       "kind": "entities",
       "description": "Canonical subject-level rows used across tabular and image assets.",
-      "key_columns": ["subject_uid"],
-      "index_columns": ["subject_uid", "primary_patient_id", "primary_seqn"],
+      "key_columns": [
+        "subject_uid"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "primary_patient_id",
+        "primary_seqn"
+      ],
       "columns": {
-        "subject_uid": "string",
-        "primary_patient_id": "string",
-        "primary_seqn": "string",
-        "sex": "string",
-        "birth_date": "datetime64[ns]",
-        "notes": "string",
-        "source_batch_id": "string",
-        "updated_at": "string"
+        "subject_uid": "str",
+        "primary_patient_id": "str",
+        "primary_seqn": "str",
+        "sex": "str",
+        "birth_date": "datetime64[s]",
+        "notes": "object",
+        "source_batch_id": "str",
+        "updated_at": "str"
+      },
+      "row_count": 1001,
+      "last_updated": "2026-04-10T16:53:39+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T16:53:39+00:00",
+        "importer": "rebuild_subjects_table"
       }
     },
     "subject_ids": {
       "path": "tables/subject_ids.parquet",
       "kind": "identifier_mapping",
       "description": "Mappings between subject_uid and external identifiers such as patient_id, seqn, and XNAT labels.",
-      "key_columns": ["subject_uid", "id_namespace", "id_value"],
-      "index_columns": ["subject_uid", "id_namespace", "id_value"],
+      "key_columns": [
+        "subject_uid",
+        "id_namespace",
+        "id_value"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "id_namespace",
+        "id_value"
+      ],
       "columns": {
         "subject_uid": "string",
         "id_namespace": "string",
@@ -33,14 +53,26 @@
         "is_primary": "boolean",
         "source_batch_id": "string",
         "updated_at": "string"
+      },
+      "row_count": 8261,
+      "last_updated": "2026-04-10T16:53:25+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T16:53:25+00:00",
+        "importer": "import_pesabrain_db_directory"
       }
     },
     "sessions": {
       "path": "tables/sessions.parquet",
       "kind": "image_inventory",
       "description": "Imaging sessions or experiments associated with each subject.",
-      "key_columns": ["session_uid"],
-      "index_columns": ["session_uid", "subject_uid", "experiment_label"],
+      "key_columns": [
+        "session_uid"
+      ],
+      "index_columns": [
+        "session_uid",
+        "subject_uid",
+        "experiment_label"
+      ],
       "columns": {
         "session_uid": "string",
         "subject_uid": "string",
@@ -55,14 +87,29 @@
         "source_sheet": "string",
         "source_batch_id": "string",
         "updated_at": "string"
+      },
+      "row_count": 978,
+      "last_updated": "2026-04-10T16:53:09+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T16:53:09+00:00",
+        "importer": "import_pesabrain_db_directory"
       }
     },
     "scans": {
       "path": "tables/scans.parquet",
       "kind": "image_inventory",
       "description": "XNAT scan inventory with sequence classification and optional local cache locations.",
-      "key_columns": ["scan_uid"],
-      "index_columns": ["scan_uid", "session_uid", "subject_uid", "scan_id", "modality", "orientation"],
+      "key_columns": [
+        "scan_uid"
+      ],
+      "index_columns": [
+        "scan_uid",
+        "session_uid",
+        "subject_uid",
+        "scan_id",
+        "modality",
+        "orientation"
+      ],
       "columns": {
         "scan_uid": "string",
         "session_uid": "string",
@@ -84,11 +131,33 @@
       "path": "tables/clinical_measurements.parquet",
       "kind": "measurements",
       "description": "Long-form clinical variables linked to subjects and optional visits.",
-      "key_columns": ["subject_uid", "visit_id", "variable_id", "source_file", "source_sheet", "source_column"],
-      "index_columns": ["subject_uid", "visit_id", "variable_id", "source_file", "source_sheet", "source_column"],
-      "wide_index_columns": ["subject_uid", "visit_id"],
-      "wide_key_columns": ["variable_id"],
-      "value_columns": ["value_num", "value_text"],
+      "key_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "wide_index_columns": [
+        "subject_uid",
+        "visit_id"
+      ],
+      "wide_key_columns": [
+        "variable_id"
+      ],
+      "value_columns": [
+        "value_num",
+        "value_text"
+      ],
       "columns": {
         "subject_uid": "string",
         "visit_id": "string",
@@ -103,23 +172,61 @@
         "source_column": "string",
         "source_batch_id": "string",
         "measured_at": "datetime64[ns]"
+      },
+      "row_count": 32606,
+      "last_updated": "2026-04-10T15:53:29+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T15:53:29+00:00",
+        "importer": "import_pesabrain_db_directory"
       }
     },
     "image_measurements": {
       "path": "tables/image_measurements.parquet",
       "kind": "measurements",
       "description": "Long-form image-derived variables linked to sessions, modalities, and regions when available.",
-      "key_columns": ["subject_uid", "modality", "region_id", "frame_index", "variable_id", "source_file", "source_sheet", "source_column"],
-      "index_columns": ["subject_uid", "modality", "region_id", "frame_index", "variable_id", "source_file", "source_sheet", "source_column"],
-      "wide_index_columns": ["subject_uid"],
-      "wide_key_columns": ["modality", "region_id", "frame_index", "variable_id"],
-      "value_columns": ["value_num", "value_text"],
+      "key_columns": [
+        "subject_uid",
+        "session_id",
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "session_id",
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "wide_index_columns": [
+        "subject_uid",
+        "session_id"
+      ],
+      "wide_key_columns": [
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id"
+      ],
+      "value_columns": [
+        "value_num",
+        "value_text"
+      ],
       "columns": {
         "subject_uid": "string",
+        "session_id": "string",
         "modality": "string",
         "region_id": "string",
         "region_label": "string",
-        "frame_index": "int64",
+        "frame_index": "Int64",
         "variable_id": "string",
         "value_num": "float64",
         "value_text": "string",
@@ -135,14 +242,28 @@
         "source_column": "string",
         "source_batch_id": "string",
         "measured_at": "datetime64[ns]"
+      },
+      "row_count": 82073,
+      "last_updated": "2026-04-10T16:53:26+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T16:53:26+00:00",
+        "importer": "import_pesabrain_db_directory"
       }
     },
     "assets": {
       "path": "tables/assets.parquet",
       "kind": "assets",
       "description": "Local files associated with raw caches or derived pipelines.",
-      "key_columns": ["asset_uid"],
-      "index_columns": ["asset_uid", "subject_uid", "session_uid", "modality", "asset_type"],
+      "key_columns": [
+        "asset_uid"
+      ],
+      "index_columns": [
+        "asset_uid",
+        "subject_uid",
+        "session_uid",
+        "modality",
+        "asset_type"
+      ],
       "columns": {
         "asset_uid": "string",
         "subject_uid": "string",
@@ -164,8 +285,14 @@
       "path": "tables/cohort_membership.parquet",
       "kind": "cohorts",
       "description": "Named subject subsets such as processed cohorts or modality-specific availability.",
-      "key_columns": ["cohort_id", "subject_uid"],
-      "index_columns": ["cohort_id", "subject_uid"],
+      "key_columns": [
+        "cohort_id",
+        "subject_uid"
+      ],
+      "index_columns": [
+        "cohort_id",
+        "subject_uid"
+      ],
       "columns": {
         "cohort_id": "string",
         "subject_uid": "string",
@@ -178,21 +305,36 @@
       "path": "tables/source_tables.parquet",
       "kind": "metadata",
       "description": "Inventory of imported workbook sheets, their layouts, and original columns.",
-      "key_columns": ["source_uid"],
-      "index_columns": ["source_file", "source_sheet", "source_kind", "domain", "modality"],
+      "key_columns": [
+        "source_uid"
+      ],
+      "index_columns": [
+        "source_file",
+        "source_sheet",
+        "source_kind",
+        "domain",
+        "modality"
+      ],
       "columns": {
         "source_uid": "string",
         "source_file": "string",
         "source_sheet": "string",
         "source_kind": "string",
         "domain": "string",
-        "modality": "string",
+        "modality": "str",
         "layout": "string",
-        "n_rows": "int64",
-        "n_columns": "int64",
+        "n_rows": "Int64",
+        "n_columns": "Int64",
         "columns_json": "string",
         "source_batch_id": "string",
         "updated_at": "string"
+      },
+      "row_count": 11,
+      "last_updated": "2026-04-10T16:53:24+00:00",
+      "provenance": {
+        "written_at": "2026-04-10T16:53:24+00:00",
+        "importer": "import_pesabrain_db_directory",
+        "reason": "undo batch trial_ids_001"
       }
     }
   }

@@ -34,8 +34,73 @@ def test_repo_generic_filters_support_range_conditions(sample_repo: DataRepo):
 
 
 def test_repo_returns_text_measurements_with_combined_value(sample_repo: DataRepo):
-    clinical = sample_repo.clinical(variables=["APOE"])
+    clinical = sample_repo.clinical(variables=["APOE"], wide=False)
 
     assert len(clinical) == 1
     assert clinical.iloc[0]["value"] == "e3/e4"
     assert pd.isna(clinical.iloc[0]["value_num"])
+
+
+def test_repo_image_wide_preserves_rows_when_session_id_all_na(tmp_path):
+    """Optional session_id is often unset for 4DFlow timeseries sheets; pivot must not drop every row."""
+    root = tmp_path / "dataset"
+    repo = DataRepo(root, auto_scaffold=True)
+    df = pd.DataFrame(
+        [
+            {
+                "subject_uid": "PESA001",
+                "session_id": pd.NA,
+                "modality": "4dflow",
+                "region_id": "lica",
+                "frame_index": 0,
+                "variable_id": "flow_tseries",
+                "value_num": 10.0,
+                "value_text": pd.NA,
+                "unit": pd.NA,
+                "value_kind": "numeric",
+                "pipeline_name": "ts",
+                "pipeline_version": pd.NA,
+                "qc_status": pd.NA,
+                "source_asset": pd.NA,
+                "source_table": "t",
+                "source_file": "long.xlsx",
+                "source_sheet": "Datos",
+                "source_column": "flow",
+                "source_batch_id": "b",
+                "measured_at": pd.NaT,
+            },
+            {
+                "subject_uid": "PESA001",
+                "session_id": pd.NA,
+                "modality": "4dflow",
+                "region_id": "lica",
+                "frame_index": 1,
+                "variable_id": "flow_tseries",
+                "value_num": 11.0,
+                "value_text": pd.NA,
+                "unit": pd.NA,
+                "value_kind": "numeric",
+                "pipeline_name": "ts",
+                "pipeline_version": pd.NA,
+                "qc_status": pd.NA,
+                "source_asset": pd.NA,
+                "source_table": "t",
+                "source_file": "long.xlsx",
+                "source_sheet": "Datos",
+                "source_column": "flow",
+                "source_batch_id": "b",
+                "measured_at": pd.NaT,
+            },
+        ]
+    )
+    df["session_id"] = pd.array([pd.NA, pd.NA], dtype="string")
+    repo.write_table("image_measurements", df)
+    wide = repo.image(wide=True)
+    assert len(wide) == 1
+    assert wide.iloc[0]["subject_uid"] == "PESA001"
+    assert wide.iloc[0]["session_id"] == ""
+    col_0 = "4dflow__lica__0__flow_tseries"
+    col_1 = "4dflow__lica__1__flow_tseries"
+    assert col_0 in wide.columns and col_1 in wide.columns
+    assert wide.iloc[0][col_0] == 10.0
+    assert wide.iloc[0][col_1] == 11.0

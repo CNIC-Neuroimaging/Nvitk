@@ -13,6 +13,7 @@ def test_sqlite_index_matches_parquet_queries(sample_repo: DataRepo):
         variables=["flow_mean"],
         regions=["ICA_L", "ICA_R"],
         use_sqlite=False,
+        wide=False,
     ).sort_values(["subject_uid", "region_id"]).reset_index(drop=True)
 
     sqlite_df = sample_repo.image(
@@ -20,6 +21,7 @@ def test_sqlite_index_matches_parquet_queries(sample_repo: DataRepo):
         variables=["flow_mean"],
         regions=["ICA_L", "ICA_R"],
         use_sqlite=True,
+        wide=False,
     ).sort_values(["subject_uid", "region_id"]).reset_index(drop=True)
 
     pd.testing.assert_frame_equal(parquet_df, sqlite_df, check_dtype=False)

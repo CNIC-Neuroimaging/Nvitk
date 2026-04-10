@@ -46,6 +46,51 @@ SUBJECT_UID_CANDIDATES = [
 VISIT_CANDIDATES = ["visit_id", "visit", "visit_label", "visit_number", "visita"]
 SESSION_CANDIDATES = ["session_uid", "session_id", "mri_id", "mr id", "experiment_label", "session"]
 DATE_CANDIDATES = ["date", "imagingdate", "measured_at", "scan_date", "session_date", "psqdate_reconocimiento_medico"]
+
+
+def _image_measurement_session_id_series(raw: pd.DataFrame) -> pd.Series:
+    """Return a per-row session id for ``image_measurements`` with a stable empty-string sentinel.
+
+    Subject-only Excel sheets have no session column. Using ``pd.NA`` for every row makes
+    ``drop_duplicates`` / merges treat rows inconsistently after Parquet round-trips, which
+    shows up as duplicated subjects. Missing or blank session is stored as ``""``.
+    """
+    column = _first_matching_column(raw, SESSION_CANDIDATES)
+    if column is None:
+        return pd.Series([""] * len(raw), dtype="string")
+    return raw[column].astype("string").fillna("").str.strip().astype("string")
+
+
+def _column_name_is_timeseries_frame_index(name: object) -> bool:
+    """True if a column label is a non-negative integer frame index (0, 1, 2 or 0.0, '3', …)."""
+    if isinstance(name, (int, np.integer)):
+        return int(name) >= 0
+    if isinstance(name, (float, np.floating)):
+        if np.isnan(name):
+            return False
+        v = float(name)
+        return v >= 0 and v == int(v)
+    s = str(name).strip()
+    if s.isdigit():
+        return True
+    try:
+        v = float(s)
+        return v >= 0 and v == int(v)
+    except ValueError:
+        return False
+
+
+def _timeseries_wide_frame_columns(all_columns: list, *, reserved: set[str]) -> list:
+    out: list = []
+    for column in all_columns:
+        if column in reserved:
+            continue
+        label = str(column)
+        if label.startswith("Unnamed"):
+            continue
+        if _column_name_is_timeseries_frame_index(column):
+            out.append(column)
+    return out
 ID_NAMESPACE_EXACT = {
     "patient_id",
     "patientid",
@@ -70,6 +115,7 @@ ID_NAMESPACE_EXACT = {
     "pesa",
 }
 LOCAL_PROJECT_ID = "local_db"
+DEFAULT_VISIT_LABEL = '4'
 
 CLINICAL_METADATA_COLUMNS = {
     "age_at_mri",
@@ -113,63 +159,49 @@ class SourceSpec:
     layout: str
     modality: str | None = None
     cohort_id: str | None = None
+    batch_id: str | None = None
+    default_visit_label: str | None = None
 
 
 PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
     "PESABrain_All_IDs.xlsx": [
-        SourceSpec("PESABrain_All_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide"),
+        SourceSpec("PESABrain_All_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_All_4DFlow_IDs.xlsx": [
-        SourceSpec("PESABrain_All_4DFlow_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide"),
-        SourceSpec("PESABrain_All_4DFlow_IDs.xlsx", "Sheet1", "cohort", "metadata", "wide", cohort_id="4dflow_available"),
+        SourceSpec("PESABrain_All_4DFlow_IDs.xlsx", "Sheet1", "subject_ids", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx": [
-        SourceSpec("PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx", "Datos", "subject_catalog", "metadata", "wide"),
+        SourceSpec("PESABrain_SubjectCatalog_AllXNAT_20260216.xlsx", "Datos", "subject_catalog", "metadata", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_Clinical_20260216.xlsx": [
-        SourceSpec("PESABrain_Clinical_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide"),
+        SourceSpec("PESABrain_Clinical_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_Clinical_AllXNAT_20260216.xlsx": [
-        SourceSpec("PESABrain_Clinical_AllXNAT_20260216.xlsx", "Datos", "clinical_wide", "clinical", "wide"),
+        SourceSpec("PESABrain_Clinical_AllXNAT_20260216.xlsx", "Datos", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_APOE_20260318.xlsx": [
-        SourceSpec("PESABrain_APOE_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide"),
+        SourceSpec("PESABrain_APOE_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_TAC_20260318.xlsx": [
-        SourceSpec("PESABrain_TAC_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide"),
+        SourceSpec("PESABrain_TAC_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_Echography_CarotidePlaque_20260216.xlsx": [
-        SourceSpec("PESABrain_Echography_CarotidePlaque_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide"),
+        SourceSpec("PESABrain_Echography_CarotidePlaque_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_4DFlow_LocalizedPI_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow"),
+        SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow"),
-    ],
-    "PESABrain_4DFlow_LocalizedTimeseriesFlow_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_20260216.xlsx", "Datos", "image_timeseries_long", "image", "long", modality="4dflow"),
+        SourceSpec("PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow"),
+        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl"),
+        SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl"),
-    ],
-    "PESABrain_LocHemodynamic_20260406.xlsx": [
-        SourceSpec("PESABrain_LocHemodynamic_20260406.xlsx", "Sheet1", "hybrid_hemodynamic", "image", "wide", modality="4dflow"),
-    ],
-    "PESABrain_4DFlow_AnatomicalCodebook_20260204.xlsx": [
-        SourceSpec("PESABrain_4DFlow_AnatomicalCodebook_20260204.xlsx", "Tests Cognitivos", "variable_dictionary", "clinical", "dictionary"),
-        SourceSpec("PESABrain_4DFlow_AnatomicalCodebook_20260204.xlsx", "Neuroimagen", "variable_dictionary", "image", "dictionary", modality="neuroimage_report"),
-        SourceSpec("PESABrain_4DFlow_AnatomicalCodebook_20260204.xlsx", "Casos", "image_wide", "image", "wide", modality="neuroimage_report"),
-        SourceSpec("PESABrain_4DFlow_AnatomicalCodebook_20260204.xlsx", "DESPLEGABLES", "dropdown_dictionary", "image", "dictionary", modality="neuroimage_report"),
-    ],
-    "PESABrain_Variables_20250312.xlsx": [
-        SourceSpec("PESABrain_Variables_20250312.xlsx", "Variables", "variable_dictionary", "clinical", "dictionary"),
+        SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
 }
 
@@ -187,6 +219,8 @@ def list_pesabrain_sources() -> list[dict[str, Any]]:
                     "layout": spec.layout,
                     "modality": spec.modality,
                     "cohort_id": spec.cohort_id,
+                    "batch_id": spec.batch_id,
+                    "default_visit_label": spec.default_visit_label,
                 }
             )
     return rows
@@ -514,6 +548,7 @@ def harvest_sessions_from_frame(
     sheet_name: str,
     source_batch_id: str,
     modality: str | None,
+    default_visit_label: str | None = None,
 ) -> pd.DataFrame:
     session_column = _first_matching_column(raw, SESSION_CANDIDATES)
     if session_column is None:
@@ -531,7 +566,7 @@ def harvest_sessions_from_frame(
             "project_id": LOCAL_PROJECT_ID,
             "experiment_label": raw[session_column].astype("string"),
             "modality": modality or "mr",
-            "visit_label": raw[visit_column].astype("string") if visit_column else pd.Series([pd.NA] * len(raw), dtype="string"),
+            "visit_label": raw[visit_column].astype("string") if visit_column else pd.Series([default_visit_label if default_visit_label else pd.NA] * len(raw), dtype="string"),
             "scanner": raw[scanner_column].astype("string") if scanner_column else pd.Series([pd.NA] * len(raw), dtype="string"),
             "available_scans": raw[scans_column].astype("string") if scans_column else pd.Series([pd.NA] * len(raw), dtype="string"),
             "acquired_at": _parse_datetime_series(raw[date_column]) if date_column else pd.Series([pd.NaT] * len(raw), dtype="datetime64[ns]"),
@@ -572,6 +607,7 @@ def _clinical_frame(
     source_batch_id: str,
     variable_id: str | None = None,
     unit: str | None = None,
+    default_visit_label: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     value_num, value_text, value_kind = _series_value_payload(raw[column])
     variable = _variable_entry(
@@ -588,7 +624,7 @@ def _clinical_frame(
     frame = pd.DataFrame(
         {
             "subject_uid": raw["subject_uid"].astype("string").where(raw["subject_uid"].notna(), pd.NA),
-            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([pd.NA] * len(raw), dtype="string"),
+            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([default_visit_label if default_visit_label else pd.NA] * len(raw), dtype="string"),
             "variable_id": variable_id or normalize_variable_id(column),
             "value_num": value_num,
             "value_text": value_text,
@@ -638,7 +674,6 @@ def _image_frame(
     frame = pd.DataFrame(
         {
             "subject_uid": raw["subject_uid"].astype("string").where(raw["subject_uid"].notna(), pd.NA),
-            "session_id": raw[session_column].astype("string") if session_column else pd.Series([pd.NA] * len(raw), dtype="string"),
             "modality": modality,
             "region_id": pd.Series([region_id if region_id else pd.NA] * len(raw), dtype="string"),
             "region_label": pd.Series([region_label if region_label else pd.NA] * len(raw), dtype="string"),
@@ -671,10 +706,11 @@ def _parse_generic_clinical_wide(
     source_path: Path,
     sheet_name: str,
     source_batch_id: str,
+    default_visit_label: str | None = None,
 ) -> pd.DataFrame:
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
-    harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id, modality=None)
+    harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id, modality=None, default_visit_label=default_visit_label)
 
     visit_column = _first_matching_column(raw, VISIT_CANDIDATES)
     date_column = _first_matching_column(raw, DATE_CANDIDATES)
@@ -700,6 +736,7 @@ def _parse_generic_clinical_wide(
             source_path=source_path,
             sheet_name=sheet_name,
             source_batch_id=source_batch_id,
+            default_visit_label=default_visit_label,
         )
         if not frame.empty:
             measurements.append(frame)
@@ -796,7 +833,7 @@ def _parse_image_timeseries_long(
     frame_index = pd.to_numeric(raw.get("frame"), errors="coerce").astype("Int64")
     region_label = raw.get("vessel", pd.Series([pd.NA] * len(raw), dtype="string")).astype("string")
     region_id = raw.get("vessel_code", region_label).astype("string").map(_region_id)
-    session_column = _first_matching_column(raw, SESSION_CANDIDATES)
+    session_id_series = _image_measurement_session_id_series(raw)
     date_column = _first_matching_column(raw, DATE_CANDIDATES)
 
     measurements: list[pd.DataFrame] = []
@@ -812,7 +849,6 @@ def _parse_image_timeseries_long(
         frame = pd.DataFrame(
             {
                 "subject_uid": raw["subject_uid"].astype("string"),
-                "session_id": raw[session_column].astype("string") if session_column else pd.Series([pd.NA] * len(raw), dtype="string"),
                 "modality": modality,
                 "region_id": region_id.astype("string"),
                 "region_label": region_label,
@@ -869,10 +905,17 @@ def _parse_image_timeseries_wide(
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
 
-    id_columns = {"subject_uid", "patient_id", "vessel", "vessel_code"}
-    frame_columns = [column for column in raw.columns if str(column).isdigit()]
-    melted = raw.melt(
-        id_vars=[column for column in raw.columns if column in id_columns],
+    wide = raw.copy()
+    # Melt only canonical identifiers. Including ``patient_id`` alongside ``subject_uid`` duplicates
+    # the subject grain and can confuse reshapes; subject_uid is the canonical key.
+    melt_id_columns = ("subject_uid", "vessel", "vessel_code")
+    id_vars = [column for column in melt_id_columns if column in wide.columns]
+    reserved = set(id_vars)
+    frame_columns = _timeseries_wide_frame_columns(list(wide.columns), reserved=reserved)
+    if not frame_columns:
+        return pd.DataFrame()
+    melted = wide.melt(
+        id_vars=id_vars,
         value_vars=frame_columns,
         var_name="frame",
         value_name="flow_value",
@@ -882,7 +925,6 @@ def _parse_image_timeseries_wide(
     df = pd.DataFrame(
         {
             "subject_uid": melted["subject_uid"].astype("string"),
-            "session_id": pd.Series([pd.NA] * len(melted), dtype="string"),
             "modality": modality,
             "region_id": melted["vessel_code"].astype("string").map(_region_id),
             "region_label": melted["vessel"].astype("string"),
@@ -1035,6 +1077,7 @@ def _parse_hybrid_hemodynamic(
                 source_path=source_path,
                 sheet_name=sheet_name,
                 source_batch_id=source_batch_id,
+                default_visit_label=DEFAULT_VISIT_LABEL,
                 variable_id=normalized,
             )
             if not frame.empty:

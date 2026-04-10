@@ -71,7 +71,7 @@ class DataRepo:
         *,
         variables: str | Iterable[str] | None = None,
         filters: dict[str, Any] | None = None,
-        wide: bool = False,
+        wide: bool = True,
         use_sqlite: bool | None = None,
     ) -> pd.DataFrame:
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="clinical")
@@ -86,7 +86,7 @@ class DataRepo:
         variables: str | Iterable[str] | None = None,
         regions: str | Iterable[str] | None = None,
         filters: dict[str, Any] | None = None,
-        wide: bool = False,
+        wide: bool = True,
         use_sqlite: bool | None = None,
     ) -> pd.DataFrame:
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="image")
@@ -212,6 +212,14 @@ class DataRepo:
             return df.copy()
 
         tmp = df.copy()
+        # pandas pivot_table drops all rows when any index level is entirely NA/NaN (common for
+        # optional session_id / visit_id). Normalize missing index values so pivot preserves rows.
+        for column in index_columns:
+            series = tmp[column]
+            if pd.api.types.is_datetime64_any_dtype(series):
+                tmp[column] = series.astype("string").fillna("")
+            else:
+                tmp[column] = series.astype("string").fillna("")
         tmp["_wide_key"] = self._compose_wide_keys(tmp, key_columns)
         wide = tmp.pivot_table(index=index_columns, columns="_wide_key", values="value", aggfunc="first")
         wide.columns = [str(column) for column in wide.columns]

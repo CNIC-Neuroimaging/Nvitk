@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "dataset_name": "nvitk-study-data",
+  "description": "Repository-managed clinical study tables, image registry, and derived measurements.",
+  "table_root": "tables",
+  "cache_root": "cache",
+  "tables_manifest": "catalog/tables.json",
+  "variables_manifest": "catalog/variables.json",
+  "sqlite_index_path": "cache/index.sqlite"
+}
