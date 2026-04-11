@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-11T11:38:13+00:00",
+  "last_updated": "2026-04-11T19:48:53+00:00",
   "variables": [
     {
       "variable_id": "age_at_mri",
@@ -30,6 +30,36 @@
       "modality": null,
       "label": "apoe",
       "value_kind": "text",
+      "unit": null
+    },
+    {
+      "variable_id": "basilar",
+      "source_column": "Basilar",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Basilar"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Basilar",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "basilar_pi",
+      "source_column": "Basilar_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Basilar_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Basilar_PI",
+      "value_kind": "numeric",
       "unit": null
     },
     {
@@ -191,8 +221,8 @@
     {
       "variable_id": "flow_mean",
       "source_column": "Right Communicating",
-      "source_file": "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx",
-      "source_sheet": "PESABrain_AnalysisDB_Batch1",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
       "aliases": [
         "patient_id",
         "Left ICA",
@@ -221,8 +251,8 @@
     {
       "variable_id": "flow_tseries",
       "source_column": "wide_frame",
-      "source_file": "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx",
-      "source_sheet": "Datos",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx",
+      "source_sheet": "Sheet1",
       "aliases": [
         "wide_frame",
         "flow",
@@ -311,6 +341,36 @@
       "unit": null
     },
     {
+      "variable_id": "left_aca",
+      "source_column": "Left ACA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ACA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left ACA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_aca_pi",
+      "source_column": "Left ACA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ACA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left ACA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
       "variable_id": "left_carotid_plaque_vol",
       "source_column": "left_carotid_plaque_vol",
       "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
@@ -322,6 +382,156 @@
       "table": "clinical_measurements",
       "modality": null,
       "label": "left_carotid_plaque_vol",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_communicating",
+      "source_column": "Left Communicating",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left Communicating"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left Communicating",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_communicating_pi",
+      "source_column": "Left Communicating_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left Communicating_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left Communicating_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_ica",
+      "source_column": "Left ICA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ICA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left ICA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_ica_pi",
+      "source_column": "Left ICA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ICA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left ICA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_mca",
+      "source_column": "Left MCA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left MCA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left MCA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_mca_pi",
+      "source_column": "Left MCA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left MCA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left MCA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_pca",
+      "source_column": "Left PCA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left PCA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left PCA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_pca_pi",
+      "source_column": "Left PCA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left PCA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left PCA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_transverse",
+      "source_column": "Left Transverse",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left Transverse"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left Transverse",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "left_transverse_pi",
+      "source_column": "Left Transverse_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left Transverse_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Left Transverse_PI",
       "value_kind": "numeric",
       "unit": null
     },
@@ -451,14 +661,14 @@
     {
       "variable_id": "patient_id",
       "source_column": "patient_id",
-      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
       "source_sheet": "Sheet1",
       "aliases": [
         "patient_id"
       ],
-      "domain": "clinical",
-      "table": "clinical_measurements",
-      "modality": null,
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
       "label": "patient_id",
       "value_kind": "text",
       "unit": null
@@ -496,8 +706,8 @@
     {
       "variable_id": "pi",
       "source_column": "Right Communicating_PI",
-      "source_file": "PESABrain_4DFlow_LocalizedPI_20260216.xlsx",
-      "source_sheet": "PESABrain_AnalysisDB_Batch1",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
       "aliases": [
         "patient_id",
         "Left ICA_PI",
@@ -539,6 +749,36 @@
       "unit": null
     },
     {
+      "variable_id": "right_aca",
+      "source_column": "Right ACA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right ACA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right ACA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_aca_pi",
+      "source_column": "Right ACA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right ACA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right ACA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
       "variable_id": "right_carotid_plaque_vol",
       "source_column": "right_carotid_plaque_vol",
       "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
@@ -550,6 +790,186 @@
       "table": "clinical_measurements",
       "modality": null,
       "label": "right_carotid_plaque_vol",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_communicating",
+      "source_column": "Right Communicating",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right Communicating"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Communicating",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_communicating_pi",
+      "source_column": "Right Communicating_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right Communicating_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Communicating_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_ica",
+      "source_column": "Right ICA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right ICA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right ICA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_ica_pi",
+      "source_column": "Right ICA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right ICA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right ICA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_mca",
+      "source_column": "Right MCA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right MCA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right MCA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_mca_pi",
+      "source_column": "Right MCA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right MCA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right MCA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_pca",
+      "source_column": "Right PCA",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right PCA"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right PCA",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_pca_pi",
+      "source_column": "Right PCA_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right PCA_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right PCA_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_transverse",
+      "source_column": "Right Transverse",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right Transverse"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Transverse",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "right_transverse_pi",
+      "source_column": "Right Transverse_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Right Transverse_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Transverse_PI",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "sagital_sinus",
+      "source_column": "Sagital Sinus",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Sagital Sinus"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Sagital Sinus",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "sagital_sinus_pi",
+      "source_column": "Sagital Sinus_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Sagital Sinus_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Sagital Sinus_PI",
       "value_kind": "numeric",
       "unit": null
     },
@@ -596,6 +1016,36 @@
       "modality": null,
       "label": "sex",
       "value_kind": "text",
+      "unit": null
+    },
+    {
+      "variable_id": "straight_sinus",
+      "source_column": "Straight Sinus",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Straight Sinus"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Straight Sinus",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "straight_sinus_pi",
+      "source_column": "Straight Sinus_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Straight Sinus_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Straight Sinus_PI",
+      "value_kind": "numeric",
       "unit": null
     },
     {
@@ -676,8 +1126,8 @@
     {
       "variable_id": "tcbf",
       "source_column": "TCBF",
-      "source_file": "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx",
-      "source_sheet": "PESABrain_AnalysisDB_Batch1",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
       "aliases": [
         "TCBF"
       ],

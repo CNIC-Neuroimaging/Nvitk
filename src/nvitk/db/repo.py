@@ -271,21 +271,7 @@ class DataRepo:
         wide: bool = True,
         use_sqlite: bool | None = True,
         pipeline: str | Iterable[str] | None = None,
-        data_version: int | None = None,
     ) -> pd.DataFrame:
-        if data_version is not None:
-            warnings.warn(
-                "data_version is deprecated; use pipeline='legacy' or pipeline=None with catalog defaults.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if data_version == 1:
-                pipeline = "legacy"
-            elif data_version == 2:
-                pipeline = None
-            else:
-                raise FilterError("data_version must be None, 1, or 2.")
-
         filters_norm = dict(filters or {})
         if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
             filters_norm["pipeline_id"] = filters_norm.pop("pipeline_version")
@@ -377,8 +363,62 @@ class DataRepo:
         mask = df.apply(row_ok, axis=1)
         return df.loc[mask].copy()
 
-    def assets(self, *, filters: dict[str, Any] | None = None, use_sqlite: bool | None = True) -> pd.DataFrame:
-        return self.get("assets", filters=filters, use_sqlite=use_sqlite)
+    def _assets_to_wide(self, df: pd.DataFrame, *, value_column: str = "asset_path") -> pd.DataFrame:
+        """One row per ``subject_uid``; column names are ``asset_slot`` values (paths in cells by default)."""
+        if df.empty:
+            return df.copy()
+        if "subject_uid" not in df.columns:
+            return df.copy()
+        if "asset_slot" not in df.columns:
+            return df[["subject_uid"]].drop_duplicates().reset_index(drop=True)
+        if value_column not in df.columns:
+            return df.copy()
+
+        work = df.copy()
+        slot = work["asset_slot"].astype("string")
+        mask = slot.notna() & (slot.str.strip() != "")
+        work = work.loc[mask]
+        if work.empty:
+            return pd.DataFrame(columns=["subject_uid"])
+
+        if "updated_at" in work.columns:
+            work = work.sort_values("updated_at", ascending=False, na_position="last")
+        work = work.drop_duplicates(subset=["subject_uid", "asset_slot"], keep="first")
+
+        wide = work.pivot_table(
+            index="subject_uid",
+            columns="asset_slot",
+            values=value_column,
+            aggfunc="first",
+        )
+        wide.columns = [str(c) for c in wide.columns]
+        return wide.reset_index()
+
+    def assets(
+        self,
+        *,
+        filters: dict[str, Any] | None = None,
+        wide: bool = False,
+        use_sqlite: bool | None = True,
+        value: str = "asset_path",
+    ) -> pd.DataFrame:
+        df = self._load_table_frame("assets", filters=filters, use_sqlite=use_sqlite)
+        if not wide:
+            return df.reset_index(drop=True)
+        if value not in df.columns:
+            raise FilterError(f"Unknown value column for assets wide form: {value!r}.")
+        return self._assets_to_wide(df, value_column=value)
+
+    def asset(
+        self,
+        *,
+        filters: dict[str, Any] | None = None,
+        wide: bool = True,
+        use_sqlite: bool | None = True,
+        value: str = "asset_path",
+    ) -> pd.DataFrame:
+        """Assets as a wide table (one row per subject) by default; see :meth:`assets`."""
+        return self.assets(filters=filters, wide=wide, use_sqlite=use_sqlite, value=value)
 
     def join(
         self,

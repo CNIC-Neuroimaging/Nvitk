@@ -209,13 +209,13 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
         SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx", "Sheet1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx", "Sheet1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx": [
-        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx", "Sheet1", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx": [
         SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_pipeline_id='asl_v1', default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
@@ -774,14 +774,14 @@ def _parse_generic_clinical_wide(
 
 
 def _parse_image_wide_column(source_name: str, column: str) -> tuple[str, str | None, str | None]:
-    if source_name == "PESABrain_4DFlow_LocalizedPI_20260216.xlsx":
+    if source_name in ["PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx"]:
         region = column.replace("_PI", "")
         return "pi", _region_id(region), region
-    if source_name == "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx":
+    if source_name in ["PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx"]:
         if column.upper() == "TCBF":
             return "tcbf", None, None
         return "flow_mean", _region_id(column), column
-    if source_name == "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx":
+    if source_name in ["PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx"]:
         return "mean_cbf", _region_id(column), column
     if source_name == "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx":
         return "mean_cbf", _region_id(column), column
@@ -798,6 +798,7 @@ def _parse_generic_image_wide(
     sheet_name: str,
     source_batch_id: str,
     modality: str,
+    pipeline_id: str | None = None,
 ) -> pd.DataFrame:
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
@@ -820,7 +821,7 @@ def _parse_generic_image_wide(
         if str(column).startswith("Unnamed:"):
             continue
         variable_id, region_id, region_label = _parse_image_wide_column(source_path.name, column)
-        pid = _resolve_import_pipeline_id(repo, modality)
+        pid = pipeline_id or _resolve_import_pipeline_id(repo, modality)
         frame, variable = _image_frame(
             raw,
             session_column=session_column,
@@ -934,6 +935,7 @@ def _parse_image_timeseries_wide(
     sheet_name: str,
     source_batch_id: str,
     modality: str,
+    pipeline_id: str | None = None,
 ) -> pd.DataFrame:
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
@@ -955,7 +957,7 @@ def _parse_image_timeseries_wide(
     )
     melted["frame"] = pd.to_numeric(melted["frame"], errors="coerce").astype("Int64")
     value_num, value_text, value_kind = _series_value_payload(melted["flow_value"])
-    _pv = _resolve_import_pipeline_id(repo, modality)
+    _pv = pipeline_id or _resolve_import_pipeline_id(repo, modality)
     _sid = _image_measurement_session_id_series(wide).astype("string").fillna("")
     session_expanded = np.repeat(_sid.to_numpy(), len(frame_columns))
     df = pd.DataFrame(
@@ -1355,6 +1357,7 @@ def import_source_spec(
     spec: SourceSpec,
     *,
     source_batch_id: str,
+    pipeline_id: str | None = None,
 ) -> pd.DataFrame | dict[str, pd.DataFrame]:
     raw = read_tabular_source(source_path, sheet_name=spec.sheet)
     _register_inventory_rows(repo, [_inventory_row(source_path, spec.sheet, raw, spec, source_batch_id)])
@@ -1382,13 +1385,11 @@ def import_source_spec(
     if spec.source_kind == "clinical_wide":
         return _parse_generic_clinical_wide(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
     if spec.source_kind == "image_wide":
-        return _parse_generic_image_wide(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
+        return _parse_generic_image_wide(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "image_timeseries_long":
-        return _parse_image_timeseries_long(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
+        return _parse_image_timeseries_long(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "image_timeseries_wide":
-        return _parse_image_timeseries_wide(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
-    if spec.source_kind == "hybrid_hemodynamic":
-        return _parse_hybrid_hemodynamic(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
+        return _parse_image_timeseries_wide(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "variable_dictionary":
         return _parse_variable_dictionary(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, domain=spec.domain, modality=spec.modality)
     if spec.source_kind == "dropdown_dictionary":
@@ -1457,6 +1458,7 @@ def import_pesabrain_source(
     source_batch_id: str | None = None,
     rebuild_subjects: bool = True,
     build_sqlite_index: bool = False,
+    pipeline_id: str | None = None,
 ) -> dict[str, Any]:
     base = Path(db_base_path)
     if not base.exists():
@@ -1479,7 +1481,7 @@ def import_pesabrain_source(
 
     spec = matches[0]
     batch_id = source_batch_id or _default_pesabrain_batch_id()
-    result = import_source_spec(repo, source_path, spec, source_batch_id=batch_id)
+    result = import_source_spec(repo, source_path, spec, source_batch_id=batch_id, pipeline_id=pipeline_id)
     subjects = rebuild_subjects_table(repo) if rebuild_subjects else pd.DataFrame()
     if build_sqlite_index:
         repo.build_sqlite_index()

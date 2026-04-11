@@ -65,7 +65,8 @@ dependencies = [
   "kaleido>=1.0.0",
 
   # Experimental dependencies
-   "scikit-learn>=1.7.1",
+  "scikit-learn>=1.7.1",
+  "h5py>=3.16.0",
 
   # MATLAB dependencies
 #   "matlabengine==25.2.2", # For MATLAB version 2025b
@@ -82,6 +83,8 @@ test = [
 ]
 xnat = [
   "xnat>=0.7.2",
+  "pyyaml>=6.0",
+  "keyring>=24.0.0",
 ]
 conda-packages = [
   # NOTE: pip extras cannot express "install from conda channels".
@@ -103,6 +106,9 @@ pyhelp = "nvitk.utils.list_cli_commands:main"
 nvitk-build-sqlite-index = "nvitk.db.sqlite_index:main"
 nvitk-import-study-data = "nvitk.db.importers:main"
 nvitk-sync-xnat = "nvitk.db.xnat:main"
+nvitk-register-nifti-assets = "nvitk.db.local_nifti_assets:main"
+nvitk-register-dicom-assets = "nvitk.db.local_dicom_assets:main"
+nvitk-xnat-keyring-set = "nvitk.db.xnat_config:keyring_set_main"
 
 [project.gui-scripts]
 # Nvitk-GUI = "gui.main:main"

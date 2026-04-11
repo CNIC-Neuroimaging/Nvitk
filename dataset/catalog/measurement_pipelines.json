@@ -6,7 +6,7 @@
     {
       "pipeline_id": "4dflow_v2",
       "modality": "4dflow",
-      "is_default": false,
+      "is_default": true,
       "role": "current",
       "label": "PESABrain 4dflow (current | v2)",
       "aliases": ["v2", 2, "current", "last"]
@@ -14,7 +14,7 @@
     {
       "pipeline_id": "4dflow_v1",
       "modality": "4dflow",
-      "is_default": true,
+      "is_default": false,
       "role": "legacy",
       "label": "PESABrain 4dflow (v1)",
       "aliases": ["legacy", "v1", 1, "first"]

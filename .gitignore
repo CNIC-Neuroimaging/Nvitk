@@ -14,6 +14,8 @@ tests/
 !tests/
 !tests/**/*.py
 docs/
+.config/
+.config/*
 
 src/nvitk.egg-info/
 

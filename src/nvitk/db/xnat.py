@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import csv
-import os
+import json
 import re
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -21,6 +20,7 @@ from nvitk.core.exceptions import BackendUnavailableError
 
 from .repo import DataRepo
 from .storage import utc_now_iso
+from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 
 try:
     import xnat
@@ -37,17 +37,6 @@ def _cli_decorator(*args, **kwargs):
 
 _click_command = click.command if click is not None else _cli_decorator
 _click_option = click.option if click is not None else _cli_decorator
-
-
-@dataclass(frozen=True)
-class XnatConnectionConfig:
-    server: str
-    project: str
-    user: str | None = None
-    password: str | None = None
-    netrc_file: str | None = None
-    verify: bool = True
-    default_timeout: int = 300
 
 
 def _normalize_header(value: str) -> str:
@@ -218,6 +207,70 @@ def _download_scan_bundle(scan: Any, zip_path: Path) -> Path:
     raise RuntimeError("Scan object does not expose a downloadable DICOM resource.")
 
 
+def _download_resource_bundle(scan: Any, zip_path: Path, resource_label: str) -> Path:
+    """Download a scan resource (e.g. ``NIFTI``) to ``zip_path``; returns path to zip or bundle."""
+    resources = getattr(scan, "resources", None)
+    if not resources or resource_label not in resources:
+        raise RuntimeError(
+            f"Scan does not expose a downloadable resource {resource_label!r}. "
+            f"Available: {list(resources.keys()) if resources else []}"
+        )
+    result = resources[resource_label].download(zip_path, verbose=False)
+    return Path(result) if result is not None else zip_path
+
+
+def _is_nifti_filename(name: str) -> bool:
+    lower = name.lower()
+    return lower.endswith(".nii.gz") or lower.endswith(".nii")
+
+
+def download_scan_niftis(
+    scan: Any,
+    output_dir: str | Path,
+    *,
+    resource_label: str = "NIFTI",
+    keep_zip: bool = False,
+) -> list[Path]:
+    """Download and extract NIfTI files from an XNAT scan resource into ``output_dir``."""
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="nvitk_xnat_nifti_") as tmp_dir:
+        zip_path = Path(tmp_dir) / "scan_nifti.zip"
+        bundle_path = _download_resource_bundle(scan, zip_path, resource_label)
+        extracted: list[Path] = []
+        with zipfile.ZipFile(bundle_path) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                base_name = Path(member.filename).name
+                if not _is_nifti_filename(base_name):
+                    continue
+                target = destination / base_name
+                stem = target.stem
+                suffix = "".join(target.suffixes)
+                counter = 1
+                while target.exists():
+                    target = destination / f"{stem}_{counter}{suffix}"
+                    counter += 1
+                with archive.open(member) as source, target.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+                extracted.append(target)
+
+        if keep_zip:
+            kept_zip = destination / "scan_nifti_bundle.zip"
+            shutil.copy2(bundle_path, kept_zip)
+            extracted.append(kept_zip)
+
+    return extracted
+
+
+def _list_local_nifti_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted(p for p in directory.iterdir() if p.is_file() and _is_nifti_filename(p.name))
+
+
 def download_scan_dicoms(scan: Any, output_dir: str | Path, *, keep_zip: bool = False) -> list[Path]:
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
@@ -260,9 +313,17 @@ def sync_xnat_project(
     requested_sequences: str | Iterable[str] | None = None,
     download_root: str | Path | None = None,
     download_dicoms: bool = False,
+    download_niftis: bool = False,
+    nifti_resource_label: str = "NIFTI",
+    nifti_download_root: str | Path | None = None,
     skip_existing: bool = True,
     build_sqlite_index: bool = False,
 ) -> dict[str, pd.DataFrame]:
+    if download_niftis:
+        base = nifti_download_root if nifti_download_root is not None else download_root
+        if base is None:
+            raise ValueError("download_niftis requires download_root or nifti_download_root to be set.")
+
     subject_labels = resolve_subject_labels(
         catalog_path=catalog_path,
         subjects=subjects,
@@ -347,9 +408,9 @@ def sync_xnat_project(
 
                     scan_uid = f"{session_uid}:{scan_id}"
                     local_cache_path = pd.NA
+                    sequence_label = classification["sequence"]
 
                     if download_dicoms and download_root is not None:
-                        sequence_label = classification["sequence"]
                         target_dir = Path(download_root) / subject_uid / sequence_label
                         if skip_existing and target_dir.exists() and any(target_dir.iterdir()):
                             extracted_files = list(target_dir.iterdir())
@@ -371,6 +432,38 @@ def sync_xnat_project(
                                     "pipeline_id": pd.NA,
                                     "exists_locally": True,
                                     "metadata_json": "{}",
+                                    "source_batch_id": source_batch_id,
+                                    "updated_at": utc_now_iso(),
+                                }
+                            )
+
+                    if download_niftis:
+                        nifti_base = Path(nifti_download_root) if nifti_download_root is not None else Path(download_root)  # type: ignore[arg-type]
+                        nifti_dir = nifti_base / subject_uid / sequence_label / "nifti"
+                        if skip_existing and nifti_dir.exists() and _list_local_nifti_files(nifti_dir):
+                            nifti_files = _list_local_nifti_files(nifti_dir)
+                        else:
+                            nifti_files = download_scan_niftis(
+                                scan,
+                                nifti_dir,
+                                resource_label=nifti_resource_label,
+                            )
+                        meta = json.dumps({"resource": nifti_resource_label, "sequence": sequence_label})
+                        for file_path in nifti_files:
+                            asset_rows.append(
+                                {
+                                    "asset_uid": f"{scan_uid}:nifti:{nifti_resource_label}:{file_path.name}",
+                                    "subject_uid": subject_uid,
+                                    "session_uid": session_uid,
+                                    "modality": classification["modality"],
+                                    "asset_type": "nifti",
+                                    "asset_path": str(file_path),
+                                    "resource_label": nifti_resource_label,
+                                    "source": "xnat",
+                                    "pipeline_name": pd.NA,
+                                    "pipeline_id": pd.NA,
+                                    "exists_locally": bool(file_path.exists()),
+                                    "metadata_json": meta,
                                     "source_batch_id": source_batch_id,
                                     "updated_at": utc_now_iso(),
                                 }
@@ -419,24 +512,41 @@ def sync_xnat_project(
 
 @_click_command()
 @_click_option("--dataset-root", type=click.Path(path_type=Path) if click is not None else None, default=Path("dataset"), show_default=True, help="Dataset root to update.")
-@_click_option("--server", type=str, required=True, help="XNAT server URL.")
-@_click_option("--project", type=str, required=True, help="XNAT project identifier.")
+@_click_option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path) if click is not None else None,
+    default=None,
+    help="YAML/JSON file with server, project, and optional auth settings. "
+    "If omitted, uses NVITK_XNAT_CONFIG or ~/.config/nvitk/xnat.{yaml,yml,json}.",
+)
+@_click_option("--server", type=str, default=None, help="XNAT server URL (overrides config / XNAT_SERVER).")
+@_click_option("--project", type=str, default=None, help="XNAT project identifier (overrides config / XNAT_PROJECT).")
 @_click_option("--user", type=str, default=None, help="XNAT username.")
-@_click_option("--password", type=str, default=None, help="XNAT password.")
+@_click_option("--password", type=str, default=None, help="XNAT password (prefer env, keyring, or netrc).")
 @_click_option("--netrc-file", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Optional netrc file to use for authentication.")
 @_click_option("--catalog-path", type=click.Path(exists=True, path_type=Path) if click is not None else None, default=None, help="Optional catalog CSV used to resolve subject IDs.")
 @_click_option("--subjects", type=str, default=None, help="Comma or space separated subject identifiers.")
 @_click_option("--subjects-file", type=click.Path(exists=True, path_type=Path) if click is not None else None, default=None, help="Text file with one subject identifier per line.")
 @_click_option("--id-type", type=click.Choice(["subject", "mrid"], case_sensitive=False) if click is not None else None, default="subject", show_default=True, help="Interpret the provided IDs as XNAT subject labels or MR IDs.")
 @_click_option("--sequences", type=str, default=None, help="Optional sequence subset such as TOF,4DFLOW_AP,4DFLOW_RL,4DFLOW_FH.")
-@_click_option("--download-root", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Local directory where DICOM bundles are extracted.")
+@_click_option("--download-root", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Local directory for DICOM / NIfTI downloads (see per-modality layout below).")
 @_click_option("--download-dicoms", is_flag=True, help="Download and extract DICOMs while syncing metadata.")
+@_click_option("--download-niftis", is_flag=True, help="Download NIfTI resource per scan into {root}/{subject}/{sequence}/nifti/.")
+@_click_option("--nifti-resource-label", type=str, default="NIFTI", show_default=True, help="XNAT scan resource label for NIfTI files.")
+@_click_option(
+    "--nifti-download-root",
+    type=click.Path(path_type=Path) if click is not None else None,
+    default=None,
+    help="Optional separate root for NIfTI files (default: same as --download-root).",
+)
 @_click_option("--skip-existing", is_flag=True, help="Skip scan downloads when the local cache directory is already populated.")
 @_click_option("--build-sqlite-index", is_flag=True, help="Rebuild the SQLite query cache after the sync.")
 def main(
     dataset_root: Path,
-    server: str,
-    project: str,
+    config_path: Path | None,
+    server: str | None,
+    project: str | None,
     user: str | None,
     password: str | None,
     netrc_file: Path | None,
@@ -447,23 +557,28 @@ def main(
     sequences: str | None,
     download_root: Path | None,
     download_dicoms: bool,
+    download_niftis: bool,
+    nifti_resource_label: str,
+    nifti_download_root: Path | None,
     skip_existing: bool,
     build_sqlite_index: bool,
 ) -> None:
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 
-    config = XnatConnectionConfig(
+    profile = load_xnat_profile(config_path)
+    conn = resolve_xnat_connection(
+        profile,
         server=server,
         project=project,
-        user=user or os.getenv("XNAT_USER"),
-        password=password or os.getenv("XNAT_PASSWORD"),
+        user=user,
+        password=password,
         netrc_file=str(netrc_file) if netrc_file else None,
     )
     repo = DataRepo(dataset_root, auto_scaffold=True)
     frames = sync_xnat_project(
         repo,
-        config,
+        conn,
         catalog_path=catalog_path,
         subjects=subjects,
         subjects_file=subjects_file,
@@ -471,6 +586,9 @@ def main(
         requested_sequences=sequences,
         download_root=download_root,
         download_dicoms=download_dicoms,
+        download_niftis=download_niftis,
+        nifti_resource_label=nifti_resource_label,
+        nifti_download_root=nifti_download_root,
         skip_existing=skip_existing,
         build_sqlite_index=build_sqlite_index,
     )

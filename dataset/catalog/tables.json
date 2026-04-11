@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-11T11:38:33+00:00",
+  "last_updated": "2026-04-11T19:49:18+00:00",
   "tables": {
     "subjects": {
       "path": "tables/subjects.parquet",
@@ -25,9 +25,9 @@
         "updated_at": "str"
       },
       "row_count": 1424,
-      "last_updated": "2026-04-11T11:38:33+00:00",
+      "last_updated": "2026-04-11T19:49:18+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:38:33+00:00",
+        "written_at": "2026-04-11T19:49:18+00:00",
         "importer": "rebuild_subjects_table"
       }
     },
@@ -55,9 +55,9 @@
         "updated_at": "string"
       },
       "row_count": 9108,
-      "last_updated": "2026-04-11T11:38:08+00:00",
+      "last_updated": "2026-04-11T19:48:46+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:38:08+00:00",
+        "written_at": "2026-04-11T19:48:46+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     },
@@ -89,9 +89,9 @@
         "updated_at": "string"
       },
       "row_count": 1400,
-      "last_updated": "2026-04-11T11:38:08+00:00",
+      "last_updated": "2026-04-11T19:48:46+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:38:08+00:00",
+        "written_at": "2026-04-11T19:48:46+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     },
@@ -246,10 +246,10 @@
         "measured_at": "datetime64[ns]",
         "session_id": "string"
       },
-      "row_count": 347012,
-      "last_updated": "2026-04-11T11:38:13+00:00",
+      "row_count": 434745,
+      "last_updated": "2026-04-11T19:48:53+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:38:13+00:00",
+        "written_at": "2026-04-11T19:48:53+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     },
@@ -265,26 +265,33 @@
         "subject_uid",
         "session_uid",
         "modality",
-        "asset_type"
+        "asset_type",
+        "asset_slot"
       ],
       "columns": {
         "asset_uid": "string",
         "subject_uid": "string",
-        "session_uid": "string",
+        "session_uid": "object",
         "modality": "string",
         "asset_type": "string",
         "asset_path": "string",
         "resource_label": "string",
         "source": "string",
-        "pipeline_name": "string",
-        "pipeline_id": "string",
+        "pipeline_name": "object",
+        "pipeline_id": "object",
         "exists_locally": "boolean",
         "metadata_json": "string",
         "source_batch_id": "string",
-        "updated_at": "string"
+        "updated_at": "string",
+        "asset_slot": "string"
       },
-      "row_count": 0,
-      "last_updated": "2026-04-11T11:30:15+00:00"
+      "row_count": 147,
+      "last_updated": "2026-04-11T15:02:49+00:00",
+      "provenance": {
+        "written_at": "2026-04-11T15:02:49+00:00",
+        "source": "local_nifti",
+        "nifti_root": "/data_local/LabVF/PESA-Brain/DATA/Nifti"
+      }
     },
     "cohort_membership": {
       "path": "tables/cohort_membership.parquet",
@@ -336,10 +343,10 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 13,
-      "last_updated": "2026-04-11T11:38:06+00:00",
+      "row_count": 16,
+      "last_updated": "2026-04-11T19:48:45+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:38:06+00:00",
+        "written_at": "2026-04-11T19:48:45+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     }

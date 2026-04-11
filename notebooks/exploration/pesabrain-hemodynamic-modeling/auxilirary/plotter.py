@@ -344,7 +344,6 @@ def extract_feature_values_from_mat(
     # Load .mat file temporarily
     qvt_data = load_qvt_data(patient_dir, minimal=False)
     data_struct = qvt_data['data_struct']
-    
     # Extract feature values
     vessel_values = {}
     for vessel_code, loc in locs.items():
@@ -377,7 +376,7 @@ def extract_flow_timeseries_from_mat(
     # Load .mat file temporarily
     qvt_data = load_qvt_data(patient_dir, minimal=False)
     data_struct = qvt_data['data_struct']
-    
+
     patient_flow = {}
     
     # Get nframes
@@ -417,7 +416,6 @@ def extract_flow_timeseries_from_mat(
             flow_pulsatile = data_struct.get('flowPulsatile_val', None)
         else:
             flow_pulsatile = getattr(data_struct, 'flowPulsatile_val', None)
-        
         if flow_pulsatile is not None and isinstance(flow_pulsatile, np.ndarray):
             if flow_pulsatile.ndim == 2 and row_idx < flow_pulsatile.shape[0]:
                 flow_array = flow_pulsatile[row_idx, :].copy()  # Copy to avoid reference
@@ -426,6 +424,7 @@ def extract_flow_timeseries_from_mat(
                     flow_array = np.abs(flow_array)
                 # Ensure correct length
                 if len(flow_array) == nframes:
+                    print(f"Flow array: {flow_array}")
                     patient_flow[vessel_code] = flow_array.astype(float)
     
     # Free memory
@@ -523,9 +522,10 @@ def load_qvt_data(patient_dir: Union[str, Path], minimal: bool = False) -> Dict:
     patient_dir = Path(patient_dir)
     
     # Find the most recent qvtData_ISOfix_*.mat file
-    mat_files = list(patient_dir.glob('qvtData_ISOfix_*.mat'))
+    mat_files = list((patient_dir / 'centerline_test').glob('qvtData_ISOfix_*.mat'))
     if not mat_files:
         raise FileNotFoundError(f"No qvtData_ISOfix_*.mat file found in {patient_dir}")
+
     
     # Get most recent file
     mat_file = max(mat_files, key=lambda p: p.stat().st_mtime)
@@ -559,11 +559,12 @@ def load_qvt_data(patient_dir: Union[str, Path], minimal: bool = False) -> Dict:
                 f"Please ensure h5py is installed: pip install h5py"
             )
     else:
+        raise ValueError(f"Unsupported MATLAB file format: {mat_file}")
         pass  # TODO: Implement loading of older MATLAB files
     
     # Load LOCs from SummaryParamTool.xls (preferred source)
     locs = {}
-    summary_file = patient_dir / 'SummaryParamTool.xls'
+    summary_file = patient_dir / 'centerline_test' / 'SummaryParamTool.xls'
     if summary_file.exists():
         try:
             # Try to read the Summary_Centerline sheet
@@ -583,7 +584,7 @@ def load_qvt_data(patient_dir: Union[str, Path], minimal: bool = False) -> Dict:
     
     # Fallback to LabelsQVT.csv if LOCs not found
     if not locs:
-        labels_file = patient_dir / 'LabelsQVT.csv'
+        labels_file = patient_dir / 'centerline_test' / 'LabelsQVT.csv'
         if labels_file.exists():
             try:
                 labels_df = pd.read_csv(labels_file)
@@ -603,9 +604,11 @@ def load_qvt_data(patient_dir: Union[str, Path], minimal: bool = False) -> Dict:
                                 if match:
                                     code, _ = match
                                     locs[code] = loc_parts[:2]
-                        except (ValueError, AttributeError):
+                        except (ValueError, AttributeError) as e:
+                            print(f"Error loading LOCs from {labels_file}: {e}")
                             pass
             except Exception as e:
+                print(f"Error loading LOCs from {labels_file}: {e}")
                 warnings.warn(f"Could not load LOCs from {labels_file}: {e}")
     
     return {
