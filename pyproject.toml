@@ -107,6 +107,10 @@ nvitk-sync-xnat = "nvitk.db.xnat:main"
 [project.gui-scripts]
 # Nvitk-GUI = "gui.main:main"
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 where = ["src/nvitk"]
 include = ["*"]  # Ensures subpackages are found

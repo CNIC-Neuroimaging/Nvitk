@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -11,10 +12,7 @@ from .catalog import DatasetCatalog, TableDefinition
 from .exceptions import FilterError
 from .filters import apply_filters, ensure_list, merge_filters
 from .sqlite_index import SQLiteIndex
-from .storage import coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
-
-PIPELINE_VERSION_V2 = "v1"
-PIPELINE_VERSION_V1 = "v1"
+from .storage import coerce_bool, coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
 
 
 def _default_dataset_root() -> Path:
@@ -204,8 +202,26 @@ class DataRepo:
         filters: dict[str, Any] | None = None,
         wide: bool = True,
         use_sqlite: bool | None = None,
+        pipeline: str | Iterable[str] | None = None,
         data_version: int | None = None,
     ) -> pd.DataFrame:
+        if data_version is not None:
+            warnings.warn(
+                "data_version is deprecated; use pipeline='legacy' or pipeline=None with catalog defaults.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if data_version == 1:
+                pipeline = "legacy"
+            elif data_version == 2:
+                pipeline = None
+            else:
+                raise FilterError("data_version must be None, 1, or 2.")
+
+        filters_norm = dict(filters or {})
+        if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
+            filters_norm["pipeline_id"] = filters_norm.pop("pipeline_version")
+
         if atlas is not None:
             if modality is None or str(modality).strip().lower() != "asl":
                 raise FilterError("Parameter 'atlas' requires modality='asl'.")
@@ -222,18 +238,35 @@ class DataRepo:
             region_filter = ensure_list(regions) if regions else None
 
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="image")
-        structural, var_specs = self._split_measurement_filters(filters, domain="image", table_name="image_measurements")
+        structural, var_specs = self._split_measurement_filters(
+            filters_norm, domain="image", table_name="image_measurements"
+        )
         merged = merge_filters(
             structural,
             {"variable_id": resolved_variables} if resolved_variables else None,
             {"modality": modality} if modality else None,
             {"region_id": region_filter} if region_filter else None,
         )
-        # SQL-friendly default (v2 only) when modality is explicitly 4dflow
-        if data_version in (None, 2) and modality is not None and str(modality).strip().lower() == "4dflow":
-            merged = merge_filters(merged, {"pipeline_version": PIPELINE_VERSION_V2})
 
-        force_parquet = bool(var_specs) or data_version == 1
+        has_pipeline_in_filters = "pipeline_id" in structural
+        explicit_pipeline_ids: list[str] | None = None
+        if not has_pipeline_in_filters:
+            explicit_pipeline_ids = self.catalog.resolve_pipeline_selector(pipeline)
+            if explicit_pipeline_ids is not None:
+                merged = merge_filters(merged, {"pipeline_id": explicit_pipeline_ids})
+            elif modality is not None:
+                dpid = self.catalog.default_pipeline_id(str(modality))
+                if dpid:
+                    merged = merge_filters(merged, {"pipeline_id": dpid})
+
+        post_filter_defaults = (
+            not has_pipeline_in_filters
+            and explicit_pipeline_ids is None
+            and modality is None
+            and pipeline is None
+        )
+
+        force_parquet = bool(var_specs) or post_filter_defaults
 
         df = self._load_table_frame(
             "image_measurements",
@@ -243,44 +276,33 @@ class DataRepo:
         )
         if var_specs:
             df = _apply_variable_value_filters(df, var_specs)
-        df = self._apply_image_pipeline_version(df, modality, data_version)
+        if post_filter_defaults:
+            df = self._filter_image_rows_to_catalog_defaults(df)
         return self._prepare_measurements(df, wide=wide, table_name="image_measurements")
 
-    def _apply_image_pipeline_version(
-        self,
-        df: pd.DataFrame,
-        modality: str | None,
-        data_version: int | None,
-    ) -> pd.DataFrame:
-        """Restrict 4dflow rows by ``pipeline_version``; other modalities pass through."""
-        if df.empty or "modality" not in df.columns or "pipeline_version" not in df.columns:
+    def _filter_image_rows_to_catalog_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Keep rows where each modality with a catalog default matches that pipeline_id; other modalities pass through."""
+        if df.empty or "modality" not in df.columns:
             return df
-        m = df["modality"].astype("string").str.lower()
-        pv = df["pipeline_version"].astype("string")
-
-        if data_version == 1:
-            if modality is not None and str(modality).strip().lower() != "4dflow":
-                return df
-            mask_legacy = pv.isna() | (pv == "") | (pv == PIPELINE_VERSION_V1)
-            if modality is not None:
-                return df.loc[mask_legacy].copy()
-            return df.loc[(m != "4dflow") | mask_legacy].copy()
-
-        if data_version == 2:
-            if modality is not None and str(modality).strip().lower() != "4dflow":
-                return df
-            mask_v2 = pv == PIPELINE_VERSION_V2
-            if modality is not None:
-                return df.loc[mask_v2].copy()
-            return df.loc[(m != "4dflow") | mask_v2].copy()
-
-        # data_version is None — default current pipeline (v2) for 4dflow rows only
-        if modality is not None and str(modality).strip().lower() != "4dflow":
+        if "pipeline_id" not in df.columns:
             return df
-        if modality is not None and str(modality).strip().lower() == "4dflow":
-            return df
-        mask_v2 = pv == PIPELINE_VERSION_V2
-        return df.loc[(m != "4dflow") | mask_v2].copy()
+        defaults: dict[str, str] = {}
+        for e in self.catalog.pipelines_manifest.get("pipelines", []):
+            if not e.get("modality") or not coerce_bool(e.get("is_default")):
+                continue
+            defaults[str(e["modality"]).strip().lower()] = str(e["pipeline_id"])
+
+        def row_ok(row: pd.Series) -> bool:
+            m = str(row.get("modality", "")).strip().lower() if pd.notna(row.get("modality")) else ""
+            if m not in defaults:
+                return True
+            pid = row.get("pipeline_id")
+            if pd.isna(pid) or str(pid).strip() == "":
+                return False
+            return str(pid) == defaults[m]
+
+        mask = df.apply(row_ok, axis=1)
+        return df.loc[mask].copy()
 
     def assets(self, *, filters: dict[str, Any] | None = None, use_sqlite: bool | None = None) -> pd.DataFrame:
         return self.get("assets", filters=filters, use_sqlite=use_sqlite)
@@ -373,6 +395,7 @@ class DataRepo:
             return empty_dataframe(selected_columns)
 
         df = read_parquet_table(definition.path, columns=columns)
+        df = coerce_dataframe_to_manifest(df, definition.columns)
         return apply_filters(df, filters)
 
     def _prepare_measurements(self, df: pd.DataFrame, *, wide: bool, table_name: str) -> pd.DataFrame:

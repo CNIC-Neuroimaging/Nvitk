@@ -10,7 +10,7 @@ import pandas as pd
 from nvitk.core.exceptions import ValidationError
 
 from .exceptions import ManifestError, TableNotFoundError
-from .storage import infer_manifest_dtypes, normalize_variable_id, read_json, utc_now_iso, write_json
+from .storage import coerce_bool, infer_manifest_dtypes, normalize_variable_id, read_json, utc_now_iso, write_json
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,8 @@ class DatasetCatalog:
         self.repository_manifest: dict[str, Any] = {}
         self.tables_manifest: dict[str, Any] = {}
         self.variables_manifest: dict[str, Any] = {}
+        self.pipelines_manifest: dict[str, Any] = {"schema_version": "1.0", "pipelines": []}
+        self.pipelines_manifest_path: Path | None = None
         self._tables: dict[str, TableDefinition] = {}
         self.refresh()
 
@@ -65,6 +67,7 @@ class DatasetCatalog:
             Path("catalog") / "repository.json",
             Path("catalog") / "tables.json",
             Path("catalog") / "variables.json",
+            Path("catalog") / "measurement_pipelines.json",
             Path("catalog") / "schema" / "repository.schema.json",
             Path("catalog") / "schema" / "tables.schema.json",
             Path("catalog") / "schema" / "variables.schema.json",
@@ -89,6 +92,15 @@ class DatasetCatalog:
         self.variables_manifest = read_json(self.variables_manifest_path)
         self.validate_tables_manifest(self.tables_manifest)
         self.validate_variables_manifest(self.variables_manifest)
+
+        pipelines_rel = self.repository_manifest.get("pipelines_manifest")
+        if pipelines_rel:
+            self.pipelines_manifest_path = self.root / pipelines_rel
+            self.pipelines_manifest = read_json(self.pipelines_manifest_path)
+            self.validate_pipelines_manifest(self.pipelines_manifest)
+        else:
+            self.pipelines_manifest_path = None
+            self.pipelines_manifest = {"schema_version": "1.0", "pipelines": []}
 
         self._tables = {}
         for name, payload in self.tables_manifest["tables"].items():
@@ -126,6 +138,91 @@ class DatasetCatalog:
 
     def table_exists(self, name: str) -> bool:
         return name in self._tables
+
+    def list_pipelines(self, modality: str | None = None) -> list[dict[str, Any]]:
+        entries = list(self.pipelines_manifest.get("pipelines", []))
+        if modality is None:
+            return entries
+        m = str(modality).strip().lower()
+        return [e for e in entries if e.get("modality") and str(e["modality"]).strip().lower() == m]
+
+    def default_pipeline_id(self, modality: str) -> str | None:
+        m = str(modality).strip().lower()
+        for entry in self.pipelines_manifest.get("pipelines", []):
+            if not entry.get("modality") or str(entry["modality"]).strip().lower() != m:
+                continue
+            if coerce_bool(entry.get("is_default")):
+                return str(entry["pipeline_id"])
+        return None
+
+    def pipeline_ids_for_role(self, role: str) -> list[str]:
+        return [
+            str(e["pipeline_id"])
+            for e in self.pipelines_manifest.get("pipelines", [])
+            if str(e.get("role") or "") == role
+        ]
+
+    def all_pipeline_ids(self) -> set[str]:
+        return {str(e["pipeline_id"]) for e in self.pipelines_manifest.get("pipelines", []) if e.get("pipeline_id")}
+
+    def resolve_pipeline_selector(self, selector: str | Iterable[str] | None) -> list[str] | None:
+        """Return None to apply catalog defaults per modality in ``DataRepo.image``. Otherwise explicit ``pipeline_id`` list."""
+        if selector is None:
+            return None
+        if isinstance(selector, str):
+            tokens = [selector.strip()] if selector.strip() else []
+        else:
+            tokens = [str(t).strip() for t in selector if str(t).strip()]
+        if not tokens:
+            return None
+
+        if len(tokens) == 1 and tokens[0].lower() == "legacy":
+            ids = self.pipeline_ids_for_role("legacy")
+            if not ids:
+                raise ManifestError("No pipelines with role 'legacy' registered in measurement_pipelines.json.")
+            return ids
+
+        known = self.all_pipeline_ids()
+        alias_map: dict[str, str] = {}
+        for e in self.pipelines_manifest.get("pipelines", []):
+            pid = str(e["pipeline_id"])
+            for a in e.get("aliases") or []:
+                alias_map[str(a).strip().lower()] = pid
+
+        resolved: list[str] = []
+        for t in tokens:
+            tl = t.lower()
+            if t in known:
+                resolved.append(t)
+            elif tl in alias_map:
+                resolved.append(alias_map[tl])
+            else:
+                raise ManifestError(f"Unknown pipeline_id or alias: {t!r}. Known: {sorted(known)}")
+
+        return list(dict.fromkeys(resolved))
+
+    def validate_pipelines_manifest(self, payload: dict[str, Any]) -> None:
+        pipelines = payload.get("pipelines")
+        if not isinstance(pipelines, list):
+            raise ManifestError("Pipelines manifest must define a 'pipelines' list.")
+        defaults_per_mod: dict[str, str] = {}
+        for entry in pipelines:
+            if not isinstance(entry, dict):
+                raise ManifestError("Each pipeline entry must be an object.")
+            pid = entry.get("pipeline_id")
+            if not isinstance(pid, str) or not pid.strip():
+                raise ManifestError("Each pipeline must have a non-empty pipeline_id.")
+            mod = entry.get("modality")
+            if mod is not None and (not isinstance(mod, str) or not str(mod).strip()):
+                raise ManifestError(f"Invalid modality for pipeline {pid!r}.")
+            if coerce_bool(entry.get("is_default")) and mod is not None:
+                key = str(mod).strip().lower()
+                if key in defaults_per_mod:
+                    raise ManifestError(
+                        f"Multiple is_default pipelines for modality {mod!r}: "
+                        f"{defaults_per_mod[key]!r} and {pid!r}."
+                    )
+                defaults_per_mod[key] = str(pid)
 
     def variable_entries(self, *, domain: str | None = None, table: str | None = None) -> list[dict[str, Any]]:
         entries = list(self.variables_manifest.get("variables", []))

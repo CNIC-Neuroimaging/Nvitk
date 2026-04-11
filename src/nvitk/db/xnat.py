@@ -368,7 +368,7 @@ def sync_xnat_project(
                                     "resource_label": "DICOM",
                                     "source": "xnat",
                                     "pipeline_name": pd.NA,
-                                    "pipeline_version": pd.NA,
+                                    "pipeline_id": pd.NA,
                                     "exists_locally": True,
                                     "metadata_json": "{}",
                                     "source_batch_id": source_batch_id,

@@ -6,5 +6,6 @@
   "cache_root": "cache",
   "tables_manifest": "catalog/tables.json",
   "variables_manifest": "catalog/variables.json",
+  "pipelines_manifest": "catalog/measurement_pipelines.json",
   "sqlite_index_path": "cache/index.sqlite"
 }

@@ -59,9 +59,27 @@ def empty_dataframe(columns: dict[str, str]) -> pd.DataFrame:
 
 def coerce_dataframe_to_manifest(df: pd.DataFrame, columns: dict[str, str]) -> pd.DataFrame:
     if df.empty:
-        return df.copy()
+        out = df.copy()
+        if "pipeline_id" in columns and "pipeline_id" not in out.columns:
+            if "pipeline_version" in out.columns:
+                out["pipeline_id"] = out["pipeline_version"]
+            else:
+                out["pipeline_id"] = pd.Series(pd.NA, index=out.index, dtype="string")
+        if "pipeline_id" in columns and "pipeline_version" in out.columns:
+            out = out.drop(columns=["pipeline_version"])
+        return out
 
     out = df.copy()
+    # Canonical column is pipeline_id; older Parquet may use pipeline_version or omit both.
+    if "pipeline_id" in columns and "pipeline_id" not in out.columns:
+        if "pipeline_version" in out.columns:
+            out["pipeline_id"] = out["pipeline_version"]
+        else:
+            out["pipeline_id"] = pd.Series(pd.NA, index=out.index, dtype="string")
+
+    if "pipeline_id" in columns and "pipeline_version" in out.columns:
+        out = out.drop(columns=["pipeline_version"])
+
     for column, dtype_name in columns.items():
         if column not in out.columns:
             continue

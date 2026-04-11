@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +17,17 @@ except Exception:
 
 from nvitk.core.exceptions import BackendUnavailableError
 
-from .repo import PIPELINE_VERSION_V2, DataRepo
+from .repo import DataRepo
 from .storage import json_dumps, normalize_string, normalize_variable_id, utc_now_iso
+
+
+def _resolve_import_pipeline_id(repo: DataRepo, modality: str) -> str | None:
+    """Prefer ``NVITK_PIPELINE_ID_<MODALITY>`` or ``NVITK_PIPELINE_ID``, else catalog default for modality."""
+    mod_key = str(modality).strip().upper().replace("-", "_")
+    env_val = os.getenv(f"NVITK_PIPELINE_ID_{mod_key}") or os.getenv("NVITK_PIPELINE_ID")
+    if env_val and str(env_val).strip():
+        return str(env_val).strip()
+    return repo.catalog.default_pipeline_id(str(modality))
 
 
 def _cli_decorator(*args, **kwargs):
@@ -161,6 +171,7 @@ class SourceSpec:
     cohort_id: str | None = None
     batch_id: str | None = None
     default_visit_label: str | None = None
+    default_pipeline_id: str | None = None
 
 
 PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
@@ -189,25 +200,31 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
         SourceSpec("PESABrain_Echography_CarotidePlaque_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_4DFlow_LocalizedPI_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlow_LocalizedTimeAvgFlow_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx": [
-        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+        SourceSpec("PESABrain_4DFlow_LocalizedTimeseriesFlow_Wide_20260216.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+    ],
+    "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx": [
+        SourceSpec("PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+    ],
+    "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx": [
+        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
+    ],
+    "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx": [
+        SourceSpec("PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx", "Datos", "image_timeseries_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v2', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
     ],
     "PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+        SourceSpec("PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_pipeline_id='asl_v1', default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_pipeline_id='asl_v1', default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
-    ],
-    "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx": [
-        SourceSpec("PESABrain_ASLPerfusion_CovCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+        SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", default_pipeline_id='asl_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
 }
 
@@ -658,7 +675,7 @@ def _image_frame(
     region_label: str | None,
     frame_index: pd.Series | None = None,
     unit: str | None = None,
-    pipeline_version: str | None = None,
+    pipeline_id: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     value_num, value_text, value_kind = _series_value_payload(raw[column])
     variable = _variable_entry(
@@ -687,9 +704,9 @@ def _image_frame(
             "unit": pd.Series([unit if unit else pd.NA] * len(raw), dtype="string"),
             "value_kind": value_kind,
             "pipeline_name": source_path.stem,
-            "pipeline_version": (
-                pd.Series([pipeline_version] * len(raw), dtype="string")
-                if pipeline_version is not None
+            "pipeline_id": (
+                pd.Series([pipeline_id] * len(raw), dtype="string")
+                if pipeline_id is not None
                 else pd.Series([pd.NA] * len(raw), dtype="string")
             ),
             "qc_status": pd.Series([pd.NA] * len(raw), dtype="string"),
@@ -803,6 +820,7 @@ def _parse_generic_image_wide(
         if str(column).startswith("Unnamed:"):
             continue
         variable_id, region_id, region_label = _parse_image_wide_column(source_path.name, column)
+        pid = _resolve_import_pipeline_id(repo, modality)
         frame, variable = _image_frame(
             raw,
             session_column=session_column,
@@ -815,7 +833,7 @@ def _parse_generic_image_wide(
             variable_id=variable_id,
             region_id=region_id,
             region_label=region_label,
-            pipeline_version=PIPELINE_VERSION_V2 if modality == "4dflow" else None,
+            pipeline_id=pid,
         )
         if not frame.empty:
             measurements.append(frame)
@@ -847,7 +865,7 @@ def _parse_image_timeseries_long(
 
     measurements: list[pd.DataFrame] = []
     variables: list[dict[str, Any]] = []
-    _pv = PIPELINE_VERSION_V2 if modality == "4dflow" else None
+    _pv = _resolve_import_pipeline_id(repo, modality)
     mapping = {
         "flow": "flow_tseries",
         "phase": "phase_fraction",
@@ -870,7 +888,7 @@ def _parse_image_timeseries_long(
                 "unit": pd.Series([pd.NA] * len(raw), dtype="string"),
                 "value_kind": value_kind,
                 "pipeline_name": source_path.stem,
-                "pipeline_version": (
+                "pipeline_id": (
                     pd.Series([_pv] * len(raw), dtype="string")
                     if _pv is not None
                     else pd.Series([pd.NA] * len(raw), dtype="string")
@@ -937,7 +955,7 @@ def _parse_image_timeseries_wide(
     )
     melted["frame"] = pd.to_numeric(melted["frame"], errors="coerce").astype("Int64")
     value_num, value_text, value_kind = _series_value_payload(melted["flow_value"])
-    _pv = PIPELINE_VERSION_V2 if modality == "4dflow" else None
+    _pv = _resolve_import_pipeline_id(repo, modality)
     _sid = _image_measurement_session_id_series(wide).astype("string").fillna("")
     session_expanded = np.repeat(_sid.to_numpy(), len(frame_columns))
     df = pd.DataFrame(
@@ -954,7 +972,7 @@ def _parse_image_timeseries_wide(
             "unit": pd.Series([pd.NA] * len(melted), dtype="string"),
             "value_kind": value_kind,
             "pipeline_name": source_path.stem,
-            "pipeline_version": (
+            "pipeline_id": (
                 pd.Series([_pv] * len(melted), dtype="string")
                 if _pv is not None
                 else pd.Series([pd.NA] * len(melted), dtype="string")
@@ -1052,7 +1070,7 @@ def _parse_hybrid_hemodynamic(
                 variable_id=variable_id,
                 region_id=region,
                 region_label=region.upper(),
-                pipeline_version=PIPELINE_VERSION_V2,
+                pipeline_id=_resolve_import_pipeline_id(repo, "4dflow"),
             )
             if not frame.empty:
                 image_frames.append(frame)
@@ -1074,6 +1092,7 @@ def _parse_hybrid_hemodynamic(
                 variable_id="mean_cbf",
                 region_id=region,
                 region_label=region.upper(),
+                pipeline_id=_resolve_import_pipeline_id(repo, "asl"),
             )
             if not frame.empty:
                 image_frames.append(frame)
@@ -1094,7 +1113,7 @@ def _parse_hybrid_hemodynamic(
                 variable_id=normalized,
                 region_id=None,
                 region_label=None,
-                pipeline_version=PIPELINE_VERSION_V2,
+                pipeline_id=_resolve_import_pipeline_id(repo, "4dflow"),
             )
             if not frame.empty:
                 image_frames.append(frame)
@@ -1507,9 +1526,18 @@ def import_pesabrain_curated_tables(
     is_flag=True,
     help="Build or refresh the SQLite query cache after import.",
 )
-def main(dataset_root: Path, db_base_path: Path, build_sqlite_index: bool) -> None:
+@_click_option(
+    "--pipeline-id",
+    type=str,
+    default=None,
+    help="Set NVITK_PIPELINE_ID for this run (overrides catalog default for all modalities unless NVITK_PIPELINE_ID_<MODALITY> is set).",
+)
+def main(dataset_root: Path, db_base_path: Path, build_sqlite_index: bool, pipeline_id: str | None) -> None:
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
+
+    if pipeline_id and str(pipeline_id).strip():
+        os.environ["NVITK_PIPELINE_ID"] = str(pipeline_id).strip()
 
     repo = DataRepo(dataset_root, auto_scaffold=True)
     imported = import_pesabrain_db_directory(repo, db_base_path, build_sqlite_index=build_sqlite_index)

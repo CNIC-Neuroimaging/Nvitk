@@ -127,9 +127,13 @@ def apply_filters(df: pd.DataFrame, filters: Mapping[str, Any] | None) -> pd.Dat
     mask = pd.Series(True, index=df.index)
 
     for column, conditions in normalized.items():
+        resolved_column = column
         if column not in df.columns:
-            raise FilterError(f"Column '{column}' is not available in the selected table.")
-        series = df[column]
+            if column == "pipeline_id" and "pipeline_version" in df.columns:
+                resolved_column = "pipeline_version"
+            else:
+                raise FilterError(f"Column '{column}' is not available in the selected table.")
+        series = df[resolved_column]
         column_mask = pd.Series(True, index=df.index)
         for condition in conditions:
             column_mask &= _mask_for_condition(series, condition)

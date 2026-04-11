@@ -15,7 +15,7 @@ from nvitk.core.exceptions import BackendUnavailableError
 
 from .catalog import DatasetCatalog
 from .filters import build_sql_where, escape_identifier
-from .storage import read_parquet_table
+from .storage import coerce_dataframe_to_manifest, read_parquet_table
 
 
 def _cli_decorator(*args, **kwargs):
@@ -46,6 +46,7 @@ class SQLiteIndex:
                 if not definition.path.exists():
                     continue
                 df = read_parquet_table(definition.path)
+                df = coerce_dataframe_to_manifest(df, definition.columns)
                 df.to_sql(table_name, connection, index=False, if_exists="replace")
                 for column in tuple(definition.key_columns) + tuple(definition.index_columns):
                     if column not in df.columns:

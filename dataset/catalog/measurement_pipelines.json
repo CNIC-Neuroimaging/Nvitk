@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-04-10T00:00:00+00:00",
+  "description": "Logical measurement pipeline identifiers for image_measurements.pipeline_id. Add rows here to register new pipelines; set is_default per modality for repo.image() default queries.",
+  "pipelines": [
+    {
+      "pipeline_id": "4dflow_v2",
+      "modality": "4dflow",
+      "is_default": false,
+      "role": "current",
+      "label": "PESABrain 4dflow (current | v2)",
+      "aliases": ["v2", 2, "current", "last"]
+    },
+    {
+      "pipeline_id": "4dflow_v1",
+      "modality": "4dflow",
+      "is_default": true,
+      "role": "legacy",
+      "label": "PESABrain 4dflow (v1)",
+      "aliases": ["legacy", "v1", 1, "first"]
+    },
+    {
+      "pipeline_id": "asl_v1",
+      "modality": "asl",
+      "is_default": true,
+      "role": "current",
+      "label": "PESABrain ASL (current | v1)",
+      "aliases": ["v1", 1, "current", "last"]
+    }
+  ]
+}

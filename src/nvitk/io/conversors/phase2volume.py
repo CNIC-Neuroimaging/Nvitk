@@ -211,7 +211,7 @@ def process_patient(
     venc: float = 700.0,
     dry_run: bool = False,
     subject_uid: str | None = None,
-    pipeline_version: str = "1.0.0",
+    pipeline_id: str = "1.0.0",
 ) -> list[Path]:
     inputs = discover_phase_inputs(patient_dir)
     actual_venc = read_venc_from_metadata(inputs.ap_dir, venc)
@@ -245,7 +245,7 @@ def phase2volume(
     multifile: bool = False,
     venc: float = 700.0,
     dry_run: bool = False,
-    pipeline_version: str = "1.0.0",
+    pipeline_id: str = "1.0.0",
 ) -> list[Path]:
     source = Path(input_path)
     if multifile:
@@ -257,7 +257,7 @@ def phase2volume(
                     venc=venc,
                     dry_run=dry_run,
                     subject_uid=patient_dir.name,
-                    pipeline_version=pipeline_version,
+                    pipeline_id=pipeline_id,
                 )
             )
         return written
@@ -267,7 +267,7 @@ def phase2volume(
         venc=venc,
         dry_run=dry_run,
         subject_uid=source.name,
-        pipeline_version=pipeline_version,
+        pipeline_id=pipeline_id,
     )
 
 
@@ -276,23 +276,39 @@ def phase2volume(
 @_click_option("--multifile", is_flag=True, help="Process each direct child directory as a separate patient.")
 @_click_option("--venc", type=float, default=700.0, show_default=True, help="Fallback VENC in mm/s when metadata is missing.")
 @_click_option("--dry-run", is_flag=True, help="Only report the discovered inputs.")
-@_click_option("--pipeline-version", type=str, default="1.0.0", show_default=True, help="Version string stored with registered derivative assets.")
+@_click_option(
+    "--pipeline-id",
+    "pipeline_id_opt",
+    type=str,
+    default=None,
+    help="Pipeline identifier stored with registered derivative assets (default: 1.0.0).",
+)
+@_click_option(
+    "--pipeline-version",
+    "pipeline_version_legacy",
+    type=str,
+    default=None,
+    hidden=True,
+    help="Deprecated; use --pipeline-id.",
+)
 def main(
     input_path: Path,
     multifile: bool,
     venc: float,
     dry_run: bool,
-    pipeline_version: str,
+    pipeline_id_opt: str | None,
+    pipeline_version_legacy: str | None,
 ) -> None:
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 
+    pipeline_id = (pipeline_id_opt or pipeline_version_legacy or "1.0.0").strip()
     outputs = phase2volume(
         input_path,
         multifile=multifile,
         venc=venc,
         dry_run=dry_run,
-        pipeline_version=pipeline_version,
+        pipeline_id=pipeline_id,
     )
     for output in outputs:
         click.echo(str(output))
