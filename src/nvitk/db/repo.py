@@ -54,6 +54,72 @@ def _frame_matches_entity_keys(df: pd.DataFrame, keys: set[tuple[str, ...] | str
     return df["subject_uid"].astype("string").fillna("").isin(keys)
 
 
+def _image_wide_single_variable_from_request(variables: str | Iterable[str] | None) -> bool:
+    """True when ``variables`` names exactly one measurement (wide columns = region only)."""
+    if variables is None:
+        return False
+    if isinstance(variables, str):
+        return bool(str(variables).strip())
+    items = list(variables)
+    if len(items) != 1:
+        return False
+    return bool(str(items[0]).strip())
+
+
+def _compose_image_wide_keys(df: pd.DataFrame, *, single_variable: bool) -> pd.Series:
+    """Build short pivot keys: ``<region>_<variable>``, or ``<region>`` when ``single_variable``."""
+    idx = df.index
+    m = (
+        df["modality"].astype("string").fillna("")
+        if "modality" in df.columns
+        else pd.Series("", index=idx, dtype="string")
+    )
+    p = (
+        df["pipeline_id"].astype("string").fillna("")
+        if "pipeline_id" in df.columns
+        else pd.Series("", index=idx, dtype="string")
+    )
+    r = (
+        df["region_id"].astype("string").fillna("")
+        if "region_id" in df.columns
+        else pd.Series("", index=idx, dtype="string")
+    )
+    r = r.replace("", pd.NA).fillna("unknown")
+    v = (
+        df["variable_id"].astype("string").fillna("")
+        if "variable_id" in df.columns
+        else pd.Series("", index=idx, dtype="string")
+    )
+    v = v.replace("", pd.NA).fillna("unknown")
+
+    fi_num = (
+        pd.to_numeric(df["frame_index"], errors="coerce")
+        if "frame_index" in df.columns
+        else pd.Series(pd.NA, index=idx, dtype="float64")
+    )
+    frame_suffix = pd.Series("", index=idx, dtype="string")
+    mask_f = fi_num.notna() & (fi_num != 0)
+    frame_suffix.loc[mask_f] = "_f" + fi_num.loc[mask_f].round().astype("Int64").astype(str)
+
+    m_nz = m.replace("", pd.NA)
+    p_nz = p.replace("", pd.NA)
+    multi_mod = m_nz.nunique(dropna=True) > 1
+    multi_pipe = p_nz.nunique(dropna=True) > 1
+
+    prefix = pd.Series("", index=idx, dtype="string")
+    if multi_mod:
+        prefix = m.astype("string") + "_"
+    if multi_pipe:
+        prefix = prefix.astype("string") + p.astype("string") + "_"
+
+    r_s = r.astype("string")
+    if single_variable:
+        keys = prefix.astype("string") + r_s + frame_suffix.astype("string")
+    else:
+        keys = prefix.astype("string") + r_s + "_" + v.astype("string") + frame_suffix.astype("string")
+    return keys.astype("string")
+
+
 def _apply_variable_value_filters(df: pd.DataFrame, specs: list[tuple[str, Any]]) -> pd.DataFrame:
     if df.empty or not specs:
         return df
@@ -167,7 +233,8 @@ class DataRepo:
         if wide:
             if table in {"clinical_measurements", "image_measurements"}:
                 df = self._resolve_measurement_values(df)
-            return self._to_wide(df, definition)
+            image_sv = False if table == "image_measurements" else None
+            return self._to_wide(df, definition, image_wide_single_variable=image_sv)
         return df.reset_index(drop=True)
 
     def clinical(
@@ -278,7 +345,12 @@ class DataRepo:
             df = _apply_variable_value_filters(df, var_specs)
         if post_filter_defaults:
             df = self._filter_image_rows_to_catalog_defaults(df)
-        return self._prepare_measurements(df, wide=wide, table_name="image_measurements")
+        return self._prepare_measurements(
+            df,
+            wide=wide,
+            table_name="image_measurements",
+            image_wide_single_variable=_image_wide_single_variable_from_request(variables),
+        )
 
     def _filter_image_rows_to_catalog_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
         """Keep rows where each modality with a catalog default matches that pipeline_id; other modalities pass through."""
@@ -398,11 +470,23 @@ class DataRepo:
         df = coerce_dataframe_to_manifest(df, definition.columns)
         return apply_filters(df, filters)
 
-    def _prepare_measurements(self, df: pd.DataFrame, *, wide: bool, table_name: str) -> pd.DataFrame:
+    def _prepare_measurements(
+        self,
+        df: pd.DataFrame,
+        *,
+        wide: bool,
+        table_name: str,
+        image_wide_single_variable: bool | None = None,
+    ) -> pd.DataFrame:
         df = self._resolve_measurement_values(df)
         if wide:
             definition = self.catalog.get_table(table_name)
-            return self._to_wide(df, definition)
+            kw: dict[str, Any] = {}
+            if table_name == "image_measurements":
+                kw["image_wide_single_variable"] = (
+                    False if image_wide_single_variable is None else image_wide_single_variable
+                )
+            return self._to_wide(df, definition, **kw)
         return df.reset_index(drop=True)
 
     def _resolve_measurement_values(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -419,7 +503,13 @@ class DataRepo:
             out["value"] = value_text
         return out
 
-    def _to_wide(self, df: pd.DataFrame, definition: TableDefinition) -> pd.DataFrame:
+    def _to_wide(
+        self,
+        df: pd.DataFrame,
+        definition: TableDefinition,
+        *,
+        image_wide_single_variable: bool | None = None,
+    ) -> pd.DataFrame:
         if df.empty:
             return df.copy()
 
@@ -437,7 +527,13 @@ class DataRepo:
                 tmp[column] = series.astype("string").fillna("")
             else:
                 tmp[column] = series.astype("string").fillna("")
-        tmp["_wide_key"] = self._compose_wide_keys(tmp, key_columns)
+        if definition.name == "image_measurements":
+            tmp["_wide_key"] = _compose_image_wide_keys(
+                tmp,
+                single_variable=bool(image_wide_single_variable),
+            )
+        else:
+            tmp["_wide_key"] = self._compose_wide_keys(tmp, key_columns)
         wide = tmp.pivot_table(index=index_columns, columns="_wide_key", values="value", aggfunc="first")
         wide.columns = [str(column) for column in wide.columns]
         return wide.reset_index()
