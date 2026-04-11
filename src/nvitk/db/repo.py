@@ -146,7 +146,7 @@ class DataRepo:
         self,
         root: str | Path | None = None,
         *,
-        use_sqlite: bool = False,
+        use_sqlite: bool = True,
         auto_scaffold: bool = False,
     ):
         dataset_root = Path(root or _default_dataset_root()).expanduser().resolve()
@@ -193,7 +193,7 @@ class DataRepo:
         *,
         columns: list[str] | None = None,
         filters: dict[str, Any] | None = None,
-        use_sqlite: bool | None = None,
+        use_sqlite: bool | None = True,
         force_parquet: bool = False,
     ) -> pd.DataFrame:
         definition = self.catalog.get_table(table)
@@ -203,6 +203,7 @@ class DataRepo:
             try:
                 df = self.sqlite.query_table(table, columns=columns, filters=filters)
             except Exception:
+                warnings.warn(f"Error querying table {table} with SQLite index. Falling back to parquet read.", stacklevel=2)
                 df = self._read_table(definition, columns=columns, filters=filters)
         else:
             df = self._read_table(definition, columns=columns, filters=filters)
@@ -216,7 +217,7 @@ class DataRepo:
         columns: list[str] | None = None,
         filters: dict[str, Any] | None = None,
         wide: bool = False,
-        use_sqlite: bool | None = None,
+        use_sqlite: bool | None = True,
     ) -> pd.DataFrame:
         definition = self.catalog.get_table(table)
         effective_sqlite = self.use_sqlite if use_sqlite is None else use_sqlite
@@ -243,7 +244,7 @@ class DataRepo:
         variables: str | Iterable[str] | None = None,
         filters: dict[str, Any] | None = None,
         wide: bool = True,
-        use_sqlite: bool | None = None,
+        use_sqlite: bool | None = True,
     ) -> pd.DataFrame:
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="clinical")
         structural, var_specs = self._split_measurement_filters(filters, domain="clinical", table_name="clinical_measurements")
@@ -268,7 +269,7 @@ class DataRepo:
         atlas: str | None = None,
         filters: dict[str, Any] | None = None,
         wide: bool = True,
-        use_sqlite: bool | None = None,
+        use_sqlite: bool | None = True,
         pipeline: str | Iterable[str] | None = None,
         data_version: int | None = None,
     ) -> pd.DataFrame:
@@ -376,7 +377,7 @@ class DataRepo:
         mask = df.apply(row_ok, axis=1)
         return df.loc[mask].copy()
 
-    def assets(self, *, filters: dict[str, Any] | None = None, use_sqlite: bool | None = None) -> pd.DataFrame:
+    def assets(self, *, filters: dict[str, Any] | None = None, use_sqlite: bool | None = True) -> pd.DataFrame:
         return self.get("assets", filters=filters, use_sqlite=use_sqlite)
 
     def join(
