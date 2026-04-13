@@ -20,6 +20,23 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+def _coerce_xnat_identifier(value: Any, field: str) -> str:
+    if value is None:
+        raise ValueError(f"{field} is required")
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            raise ValueError(f"{field} must be non-empty")
+        return s
+    if isinstance(value, (set, frozenset, list, tuple)):
+        if len(value) != 1:
+            raise TypeError(
+                f"{field} must be a single string, not {type(value).__name__} with {len(value)} elements"
+            )
+        return _coerce_xnat_identifier(next(iter(value)), field)
+    return _coerce_xnat_identifier(str(value), field)
+
+
 @dataclass(frozen=True)
 class XnatConnectionConfig:
     server: str
@@ -27,8 +44,12 @@ class XnatConnectionConfig:
     user: str | None = None
     password: str | None = None
     netrc_file: str | None = None
-    verify: bool = True
-    default_timeout: int = 300
+    verify: bool = False
+    default_timeout: int = 600
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "server", _coerce_xnat_identifier(self.server, "server"))
+        object.__setattr__(self, "project", _coerce_xnat_identifier(self.project, "project"))
 
 KEYRING_SERVICE = "nvitk"
 

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+import netrc
 import re
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 import pandas as pd
 
@@ -177,20 +179,141 @@ def _coalesce_attr(obj: Any, *names: str) -> Any:
     return None
 
 
+def _netrc_host_candidates(server: str) -> list[str]:
+    """Bare hostnames to try (host, then parent domain ``a.b.c`` → ``b.c``)."""
+    netloc = urlparse(server if "://" in server else f"https://{server}").netloc
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[-1]
+    host = netloc
+    if host.startswith("["):
+        end = host.find("]")
+        if end != -1:
+            inner = host[1:end]
+            rest = host[end + 1 :]
+            host = inner if rest.startswith(":") else inner
+    elif host.count(":") == 1:
+        host = host.split(":", 1)[0]
+
+    ordered: list[str] = []
+    if host:
+        ordered.append(host)
+    parts = host.split(".")
+    if len(parts) > 2:
+        parent = ".".join(parts[1:])
+        if parent not in ordered:
+            ordered.append(parent)
+    return list(dict.fromkeys(ordered))
+
+
+def _netrc_machine_candidates(server: str) -> list[str]:
+    """Ordered *machine* strings for ~/.netrc lookup."""
+    s = server.strip().rstrip("/")
+    out: list[str] = []
+
+    def add(x: str) -> None:
+        if x and x not in out:
+            out.append(x)
+
+    add(s)
+
+    parsed = urlparse(s if "://" in s else f"https://{s}")
+    netloc = parsed.netloc
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[-1]
+    if netloc.startswith("["):
+        end = netloc.find("]")
+        if end != -1:
+            inner = netloc[1:end]
+            rest = netloc[end + 1 :]
+            host = inner if rest.startswith(":") else inner
+        else:
+            host = netloc
+    elif netloc.count(":") == 1:
+        host = netloc.split(":", 1)[0]
+    else:
+        host = netloc
+
+    if parsed.scheme and host:
+        add(f"{parsed.scheme}://{host}".rstrip("/"))
+
+    if "://" not in s.strip() and host:
+        add(f"https://{host}")
+        add(f"http://{host}")
+
+    for h in _netrc_host_candidates(server):
+        add(h)
+
+    return out
+
+
+def _credentials_from_netrc(
+    server: str,
+    netrc_path: str | Path,
+    *,
+    preferred_user: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Return (login, password) from a netrc file for *server*, or (None, None).
+
+    If *preferred_user* is set, only an entry whose login matches is returned
+    (so explicit ``config.user`` can be paired with the password from netrc).
+    """
+    path = Path(netrc_path).expanduser()
+    if not path.is_file():
+        return None, None
+    try:
+        n = netrc.netrc(str(path))
+    except OSError:
+        return None, None
+
+    machines = _netrc_machine_candidates(server)
+
+    if preferred_user:
+        for machine in machines:
+            try:
+                login, _account, password = n.authenticators(machine)
+            except (KeyError, TypeError):
+                continue
+            if login == preferred_user and password:
+                return login, password
+        return None, None
+
+    for machine in machines:
+        try:
+            login, _account, password = n.authenticators(machine)
+        except (KeyError, TypeError):
+            continue
+        if login and password:
+            return login, password
+    return None, None
+
+
 def connect_xnat(config: XnatConnectionConfig):
     if xnat is None:
         raise BackendUnavailableError('xnat is not installed. Please install it with "pip install xnat".')
+
+    user = config.user
+    password = config.password
+    if config.netrc_file:
+        nu, np = _credentials_from_netrc(
+            config.server,
+            config.netrc_file,
+            preferred_user=user,
+        )
+        if user is None:
+            user = nu
+        if password is None:
+            password = np
 
     kwargs: dict[str, Any] = {
         "server": config.server,
         "verify": config.verify,
         "default_timeout": config.default_timeout,
     }
-    if config.user:
-        kwargs["user"] = config.user
-    if config.password:
-        kwargs["password"] = config.password
-    if config.netrc_file:
+    if user:
+        kwargs["user"] = user
+    if password:
+        kwargs["password"] = password
+    if config.netrc_file and not (user and password):
         kwargs["netrc_file"] = config.netrc_file
     return xnat.connect(**kwargs)
 

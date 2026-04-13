@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-11T19:48:53+00:00",
+  "last_updated": "2026-04-13T08:11:10+00:00",
   "variables": [
     {
       "variable_id": "age_at_mri",
@@ -732,6 +732,22 @@
       "label": "Right Communicating",
       "value_kind": "numeric",
       "unit": null
+    },
+    {
+      "variable_id": "psf",
+      "source_column": "psf",
+      "source_file": "derived",
+      "source_sheet": "psf",
+      "aliases": [
+        "psf",
+        "PSF",
+        "peak_systolic_flow"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Peak systolic flow (max over flow_tseries frames)",
+      "value_kind": "float"
     },
     {
       "variable_id": "psqto000",
