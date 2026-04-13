@@ -165,14 +165,46 @@ class DatasetCatalog:
     def all_pipeline_ids(self) -> set[str]:
         return {str(e["pipeline_id"]) for e in self.pipelines_manifest.get("pipelines", []) if e.get("pipeline_id")}
 
-    def resolve_pipeline_selector(self, selector: str | Iterable[str] | None) -> list[str] | None:
-        """Return None to apply catalog defaults per modality in ``DataRepo.image``. Otherwise explicit ``pipeline_id`` list."""
+    def _pipeline_entries_for_modality(self, modality: str | None) -> list[dict[str, Any]]:
+        entries = list(self.pipelines_manifest.get("pipelines", []))
+        if modality is None or not str(modality).strip():
+            return entries
+        m = str(modality).strip().lower()
+        return [e for e in entries if e.get("modality") and str(e["modality"]).strip().lower() == m]
+
+    @staticmethod
+    def _normalize_pipeline_tokens(selector: str | int | Iterable[str | int] | None) -> list[str]:
         if selector is None:
-            return None
-        if isinstance(selector, str):
-            tokens = [selector.strip()] if selector.strip() else []
+            return []
+        if isinstance(selector, (str, int)):
+            raw = [selector]
         else:
-            tokens = [str(t).strip() for t in selector if str(t).strip()]
+            raw = list(selector)
+        out: list[str] = []
+        for t in raw:
+            if isinstance(t, int):
+                s = str(t).strip()
+            else:
+                s = str(t).strip()
+            if s:
+                out.append(s)
+        return out
+
+    def resolve_pipeline_selector(
+        self,
+        selector: str | int | Iterable[str | int] | None,
+        *,
+        modality: str | None = None,
+    ) -> list[str] | None:
+        """
+        Return None to apply catalog defaults per modality in ``DataRepo.image``.
+        Otherwise return an explicit ``pipeline_id`` list.
+
+        Aliases from ``measurement_pipelines.json`` (including integers like ``1`` / ``2``) resolve
+        within the pipelines for ``modality`` when provided; without ``modality``, ambiguous aliases
+        raise ``ManifestError``.
+        """
+        tokens = self._normalize_pipeline_tokens(selector)
         if not tokens:
             return None
 
@@ -182,23 +214,41 @@ class DatasetCatalog:
                 raise ManifestError("No pipelines with role 'legacy' registered in measurement_pipelines.json.")
             return ids
 
-        known = self.all_pipeline_ids()
-        alias_map: dict[str, str] = {}
-        for e in self.pipelines_manifest.get("pipelines", []):
+        mod_scope = str(modality).strip() if modality and str(modality).strip() else None
+        candidates = self._pipeline_entries_for_modality(mod_scope) if mod_scope else list(
+            self.pipelines_manifest.get("pipelines", [])
+        )
+        cand_ids = {str(e["pipeline_id"]) for e in candidates if e.get("pipeline_id")}
+
+        # alias_key -> list of pipeline_ids (detect ambiguity when len > 1)
+        alias_buckets: dict[str, list[str]] = {}
+        for e in candidates:
             pid = str(e["pipeline_id"])
+            keys: set[str] = {pid.lower()}
             for a in e.get("aliases") or []:
-                alias_map[str(a).strip().lower()] = pid
+                keys.add(str(a).strip().lower())
+            for k in keys:
+                alias_buckets.setdefault(k, []).append(pid)
 
-        resolved: list[str] = []
-        for t in tokens:
-            tl = t.lower()
-            if t in known:
-                resolved.append(t)
-            elif tl in alias_map:
-                resolved.append(alias_map[tl])
-            else:
-                raise ManifestError(f"Unknown pipeline_id or alias: {t!r}. Known: {sorted(known)}")
+        def resolve_one(token: str) -> str:
+            tl = token.lower()
+            # Exact pipeline_id match (case-insensitive) within candidates
+            for pid in cand_ids:
+                if pid.lower() == tl:
+                    return pid
+            # Alias / short id
+            if tl in alias_buckets:
+                hits = list(dict.fromkeys(alias_buckets[tl]))
+                if len(hits) == 1:
+                    return hits[0]
+                raise ManifestError(
+                    f"Ambiguous pipeline selector {token!r} matches multiple pipeline_id values {hits!r}; "
+                    "pass modality=... to choose a pipeline."
+                )
+            known = sorted(self.all_pipeline_ids())
+            raise ManifestError(f"Unknown pipeline_id or alias: {token!r}. Known pipeline_id values: {known}")
 
+        resolved = [resolve_one(t) for t in tokens]
         return list(dict.fromkeys(resolved))
 
     def validate_pipelines_manifest(self, payload: dict[str, Any]) -> None:

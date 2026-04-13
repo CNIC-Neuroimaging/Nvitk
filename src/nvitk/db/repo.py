@@ -270,7 +270,7 @@ class DataRepo:
         filters: dict[str, Any] | None = None,
         wide: bool = True,
         use_sqlite: bool | None = True,
-        pipeline: str | Iterable[str] | None = None,
+        pipeline: str | int | Iterable[str | int] | None = None,
     ) -> pd.DataFrame:
         filters_norm = dict(filters or {})
         if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
@@ -305,7 +305,7 @@ class DataRepo:
         has_pipeline_in_filters = "pipeline_id" in structural
         explicit_pipeline_ids: list[str] | None = None
         if not has_pipeline_in_filters:
-            explicit_pipeline_ids = self.catalog.resolve_pipeline_selector(pipeline)
+            explicit_pipeline_ids = self.catalog.resolve_pipeline_selector(pipeline, modality=modality)
             if explicit_pipeline_ids is not None:
                 merged = merge_filters(merged, {"pipeline_id": explicit_pipeline_ids})
             elif modality is not None:
@@ -398,13 +398,84 @@ class DataRepo:
         self,
         *,
         filters: dict[str, Any] | None = None,
+        modality: str | None = None,
+        asset_type: str | None = None,
+        resource_label: str | None = None,
+        subject_uid: str | None = None,
+        session_uid: str | None = None,
+        pipeline_id: str | None = None,
+        asset_slot: str | None = None,
+        source: str | None = None,
         wide: bool = False,
         use_sqlite: bool | None = True,
         value: str = "asset_path",
-    ) -> pd.DataFrame:
-        df = self._load_table_frame("assets", filters=filters, use_sqlite=use_sqlite)
+        get_image: bool = False,
+    ) -> pd.DataFrame | Any:
+        merged = merge_filters(
+            dict(filters or {}),
+            {"modality": modality} if modality else None,
+            {"asset_type": asset_type} if asset_type else None,
+            {"resource_label": resource_label} if resource_label else None,
+            {"subject_uid": subject_uid} if subject_uid else None,
+            {"session_uid": session_uid} if session_uid else None,
+            {"pipeline_id": pipeline_id} if pipeline_id else None,
+            {"asset_slot": asset_slot} if asset_slot else None,
+            {"source": source} if source else None,
+        )
+        if get_image:
+            if wide:
+                raise FilterError("get_image=True is incompatible with wide=True; use wide=False.")
+            if not modality or not str(modality).strip():
+                raise FilterError("get_image=True requires modality=... (non-empty).")
+            if not asset_type or not str(asset_type).strip():
+                raise FilterError("get_image=True requires asset_type=... (non-empty).")
+
+        df = self._load_table_frame("assets", filters=merged, use_sqlite=use_sqlite)
+        df = df.reset_index(drop=True)
+
+        if get_image:
+            from nvitk.io.imageio import imread
+
+            if df.empty:
+                return []
+            if value not in df.columns:
+                raise FilterError(f"Unknown value column for asset images: {value!r}.")
+
+            def _read_row(row: pd.Series) -> Any:
+                path = row[value]
+                force = row["asset_type"] if "asset_type" in row.index and pd.notna(row.get("asset_type")) else asset_type
+                if path.endswith('.json'):
+                    return
+                if force == 'dicom' and path.endswith('.nii') or path.endswith('.nii.gz'):
+                    return
+                if force == 'nifti' and path.endswith('.dcm'):
+                    return
+                if path is None or (isinstance(path, float) and pd.isna(path)):
+                    raise FilterError(f"Asset row has no path in column {value!r}.")
+                if force is None or (isinstance(force, float) and pd.isna(force)):
+                    force = asset_type
+                ft = str(force).strip() if force is not None else None
+                if not ft:
+                    raise FilterError("Cannot determine asset_type for imread(force_type=...).")
+                return imread(str(path), force_type=ft)
+
+            if len(df) == 1:
+                try:
+                    return _read_row(df.iloc[0])
+                except Exception as e:
+                    warnings.warn(f"Error reading asset image: {e}", stacklevel=2)
+                    return []
+            l = []
+            for i in range(len(df)):
+                try:
+                    l.append(_read_row(df.iloc[i]))
+                except Exception as e:
+                    warnings.warn(f"Error reading asset image: {e}", stacklevel=2)
+                    continue
+            return l
+
         if not wide:
-            return df.reset_index(drop=True)
+            return df
         if value not in df.columns:
             raise FilterError(f"Unknown value column for assets wide form: {value!r}.")
         return self._assets_to_wide(df, value_column=value)
@@ -413,12 +484,35 @@ class DataRepo:
         self,
         *,
         filters: dict[str, Any] | None = None,
+        modality: str | None = None,
+        asset_type: str | None = None,
+        resource_label: str | None = None,
+        subject_uid: str | None = None,
+        session_uid: str | None = None,
+        pipeline_id: str | None = None,
+        asset_slot: str | None = None,
+        source: str | None = None,
         wide: bool = True,
         use_sqlite: bool | None = True,
         value: str = "asset_path",
-    ) -> pd.DataFrame:
+        get_image: bool = False,
+    ) -> pd.DataFrame | Any:
         """Assets as a wide table (one row per subject) by default; see :meth:`assets`."""
-        return self.assets(filters=filters, wide=wide, use_sqlite=use_sqlite, value=value)
+        return self.assets(
+            filters=filters,
+            modality=modality,
+            asset_type=asset_type,
+            resource_label=resource_label,
+            subject_uid=subject_uid,
+            session_uid=session_uid,
+            pipeline_id=pipeline_id,
+            asset_slot=asset_slot,
+            source=source,
+            wide=wide,
+            use_sqlite=use_sqlite,
+            value=value,
+            get_image=get_image,
+        )
 
     def join(
         self,

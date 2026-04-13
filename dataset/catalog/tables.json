@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-13T09:20:14+00:00",
+  "last_updated": "2026-04-13T10:40:23+00:00",
   "tables": {
     "subjects": {
       "path": "tables/subjects.parquet",
@@ -135,8 +135,8 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 10,
-      "last_updated": "2026-04-13T09:20:14+00:00",
+      "row_count": 0,
+      "last_updated": "2026-04-13T10:33:30+00:00",
       "provenance": {
         "written_at": "2026-04-13T09:20:14+00:00",
         "source": "xnat",
@@ -302,11 +302,11 @@
         "updated_at": "string",
         "asset_slot": "string"
       },
-      "row_count": 19695,
-      "last_updated": "2026-04-13T08:46:37+00:00",
+      "row_count": 0,
+      "last_updated": "2026-04-13T10:40:23+00:00",
       "provenance": {
-        "written_at": "2026-04-13T08:46:37+00:00",
-        "source": "xnat",
+        "written_at": "2026-04-13T10:40:03+00:00",
+        "source": "local_nifti",
         "nifti_root": "/data_local/LabVF/PESA-Brain/DATA/Nifti",
         "project": "PESA_Brain",
         "server": "https://xnat.cnic.es"
