@@ -14,7 +14,13 @@ from .repo import DataRepo
 from .sqlite_index import SQLiteIndex
 from .local_dicom_assets import register_dicom_tree, upsert_dicom_assets
 from .local_nifti_assets import register_nifti_tree, upsert_nifti_assets
-from .xnat import classify_scan, connect_xnat, sync_xnat_project
+from .xnat import (
+    classify_scan,
+    connect_xnat,
+    resolve_xnat_scan_from_scan_row,
+    sync_xnat_project,
+    xnat_sequence_to_asset_slot,
+)
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 
 __all__ = [
@@ -33,6 +39,8 @@ __all__ = [
     "import_subject_ids_from_source",
     "list_pesabrain_sources",
     "sync_xnat_project",
+    "resolve_xnat_scan_from_scan_row",
+    "xnat_sequence_to_asset_slot",
     "load_xnat_profile",
     "resolve_xnat_connection",
     "register_dicom_tree",

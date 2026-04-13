@@ -7,9 +7,9 @@ Expected layout::
     {dicom_root}/{subject_uid}/4Dflow_RL/**/*.dcm
     {dicom_root}/{subject_uid}/TOF/**/*.dcm
 
-Each DICOM file becomes one ``assets`` row. ``asset_slot`` is
-``dicom_<folder_token>__<relative_path_token>`` so slices in the same logical folder stay
-unique for :meth:`nvitk.db.repo.DataRepo.asset` wide tables.
+Each DICOM file becomes one ``assets`` row. ``asset_slot`` is a short, stable key per
+sequence folder (e.g. ``tof``, ``4dflow_ap``), aligned with :mod:`nvitk.db.local_nifti_assets`
+and XNAT sync. Wide tables use ``subject_uid`` + ``asset_slot`` (one column per sequence).
 
 Files are included if they look like DICOM (``*.dcm``, ``*.dicom``, ``*.ima``, ``*.img``,
 case-insensitive) or have no extension (common for raw exports); obvious junk names are skipped.
@@ -22,7 +22,6 @@ See also :mod:`nvitk.db.local_nifti_assets` for the NIfTI variant.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -38,12 +37,12 @@ from nvitk.core.exceptions import BackendUnavailableError
 from .repo import DataRepo
 from .storage import utc_now_iso
 
-# (directory name under subject, modality, resource_label, slot prefix for wide keys)
+# (directory name under subject, modality, resource_label, asset_slot — same for all files in folder)
 _SUBJECT_FOLDER_SPECS: tuple[tuple[str, str, str, str], ...] = (
-    ("4Dflow_AP", "4dflow", "4Dflow/AP", "dicom_4dflow_ap"),
-    ("4Dflow_FH", "4dflow", "4Dflow/FH", "dicom_4dflow_fh"),
-    ("4Dflow_RL", "4dflow", "4Dflow/RL", "dicom_4dflow_rl"),
-    ("TOF", "tof", "TOF", "dicom_tof"),
+    ("4Dflow_AP", "4dflow", "4Dflow/AP", "4dflow_ap"),
+    ("4Dflow_FH", "4dflow", "4Dflow/FH", "4dflow_fh"),
+    ("4Dflow_RL", "4dflow", "4Dflow/RL", "4dflow_rl"),
+    ("TOF", "tof", "TOF", "tof"),
 )
 
 _JUNK_NAMES = frozenset(
@@ -56,10 +55,6 @@ _JUNK_NAMES = frozenset(
         "desktop.ini",
     }
 )
-
-
-def _normalize_slot_token(text: str) -> str:
-    return re.sub(r"[^0-9a-z]+", "_", text.lower()).strip("_")
 
 
 def _is_probably_dicom_file(path: Path) -> bool:
@@ -85,14 +80,6 @@ def _iter_dicoms_under(folder: Path) -> Iterable[Path]:
             yield p
 
 
-def _dicom_asset_slot(folder_key: str, rel_within: str) -> str:
-    """Unique wide key: ``dicom_<folder>__<path_under_folder>``."""
-    token = _normalize_slot_token(rel_within.replace("\\", "/"))
-    if not token:
-        token = "file"
-    return f"{folder_key}__{token}"
-
-
 def register_dicom_tree(
     dicom_root: str | Path,
     *,
@@ -113,7 +100,7 @@ def register_dicom_tree(
     for subject_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         subject_uid = subject_dir.name
 
-        for dir_name, modality, res_label, slot_prefix in _SUBJECT_FOLDER_SPECS:
+        for dir_name, modality, res_label, asset_slot in _SUBJECT_FOLDER_SPECS:
             mod_dir = subject_dir / dir_name
             if not mod_dir.is_dir():
                 continue
@@ -124,12 +111,12 @@ def register_dicom_tree(
                     rel_within = fp.relative_to(mod_dir).as_posix()
                 except ValueError:
                     rel_within = fp.name
-                slot = _dicom_asset_slot(slot_prefix, rel_within)
                 meta_obj: dict[str, Any] = {
                     "relative_path": rel,
                     "basename": fp.name,
                     "folder": dir_name,
-                    "asset_slot": slot,
+                    "rel_within": rel_within.replace("\\", "/"),
+                    "asset_slot": asset_slot,
                     "layout": "local_dicom_per_subject",
                 }
                 rows.append(
@@ -145,7 +132,7 @@ def register_dicom_tree(
                         "pipeline_name": pipeline_name if pipeline_name is not None else pd.NA,
                         "pipeline_id": pipeline_id if pipeline_id is not None else pd.NA,
                         "exists_locally": fp.exists(),
-                        "asset_slot": slot,
+                        "asset_slot": asset_slot,
                         "metadata_json": json.dumps(meta_obj),
                         "source_batch_id": batch,
                         "updated_at": now,

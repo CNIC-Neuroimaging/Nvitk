@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -147,6 +147,68 @@ def classify_scan(series_description: str | None, quality: str | None = None) ->
         }
 
     return None
+
+
+def resolve_xnat_scan_from_scan_row(session: Any, row: Mapping[str, Any]) -> Any:
+    """Return the XNAT *scan* handle for a ``scans`` table row (uses ``session_uid`` and ``scan_id``)."""
+    session_uid = row.get("session_uid")
+    scan_id = str(row.get("scan_id") or "").strip()
+    if session_uid is None or (isinstance(session_uid, float) and pd.isna(session_uid)):
+        raise ValueError("scan row has no session_uid")
+    if not scan_id:
+        raise ValueError("scan row has no scan_id")
+    parts = str(session_uid).split(":", 2)
+    if len(parts) != 3:
+        raise ValueError(f"session_uid must be project:subject:experiment, got {session_uid!r}")
+    project_id, subject_key, experiment_label = parts
+    project = session.projects[project_id]
+    subject = None
+    if subject_key in project.subjects:
+        subject = project.subjects[subject_key]
+    else:
+        for _lbl, subj in project.subjects.items():
+            uid = str(_coalesce_attr(subj, "label", "id", "name") or _lbl)
+            if uid == subject_key:
+                subject = subj
+                break
+    if subject is None:
+        raise LookupError(f"No subject matching {subject_key!r} in project {project_id!r}")
+
+    experiments_map = getattr(subject, "experiments", None) or {}
+    experiment = None
+    if experiment_label in experiments_map:
+        experiment = experiments_map[experiment_label]
+    else:
+        for exp in experiments_map.values():
+            if str(_coalesce_attr(exp, "label", "id") or "") == experiment_label:
+                experiment = exp
+                break
+    if experiment is None:
+        raise LookupError(f"Experiment {experiment_label!r} not found for subject {subject_key!r}")
+
+    scans_map = getattr(experiment, "scans", None) or {}
+    if scan_id in scans_map:
+        return scans_map[scan_id]
+    for sc in scans_map.values():
+        sid = str(_coalesce_attr(sc, "id", "label", "name") or "")
+        if sid == scan_id:
+            return sc
+    raise LookupError(f"Scan {scan_id!r} not found under session {session_uid!r}")
+
+
+def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
+    """Map XNAT sequence labels (see :func:`classify_scan`) to canonical ``asset_slot`` names."""
+    key = str(sequence_label).strip().upper().replace("-", "_")
+    mapping = {
+        "TOF": "tof",
+        "4DFLOW_AP": "4dflow_ap",
+        "4DFLOW_FH": "4dflow_fh",
+        "4DFLOW_RL": "4dflow_rl",
+        "4DFLOW_GENERIC": "4dflow",
+    }
+    if key in mapping:
+        return mapping[key]
+    return re.sub(r"[^0-9a-z]+", "_", key.lower()).strip("_") or "unknown"
 
 
 def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
@@ -532,6 +594,7 @@ def sync_xnat_project(
                     scan_uid = f"{session_uid}:{scan_id}"
                     local_cache_path = pd.NA
                     sequence_label = classification["sequence"]
+                    asset_slot = xnat_sequence_to_asset_slot(sequence_label)
 
                     if download_dicoms and download_root is not None:
                         target_dir = Path(download_root) / subject_uid / sequence_label
@@ -540,6 +603,7 @@ def sync_xnat_project(
                         else:
                             extracted_files = download_scan_dicoms(scan, target_dir)
                         local_cache_path = str(target_dir)
+                        dicom_meta = json.dumps({"sequence": sequence_label, "asset_slot": asset_slot})
                         for file_path in extracted_files:
                             asset_rows.append(
                                 {
@@ -554,7 +618,8 @@ def sync_xnat_project(
                                     "pipeline_name": pd.NA,
                                     "pipeline_id": pd.NA,
                                     "exists_locally": True,
-                                    "metadata_json": "{}",
+                                    "asset_slot": asset_slot,
+                                    "metadata_json": dicom_meta,
                                     "source_batch_id": source_batch_id,
                                     "updated_at": utc_now_iso(),
                                 }
@@ -571,7 +636,9 @@ def sync_xnat_project(
                                 nifti_dir,
                                 resource_label=nifti_resource_label,
                             )
-                        meta = json.dumps({"resource": nifti_resource_label, "sequence": sequence_label})
+                        meta = json.dumps(
+                            {"resource": nifti_resource_label, "sequence": sequence_label, "asset_slot": asset_slot}
+                        )
                         for file_path in nifti_files:
                             asset_rows.append(
                                 {
@@ -586,6 +653,7 @@ def sync_xnat_project(
                                     "pipeline_name": pd.NA,
                                     "pipeline_id": pd.NA,
                                     "exists_locally": bool(file_path.exists()),
+                                    "asset_slot": asset_slot,
                                     "metadata_json": meta,
                                     "source_batch_id": source_batch_id,
                                     "updated_at": utc_now_iso(),
@@ -606,6 +674,7 @@ def sync_xnat_project(
                             "resource_label": "DICOM",
                             "local_cache_path": local_cache_path,
                             "xnat_uri": str(_coalesce_attr(scan, "uri") or ""),
+                            "asset_slot": asset_slot,
                             "source_batch_id": source_batch_id,
                             "updated_at": utc_now_iso(),
                         }

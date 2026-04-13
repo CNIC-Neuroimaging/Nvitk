@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -11,6 +12,7 @@ from .asl_atlases import regions_for_atlas
 from .catalog import DatasetCatalog, TableDefinition
 from .exceptions import FilterError
 from .filters import apply_filters, ensure_list, merge_filters
+from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 from .sqlite_index import SQLiteIndex
 from .storage import coerce_bool, coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
 
@@ -20,6 +22,56 @@ def _default_dataset_root() -> Path:
     if env_root:
         return Path(env_root).expanduser().resolve()
     return Path(__file__).resolve().parents[3] / "dataset"
+
+
+def _root_path_for_imread(path: str | Path, *, asset_type: str) -> Path:
+    """Directory or file path to pass to :func:`nvitk.io.imageio.imread` for ``force_type``."""
+    p = Path(path)
+    t = str(asset_type).strip().lower()
+    if t == "dicom":
+        if p.is_dir():
+            return p
+        return p.parent
+    return p
+
+
+def _dedupe_imread_jobs(jobs: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[Path, str]] = []
+    for p, ft in jobs:
+        key = (p.resolve().as_posix(), str(ft).strip().lower())
+        if key not in seen:
+            seen.add(key)
+            out.append((p, ft))
+    return out
+
+
+def _imread_stack_from_jobs(jobs: list[tuple[Path, str]]) -> Any:
+    from nvitk.io.imageio import imread
+
+    if not jobs:
+        return []
+    outs: list[Any] = []
+    for p, ft in jobs:
+        outs.append(imread(str(p), force_type=str(ft).strip().lower()))
+    if len(outs) == 1:
+        return outs[0]
+    return outs
+
+
+def _dicom_cache_dir_has_files(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    for child in directory.iterdir():
+        if not child.is_file():
+            continue
+        low = child.name.lower()
+        if low.startswith("."):
+            continue
+        suf = child.suffix.lower()
+        if suf in {".dcm", ".dicom", ".ima", ".img"} or suf == "":
+            return True
+    return False
 
 
 def _pick_value_column_for_spec(spec: Any) -> str:
@@ -434,45 +486,27 @@ class DataRepo:
         df = df.reset_index(drop=True)
 
         if get_image:
-            from nvitk.io.imageio import imread
-
             if df.empty:
                 return []
             if value not in df.columns:
                 raise FilterError(f"Unknown value column for asset images: {value!r}.")
 
-            def _read_row(row: pd.Series) -> Any:
-                path = row[value]
-                force = row["asset_type"] if "asset_type" in row.index and pd.notna(row.get("asset_type")) else asset_type
-                if path.endswith('.json'):
-                    return
-                if force == 'dicom' and path.endswith('.nii') or path.endswith('.nii.gz'):
-                    return
-                if force == 'nifti' and path.endswith('.dcm'):
-                    return
-                if path is None or (isinstance(path, float) and pd.isna(path)):
+            jobs: list[tuple[Path, str]] = []
+            for i in range(len(df)):
+                row = df.iloc[i]
+                raw = row[value]
+                if raw is None or (isinstance(raw, float) and pd.isna(raw)):
                     raise FilterError(f"Asset row has no path in column {value!r}.")
+                force = row["asset_type"] if "asset_type" in row.index and pd.notna(row.get("asset_type")) else asset_type
                 if force is None or (isinstance(force, float) and pd.isna(force)):
                     force = asset_type
-                ft = str(force).strip() if force is not None else None
+                ft = str(force).strip().lower() if force is not None else ""
                 if not ft:
                     raise FilterError("Cannot determine asset_type for imread(force_type=...).")
-                return imread(str(path), force_type=ft)
+                jobs.append((_root_path_for_imread(str(raw), asset_type=ft), ft))
 
-            if len(df) == 1:
-                try:
-                    return _read_row(df.iloc[0])
-                except Exception as e:
-                    warnings.warn(f"Error reading asset image: {e}", stacklevel=2)
-                    return []
-            l = []
-            for i in range(len(df)):
-                try:
-                    l.append(_read_row(df.iloc[i]))
-                except Exception as e:
-                    warnings.warn(f"Error reading asset image: {e}", stacklevel=2)
-                    continue
-            return l
+            jobs = _dedupe_imread_jobs(jobs)
+            return _imread_stack_from_jobs(jobs)
 
         if not wide:
             return df
@@ -513,6 +547,143 @@ class DataRepo:
             value=value,
             get_image=get_image,
         )
+
+    def scans(
+        self,
+        *,
+        filters: dict[str, Any] | None = None,
+        scan_uid: str | None = None,
+        session_uid: str | None = None,
+        subject_uid: str | None = None,
+        scan_id: str | None = None,
+        modality: str | None = None,
+        orientation: str | None = None,
+        resource_label: str | None = None,
+        asset_slot: str | None = None,
+        quality: str | None = None,
+        series_description: str | None = None,
+        source_batch_id: str | None = None,
+        use_sqlite: bool | None = True,
+        path_column: str = "local_cache_path",
+        get_image: bool = False,
+        asset_type: str | None = None,
+        download_scan_path: str | Path | None = None,
+        xnat_config: XnatConnectionConfig | None = None,
+        skip_existing_download: bool = True,
+    ) -> pd.DataFrame | Any:
+        """Query the ``scans`` inventory table with optional keyword filters (like :meth:`assets`)."""
+        merged = merge_filters(
+            dict(filters or {}),
+            {"scan_uid": scan_uid} if scan_uid else None,
+            {"session_uid": session_uid} if session_uid else None,
+            {"subject_uid": subject_uid} if subject_uid else None,
+            {"scan_id": scan_id} if scan_id else None,
+            {"modality": modality} if modality else None,
+            {"orientation": orientation} if orientation else None,
+            {"resource_label": resource_label} if resource_label else None,
+            {"asset_slot": asset_slot} if asset_slot else None,
+            {"quality": quality} if quality else None,
+            {"series_description": series_description} if series_description else None,
+            {"source_batch_id": source_batch_id} if source_batch_id else None,
+        )
+        if get_image:
+            if not modality or not str(modality).strip():
+                raise FilterError("get_image=True requires modality=... (non-empty).")
+            if not asset_type or not str(asset_type).strip():
+                raise FilterError("get_image=True requires asset_type=... (non-empty).")
+
+        df = self._load_table_frame("scans", filters=merged, use_sqlite=use_sqlite)
+        df = df.reset_index(drop=True)
+
+        if get_image:
+            if path_column not in df.columns:
+                raise FilterError(f"Unknown path column for scan images: {path_column!r}.")
+            if df.empty:
+                return []
+            ft = str(asset_type).strip().lower()
+            jobs: list[tuple[Path, str]] = []
+            need_download: list[pd.Series] = []
+            for i in range(len(df)):
+                row = df.iloc[i]
+                raw = row[path_column]
+                if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+                    need_download.append(row)
+                    continue
+                jobs.append((_root_path_for_imread(str(raw), asset_type=ft), ft))
+
+            if need_download:
+                cfg = xnat_config
+                if cfg is None:
+                    try:
+                        cfg = resolve_xnat_connection(load_xnat_profile())
+                    except ValueError as exc:
+                        raise FilterError(
+                            "get_image=True with missing local_cache_path requires XNAT credentials: "
+                            "pass xnat_config=... or set XNAT_SERVER / XNAT_PROJECT (and auth), "
+                            "or use an NVITK XNAT profile."
+                        ) from exc
+
+                from nvitk.io.imageio import imread
+
+                from .xnat import connect_xnat, download_scan_dicoms, resolve_xnat_scan_from_scan_row
+
+                if ft != "dicom":
+                    raise FilterError(
+                        "On-demand download from XNAT in scans(get_image=True) is implemented for "
+                        "asset_type='dicom' only; sync NIfTI assets or set local_cache_path."
+                    )
+
+                use_persistent_cache = download_scan_path is not None and str(download_scan_path).strip()
+                persistent_base = Path(download_scan_path).expanduser().resolve() if use_persistent_cache else None
+                if persistent_base is not None:
+                    persistent_base.mkdir(parents=True, exist_ok=True)
+
+                ephemeral_images: list[Any] = []
+
+                with connect_xnat(cfg) as xsession:
+                    for row in need_download:
+                        try:
+                            scan_obj = resolve_xnat_scan_from_scan_row(xsession, row.to_dict())
+                        except (LookupError, ValueError) as exc:
+                            raise FilterError(f"Could not resolve XNAT scan for downloads: {exc}") from exc
+
+                        if persistent_base is not None:
+                            subj = str(row.get("subject_uid") or "unknown")
+                            slot = str(row.get("asset_slot") or "scan").strip() or "scan"
+                            sid = str(row.get("scan_id") or "unknown")
+                            dest = persistent_base / subj / slot / sid
+                            dest.mkdir(parents=True, exist_ok=True)
+                            if skip_existing_download and _dicom_cache_dir_has_files(dest):
+                                pass
+                            else:
+                                download_scan_dicoms(scan_obj, dest)
+                            jobs.append((_root_path_for_imread(dest, asset_type=ft), ft))
+                        else:
+                            with tempfile.TemporaryDirectory(prefix="nvitk_xnat_scan_") as tmp:
+                                dest = Path(tmp)
+                                download_scan_dicoms(scan_obj, dest)
+                                ephemeral_images.append(
+                                    imread(str(_root_path_for_imread(dest, asset_type=ft)), force_type=ft)
+                                )
+
+                if ephemeral_images:
+                    disk_out: list[Any] = []
+                    for p, fft in _dedupe_imread_jobs(jobs):
+                        disk_out.append(imread(str(p), force_type=str(fft).strip().lower()))
+                    combined = disk_out + ephemeral_images
+                    if len(combined) == 1:
+                        return combined[0]
+                    return combined
+
+            if not jobs:
+                raise FilterError(
+                    f"No usable paths in column {path_column!r} for the selected scans "
+                    "(expected non-null local download/cache directories)."
+                )
+            jobs = _dedupe_imread_jobs(jobs)
+            return _imread_stack_from_jobs(jobs)
+
+        return df
 
     def join(
         self,
