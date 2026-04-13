@@ -100,15 +100,10 @@ full = ["nvitk[gpu,test,xnat]"]
 dcm2nii = "nvitk.io.conversors.dcm2nii:main"
 stl2nifti = "nvitk.io.conversors.stl2nifti:main"
 phase2volume = "nvitk.io.conversors.phase2volume:main"
+nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 
 # Miscellaneous scripts
 pyhelp = "nvitk.utils.list_cli_commands:main"
-nvitk-build-sqlite-index = "nvitk.db.sqlite_index:main"
-nvitk-import-study-data = "nvitk.db.importers:main"
-nvitk-sync-xnat = "nvitk.db.xnat:main"
-nvitk-register-nifti-assets = "nvitk.db.local_nifti_assets:main"
-nvitk-register-dicom-assets = "nvitk.db.local_dicom_assets:main"
-nvitk-xnat-keyring-set = "nvitk.db.xnat_config:keyring_set_main"
 
 [project.gui-scripts]
 # Nvitk-GUI = "gui.main:main"

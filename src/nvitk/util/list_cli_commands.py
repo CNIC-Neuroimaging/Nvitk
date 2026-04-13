@@ -6,14 +6,18 @@ List all CLI commands defined in pyproject.toml organized by sub-modules
 import re
 from pathlib import Path
 
-from util.colors import bcolors as Colors
+import sys
+project_root = Path(__file__).resolve().parents[3]
+src_dir = project_root / 'src' 
+sys.path.insert(0, str(src_dir))
 
+from nvitk.util.colors import bcolors as Colors
 
 def categorize_command(cmd, module):
     """Categorize command based on its name and module path"""
     
     # General/Conversion commands (top priority)
-    if any(conv in cmd.lower() for conv in ['dcm2nii', 'stl2nifti', 'nikon2nifti', 'v-phase2volume']):
+    if any(conv in cmd.lower() for conv in ['dcm2nii', 'stl2nifti', 'nikon2nifti', 'phase2volume']):
         return "Image Conversion"
     
     # Segmentation commands
@@ -31,9 +35,9 @@ def categorize_command(cmd, module):
 def get_command_color(category):
     """Get the appropriate color for each command category"""
     color_map = {
-        "Image Conversion": Colors.CYAN,
-        "Segmentation": Colors.GREEN,
-        "PESA-Brain Analysis": Colors.YELLOW,
+        "Image Conversion": Colors.OKCYAN,
+        "Segmentation": Colors.OKGREEN,
+        "PESA-Brain Analysis": Colors.WARNING,
         "General": Colors.WHITE
     }
     return color_map.get(category, Colors.WHITE)
@@ -115,11 +119,11 @@ def list_cli_commands():
     ]
 
     # Display header
-    print("\n" + "=" * 100)
-    print(f"{Colors.BOLD}{Colors.BLUE}Nvitk CLI Commands{Colors.RESET}")
-    print("=" * 100)
-    print(f"{Colors.WHITE}Available command-line interfaces organized by functionality{Colors.RESET}")
-    print("=" * 100)
+    print("\n" + "=" * 80)
+    print(f"{Colors.BOLD}{Colors.OKBLUE}Nvitk CLI Commands{Colors.ENDC}")
+    print("=" * 80)
+    print(f"{Colors.WHITE}Available command-line interfaces organized by functionality{Colors.ENDC}")
+    print("=" * 80)
 
     total_commands = 0
     
@@ -129,7 +133,7 @@ def list_cli_commands():
             commands_in_category = categorized[category]
             total_commands += len(commands_in_category)
             
-            print(f"\n{Colors.BOLD}{category}{Colors.RESET}")
+            print(f"\n{Colors.BOLD}{category}{Colors.ENDC}")
             print("─" * len(category))
             
             for cmd, module in commands_in_category:
@@ -142,27 +146,27 @@ def list_cli_commands():
                 
                 # Get color for this command category
                 cmd_color = get_command_color(category)
-                colored_cmd = f"{cmd_color}{Colors.BOLD}{cmd}{Colors.RESET}"
+                colored_cmd = f"{cmd_color}{Colors.BOLD}{cmd}{Colors.ENDC}"
                 
                 # Check if the line would be too long
-                line = f"  {colored_cmd:<20} → {Colors.GRAY}{module_display}{Colors.RESET}"
+                line = f"  {colored_cmd:<20} → {Colors.GRAY}{module_display}{Colors.ENDC}"
                 if len(f"  {cmd:<20} → {module_display}") > 100:
                     print(f"  {colored_cmd:<20} →")
-                    print(f"    {Colors.GRAY}{module_display}{Colors.RESET}")
+                    print(f"    {Colors.GRAY}{module_display}{Colors.ENDC}")
                 else:
                     print(line)
             
             print()  # Empty line between categories
 
     # Display footer
-    print("=" * 100)
-    print(f"{Colors.BOLD}Total commands: {Colors.GREEN}{total_commands}{Colors.RESET}")
-    print("=" * 100)
-    print(f"\n{Colors.BOLD}Backend Options:{Colors.RESET}")
-    print(f"   {Colors.WHITE}• --backend numpy  (CPU processing){Colors.RESET}")
-    print(f"   {Colors.WHITE}• --backend cupy   (GPU processing){Colors.RESET}")
-    print(f"   {Colors.WHITE}[• --backend gpu    (GPU processing alias for some commands){Colors.RESET}]")
-    print("=" * 100)
+    print("=" * 80)
+    print(f"{Colors.BOLD}Total commands: {Colors.OKGREEN}{total_commands}{Colors.ENDC}")
+    print("=" * 80)
+    print(f"\n{Colors.BOLD}Backend Options:{Colors.ENDC}")
+    print(f"   {Colors.WHITE}• --backend numpy  (CPU processing){Colors.ENDC}")
+    print(f"   {Colors.WHITE}• --backend cupy   (GPU processing){Colors.ENDC}")
+    print(f"   {Colors.WHITE}[• --backend gpu    (GPU processing alias for some commands){Colors.ENDC}]")
+    print("=" * 80)
 
 
 def main():
