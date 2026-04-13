@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-13T08:11:10+00:00",
+  "last_updated": "2026-04-13T17:32:49+00:00",
   "variables": [
     {
       "variable_id": "age_at_mri",
@@ -15,7 +15,7 @@
       "modality": null,
       "label": "age_at_mri",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "Years"
     },
     {
       "variable_id": "apoe",
@@ -30,7 +30,7 @@
       "modality": null,
       "label": "apoe",
       "value_kind": "text",
-      "unit": null
+      "unit": "Apolipoprotein E Aplotype Status"
     },
     {
       "variable_id": "basilar",
@@ -75,7 +75,7 @@
       "modality": null,
       "label": "bmi",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "kg/m2"
     },
     {
       "variable_id": "bpxdim",
@@ -105,7 +105,7 @@
       "modality": null,
       "label": "BPXPLS",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "bpm"
     },
     {
       "variable_id": "bpxsym",
@@ -120,7 +120,7 @@
       "modality": null,
       "label": "BPXSYM",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mmHg"
     },
     {
       "variable_id": "cov_cbf",
@@ -219,6 +219,12 @@
       "unit": null
     },
     {
+      "variable_id": "dpxdim",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mmHg"
+    },
+    {
       "variable_id": "flow_mean",
       "source_column": "Right Communicating",
       "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
@@ -246,7 +252,7 @@
       "modality": "4dflow",
       "label": "Right Communicating",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mL/min"
     },
     {
       "variable_id": "flow_tseries",
@@ -263,7 +269,8 @@
       "table": "image_measurements",
       "modality": "4dflow",
       "label": "Flow time series",
-      "value_kind": "numeric"
+      "value_kind": "numeric",
+      "unit": "mL/min"
     },
     {
       "variable_id": "height",
@@ -278,7 +285,7 @@
       "modality": null,
       "label": "height",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "cm"
     },
     {
       "variable_id": "hematocrit",
@@ -293,7 +300,7 @@
       "modality": null,
       "label": "Hematocrit",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "%"
     },
     {
       "variable_id": "lbdldl",
@@ -311,6 +318,12 @@
       "unit": null
     },
     {
+      "variable_id": "lbdlld",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mg/dL"
+    },
+    {
       "variable_id": "lbxhdd",
       "source_column": "LBXHDD",
       "source_file": "PESABrain_Clinical_20260216.xlsx",
@@ -323,7 +336,7 @@
       "modality": null,
       "label": "LBXHDD",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mg/dL"
     },
     {
       "variable_id": "lbxtc",
@@ -338,7 +351,7 @@
       "modality": null,
       "label": "LBXTC",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mg/dL"
     },
     {
       "variable_id": "left_aca",
@@ -383,7 +396,7 @@
       "modality": null,
       "label": "left_carotid_plaque_vol",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mm3"
     },
     {
       "variable_id": "left_communicating",
@@ -414,6 +427,12 @@
       "label": "Left Communicating_PI",
       "value_kind": "numeric",
       "unit": null
+    },
+    {
+      "variable_id": "left_femoral_plaque_vol",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mm3"
     },
     {
       "variable_id": "left_ica",
@@ -537,8 +556,8 @@
     },
     {
       "variable_id": "mean_cbf",
-      "source_column": "patient_id",
-      "source_file": "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx",
+      "source_column": "ctx-rh-insula",
+      "source_file": "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx",
       "source_sheet": "Sheet1",
       "aliases": [
         "patient_id",
@@ -654,20 +673,20 @@
       "domain": "image",
       "table": "image_measurements",
       "modality": "asl",
-      "label": "patient_id",
-      "value_kind": "text",
-      "unit": null
+      "label": "ctx-rh-insula",
+      "value_kind": "numeric",
+      "unit": "mL/100g/min"
     },
     {
       "variable_id": "patient_id",
       "source_column": "patient_id",
-      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
       "source_sheet": "Sheet1",
       "aliases": [
         "patient_id"
       ],
-      "domain": "image",
-      "table": "image_measurements",
+      "domain": "clinical",
+      "table": "clinical_measurements",
       "modality": "4dflow",
       "label": "patient_id",
       "value_kind": "text",
@@ -747,7 +766,9 @@
       "table": "image_measurements",
       "modality": "4dflow",
       "label": "Peak systolic flow (max over flow_tseries frames)",
-      "value_kind": "float"
+      "value_kind": "float",
+      "unit": "mL/min",
+      "parent_variable": "flow_tseries"
     },
     {
       "variable_id": "psqto000",
@@ -762,7 +783,7 @@
       "modality": null,
       "label": "PSQTO000",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "0: non; 1: active; 2: former; 3: social"
     },
     {
       "variable_id": "right_aca",
@@ -807,7 +828,7 @@
       "modality": null,
       "label": "right_carotid_plaque_vol",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mm3"
     },
     {
       "variable_id": "right_communicating",
@@ -838,6 +859,12 @@
       "label": "Right Communicating_PI",
       "value_kind": "numeric",
       "unit": null
+    },
+    {
+      "variable_id": "right_femoral_plaque_vol",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mm3"
     },
     {
       "variable_id": "right_ica",
@@ -1077,7 +1104,7 @@
       "modality": null,
       "label": "sys_dias_delta",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mmHg"
     },
     {
       "variable_id": "tacsctot",
@@ -1092,7 +1119,7 @@
       "modality": null,
       "label": "tacsctot",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "Agaston Units"
     },
     {
       "variable_id": "tacsctot_group",
@@ -1122,7 +1149,7 @@
       "modality": null,
       "label": "TAD",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mmHg"
     },
     {
       "variable_id": "tas",
@@ -1137,7 +1164,7 @@
       "modality": null,
       "label": "TAS",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mmHg"
     },
     {
       "variable_id": "tcbf",
@@ -1167,7 +1194,7 @@
       "modality": null,
       "label": "total_carotid_plaque_vol",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mm3"
     },
     {
       "variable_id": "total_femoral_plaque_vol",
@@ -1182,7 +1209,7 @@
       "modality": null,
       "label": "total_femoral_plaque_vol",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mm3"
     },
     {
       "variable_id": "total_plaque_vol",
@@ -1197,7 +1224,7 @@
       "modality": null,
       "label": "total_plaque_vol",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "mm3"
     },
     {
       "variable_id": "weight",
@@ -1212,7 +1239,7 @@
       "modality": null,
       "label": "weight",
       "value_kind": "numeric",
-      "unit": null
+      "unit": "kg"
     }
   ]
 }

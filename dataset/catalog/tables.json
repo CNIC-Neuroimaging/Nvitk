@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "last_updated": "2026-04-13T13:37:51+00:00",
+  "last_updated": "2026-04-13T17:32:36+00:00",
   "tables": {
     "subjects": {
       "path": "tables/subjects.parquet",
@@ -25,9 +25,9 @@
         "updated_at": "str"
       },
       "row_count": 1424,
-      "last_updated": "2026-04-13T13:37:51+00:00",
+      "last_updated": "2026-04-13T17:27:59+00:00",
       "provenance": {
-        "written_at": "2026-04-13T13:37:51+00:00",
+        "written_at": "2026-04-13T17:27:59+00:00",
         "importer": "rebuild_subjects_table",
         "source": "xnat",
         "project": "PESA_Brain",
@@ -57,10 +57,10 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 9111,
-      "last_updated": "2026-04-13T13:37:51+00:00",
+      "row_count": 10088,
+      "last_updated": "2026-04-13T17:27:59+00:00",
       "provenance": {
-        "written_at": "2026-04-13T13:37:51+00:00",
+        "written_at": "2026-04-13T17:27:59+00:00",
         "importer": "import_pesabrain_db_directory",
         "source": "xnat",
         "project": "PESA_Brain",
@@ -94,10 +94,10 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 1403,
-      "last_updated": "2026-04-13T13:37:51+00:00",
+      "row_count": 2378,
+      "last_updated": "2026-04-13T17:27:59+00:00",
       "provenance": {
-        "written_at": "2026-04-13T13:37:51+00:00",
+        "written_at": "2026-04-13T17:27:59+00:00",
         "importer": "import_pesabrain_db_directory",
         "source": "xnat",
         "project": "PESA_Brain",
@@ -137,10 +137,10 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 15,
-      "last_updated": "2026-04-13T13:37:51+00:00",
+      "row_count": 9976,
+      "last_updated": "2026-04-13T17:27:59+00:00",
       "provenance": {
-        "written_at": "2026-04-13T13:37:51+00:00",
+        "written_at": "2026-04-13T17:27:59+00:00",
         "source": "xnat",
         "project": "PESA_Brain",
         "server": "https://xnat.cnic.es"
@@ -180,22 +180,51 @@
       "columns": {
         "subject_uid": "string",
         "visit_id": "string",
-        "variable_id": "string",
+        "age_at_mri": "object",
+        "apoe": "object",
+        "bmi": "object",
+        "bpxdim": "object",
+        "bpxpls": "object",
+        "bpxsym": "object",
+        "height": "object",
+        "hematocrit": "object",
+        "lbdldl": "object",
+        "lbxhdd": "object",
+        "lbxtc": "object",
+        "left_carotid_plaque_vol": "object",
+        "patient_id": "object",
+        "pedframi10": "object",
+        "pedframi30": "object",
+        "psqto000": "object",
+        "right_carotid_plaque_vol": "object",
+        "score2": "object",
+        "seqn": "object",
+        "sex": "object",
+        "sys_dias_delta": "object",
+        "tacsctot": "object",
+        "tacsctot_group": "object",
+        "tad": "object",
+        "tas": "object",
+        "total_carotid_plaque_vol": "object",
+        "total_femoral_plaque_vol": "object",
+        "total_plaque_vol": "object",
+        "weight": "object",
+        "variable_id": "str",
         "value_num": "float64",
         "value_text": "string",
         "unit": "string",
-        "value_kind": "string",
-        "source_table": "string",
-        "source_file": "string",
-        "source_sheet": "string",
-        "source_column": "string",
-        "source_batch_id": "string",
+        "value_kind": "str",
+        "source_table": "str",
+        "source_file": "str",
+        "source_sheet": "str",
+        "source_column": "str",
+        "source_batch_id": "str",
         "measured_at": "datetime64[ns]"
       },
       "row_count": 32606,
-      "last_updated": "2026-04-11T11:35:58+00:00",
+      "last_updated": "2026-04-13T17:07:57+00:00",
       "provenance": {
-        "written_at": "2026-04-11T11:35:58+00:00",
+        "written_at": "2026-04-13T17:07:57+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     },
@@ -264,10 +293,10 @@
         "session_id": "string",
         "updated_at": "string"
       },
-      "row_count": 439337,
-      "last_updated": "2026-04-13T08:11:01+00:00",
+      "row_count": 430091,
+      "last_updated": "2026-04-13T17:32:36+00:00",
       "provenance": {
-        "written_at": "2026-04-13T08:11:01+00:00",
+        "written_at": "2026-04-13T17:32:36+00:00",
         "importer": "derive_psf",
         "parent_variable": "flow_tseries"
       }
@@ -304,8 +333,8 @@
         "updated_at": "string",
         "asset_slot": "string"
       },
-      "row_count": 9283,
-      "last_updated": "2026-04-13T12:13:43+00:00",
+      "row_count": 0,
+      "last_updated": "2026-04-13T17:06:49+00:00",
       "provenance": {
         "written_at": "2026-04-13T12:13:43+00:00",
         "source": "local_nifti",
@@ -334,8 +363,13 @@
         "source_batch_id": "string",
         "updated_at": "string"
       },
-      "row_count": 0,
-      "last_updated": "2026-04-11T11:30:16+00:00"
+      "row_count": 1424,
+      "last_updated": "2026-04-13T17:27:59+00:00",
+      "provenance": {
+        "written_at": "2026-04-13T17:27:59+00:00",
+        "cohort_id": "PESA-Brain",
+        "importer": "upsert_cohort_membership_for_subjects"
+      }
     },
     "source_tables": {
       "path": "tables/source_tables.parquet",
@@ -366,9 +400,9 @@
         "updated_at": "string"
       },
       "row_count": 16,
-      "last_updated": "2026-04-11T19:48:45+00:00",
+      "last_updated": "2026-04-13T17:11:29+00:00",
       "provenance": {
-        "written_at": "2026-04-11T19:48:45+00:00",
+        "written_at": "2026-04-13T17:11:29+00:00",
         "importer": "import_pesabrain_db_directory"
       }
     }

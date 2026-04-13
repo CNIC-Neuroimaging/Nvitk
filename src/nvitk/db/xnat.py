@@ -20,7 +20,8 @@ except Exception:
 
 from nvitk.core.exceptions import BackendUnavailableError
 
-from .repo import DataRepo
+from .importers import upsert_cohort_membership_for_subjects
+from .repo import DEFAULT_COHORT_ID, DataRepo
 from .storage import utc_now_iso
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 
@@ -114,6 +115,30 @@ def resolve_subject_labels(
     return sorted(set(resolved))
 
 
+def parse_requested_sequences(requested: str | Iterable[str] | None) -> list[str]:
+    """Split ``requested_sequences`` on commas; spaces inside a token are kept until normalized."""
+    if requested is None:
+        return []
+    if isinstance(requested, str):
+        return [part.strip() for part in requested.split(",") if part.strip()]
+    out: list[str] = []
+    for item in requested:
+        s = str(item).strip()
+        if not s:
+            continue
+        out.extend([p.strip() for p in s.split(",") if p.strip()])
+    return out
+
+
+def _normalize_sequence_request_token(token: str) -> str:
+    """Canonical sequence key for filtering (aligned with :func:`classify_scan` ``sequence``)."""
+    t = str(token).strip()
+    t = re.sub(r"\s+", "_", t)
+    t = t.replace("-", "_").replace("/", "_")
+    t = re.sub(r"_+", "_", t).strip("_")
+    return t.upper()
+
+
 def infer_flow_orientation(description: str) -> str:
     desc = description.upper()
     if any(token in desc for token in ("AP", "PA", "FA")):
@@ -144,6 +169,72 @@ def classify_scan(series_description: str | None, quality: str | None = None) ->
             "modality": "4dflow",
             "orientation": orientation,
             "sequence": sequence,
+        }
+
+    # --- Additional structural / functional sequences (order: specific before broad) ---
+
+    if re.search(
+        r"resting\s*state|resting-state|\brsfmri\b|\brsf?mri\b|"
+        r"rest\s*fmri|fmri\s*rest|bold.*rest|epi.*rest|task\s*rest|mb\s*epi|multiband.*rest",
+        description,
+        flags=re.IGNORECASE,
+    ):
+        return {
+            "modality": "fmri",
+            "orientation": None,
+            "sequence": "RESTING_STATE_MB",
+        }
+
+    if re.search(r"carotid.*qf|qf.*carotid|carotid_qf|carotid\s*4d", description, flags=re.IGNORECASE):
+        return {
+            "modality": "mra",
+            "orientation": None,
+            "sequence": "CAROTID_QF",
+        }
+
+    if re.search(r"\bqsm\b|quantitative\s*suscept|suscept.*map", description, flags=re.IGNORECASE) and not re.search(
+        r"\bswi\b|susceptibility\s*weighted", description, flags=re.IGNORECASE
+    ):
+        return {
+            "modality": "qsm",
+            "orientation": None,
+            "sequence": "QSM",
+        }
+
+    if re.search(r"\bswi\b|swi\s*/\s*qsm|susceptibility\s*weighted", description, flags=re.IGNORECASE):
+        return {
+            "modality": "swi",
+            "orientation": None,
+            "sequence": "SWI_QSM",
+        }
+
+    if re.search(r"3d.*flair|flair.*3d|space.*flair|\bflair\b.*\b3d\b", description, flags=re.IGNORECASE):
+        return {
+            "modality": "flair",
+            "orientation": None,
+            "sequence": "3D_FLAIR",
+        }
+
+    if re.search(
+        r"3d.*t2.*(?:hr|high\s*res)|t2.*(?:hr|high\s*res).*(?:3d|space)|\bt2\s*space\b|space\s*t2",
+        description,
+        flags=re.IGNORECASE,
+    ):
+        return {
+            "modality": "t2",
+            "orientation": None,
+            "sequence": "3D_T2_HR",
+        }
+
+    if re.search(
+        r"\b3d\s*t1\b|\bt1\b.*\b3d\b|\bmprage\b|mp[_\s-]?rage|t1_mpr|t1\s*mprage|t1w?\s*3d",
+        description,
+        flags=re.IGNORECASE,
+    ):
+        return {
+            "modality": "t1",
+            "orientation": None,
+            "sequence": "3D_T1",
         }
 
     return None
@@ -205,6 +296,13 @@ def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
         "4DFLOW_FH": "4dflow_fh",
         "4DFLOW_RL": "4dflow_rl",
         "4DFLOW_GENERIC": "4dflow",
+        "3D_T1": "t1_3d",
+        "3D_T2_HR": "t2_hr_3d",
+        "3D_FLAIR": "flair_3d",
+        "SWI_QSM": "swi",
+        "QSM": "qsm",
+        "CAROTID_QF": "carotid_qf",
+        "RESTING_STATE_MB": "resting_state_mb",
     }
     if key in mapping:
         return mapping[key]
@@ -212,12 +310,13 @@ def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
 
 
 def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
-    tokens = parse_subject_tokens(requested)
+    """Normalize ``requested_sequences`` tokens to the same keys :func:`classify_scan` uses for ``sequence``."""
+    tokens = parse_requested_sequences(requested)
     if not tokens:
         return set()
     normalized: set[str] = set()
     for token in tokens:
-        upper = token.upper().replace("-", "_")
+        upper = _normalize_sequence_request_token(token)
         if upper in {"4DFLOW", "4DFLOW_ALL"}:
             normalized.update({"4DFLOW_AP", "4DFLOW_RL", "4DFLOW_FH"})
         elif upper == "TOF":
@@ -503,6 +602,7 @@ def sync_xnat_project(
     nifti_download_root: str | Path | None = None,
     skip_existing: bool = True,
     build_sqlite_index: bool = False,
+    cohort_id: str | None = None,
 ) -> dict[str, pd.DataFrame]:
     if download_niftis:
         base = nifti_download_root if nifti_download_root is not None else download_root
@@ -697,6 +797,17 @@ def sync_xnat_project(
             provenance={"source": "xnat", "project": config.project, "server": config.server},
         )
 
+    cohort_resolved = (cohort_id or "").strip() or DEFAULT_COHORT_ID
+    synced_subjects = sorted({str(r["subject_uid"]) for r in subject_rows if r.get("subject_uid")})
+    if synced_subjects:
+        upsert_cohort_membership_for_subjects(
+            repo,
+            cohort_resolved,
+            synced_subjects,
+            source_batch_id=source_batch_id,
+            membership_source="sync_xnat_project",
+        )
+
     if build_sqlite_index:
         repo.build_sqlite_index()
     return frames
@@ -721,7 +832,13 @@ def sync_xnat_project(
 @_click_option("--subjects", type=str, default=None, help="Comma or space separated subject identifiers.")
 @_click_option("--subjects-file", type=click.Path(exists=True, path_type=Path) if click is not None else None, default=None, help="Text file with one subject identifier per line.")
 @_click_option("--id-type", type=click.Choice(["subject", "mrid"], case_sensitive=False) if click is not None else None, default="subject", show_default=True, help="Interpret the provided IDs as XNAT subject labels or MR IDs.")
-@_click_option("--sequences", type=str, default=None, help="Optional sequence subset such as TOF,4DFLOW_AP,4DFLOW_RL,4DFLOW_FH.")
+@_click_option(
+    "--sequences",
+    type=str,
+    default=None,
+    help="Comma-separated sequence keys (spaces allowed inside a name), e.g. "
+    "TOF,4DFLOW_AP,3D T1,3D_T2 HR,3D_FLAIR,SWI/QSM,QSM,carotid_QF,RESTING STATE MB.",
+)
 @_click_option("--download-root", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Local directory for DICOM / NIfTI downloads (see per-modality layout below).")
 @_click_option("--download-dicoms", is_flag=True, help="Download and extract DICOMs while syncing metadata.")
 @_click_option("--download-niftis", is_flag=True, help="Download NIfTI resource per scan into {root}/{subject}/{sequence}/nifti/.")

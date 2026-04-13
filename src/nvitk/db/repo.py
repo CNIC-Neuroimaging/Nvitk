@@ -24,6 +24,10 @@ def _default_dataset_root() -> Path:
     return Path(__file__).resolve().parents[3] / "dataset"
 
 
+# Default cohort for API queries when ``cohort_id`` is omitted (see :meth:`DataRepo._resolve_cohort`).
+DEFAULT_COHORT_ID = "PESA-Brain"
+
+
 def _root_path_for_imread(path: str | Path, *, asset_type: str) -> Path:
     """Directory or file path to pass to :func:`nvitk.io.imageio.imread` for ``force_type``."""
     p = Path(path)
@@ -86,24 +90,58 @@ def _pick_value_column_for_spec(spec: Any) -> str:
     return "value_num"
 
 
+def _normalize_visit_like_for_key(series: pd.Series) -> pd.Series:
+    """Normalize visit_id / session_id so 4, 4.0, and '4' compare as the same key part."""
+    num = pd.to_numeric(series, errors="coerce")
+    out = series.astype("string").fillna("")
+    intlike = num.notna() & (num == num.round())
+    out = out.copy()
+    out.loc[intlike] = num.loc[intlike].round().astype("Int64").astype(str)
+    return out
+
+
+def _normalize_frame_index_for_key(series: pd.Series, *, index: pd.Index) -> pd.Series:
+    fi = pd.to_numeric(series, errors="coerce")
+    fr = pd.Series("", index=index, dtype="string")
+    mask = fi.notna() & (fi != 0)
+    fr.loc[mask] = fi.loc[mask].round().astype("Int64").astype(str)
+    return fr
+
+
+def _measurement_entity_tuple_series(df: pd.DataFrame) -> pd.Series:
+    """One hashable tuple per row identifying a measurement row (excluding ``variable_id``)."""
+    if df.empty:
+        return pd.Series(dtype=object)
+    idx = df.index
+    parts: list[pd.Series] = [df["subject_uid"].astype("string").fillna("")]
+    if "visit_id" in df.columns:
+        parts.append(_normalize_visit_like_for_key(df["visit_id"]))
+    elif "session_id" in df.columns:
+        parts.append(_normalize_visit_like_for_key(df["session_id"]))
+    for col in ("modality", "pipeline_id", "region_id"):
+        if col in df.columns:
+            parts.append(df[col].astype("string").fillna(""))
+    if "frame_index" in df.columns:
+        parts.append(_normalize_frame_index_for_key(df["frame_index"], index=idx))
+    if len(parts) == 1:
+        return parts[0]
+    return pd.Series(
+        pd.MultiIndex.from_arrays([p.array for p in parts]).tolist(),
+        index=idx,
+        dtype=object,
+    )
+
+
 def _entity_keys_from_frame(df: pd.DataFrame) -> set[tuple[str, ...] | str]:
     if df.empty:
         return set()
-    if "visit_id" in df.columns:
-        return set(
-            zip(
-                df["subject_uid"].astype("string").fillna(""),
-                df["visit_id"].astype("string").fillna(""),
-            )
-        )
-    return set(df["subject_uid"].astype("string").fillna(""))
+    s = _measurement_entity_tuple_series(df)
+    return set(s.tolist())
 
 
 def _frame_matches_entity_keys(df: pd.DataFrame, keys: set[tuple[str, ...] | str]) -> pd.Series:
-    if "visit_id" in df.columns:
-        tuples = zip(df["subject_uid"].astype("string").fillna(""), df["visit_id"].astype("string").fillna(""))
-        return pd.Series([t in keys for t in tuples], index=df.index)
-    return df["subject_uid"].astype("string").fillna("").isin(keys)
+    s = _measurement_entity_tuple_series(df)
+    return s.isin(keys)
 
 
 def _image_wide_single_variable_from_request(variables: str | Iterable[str] | None) -> bool:
@@ -184,6 +222,10 @@ def _apply_variable_value_filters(df: pd.DataFrame, specs: list[tuple[str, Any]]
         if value_col not in sub.columns:
             return df.iloc[0:0].copy()
         filtered = apply_filters(sub, {value_col: spec})
+        if filtered.empty and value_col == "value_num" and "value_text" in sub.columns:
+            tmp = sub.copy()
+            tmp["value_num"] = pd.to_numeric(tmp["value_text"], errors="coerce")
+            filtered = apply_filters(tmp, {value_col: spec})
         if filtered.empty:
             return df.iloc[0:0].copy()
         key_sets.append(_entity_keys_from_frame(filtered))
@@ -213,6 +255,48 @@ class DataRepo:
     def list_tables(self) -> list[str]:
         return self.catalog.list_tables()
 
+    def _resolve_cohort(
+        self,
+        cohort_id: str | bool | None,
+        filters: Mapping[str, Any] | None,
+    ) -> tuple[str | bool, dict[str, Any]]:
+        """Return ``(effective_cohort, filters_without_cohort_id)``. ``False`` = do not filter by cohort."""
+        f = dict(filters or {})
+        from_filters = f.pop("cohort_id", None)
+        c = cohort_id
+        if c is None:
+            c = from_filters
+        if c is False:
+            return False, f
+        if c is None or (isinstance(c, str) and not str(c).strip()):
+            return DEFAULT_COHORT_ID, f
+        return str(c).strip(), f
+
+    def _cohort_subject_uid_set(self, cohort_id: str) -> set[str] | None:
+        """Subjects in ``cohort_membership`` for ``cohort_id``; ``None`` if table missing or empty (no filtering)."""
+        if not self.catalog.table_exists("cohort_membership"):
+            return None
+        try:
+            cm = self._load_table_frame(
+                "cohort_membership",
+                filters={"cohort_id": cohort_id},
+                use_sqlite=None,
+            )
+        except Exception:
+            return None
+        if cm.empty or "subject_uid" not in cm.columns:
+            return None
+        return set(cm["subject_uid"].astype("string").str.strip())
+
+    def _filter_dataframe_by_cohort(self, df: pd.DataFrame, cohort_id: str) -> pd.DataFrame:
+        if df.empty or "subject_uid" not in df.columns:
+            return df
+        uids = self._cohort_subject_uid_set(cohort_id)
+        if uids is None:
+            return df
+        s = df["subject_uid"].astype("string").fillna("")
+        return df.loc[s.isin(uids)].copy()
+
     def _measurement_column_names(self, table_name: str) -> set[str]:
         return set(self.catalog.get_table(table_name).columns.keys())
 
@@ -226,16 +310,25 @@ class DataRepo:
         if not filters:
             return {}, []
         columns = self._measurement_column_names(table_name)
+        definition = self.catalog.get_table(table_name)
+        reserved = set(definition.key_columns) | set(definition.index_columns)
+        canonical_var_ids = {str(e["variable_id"]) for e in self.catalog.variable_entries(domain=domain)}
         structural: dict[str, Any] = {}
         variable_specs: list[tuple[str, Any]] = []
         for key, spec in filters.items():
             if not isinstance(key, str) or not key.strip():
                 raise FilterError("Filter columns must be non-empty strings.")
             k = key.strip()
-            if k in columns:
+            if k in reserved:
                 structural[k] = spec
                 continue
             resolved = self.catalog.resolve_variable_ids([k], domain=domain)[0]
+            if resolved in canonical_var_ids:
+                variable_specs.append((str(resolved), spec))
+                continue
+            if k in columns:
+                structural[k] = spec
+                continue
             variable_specs.append((str(resolved), spec))
         return structural, variable_specs
 
@@ -270,19 +363,23 @@ class DataRepo:
         filters: dict[str, Any] | None = None,
         wide: bool = False,
         use_sqlite: bool | None = True,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
         definition = self.catalog.get_table(table)
         effective_sqlite = self.use_sqlite if use_sqlite is None else use_sqlite
+        cohort_eff, clean_filters = self._resolve_cohort(cohort_id, filters)
 
         if effective_sqlite and self.sqlite.exists():
             try:
-                df = self.sqlite.query_table(table, columns=columns, filters=filters)
+                df = self.sqlite.query_table(table, columns=columns, filters=clean_filters)
             except Exception:
-                df = self._read_table(definition, columns=columns, filters=filters)
+                df = self._read_table(definition, columns=columns, filters=clean_filters)
         else:
-            df = self._read_table(definition, columns=columns, filters=filters)
+            df = self._read_table(definition, columns=columns, filters=clean_filters)
 
         df = coerce_dataframe_to_manifest(df, definition.columns)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
         if wide:
             if table in {"clinical_measurements", "image_measurements"}:
                 df = self._resolve_measurement_values(df)
@@ -297,9 +394,13 @@ class DataRepo:
         filters: dict[str, Any] | None = None,
         wide: bool = True,
         use_sqlite: bool | None = True,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
+        cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="clinical")
-        structural, var_specs = self._split_measurement_filters(filters, domain="clinical", table_name="clinical_measurements")
+        structural, var_specs = self._split_measurement_filters(
+            filters_clean, domain="clinical", table_name="clinical_measurements"
+        )
         merged = merge_filters(structural, {"variable_id": resolved_variables} if resolved_variables else None)
         force_parquet = bool(var_specs)
         df = self._load_table_frame(
@@ -310,6 +411,8 @@ class DataRepo:
         )
         if var_specs:
             df = _apply_variable_value_filters(df, var_specs)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
         return self._prepare_measurements(df, wide=wide, table_name="clinical_measurements")
 
     def image(
@@ -323,8 +426,9 @@ class DataRepo:
         wide: bool = True,
         use_sqlite: bool | None = True,
         pipeline: str | int | Iterable[str | int] | None = None,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
-        filters_norm = dict(filters or {})
+        cohort_eff, filters_norm = self._resolve_cohort(cohort_id, filters)
         if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
             filters_norm["pipeline_id"] = filters_norm.pop("pipeline_version")
 
@@ -384,6 +488,8 @@ class DataRepo:
             df = _apply_variable_value_filters(df, var_specs)
         if post_filter_defaults:
             df = self._filter_image_rows_to_catalog_defaults(df)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
         return self._prepare_measurements(
             df,
             wide=wide,
@@ -462,9 +568,11 @@ class DataRepo:
         use_sqlite: bool | None = True,
         value: str = "asset_path",
         get_image: bool = False,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
+        cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
-            dict(filters or {}),
+            dict(filters_clean),
             {"modality": modality} if modality else None,
             {"asset_type": asset_type} if asset_type else None,
             {"resource_label": resource_label} if resource_label else None,
@@ -484,6 +592,8 @@ class DataRepo:
 
         df = self._load_table_frame("assets", filters=merged, use_sqlite=use_sqlite)
         df = df.reset_index(drop=True)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
 
         if get_image:
             if df.empty:
@@ -530,6 +640,7 @@ class DataRepo:
         use_sqlite: bool | None = True,
         value: str = "asset_path",
         get_image: bool = False,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
         """Assets as a wide table (one row per subject) by default; see :meth:`assets`."""
         return self.assets(
@@ -546,6 +657,7 @@ class DataRepo:
             use_sqlite=use_sqlite,
             value=value,
             get_image=get_image,
+            cohort_id=cohort_id,
         )
 
     def scans(
@@ -570,10 +682,12 @@ class DataRepo:
         download_scan_path: str | Path | None = None,
         xnat_config: XnatConnectionConfig | None = None,
         skip_existing_download: bool = True,
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
         """Query the ``scans`` inventory table with optional keyword filters (like :meth:`assets`)."""
+        cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
-            dict(filters or {}),
+            dict(filters_clean),
             {"scan_uid": scan_uid} if scan_uid else None,
             {"session_uid": session_uid} if session_uid else None,
             {"subject_uid": subject_uid} if subject_uid else None,
@@ -594,6 +708,8 @@ class DataRepo:
 
         df = self._load_table_frame("scans", filters=merged, use_sqlite=use_sqlite)
         df = df.reset_index(drop=True)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
 
         if get_image:
             if path_column not in df.columns:
@@ -691,6 +807,7 @@ class DataRepo:
         *,
         on: str | list[str] = "subject_uid",
         how: str = "left",
+        cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
         dataframes = [frame.copy() for frame in frames]
         if not dataframes:
@@ -699,6 +816,9 @@ class DataRepo:
         result = dataframes[0]
         for frame in dataframes[1:]:
             result = result.merge(frame, on=keys, how=how)
+        cohort_eff, _ = self._resolve_cohort(cohort_id, None)
+        if cohort_eff is not False and "subject_uid" in result.columns:
+            result = self._filter_dataframe_by_cohort(result, str(cohort_eff))
         return result
 
     def write_table(
@@ -729,7 +849,7 @@ class DataRepo:
         build_sqlite_index: bool = False,
     ) -> pd.DataFrame:
         definition = self.catalog.get_table(table)
-        existing = self.get(table)
+        existing = self.get(table, cohort_id=False)
         combined = pd.concat([existing, df], ignore_index=True)
         keys = key_columns or list(definition.key_columns)
         if keys:

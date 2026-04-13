@@ -38,11 +38,20 @@ def _normalize_op(op: str) -> str:
     normalized = op.strip().lower().lstrip("$")
     aliases = {
         "gte": "ge",
+        '>=': 'ge',
+        ">": "gt",
         "lte": "le",
+        "<=": "le",
+        "<": "lt",
         "isin": "in",
+        "==": "eq",
+        "!=": "ne",
         "nin": "not_in",
         "notin": "not_in",
         "null": "is_null",
+        "isnull": "is_null",
+        'Null': "is_null",
+        'NULL': "is_null",
         "notnull": "not_null",
     }
     normalized = aliases.get(normalized, normalized)

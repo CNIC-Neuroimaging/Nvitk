@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -17,7 +17,7 @@ except Exception:
 
 from nvitk.core.exceptions import BackendUnavailableError
 
-from .repo import DataRepo
+from .repo import DEFAULT_COHORT_ID, DataRepo
 from .storage import json_dumps, normalize_string, normalize_variable_id, utc_now_iso
 
 
@@ -522,6 +522,52 @@ def import_cohort_membership_from_source(
         provenance={"source_path": str(source_path), "importer": "import_cohort_membership_from_source"},
     )
     return df
+
+
+def upsert_cohort_membership_for_subjects(
+    repo: DataRepo,
+    cohort_id: str,
+    subject_uids: Iterable[str],
+    *,
+    source_batch_id: str,
+    membership_source: str = "import",
+) -> pd.DataFrame:
+    """Register ``subject_uid`` values as members of ``cohort_id`` (upserts ``cohort_membership``)."""
+    uids = sorted({str(u).strip() for u in subject_uids if u is not None and str(u).strip()})
+    if not uids:
+        return pd.DataFrame()
+    now = utc_now_iso()
+    df = pd.DataFrame(
+        {
+            "cohort_id": cohort_id,
+            "subject_uid": uids,
+            "membership_source": membership_source,
+            "source_batch_id": source_batch_id,
+            "updated_at": now,
+        }
+    )
+    return repo.upsert_table(
+        "cohort_membership",
+        df,
+        provenance={"cohort_id": cohort_id, "importer": "upsert_cohort_membership_for_subjects"},
+    )
+
+
+def _collect_subject_uids_from_import_result(result: Any) -> set[str]:
+    out: set[str] = set()
+    if isinstance(result, pd.DataFrame):
+        if "subject_uid" in result.columns:
+            out.update(result["subject_uid"].dropna().astype(str).str.strip().tolist())
+        return {u for u in out if u}
+    if isinstance(result, dict):
+        for v in result.values():
+            out |= _collect_subject_uids_from_import_result(v)
+        return {u for u in out if u}
+    if isinstance(result, (list, tuple)):
+        for item in result:
+            out |= _collect_subject_uids_from_import_result(item)
+        return {u for u in out if u}
+    return set()
 
 
 def import_measurements_from_source(
@@ -1403,14 +1449,17 @@ def import_pesabrain_db_directory(
     *,
     source_batch_id: str | None = None,
     build_sqlite_index: bool = False,
+    cohort_id: str | None = None,
 ) -> dict[str, Any]:
     base = Path(db_base_path)
     if not base.exists():
         raise FileNotFoundError(base)
 
     batch_id = source_batch_id or _default_pesabrain_batch_id()
+    cohort_resolved = (cohort_id or "").strip() or DEFAULT_COHORT_ID
     imported: dict[str, Any] = {}
     inventory_rows: list[dict[str, Any]] = []
+    cohort_uids: set[str] = set()
 
     for source_path in list_excel_sources(base):
         specs = PESABRAIN_DB_SPECS.get(source_path.name, [])
@@ -1423,6 +1472,7 @@ def import_pesabrain_db_directory(
 
         for spec in specs:
             result = import_source_spec(repo, source_path, spec, source_batch_id=batch_id)
+            cohort_uids |= _collect_subject_uids_from_import_result(result)
             imported[f"{source_path.name}:{spec.sheet}:{spec.source_kind}"] = result
 
         for sheet_name in workbook_sheets:
@@ -1443,6 +1493,15 @@ def import_pesabrain_db_directory(
     subjects = rebuild_subjects_table(repo)
     imported["subjects"] = subjects
 
+    if cohort_uids:
+        upsert_cohort_membership_for_subjects(
+            repo,
+            cohort_resolved,
+            cohort_uids,
+            source_batch_id=batch_id,
+            membership_source="import_pesabrain_db_directory",
+        )
+
     if build_sqlite_index:
         repo.build_sqlite_index()
     return imported
@@ -1459,6 +1518,7 @@ def import_pesabrain_source(
     rebuild_subjects: bool = True,
     build_sqlite_index: bool = False,
     pipeline_id: str | None = None,
+    cohort_id: str | None = None,
 ) -> dict[str, Any]:
     base = Path(db_base_path)
     if not base.exists():
@@ -1481,7 +1541,17 @@ def import_pesabrain_source(
 
     spec = matches[0]
     batch_id = source_batch_id or _default_pesabrain_batch_id()
+    cohort_resolved = (cohort_id or "").strip() or DEFAULT_COHORT_ID
     result = import_source_spec(repo, source_path, spec, source_batch_id=batch_id, pipeline_id=pipeline_id)
+    uids = _collect_subject_uids_from_import_result(result)
+    if uids:
+        upsert_cohort_membership_for_subjects(
+            repo,
+            cohort_resolved,
+            uids,
+            source_batch_id=batch_id,
+            membership_source=f"import_pesabrain_source:{filename}",
+        )
     subjects = rebuild_subjects_table(repo) if rebuild_subjects else pd.DataFrame()
     if build_sqlite_index:
         repo.build_sqlite_index()
@@ -1489,6 +1559,7 @@ def import_pesabrain_source(
         "filename": filename,
         "sheet": spec.sheet,
         "source_kind": spec.source_kind,
+        "cohort_id": cohort_resolved,
         "result": result,
         "subjects": subjects,
     }
@@ -1500,12 +1571,14 @@ def import_pesabrain_curated_tables(
     *,
     source_batch_id: str | None = None,
     build_sqlite_index: bool = False,
+    cohort_id: str | None = None,
 ) -> dict[str, Any]:
     return import_pesabrain_db_directory(
         repo,
         db_base_path,
         source_batch_id=source_batch_id,
         build_sqlite_index=build_sqlite_index,
+        cohort_id=cohort_id,
     )
 
 
