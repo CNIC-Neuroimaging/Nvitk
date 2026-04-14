@@ -95,9 +95,6 @@ class Image:
     orientation: str | None = None
     """Voxel axes orientation codes (e.g. ``\"RAS\"``, ``\"LPS\"``) from the image affine."""
 
-    # Make numpy defer to this object in mixed operations.
-    __array_priority__ = 1000
-
     def __post_init__(self) -> None:
         """Normalize metadata, validate ``axes`` vs ``ndim``, and merge path loads."""
         # Allow direct construction from file path:
