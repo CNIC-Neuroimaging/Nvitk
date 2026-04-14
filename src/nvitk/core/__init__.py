@@ -1,3 +1,15 @@
+"""
+Public core API: NumPy/CuPy backend switching, array helpers, and proxy setup.
+
+Typical GPU-aware code::
+
+    from nvitk.core import setup, get_current_backend
+    setup(globals())
+
+    def f(x):
+        return np.asarray(x)  # np follows active backend after setup
+"""
+
 from __future__ import annotations
 
 from .array import as_backend_array, ensure_same_backend, is_cupy_array, is_numpy_array, to_cupy, to_numpy

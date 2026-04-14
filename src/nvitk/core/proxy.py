@@ -1,3 +1,5 @@
+"""Per-module proxies so ``np`` / ``scipy`` / ``ndi`` globals track :mod:`nvitk.core.backend` switches."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -5,13 +7,17 @@ from typing import Any
 _PROXY_GLOBAL_KEYS = ("np", "scipy", "ndi")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# BackendProxy
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class BackendProxy:
     """
-    Dynamic proxy that resolves backend modules (`numpy/scipy/ndi` or
-    `cupy/cupyx.scipy/cupyx.scipy.ndimage`) on demand.
+    Lazily bind ``np``, ``scipy``, ``ndi`` in a module's ``globals()`` to the active backend.
 
-    Each importing module should have its own proxy instance so module-level
-    globals can be refreshed when backend changes.
+    On :meth:`refresh_globals`, inserts either NumPy/SciPy or CuPy/cupyx equivalents.
+    Unknown attribute access forwards to the active array module (``proxy.np``).
     """
 
     def __init__(self, module_name: str) -> None:
@@ -30,14 +36,17 @@ class BackendProxy:
         return self._cached_modules
 
     def bind_globals(self, module_globals: dict[str, Any]) -> None:
+        """Store *module_globals* and populate ``np``/``scipy``/``ndi`` keys."""
         self._module_globals = module_globals
         self.refresh_globals()
 
     def invalidate(self) -> None:
+        """Drop cached backend tuple so the next access re-reads :func:`~nvitk.core.backend.get_current_backend`."""
         self._cached_backend = None
         self._cached_modules = None
 
     def refresh_globals(self) -> None:
+        """Write current ``(np, scipy, ndi)`` triple into bound module globals."""
         if self._module_globals is None:
             return
         np_mod, scipy_mod, ndi_mod = self._resolve_modules()
@@ -62,10 +71,19 @@ class BackendProxy:
         return getattr(self.np, name)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Registry
+# ──────────────────────────────────────────────────────────────────────────────
+
 _proxies: dict[str, BackendProxy] = {}
 
 
 def get_backend_proxy(module_name: str | None = None) -> BackendProxy:
+    """
+    Return (or create) the :class:`BackendProxy` keyed by *module_name*.
+
+    If *module_name* is omitted, uses the caller's ``__name__`` via the stack.
+    """
     if module_name is None:
         import inspect
 
@@ -82,10 +100,12 @@ def get_backend_proxy(module_name: str | None = None) -> BackendProxy:
 
 def setup_backend_proxy(module_globals: dict[str, Any], module_name: str | None = None) -> BackendProxy:
     """
-    Backward-compatible setup function.
+    Bind *module_globals* to a proxy for this package (typically ``setup_backend_proxy(globals())``).
 
-    Typical usage:
-        setup_backend_proxy(globals())
+    Returns
+    -------
+    BackendProxy
+        The proxy instance; call :meth:`BackendProxy.refresh_globals` after backend changes (normally automatic).
     """
     if module_name is None:
         module_name = module_globals.get("__name__", "unknown")
@@ -96,6 +116,7 @@ def setup_backend_proxy(module_globals: dict[str, Any], module_name: str | None 
 
 
 def refresh_all_proxies() -> None:
+    """Invalidate and refresh every registered :class:`BackendProxy` (called from :mod:`nvitk.core.backend`)."""
     for proxy in _proxies.values():
         proxy.invalidate()
         proxy.refresh_globals()

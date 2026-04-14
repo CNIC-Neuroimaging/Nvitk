@@ -1,3 +1,5 @@
+"""MetaImage (``.mha`` / ``.mhd``) reader via SimpleITK."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,6 +37,7 @@ def _build_affine(
 
 
 def read_mha(path: str, *, axes: str | None = None, **_: Any):
+    """Load MetaImage volume as numpy array with ``axes``, ``affine``, spacing, and origin metadata."""
     if sitk is None:
         raise BackendUnavailableError('SimpleITK is not installed. Please install it with "pip install SimpleITK".')
 

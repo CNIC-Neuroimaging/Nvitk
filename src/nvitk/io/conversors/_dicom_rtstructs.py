@@ -1,3 +1,5 @@
+"""DICOM RT-STRUCT contours → masks / overlays (optional scikit-image)."""
+
 from __future__ import annotations
 
 import json

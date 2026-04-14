@@ -1,3 +1,7 @@
+"""
+Writers for NIfTI, TIFF, MetaImage, and PIL-supported formats (used by :func:`nvitk.io.imsave`).
+"""
+
 from __future__ import annotations
 
 from .mha import write_mha

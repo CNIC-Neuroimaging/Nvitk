@@ -1,23 +1,30 @@
+"""Exceptions for dataset tables, manifests, filters, and XNAT sync."""
+
 from __future__ import annotations
 
 from nvitk.core.exceptions import NvitkError
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Dataset / repository
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class DatasetError(NvitkError):
-    """Base exception for dataset/repository operations."""
+    """Base class for :mod:`nvitk.db` catalog and :class:`~nvitk.db.repo.DataRepo` failures."""
 
 
 class ManifestError(DatasetError):
-    """Raised when a dataset manifest is invalid or inconsistent."""
+    """Parquet manifest or cohort metadata is missing, malformed, or inconsistent."""
 
 
 class TableNotFoundError(DatasetError):
-    """Raised when a requested dataset table is not defined."""
+    """No :class:`~nvitk.db.catalog.TableDefinition` matches the requested table name."""
 
 
 class FilterError(DatasetError):
-    """Raised when a filter specification cannot be applied."""
+    """Filter keys or values cannot be applied to the selected table (e.g. unknown column)."""
 
 
 class XnatSyncError(DatasetError):
-    """Raised when XNAT inventory or download steps fail."""
+    """XNAT download, extraction, or inventory update failed."""

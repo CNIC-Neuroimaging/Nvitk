@@ -1,3 +1,5 @@
+"""TIFF reader via ``tifffile``: array load, inferred axes, and common TIFF tags."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,6 +23,11 @@ def _infer_axes(ndim: int, series_axes: str | None = None) -> str:
 
 
 def read_tiff(path: str, *, axes: str | None = None, **_: Any):
+    """
+    Load a TIFF stack; returns ``(data, metadata)`` with ``axes``, ``shape``, and optional resolutions.
+
+    *axes* may reorder via :func:`~nvitk.io._common.reorder_axes` when provided.
+    """
     try:
         import tifffile
     except Exception as exc:

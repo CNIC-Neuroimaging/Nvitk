@@ -1,3 +1,9 @@
+"""
+Filesystem helpers for the dataset layer: JSON, Parquet, dtype coercion, variable id normalization.
+
+Shared by the catalog, SQLite index, and import pipelines.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,16 +16,24 @@ import numpy as np
 import pandas as pd
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# JSON & time
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def utc_now_iso() -> str:
+    """Current UTC timestamp as ISO-8601 string (no microseconds)."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def read_json(path: str | Path) -> dict[str, Any]:
+    """Load a UTF-8 JSON object from *path*."""
     with Path(path).open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def write_json(path: str | Path, payload: dict[str, Any]) -> None:
+    """Write *payload* as indented JSON; creates parent directories."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w", encoding="utf-8") as handle:
@@ -27,11 +41,18 @@ def write_json(path: str | Path, payload: dict[str, Any]) -> None:
         handle.write("\n")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Manifest dtypes & DataFrames
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def infer_manifest_dtypes(df: pd.DataFrame) -> dict[str, str]:
+    """Map column names to dtype strings as stored in table manifests."""
     return {column: str(dtype) for column, dtype in df.dtypes.items()}
 
 
 def manifest_dtype_to_pandas(dtype_name: str) -> str:
+    """Map manifest dtype strings to pandas dtypes used when coercing frames."""
     normalized = dtype_name.lower()
     if normalized in {"string", "string[python]"}:
         return "string"
@@ -47,6 +68,7 @@ def manifest_dtype_to_pandas(dtype_name: str) -> str:
 
 
 def empty_dataframe(columns: dict[str, str]) -> pd.DataFrame:
+    """Build an empty DataFrame with columns typed per manifest *columns*."""
     data: dict[str, pd.Series] = {}
     for column, dtype_name in columns.items():
         dtype = manifest_dtype_to_pandas(dtype_name)
@@ -58,6 +80,7 @@ def empty_dataframe(columns: dict[str, str]) -> pd.DataFrame:
 
 
 def coerce_dataframe_to_manifest(df: pd.DataFrame, columns: dict[str, str]) -> pd.DataFrame:
+    """Align *df* to manifest columns: ``pipeline_id`` vs ``pipeline_version``, then cast dtypes."""
     if df.empty:
         out = df.copy()
         if "pipeline_id" in columns and "pipeline_id" not in out.columns:
@@ -97,17 +120,30 @@ def coerce_dataframe_to_manifest(df: pd.DataFrame, columns: dict[str, str]) -> p
     return out
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Parquet
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def read_parquet_table(path: str | Path, columns: list[str] | None = None) -> pd.DataFrame:
+    """Read Parquet with pyarrow; optional column projection."""
     return pd.read_parquet(Path(path), columns=columns, engine="pyarrow")
 
 
 def write_parquet_table(path: str | Path, df: pd.DataFrame) -> None:
+    """Write *df* to Parquet (no index); creates parent directories."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(target, index=False, engine="pyarrow")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Values & identifiers
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def coerce_bool(value: Any) -> bool:
+    """Parse manifest/catalog boolean flags from bool, int, or common string tokens."""
     if isinstance(value, bool):
         return value
     if value is None:
@@ -126,6 +162,7 @@ def normalize_variable_id(value: str) -> str:
 
 
 def normalize_string(value: Any) -> str | None:
+    """Strip strings; map NaN/empty to None."""
     if value is None:
         return None
     if isinstance(value, float) and np.isnan(value):
@@ -135,6 +172,7 @@ def normalize_string(value: Any) -> str | None:
 
 
 def ensure_string_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Cast existing *columns* to pandas ``string`` dtype."""
     out = df.copy()
     for column in columns:
         if column in out.columns:
@@ -143,4 +181,5 @@ def ensure_string_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 
 def json_dumps(value: Any) -> str:
+    """Stable JSON for hashing or sidecars (sorted keys, ASCII)."""
     return json.dumps(value, ensure_ascii=True, sort_keys=True)

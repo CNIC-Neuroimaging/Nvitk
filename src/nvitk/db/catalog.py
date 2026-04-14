@@ -1,3 +1,9 @@
+"""
+Dataset catalog: ``repository.json``, table manifests, variable registry, scaffold helpers.
+
+:class:`DatasetCatalog` is the source of truth for paths and schemas under the dataset root.
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -15,6 +21,8 @@ from .storage import coerce_bool, infer_manifest_dtypes, normalize_variable_id, 
 
 @dataclass(frozen=True)
 class TableDefinition:
+    """Static description of one Parquet-backed table (columns, keys, wide pivot settings)."""
+
     name: str
     path: Path
     kind: str
@@ -30,6 +38,12 @@ class TableDefinition:
 
 
 class DatasetCatalog:
+    """
+    Load and update ``catalog/repository.json``, resolve table paths, variables, and pipelines.
+
+    Use :meth:`get_table` for :class:`TableDefinition` rows and :meth:`list_tables` for names.
+    """
+
     REQUIRED_REPOSITORY_KEYS = {
         "schema_version",
         "dataset_name",

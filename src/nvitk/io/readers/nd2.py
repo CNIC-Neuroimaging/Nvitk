@@ -1,3 +1,5 @@
+"""Nikon ND2 microscopy reader via the ``nd2`` package."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,6 +33,7 @@ def _infer_axes_from_sizes(sizes: Any, ndim: int) -> str:
 
 
 def read_nd2(path: str, *, axes: str | None = None, **_: Any):
+    """Load ND2 to array with inferred axis labels (e.g. ``TCZYX``) and shape metadata."""
     if nd2 is None:
         raise BackendUnavailableError('nd2 is not installed. Please install it with "pip install nd2".')
 

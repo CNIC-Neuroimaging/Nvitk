@@ -1,3 +1,5 @@
+"""VTK helpers: STL → voxel grid, multilabel merge, and NIfTI export for :mod:`nvitk.io.conversors.stl2nifti`."""
+
 from __future__ import annotations
 
 from pathlib import Path

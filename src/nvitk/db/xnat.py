@@ -1,3 +1,9 @@
+"""
+XNAT client helpers: sessions, scan resolution, DICOM/NIfTI downloads, project sync into catalog tables.
+
+Depends on the ``xnat`` package and :mod:`nvitk.db.xnat_config` for host/project credentials.
+"""
+
 from __future__ import annotations
 
 import csv

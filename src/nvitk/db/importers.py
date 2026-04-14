@@ -1,3 +1,9 @@
+"""
+Curated and PESA-brain import pipelines: spreadsheets, cohort membership, measurement upserts.
+
+Functions return DataFrames or call :class:`~nvitk.db.repo.DataRepo` writers; CLI is optional via ``click``.
+"""
+
 from __future__ import annotations
 
 import json

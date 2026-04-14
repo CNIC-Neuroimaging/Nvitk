@@ -1,3 +1,16 @@
+"""
+NumPy vs CuPy selection, global and context-scoped switching, and array conversion.
+
+Environment variables:
+
+- ``NVITK_BACKEND`` — ``auto``, ``numpy``, ``cupy``, ``cupy_required``, or aliases (``cpu``, ``gpu``, …).
+- ``NVITK_CUDA_DEVICE`` — optional integer device index.
+- ``NVITK_WARN_ON_FALLBACK`` — warn when falling back from CuPy to NumPy.
+
+Use :class:`using` or :func:`using_backend` for temporary switches; :func:`set_global_backend`
+for process-wide default. Modules can call :func:`setup` once to inject dynamic ``np``/``scipy``/``ndi``.
+"""
+
 from __future__ import annotations
 
 import contextlib
@@ -23,17 +36,29 @@ except Exception:
     _cp_ndi = None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
+
 BackendName = Literal["numpy", "cupy"]
 
 
 @dataclass(frozen=True)
 class BackendModules:
+    """Triple of ``(xp, scipy, ndi)`` for the resolved backend name."""
+
     xp: Any
     scipy: Any
     ndi: Any
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# CuPy availability
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def _cupy_runtime_available() -> bool:
+    """True if CuPy is importable and reports at least one CUDA device."""
     if _cp is None:
         return False
     try:
@@ -43,20 +68,24 @@ def _cupy_runtime_available() -> bool:
 
 
 def is_cupy_installed() -> bool:
+    """True if the ``cupy`` package imported (does not guarantee a usable GPU)."""
     return _cp is not None
 
 
 def is_gpu_available() -> bool:
+    """True if CuPy is installed and a CUDA device is visible."""
     return _cupy_runtime_available()
 
 
 def available_backends() -> tuple[BackendName, ...]:
+    """Tuple of backend names usable on this machine (always includes ``numpy``)."""
     if is_gpu_available():
         return ("numpy", "cupy")
     return ("numpy",)
 
 
 def _normalize_backend_name(name: str) -> BackendName:
+    """Map user-facing strings to ``numpy`` or ``cupy``."""
     value = name.strip().lower()
     aliases = {
         "numpy": "numpy",
@@ -69,10 +98,11 @@ def _normalize_backend_name(name: str) -> BackendName:
     normalized = aliases.get(value)
     if normalized is None:
         raise BackendUnavailableError(f"Unknown backend '{name}'. Expected one of numpy/cupy.")
-    return normalized  
+    return normalized
 
 
 def _resolve_backend(name: str, allow_fallback: bool = False) -> BackendName:
+    """Resolve *name* to ``numpy`` or ``cupy``, optionally falling back to NumPy if no GPU."""
     target = _normalize_backend_name(name)
     if target == "cupy" and not is_gpu_available():
         if allow_fallback:
@@ -85,6 +115,7 @@ def _resolve_backend(name: str, allow_fallback: bool = False) -> BackendName:
 
 
 def _initial_backend() -> BackendName:
+    """Pick startup backend from :func:`~nvitk.core.config.load_core_config` and env."""
     cfg = load_core_config()
 
     env_backend = os.getenv("NVITK_BACKEND")
@@ -102,7 +133,7 @@ def _initial_backend() -> BackendName:
     return "cupy" if is_gpu_available() else "numpy"
 
 
-_BACKENDS: dict[BackendName, tuple[Any, Any, Any]] = { "numpy": (np, scipy, ndi), }
+_BACKENDS: dict[BackendName, tuple[Any, Any, Any]] = {"numpy": (np, scipy, ndi),}
 if _cp is not None and _cp_scipy is not None and _cp_ndi is not None and _cupy_runtime_available():
     _BACKENDS["cupy"] = (_cp, _cp_scipy, _cp_ndi)
 
@@ -122,11 +153,32 @@ def _update_backend_proxies() -> None:
         pass
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Global & context backend
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def get_global_backend() -> BackendName:
+    """Process-wide default backend (updated by :func:`set_global_backend`)."""
     return _global_backend
 
 
 def set_global_backend(name: str, allow_fallback: bool = False) -> BackendName:
+    """
+    Set the default backend for new code and refresh registered module proxies.
+
+    Parameters
+    ----------
+    name
+        ``numpy`` or ``cupy`` (aliases accepted).
+    allow_fallback
+        If True and CuPy is unavailable, use NumPy instead of raising.
+
+    Returns
+    -------
+    BackendName
+        The resolved backend actually in effect.
+    """
     global _global_backend
     resolved = _resolve_backend(name, allow_fallback=allow_fallback)
     if resolved not in _BACKENDS:
@@ -140,6 +192,7 @@ def set_global_backend(name: str, allow_fallback: bool = False) -> BackendName:
 
 
 def get_current_backend() -> BackendName:
+    """Active backend for this context (thread/async aware via :class:`contextvars.ContextVar`)."""
     return _backend_context.get()
 
 
@@ -147,6 +200,16 @@ def get_backend_modules(
     name: str | None = None,
     allow_fallback: bool = True,
 ) -> BackendModules:
+    """
+    Return :class:`BackendModules` for *name* or :func:`get_current_backend`.
+
+    Parameters
+    ----------
+    name
+        Optional explicit backend; default is current context.
+    allow_fallback
+        Passed to :func:`_resolve_backend` when *name* is given.
+    """
     target = get_current_backend() if name is None else _resolve_backend(name, allow_fallback)
     mods = _BACKENDS[target]
     return BackendModules(xp=mods[0], scipy=mods[1], ndi=mods[2])
@@ -154,6 +217,11 @@ def get_backend_modules(
 
 @contextlib.contextmanager
 def using_backend(name: str, allow_fallback: bool = True) -> Iterator[BackendName]:
+    """
+    Context manager: temporarily set :func:`get_current_backend` to *name* (generator style).
+
+    Prefer :class:`using` for the attribute-style API; this is the lower-level API.
+    """
     resolved = _resolve_backend(name, allow_fallback=allow_fallback)
     if resolved not in _BACKENDS:
         raise BackendUnavailableError(
@@ -170,21 +238,14 @@ def using_backend(name: str, allow_fallback: bool = True) -> Iterator[BackendNam
 
 class using:
     """
-    Context manager for scoped backend switching.
-    
-    This allows temporary backend switching within a specific scope,
-    supporting both global and thread-local context switching.
-    
-    Examples:
-        # Global context switching
-        with using('cupy'):
-            result = np.array([1, 2, 3])  # Uses CuPy
-        
-        # Nested contexts
-        with using('numpy'):
-            with using('cupy'):
-                result = np.array([1, 2, 3])  # Uses CuPy
-            result = np.array([1, 2, 3])  # Uses NumPy
+    Context manager for scoped backend switching (updates :class:`contextvars.ContextVar`).
+
+    Examples
+    --------
+    .. code-block:: python
+
+        with using("cupy"):
+            x = np.array([1])  # CuPy array module
     """
 
     def __init__(self, backend_name: str, allow_fallback: bool = True) -> None:
@@ -212,16 +273,19 @@ class using:
 
 
 def get_cupy_module() -> Any | None:
+    """Return the ``cupy`` module or None if not installed."""
     return _cp
 
 
 def get_array_module(array: Any) -> Any:
+    """Return ``cupy`` or ``numpy`` depending on *array*'s type."""
     if _cp is not None and isinstance(array, _cp.ndarray):
         return _cp
     return np
 
 
 def synchronize() -> None:
+    """If current backend is CuPy, synchronize the default CUDA stream (no-op otherwise)."""
     if get_current_backend() == "cupy" and _cp is not None:
         try:
             _cp.cuda.Stream.null.synchronize()
@@ -234,11 +298,9 @@ def register_module_for_backend_updates(
     module_globals: dict[str, Any] | None = None,
 ) -> None:
     """
-    Register a module so backend switches refresh `np/scipy/ndi`.
+    Register *module_name* so backend switches refresh its ``np``/``scipy``/``ndi`` globals.
 
-    Kept for backward compatibility with previous pattern:
-        setup_backend_proxy(globals())
-        register_module_for_backend_updates(__name__)
+    Typically used together with :func:`setup_backend_proxy` via :func:`setup`.
     """
     _backend_dependent_modules.add(module_name)
     if module_globals is not None:
@@ -249,11 +311,19 @@ def register_module_for_backend_updates(
 
 def setup(module_globals: dict[str, Any], module_name: str | None = None):
     """
-    One-call module setup for dynamic backend globals.
+    One-call setup: :func:`~nvitk.core.proxy.setup_backend_proxy` + :func:`register_module_for_backend_updates`.
 
-    Preferred usage:
-        from nvitk.core import setup
-        setup(globals())
+    Parameters
+    ----------
+    module_globals
+        Pass ``globals()`` from the calling module.
+    module_name
+        Defaults to ``module_globals['__name__']``.
+
+    Returns
+    -------
+    BackendProxy
+        The proxy bound to *module_globals*.
     """
     if module_name is None:
         module_name = module_globals.get("__name__", "unknown")
@@ -266,19 +336,23 @@ def setup(module_globals: dict[str, Any], module_name: str | None = None):
 
 
 def get_ops(name: str | None = None, allow_fallback: bool = True) -> tuple[Any, Any, Any]:
+    """Return ``(xp, scipy, ndi)`` tuple for *name* or current backend."""
     target = get_current_backend() if name is None else _resolve_backend(name, allow_fallback=allow_fallback)
     return _BACKENDS[target]
 
 
 def is_cupy_array(arr: Any) -> bool:
+    """True if *arr* is a ``cupy.ndarray``."""
     return _cp is not None and isinstance(arr, _cp.ndarray)
 
 
 def is_numpy_array(arr: Any) -> bool:
+    """True if *arr* is a ``numpy.ndarray``."""
     return isinstance(arr, np.ndarray)
 
 
 def to_numpy(arr: Any, copy: bool = False) -> np.ndarray:
+    """Materialize *arr* on CPU as ``numpy.ndarray`` (``get()`` for CuPy)."""
     if is_cupy_array(arr):
         out = arr.get()
         return out.copy() if copy else out
@@ -289,6 +363,14 @@ def to_numpy(arr: Any, copy: bool = False) -> np.ndarray:
 
 
 def to_cupy(arr: Any, copy: bool = False, strict: bool = False):
+    """
+    Move *arr* to CuPy, or return NumPy array if *strict* is False and CuPy is unavailable.
+
+    Parameters
+    ----------
+    strict
+        If True, raise :class:`~nvitk.core.exceptions.BackendUnavailableError` when CuPy cannot load.
+    """
     if _cp is None or "cupy" not in _BACKENDS:
         if strict:
             raise BackendUnavailableError("CuPy backend is unavailable.")

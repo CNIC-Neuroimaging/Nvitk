@@ -1,3 +1,5 @@
+"""Save 2D or ``YXC`` arrays with Pillow (format from file extension)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,6 +30,7 @@ def write_pil(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> None:
+    """Write raster image; floats are scaled to uint8 when needed."""
     try:
         from PIL import Image as PILImage
     except Exception as exc:

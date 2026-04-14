@@ -1,3 +1,9 @@
+"""
+Declarative table filters: normalize user specs to conditions, apply on DataFrames, or compile SQL.
+
+Used by :class:`~nvitk.db.repo.DataRepo` and :class:`~nvitk.db.sqlite_index.SQLiteIndex`.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,6 +12,10 @@ from typing import Any, Iterable, Mapping
 import pandas as pd
 
 from .exceptions import FilterError
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Operators & condition model
+# ──────────────────────────────────────────────────────────────────────────────
 
 _SEQUENCE_TYPES = (list, tuple, set, frozenset, pd.Index)
 _SUPPORTED_OPS = {
@@ -25,6 +35,8 @@ _SUPPORTED_OPS = {
 
 @dataclass(frozen=True)
 class FilterCondition:
+    """One predicate: *column* name, canonical *op*, and optional *value*."""
+
     column: str
     op: str
     value: Any = None
@@ -61,6 +73,12 @@ def _normalize_op(op: str) -> str:
 
 
 def normalize_filters(filters: Mapping[str, Any] | None) -> dict[str, list[FilterCondition]]:
+    """
+    Turn API filter dicts into column → list of :class:`FilterCondition`.
+
+    Values may be scalars (``eq``), sequences (``in``), ``None`` (``is_null``), mappings of
+    ``{$op: value}``, or :class:`FilterCondition` instances.
+    """
     if not filters:
         return {}
 
@@ -87,6 +105,11 @@ def normalize_filters(filters: Mapping[str, Any] | None) -> dict[str, list[Filte
 
         normalized[column_name] = conditions
     return normalized
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DataFrame masks
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _mask_for_condition(series: pd.Series, condition: FilterCondition) -> pd.Series:
@@ -129,6 +152,7 @@ def _mask_for_condition(series: pd.Series, condition: FilterCondition) -> pd.Ser
 
 
 def apply_filters(df: pd.DataFrame, filters: Mapping[str, Any] | None) -> pd.DataFrame:
+    """AND-combine normalized filters; ``pipeline_version`` maps to ``pipeline_id`` when needed."""
     if df.empty or not filters:
         return df.copy()
 
@@ -151,11 +175,22 @@ def apply_filters(df: pd.DataFrame, filters: Mapping[str, Any] | None) -> pd.Dat
     return df.loc[mask].copy()
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# SQLite WHERE compilation
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def escape_identifier(identifier: str) -> str:
+    """Double-quote an SQL identifier (internal use for parameterized queries)."""
     return '"' + identifier.replace('"', '""') + '"'
 
 
 def build_sql_where(filters: Mapping[str, Any] | None) -> tuple[str, list[Any]]:
+    """
+    Build a ``WHERE`` fragment and positional parameters for the SQLite index.
+
+    Returns ``("", [])`` when *filters* is empty or None.
+    """
     normalized = normalize_filters(filters)
     if not normalized:
         return "", []
@@ -214,7 +249,13 @@ def build_sql_where(filters: Mapping[str, Any] | None) -> tuple[str, list[Any]]:
     return " AND ".join(clauses), params
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def merge_filters(*filters: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Shallow-merge dicts left to right; skips None."""
     merged: dict[str, Any] = {}
     for item in filters:
         if not item:
@@ -224,6 +265,7 @@ def merge_filters(*filters: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def ensure_list(value: str | Iterable[str] | None) -> list[str]:
+    """Normalize a single string or iterable of strings to a list of str (empty if None)."""
     if value is None:
         return []
     if isinstance(value, str):

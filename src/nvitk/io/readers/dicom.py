@@ -1,3 +1,9 @@
+"""
+Thin wrapper around :func:`~nvitk.io.conversors._dicom_conversion.load_dicom_series` for ``imread``.
+
+Returns array(s) and metadata without writing NIfTI files to disk.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,9 +27,10 @@ def read_dicom(
     **_: Any,
 ):
     """
-    Read DICOM source using the same series discovery and conversion
-    strategy as the DICOM-to-NIfTI converter, but return numpy arrays
-    plus metadata instead of writing files.
+    Read a DICOM file, directory, or archive using the shared conversion stack (see *load_dicom_series*).
+
+    Parameters mirror the loader: series selection, optional private tags, RAS orientation, and
+    rescaling. Returns one ``(data, metadata)`` pair or a list when ``return_all_series=True``.
     """
     return load_dicom_series(
         path,

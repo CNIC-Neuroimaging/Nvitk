@@ -1,3 +1,5 @@
+"""Zeiss OCT raw DICOM storage: extract B-scans / volumes for the conversion pipeline."""
+
 from __future__ import annotations
 
 import io

@@ -1,3 +1,5 @@
+"""Raster images via Pillow (PNG, JPEG, …): ``YX`` or ``YXC`` arrays."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +13,7 @@ from .._common import reorder_axes
 
 
 def read_pil(path: str, *, axes: str | None = None, **_: Any):
+    """Load image file as array and metadata (``mode``, ``axes``, ``shape``)."""
     try:
         from PIL import Image as PILImage
     except Exception as exc:

@@ -1,3 +1,9 @@
+"""
+NIfTI reader (nibabel): array load, affine/orientation, zooms, JSON sidecar and header extensions.
+
+Use :func:`read_nifti` or :func:`nvitk.io.imread` with ``force_type='nifti'``.
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +15,11 @@ import numpy as np
 from nvitk.core.exceptions import BackendUnavailableError
 
 from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Constants & path helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
 _NIFTI_JSON_STRIP_KEYS = {
     "axes",
@@ -37,6 +48,11 @@ def _sorted_nifti_files_in_dir(directory: Path) -> list[Path]:
     return sorted(out, key=lambda x: x.name.lower())
 
 
+# -----------------------------------------------------------------------------
+# Single-file resolution
+# -----------------------------------------------------------------------------
+
+
 def _resolve_nifti_file_path(path: Path) -> Path:
     if path.is_file():
         return path
@@ -59,7 +75,7 @@ def _json_sidecar_path(nifti_file: Path) -> Path:
 
 
 def nifti_metadata_json_path(nifti_file: str | Path) -> Path:
-    """Expected path to the sibling ``<stem>.json`` for a ``.nii`` / ``.nii.gz`` file (file may not exist)."""
+    """Sibling path ``<stem>.json`` for a ``.nii`` / ``.nii.gz`` file (the JSON need not exist)."""
     return _json_sidecar_path(Path(nifti_file))
 
 
@@ -70,6 +86,11 @@ def _merge_sidecar_dict(metadata: dict[str, Any], raw: Any) -> None:
     metadata.update(extra)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# read_nifti
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def read_nifti(
     path: str,
     *,
@@ -77,6 +98,19 @@ def read_nifti(
     metadata_json: str | Path | None = None,
     **_: Any,
 ):
+    """
+    Load a NIfTI file or the first ``.nii`` / ``.nii.gz`` in a directory via nibabel.
+
+    Populates ``axes``, ``shape``, ``affine``, ``orientation`` (when derivable), voxel sizes,
+    and merges a sibling JSON sidecar if present (or *metadata_json* when given). NIfTI header
+    extension payloads that decode as JSON are merged without overwriting core spatial keys.
+    Optional *axes* reorders the array and updates metadata.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, dict]
+        Voxel array and metadata dict for :class:`~nvitk.types.image.Image` construction.
+    """
     try:
         import nibabel as nib
     except Exception as exc:

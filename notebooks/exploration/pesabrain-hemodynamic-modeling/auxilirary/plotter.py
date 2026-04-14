@@ -2,13 +2,8 @@
 """
 Core visualization functions for QVT+ analysis.
 
-This module provides:
-- plot_violin: Violin plots for features grouped by vessel groups
-- plot_correlation_heatmap: Correlation heatmap with patient annotations
-- plot_flow_timeseries: Flow plots over time for individual patients
-- plot_flow_timeseries_all: Flow plots for all patients together
-- plot_crosssections: Mosaic plots showing cross-sections at vessel LOCs with highlighted measurement pixels
-- plot_tree: Dendrogram/tree visualization of Circle of Willis and venous system structure
+This module ... to be filled ...:
+... to be filled ...
 """
 
 # ──────────────────────────────────────────────────────────────────────────────

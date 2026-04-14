@@ -1,3 +1,5 @@
+"""Write arrays to TIFF via ``tifffile`` (optional metadata passthrough)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,6 +19,9 @@ def write_tiff(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> None:
+    """
+    Save *data* to *path* as TIFF; reorders axes when *metadata* contains ``axes`` and *axes* differs.
+    """
     try:
         import tifffile
     except Exception as exc:

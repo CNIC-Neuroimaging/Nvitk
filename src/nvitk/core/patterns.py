@@ -1,7 +1,15 @@
+"""Reusable patterns (e.g. singleton metaclass)."""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Singleton
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class Singleton(type):
     """
-    Singleton structural design pattern metaclass.
-    Ensure a class has only one instance and provide a global point of access to it.
+    Metaclass that returns the same instance for each ``cls(*args, **kwargs)`` call.
+
+    The instance is stored on ``cls._instances[cls]``. Used by :class:`~nvitk.core.logger.Logger`.
     """
 
     _instances = {}

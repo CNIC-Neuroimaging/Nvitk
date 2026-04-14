@@ -1,21 +1,28 @@
+"""Typed exceptions for NVITK (I/O, backends, validation)."""
+
 from __future__ import annotations
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Exception hierarchy
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class NvitkError(Exception):
-    """Base exception for nvitk."""
+    """Base class for all library-specific errors."""
 
 
 class BackendError(NvitkError):
-    """Generic backend-related error."""
+    """Raised when array backend selection or availability fails."""
 
 
 class BackendUnavailableError(BackendError):
-    """Requested backend is not available in current runtime."""
+    """Requested backend (e.g. CuPy) cannot be used in this environment."""
 
 
 class UnsupportedFormatError(NvitkError):
-    """Input/output format is not supported by registered codecs."""
+    """No registered reader/writer matches the path or ``force_type``."""
 
 
 class ValidationError(NvitkError):
-    """Validation error for shape, axes, metadata, etc."""
+    """Inconsistent axes, shapes, metadata, or other semantic validation failure."""

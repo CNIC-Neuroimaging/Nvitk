@@ -1,3 +1,5 @@
+"""Write arrays as MetaImage via SimpleITK (spacing, origin, direction from metadata)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,6 +26,7 @@ def write_mha(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> None:
+    """Save *data* as ``.mha`` / ``.mhd``; expects ``ZYX`` (or reordered) for 3D volumes."""
     if sitk is None:
         raise BackendUnavailableError('SimpleITK is not installed. Please install it with "pip install SimpleITK".')
 

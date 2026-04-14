@@ -1,3 +1,9 @@
+"""
+Dataset catalog, SQLite index, XNAT helpers, imports, and :class:`~nvitk.db.repo.DataRepo`.
+
+Configure the tree with ``NVITK_DATASET_ROOT`` or pass ``root=`` to ``DataRepo``.
+"""
+
 from __future__ import annotations
 
 from .catalog import DatasetCatalog, TableDefinition

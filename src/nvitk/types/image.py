@@ -1,3 +1,5 @@
+"""The :class:`Image` container: voxel array plus metadata, axes, and optional orientation."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +10,11 @@ import numpy as np
 
 from nvitk.core.array import as_backend_array, is_cupy_array, to_cupy, to_numpy
 from nvitk.core.exceptions import ValidationError
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Metadata helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _is_array_like(value: Any) -> bool:
@@ -43,6 +50,7 @@ _NON_DICOM_METADATA_KEYS = {
 
 
 def _is_dicom_tag_key(key: str) -> bool:
+    """Return True if *key* looks like a DICOM tag name (group/element or capitalized tag)."""
     if key in _NON_DICOM_METADATA_KEYS:
         return False
 
@@ -59,14 +67,25 @@ def _is_dicom_tag_key(key: str) -> bool:
     return bool(key) and key[0].isupper()
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Image
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 @dataclass
 class Image:
     """
-    Backend-aware image wrapper.
+    Voxel data with a metadata dict, optional axis labels, and NumPy/CuPy interoperability.
 
-    - Stores image data as numpy/cupy array.
-    - Keeps lightweight metadata (axes, shape, spacing, affine, etc.).
-    - Behaves naturally as an array for indexing and arithmetic.
+    **Construction**
+
+    - Pass a NumPy/CuPy array (and optional ``metadata`` / ``axes`` / ``name`` / ``orientation``).
+    - Pass a path string or :class:`~pathlib.Path` to load via :func:`nvitk.io.imageio.imread`.
+
+    **Behavior**
+
+    Indexing and ufuncs return a new :class:`Image` when the result is array-like.
+    Use :meth:`with_data` or :meth:`take` to replace voxels while merging metadata safely.
     """
 
     data: Any
@@ -80,6 +99,7 @@ class Image:
     __array_priority__ = 1000
 
     def __post_init__(self) -> None:
+        """Normalize metadata, validate ``axes`` vs ``ndim``, and merge path loads."""
         # Allow direct construction from file path:
         #   Image("/path/to/scan.nii.gz")
         if isinstance(self.data, (str, Path)):
@@ -140,6 +160,7 @@ class Image:
 
     @property
     def backend(self) -> str:
+        """``\"cupy\"`` or ``\"numpy\"`` depending on ``self.data``."""
         return "cupy" if is_cupy_array(self.data) else "numpy"
 
     @property
@@ -350,6 +371,7 @@ class Image:
         self.data[key] = value.data if isinstance(value, Image) else value
 
     def copy(self, deep_data: bool = True) -> "Image":
+        """Duplicate voxel data when *deep_data* is True (default); shallow copy shares the array reference."""
         copied = self.data.copy() if deep_data and hasattr(self.data, "copy") else self.data
         return self._clone(copied)
 
@@ -396,21 +418,27 @@ class Image:
         return self._clone(new_data, axes=new_axes)
 
     def astype(self, dtype: Any, copy: bool = True) -> "Image":
+        """Return a new :class:`Image` whose array is ``self.data.astype(...)``."""
         return self._clone(self.data.astype(dtype, copy=copy))
 
     def to_numpy(self, copy: bool = False) -> "Image":
+        """Host-memory :class:`Image` (delegates to :func:`nvitk.core.array.to_numpy`)."""
         return self._clone(to_numpy(self.data, copy=copy))
 
     def to_cupy(self, copy: bool = False, strict: bool = False) -> "Image":
+        """CuPy-backed :class:`Image` when available."""
         return self._clone(to_cupy(self.data, copy=copy, strict=strict))
 
     def to_backend(self, backend: str, copy: bool = False, strict: bool = False) -> "Image":
+        """Coerce voxels with :func:`nvitk.core.array.as_backend_array`."""
         return self._clone(as_backend_array(self.data, backend=backend, copy=copy, strict=strict))
 
     def as_tuple(self) -> tuple[Any, dict[str, Any]]:
+        """``(data, metadata)`` for interop with APIs expecting raw arrays."""
         return self.data, dict(self.metadata or {})
 
     def get_meta(self, key: str, default: Any = None, *aliases: str) -> Any:
+        """First matching key among *key* and *aliases* in ``metadata``, else *default*."""
         if key in self.metadata:
             return self.metadata[key]
         for alias in aliases:
@@ -419,17 +447,23 @@ class Image:
         return default
 
     def set_meta(self, key: str, value: Any) -> None:
+        """Assign ``metadata[key] = value``."""
         self.metadata[key] = value
 
     def has_meta(self, key: str, *aliases: str) -> bool:
+        """True if *key* or any *aliases* is present in ``metadata``."""
         if key in self.metadata:
             return True
         return any(alias in self.metadata for alias in aliases)
 
     def select_meta(self, keys: list[str] | tuple[str, ...]) -> dict[str, Any]:
+        """Subset of ``metadata`` containing only keys that exist."""
         return {k: self.metadata[k] for k in keys if k in self.metadata}
 
-    # ---- Arithmetic -----------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────────────────
+    # Arithmetic
+    # ──────────────────────────────────────────────────────────────────────────────
+
     def _binary(self, other: Any, op) -> Any:
         rhs = other.data if isinstance(other, Image) else other
         out = op(self.data, rhs)
@@ -477,14 +511,19 @@ class Image:
             return tuple(self._clone(x) if _is_array_like(x) else x for x in result)
         return result
 
-    # ---- IO hooks (lazy import to avoid hard dependency loops) ----------
+    # ──────────────────────────────────────────────────────────────────────────────
+    # I/O
+    # ──────────────────────────────────────────────────────────────────────────────
+
     def save(self, path: str, **kwargs: Any) -> None:
+        """Write via :func:`nvitk.io.imageio.imsave` (format from extension or ``force_type``)."""
         from nvitk.io.imageio import imsave
 
         imsave(path, self, **kwargs)
 
     @classmethod
     def from_file(cls, path: str, **kwargs: Any):
+        """Shorthand for :func:`nvitk.io.imageio.imread` returning an :class:`Image`."""
         from nvitk.io.imageio import imread
 
         return imread(path, **kwargs)

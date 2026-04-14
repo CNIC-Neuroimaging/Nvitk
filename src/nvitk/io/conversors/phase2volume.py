@@ -1,3 +1,5 @@
+"""Phase-contrast / cine MRI-style tabular pipelines to 3D/4D volumes (CLI optional)."""
+
 from __future__ import annotations
 
 import json

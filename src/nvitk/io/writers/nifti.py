@@ -1,3 +1,7 @@
+"""
+Write volumes to NIfTI (and optional JSON sidecar / header extension) via nibabel.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +14,11 @@ from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
 
 from .._common import default_nifti_axes, reorder_axes
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
 _NIFTI_RESERVED_KEYS = {
     "axes",
@@ -54,6 +63,11 @@ def _extract_zooms(metadata: dict[str, Any], ndim: int) -> tuple[float, ...]:
     return tuple(defaults[:ndim])
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# write_nifti
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def write_nifti(
     path: str,
     data: Any,
@@ -63,6 +77,13 @@ def write_nifti(
     save_metadata_extension: bool = True,
     **_: Any,
 ) -> None:
+    """
+    Save *data* to *path* as NIfTI; writes a sibling ``.json`` when extra metadata is JSON-safe.
+
+    Reorders from ``metadata['axes']`` to *axes* when both differ. Zooms come from ``x_res`` /
+    ``y_res`` / ``z_res`` / ``t_res`` (or aliases). With ``save_metadata_extension=True``, a
+    nibabel header extension may embed additional JSON metadata.
+    """
     try:
         import nibabel as nib
     except Exception as exc:

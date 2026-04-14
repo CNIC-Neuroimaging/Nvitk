@@ -1,3 +1,9 @@
+"""
+DICOM discovery, series selection, dicom2nifti execution, and in-memory :func:`load_dicom_series`.
+
+RT struct, tissue, and vendor-specific hooks live in sibling ``_dicom_*`` modules.
+"""
+
 from __future__ import annotations
 
 import hashlib

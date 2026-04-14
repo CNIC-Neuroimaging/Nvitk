@@ -1,3 +1,5 @@
+"""Convert Nikon ND2 to NIfTI via :func:`~nvitk.io.readers.read_nd2` and :func:`~nvitk.io.writers.write_nifti`."""
+
 from __future__ import annotations
 
 from typing import Any

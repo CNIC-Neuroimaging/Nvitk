@@ -1,3 +1,9 @@
+"""
+Low-level readers by format (also invoked via :mod:`nvitk.io.imageio`).
+
+Prefer :func:`nvitk.io.imread` unless you need a specific reader directly.
+"""
+
 from __future__ import annotations
 
 from .dicom import read_dicom

@@ -1,3 +1,9 @@
+"""
+SQLite mirror of catalog Parquet tables for fast filtered queries (rebuilt from Parquet).
+
+:class:`SQLiteIndex` materializes whole tables and supports :func:`~nvitk.db.filters.build_sql_where`.
+"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -30,6 +36,8 @@ _click_option = click.option if click is not None else _cli_decorator
 
 
 class SQLiteIndex:
+    """Path to ``catalog.sqlite`` (or configured index); :meth:`build` refreshes from Parquet."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
 

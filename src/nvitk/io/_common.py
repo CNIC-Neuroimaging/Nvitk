@@ -1,3 +1,5 @@
+"""Shared I/O helpers: format aliases, axis reordering, NIfTI axis labels, orientation from affine."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +9,10 @@ import numpy as np
 
 from nvitk.core.exceptions import UnsupportedFormatError, ValidationError
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Format aliases
+# ──────────────────────────────────────────────────────────────────────────────
 
 _TYPE_ALIASES = {
     "nii": "nifti",
@@ -28,6 +34,7 @@ _TYPE_ALIASES = {
 
 
 def normalize_type(force_type: str | None) -> str | None:
+    """Map *force_type* aliases (``nii``, ``dcm``, …) to canonical reader names, or None."""
     if force_type is None:
         return None
     key = force_type.strip().lower().lstrip(".")
@@ -35,6 +42,14 @@ def normalize_type(force_type: str | None) -> str | None:
 
 
 def reorder_axes(data: Any, axes_prev: str, axes_new: str) -> Any:
+    """
+    Permute *data* so axis labels match *axes_new* (same multiset of letters as *axes_prev*).
+
+    Raises
+    ------
+    ValidationError
+        If lengths or letter sets differ from ``data.ndim``.
+    """
     if axes_prev == axes_new:
         return data
 
@@ -53,6 +68,7 @@ def reorder_axes(data: Any, axes_prev: str, axes_new: str) -> Any:
 
 
 def _path_suffix(path: Path) -> str:
+    """File suffix for *path*, treating ``.nii.gz`` as a unit."""
     name = path.name.lower()
     if name.endswith(".nii.gz"):
         return ".nii.gz"
@@ -60,6 +76,12 @@ def _path_suffix(path: Path) -> str:
 
 
 def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
+    """
+    Resolve which reader registry key to use (``nifti``, ``dicom``, …).
+
+    If *force_type* is set, it wins after :func:`normalize_type`. Otherwise uses extension;
+    directories default to ``dicom``.
+    """
     normalized = normalize_type(force_type)
     if normalized:
         return normalized
@@ -81,6 +103,7 @@ def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
 
 
 def guess_write_type(path: str | Path, force_type: str | None = None) -> str:
+    """Like :func:`guess_read_type` but for output paths (writer registry keys)."""
     normalized = normalize_type(force_type)
     if normalized:
         return normalized
@@ -97,7 +120,13 @@ def guess_write_type(path: str | Path, force_type: str | None = None) -> str:
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Spatial metadata
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def default_nifti_axes(ndim: int) -> str:
+    """Default axis label string (``XY``, ``XYZ``, ``XYZT``, …) for *ndim*."""
     if ndim == 2:
         return "XY"
     if ndim == 3:

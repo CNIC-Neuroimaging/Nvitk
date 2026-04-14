@@ -1,3 +1,14 @@
+"""Console and file logging for NVITK.
+
+Uses ANSI escape codes (see :mod:`nvitk.util.colors`) for level colors on ``stderr``,
+plain formatting on file handlers, and Rich :class:`~rich.progress.Progress` in terminals
+only (disabled in Jupyter). The :class:`Logger` is a process-wide singleton.
+"""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+
 import logging
 import inspect
 import re
@@ -18,7 +29,13 @@ except ImportError:
     get_ipython = None
 
 
-def in_notebook():
+# ──────────────────────────────────────────────────────────────────────────────
+# Environment & helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def in_notebook() -> bool:
+    """Return True when running inside a Jupyter / IPython ZMQ kernel (no Rich progress)."""
     try:
         shell = get_ipython().__class__.__name__
         return shell == 'ZMQInteractiveShell'
@@ -30,11 +47,17 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _strip_ansi(text: str) -> str:
+    """Remove ANSI CSI color sequences from *text* (for the in-memory log buffer)."""
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Console formatting
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class _AnsiLevelFormatter(logging.Formatter):
-    """Console handler: colors the level column only so messages can include their own ANSI (e.g. :meth:`Logger.ok`)."""
+    """Format log lines as ``time | LEVEL | message`` with ANSI color on the level column only."""
 
     _LEVEL_PREFIX = {
         logging.DEBUG: bcolors.GRAY,
@@ -56,60 +79,35 @@ class _AnsiLevelFormatter(logging.Formatter):
         return f"{asctime} | {colored_level} | {msg}"
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Logger
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class Logger(metaclass=Singleton):
     """
-    Logger class for the PyMicra package.
+    Singleton logger: stderr with ANSI level colors, optional file handlers, Rich progress in terminals.
 
-    This class provides robust logging capabilities by integrating Python's built-in
-    logging module with the Rich library. The Logger offers the following features:
+    **Levels:** ``NONE`` (disable console), ``INFO``, ``DEBUG``. Debug can optionally append
+    caller locals via :meth:`enable_debug_locals`.
 
-      - **Unified Rich Console**: Uses a shared Rich Console instance for logging.
-      - **Auto-Scrolling Logs**: Log messages are output via a RichHandler so they auto-scroll
-        in the terminal.
-      - **Flexible Logging Levels**: Supports 'NONE', 'INFO', and 'DEBUG' levels. In DEBUG mode,
-        caller local variables can optionally be appended to log messages.
-      - **Singleton Pattern**: Ensures a single Logger instance per process.
-      - **Testing Friendly**: Maintains an internal log buffer that stores formatted log lines.
-      - **Jupyter Compatibility**: In notebook environments, live updates and progress tracking
-        are disabled to avoid notebook output issues.
-      - **File Logging**: Supports saving logs to .log and .err files with automatic directory creation.
-      - **Usage in Other Modules**: Since the Logger is a singleton, you can import it directly:
-            >>> from nvitk.core.logger import Logger
-            >>> logger = Logger(level='INFO')
-            >>> logger.info("Hello, world!")
+    **Console:** :class:`logging.StreamHandler` on ``stderr`` with :class:`_AnsiLevelFormatter`
+    (not Rich markup), so output is reliable in Jupyter and on HPC.
+
+    **Progress:** :class:`~rich.progress.Progress` on a shared :class:`~rich.console.Console`
+    when not in a notebook; otherwise disabled.
+
+    **Typical import**
+
+    .. code-block:: python
+
+        from nvitk.core.logger import Logger
+        logger = Logger(level="INFO")
+        logger.info("message")
 
     Examples
     --------
-    Basic usage:
-
-        >>> logger = Logger(level='INFO')
-        >>> logger.info("Starting process...")
-        >>> task_id = logger.progress("Task A", total=10)  # In terminal mode only.
-        >>> for i in range(10):
-        ...     logger.info(f"Iteration {i}")
-        ...     logger.update_progress(task_id, 1)
-        >>> logger.info("Process completed!")
-
-    File logging:
-
-        >>> logger = Logger(level='INFO')
-        >>> logger.add_file_handler("my_script.log")  # Saves all logs to file
-        >>> logger.add_file_handler("my_script.err", level="ERROR")  # Saves only errors
-        >>> logger.info("This goes to console and .log file")
-        >>> logger.error("This goes to console, .log file, and .err file")
-
-    Convenient script logging:
-
-        >>> logger = Logger(level='INFO')
-        >>> logger.setup_script_logging("my_script")  # Creates my_script.log and my_script.err
-        >>> logger.info("Processing data...")
-        >>> logger.error("Something went wrong!")
-
-    Enabling debug locals:
-
-        >>> logger.set_level("DEBUG")
-        >>> logger.enable_debug_locals(True)
-        >>> logger.debug("Debug message with local variables.")
+    File logging and script setup use :meth:`add_file_handler` and :meth:`setup_script_logging`.
     """
 
     _levels = {
@@ -118,20 +116,16 @@ class Logger(metaclass=Singleton):
         "DEBUG": logging.DEBUG
     }
 
-    def __init__(self, level: str = 'INFO', name: str = 'pymicra'):
+    def __init__(self, level: str = 'INFO', name: str = 'nvitk'):
         """
-        Initialize the Logger singleton.
-
-        This constructor sets up the logging environment for PyMicra. In a terminal environment,
-        a persistent Rich Progress object is created for progress tracking; in a Jupyter Notebook,
-        live progress is disabled and the Console is configured for standard notebook output.
+        Configure the singleton: console handler, optional Rich progress (terminal only).
 
         Parameters
         ----------
-        level : {'NONE', 'INFO', 'DEBUG'}, optional
-            The desired logging level, default is 'INFO'.
-        name : str, optional
-            The name of the logger, by default 'pymicra'.
+        level
+            ``'NONE'``, ``'INFO'``, or ``'DEBUG'``.
+        name
+            Root :class:`logging.Logger` name (default ``'nvitk'``).
         """
         self._name = name
         self._logger = logging.getLogger(name)
@@ -168,15 +162,14 @@ class Logger(metaclass=Singleton):
 
     def set_level(self, level: str = 'INFO') -> None:
         """
-        Set the logging level for the base logger.
+        Replace console handlers with Null (``NONE``) or ANSI :class:`logging.StreamHandler`.
 
-        Removes existing handlers and configures the logger with either a NullHandler (if level is 'NONE')
-        or a console StreamHandler with ANSI level colors. File handlers are preserved.
+        File handlers registered via :meth:`add_file_handler` are left unchanged.
 
         Parameters
         ----------
-        level : {'NONE', 'INFO', 'DEBUG'}
-            The desired logging level.
+        level
+            ``'NONE'``, ``'INFO'``, or ``'DEBUG'``.
         """
         # Remove only console handlers, preserve file handlers
         handlers_to_remove = []
@@ -206,12 +199,12 @@ class Logger(metaclass=Singleton):
 
     def get_level(self) -> str:
         """
-        Get the current logging level of the logger.
+        Map the underlying logger level to ``'NONE'``, ``'INFO'``, or ``'DEBUG'``.
 
         Returns
         -------
         str
-            The current logging level as a string ('NONE', 'INFO', 'DEBUG').
+            Current level label; unknown numeric levels fall back to ``'INFO'``.
         """
         level_value = self._logger.level
         for name, value in self._levels.items():
@@ -227,23 +220,26 @@ class Logger(metaclass=Singleton):
         mode: str = "a"
     ) -> logging.FileHandler:
         """
-        Add a file handler to save logs to a file.
+        Append a :class:`logging.FileHandler` with plain (non-ANSI) formatting.
+
+        Parent directories are created automatically. The handler is tracked for
+        :meth:`remove_file_handlers`. Emits one :meth:`info` line to the console when added.
 
         Parameters
         ----------
-        file_path : str or Path
-            Path to the log file. Parent directories will be created if they don't exist.
-        level : {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}, optional
-            Minimum logging level for this file handler, default is 'INFO'.
-        format_string : str, optional
-            Custom format string for log messages. If None, uses a default format.
-        mode : str, optional
-            File mode for opening the log file, default is 'a' (append).
+        file_path
+            Destination ``.log`` or ``.err`` path.
+        level
+            Minimum record level for this handler (standard logging names).
+        format_string
+            If omitted, ``"%(asctime)s - %(name)s - %(levelname)s - %(message)s"``.
+        mode
+            File open mode, default append ``'a'``.
 
         Returns
         -------
         logging.FileHandler
-            The created file handler.
+            The attached handler instance.
 
         Examples
         --------
@@ -286,34 +282,28 @@ class Logger(metaclass=Singleton):
         err_level: str = "ERROR"
     ) -> tuple[logging.FileHandler, logging.FileHandler]:
         """
-        Set up convenient logging for a script with both .log and .err files.
-
-        Creates two file handlers:
-        - {script_name}.log: Contains all log messages at or above log_level
-        - {script_name}.err: Contains only error messages at or above err_level
+        Create ``{script_name}.log`` (all messages ≥ *log_level*) and ``{script_name}.err`` (≥ *err_level*).
 
         Parameters
         ----------
-        script_name : str
-            Name of the script (without extension). Used as the base name for log files.
-        log_dir : str or Path, optional
-            Directory to save log files, default is "logs".
-        log_level : str, optional
-            Minimum level for the .log file, default is "INFO".
-        err_level : str, optional
-            Minimum level for the .err file, default is "ERROR".
+        script_name
+            Base filename without extension.
+        log_dir
+            Directory for both files.
+        log_level
+            Threshold for the general log file.
+        err_level
+            Threshold for the error-only file.
 
         Returns
         -------
         tuple[logging.FileHandler, logging.FileHandler]
-            A tuple containing (log_handler, err_handler).
+            ``(log_handler, err_handler)``.
 
         Examples
         --------
         >>> logger = Logger()
-        >>> logger.setup_script_logging("data_processor")
-        >>> logger.info("Processing started")  # Goes to console and data_processor.log
-        >>> logger.error("Failed to process")  # Goes to console, data_processor.log, and data_processor.err
+        >>> logger.setup_script_logging("pipeline")
         """
         log_dir = Path(log_dir)
 
@@ -330,11 +320,9 @@ class Logger(metaclass=Singleton):
 
         return log_handler, err_handler
 
-    def remove_file_handlers(self):
+    def remove_file_handlers(self) -> None:
         """
-        Remove all file handlers from the logger.
-
-        This is useful for cleanup or when switching between different logging configurations.
+        Close and remove every handler added via :meth:`add_file_handler` (not console handlers).
         """
         for handler in self._file_handlers:
             handler.close()
@@ -343,14 +331,14 @@ class Logger(metaclass=Singleton):
         self._file_handlers.clear()
         self.info("All file handlers removed")
 
-    def enable_debug_locals(self, enable: bool = True):
+    def enable_debug_locals(self, enable: bool = True) -> None:
         """
-        Enable or disable a filter that appends caller local variables to DEBUG log messages.
+        When *enable* is True, attach a filter so DEBUG records append ``| LOCALS=...`` from the caller frame.
 
         Parameters
         ----------
-        enable : bool
-            True to enable, False to disable.
+        enable
+            Toggle the :class:`_DebugLocalsFilter` on the root logger.
         """
         self._show_debug_locals = enable
         if enable:
@@ -361,13 +349,8 @@ class Logger(metaclass=Singleton):
                     self._logger.removeFilter(f)
 
     class _DebugLocalsFilter(logging.Filter):
-        """
-        Appends local variables to DEBUG log messages.
+        """Internal: extend DEBUG ``record.msg`` with ``f_locals`` of the direct caller."""
 
-        Example:
-        >>> Logger().enable_debug_locals(True)
-        >>> Logger().debug("Check variables")
-        """
         def filter(self, record: logging.LogRecord) -> bool:
             if record.levelno == logging.DEBUG:
                 stack = inspect.stack()
@@ -379,19 +362,19 @@ class Logger(metaclass=Singleton):
 
     def progress(self, description: str, total: float) -> Optional[TaskID]:
         """
-        Create a new progress task (only in terminal mode).
+        Add a Rich progress task (no-op in notebooks: logs a single INFO and returns None).
 
         Parameters
         ----------
-        description : str
-            Description for the task.
-        total : float
-            Total steps for the task.
+        description
+            Task label shown in the progress bar.
+        total
+            Total units for completion (float for partial steps).
 
         Returns
         -------
         TaskID or None
-            The created task's ID, or None if progress is disabled.
+            Task id for :meth:`update_progress`, or None if progress is disabled.
         """
         if self._progress is None:
             self._logger.info("Progress tasks are disabled in notebook mode.")
@@ -404,16 +387,9 @@ class Logger(metaclass=Singleton):
         self._progress.refresh()
         return task_id
 
-    def update_progress(self, task_id: TaskID, advance: float = 1.0):
+    def update_progress(self, task_id: TaskID, advance: float = 1.0) -> None:
         """
-        Advance a progress task (only in terminal mode).
-
-        Parameters
-        ----------
-        task_id : TaskID
-            The ID of the task.
-        advance : float, optional
-            Amount to advance (default is 1.0).
+        Advance a Rich task created by :meth:`progress` (ignored if progress is disabled).
         """
         if self._progress is None:
             return
@@ -421,68 +397,72 @@ class Logger(metaclass=Singleton):
         self._progress.refresh()
 
     def debug(self, msg, *args, **kwargs):
-        """Log a DEBUG message."""
+        """Emit a DEBUG record (``%``-style formatting supported like :meth:`logging.Logger.debug`)."""
         self._append_log_line("DEBUG", msg)
         self._logger.debug(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def info(self, msg, *args, **kwargs):
-        """Log an INFO message."""
+        """Emit an INFO record."""
         self._append_log_line("INFO", msg)
         self._logger.info(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def warning(self, msg, *args, **kwargs):
-        """Log a WARNING message."""
+        """Emit a WARNING record."""
         self._append_log_line("WARNING", msg)
         self._logger.warning(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def error(self, msg, *args, **kwargs):
-        """Log an ERROR message."""
+        """Emit an ERROR record."""
         self._append_log_line("ERROR", msg)
         self._logger.error(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def critical(self, msg, *args, **kwargs):
-        """Log a CRITICAL message."""
+        """Emit a CRITICAL record."""
         self._append_log_line("CRITICAL", msg)
         self._logger.critical(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def exception(self, msg, *args, **kwargs):
-        """Log an exception."""
+        """Emit an ERROR record with exception info (call inside ``except``)."""
         self._append_log_line("ERROR", msg)
         self._logger.exception(msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
     def ok(self, msg, *args, **kwargs):
-        """Log a message in green (OK message)."""
+        """Emit at INFO level with green ANSI on the message body (level column stays INFO color)."""
         styled_msg = f"{bcolors.OKGREEN}{msg}{bcolors.ENDC}"
         self._append_log_line("INFO", styled_msg)
         self._logger.info(styled_msg, *args, **kwargs)
         if self._progress:
             self._progress.refresh()
 
-    def _append_log_line(self, level_name: str, msg: str):
-        """Append a formatted log line to the internal buffer."""
+    def _append_log_line(self, level_name: str, msg: str) -> None:
+        """Strip ANSI and append one line to :attr:`_log_buffer` for testing or inspection."""
         now_str = datetime.now().strftime("%H:%M:%S")
         plain = _strip_ansi(str(msg))
         line = f"{now_str} - {level_name} - {plain}"
         self._log_buffer.append(line)
 
     def get_logger(self) -> logging.Logger:
-        """Retrieve the underlying Python logger."""
+        """Return the underlying :class:`logging.Logger` (same *name* as passed to ``__init__``)."""
         return self._logger
 
-    def reset(self):
-        """Reset the logger (useful for testing)."""
+    def reset(self) -> None:
+        """
+        Stop progress, clear buffers, remove file handlers, and restart Rich progress in terminals.
+
+        Intended for tests or subprocess isolation.
+        """
         if self._progress:
             self._progress.stop()
         self._log_buffer.clear()
@@ -492,7 +472,7 @@ class Logger(metaclass=Singleton):
             self._progress.start()
 
     def __repr__(self) -> str:
-        """Return string representation."""
+        """``Logger(name=..., level=..., file_handlers=...)``."""
         return f"Logger(name='{self._name}', level='{self._logger.level}', file_handlers={len(self._file_handlers)})"
 
     def __str__(self) -> str:

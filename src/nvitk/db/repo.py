@@ -1,3 +1,12 @@
+"""
+High-level access to the on-disk dataset: catalog tables, measurements, assets, scans, and writes.
+
+:class:`DataRepo` resolves the dataset root (``NVITK_DATASET_ROOT`` or the ``dataset/`` tree
+next to the package), opens :class:`~nvitk.db.catalog.DatasetCatalog` and
+:class:`~nvitk.db.sqlite_index.SQLiteIndex`, and exposes filtered queries with optional cohort
+scoping (see ``DEFAULT_COHORT_ID``).
+"""
+
 from __future__ import annotations
 
 import os
@@ -17,6 +26,11 @@ from .sqlite_index import SQLiteIndex
 from .storage import coerce_bool, coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Dataset root & defaults
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def _default_dataset_root() -> Path:
     env_root = os.getenv("NVITK_DATASET_ROOT")
     if env_root:
@@ -26,6 +40,11 @@ def _default_dataset_root() -> Path:
 
 # Default cohort for API queries when ``cohort_id`` is omitted (see :meth:`DataRepo._resolve_cohort`).
 DEFAULT_COHORT_ID = "PESA-Brain"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Local paths & imread job helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _root_path_for_imread(path: str | Path, *, asset_type: str) -> Path:
@@ -135,6 +154,11 @@ def _dicom_cache_dir_has_files(directory: Path) -> bool:
         if suf in {".dcm", ".dicom", ".ima", ".img"} or suf == "":
             return True
     return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Measurement entity keys & variable-value filters
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _pick_value_column_for_spec(spec: Any) -> str:
@@ -294,7 +318,20 @@ def _apply_variable_value_filters(df: pd.DataFrame, specs: list[tuple[str, Any]]
     return df.loc[_frame_matches_entity_keys(df, allowed)].copy()
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# DataRepo
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class DataRepo:
+    """
+    Dataset-facing API: load tables, clinical/image measurements, assets, scans, and writes.
+
+    Queries prefer the SQLite index when ``use_sqlite`` is True and the index file exists;
+    otherwise fall back to Parquet. Cohort filtering uses ``cohort_membership`` when present
+    unless ``cohort_id=False`` (disable) or an explicit cohort id is passed.
+    """
+
     def __init__(
         self,
         root: str | Path | None = None,
@@ -302,6 +339,16 @@ class DataRepo:
         use_sqlite: bool = True,
         auto_scaffold: bool = False,
     ):
+        """
+        Parameters
+        ----------
+        root
+            Dataset root directory; defaults to ``NVITK_DATASET_ROOT`` or the ``dataset/`` folder.
+        use_sqlite
+            When True, use :class:`~nvitk.db.sqlite_index.SQLiteIndex` for fast filtered reads.
+        auto_scaffold
+            If True and ``catalog/repository.json`` is missing, create a minimal dataset scaffold.
+        """
         dataset_root = Path(root or _default_dataset_root()).expanduser().resolve()
         if auto_scaffold and not (dataset_root / "catalog" / "repository.json").exists():
             DatasetCatalog.create_scaffold(dataset_root)
@@ -312,6 +359,7 @@ class DataRepo:
         self.use_sqlite = use_sqlite
 
     def list_tables(self) -> list[str]:
+        """Registered table names from the catalog manifest."""
         return self.catalog.list_tables()
 
     def _resolve_cohort(
@@ -424,6 +472,12 @@ class DataRepo:
         use_sqlite: bool | None = True,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
+        """
+        Load *table* as a DataFrame with optional column projection, filters, and wide pivot.
+
+        For ``clinical_measurements`` / ``image_measurements``, ``wide=True`` resolves values
+        and pivots to one column per variable (and entity keys); see catalog wide definitions.
+        """
         definition = self.catalog.get_table(table)
         effective_sqlite = self.use_sqlite if use_sqlite is None else use_sqlite
         cohort_eff, clean_filters = self._resolve_cohort(cohort_id, filters)
@@ -455,6 +509,12 @@ class DataRepo:
         use_sqlite: bool | None = True,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
+        """
+        Query ``clinical_measurements`` with variable resolution, optional value filters, and cohort scope.
+
+        Non-reserved *filters* keys are treated as variable ids with comparison specs (see
+        :func:`~nvitk.db.filters.apply_filters`). Set ``wide=False`` for long (tidy) form.
+        """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         resolved_variables = self.catalog.resolve_variable_ids(variables, domain="clinical")
         structural, var_specs = self._split_measurement_filters(
@@ -487,6 +547,13 @@ class DataRepo:
         pipeline: str | int | Iterable[str | int] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
+        """
+        Query ``image_measurements`` with modality, regions, atlas (ASL), pipeline selection, and filters.
+
+        When neither modality nor pipeline filters are given, rows are restricted to catalog
+        default pipelines per modality where defined. Use ``atlas=`` with ``modality='asl'`` to
+        expand *regions* from a named atlas.
+        """
         cohort_eff, filters_norm = self._resolve_cohort(cohort_id, filters)
         if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
             filters_norm["pipeline_id"] = filters_norm.pop("pipeline_version")
@@ -630,9 +697,12 @@ class DataRepo:
         imread_kwargs: dict[str, Any] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
-        """Query the ``assets`` inventory table with optional filters.
+        """
+        Query the ``assets`` table; optionally pivot to one row per ``subject_uid`` (``wide=True``).
 
-        When ``get_image=True``, ``imread_kwargs`` is forwarded to :func:`nvitk.io.imageio.imread`.
+        With ``get_image=True``, resolve paths to :func:`nvitk.io.imageio.imread` jobs (NIfTI
+        directories expand to multiple volumes; JSON sidecars are picked up when present).
+        ``imread_kwargs`` is forwarded to ``imread``; ``value`` selects the path column to read.
         """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
@@ -751,10 +821,12 @@ class DataRepo:
         imread_kwargs: dict[str, Any] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
-        """Query the ``scans`` inventory table with optional keyword filters (like :meth:`assets`).
+        """
+        Query the ``scans`` table; with ``get_image=True``, load volumes from ``path_column``.
 
-        When ``get_image=True``, ``imread_kwargs`` is forwarded to :func:`nvitk.io.imageio.imread`
-        (e.g. DICOM options such as ``force_ras``).
+        Missing local paths can trigger XNAT download when ``xnat_config`` or env/profile resolves;
+        use ``download_scan_path`` for a persistent cache directory. ``asset_type`` must be
+        ``dicom`` or ``nifti`` for on-demand download; ``imread_kwargs`` passes through to ``imread``.
         """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
@@ -917,6 +989,9 @@ class DataRepo:
         how: str = "left",
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
+        """
+        Merge multiple DataFrames on *on* (default ``subject_uid``); optionally filter by cohort after join.
+        """
         dataframes = [frame.copy() for frame in frames]
         if not dataframes:
             return pd.DataFrame()
@@ -937,6 +1012,11 @@ class DataRepo:
         provenance: dict[str, Any] | None = None,
         build_sqlite_index: bool = False,
     ) -> Path:
+        """
+        Write *df* to the table's Parquet file and refresh catalog schema metadata.
+
+        Set ``build_sqlite_index=True`` to rebuild the SQLite index for *table* after the write.
+        """
         definition = self.catalog.get_table(table)
         write_parquet_table(definition.path, df)
         merged_provenance = {"written_at": utc_now_iso()}
@@ -956,6 +1036,11 @@ class DataRepo:
         provenance: dict[str, Any] | None = None,
         build_sqlite_index: bool = False,
     ) -> pd.DataFrame:
+        """
+        Append *df* to the existing table and drop duplicates on *key_columns* (default: manifest keys).
+
+        Returns the combined frame after :meth:`write_table`.
+        """
         definition = self.catalog.get_table(table)
         existing = self.get(table, cohort_id=False)
         combined = pd.concat([existing, df], ignore_index=True)
@@ -968,17 +1053,21 @@ class DataRepo:
         return combined
 
     def build_sqlite_index(self, *, tables: list[str] | None = None) -> Path:
+        """Rebuild the SQLite index from Parquet (all tables or the subset *tables*)."""
         return self.sqlite.build(self.catalog, tables=tables)
 
     def register_variables(self, entries: list[dict[str, Any]]) -> None:
+        """Register variable definitions in the catalog manifest (clinical/image domains)."""
         self.catalog.register_variables(entries)
 
     def drop_table(self, name: str, *, remove_sqlite: bool = True) -> None:
+        """Clear *name* from the catalog; optionally delete the SQLite DB file if ``remove_sqlite``."""
         self.catalog.clear_table(name)
         if remove_sqlite and self.sqlite.exists():
             self.sqlite.db_path.unlink()
 
     def drop_all_tables(self, *, remove_sqlite: bool = True) -> None:
+        """Clear every registered table; optionally remove the SQLite index file once at the end."""
         for table_name in self.catalog.list_tables():
             self.drop_table(table_name, remove_sqlite=False)
         if remove_sqlite and self.sqlite.exists():

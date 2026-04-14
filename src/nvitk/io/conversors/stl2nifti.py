@@ -1,3 +1,5 @@
+"""Rasterize STL surfaces to labeled NIfTI volumes (VTK-based; CLI optional)."""
+
 from __future__ import annotations
 
 from pathlib import Path

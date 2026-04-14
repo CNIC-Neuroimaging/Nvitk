@@ -1,7 +1,15 @@
+"""
+High-level image load/save and helpers (:func:`imread`, :func:`imsave`, :func:`imshow`, axis tools).
+
+Readers and writers are selected by extension or ``force_type``; see :mod:`nvitk.io._common`.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.exceptions import ValidationError
@@ -28,6 +36,11 @@ _WRITERS = {
 }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Load / save
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def imread(
     path: str | Path,
     *,
@@ -37,11 +50,25 @@ def imread(
     **kwargs: Any,
 ):
     """
-    Read an image from disk and return Image object(s).
+    Load a volume or series from disk into :class:`~nvitk.types.image.Image`.
 
-    Returns:
-      - Image for single image/series
-      - list[Image] for multi-series DICOM sources
+    Parameters
+    ----------
+    path
+        File or directory (directories are treated as DICOM folders unless ``force_type`` overrides).
+    axes
+        If set, reorder reader output to this axis string (reader-dependent).
+    force_type
+        Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, …
+    backend
+        ``numpy`` or ``cupy`` for the returned :class:`~nvitk.types.image.Image` array.
+    **kwargs
+        Passed to the format reader (e.g. DICOM ``force_ras``, NIfTI ``metadata_json``).
+
+    Returns
+    -------
+    Image or list[Image]
+        A single image, or a list when the reader returns multiple series (e.g. DICOM).
     """
     from nvitk.types import Image
 
@@ -86,7 +113,9 @@ def imsave(
     **kwargs: Any,
 ) -> None:
     """
-    Save image to disk in the requested output format.
+    Write array or :class:`~nvitk.types.image.Image` to *path* using the writer chosen by extension or *force_type*.
+
+    Merges ``image.metadata`` with *metadata*; optional *axes* reorders data before write.
     """
     data = image
     merged_meta = dict(metadata or {})
@@ -109,12 +138,23 @@ def imsave(
     writer(str(path), data, axes=axes, metadata=merged_meta, **kwargs)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Axis helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def swapaxes(
     image: Any,
     axes_prev: str,
     axes_new: str,
     metadata: dict[str, Any] | None = None,
 ):
+    """
+    Reorder *image* from *axes_prev* to *axes_new* using :func:`~nvitk.io._common.reorder_axes`.
+
+    If *metadata* is omitted, returns only the reordered array. If provided, returns
+    ``(data, metadata)`` with ``axes`` and ``shape`` updated.
+    """
     data = image.data if hasattr(image, "data") else image
     out = reorder_axes(data, axes_prev, axes_new)
     if metadata is None:
@@ -125,7 +165,78 @@ def swapaxes(
     return out, meta
 
 
-from typing import Any
+# ──────────────────────────────────────────────────────────────────────────────
+# Visualization (matplotlib)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _parse_index_token(index: Any, axis: int) -> str | None:
+    if isinstance(index, str):
+        return index.strip().lower()
+    if isinstance(index, (tuple, list)) and len(index) > axis and isinstance(index[axis], str):
+        return str(index[axis]).strip().lower()
+    return None
+
+
+def _is_projection_token(tok: str | None) -> bool:
+    return tok is not None and tok in ("max", "mean", "avg", "median")
+
+
+def _project_along_axis(vol: np.ndarray, axis: int, how: str) -> np.ndarray:
+    how = how.lower()
+    if how == "max":
+        return np.max(vol, axis=axis)
+    if how in ("mean", "avg"):
+        return np.mean(vol, axis=axis)
+    if how == "median":
+        return np.median(vol, axis=axis)
+    raise ValueError(f"Unknown projection {how!r}")
+
+
+def _rgb_along_axis(vol: np.ndarray, axis: int) -> np.ndarray:
+    if vol.shape[axis] != 3:
+        raise ValueError(
+            f"index='rgb' requires length 3 along axis {axis}, got shape {vol.shape[axis]}"
+        )
+    return np.moveaxis(vol, axis, -1)
+
+
+def _kwargs_imshow_rgb(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in kwargs.items() if k != "cmap"}
+
+
+def _standard_2d_view(
+    vol: np.ndarray,
+    axis: int,
+    index: Any,
+    resolve_index,
+) -> tuple[np.ndarray, bool]:
+    """
+    Reduce *vol* to a 2D array for a single ``imshow`` call.
+
+    Returns
+    -------
+    view : ndarray
+    rgb_layout
+        If True, omit ``cmap`` (RGB / multi-channel image).
+    """
+    tok = _parse_index_token(index, axis)
+    if vol.ndim < 3:
+        return vol, False
+    if _is_projection_token(tok):
+        if vol.ndim != 3:
+            raise ValueError(
+                f"Projection index {tok!r} requires a 3D volume; got ndim={vol.ndim}"
+            )
+        return _project_along_axis(vol, axis, tok), False
+    if tok == "rgb":
+        if vol.ndim != 3:
+            raise ValueError(f"index='rgb' requires a 3D volume; got ndim={vol.ndim}")
+        return _rgb_along_axis(vol, axis), True
+    idx_raw = index if isinstance(index, (int, str)) else index[axis]
+    idx = resolve_index(idx_raw, vol.shape[axis])
+    return np.take(vol, idx, axis=axis), False
+
 
 def imshow(
     image,
@@ -139,10 +250,45 @@ def imshow(
     t_axis: int = 3,
     **kwargs,
 ):
+    """
+    Display a 2D slice, orthogonal triple, mosaic of slices, or animation via matplotlib.
+
+    *display* selects layout: ``standard`` (single slice), ``orth`` / ``orthogonal`` (three
+    linked views), ``mosaic`` (grid of slices along *axis*), or ``animation`` (time or slice
+    sweep). Pass ``cmap`` and other ``imshow`` kwargs as needed; default colormap is ``gray``;
+    omit or override ``cmap`` for RGB output.
+
+    Parameters
+    ----------
+    image
+        Array or :class:`~nvitk.types.image.Image` with optional ``axes`` (used when *axis* is None).
+    axis
+        Dimension index along which to slice, mosaic, project, or stack RGB; if None, uses the
+        ``Z`` axis index when present, else 2.
+    index
+        Per-axis slice index, ``"mid"``, a triple for orthogonal mode, a **projection** along
+        *axis* (``"max"``, ``"mean"``, ``"avg"``, ``"median"``), or ``"rgb"`` when that axis has
+        length 3 (last dimension becomes channels for ``imshow``). Projection and RGB use a
+        single 2D panel (orthogonal and mosaic layouts fall back to standard for those modes).
+    show
+        If True, ``plt.show()`` (or JS HTML in Jupyter for animations).
+    display
+        Layout name; aliases include ``orth``, ``mosaic``, ``animation``, ``animation+orth``, etc.
+    mosaic_init, mosaic_fin
+        Inclusive start / exclusive end slice indices for mosaic mode.
+    t_axis
+        Time dimension for 4D animation when *display* is ``animation``.
+    **kwargs
+        Forwarded to ``imshow`` (e.g. ``vmin``, ``vmax``, ``cmap``).
+
+    Returns
+    -------
+    list or matplotlib.animation.FuncAnimation
+        Artist handles from static views, or a ``FuncAnimation`` when *display* is ``animation``.
+    """
     import matplotlib.pyplot as plt
     import matplotlib.animation as animation
     from matplotlib.gridspec import GridSpec
-    import numpy as np
     import math
 
     # 1. Data Prep
@@ -167,7 +313,12 @@ def imshow(
     elif display in ['mosaic', 'series']: spatial_mode = 'mosaic'
     elif display in ['standard', 'default']: spatial_mode = 'standard'
     else: raise ValueError(f"Invalid display mode: {display}")
-    
+
+    _idx_tok = _parse_index_token(index, axis)
+    if _is_projection_token(_idx_tok) or _idx_tok == "rgb":
+        if spatial_mode in ("orth", "orthogonal", "mosaic"):
+            spatial_mode = "standard"
+
     # 3. Temporal vs Spatial separation
     if display == "animation":
         if arr.ndim == 4:
@@ -178,6 +329,8 @@ def imshow(
             spatial_arr = arr
         else:
             raise ValueError("Animation requires 3D or 4D data.")
+        if (_is_projection_token(_idx_tok) or _idx_tok == "rgb") and arr.ndim == 3:
+            num_frames = 1
     else:
         spatial_arr = arr
 
@@ -249,15 +402,19 @@ def imshow(
         handles.append(ax_right.imshow(right_v, aspect='auto', **kwargs))
         for a in [ax_main, ax_top, ax_right]: a.axis("off")
 
-    # CASE: STANDARD (2D or single slice)
+    # CASE: STANDARD (2D, slice, projection, or RGB)
     else:
-        view = spatial_arr
-        if spatial_arr.ndim == 3:
-            idx = resolve_index(index if isinstance(index, (int, str)) else index[axis], spatial_arr.shape[axis])
-            view = spatial_arr.take(indices=idx, axis=axis)
-        
+        vol_work = spatial_arr
+        if vol_work.ndim == 4 and display != "animation":
+            vol_work = vol_work.take(indices=0, axis=t_axis)
+        if vol_work.ndim >= 3:
+            view, rgb_layout = _standard_2d_view(vol_work, axis, index, resolve_index)
+            im_kw = _kwargs_imshow_rgb(kwargs) if rgb_layout else kwargs
+        else:
+            view = vol_work
+            im_kw = kwargs
         fig, ax = plt.subplots()
-        handles = [ax.imshow(view, **kwargs)]
+        handles = [ax.imshow(view, **im_kw)]
         ax.axis("off")
 
     # --- BLOCK: ANIMATION EXECUTION ---
@@ -280,10 +437,12 @@ def imshow(
                 handles[1].set_data(m_v)
                 handles[2].set_data(r_v)
             else:
-                # Standard update
+                # Standard update (slice, projection, or RGB per frame)
                 up_view = vol
-                if vol.ndim == 3:
-                    # Determine if 'frame' represents time (4D array) or slice (3D array)
+                tok = _parse_index_token(index, axis)
+                if vol.ndim == 3 and (_is_projection_token(tok) or tok == "rgb"):
+                    up_view, _rgb = _standard_2d_view(vol, axis, index, resolve_index)
+                elif vol.ndim == 3:
                     if arr.ndim == 3:
                         idx = frame
                     else:
@@ -309,6 +468,11 @@ def imshow(
     return handles
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Format conversion
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def convert_image(
     src: str | Path,
     dst: str | Path,
@@ -320,6 +484,12 @@ def convert_image(
     series_index: int = 0,
     **kwargs: Any,
 ) -> None:
+    """
+    Read *src* with :func:`imread`, pick one series if multiple, then :func:`imsave` to *dst*.
+
+    Use *series_index* when the reader returns a list (e.g. multi-series DICOM). *src_type* /
+    *dst_type* override extension-based format detection; remaining *kwargs* go to read and write.
+    """
     result = imread(src, force_type=src_type, axes=axes, backend=backend, **kwargs)
 
     if isinstance(result, list):
