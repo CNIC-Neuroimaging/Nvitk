@@ -38,6 +38,7 @@ _NON_DICOM_METADATA_KEYS = {
     "dtype",
     "mode",
     "tiff_tags",
+    "orientation",
 }
 
 
@@ -72,6 +73,8 @@ class Image:
     metadata: dict[str, Any] | None = None
     axes: str | None = None
     name: str | None = None
+    orientation: str | None = None
+    """Voxel axes orientation codes (e.g. ``\"RAS\"``, ``\"LPS\"``) from the image affine."""
 
     # Make numpy defer to this object in mixed operations.
     __array_priority__ = 1000
@@ -101,8 +104,15 @@ class Image:
                 self.axes = loaded.axes
             if self.name is None:
                 self.name = loaded.name or source_path.stem
+            if self.orientation is None:
+                self.orientation = getattr(loaded, "orientation", None) or self.metadata.get("orientation")
         else:
             self.metadata = dict(self.metadata or {})
+
+        if self.orientation is None:
+            self.orientation = self.metadata.get("orientation")
+        if self.orientation is not None:
+            self.metadata["orientation"] = self.orientation
 
         # Prefer explicit axes, else metadata axes.
         if self.axes is None:
@@ -243,8 +253,8 @@ class Image:
     def __repr__(self) -> str:
         return (
             f"Image(shape={self.shape}, dtype={self.dtype}, backend={self.backend}, "
-            f"axes={self.axes!r}, name={self.name!r}, modality={self.modality!r}, "
-            f"submodality={self.submodality!r}, rescale_type={self.rescale_type!r})"
+            f"axes={self.axes!r}, orientation={self.orientation!r}, name={self.name!r}, "
+            f"modality={self.modality!r}, submodality={self.submodality!r}, rescale_type={self.rescale_type!r})"
         )
 
     def __len__(self) -> int:
@@ -273,7 +283,8 @@ class Image:
         if axes is not None:
             md["axes"] = axes
         md["shape"] = tuple(getattr(data, "shape", ()))
-        return Image(data=data, metadata=md, axes=axes, name=self.name)
+        ori = md.get("orientation", self.orientation)
+        return Image(data=data, metadata=md, axes=axes, name=self.name, orientation=ori)
 
     def _axes_after_indexing(self, key: Any) -> str | None:
         if self.axes is None:
@@ -308,6 +319,22 @@ class Image:
 
         return "".join(out_axes) if out_axes else None
 
+    def _axes_after_take(self, new_data: Any, *, axis: int | None) -> str | None:
+        """Infer ``axes`` string after :meth:`numpy.ndarray.take` when possible."""
+        if self.axes is None:
+            return None
+        nd_old = self.ndim
+        nd_new = int(getattr(new_data, "ndim", 0))
+        if len(self.axes) != nd_old:
+            return None
+        if nd_new == nd_old:
+            return self.axes
+        if nd_new == nd_old - 1 and axis is not None:
+            ax = axis if axis >= 0 else nd_old + axis
+            if 0 <= ax < len(self.axes):
+                return self.axes[:ax] + self.axes[ax + 1 :]
+        return None
+
     def __getitem__(self, key: Any) -> Any:
         out = self.data[key]
         if _is_array_like(out):
@@ -325,6 +352,48 @@ class Image:
     def copy(self, deep_data: bool = True) -> "Image":
         copied = self.data.copy() if deep_data and hasattr(self.data, "copy") else self.data
         return self._clone(copied)
+
+    def with_data(self, data: Any, *, axes: str | None = None) -> "Image":
+        """Return a new :class:`Image` with replaced voxel ``data`` (and merged metadata when ``data`` is an :class:`Image`)."""
+        if isinstance(data, Image):
+            md = dict(self.metadata or {})
+            md.update(dict(data.metadata or {}))
+            eff_axes = axes if axes is not None else data.axes
+            md["shape"] = tuple(getattr(data.data, "shape", ()))
+            if eff_axes is not None:
+                md["axes"] = eff_axes
+            else:
+                md.pop("axes", None)
+            out_name = self.name if self.name is not None else data.name
+            return Image(
+                data=data.data,
+                metadata=md,
+                axes=eff_axes,
+                name=out_name,
+                orientation=md.get("orientation"),
+            )
+
+        nd = int(getattr(data, "ndim", -1))
+        eff_axes = axes
+        if eff_axes is None and self.axes is not None and len(self.axes) != nd:
+            md = dict(self.metadata or {})
+            md.pop("axes", None)
+            md["shape"] = tuple(getattr(data, "shape", ()))
+            md.pop("orientation", None)
+            return Image(data=data, metadata=md, axes=None, name=self.name, orientation=None)
+        return self._clone(data, axes=eff_axes)
+
+    def take(self, indices: Any, axis: int | None = None, **kwargs: Any) -> "Image":
+        """Apply :meth:`numpy.ndarray.take` to ``data`` and wrap the result as an :class:`Image`."""
+        new_data = self.data.take(indices, axis=axis, **kwargs)
+        new_axes = self._axes_after_take(new_data, axis=axis)
+        if new_axes is None and self.axes is not None:
+            md = dict(self.metadata or {})
+            md.pop("axes", None)
+            md["shape"] = tuple(getattr(new_data, "shape", ()))
+            md.pop("orientation", None)
+            return Image(data=new_data, metadata=md, axes=None, name=self.name, orientation=None)
+        return self._clone(new_data, axes=new_axes)
 
     def astype(self, dtype: Any, copy: bool = True) -> "Image":
         return self._clone(self.data.astype(dtype, copy=copy))

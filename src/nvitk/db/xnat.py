@@ -460,9 +460,9 @@ def connect_xnat(config: XnatConnectionConfig):
             config.netrc_file,
             preferred_user=user,
         )
-        if user is None:
+        if nu is not None:
             user = nu
-        if password is None:
+        if np is not None:
             password = np
 
     kwargs: dict[str, Any] = {
@@ -508,6 +508,25 @@ def _is_nifti_filename(name: str) -> bool:
     return lower.endswith(".nii.gz") or lower.endswith(".nii")
 
 
+def _is_json_sidecar_filename(name: str) -> bool:
+    return name.lower().endswith(".json")
+
+
+def _extract_zip_member_flat(archive: zipfile.ZipFile, member: zipfile.ZipInfo, destination: Path) -> Path:
+    """Write one archive file to ``destination`` using basename only; resolve name collisions."""
+    base_name = Path(member.filename).name
+    target = destination / base_name
+    stem = target.stem
+    suffix = "".join(target.suffixes)
+    counter = 1
+    while target.exists():
+        target = destination / f"{stem}_{counter}{suffix}"
+        counter += 1
+    with archive.open(member) as source, target.open("wb") as handle:
+        shutil.copyfileobj(source, handle)
+    return target
+
+
 def download_scan_niftis(
     scan: Any,
     output_dir: str | Path,
@@ -530,16 +549,15 @@ def download_scan_niftis(
                 base_name = Path(member.filename).name
                 if not _is_nifti_filename(base_name):
                     continue
-                target = destination / base_name
-                stem = target.stem
-                suffix = "".join(target.suffixes)
-                counter = 1
-                while target.exists():
-                    target = destination / f"{stem}_{counter}{suffix}"
-                    counter += 1
-                with archive.open(member) as source, target.open("wb") as handle:
-                    shutil.copyfileobj(source, handle)
-                extracted.append(target)
+                extracted.append(_extract_zip_member_flat(archive, member, destination))
+
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                base_name = Path(member.filename).name
+                if not _is_json_sidecar_filename(base_name):
+                    continue
+                extracted.append(_extract_zip_member_flat(archive, member, destination))
 
         if keep_zip:
             kept_zip = destination / "scan_nifti_bundle.zip"

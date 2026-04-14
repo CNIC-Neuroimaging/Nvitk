@@ -107,3 +107,19 @@ def default_nifti_axes(ndim: int) -> str:
     if ndim == 5:
         return "XYZCT"
     return "".join(f"D{i}" for i in range(ndim))
+
+
+def orientation_codes_from_affine(affine: Any) -> str | None:
+    """Return axis codes like ``\"RAS\"`` / ``\"LPS\"`` from a 4x4 voxel-to-world affine (nibabel)."""
+    try:
+        import nibabel as nib
+    except Exception:
+        return None
+    aff = np.asarray(affine, dtype=float)
+    if aff.shape != (4, 4):
+        return None
+    try:
+        codes = nib.orientations.aff2axcodes(aff)
+    except Exception:
+        return None
+    return "".join(str(c) for c in codes)

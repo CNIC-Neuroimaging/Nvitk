@@ -1,14 +1,16 @@
 import logging
 import inspect
+import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
-from rich.console import Console, Theme
+from rich.console import Console
 from rich.progress import Progress, TaskID
-from rich.logging import RichHandler
 
 from nvitk.core.patterns import Singleton
+from nvitk.util.colors import bcolors
 
 try:
     from IPython import get_ipython
@@ -22,6 +24,36 @@ def in_notebook():
         return shell == 'ZMQInteractiveShell'
     except NameError:
         return False
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+class _AnsiLevelFormatter(logging.Formatter):
+    """Console handler: colors the level column only so messages can include their own ANSI (e.g. :meth:`Logger.ok`)."""
+
+    _LEVEL_PREFIX = {
+        logging.DEBUG: bcolors.GRAY,
+        logging.INFO: bcolors.OKBLUE,
+        logging.WARNING: bcolors.WARNING,
+        logging.ERROR: bcolors.FAIL,
+        logging.CRITICAL: bcolors.BOLD + bcolors.FAIL,
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        asctime = self.formatTime(record, self.datefmt)
+        levelname = record.levelname
+        msg = record.getMessage()
+        lc = self._LEVEL_PREFIX.get(record.levelno, "")
+        if lc:
+            colored_level = f"{lc}{levelname:<8}{bcolors.ENDC}"
+        else:
+            colored_level = f"{levelname:<8}"
+        return f"{asctime} | {colored_level} | {msg}"
 
 
 class Logger(metaclass=Singleton):
@@ -86,18 +118,6 @@ class Logger(metaclass=Singleton):
         "DEBUG": logging.DEBUG
     }
 
-    _theme = Theme({
-        "info": "blue",
-        "warning": "yellow",
-        "error": "red",
-        "critical": "bold red",
-        "debug": "magenta",
-        "ok": "green",
-        "bold": "bold",
-        "italic": "italic",
-        "underline": "underline",
-    })
-
     def __init__(self, level: str = 'INFO', name: str = 'pymicra'):
         """
         Initialize the Logger singleton.
@@ -129,13 +149,13 @@ class Logger(metaclass=Singleton):
             )
             self._progress = None  # Disable progress in notebooks.
         else:
-            # Terminal mode: use live features.
+            # Terminal mode: use live features (no Rich theme; log colors use ANSI via StreamHandler).
             self._base_console = Console(
-                theme=self._theme,
                 soft_wrap=True,
                 force_terminal=True,
                 record=True,
-                markup=True
+                markup=False,
+                theme=None,
             )
             self._progress = Progress(console=self._base_console, transient=False)
             self._progress.start()
@@ -151,7 +171,7 @@ class Logger(metaclass=Singleton):
         Set the logging level for the base logger.
 
         Removes existing handlers and configures the logger with either a NullHandler (if level is 'NONE')
-        or a RichHandler to render logs on the shared console. File handlers are preserved.
+        or a console StreamHandler with ANSI level colors. File handlers are preserved.
 
         Parameters
         ----------
@@ -175,15 +195,14 @@ class Logger(metaclass=Singleton):
             self._logger.addHandler(logging.NullHandler())
             return
 
-        rich_handler = RichHandler(
-            console=self._base_console,
-            show_time=False,
-            show_level=True,
-            show_path=False,
-            markup=True,
-            log_time_format="%H:%M:%S"
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setFormatter(
+            _AnsiLevelFormatter(
+                fmt="%(asctime)s | %(levelname)-8s | %(message)s",
+                datefmt="%H:%M:%S",
+            )
         )
-        self._logger.addHandler(rich_handler)
+        self._logger.addHandler(console_handler)
 
     def get_level(self) -> str:
         """
@@ -445,7 +464,7 @@ class Logger(metaclass=Singleton):
 
     def ok(self, msg, *args, **kwargs):
         """Log a message in green (OK message)."""
-        styled_msg = f"[green]{msg}[/green]"
+        styled_msg = f"{bcolors.OKGREEN}{msg}{bcolors.ENDC}"
         self._append_log_line("INFO", styled_msg)
         self._logger.info(styled_msg, *args, **kwargs)
         if self._progress:
@@ -454,7 +473,8 @@ class Logger(metaclass=Singleton):
     def _append_log_line(self, level_name: str, msg: str):
         """Append a formatted log line to the internal buffer."""
         now_str = datetime.now().strftime("%H:%M:%S")
-        line = f"{now_str} - {level_name} - {msg}"
+        plain = _strip_ansi(str(msg))
+        line = f"{now_str} - {level_name} - {plain}"
         self._log_buffer.append(line)
 
     def get_logger(self) -> logging.Logger:

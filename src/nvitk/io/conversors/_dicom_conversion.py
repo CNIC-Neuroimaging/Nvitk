@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
-from .._common import default_nifti_axes, reorder_axes
+from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
 
 from ._dicom_rtstructs import integrate_rtstruct_processing
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
@@ -1296,9 +1296,90 @@ def _force_ras_nifti(image: Any) -> Any:
     return image
 
 
+def _spatial_sort_ds_list(ds_list: list[Any]) -> list[Any]:
+    """Order slices along the slice normal when IOP/IPP are available."""
+    if not ds_list:
+        return ds_list
+    first = ds_list[0]
+    iop = getattr(first, "ImageOrientationPatient", None)
+    if iop is None or len(iop) < 6:
+        return ds_list
+    row_dir = np.array([float(x) for x in iop[:3]], dtype=float)
+    col_dir = np.array([float(x) for x in iop[3:6]], dtype=float)
+    slice_dir = np.cross(row_dir, col_dir)
+    nrm = np.linalg.norm(slice_dir)
+    if nrm < 1e-8:
+        return ds_list
+    slice_dir = slice_dir / nrm
+
+    scored: list[tuple[float, int, Any]] = []
+    for idx, ds in enumerate(ds_list):
+        ipp = getattr(ds, "ImagePositionPatient", None)
+        if ipp is None:
+            return ds_list
+        ipp_arr = np.array([float(x) for x in ipp], dtype=float)
+        scored.append((float(np.dot(ipp_arr, slice_dir)), idx, ds))
+    scored.sort(key=lambda t: t[0])
+    return [t[2] for t in scored]
+
+
+def _affine_from_dicom_series(ds_list: list[Any]) -> np.ndarray | None:
+    """
+    Build a 4x4 LPS voxel-to-world affine from ImageOrientationPatient,
+    ImagePositionPatient, PixelSpacing, and slice spacing.
+
+    Volume layout must match :func:`_pixel_arrays_to_basic_volume` (first axis = column,
+    second = row, third = slice when multiple 2D slices).
+    """
+    if not ds_list or nib is None:
+        return None
+    ds0 = ds_list[0]
+    iop = getattr(ds0, "ImageOrientationPatient", None)
+    ipp0 = getattr(ds0, "ImagePositionPatient", None)
+    ps = getattr(ds0, "PixelSpacing", None)
+    if iop is None or ipp0 is None or ps is None or len(iop) < 6:
+        return None
+    try:
+        row_dir = np.array([float(x) for x in iop[:3]], dtype=float)
+        col_dir = np.array([float(x) for x in iop[3:6]], dtype=float)
+        slice_dir = np.cross(row_dir, col_dir)
+        nrm = np.linalg.norm(slice_dir)
+        if nrm < 1e-8:
+            return None
+        slice_dir = slice_dir / nrm
+        row_spacing = float(ps[0])
+        col_spacing = float(ps[1])
+        ipp_first = np.array([float(x) for x in ipp0], dtype=float)
+
+        if len(ds_list) > 1:
+            ipp1 = np.array([float(x) for x in ds_list[1].ImagePositionPatient], dtype=float)
+            d_slice = float(np.linalg.norm(ipp1 - ipp_first))
+            if d_slice < 1e-8:
+                st = getattr(ds0, "SpacingBetweenSlices", None)
+                if st is None:
+                    st = getattr(ds0, "SliceThickness", None)
+                d_slice = float(st) if st is not None else 1.0
+        else:
+            st = getattr(ds0, "SpacingBetweenSlices", None)
+            if st is None:
+                st = getattr(ds0, "SliceThickness", None)
+            d_slice = float(st) if st is not None else 1.0
+
+        affine = np.eye(4)
+        # Match _pixel_arrays_to_basic_volume: volume axes are (col, row, slice).
+        affine[:3, 0] = col_dir * col_spacing
+        affine[:3, 1] = row_dir * row_spacing
+        affine[:3, 2] = slice_dir * d_slice
+        affine[:3, 3] = ipp_first
+        return affine
+    except Exception:
+        return None
+
+
 def _basic_fallback_image(ds_list: list[Any]) -> Any | None:
+    ordered = _spatial_sort_ds_list(ds_list)
     pixel_arrays = []
-    for ds in ds_list:
+    for ds in ordered:
         try:
             if hasattr(ds, "pixel_array"):
                 pixel_arrays.append(ds.pixel_array)
@@ -1307,7 +1388,10 @@ def _basic_fallback_image(ds_list: list[Any]) -> Any | None:
     if not pixel_arrays:
         return None
     volume = _pixel_arrays_to_basic_volume(pixel_arrays)
-    return nib.Nifti1Image(volume, np.eye(4))
+    affine = _affine_from_dicom_series(ordered)
+    if affine is None:
+        affine = np.eye(4)
+    return nib.Nifti1Image(volume, affine)
 
 
 def _apply_requested_rescale(
@@ -1538,6 +1622,11 @@ def _prepare_array_output(
             md_out.get("y_res"),
             md_out.get("z_res"),
         )
+    aff_final = md_out.get("affine")
+    if aff_final is not None:
+        oc = orientation_codes_from_affine(np.asarray(aff_final, dtype=float))
+        if oc is not None:
+            md_out["orientation"] = oc
     return arr, md_out
 
 

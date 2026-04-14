@@ -60,6 +60,7 @@ def imread(
                     metadata=md,
                     axes=md.get("axes"),
                     name=source.stem,
+                    orientation=md.get("orientation"),
                 )
             )
         return out
@@ -71,6 +72,7 @@ def imread(
         metadata=md,
         axes=md.get("axes"),
         name=source.stem,
+        orientation=md.get("orientation"),
     )
 
 
@@ -123,38 +125,6 @@ def swapaxes(
     return out, meta
 
 
-# def imshow(
-#     image: Any,
-#     *,
-#     axis: int = 0,
-#     index: int | str = "mid",
-#     show: bool = True,
-#     **kwargs: Any,
-# ):
-#     import matplotlib.pyplot as plt
-
-#     data = image.data if hasattr(image, "data") else image
-#     arr = to_numpy(data)
-
-#     if arr.ndim not in (2, 3):
-#         raise ValidationError(f"imshow only supports 2D/3D arrays, got ndim={arr.ndim}")
-
-#     if arr.ndim == 3:
-#         if index == "mid":
-#             index = arr.shape[axis] // 2
-#         if not isinstance(index, int):
-#             raise ValidationError("index must be int or 'mid'")
-#         view = arr.take(indices=index, axis=axis)
-#     else:
-#         view = arr
-
-#     if 'cmap' not in kwargs: kwargs['cmap'] = 'gray'
-#     handle = plt.imshow(view, **kwargs)
-#     if show:
-#         plt.axis("off")
-#         plt.show()
-#     return handle
-
 from typing import Any
 
 def imshow(
@@ -188,7 +158,7 @@ def imshow(
 
     # 2. Setup Dimensions
     spatial_mode = display
-    if display is None and arr.ndim == 3: spatial_mode = "standard"
+    if display is None and arr.ndim == 3: spatial_mode = "orthogonal"
     elif display is None: spatial_mode = "standard"
     elif display == "animation": spatial_mode = "standard"
     elif display in ["animation+orth", "animation+orthogonal"]: spatial_mode = "orthogonal"
@@ -200,8 +170,14 @@ def imshow(
     
     # 3. Temporal vs Spatial separation
     if display == "animation":
-        num_frames = arr.shape[t_axis]
-        spatial_arr = arr.take(indices=0, axis=t_axis)
+        if arr.ndim == 4:
+            num_frames = arr.shape[t_axis]
+            spatial_arr = arr.take(indices=0, axis=t_axis)
+        elif arr.ndim == 3:
+            num_frames = arr.shape[axis]
+            spatial_arr = arr
+        else:
+            raise ValueError("Animation requires 3D or 4D data.")
     else:
         spatial_arr = arr
 
@@ -253,7 +229,7 @@ def imshow(
         gs = GridSpec(2, 2, width_ratios=[4, 1], height_ratios=[1, 4], wspace=0.05, hspace=0.05)
         
         ax_main = fig.add_subplot(gs[1, 0])
-        ax_top = fig.add_subplot(gs[0, 0], sharey=ax_main)
+        ax_top = fig.add_subplot(gs[0, 0], sharex=ax_main)
         ax_right = fig.add_subplot(gs[1, 1], sharey=ax_main)
 
         rem = [i for i in range(3) if i != axis]
@@ -263,9 +239,9 @@ def imshow(
             if axis == 2:
                 return vol[indices[axis_top], :, :].T, vol[:, :, indices[axis]], vol[:, indices[axis_right], :]
             elif axis == 1:
-                return vol[:, indices[axis_top], :], vol[:, indices[axis], :], vol[:, :, indices[axis_right]]
+                return vol[:, :, indices[axis_top]], vol[:, indices[axis], :], vol[:, :, indices[axis_right]]
             else: # axis 0
-                return vol[:, indices[axis_top], :], vol[indices[axis], :, :], vol[:, :, indices[axis_right]]
+                return vol[:, indices[axis_top], :], vol[indices[axis], :, :], vol[indices[axis_right], :, :]
 
         top_v, main_v, right_v = get_orth_slices(spatial_arr)
         handles.append(ax_top.imshow(top_v, aspect='auto', **kwargs))
@@ -287,11 +263,18 @@ def imshow(
     # --- BLOCK: ANIMATION EXECUTION ---
     if display == "animation":
         def update(frame):
-            vol = arr.take(indices=frame, axis=t_axis)
+            if arr.ndim == 4:
+                vol = arr.take(indices=frame, axis=t_axis)
+            else:
+                vol = arr
+
             if spatial_mode == "mosaic":
                 for i, s_idx in enumerate(slice_indices):
                     handles[i].set_data(vol.take(indices=s_idx, axis=axis))
             elif spatial_mode in ("orth", "orthogonal"):
+                # If animating a 3D array, update the current orth slice dynamically
+                if arr.ndim == 3:
+                    indices[axis] = frame
                 t_v, m_v, r_v = get_orth_slices(vol)
                 handles[0].set_data(t_v)
                 handles[1].set_data(m_v)
@@ -300,7 +283,11 @@ def imshow(
                 # Standard update
                 up_view = vol
                 if vol.ndim == 3:
-                    idx = resolve_index(index if isinstance(index, (int, str)) else index[axis], vol.shape[axis])
+                    # Determine if 'frame' represents time (4D array) or slice (3D array)
+                    if arr.ndim == 3:
+                        idx = frame
+                    else:
+                        idx = resolve_index(index if isinstance(index, (int, str)) else index[axis], vol.shape[axis])
                     up_view = vol.take(indices=idx, axis=axis)
                 handles[0].set_data(up_view)
             return handles

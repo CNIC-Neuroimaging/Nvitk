@@ -39,6 +39,44 @@ def _root_path_for_imread(path: str | Path, *, asset_type: str) -> Path:
     return p
 
 
+def _nifti_files_in_dir(directory: Path) -> list[Path]:
+    """Sorted list of ``.nii`` / ``.nii.gz`` files directly under ``directory``."""
+    if not directory.is_dir():
+        return []
+    out: list[Path] = []
+    for child in directory.iterdir():
+        if not child.is_file():
+            continue
+        low = child.name.lower()
+        if low.startswith("."):
+            continue
+        if low.endswith(".nii.gz") or low.endswith(".nii"):
+            out.append(child)
+    return sorted(out, key=lambda p: p.name.lower())
+
+
+def _nifti_cache_dir_has_files(directory: Path) -> bool:
+    return bool(_nifti_files_in_dir(directory))
+
+
+def _imread_jobs_for_scan_path(raw: str | Path, *, asset_type: str) -> list[tuple[Path, str]]:
+    """One or more ``(path, force_type)`` jobs for a local cache path (expands NIfTI directories)."""
+    p = Path(str(raw)).expanduser().resolve()
+    ft = str(asset_type).strip().lower()
+    if ft == "nifti":
+        if p.is_file():
+            return [(p, "nifti")]
+        if p.is_dir():
+            files = _nifti_files_in_dir(p)
+            if not files:
+                raise FilterError(f"No NIfTI (.nii/.nii.gz) files found under {p!r}.")
+            return [(f, "nifti") for f in files]
+        raise FilterError(f"Invalid NIfTI path: {raw!r}")
+    if ft == "dicom":
+        return [(_root_path_for_imread(p, asset_type="dicom"), "dicom")]
+    return [(p, ft)]
+
+
 def _dedupe_imread_jobs(jobs: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
     seen: set[tuple[str, str]] = set()
     out: list[tuple[Path, str]] = []
@@ -50,14 +88,35 @@ def _dedupe_imread_jobs(jobs: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
     return out
 
 
-def _imread_stack_from_jobs(jobs: list[tuple[Path, str]]) -> Any:
+def _metadata_json_path_for_nifti(nifti_path: Path) -> Path | None:
+    """If a sibling JSON sidecar exists next to ``nifti_path``, return its path (for ``imread(metadata_json=...)``)."""
+    from nvitk.io.readers.nifti import nifti_metadata_json_path
+
+    jp = nifti_metadata_json_path(nifti_path)
+    return jp if jp.is_file() else None
+
+
+def _imread_kwargs_with_nifti_sidecar(path: Path, force_type: str, base: dict[str, Any]) -> dict[str, Any]:
+    """Merge ``imread`` kwargs; for NIfTI, set ``metadata_json`` when a per-file sidecar exists (overrides generic ``metadata_json``)."""
+    kw = dict(base)
+    if str(force_type).strip().lower() == "nifti":
+        mj = _metadata_json_path_for_nifti(path)
+        if mj is not None:
+            kw["metadata_json"] = str(mj)
+    return kw
+
+
+def _imread_stack_from_jobs(jobs: list[tuple[Path, str]], **imread_kwargs: Any) -> Any:
     from nvitk.io.imageio import imread
 
     if not jobs:
         return []
     outs: list[Any] = []
+    base_kw = dict(imread_kwargs)
     for p, ft in jobs:
-        outs.append(imread(str(p), force_type=str(ft).strip().lower()))
+        ft_l = str(ft).strip().lower()
+        kw = _imread_kwargs_with_nifti_sidecar(p, ft_l, base_kw)
+        outs.append(imread(str(p), force_type=ft_l, **kw))
     if len(outs) == 1:
         return outs[0]
     return outs
@@ -568,8 +627,13 @@ class DataRepo:
         use_sqlite: bool | None = True,
         value: str = "asset_path",
         get_image: bool = False,
+        imread_kwargs: dict[str, Any] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
+        """Query the ``assets`` inventory table with optional filters.
+
+        When ``get_image=True``, ``imread_kwargs`` is forwarded to :func:`nvitk.io.imageio.imread`.
+        """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
             dict(filters_clean),
@@ -616,7 +680,7 @@ class DataRepo:
                 jobs.append((_root_path_for_imread(str(raw), asset_type=ft), ft))
 
             jobs = _dedupe_imread_jobs(jobs)
-            return _imread_stack_from_jobs(jobs)
+            return _imread_stack_from_jobs(jobs, **(imread_kwargs or {}))
 
         if not wide:
             return df
@@ -640,6 +704,7 @@ class DataRepo:
         use_sqlite: bool | None = True,
         value: str = "asset_path",
         get_image: bool = False,
+        imread_kwargs: dict[str, Any] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
         """Assets as a wide table (one row per subject) by default; see :meth:`assets`."""
@@ -657,6 +722,7 @@ class DataRepo:
             use_sqlite=use_sqlite,
             value=value,
             get_image=get_image,
+            imread_kwargs=imread_kwargs,
             cohort_id=cohort_id,
         )
 
@@ -682,9 +748,14 @@ class DataRepo:
         download_scan_path: str | Path | None = None,
         xnat_config: XnatConnectionConfig | None = None,
         skip_existing_download: bool = True,
+        imread_kwargs: dict[str, Any] | None = None,
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame | Any:
-        """Query the ``scans`` inventory table with optional keyword filters (like :meth:`assets`)."""
+        """Query the ``scans`` inventory table with optional keyword filters (like :meth:`assets`).
+
+        When ``get_image=True``, ``imread_kwargs`` is forwarded to :func:`nvitk.io.imageio.imread`
+        (e.g. DICOM options such as ``force_ras``).
+        """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
         merged = merge_filters(
             dict(filters_clean),
@@ -725,13 +796,14 @@ class DataRepo:
                 if raw is None or (isinstance(raw, float) and pd.isna(raw)):
                     need_download.append(row)
                     continue
-                jobs.append((_root_path_for_imread(str(raw), asset_type=ft), ft))
+                jobs.extend(_imread_jobs_for_scan_path(raw, asset_type=ft))
 
             if need_download:
                 cfg = xnat_config
                 if cfg is None:
                     try:
                         cfg = resolve_xnat_connection(load_xnat_profile())
+                        print(f'Connected to XNAT: {cfg.server} / {cfg.project}')
                     except ValueError as exc:
                         raise FilterError(
                             "get_image=True with missing local_cache_path requires XNAT credentials: "
@@ -741,12 +813,17 @@ class DataRepo:
 
                 from nvitk.io.imageio import imread
 
-                from .xnat import connect_xnat, download_scan_dicoms, resolve_xnat_scan_from_scan_row
+                from .xnat import (
+                    connect_xnat,
+                    download_scan_dicoms,
+                    download_scan_niftis,
+                    resolve_xnat_scan_from_scan_row,
+                )
 
-                if ft != "dicom":
+                if ft not in ("dicom", "nifti"):
                     raise FilterError(
                         "On-demand download from XNAT in scans(get_image=True) is implemented for "
-                        "asset_type='dicom' only; sync NIfTI assets or set local_cache_path."
+                        "asset_type='dicom' or 'nifti' only; sync other assets or set local_cache_path."
                     )
 
                 use_persistent_cache = download_scan_path is not None and str(download_scan_path).strip()
@@ -755,6 +832,7 @@ class DataRepo:
                     persistent_base.mkdir(parents=True, exist_ok=True)
 
                 ephemeral_images: list[Any] = []
+                read_kw = imread_kwargs or {}
 
                 with connect_xnat(cfg) as xsession:
                     for row in need_download:
@@ -769,23 +847,53 @@ class DataRepo:
                             sid = str(row.get("scan_id") or "unknown")
                             dest = persistent_base / subj / slot / sid
                             dest.mkdir(parents=True, exist_ok=True)
-                            if skip_existing_download and _dicom_cache_dir_has_files(dest):
-                                pass
+                            if ft == "dicom":
+                                if skip_existing_download and _dicom_cache_dir_has_files(dest):
+                                    pass
+                                else:
+                                    download_scan_dicoms(scan_obj, dest)
+                                jobs.extend(_imread_jobs_for_scan_path(dest, asset_type=ft))
                             else:
-                                download_scan_dicoms(scan_obj, dest)
-                            jobs.append((_root_path_for_imread(dest, asset_type=ft), ft))
+                                if skip_existing_download and _nifti_cache_dir_has_files(dest):
+                                    pass
+                                else:
+                                    download_scan_niftis(scan_obj, dest)
+                                nifti_paths = _nifti_files_in_dir(dest)
+                                if not nifti_paths:
+                                    raise FilterError(f"No NIfTI files available under {dest!r} after download.")
+                                for npth in nifti_paths:
+                                    jobs.append((npth, "nifti"))
                         else:
                             with tempfile.TemporaryDirectory(prefix="nvitk_xnat_scan_") as tmp:
                                 dest = Path(tmp)
-                                download_scan_dicoms(scan_obj, dest)
-                                ephemeral_images.append(
-                                    imread(str(_root_path_for_imread(dest, asset_type=ft)), force_type=ft)
-                                )
+                                if ft == "dicom":
+                                    download_scan_dicoms(scan_obj, dest)
+                                    ephemeral_images.append(
+                                        imread(
+                                            str(_root_path_for_imread(dest, asset_type=ft)),
+                                            force_type=ft,
+                                            **read_kw,
+                                        )
+                                    )
+                                else:
+                                    download_scan_niftis(scan_obj, dest)
+                                    nifti_paths = _nifti_files_in_dir(dest)
+                                    if not nifti_paths:
+                                        raise FilterError(
+                                            f"No NIfTI files extracted to temporary directory {dest!r}."
+                                        )
+                                    for npth in nifti_paths:
+                                        kw = _imread_kwargs_with_nifti_sidecar(npth, "nifti", read_kw)
+                                        ephemeral_images.append(
+                                            imread(str(npth), force_type="nifti", **kw)
+                                        )
 
                 if ephemeral_images:
                     disk_out: list[Any] = []
                     for p, fft in _dedupe_imread_jobs(jobs):
-                        disk_out.append(imread(str(p), force_type=str(fft).strip().lower()))
+                        fft_l = str(fft).strip().lower()
+                        kw = _imread_kwargs_with_nifti_sidecar(p, fft_l, read_kw)
+                        disk_out.append(imread(str(p), force_type=fft_l, **kw))
                     combined = disk_out + ephemeral_images
                     if len(combined) == 1:
                         return combined[0]
@@ -797,7 +905,7 @@ class DataRepo:
                     "(expected non-null local download/cache directories)."
                 )
             jobs = _dedupe_imread_jobs(jobs)
-            return _imread_stack_from_jobs(jobs)
+            return _imread_stack_from_jobs(jobs, **(imread_kwargs or {}))
 
         return df
 
