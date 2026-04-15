@@ -8,9 +8,10 @@ from pathlib import Path
 
 import sys
 project_root = Path(__file__).resolve().parents[3]
-src_dir = project_root / 'src' 
+src_dir = project_root / 'src' / 'nvitk'
 sys.path.insert(0, str(src_dir))
 
+print(f"Adding {src_dir} to sys.path")
 from nvitk.util.colors import bcolors as Colors
 
 def categorize_command(cmd, module):

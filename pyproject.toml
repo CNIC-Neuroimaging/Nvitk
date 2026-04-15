@@ -1,3 +1,6 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Project configuration
+# ──────────────────────────────────────────────────────────────────────────────
 [build-system]
 requires = ["setuptools>=61.0", "wheel", "setuptools_scm[toml]>=6.0"]
 build-backend = "setuptools.build_meta"
@@ -19,8 +22,14 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "License :: Open Source"
 ]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dependencies
+# ──────────────────────────────────────────────────────────────────────────────
 dependencies = [
-  # General dependencies
+  # -----------------------------------------------------------------------------
+  # Core dependencies
+  # -----------------------------------------------------------------------------
   "numpy>=2.3.3",
   "scipy>=1.15.3",
   "click>=8.2.1",
@@ -31,7 +40,9 @@ dependencies = [
   "debugpy>=1.8.16",
   "jupyter>=1.1.1",
 
-  # Image processing
+  # -----------------------------------------------------------------------------
+  # Image processing dependencies
+  # -----------------------------------------------------------------------------
   "nibabel>=5.3.2",
   "tifffile>=2025.5.26",
   "pillow>=11.0.0",
@@ -46,16 +57,20 @@ dependencies = [
   "SimpleITK>=2.5.2",
   "scikit-image>=0.25.2",
   "opencv-python>=4.11",
-
+  
   "totalsegmentator>=2.11.0",
   "nnunetv2>=2.6.2",
 
-  # Mesh processing
-  # "trimesh>=4.7.4",
-  #  "open3d>=0.19.0",
-  #'pymeshlab>=',
+  # -----------------------------------------------------------------------------
+  # Mesh processing dependencies
+  # -----------------------------------------------------------------------------
+  # "trimesh>=",
+  # "open3d>=",
+  # "pymeshlab>=",
 
-  # GUI and visualization
+  # -----------------------------------------------------------------------------
+  # GUI/visualization/logging dependencies
+  # -----------------------------------------------------------------------------
   "rich>=14.1.0",
   "lazy-loader>=0.4",
   "networkx>=3.3",
@@ -64,22 +79,26 @@ dependencies = [
   "plotly>=6.3.0",
   "kaleido>=1.0.0",
 
+  # -----------------------------------------------------------------------------
   # Experimental dependencies
+  # -----------------------------------------------------------------------------
   "scikit-learn>=1.7.1",
   "h5py>=3.16.0",
 
+  # -----------------------------------------------------------------------------
   # MATLAB dependencies
-#   "matlabengine==25.2.2", # For MATLAB version 2025b
+  # -----------------------------------------------------------------------------
+  # "matlabengine==25.2.2", # For MATLAB version 2025b
 ]
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Optional dependencies
+# ──────────────────────────────────────────────────────────────────────────────
 [project.optional-dependencies]
 gpu = [
   "cupy-cuda12x>=13.6.0",
   "pytorch>=2.8.0", # +cu129
   "torchvision>=0.23.0", # +cu129
-]
-test = [
-  "pytest>=8.3.5",
 ]
 xnat = [
   "xnat>=0.7.2",
@@ -93,34 +112,50 @@ conda-packages = [
   # - mrtrix3>=3.0.8 (mrtrix3)
   # - libstdcxx-ng>=15.2.0 (conda-forge)
 ]
-full = ["nvitk[gpu,test,xnat]"]
+test = [
+  "pytest>=8.3.5",
+]
+full = ["nvitk[gpu,xnat,test]"]
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Scripts
+# ──────────────────────────────────────────────────────────────────────────────
 [project.scripts]
-# General imaging and mesh processing scripts
+# -----------------------------------------------------------------------------
+# Conversion scripts
+# -----------------------------------------------------------------------------
 dcm2nii = "nvitk.io.conversors.dcm2nii:main"
 stl2nifti = "nvitk.io.conversors.stl2nifti:main"
 phase2volume = "nvitk.io.conversors.phase2volume:main"
 nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 
+# -----------------------------------------------------------------------------
 # Miscellaneous scripts
-pyhelp = "nvitk.utils.list_cli_commands:main"
+# -----------------------------------------------------------------------------
+pyhelp = "nvitk.util.list_cli_commands:main"
 
+# -----------------------------------------------------------------------------
+# GUI scripts
+# -----------------------------------------------------------------------------
 [project.gui-scripts]
-# Nvitk-GUI = "gui.main:main"
+# nvitk-gui = "gui.main:main"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Setuptools configuration
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]
+testpaths = ["test"]
 
 [tool.setuptools.packages.find]
-where = ["src/nvitk"]
-include = ["*"]  # Ensures subpackages are found
+where = ["src"]
+include = ["nvitk", "nvitk.*"]  
 
 [tool.poetry]
 packages = [
-  { include = "scripts", from = "src" },
-  { include = "scripts.*", from = "src" },
   { include = "nvitk", from = "src" },
   { include = "nvitk.*", from = "src" },
-  { include = "nvitk.*.*", from = "src" },
 ]
