@@ -1,0 +1,16 @@
+----------------------------------------------------------------------------------------------------------------
+MATLAB Version: 9.14.0.2891782 (R2023a) Update 8
+MATLAB License Number: 40653209
+Operating System: Linux 6.8.0-85-generic #85~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep 19 16:18:59 UTC 2 x86_64
+Java Version: Java 1.8.0_202-b08 with Oracle Corporation Java HotSpot(TM) 64-Bit Server VM mixed mode
+----------------------------------------------------------------------------------------------------------------
+MATLAB                                                Version 9.14        (R2023a)   
+Simulink                                              Version 10.7        (R2023a)   
+Computer Vision Toolbox                               Version 10.4        (R2023a)   
+Curve Fitting Toolbox                                 Version 3.9         (R2023a)   
+GEOM3D Geometry 3D Toolbox                            Version 1.22        06-Jun-2018
+Image Processing Toolbox                              Version 11.7        (R2023a)   
+MESHES3D 3D Surface Meshes                            Version 1.22        06-Jun-2018
+Statistical Parametric Mapping                        Version 7771        (SPM12)    
+Statistics and Machine Learning Toolbox               Version 12.5        (R2023a)
+MATLAB Compiler                                       Version 8.6         (R2023a)

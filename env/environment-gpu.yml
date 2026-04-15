@@ -22,4 +22,4 @@ dependencies:
       - torchvision==0.23.0+cu129
       - cupy-cuda12x==13.6.0
       # Install the Python package from this repo
-      - -e .
+      - -e ../

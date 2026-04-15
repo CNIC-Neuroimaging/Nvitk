@@ -34,11 +34,11 @@ dist/
 .eggs/
 
 # Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
+# .env
+# .venv
+# env/
+# venv/
+# ENV/
 
 # Conda
 *.conda
@@ -94,6 +94,8 @@ htmlcov/
 data/
 results/
 outputs/
+dataset/
+dataset/*
 dataset/cache/*
 !dataset/cache/.gitkeep
 

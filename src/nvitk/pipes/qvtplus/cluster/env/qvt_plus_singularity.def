@@ -1,0 +1,272 @@
+Bootstrap: docker
+From: debian:trixie-slim
+
+%labels
+    Author imarcoss
+    Version 2.0
+    Description QVT+ 4D Flow Analysis Pipeline with SPM12 and FSL
+    Maintainer imarcoss
+
+%help
+    QVT+ Neuroimaging Analysis Container
+    
+    This container provides the QVT+ (Quantitative Velocity Tool Plus) pipeline
+    for 4D Flow MRI analysis with SPM12 and FSL dependencies.
+    
+    Usage:
+        # Single patient mode
+        singularity run qvtv2_plus.sif <path_to_data> 
+        
+        # Show help
+        singularity run qvtv2_plus.sif --help
+    
+    Examples:
+        # Single patient
+        singularity run --bind /data:/data --bind /results:/results \
+            qvt_plus.sif /data/sub-001/4DFlow /data/sub-001/eICAB /results/sub-001
+        
+        # Batch processing all patients
+        singularity run --bind /data:/data --bind /results:/results \
+            qvt_plus.sif --batch /data all 1 1
+    
+    Environment Variables:
+        FSLDIR - FSL installation directory
+        SPM12DIR - SPM12 installation directory
+        MCR_CACHE_ROOT - MATLAB Runtime cache directory
+
+%files
+    # Copy compiled QVT+ application from QVTV2Compiled directory
+    # Paths are relative to the build context (where you run 'singularity build')
+    # Uncomment and adjust paths as needed:
+    #
+    # If building from BioImaging root directory:
+    /home/imarcoss/BioImaging/src/neuroimaging/qvt_plus/QVTV2Compiled/QVTRun /opt/qvt/QVTRun
+    /home/imarcoss/BioImaging/src/neuroimaging/qvt_plus/QVTV2Compiled/run_QVTRun.sh /opt/qvt/run_QVTRun.sh
+    /home/imarcoss/BioImaging/src/neuroimaging/qvt_plus/QVTV2Compiled/readme.txt /opt/qvt/readme.txt
+    #
+    # Copy SPM12 from host (absolute path, adjust as needed)
+    "/home/imarcoss/MATLAB Add-Ons/SWR/spm12-r7771" /opt/spm12
+    #
+    # Copy FSL from host (optional - if you want to use your existing installation)
+    # /home/imarcoss/fsl /opt/fsl-6.0.7.19
+    #
+    # Copy MATLAB Runtime installer (download separately from MathWorks)
+    # Download: https://ssd.mathworks.com/supportfiles/downloads/R2023a/Release/0/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2023a_glnxa64.zip
+    # Extract and place installer in build context, then:
+    "/home/imarcoss/MATLAB Add-Ons/MCR/MATLAB_Runtime_R2023a" /opt/mcr_installer
+
+%environment
+    # FSL environment (version 6.0.7.19)
+    export FSLDIR="/opt/fsl-6.0.7.19"
+    export PATH="${FSLDIR}/bin:${PATH}"
+    export FSLOUTPUTTYPE="NIFTI"
+    export FSLMULTIFILEQUIT="TRUE"
+    export FSLTCLSH="${FSLDIR}/bin/fsltclsh"
+    export FSLWISH="${FSLDIR}/bin/fslwish"
+    export FSLLOCKDIR=""
+    export FSLMACHINELIST=""
+    export FSLREMOTECALL=""
+    export FSLGECUDAQ="cuda.q"
+    
+    # SPM12 environment (r7771)
+    export SPM12DIR="/opt/spm12"
+    export MATLABPATH="${SPM12DIR}:${MATLABPATH}"
+    
+    # MATLAB Runtime environment (R2023a)
+    export MCRROOT="/opt/mcr/R2023a"
+    export MCR_CACHE_ROOT="/tmp/mcr_cache_${USER}"
+    export MCR_CACHE_VERBOSE="true"
+    export XAPPLRESDIR="${MCRROOT}/X11/app-defaults"
+    export LD_LIBRARY_PATH="${MCRROOT}/runtime/glnxa64:${MCRROOT}/bin/glnxa64:${MCRROOT}/sys/os/glnxa64:${MCRROOT}/sys/opengl/lib/glnxa64:${LD_LIBRARY_PATH}"
+    
+    # QVT+ paths
+    export PATH="/opt/qvt:${PATH}"
+
+%post
+    # Install system dependencies
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        lbzip2 \
+        unzip \
+        curl \
+        wget \
+        libxt-dev \
+        libncursesw6 \
+        python3 \
+        libxext6 \
+        libxmu6 \
+        libgomp1 \
+        && rm -rf /var/lib/apt/lists/*
+    
+    # Install FSL (version 6.0.7.19)
+    # Option 1: Copy from host (if available in build context)
+    # Option 2: Install fresh using installer
+    echo "Installing FSL 6.0.7.19..."
+    if [ -d /opt/fsl-6.0.7.19 ]; then
+        # Copy FSL from host
+        echo "Copying FSL from host..."
+    else
+        # Install FSL using conda installer
+        echo "Installing FSL using conda installer..."
+        curl -fsSL https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/fslinstaller.py | python3 - -d /opt/fsl-6.0.7.19 -V 6.0.7.19
+    fi
+    
+    # Install MATLAB Runtime (R2023a)
+    # NOTE: You need to download the MCR installer separately and place it in the build context
+    # Download from: https://www.mathworks.com/products/compiler/matlab-runtime.html
+    # For R2023a: https://ssd.mathworks.com/supportfiles/downloads/R2023a/Release/0/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2023a_glnxa64.zip
+    echo "Installing MATLAB Runtime..."
+    if [ -e /opt/mcr_installer ]; then
+        /opt/mcr_installer/install -mode silent -agreeToLicense yes -destinationFolder /opt/mcr
+        rm -rf /opt/mcr_installer
+    else
+        echo "WARNING: MATLAB Runtime installer not found. Please download and include in build context."
+        echo "Download from: https://www.mathworks.com/products/compiler/matlab-runtime.html"
+    fi
+    
+    # Install SPM12
+    # NOTE: You need to download SPM12 separately and place it in the build context
+    # Download from: https://www.fil.ion.ucl.ac.uk/spm/software/download/
+    echo "Installing SPM12..."
+    if [ -d /opt/spm12 ]; then
+        echo "Copying SPM12 from host..."
+    else
+        echo "WARNING: SPM12 not found. Please download and include in build context."
+        echo "Download from: https://www.fil.ion.ucl.ac.uk/spm/software/download/"
+    fi
+    
+    # Create QVT+ directory and copy compiled application
+    if [ -f /opt/qvt/QVTRun ]; then
+        echo "Copying QVTRun from host..."
+        chmod +x /opt/qvt/QVTRun
+        # Copy run script
+        if [ -f /opt/qvt/run_QVTRun.sh ]; then
+            echo "Copying run_QVTRun.sh from host..."
+            chmod +x /opt/qvt/run_QVTRun.sh
+        fi
+        echo "✓ QVT+ application copied successfully"
+    else
+        echo "WARNING: QVTRun executable not found. Please include in build context."
+        echo "Expected: QVTRun and run_QVTRun.sh from QVTV2Compiled directory"
+    fi
+    
+    # Create necessary directories
+    mkdir -p /data /results
+    
+    # Clean up
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%runscript
+    #!/bin/bash
+    set -euo pipefail
+
+    # Runs QVT+ processing inside the container.
+    # New single-patient usage (per request):
+    #   singularity run qvt_plus.sif <path_to_qvtplus_output>
+    # Batch usage (keeps compatibility):
+    #   singularity run qvt_plus.sif --batch <base_path> <patient_id>
+
+    show_help() {
+        cat <<EOF
+QVT+ Container runscript
+
+Usage (single patient):
+    $0 <path_to_qvtplus_output>
+
+Usage (batch):
+    $0 --batch <base_path> <patient_id>
+
+Examples:
+    $0 /data/RESULTS/QVTPlus/sub-001
+    $0 --batch /data all
+EOF
+    }
+
+    if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "-?" ]; then
+        show_help
+        exit 0
+    fi
+
+    # Prefer externally provided MCRROOT, fallback to default
+    MCRROOT="${MCRROOT:-/opt/mcr/R2023a}"
+
+    # Ensure run wrapper exists
+    if [ ! -x /opt/qvt/run_QVTRun.sh ]; then
+        echo "ERROR: /opt/qvt/run_QVTRun.sh not found or not executable"
+        exit 1
+    fi
+
+    if [ "${1:-}" = "--batch" ]; then
+        if [ "$#" -lt 3 ]; then
+            echo "ERROR: Batch mode requires: --batch <base_path> <patient_id>"
+            exit 1
+        fi
+        BASE_PATH="$2"
+        PATIENT_ID="$3"
+
+        # We assume /opt/qvt/run_QVTRun.sh supports the same --batch interface.
+        exec /opt/qvt/run_QVTRun.sh "$MCRROOT" --batch "$BASE_PATH" "$PATIENT_ID"
+    else
+        if [ "$#" -lt 1 ]; then
+            echo "ERROR: Single patient mode requires: <path_to_qvtplus_output>"
+            exit 1
+        fi
+        QVTPATH="$1"
+
+        if [ ! -d "$QVTPATH" ]; then
+            echo "ERROR: QVT+ results path does not exist: $QVTPATH"
+            exit 1
+        fi
+
+        # Call the run wrapper with MCRROOT and the single QVT+ path.
+        # Assumption: /opt/qvt/run_QVTRun.sh accepts (MCRROOT, <qvt_path>) for single-patient runs.
+        exec /opt/qvt/run_QVTRun.sh "$MCRROOT" "$QVTPATH"
+    fi
+
+%test
+    # Test the container
+    echo "Testing QVT+ container..."
+    
+    # Check if FSL is installed
+    if [ -d "$FSLDIR" ]; then
+        echo "✓ FSL found at $FSLDIR"
+    else
+        echo "✗ FSL not found"
+        exit 1
+    fi
+    
+    # Check if SPM12 is installed
+    if [ -d "$SPM12DIR" ]; then
+        echo "✓ SPM12 found at $SPM12DIR"
+    else
+        echo "✗ SPM12 not found"
+        exit 1
+    fi
+    
+    # Check if MATLAB Runtime is installed
+    if [ -d "/opt/mcr" ]; then
+        echo "✓ MATLAB Runtime found"
+    else
+        echo "✗ MATLAB Runtime not found"
+        exit 1
+    fi
+    
+    # Check if QVT+ executable exists
+    if [ -f "/opt/qvt/QVTRun" ]; then
+        echo "✓ QVTRun executable found"
+    else
+        echo "✗ QVTRun executable not found"
+        exit 1
+    fi
+    
+    # Check if run script exists
+    if [ -f "/opt/qvt/run_QVTRun.sh" ]; then
+        echo "✓ run_QVTRun.sh script found"
+    else
+        echo "✗ run_QVTRun.sh script not found"
+        exit 1
+    fi
+    
+    echo "All tests passed!"
+

@@ -11,4 +11,4 @@ dependencies:
   - libstdcxx-ng>=15.2.0
   # Install the Python package from this repo via pip
   - pip:
-      - -e .
+      - -e ../
