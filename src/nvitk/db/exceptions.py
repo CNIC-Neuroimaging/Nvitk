@@ -28,3 +28,6 @@ class FilterError(DatasetError):
 
 class XnatSyncError(DatasetError):
     """XNAT download, extraction, or inventory update failed."""
+
+class SettingsError(DatasetError):
+    """Error reading settings file."""

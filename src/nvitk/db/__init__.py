@@ -26,7 +26,7 @@ from .importers import (
     upsert_cohort_membership_for_subjects,
 )
 from .asl_atlases import ASL_ATLAS_REGIONS, regions_for_atlas
-from .repo import DEFAULT_COHORT_ID, DataRepo
+from .repo import DEFAULT_COHORT_ID, DataRepo, get_repo_from_settings
 from .sqlite_index import SQLiteIndex
 from .local_dicom_assets import register_dicom_tree, upsert_dicom_assets
 from .local_nifti_assets import register_nifti_tree, upsert_nifti_assets
@@ -46,6 +46,7 @@ __all__ = [
     "DerivedImageMeasurementSpec",
     "DerivedVariableRegistration",
     "DataRepo",
+    "get_repo_from_settings",
     "regions_for_atlas",
     "DatasetCatalog",
     "TableDefinition",

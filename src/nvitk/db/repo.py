@@ -19,7 +19,7 @@ import pandas as pd
 
 from .asl_atlases import regions_for_atlas
 from .catalog import DatasetCatalog, TableDefinition
-from .exceptions import FilterError
+from .exceptions import FilterError, SettingsError
 from .filters import apply_filters, ensure_list, merge_filters
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 from .sqlite_index import SQLiteIndex
@@ -35,7 +35,42 @@ def _default_dataset_root() -> Path:
     env_root = os.getenv("NVITK_DATASET_ROOT")
     if env_root:
         return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[3] / "dataset"
+    return Path(__file__).resolve().parents[3] / "dataset" / "nvitk-dataset"
+
+
+def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatConnectionConfig:
+    """Get :class:`DataRepo` from settings file, optionally with :class:`XnatConnectionConfig`."""
+    try:
+        settings = load_json_file(Path(__file__).resolve().parents[3] / ".nvitk" / "settings.json")
+        if "local_fallback_root" in settings["db"] and settings["db"]["local_fallback_root"] is not None:
+            print(f"Using local root: {settings['db']['local_fallback_root']}")
+            root = settings["db"]["local_fallback_root"]
+        else: root = settings["db"]["root"]
+
+        repo = DataRepo(
+            root=root,
+            use_sqlite=settings["db"]["sqlite_index"],
+            auto_scaffold=settings["db"]["auto_scaffold"],
+        )
+        if return_xnat_config:
+            if "xnat_config" in settings["db"]:
+                _net_file, _urs, _pwd = None, None, None
+                try: _net_file = settings["db"]["xnat_config"]["netrc_file"]
+                except Exception: _urs, _pwd = settings["db"]["xnat_config"]["user"], settings["db"]["xnat_config"]["password"]
+                finally:
+                    if _net_file is None and (_urs is None or _pwd is None):
+                        raise SettingsError("XNAT config requires netrc_file or user and password")
+                return repo, XnatConnectionConfig(
+                    server=settings["db"]["xnat_config"]["server"],
+                    project=settings["db"]["xnat_config"]["project"],
+                    netrc_file=_net_file,
+                    user=_urs,
+                    password=_pwd,
+                    verify=settings["db"]["xnat_config"]["verify"],
+                )
+            return repo
+    except Exception as e:
+        raise SettingsError(f"Error getting repo from settings: {e}")
 
 
 # Default cohort for API queries when ``cohort_id`` is omitted (see :meth:`DataRepo._resolve_cohort`).
