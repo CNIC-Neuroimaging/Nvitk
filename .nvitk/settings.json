@@ -13,6 +13,6 @@
             "project":    "PESA_Brain",
             "netrc_file": "~/.netrc",
             "verify":     false
-        },
-    },
+        }
+    }
 }

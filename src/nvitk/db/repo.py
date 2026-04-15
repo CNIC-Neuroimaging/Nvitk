@@ -41,34 +41,38 @@ def _default_dataset_root() -> Path:
 def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatConnectionConfig:
     """Get :class:`DataRepo` from settings file, optionally with :class:`XnatConnectionConfig`."""
     try:
-        settings = load_json_file(Path(__file__).resolve().parents[3] / ".nvitk" / "settings.json")
-        if "local_fallback_root" in settings["db"] and settings["db"]["local_fallback_root"] is not None:
-            print(f"Using local root: {settings['db']['local_fallback_root']}")
-            root = settings["db"]["local_fallback_root"]
-        else: root = settings["db"]["root"]
+        import json
+        with open(Path(__file__).resolve().parents[3] / ".nvitk" / "settings.json", "r") as f:
+            settings = json.load(f)
+            if "local_fallback_root" in settings["db"] and settings["db"]["local_fallback_root"] is not None:
+                print(f"Using local root: {settings['db']['local_fallback_root']}")
+                root = settings["db"]["local_fallback_root"]
+            else: 
+                print(f"Using remote root: {settings['db']['root']}")
+                root = settings["db"]["root"]
 
-        repo = DataRepo(
-            root=root,
-            use_sqlite=settings["db"]["sqlite_index"],
-            auto_scaffold=settings["db"]["auto_scaffold"],
-        )
-        if return_xnat_config:
-            if "xnat_config" in settings["db"]:
-                _net_file, _urs, _pwd = None, None, None
-                try: _net_file = settings["db"]["xnat_config"]["netrc_file"]
-                except Exception: _urs, _pwd = settings["db"]["xnat_config"]["user"], settings["db"]["xnat_config"]["password"]
-                finally:
-                    if _net_file is None and (_urs is None or _pwd is None):
-                        raise SettingsError("XNAT config requires netrc_file or user and password")
-                return repo, XnatConnectionConfig(
-                    server=settings["db"]["xnat_config"]["server"],
-                    project=settings["db"]["xnat_config"]["project"],
-                    netrc_file=_net_file,
-                    user=_urs,
-                    password=_pwd,
-                    verify=settings["db"]["xnat_config"]["verify"],
-                )
-            return repo
+            repo = DataRepo(
+                root=root,
+                use_sqlite=settings["db"]["sqlite_index"],
+                auto_scaffold=settings["db"]["auto_scaffold"],
+            )
+            if return_xnat_config:
+                if "xnat_config" in settings["db"]:
+                    _net_file, _urs, _pwd = None, None, None
+                    try: _net_file = settings["db"]["xnat_config"]["netrc_file"]
+                    except Exception: _urs, _pwd = settings["db"]["xnat_config"]["user"], settings["db"]["xnat_config"]["password"]
+                    finally:
+                        if _net_file is None and (_urs is None or _pwd is None):
+                            raise SettingsError("XNAT config requires netrc_file or user and password")
+                    return repo, XnatConnectionConfig(
+                        server=settings["db"]["xnat_config"]["server"],
+                        project=settings["db"]["xnat_config"]["project"],
+                        netrc_file=_net_file,
+                        user=_urs,
+                        password=_pwd,
+                        verify=settings["db"]["xnat_config"]["verify"],
+                    )
+                return repo
     except Exception as e:
         raise SettingsError(f"Error getting repo from settings: {e}")
 
