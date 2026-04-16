@@ -18,6 +18,7 @@ from typing import Any, Iterable, Mapping
 import pandas as pd
 
 from .asl_atlases import regions_for_atlas
+from .t1_atlases import regions_for_t1_atlas
 from .catalog import DatasetCatalog, TableDefinition
 from .exceptions import FilterError, SettingsError
 from .filters import apply_filters, ensure_list, merge_filters
@@ -514,8 +515,9 @@ class DataRepo:
         """
         Load *table* as a DataFrame with optional column projection, filters, and wide pivot.
 
-        For ``clinical_measurements`` / ``image_measurements``, ``wide=True`` resolves values
-        and pivots to one column per variable (and entity keys); see catalog wide definitions.
+        For ``clinical_measurements`` / ``image_measurements`` / ``cognitive_measurements``,
+        ``wide=True`` resolves values and pivots to one column per variable (and entity keys);
+        see catalog wide definitions.
         """
         definition = self.catalog.get_table(table)
         effective_sqlite = self.use_sqlite if use_sqlite is None else use_sqlite
@@ -533,11 +535,44 @@ class DataRepo:
         if cohort_eff is not False:
             df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
         if wide:
-            if table in {"clinical_measurements", "image_measurements"}:
+            if table in {"clinical_measurements", "image_measurements", "cognitive_measurements"}:
                 df = self._resolve_measurement_values(df)
             image_sv = False if table == "image_measurements" else None
             return self._to_wide(df, definition, image_wide_single_variable=image_sv)
         return df.reset_index(drop=True)
+
+    def cognitive(
+        self,
+        *,
+        variables: str | Iterable[str] | None = None,
+        filters: dict[str, Any] | None = None,
+        wide: bool = True,
+        use_sqlite: bool | None = True,
+        cohort_id: str | bool | None = None,
+    ) -> pd.DataFrame:
+        """
+        Query ``cognitive_measurements`` like :meth:`clinical` but with ``domain='cognitive'``.
+        """
+        if not self.catalog.table_exists("cognitive_measurements"):
+            return pd.DataFrame()
+        cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
+        resolved_variables = self.catalog.resolve_variable_ids(variables, domain="cognitive")
+        structural, var_specs = self._split_measurement_filters(
+            filters_clean, domain="cognitive", table_name="cognitive_measurements"
+        )
+        merged = merge_filters(structural, {"variable_id": resolved_variables} if resolved_variables else None)
+        force_parquet = bool(var_specs)
+        df = self._load_table_frame(
+            "cognitive_measurements",
+            filters=merged,
+            use_sqlite=use_sqlite,
+            force_parquet=force_parquet,
+        )
+        if var_specs:
+            df = _apply_variable_value_filters(df, var_specs)
+        if cohort_eff is not False:
+            df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
+        return self._prepare_measurements(df, wide=wide, table_name="cognitive_measurements")
 
     def clinical(
         self,
@@ -587,20 +622,24 @@ class DataRepo:
         cohort_id: str | bool | None = None,
     ) -> pd.DataFrame:
         """
-        Query ``image_measurements`` with modality, regions, atlas (ASL), pipeline selection, and filters.
+        Query ``image_measurements`` with modality, regions, atlas (ASL or T1), pipeline selection, and filters.
 
         When neither modality nor pipeline filters are given, rows are restricted to catalog
-        default pipelines per modality where defined. Use ``atlas=`` with ``modality='asl'`` to
-        expand *regions* from a named atlas.
+        default pipelines per modality where defined. Use ``atlas=`` with ``modality='asl'`` or
+        ``modality='t1'`` to expand *regions* from a named atlas preset.
         """
         cohort_eff, filters_norm = self._resolve_cohort(cohort_id, filters)
         if "pipeline_version" in filters_norm and "pipeline_id" not in filters_norm:
             filters_norm["pipeline_id"] = filters_norm.pop("pipeline_version")
 
         if atlas is not None:
-            if modality is None or str(modality).strip().lower() != "asl":
-                raise FilterError("Parameter 'atlas' requires modality='asl'.")
-            atlas_regions = regions_for_atlas(atlas)
+            mod_l = str(modality).strip().lower() if modality is not None else ""
+            if mod_l == "asl":
+                atlas_regions = regions_for_atlas(atlas)
+            elif mod_l == "t1":
+                atlas_regions = regions_for_t1_atlas(atlas)
+            else:
+                raise FilterError("Parameter 'atlas' requires modality='asl' or modality='t1'.")
             user_regions = [normalize_variable_id(r) for r in ensure_list(regions)] if regions else []
             if user_regions:
                 intersection = sorted(set(atlas_regions) & set(user_regions))

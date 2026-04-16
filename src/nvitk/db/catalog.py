@@ -16,7 +16,16 @@ import pandas as pd
 from nvitk.core.exceptions import ValidationError
 
 from .exceptions import ManifestError, TableNotFoundError
-from .storage import coerce_bool, infer_manifest_dtypes, normalize_variable_id, read_json, utc_now_iso, write_json
+from .storage import (
+    coerce_bool,
+    empty_dataframe,
+    infer_manifest_dtypes,
+    normalize_variable_id,
+    read_json,
+    utc_now_iso,
+    write_json,
+    write_parquet_table,
+)
 
 
 @dataclass(frozen=True)
@@ -152,6 +161,56 @@ class DatasetCatalog:
 
     def table_exists(self, name: str) -> bool:
         return name in self._tables
+
+    def ensure_table_definition(self, name: str, *, clone_from: str) -> Path:
+        """
+        Register *name* in ``tables.json`` by cloning manifest metadata from *clone_from*,
+        pointing at ``<table_root>/{name}.parquet``. Creates an empty Parquet file if missing.
+
+        No-op (returns existing Parquet path) when *name* is already registered.
+        """
+        if self.table_exists(name):
+            return self.get_table(name).path
+
+        template = self.tables_manifest.setdefault("tables", {}).get(clone_from)
+        if template is None:
+            raise TableNotFoundError(f"Cannot clone table definition: unknown template {clone_from!r}")
+
+        table_root = self.repository_manifest.get("table_root", "tables").strip().rstrip("/")
+        rel_path = f"{table_root}/{name}.parquet"
+        new_payload: dict[str, Any] = {
+            "path": rel_path,
+            "kind": template.get("kind", "derived"),
+            "columns": dict(template.get("columns", {})),
+        }
+        for optional in (
+            "description",
+            "key_columns",
+            "index_columns",
+            "wide_index_columns",
+            "wide_key_columns",
+            "value_columns",
+        ):
+            if optional in template:
+                new_payload[optional] = template[optional]
+        if "provenance" in template:
+            new_payload["provenance"] = dict(template["provenance"])
+
+        new_payload["row_count"] = 0
+        new_payload["last_updated"] = utc_now_iso()
+
+        dest = self.root / rel_path
+        columns_map: dict[str, str] = dict(new_payload["columns"])
+        if not columns_map:
+            raise ManifestError(f"Template table {clone_from!r} has no columns; cannot clone schema.")
+        write_parquet_table(dest, empty_dataframe(columns_map))
+
+        tables = self.tables_manifest.setdefault("tables", {})
+        tables[name] = new_payload
+        self.tables_manifest["last_updated"] = utc_now_iso()
+        write_json(self.tables_manifest_path, self.tables_manifest)
+        self.refresh()
+        return dest
 
     def list_pipelines(self, modality: str | None = None) -> list[dict[str, Any]]:
         entries = list(self.pipelines_manifest.get("pipelines", []))

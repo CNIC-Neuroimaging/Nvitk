@@ -294,7 +294,7 @@ def publish_derived_measurements(
     repo: DataRepo,
     df: pd.DataFrame,
     *,
-    table: Literal["image_measurements", "clinical_measurements"],
+    table: Literal["image_measurements", "clinical_measurements", "cognitive_measurements"],
     register: DerivedVariableRegistration | Mapping[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     build_sqlite_index: bool = True,
@@ -304,7 +304,8 @@ def publish_derived_measurements(
     """Upsert derived measurement rows and optionally register catalog metadata.
 
     Pass the dataframe returned by :func:`build_image_measurement_rows` or
-    :func:`build_clinical_measurement_rows`. When ``register`` is set, that entry
+    :func:`build_clinical_measurement_rows` (the latter also matches the
+    ``cognitive_measurements`` schema). When ``register`` is set, that entry
     is written with :func:`register_derived_variable` after a successful upsert.
     """
     if df.empty and not allow_empty:

@@ -26,6 +26,7 @@ from .importers import (
     upsert_cohort_membership_for_subjects,
 )
 from .asl_atlases import ASL_ATLAS_REGIONS, regions_for_atlas
+from .t1_atlases import register_t1_atlas_regions, regions_for_t1_atlas
 from .repo import DEFAULT_COHORT_ID, DataRepo, get_repo_from_settings
 from .sqlite_index import SQLiteIndex
 from .local_dicom_assets import register_dicom_tree, upsert_dicom_assets
@@ -48,6 +49,8 @@ __all__ = [
     "DataRepo",
     "get_repo_from_settings",
     "regions_for_atlas",
+    "regions_for_t1_atlas",
+    "register_t1_atlas_regions",
     "DatasetCatalog",
     "TableDefinition",
     "build_clinical_measurement_rows",

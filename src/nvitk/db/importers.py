@@ -49,6 +49,7 @@ _click_option = click.option if click is not None else _cli_decorator
 SUBJECT_UID_CANDIDATES = [
     "subject_uid",
     "patient_id",
+    "pesa_id",
     "patientid",
     "codigoimagen",
     "codigoimagen_x",
@@ -113,6 +114,8 @@ ID_NAMESPACE_EXACT = {
     "subject",
     "subject_id",
     "subject_uid",
+    "id",
+    'pesa_id'
     "session",
     "session_id",
     "session_uid",
@@ -144,7 +147,7 @@ CLINICAL_METADATA_COLUMNS = {
     "bpxpls",
     "tas",
     "tad",
-    "sys_dias_delta",
+    "pp",
     "hematocrit",
     "psqto000",
     "lbxhdd",
