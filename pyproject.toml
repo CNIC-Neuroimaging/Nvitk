@@ -148,7 +148,7 @@ package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["test"]
+testpaths = ["tests", "test"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
