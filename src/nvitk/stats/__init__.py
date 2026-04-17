@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from .__hemodynamic_frames import (
+    aggregate_territory_measurements,
+    build_analysis_df_from_repo_frames,
+    merge_subject_covariates,
+)
 from .mixedlm import (
     build_mixedlm_frame_from_repo,
     fit_or_load_mixedlm,
     plot_mixedlm_params,
     print_mixedlm_info,
 )
-from .vessel_territory_map import (
+from .__vessel_territory_map import (
     FLOW_REGION_ID_TO_TERRITORY,
     IMAGE_VARIABLE_IDS,
     IMAGING_VARIABLE_TERRITORY_RULE,
@@ -22,6 +27,9 @@ from .vessel_territory_map import (
 )
 
 __all__ = [
+    "aggregate_territory_measurements",
+    "merge_subject_covariates",
+    "build_analysis_df_from_repo_frames",
     "fit_or_load_mixedlm",
     "print_mixedlm_info",
     "plot_mixedlm_params",
