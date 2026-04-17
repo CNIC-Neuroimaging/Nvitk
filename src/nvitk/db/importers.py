@@ -235,6 +235,34 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
     "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx": [
         SourceSpec("PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "Sheet1", "image_wide", "image", "wide", modality="asl", default_pipeline_id='asl_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
+    "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx": [
+        SourceSpec(
+            "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx",
+            "Sheet1",
+            "image_wide",
+            "image",
+            "wide",
+            modality="asl",
+            default_pipeline_id="asl_v1",
+            cohort_id="PESA-Brain",
+            default_visit_label=DEFAULT_VISIT_LABEL,
+            batch_id="All",
+        ),
+    ],
+    "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx": [
+        SourceSpec(
+            "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx",
+            "Sheet1",
+            "image_wide",
+            "image",
+            "wide",
+            modality="asl",
+            default_pipeline_id="asl_v1",
+            cohort_id="PESA-Brain",
+            default_visit_label=DEFAULT_VISIT_LABEL,
+            batch_id="All",
+        ),
+    ],
 }
 
 
@@ -836,12 +864,14 @@ def _parse_image_wide_column(source_name: str, column: str) -> tuple[str, str | 
         if column.upper() == "TCBF":
             return "tcbf", None, None
         return "flow_mean", _region_id(column), column
-    if source_name in ["PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx", "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx"]:
-        return "mean_cbf", _region_id(column), column
-    if source_name == "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx":
+    if source_name in ["PESABrain_ASLPerfusion_ThrMeanCBF_20260216.xlsx", "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx"]:
         return "mean_cbf", _region_id(column), column
     if source_name == "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx":
         return "cov_cbf", _region_id(column), column
+    if source_name == "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx":
+        return "att_mean", _region_id(column), column
+    if source_name == "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx":
+        return "att_median", _region_id(column), column
     return normalize_variable_id(column), None, None
 
 
@@ -1074,135 +1104,6 @@ def _parse_image_timeseries_wide(
     return df
 
 
-def _parse_hybrid_hemodynamic(
-    repo: DataRepo,
-    raw: pd.DataFrame,
-    *,
-    source_path: Path,
-    sheet_name: str,
-    source_batch_id: str,
-) -> dict[str, pd.DataFrame]:
-    raw = ensure_subject_uid(raw)
-    harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
-    harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id, modality="4dflow")
-
-    session_column = _first_matching_column(raw, SESSION_CANDIDATES)
-    date_column = _first_matching_column(raw, DATE_CANDIDATES)
-    visit_column = _first_matching_column(raw, VISIT_CANDIDATES)
-    skip_columns = {
-        "subject_uid",
-        _first_matching_column(raw, SUBJECT_UID_CANDIDATES),
-        session_column,
-        visit_column,
-        date_column,
-    }
-    clinical_frames: list[pd.DataFrame] = []
-    clinical_variables: list[dict[str, Any]] = []
-    image_frames: list[pd.DataFrame] = []
-    image_variables: list[dict[str, Any]] = []
-
-    for column in raw.columns:
-        if column in skip_columns:
-            continue
-        if str(column).startswith("Unnamed:"):
-            continue
-        normalized = normalize_variable_id(column)
-
-        vessel_match = re.match(r"^([a-z0-9]+)_(flow|area|psv|pi|ri)$", normalized)
-        asl_match = re.match(r"^([a-z0-9]+)_asl$", normalized)
-
-        if vessel_match:
-            region = vessel_match.group(1)
-            metric = vessel_match.group(2)
-            variable_id = "flow_mean" if metric == "flow" else metric
-            frame, variable = _image_frame(
-                raw,
-                session_column=session_column,
-                date_column=date_column,
-                column=column,
-                source_path=source_path,
-                sheet_name=sheet_name,
-                source_batch_id=source_batch_id,
-                modality="4dflow",
-                variable_id=variable_id,
-                region_id=region,
-                region_label=region.upper(),
-                pipeline_id=_resolve_import_pipeline_id(repo, "4dflow"),
-            )
-            if not frame.empty:
-                image_frames.append(frame)
-            if variable is not None:
-                image_variables.append(variable)
-            continue
-
-        if asl_match:
-            region = asl_match.group(1)
-            frame, variable = _image_frame(
-                raw,
-                session_column=session_column,
-                date_column=date_column,
-                column=column,
-                source_path=source_path,
-                sheet_name=sheet_name,
-                source_batch_id=source_batch_id,
-                modality="asl",
-                variable_id="mean_cbf",
-                region_id=region,
-                region_label=region.upper(),
-                pipeline_id=_resolve_import_pipeline_id(repo, "asl"),
-            )
-            if not frame.empty:
-                image_frames.append(frame)
-            if variable is not None:
-                image_variables.append(variable)
-            continue
-
-        if normalized in {"ipb", "a2vpb", "apcpi"}:
-            frame, variable = _image_frame(
-                raw,
-                session_column=session_column,
-                date_column=date_column,
-                column=column,
-                source_path=source_path,
-                sheet_name=sheet_name,
-                source_batch_id=source_batch_id,
-                modality="4dflow",
-                variable_id=normalized,
-                region_id=None,
-                region_label=None,
-                pipeline_id=_resolve_import_pipeline_id(repo, "4dflow"),
-            )
-            if not frame.empty:
-                image_frames.append(frame)
-            if variable is not None:
-                image_variables.append(variable)
-            continue
-
-        if normalized in CLINICAL_METADATA_COLUMNS:
-            frame, variable = _clinical_frame(
-                raw,
-                visit_column=visit_column,
-                date_column=date_column,
-                column=column,
-                source_path=source_path,
-                sheet_name=sheet_name,
-                source_batch_id=source_batch_id,
-                default_visit_label=DEFAULT_VISIT_LABEL,
-                variable_id=normalized,
-            )
-            if not frame.empty:
-                clinical_frames.append(frame)
-            if variable is not None:
-                clinical_variables.append(variable)
-
-    clinical_df = pd.concat(clinical_frames, ignore_index=True) if clinical_frames else pd.DataFrame()
-    image_df = pd.concat(image_frames, ignore_index=True) if image_frames else pd.DataFrame()
-    _upsert_measurements(repo, "clinical_measurements", clinical_df)
-    _upsert_measurements(repo, "image_measurements", image_df)
-    _register_variables(repo, clinical_variables + image_variables)
-    return {"clinical": clinical_df, "image": image_df}
-
-
 def _resolve_metadata_columns(df: pd.DataFrame) -> dict[str, str | None]:
     return {
         "name": _first_matching_column(df, ["Nombre", "Variable", "Glosario"]),
@@ -1417,6 +1318,8 @@ def import_source_spec(
     raw = read_tabular_source(source_path, sheet_name=spec.sheet)
     _register_inventory_rows(repo, [_inventory_row(source_path, spec.sheet, raw, spec, source_batch_id)])
 
+    resolved_pipeline_id = pipeline_id or spec.default_pipeline_id
+
     if spec.source_kind == "subject_ids":
         return import_subject_ids_from_source(
             repo,
@@ -1440,11 +1343,11 @@ def import_source_spec(
     if spec.source_kind == "clinical_wide":
         return _parse_generic_clinical_wide(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
     if spec.source_kind == "image_wide":
-        return _parse_generic_image_wide(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
+        return _parse_generic_image_wide(repo, raw, pipeline_id=resolved_pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "image_timeseries_long":
-        return _parse_image_timeseries_long(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
+        return _parse_image_timeseries_long(repo, raw, pipeline_id=resolved_pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "image_timeseries_wide":
-        return _parse_image_timeseries_wide(repo, raw, pipeline_id=pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
+        return _parse_image_timeseries_wide(repo, raw, pipeline_id=resolved_pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "variable_dictionary":
         return _parse_variable_dictionary(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, domain=spec.domain, modality=spec.modality)
     if spec.source_kind == "dropdown_dictionary":
