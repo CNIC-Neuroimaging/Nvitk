@@ -10,6 +10,7 @@ scoping (see ``DEFAULT_COHORT_ID``).
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import warnings
 from pathlib import Path
@@ -279,6 +280,104 @@ def _image_wide_single_variable_from_request(variables: str | Iterable[str] | No
     return bool(str(items[0]).strip())
 
 
+def _ordered_unique(values: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _resolve_requested_variables_with_alias_map(
+    catalog: DatasetCatalog,
+    requested: str | Iterable[str] | None,
+    *,
+    domain: str,
+) -> tuple[list[str], dict[str, str]]:
+    if requested is None:
+        return [], {}
+    raw_values = [requested] if isinstance(requested, str) else list(requested)
+    cleaned = [str(item).strip() for item in raw_values if str(item).strip()]
+    if not cleaned:
+        return [], {}
+    resolved = catalog.resolve_variable_ids(cleaned, domain=domain)
+    alias_map: dict[str, str] = {}
+    ordered_canonicals: list[str] = []
+    for raw, canonical in zip(cleaned, resolved):
+        c = str(canonical).strip()
+        if not c:
+            continue
+        ordered_canonicals.append(c)
+        if c not in alias_map:
+            alias_map[c] = raw
+    return _ordered_unique(ordered_canonicals), alias_map
+
+
+def _resolve_variable_id_filter_spec(
+    catalog: DatasetCatalog,
+    *,
+    domain: str,
+    spec: Any,
+) -> tuple[Any, dict[str, str]]:
+    """
+    Resolve aliases inside a structural ``variable_id`` filter spec to canonical ids.
+    Returns ``(resolved_spec, canonical_to_requested_alias)``.
+    """
+
+    alias_map: dict[str, str] = {}
+
+    def resolve_tokens(values: list[Any]) -> list[str]:
+        cleaned = [str(v).strip() for v in values if str(v).strip()]
+        if not cleaned:
+            return []
+        resolved = catalog.resolve_variable_ids(cleaned, domain=domain)
+        out: list[str] = []
+        for raw, canonical in zip(cleaned, resolved):
+            c = str(canonical).strip()
+            if not c:
+                continue
+            out.append(c)
+            if c not in alias_map:
+                alias_map[c] = raw
+        return _ordered_unique(out)
+
+    if isinstance(spec, Mapping):
+        out_spec: dict[str, Any] = {}
+        for op, value in spec.items():
+            if isinstance(value, (list, tuple, set)):
+                out_spec[op] = resolve_tokens(list(value))
+            elif isinstance(value, str):
+                resolved_one = resolve_tokens([value])
+                out_spec[op] = resolved_one[0] if resolved_one else value
+            else:
+                out_spec[op] = value
+        return out_spec, alias_map
+
+    if isinstance(spec, (list, tuple, set)):
+        return resolve_tokens(list(spec)), alias_map
+    if isinstance(spec, str):
+        resolved_one = resolve_tokens([spec])
+        return (resolved_one[0] if resolved_one else spec), alias_map
+    return spec, alias_map
+
+
+def _rename_image_wide_column_with_alias(name: str, canonical_to_alias: dict[str, str]) -> str:
+    if not canonical_to_alias:
+        return name
+    ordered = sorted(canonical_to_alias.items(), key=lambda item: len(item[0]), reverse=True)
+    for canonical, alias in ordered:
+        if alias == canonical:
+            continue
+        if name.endswith(f"_{canonical}"):
+            return name[: -len(canonical)] + alias
+        match = re.match(rf"^(.*)_{re.escape(canonical)}(_f\d+)$", name)
+        if match:
+            return f"{match.group(1)}_{alias}{match.group(2)}"
+    return name
+
+
 def _compose_image_wide_keys(df: pd.DataFrame, *, single_variable: bool) -> pd.Series:
     """Build short pivot keys: ``<region>_<variable>``, or ``<region>`` when ``single_variable``."""
     idx = df.index
@@ -453,21 +552,40 @@ class DataRepo:
         *,
         domain: str,
         table_name: str,
-    ) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[tuple[str, Any]], dict[str, str]]:
         if not filters:
-            return {}, []
+            return {}, [], {}
         columns = self._measurement_column_names(table_name)
         definition = self.catalog.get_table(table_name)
         reserved = set(definition.key_columns) | set(definition.index_columns)
         canonical_var_ids = {str(e["variable_id"]) for e in self.catalog.variable_entries(domain=domain)}
         structural: dict[str, Any] = {}
         variable_specs: list[tuple[str, Any]] = []
+        alias_map: dict[str, str] = {}
         for key, spec in filters.items():
             if not isinstance(key, str) or not key.strip():
                 raise FilterError("Filter columns must be non-empty strings.")
             k = key.strip()
             if k in reserved:
-                structural[k] = spec
+                if k == "variable_id":
+                    resolved_spec, resolved_aliases = _resolve_variable_id_filter_spec(
+                        self.catalog, domain=domain, spec=spec
+                    )
+                    structural[k] = resolved_spec
+                    for canonical, requested in resolved_aliases.items():
+                        if canonical not in alias_map:
+                            alias_map[canonical] = requested
+                else:
+                    structural[k] = spec
+                continue
+            if k == "variable_id":
+                resolved_spec, resolved_aliases = _resolve_variable_id_filter_spec(
+                    self.catalog, domain=domain, spec=spec
+                )
+                structural[k] = resolved_spec
+                for canonical, requested in resolved_aliases.items():
+                    if canonical not in alias_map:
+                        alias_map[canonical] = requested
                 continue
             resolved = self.catalog.resolve_variable_ids([k], domain=domain)[0]
             if resolved in canonical_var_ids:
@@ -477,7 +595,31 @@ class DataRepo:
                 structural[k] = spec
                 continue
             variable_specs.append((str(resolved), spec))
-        return structural, variable_specs
+        return structural, variable_specs, alias_map
+
+    def _rename_measurement_wide_columns(
+        self,
+        df: pd.DataFrame,
+        *,
+        table_name: str,
+        canonical_to_alias: dict[str, str],
+    ) -> pd.DataFrame:
+        if df.empty or not canonical_to_alias:
+            return df
+        out = df.copy()
+        rename_map: dict[str, str] = {}
+        if table_name == "image_measurements":
+            for column in out.columns:
+                renamed = _rename_image_wide_column_with_alias(str(column), canonical_to_alias)
+                if renamed != column:
+                    rename_map[column] = renamed
+        else:
+            for canonical, alias in canonical_to_alias.items():
+                if canonical != alias and canonical in out.columns:
+                    rename_map[canonical] = alias
+        if rename_map:
+            out = out.rename(columns=rename_map)
+        return out
 
     def _load_table_frame(
         self,
@@ -556,10 +698,16 @@ class DataRepo:
         if not self.catalog.table_exists("cognitive_measurements"):
             return pd.DataFrame()
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
-        resolved_variables = self.catalog.resolve_variable_ids(variables, domain="cognitive")
-        structural, var_specs = self._split_measurement_filters(
+        resolved_variables, req_aliases = _resolve_requested_variables_with_alias_map(
+            self.catalog, variables, domain="cognitive"
+        )
+        structural, var_specs, filter_aliases = self._split_measurement_filters(
             filters_clean, domain="cognitive", table_name="cognitive_measurements"
         )
+        alias_map: dict[str, str] = dict(req_aliases)
+        for canonical, requested in filter_aliases.items():
+            if canonical not in alias_map:
+                alias_map[canonical] = requested
         merged = merge_filters(structural, {"variable_id": resolved_variables} if resolved_variables else None)
         force_parquet = bool(var_specs)
         df = self._load_table_frame(
@@ -572,7 +720,12 @@ class DataRepo:
             df = _apply_variable_value_filters(df, var_specs)
         if cohort_eff is not False:
             df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
-        return self._prepare_measurements(df, wide=wide, table_name="cognitive_measurements")
+        out = self._prepare_measurements(df, wide=wide, table_name="cognitive_measurements")
+        if wide:
+            out = self._rename_measurement_wide_columns(
+                out, table_name="cognitive_measurements", canonical_to_alias=alias_map
+            )
+        return out
 
     def clinical(
         self,
@@ -590,10 +743,16 @@ class DataRepo:
         :func:`~nvitk.db.filters.apply_filters`). Set ``wide=False`` for long (tidy) form.
         """
         cohort_eff, filters_clean = self._resolve_cohort(cohort_id, filters)
-        resolved_variables = self.catalog.resolve_variable_ids(variables, domain="clinical")
-        structural, var_specs = self._split_measurement_filters(
+        resolved_variables, req_aliases = _resolve_requested_variables_with_alias_map(
+            self.catalog, variables, domain="clinical"
+        )
+        structural, var_specs, filter_aliases = self._split_measurement_filters(
             filters_clean, domain="clinical", table_name="clinical_measurements"
         )
+        alias_map: dict[str, str] = dict(req_aliases)
+        for canonical, requested in filter_aliases.items():
+            if canonical not in alias_map:
+                alias_map[canonical] = requested
         merged = merge_filters(structural, {"variable_id": resolved_variables} if resolved_variables else None)
         force_parquet = bool(var_specs)
         df = self._load_table_frame(
@@ -606,7 +765,12 @@ class DataRepo:
             df = _apply_variable_value_filters(df, var_specs)
         if cohort_eff is not False:
             df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
-        return self._prepare_measurements(df, wide=wide, table_name="clinical_measurements")
+        out = self._prepare_measurements(df, wide=wide, table_name="clinical_measurements")
+        if wide:
+            out = self._rename_measurement_wide_columns(
+                out, table_name="clinical_measurements", canonical_to_alias=alias_map
+            )
+        return out
 
     def image(
         self,
@@ -651,10 +815,16 @@ class DataRepo:
         else:
             region_filter = ensure_list(regions) if regions else None
 
-        resolved_variables = self.catalog.resolve_variable_ids(variables, domain="image")
-        structural, var_specs = self._split_measurement_filters(
+        resolved_variables, req_aliases = _resolve_requested_variables_with_alias_map(
+            self.catalog, variables, domain="image"
+        )
+        structural, var_specs, filter_aliases = self._split_measurement_filters(
             filters_norm, domain="image", table_name="image_measurements"
         )
+        alias_map: dict[str, str] = dict(req_aliases)
+        for canonical, requested in filter_aliases.items():
+            if canonical not in alias_map:
+                alias_map[canonical] = requested
         merged = merge_filters(
             structural,
             {"variable_id": resolved_variables} if resolved_variables else None,
@@ -694,12 +864,17 @@ class DataRepo:
             df = self._filter_image_rows_to_catalog_defaults(df)
         if cohort_eff is not False:
             df = self._filter_dataframe_by_cohort(df, str(cohort_eff))
-        return self._prepare_measurements(
+        out = self._prepare_measurements(
             df,
             wide=wide,
             table_name="image_measurements",
             image_wide_single_variable=_image_wide_single_variable_from_request(variables),
         )
+        if wide:
+            out = self._rename_measurement_wide_columns(
+                out, table_name="image_measurements", canonical_to_alias=alias_map
+            )
+        return out
 
     def _filter_image_rows_to_catalog_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
         """Keep rows where each modality with a catalog default matches that pipeline_id; other modalities pass through."""

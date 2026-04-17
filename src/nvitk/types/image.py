@@ -430,6 +430,79 @@ class Image:
         """Coerce voxels with :func:`nvitk.core.array.as_backend_array`."""
         return self._clone(as_backend_array(self.data, backend=backend, copy=copy, strict=strict))
 
+    def orient_to(self, target: str) -> "Image":
+        """
+        Return a new image reoriented to *target* axis codes (e.g. ``\"RAS\"``).
+
+        Uses nibabel orientation transforms on the first 3 spatial axes and updates
+        affine/orientation metadata accordingly.
+        """
+        target_codes = str(target).strip().upper()
+        if len(target_codes) != 3:
+            raise ValidationError(f"target orientation must have length 3, got {target!r}")
+        if any(c not in {"L", "R", "A", "P", "S", "I"} for c in target_codes):
+            raise ValidationError(f"Invalid orientation codes: {target!r}")
+        affine = self.affine
+        if affine is None:
+            raise ValidationError("orient_to requires metadata['affine'] to be set.")
+        if self.ndim < 3:
+            raise ValidationError("orient_to requires at least 3 dimensions.")
+
+        try:
+            import nibabel as nib
+        except Exception as exc:
+            raise ValidationError(
+                "nibabel is required for Image.orient_to. Install nibabel to use this method."
+            ) from exc
+
+        data_np = to_numpy(self.data, copy=False)
+        old_ornt = nib.orientations.io_orientation(affine)
+        target_ornt = nib.orientations.axcodes2ornt(tuple(target_codes))
+        xfm = nib.orientations.ornt_transform(old_ornt, target_ornt)
+
+        if np.allclose(xfm, np.array([[0, 1], [1, 1], [2, 1]], dtype=float)):
+            out = self.copy(deep_data=True)
+            out.orientation = target_codes
+            out.metadata["orientation"] = target_codes
+            return out
+
+        reoriented_np = nib.orientations.apply_orientation(data_np, xfm)
+        new_affine = affine @ nib.orientations.inv_ornt_aff(xfm, data_np.shape)
+
+        if is_cupy_array(self.data):
+            new_data = to_cupy(reoriented_np, copy=False)
+        else:
+            new_data = reoriented_np
+
+        md = dict(self.metadata or {})
+        md["affine"] = np.asarray(new_affine, dtype=float)
+        md["orientation"] = target_codes
+        md["shape"] = tuple(getattr(new_data, "shape", ()))
+
+        # Keep spacing consistent with the reoriented affine.
+        for i, key in enumerate(("x_res", "y_res", "z_res")):
+            md[key] = float(np.linalg.norm(md["affine"][:3, i]))
+        spacing_existing = self.spacing
+        spacing_xyz = (md["x_res"], md["y_res"], md["z_res"])
+        if spacing_existing is not None and len(spacing_existing) > 3:
+            md["spacing"] = spacing_xyz + tuple(spacing_existing[3:])
+        else:
+            md["spacing"] = spacing_xyz
+
+        new_axes: str | None = self.axes
+        if self.axes is not None and len(self.axes) >= 3:
+            perm = [int(i) for i in xfm[:, 0]]
+            spatial = [self.axes[p] for p in perm]
+            tail = self.axes[3:]
+            candidate = "".join(spatial) + tail
+            if len(candidate) == int(getattr(new_data, "ndim", 0)):
+                new_axes = candidate
+            else:
+                new_axes = None
+                md.pop("axes", None)
+
+        return Image(data=new_data, metadata=md, axes=new_axes, name=self.name, orientation=target_codes)
+
     def as_tuple(self) -> tuple[Any, dict[str, Any]]:
         """``(data, metadata)`` for interop with APIs expecting raw arrays."""
         return self.data, dict(self.metadata or {})
