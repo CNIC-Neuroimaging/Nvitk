@@ -927,6 +927,26 @@ def _parse_generic_image_wide(
             variables.append(variable)
 
     df = pd.concat(measurements, ignore_index=True) if measurements else pd.DataFrame()
+    # subject_uid recovery from session_id
+    if not df.empty and {"subject_uid", "session_id"}.issubset(df.columns):
+        df["subject_uid"] = df["subject_uid"].astype("string")
+        missing_subject = df["subject_uid"].isna() | (df["subject_uid"].str.strip() == "")
+        if bool(missing_subject.any()):
+            sessions = repo.get("sessions", columns=["session_uid", "subject_uid"], cohort_id=False)
+            if not sessions.empty:
+                sess = sessions[["session_uid", "subject_uid"]].copy()
+                sess["session_uid"] = sess["session_uid"].astype("string").str.strip()
+                sess["subject_uid"] = sess["subject_uid"].astype("string").str.strip()
+                sess = sess[
+                    sess["session_uid"].notna()
+                    & (sess["session_uid"] != "")
+                    & sess["subject_uid"].notna()
+                    & (sess["subject_uid"] != "")
+                ]
+                if not sess.empty:
+                    lut = sess.drop_duplicates(subset=["session_uid"], keep="last").set_index("session_uid")["subject_uid"]
+                    resolved = df["session_id"].astype("string").str.strip().map(lut).astype("string")
+                    df.loc[missing_subject, "subject_uid"] = resolved.loc[missing_subject]
     _upsert_measurements(repo, "image_measurements", df)
     _register_variables(repo, variables)
     return df
