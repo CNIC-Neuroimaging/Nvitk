@@ -16,6 +16,27 @@ def _safe_col(name: str) -> str:
     return re.sub(r"[^0-9a-zA-Z_]+", "_", str(name))
 
 
+def _match_grid_columns_to_df_dtypes(
+    grid: pd.DataFrame,
+    df_ref: pd.DataFrame,
+    cols: Iterable[str],
+) -> pd.DataFrame:
+    """Align ``grid`` column dtypes with ``df_ref`` so patsy sees the same encodings."""
+    out = grid.copy()
+    for c in cols:
+        if c not in out.columns or c not in df_ref.columns:
+            continue
+        ref = df_ref[c]
+        if isinstance(ref.dtype, pd.CategoricalDtype):
+            cats = list(ref.dtype.categories)
+            out[c] = pd.Categorical(out[c], categories=cats, ordered=ref.dtype.ordered)
+        elif pd.api.types.is_numeric_dtype(ref):
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+        else:
+            out[c] = out[c].astype(object)
+    return out
+
+
 def _map_sex_to_numeric(series: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
@@ -251,13 +272,21 @@ def plot_mixedlm_params(
     hue_order: list[str] | None = None,
     palette: str | Mapping[str, str] = "tab10",
     include_points: bool = True,
+    errorbar: bool = False,
     covariate_refs: dict[str, float] | None = None,
     output_path: str | Path | None = None,
     title: str = "MixedLM parameter plot",
     x_label: str | None = None,
     y_label: str | None = None,
 ) -> Any:
-    """Generic plotting utility for continuous or grouped/categorical predictors."""
+    """Generic plotting utility for continuous or grouped/categorical predictors.
+
+    In ``mode="categorical"``, fixed-effects EMM uses a prediction grid at
+    ``covariate_refs``. If the model formula includes a second categorical factor
+    (e.g. ``C(x) * C(territory)``), pass that factor as ``hue`` or as ``group``
+    when it differs from ``x``; the grid is then the factorial ``x`` × factor so
+    patsy can evaluate all terms.
+    """
     import matplotlib.pyplot as plt
     import seaborn as sns
 
@@ -318,16 +347,48 @@ def plot_mixedlm_params(
             re_x = float(re_vals.get(x, 0.0))
             y_line = (b_int + extra + re_int) + (b_x + re_x) * x_line
             ax.plot(x_line, y_line, color=cmap[g], lw=2, alpha=0.9, label=f"{group}={g}")
+            if errorbar:
+                ax.fill_between(x_line, y_line - 1.96 * se, y_line + 1.96 * se, color=cmap[g], alpha=0.2)
 
     else:
-        order = categorical_order or list(pd.unique(df[x].dropna()))
+        order = list(categorical_order) if categorical_order is not None else list(pd.unique(df[x].dropna()))
+        # Second factor: interaction models need a full factorial x × (hue|group) grid
+        # so patsy can evaluate e.g. C(x) * C(territory); a single-column grid raises
+        # NameError for the missing factor.
+        facet_col: str | None = None
+        if hue is not None and hue != x:
+            facet_col = hue
+        elif group is not None and group != x:
+            facet_col = group
+
         # EMM-like fixed-effects prediction grid at reference covariates.
         try:
             import patsy
 
-            grid = pd.DataFrame({x: order})
+            if facet_col is not None:
+                if facet_col == hue:
+                    facet_order = (
+                        list(hue_order)
+                        if hue_order is not None
+                        else list(pd.unique(df[facet_col].dropna().astype(str)))
+                    )
+                elif facet_col == group:
+                    facet_order = (
+                        list(group_order)
+                        if group_order is not None
+                        else list(pd.unique(df[facet_col].dropna().astype(str)))
+                    )
+                else:
+                    facet_order = list(pd.unique(df[facet_col].dropna().astype(str)))
+                rows = [(xv, fv) for xv in order for fv in facet_order]
+                grid = pd.DataFrame(rows, columns=[x, facet_col])
+            else:
+                grid = pd.DataFrame({x: order})
+
             for cov_name, cov_val in covariate_refs.items():
                 grid[cov_name] = cov_val
+
+            grid = _match_grid_columns_to_df_dtypes(grid, df, [c for c in grid.columns if c in df.columns])
             X = patsy.build_design_matrices([result.model.data.design_info], grid, return_type="dataframe")[0]
             fe = result.fe_params
             cov = result.cov_params().loc[fe.index, fe.index]
@@ -338,11 +399,58 @@ def plot_mixedlm_params(
             emm["estimate"] = pred
             emm["lower"] = pred - 1.96 * se
             emm["upper"] = pred + 1.96 * se
-            ax.plot(emm[x], emm["estimate"], color="black", lw=2.6, marker="o", label="Fixed-effects EMM")
-            ax.fill_between(emm[x], emm["lower"], emm["upper"], color="gray", alpha=0.2, label="95% CI")
+
+            x_to_pos = {k: i for i, k in enumerate(order)}
+            emm["_xi"] = emm[x].map(x_to_pos)
+
+            if facet_col is None:
+                sub = emm.sort_values("_xi")
+                ax.plot(
+                    sub["_xi"],
+                    sub["estimate"],
+                    color="black",
+                    lw=2.6,
+                    marker="o",
+                    label="Fixed-effects EMM",
+                )
+                if errorbar:
+                    ax.fill_between(
+                        sub["_xi"],
+                        sub["lower"],
+                        sub["upper"],
+                        color="gray",
+                        alpha=0.2,
+                        label="95% CI",
+                    )
+            else:
+                colors = sns.color_palette(palette, n_colors=max(len(facet_order), 3))
+                for i, lev in enumerate(facet_order):
+                    sub = emm[emm[facet_col] == lev].sort_values("_xi")
+                    if sub.empty:
+                        continue
+                    c = colors[i % len(colors)]
+                    ax.plot(
+                        sub["_xi"],
+                        sub["estimate"],
+                        color=c,
+                        lw=2.4,
+                        marker="o",
+                        label=f"EMM {facet_col}={lev}",
+                    )
+                    if errorbar:
+                        ax.fill_between(
+                            sub["_xi"],
+                            sub["lower"],
+                            sub["upper"],
+                            color=c,
+                            alpha=0.12,
+                        )
+            ax.set_xticks(np.arange(len(order)))
+            ax.set_xticklabels([str(v) for v in order])
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"Error calculating EMM: {e}")
-            pass
 
         if include_points:
             sns.pointplot(
