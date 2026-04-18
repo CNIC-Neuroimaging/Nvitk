@@ -13,6 +13,21 @@ __all__ = [
 ]
 
 
+def _map_sex_to_numeric(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    s = series.astype(str).str.strip().str.lower()
+    mapping = {
+        "male": 1,
+        "m": 1,
+        "1": 1,
+        "female": 0,
+        "f": 0,
+        "0": 0,
+    }
+    return pd.to_numeric(s.map(mapping), errors="coerce")
+
+
 def aggregate_territory_measurements(
     territory_df: pd.DataFrame,
     variable_ids: Sequence[str],
@@ -71,6 +86,9 @@ def merge_subject_covariates(
     missing = [c for c in cov_cols if c not in clinical_wide.columns]
     if missing:
         raise KeyError(f"clinical_wide missing columns: {missing}")
+
+    if 'sex' in clinical_wide.columns and clinical_wide['sex'].dtype in [str, object]:
+        clinical_wide['sex'] = _map_sex_to_numeric(clinical_wide['sex'])
 
     cov = clinical_wide[cov_cols].drop_duplicates(subset=[subject_key], keep=dedupe)
     return long_df.merge(cov, on=subject_key, how="inner")

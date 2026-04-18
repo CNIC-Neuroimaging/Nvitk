@@ -42,16 +42,17 @@ def _default_fit_function(
 ):
     import warnings
 
-    from statsmodels.regression.mixed_linear_model import MixedLM
+    # from statsmodels.regression.mixed_linear_model import MixedLM
     from statsmodels.tools.sm_exceptions import ConvergenceWarning
+    import statsmodels.formula.api as smf
 
     fit_kwargs = dict(fit_kwargs or {})
-    model = MixedLM.from_formula(
-        formula=formula,
+    model = smf.mixedlm(
+        formula,
+        data=model_df,
         groups=model_df[groups],
         re_formula=re_formula,
         vc_formula=vc_formula,
-        data=model_df,
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")

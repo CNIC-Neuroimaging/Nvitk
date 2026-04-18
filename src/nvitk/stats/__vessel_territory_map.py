@@ -218,6 +218,42 @@ for _territory, _regs in TERRITORY_FLOW_REGIONS.items():
     for _r in _regs:
         REGION_TO_TERRITORY_FLOW.setdefault(_r, _territory)
 
+
+def _merged_territory_region_table(
+    base: dict[str, tuple[str, ...]],
+    override: dict[str, tuple[str, ...]] | None,
+) -> dict[str, tuple[str, ...]]:
+    """Shallow merge ``{**base, **override}``; returns ``base`` when ``override`` is None."""
+    if override is None:
+        return base
+    return {**base, **override}
+
+
+def _build_region_to_territory_flow(
+    territory_flow_regions: dict[str, tuple[str, ...]] | None,
+) -> dict[str, str]:
+    """
+    Module default (``territory_flow_regions is None``): same as
+    ``REGION_TO_TERRITORY_FLOW`` — copy ``FLOW_REGION_ID_TO_TERRITORY``, then
+    ``setdefault`` from ``TERRITORY_FLOW_REGIONS`` so explicit flow IDs win over
+    short synonym tokens.
+
+    Custom mapping: ``TERRITORY_FLOW_REGIONS`` shallow-merged with
+    ``territory_flow_regions``; every region token in that merged table **overrides**
+    ``FLOW_REGION_ID_TO_TERRITORY`` for that token (same idea as inverting the ASL
+    table). Region IDs not listed in any tuple keep their ``FLOW_REGION_ID_TO_TERRITORY``
+    assignment.
+    """
+    if territory_flow_regions is None:
+        return REGION_TO_TERRITORY_FLOW
+    table = _merged_territory_region_table(TERRITORY_FLOW_REGIONS, territory_flow_regions)
+    out: dict[str, str] = dict(FLOW_REGION_ID_TO_TERRITORY)
+    for territory, regs in table.items():
+        for r in regs:
+            out[r] = territory
+    return out
+
+
 # Longest suffix first so ``mean_cbf`` wins over embedded shorter tokens.
 _WIDE_IMAGE_VARIABLE_SUFFIXES: tuple[str, ...] = tuple(
     sorted(
@@ -307,12 +343,27 @@ def asl_vascular_parcel_to_territory(region_id: str) -> str | None:
     return None
 
 
-def asl_region_id_to_territory(region_id: str) -> str | None:
+def asl_region_id_to_territory(
+    region_id: str,
+    *,
+    territory_asl_v8_regions: dict[str, tuple[str, ...]] | None = None,
+) -> str | None:
     """
     Resolve ASL ``region_id`` to a display territory: vascular-8 table,
     vascular parcel heuristics, then Desikan ``ctx-*``.
+
+    When ``territory_asl_v8_regions`` is set, it is merged with
+    ``TERRITORY_ASL_V8_REGIONS`` (same shape) and used for the first lookup step
+    instead of ``REGION_TO_TERRITORY_ASL_V8``.
     """
-    t = REGION_TO_TERRITORY_ASL_V8.get(region_id)
+    if territory_asl_v8_regions is None:
+        region_map = REGION_TO_TERRITORY_ASL_V8
+    else:
+        merged = _merged_territory_region_table(
+            TERRITORY_ASL_V8_REGIONS, territory_asl_v8_regions
+        )
+        region_map = {r: t for t, regs in merged.items() for r in regs}
+    t = region_map.get(region_id)
     if t is not None:
         return t
     t2 = asl_vascular_parcel_to_territory(region_id)
@@ -329,6 +380,8 @@ def melt_imaging_territories(
     id_cols: list[str] | tuple[str, ...] | None = None,
     flow_vars: list[str] | tuple[str, ...] | None = None,
     asl_vars: list[str] | tuple[str, ...] | None = None,
+    territory_flow_regions: dict[str, tuple[str, ...]] | None = None,
+    territory_asl_v8_regions: dict[str, tuple[str, ...]] | None = None,
     unmapped_label: str = "Unmapped",
     include_frame_index: bool = False,
 ) -> pd.DataFrame:
@@ -338,6 +391,13 @@ def melt_imaging_territories(
 
     Columns that do not parse as ``{region}_{variable}`` image wide keys are
     omitted (clinical / cognitive / unknown).
+
+    Optional ``territory_flow_regions`` / ``territory_asl_v8_regions`` use the
+    same shapes as ``TERRITORY_FLOW_REGIONS`` and ``TERRITORY_ASL_V8_REGIONS``;
+    each is shallow-merged into its default table (``{**default, **custom}``).
+    For flow, when ``territory_flow_regions`` is set, the merged table **overrides**
+    ``FLOW_REGION_ID_TO_TERRITORY`` for every region token listed in its tuples;
+    omitting a region from all tuples leaves its default flow mapping unchanged.
     """
     _id = ("subject_uid",) if id_cols is None else tuple(id_cols)
     missing = [c for c in _id if c not in df.columns]
@@ -373,6 +433,8 @@ def melt_imaging_territories(
         cols.append("value")
         return pd.DataFrame(columns=cols)
 
+    flow_region_map = _build_region_to_territory_flow(territory_flow_regions)
+
     long = df.melt(id_vars=id_list, value_vars=image_cols, var_name="_column", value_name="value")
     rows: list[dict] = []
     for _, row in long.iterrows():
@@ -382,10 +444,12 @@ def melt_imaging_territories(
             continue
         var = pw.variable_id
         if var in _flow:
-            territory = REGION_TO_TERRITORY_FLOW.get(pw.region_id)
+            territory = flow_region_map.get(pw.region_id)
             group = "flow"
         elif var in _asl:
-            territory = asl_region_id_to_territory(pw.region_id)
+            territory = asl_region_id_to_territory(
+                pw.region_id, territory_asl_v8_regions=territory_asl_v8_regions
+            )
             group = "asl"
         else:
             continue
