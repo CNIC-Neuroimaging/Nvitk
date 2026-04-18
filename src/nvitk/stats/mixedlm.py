@@ -340,7 +340,8 @@ def plot_mixedlm_params(
             emm["upper"] = pred + 1.96 * se
             ax.plot(emm[x], emm["estimate"], color="black", lw=2.6, marker="o", label="Fixed-effects EMM")
             ax.fill_between(emm[x], emm["lower"], emm["upper"], color="gray", alpha=0.2, label="95% CI")
-        except Exception:
+        except Exception as e:
+            print(f"Error calculating EMM: {e}")
             pass
 
         if include_points:

@@ -174,20 +174,20 @@ FLOW_REGION_ID_TO_TERRITORY: dict[str, str] = {
     "rpca": "Posterior Circulation",
     "left_pca": "Posterior Circulation",
     "right_pca": "Posterior Circulation",
-    "lcomm": "Circle of Willis / Communicating",
-    "rcomm": "Circle of Willis / Communicating",
-    "left_communicating": "Circle of Willis / Communicating",
-    "right_communicating": "Circle of Willis / Communicating",
+    "lcomm": "Communicating",
+    "rcomm": "Communicating",
+    "left_communicating": "Communicating",
+    "right_communicating": "Communicating",
     "left_transverse": "Venous Drainage",
     "right_transverse": "Venous Drainage",
     "basilar": "Posterior Circulation",
 }
 
 TERRITORY_FLOW_REGIONS: dict[str, tuple[str, ...]] = {
-    "Internal Carotid Arteries": ("lica", "rica"),
-    "Venous Drainage": ("sssv", "strv", "ltsv", "rtsv"),
-    "Anterior Circulation": ("lmca", "rmca", "laca", "raca"),
-    "Posterior Circulation": ("basi", "lpca", "rpca"),
+    "Internal Carotid Arteries": ("left_ica", "right_ica"),
+    "Venous Drainage": ("sagital_sinus", "straight_sinus", "left_transverse", "right_transverse"),
+    "Anterior Circulation": ("left_mca", "right_mca", "left_aca", "right_aca"),
+    "Posterior Circulation": ("basilar", "left_pca", "right_pca"),
 }
 
 TERRITORY_ASL_V8_REGIONS: dict[str, tuple[str, ...]] = {
