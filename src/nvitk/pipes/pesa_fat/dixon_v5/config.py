@@ -1,8 +1,5 @@
-"""Single source of truth for the Dixon v5 pipeline.
-
-Analogous to :mod:`nvitk.pipes.pesa_fat.ct_pet_v5.config` but for the MR
-Dixon pipeline. Centralises per-region TotalSegmentator task lists, output
-directory fragments, SGE defaults and Singularity container / model paths.
+"""
+DIXON v5 configuration.
 """
 
 from __future__ import annotations
@@ -19,24 +16,24 @@ from nvitk.pipes.pesa_fat.dixon_v5.labels import (
 
 
 # ---------------------------------------------------------------------------
-# Pipeline identity
+# Pipeline identity (Just naming, nothing important)
 # ---------------------------------------------------------------------------
 
-PIPELINE_NAME: str = "dixon-v5"
-SGE_JOB_PREFIX: str = "PESAFat_DIXON"
+PIPELINE_NAME = "dixon-v5"
+SGE_JOB_PREFIX = "PESAFat_DIXON"
 
 
 # ---------------------------------------------------------------------------
 # Filesystem fragments
 # ---------------------------------------------------------------------------
 
-STAGE1_DIR: str = "res_segmentation_dixon"     # <subj>/DIXON_<REGION>/<task>.nii.gz
-STAGE2_DIR: str = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}.nii.gz
-STAGE3_DIR: str = "res_measure_dixon"          # <batch>_SummaryCodebook.xlsx
+STAGE1_DIR = "res_segmentation_dixon"     # <subj>/DIXON_<REGION>/<task>.nii.gz
+STAGE2_DIR = "res_post_processing_dixon"  # <subj>/{HEAD,THORAX,LEGS}.nii.gz
+STAGE3_DIR = "res_measure_dixon"          # <batch>_SummaryCodebook.xlsx
 
 # Expected Dixon input stems: DIXON_<REGION>_<SUFFIX>.nii[.gz]
-INPUT_PREFIX: str = "DIXON"
-INPUT_SUFFIXES: tuple[str, ...] = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
+INPUT_PREFIX = "DIXON"
+INPUT_SUFFIXES = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
 
 
 # ---------------------------------------------------------------------------
@@ -46,18 +43,18 @@ INPUT_SUFFIXES: tuple[str, ...] = ("FAT", "WATER", "FAT_FRACTION", "T2STAR")
 
 @dataclass(frozen=True)
 class MrTask:
-    """A MR TotalSegmentator task and which Dixon contrast feeds it."""
+    """MR TotalSegmentator task and which DIXON sequence it uses."""
 
     name: str
     input_suffix: str                # FAT / WATER / ...
     roi_subset: tuple[str, ...] = ()
 
 
-HEAD_TASKS: tuple[MrTask, ...] = (
+HEAD_TASKS = (
     MrTask("total_mr", input_suffix="FAT", roi_subset=("autochthon_left", "autochthon_right")),
 )
 
-THORAX_TASKS: tuple[MrTask, ...] = (
+THORAX_TASKS = (
     MrTask(
         "total_mr",
         input_suffix="FAT",
@@ -76,20 +73,20 @@ THORAX_TASKS: tuple[MrTask, ...] = (
     MrTask("vertebrae_mr", input_suffix="WATER"),
 )
 
-LEGS_TASKS: tuple[MrTask, ...] = (
+LEGS_TASKS = (
     MrTask("thigh_shoulder_muscles_mr", input_suffix="FAT"),
     MrTask("tissue_types_mr", input_suffix="FAT"),
     MrTask("body_mr", input_suffix="FAT"),
 )
 
 
-REGIONS: dict[str, tuple[MrTask, ...]] = {
+REGIONS = {
     "HEAD": HEAD_TASKS,
     "THORAX": THORAX_TASKS,
     "LEGS": LEGS_TASKS,
 }
 
-REGION_ORDER: tuple[str, ...] = ("HEAD", "THORAX", "LEGS")
+REGION_ORDER = ("HEAD", "THORAX", "LEGS")
 
 
 # ---------------------------------------------------------------------------
@@ -99,14 +96,15 @@ REGION_ORDER: tuple[str, ...] = ("HEAD", "THORAX", "LEGS")
 
 @dataclass(frozen=True)
 class DixonMeasureSpec:
-    """One Dixon stage-3 measurement column group.
+    """DIXON stage-3 measurement definition.
 
     ``prefix`` is the Excel column prefix; each metric in ``metrics`` becomes
-    a column ``f"{prefix}_{metric}"``. ``region`` selects which stage-2 mask
-    and which Dixon-contrast maps are used; ``mask_file`` is the stage-2
-    label file (under ``RESULTS/<batch>/res_post_processing_dixon/<SUBJECT>``)
-    and ``label_ids`` are the integer labels contributing to the mask (a
-    tuple with >1 entries is treated as the union).
+      a column ``f"{prefix}_{metric}"``. 
+    ``region`` selects which stage-2 mask and which Dixon-contrast maps are used; 
+    ``mask_file`` is the stage-2 label file 
+      (under ``RESULTS/<batch>/res_post_processing_dixon/<SUBJECT>``)
+    ``label_ids`` are the integer labels contributing to the mask 
+      (atuple with >1 entries is treated as the union).
     """
 
     prefix: str
@@ -126,7 +124,7 @@ def _lr_triplet(
     *,
     metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2"),
 ) -> tuple[DixonMeasureSpec, ...]:
-    """Emit (L, R, LR-union) specs for a bilateral structure."""
+    """Emit (L, R, LR-union) specs for a bilateral structures."""
     return (
         DixonMeasureSpec(
             prefix_fmt.format(side="L"),
@@ -152,7 +150,7 @@ def _lr_triplet(
     )
 
 
-MEASURE_SPECS: tuple[DixonMeasureSpec, ...] = (
+MEASURE_SPECS = (
     # # HEAD: paravertebral (PVM) L, R, LR
     # *_lr_triplet(
     #     "DIXON_H_PVM_{side}", "HEAD", "HEAD.nii", HEAD_LABELS, "H_PVM_L", "H_PVM_R",
@@ -208,15 +206,13 @@ MEASURE_SPECS: tuple[DixonMeasureSpec, ...] = (
 )
 
 
-# ``WF`` is computed (for LIVER only) as::
+# ``WF`` is computed (for LIVER only) as:
 #
 #     WF = mean(water_map_liver) / mean(water_map_PVM) * 100
 #
 # where the denominator is the mean water-map signal pooled over both
 # paravertebral muscle masks (T_PVM_L + T_PVM_R) in the THORAX region.
-# Defined here (as anatomic references) so stage 3 has a single source of
-# truth for the reference tissue used in the fraction.
-WF_REFERENCE_LABELS: tuple[tuple[str, str, str], ...] = (
+WF_REFERENCE_LABELS = (
     # (region, mask_file, label_key)
     ("THORAX", "THORAX.nii", "T_PVM_L"),
     ("THORAX", "THORAX.nii", "T_PVM_R"),
@@ -227,22 +223,20 @@ WF_REFERENCE_LABELS: tuple[tuple[str, str, str], ...] = (
 # SGE / Singularity defaults
 # ---------------------------------------------------------------------------
 
-SGE_PROJECT: str = "GPU"
-SGE_ACCOUNT: str = "Prod"
-SGE_NGPU: int = 1
-SGE_H_VMEM: str = "50G"
-SGE_QUEUE: str | None = None
+SGE_PROJECT    = "GPU"
+SGE_ACCOUNT    = "Prod"
+SGE_NGPU       = 1
+SGE_H_VMEM     = "50G"
+SGE_QUEUE      = None
 
-SGE_CPU_H_VMEM: str = "32G"
-SGE_CPU_NGPU: int = 0
+SGE_CPU_H_VMEM = "32G"
+SGE_CPU_NGPU   = 0
 
-SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFat")
-SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFat")
+SGE_LOG_DIR    = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFat")
+SGE_ERR_DIR    = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFat")
 
-CONTAINER_PATH: Path = Path(
-    "/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif"
-)
-MODELS_PATH: Path = DEFAULT_MODEL_ROOT
+CONTAINER_PATH = Path("/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif")
+MODELS_PATH     = DEFAULT_MODEL_ROOT
 
 
 __all__ = [

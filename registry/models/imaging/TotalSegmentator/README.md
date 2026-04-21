@@ -1,4 +1,0 @@
-# TotalSegmentator
-
-TBA
-

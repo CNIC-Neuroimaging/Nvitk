@@ -1,4 +1,0 @@
-# TopCoW CLAIM
-
-TBA
-

@@ -1,4 +1,0 @@
-# VascX Disc
-
-TBA
-

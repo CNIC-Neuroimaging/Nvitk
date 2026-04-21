@@ -1,4 +1,0 @@
-# VascX Fovea
-
-TBA
-
