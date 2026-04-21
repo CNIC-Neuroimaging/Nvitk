@@ -1292,7 +1292,7 @@ def _force_ras_nifti(image: Any) -> Any:
     ornt_from = nib.orientations.io_orientation(image.affine)
     ornt_to = nib.orientations.axcodes2ornt(("R", "A", "S"))
     xfm = nib.orientations.ornt_transform(ornt_from, ornt_to)
-    _info(f"Forcing canonical RAS reorientation with transform:\n {xfm}")
+    # _info(f"Forcing canonical RAS reorientation with transform:\n {xfm}")
     if xfm.size:
         data_ras = nib.orientations.apply_orientation(image.get_fdata(), xfm)
         aff_ras = image.affine @ nib.orientations.inv_ornt_aff(xfm, image.shape)

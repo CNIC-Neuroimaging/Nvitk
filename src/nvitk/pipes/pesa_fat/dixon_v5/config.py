@@ -153,10 +153,10 @@ def _lr_triplet(
 
 
 MEASURE_SPECS: tuple[DixonMeasureSpec, ...] = (
-    # HEAD: paravertebral (PVM) L, R, LR
-    *_lr_triplet(
-        "DIXON_H_PVM_{side}", "HEAD", "HEAD.nii", HEAD_LABELS, "H_PVM_L", "H_PVM_R",
-    ),
+    # # HEAD: paravertebral (PVM) L, R, LR
+    # *_lr_triplet(
+    #     "DIXON_H_PVM_{side}", "HEAD", "HEAD.nii", HEAD_LABELS, "H_PVM_L", "H_PVM_R",
+    # ),
 
     # THORAX: liver (with WF), pancreas, kidneys L/R/LR, paravertebral L/R/LR,
     #         and bone-narrow vertebrae L3/L4.
@@ -208,15 +208,18 @@ MEASURE_SPECS: tuple[DixonMeasureSpec, ...] = (
 )
 
 
-# ``WF`` is computed relative to the mean water-map signal over this union
-# of paravertebral muscle (thorax) + quadriceps (legs) labels. Defined here
-# (as anatomic references) so stage 3 has a single source of truth.
+# ``WF`` is computed (for LIVER only) as::
+#
+#     WF = mean(water_map_liver) / mean(water_map_PVM) * 100
+#
+# where the denominator is the mean water-map signal pooled over both
+# paravertebral muscle masks (T_PVM_L + T_PVM_R) in the THORAX region.
+# Defined here (as anatomic references) so stage 3 has a single source of
+# truth for the reference tissue used in the fraction.
 WF_REFERENCE_LABELS: tuple[tuple[str, str, str], ...] = (
     # (region, mask_file, label_key)
     ("THORAX", "THORAX.nii", "T_PVM_L"),
     ("THORAX", "THORAX.nii", "T_PVM_R"),
-    ("LEGS",   "LEGS.nii",   "L_QM_L"),
-    ("LEGS",   "LEGS.nii",   "L_QM_R"),
 )
 
 

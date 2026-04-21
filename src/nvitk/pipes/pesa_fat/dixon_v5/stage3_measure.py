@@ -9,9 +9,10 @@ computes per label and per region:
 * ``FF``  - mean of the Dixon fat-fraction map inside the mask
 * ``T2``  - mean of the T2* map inside the mask
 * ``R2``  - mean of the reciprocal T2* map (``1/T2`` where T2 > 0)
-* ``WF``  - for liver only: ``(liver_water / skm_water) * 100``. The SKM
-            reference is the union of THORAX SKM (L+R) and LEGS quadriceps
-            (L+R), each averaged against their respective water map.
+* ``WF``  - for liver only: ``(liver_water_mean / pvm_water_mean) * 100``.
+            The reference is the mean Dixon water signal pooled over the
+            bilateral paravertebral muscle (``T_PVM_L`` + ``T_PVM_R``) in
+            the THORAX region. See ``cfg.WF_REFERENCE_LABELS``.
 
 Writes a single-row Excel file per subject under
 ``RESULTS/<batch>/res_measure_dixon/per_subject/<SUBJECT>.xlsx``; the batch
@@ -125,21 +126,33 @@ def _wf_reference(
     region_masks: dict[str, Image | None],
     region_waters: dict[str, Image | None],
 ) -> float | None:
-    """Mean of the water-map signal over ``cfg.WF_REFERENCE_LABELS``."""
-    values: list[float] = []
+    """Pooled mean of the water-map signal over ``cfg.WF_REFERENCE_LABELS``.
+
+    All voxels from every referenced (region, label) are concatenated into a
+    single pool, and the arithmetic mean of that pool is returned. This
+    matches the definition
+    ``WF_ref = mean(water[ union over PVM_L, PVM_R ])``
+    rather than averaging per-mask means, so unbalanced mask sizes stay
+    properly weighted.
+    """
+    total_sum = 0.0
+    total_count = 0
     for region, _mask_file, label_key in cfg.WF_REFERENCE_LABELS:
         mask_img = region_masks.get(region)
         water_img = region_waters.get(region)
         if mask_img is None or water_img is None:
             continue
         label_id = _REGION_LABELS[region][label_key]
-        m = get_label(mask_img, label_id, missing="empty").data
-        v = _mean_under_mask(water_img.data, m)
-        if not np.isnan(v):
-            values.append(v)
-    if not values:
+        m_np = (as_backend_array(get_label(mask_img, label_id, missing="empty").data) > 0).astype(bool)
+        if not m_np.any():
+            continue
+        vals = as_backend_array(water_img.data)[m_np]
+        total_sum += float(np.sum(vals))
+        total_count += int(vals.size)
+
+    if total_count == 0:
         return None
-    return float(np.mean(as_backend_array(values)))
+    return total_sum / total_count
 
 
 def process_subject(
@@ -204,9 +217,8 @@ def process_subject(
                 t2_np = to_numpy(t2_map.data).astype("float32")
                 r2_np = np.zeros_like(t2_np, dtype="float32")
                 pos = t2_np > 0
-                r2_np[pos] = 1.0 / t2_np[pos]
+                r2_np[pos] = 1.0 / t2_np[pos] * 1000.0 # convert to Hz
                 row[f"{spec.prefix}_R2"] = _mean_under_mask(r2_np, bm.data)
-                row[f"{spec.prefix}_R2"] /= 1000.0 # convert to hz
             elif "R2" in spec.metrics:
                 row[f"{spec.prefix}_R2"] = None
 
@@ -218,9 +230,7 @@ def process_subject(
                     if np.isnan(tissue_water):
                         row[f"{spec.prefix}_WF"] = None
                     else:
-                        row[f"{spec.prefix}_WF"] = float(
-                            (tissue_water / wf_ref) * 100.0
-                        )
+                        row[f"{spec.prefix}_WF"] = float((tissue_water / wf_ref) * 100.0)
         except Exception as exc:
             log.error(f"spec {spec.prefix} failed: {exc}")
             for metric in spec.metrics:

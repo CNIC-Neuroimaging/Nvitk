@@ -381,6 +381,7 @@ def _run_sge(
 )
 @click.option("--dry-run", is_flag=True)
 @click.option("--log-level", default="INFO", show_default=True)
+@click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
     batch: str,
     subjects: str | None,
@@ -399,10 +400,18 @@ def main(
     src_dir: Path | None,
     dry_run: bool,
     log_level: str,
+    debug: bool,
 ) -> None:
     """Dixon v5 pipeline master (local or SGE dispatch)."""
     Logger(level=log_level.upper())
     log.set_level(log_level.upper())
+
+    if debug:
+        try:
+            import debugpy
+            debugpy.listen(("localhost", 5678))
+        except Exception as exc:
+            log.warning(f'debugpy not available. Continuing without debugpy: \nException: {exc}')
 
     lay = layout(
         batch,

@@ -377,6 +377,7 @@ def _run_sge(
 )
 @click.option("--dry-run", is_flag=True, help="(sge) Print commands but do not submit.")
 @click.option("--log-level", default="INFO", show_default=True)
+@click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
     batch: str,
     subjects: str | None,
@@ -396,10 +397,21 @@ def main(
     src_dir: Path | None,
     dry_run: bool,
     log_level: str,
+    debug: bool,
 ) -> None:
     """Run the full PESA-Fat pipeline (stage 0 + ct-pet-v5 + dixon-v5) for a batch."""
     Logger(level=log_level.upper())
     log.set_level(log_level.upper())
+
+    if debug:
+        try:
+            import debugpy
+            debugpy.listen(("localhost", 5678))
+        except Exception as exc:
+            warn(
+                f'debugpy not available. Continuing without debugpy: \n'
+                f'Exception: {exc}\n'
+            )
 
     pipelines_sel = [p.strip().lower() for p in pipelines.split(",") if p.strip()]
     unknown_pipes = set(pipelines_sel) - set(PIPELINE_CHOICES)
