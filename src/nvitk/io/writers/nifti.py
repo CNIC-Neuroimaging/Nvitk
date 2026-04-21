@@ -107,7 +107,7 @@ def write_nifti(
     if affine is None:
         affine = np.eye(4, dtype=float)
     else:
-        affine = np.asarray(affine, dtype=float)
+        affine = to_numpy(affine)
         if affine.shape != (4, 4):
             raise ValidationError(f"Affine matrix must have shape (4,4), got {affine.shape}")
 

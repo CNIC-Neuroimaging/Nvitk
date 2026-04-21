@@ -130,9 +130,21 @@ phase2volume = "nvitk.io.conversors.phase2volume:main"
 nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 
 # -----------------------------------------------------------------------------
+# Segmentation scripts
+# -----------------------------------------------------------------------------
+nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
+
+# -----------------------------------------------------------------------------
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
+
+# -----------------------------------------------------------------------------
+# Pipeline scripts
+# -----------------------------------------------------------------------------
+nvitk-pesa-fat       = "nvitk.pipes.pesa_fat.run_batch:main"
+nvitk-pesa-fat-ctpet = "nvitk.pipes.pesa_fat.ct_pet_v5.run:main"
+nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
 
 # -----------------------------------------------------------------------------
 # GUI scripts
