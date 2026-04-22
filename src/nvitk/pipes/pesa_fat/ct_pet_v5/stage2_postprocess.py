@@ -368,9 +368,7 @@ def run_subject(
     if not seg_dir.exists():
         raise FileNotFoundError(f"Expected stage-1 outputs under {seg_dir}")
 
-    log.info(
-        f"CT-PET v5 stage 2 | subject={subject} | backend={get_current_backend()}"
-    )
+    log.info(f"CT-PET v5 stage 2 | subject={subject} | backend={get_current_backend()}")
     _process(seg_dir, nifti_dir, out_dir)
     log.info(f"[{subject}] ok -> {out_dir}")
     return out_dir

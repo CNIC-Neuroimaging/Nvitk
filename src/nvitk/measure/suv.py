@@ -244,7 +244,7 @@ def suv_image(
     metadata: Dict[str, Any] | None = None,
     *,
     kind: str = "bw",
-    philips: bool = True,
+    philips: bool = False,
     revert_scaling: bool = False,
 ) -> Image | Any:
     """
@@ -334,7 +334,7 @@ def suv_stats(
     *,
     kinds: Iterable[str] = ("bw",),
     stats: Iterable[str] = ("mean", "median", "max", "min", "std", "p95", "p5"),
-    philips: bool = True,
+    philips: bool = False,
     revert_scaling: bool = False,
 ) -> Dict[str, float]:
     """
