@@ -527,7 +527,7 @@ def main(
             )
         log.info("=" * 78)
         log.info(f"PESA-Fat batch '{batch}' script written: {emit_script}")
-        log.info(f"Run on the cluster login node: bash {emit_script}")
+        log.info(f"Run on the cluster: bash {emit_script}")
         log.info("=" * 78)
         return
 
