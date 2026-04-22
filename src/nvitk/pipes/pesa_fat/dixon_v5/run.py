@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TextIO
 
 import click
 import pandas as pd
@@ -31,6 +31,7 @@ from nvitk.pipes.pesa_fat.common.sge import (
     SingularityBinds,
     StageSpec,
     submit_chain,
+    write_script_header,
 )
 from nvitk.pipes.pesa_fat.dixon_v5 import (
     config as cfg,
@@ -233,6 +234,7 @@ def submit_subject_chain(
     base_hold: str | None = None,
     dry_run: bool = False,
     log_level: str = "INFO",
+    emit: TextIO | None = None,
 ) -> list[str]:
     """Submit the Dixon v5 SGE chain for a *single* subject.
 
@@ -278,7 +280,7 @@ def submit_subject_chain(
                 }
             )
         )
-    jids = submit_chain(specs, paths, base_hold=base_hold, dry_run=dry_run)
+    jids = submit_chain(specs, paths, base_hold=base_hold, dry_run=dry_run, emit=emit)
     log.info(f"[{subject}] Dixon v5 SGE chain jids: {jids}")
     return jids
 
@@ -298,6 +300,7 @@ def _run_sge(
     base_hold: str | None,
     dry_run: bool,
     log_level: str,
+    emit: TextIO | None = None,
 ) -> dict[str, list[str]]:
     all_jids: dict[str, list[str]] = {}
     for subj in subjects:
@@ -315,6 +318,7 @@ def _run_sge(
             base_hold=base_hold,
             dry_run=dry_run,
             log_level=log_level,
+            emit=emit,
         )
     return all_jids
 
@@ -384,6 +388,14 @@ def _run_sge(
     help="Host path to the nvitk source tree (required for --submit sge).",
 )
 @click.option("--dry-run", is_flag=True)
+@click.option(
+    "--emit-script",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="(sge) Write a self-contained bash submission script to this path "
+         "instead of submitting. Run it on the cluster login node with "
+         "`bash <script>`; only qsub + singularity are required there.",
+)
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
@@ -403,6 +415,7 @@ def main(
     container: Path | None,
     src_dir: Path | None,
     dry_run: bool,
+    emit_script: Path | None,
     log_level: str,
     debug: bool,
 ) -> None:
@@ -462,6 +475,34 @@ def main(
         container = cfg.CONTAINER_PATH
     if src_dir is None:
         raise click.UsageError("--src-dir is required for --submit sge")
+
+    if emit_script is not None:
+        emit_script.parent.mkdir(parents=True, exist_ok=True)
+        with open(emit_script, "w", encoding="utf-8") as fh:
+            write_script_header(
+                fh,
+                log_dir=cfg.SGE_LOG_DIR,
+                err_dir=cfg.SGE_ERR_DIR,
+                title=f"dixon-v5 batch={batch}",
+            )
+            _run_sge(
+                lay,
+                subj_list,
+                stages_sel,
+                backend=backend,
+                device=device,
+                model_dir=model_dir,
+                overwrite=overwrite,
+                regions=region_tuple,
+                container=container,
+                src_dir=src_dir,
+                base_hold=base_hold,
+                dry_run=False,
+                log_level=log_level,
+                emit=fh,
+            )
+        log.info(f"Wrote submission script: {emit_script}")
+        return
 
     _run_sge(
         lay,

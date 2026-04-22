@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
+from typing import TextIO
 
 import click
 
@@ -58,6 +59,7 @@ from nvitk.pipes.pesa_fat.common.sge import (
     SingularityBinds,
     StageSpec,
     submit_stage,
+    write_script_header,
 )
 from nvitk.pipes.pesa_fat.common import stage0_convert
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
@@ -124,8 +126,10 @@ def _submit_stage0(
     src_dir: Path,
     dry_run: bool,
     log_level: str,
+    emit: TextIO | None = None,
 ) -> str:
-    """Submit a single stage-0 SGE job and return its jid (or 'DRY_RUN')."""
+    """Submit a single stage-0 SGE job and return its jid (or a shell-variable
+    reference when *emit* is set, or ``'DRY_RUN'``)."""
     paths = _stage0_cluster_paths(lay, container, src_dir)
     binds = SingularityBinds(data=_STAGE0_BIND_DICOM, output=_STAGE0_BIND_NIFTI)
     spec = StageSpec(
@@ -145,7 +149,7 @@ def _submit_stage0(
             "TOTALSEG_HOME_DIR": str(binds.models),
         }
     )
-    jid = submit_stage(spec, paths, dry_run=dry_run)
+    jid = submit_stage(spec, paths, dry_run=dry_run, emit=emit)
     log.info(f"[{subject}] stage0 submitted -> {jid}")
     return jid
 
@@ -250,6 +254,7 @@ def _run_sge(
     src_dir: Path,
     dry_run: bool,
     log_level: str,
+    emit: TextIO | None = None,
 ) -> None:
     run_stage0 = "stage0" in stages_sel
     pipe_stages = [s for s in stages_sel if s != "stage0"]
@@ -267,6 +272,7 @@ def _run_sge(
                 src_dir=src_dir,
                 dry_run=dry_run,
                 log_level=log_level,
+                emit=emit,
             )
 
     if not pipe_stages:
@@ -288,6 +294,7 @@ def _run_sge(
                 base_hold=base_hold,
                 dry_run=dry_run,
                 log_level=log_level,
+                emit=emit,
             )
         if "dixon-v5" in pipelines:
             dixon_run.submit_subject_chain(
@@ -304,6 +311,7 @@ def _run_sge(
                 base_hold=base_hold,
                 dry_run=dry_run,
                 log_level=log_level,
+                emit=emit,
             )
 
 
@@ -380,6 +388,13 @@ def _run_sge(
     help="Host path to the nvitk source tree (required for --submit sge).",
 )
 @click.option("--dry-run", is_flag=True, help="(sge) Print commands but do not submit.")
+@click.option(
+    "--emit-script",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="(sge) Write a self-contained bash submission script to this path "
+         "instead of submitting. Run it on the cluster with `bash <script>`.",
+)
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
@@ -400,6 +415,7 @@ def main(
     container: Path | None,
     src_dir: Path | None,
     dry_run: bool,
+    emit_script: Path | None,
     log_level: str,
     debug: bool,
 ) -> None:
@@ -471,6 +487,37 @@ def main(
         container = ctpet_cfg.CONTAINER_PATH
     if src_dir is None:
         raise click.UsageError("--src-dir is required for --submit sge")
+
+    if emit_script is not None:
+        emit_script.parent.mkdir(parents=True, exist_ok=True)
+        with open(emit_script, "w", encoding="utf-8") as fh:
+            write_script_header(
+                fh,
+                log_dir=ctpet_cfg.SGE_LOG_DIR,
+                err_dir=ctpet_cfg.SGE_ERR_DIR,
+                title=f"batch={batch} pipelines={','.join(pipelines_sel)}",
+            )
+            _run_sge(
+                lay,
+                subj_list,
+                pipelines_sel,
+                stages_sel,
+                backend=backend,
+                device=device,
+                model_dir=model_dir,
+                overwrite=overwrite,
+                regions=region_tuple,
+                container=container,
+                src_dir=src_dir,
+                dry_run=False,
+                log_level=log_level,
+                emit=fh,
+            )
+        log.info("=" * 78)
+        log.info(f"PESA-Fat batch '{batch}' script written: {emit_script}")
+        log.info(f"Run on the cluster login node: bash {emit_script}")
+        log.info("=" * 78)
+        return
 
     _run_sge(
         lay,
