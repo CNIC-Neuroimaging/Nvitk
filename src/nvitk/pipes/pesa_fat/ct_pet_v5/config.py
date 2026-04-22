@@ -194,9 +194,7 @@ SGE_CPU_NGPU: int = 0
 SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFat")
 SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFat")
 
-CONTAINER_PATH: Path = Path(
-    "/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif"
-)
+CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
 MODELS_PATH: Path = DEFAULT_MODEL_ROOT
 
 

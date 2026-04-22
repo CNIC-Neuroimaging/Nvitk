@@ -140,6 +140,10 @@ def _submit_stage0(
         ),
         binds=binds,
         use_nv=False,
+        extra_env={
+            "PYTHONPATH": str(binds.src + "src/"),
+            "TOTALSEG_HOME_DIR": str(binds.models),
+        }
     )
     jid = submit_stage(spec, paths, dry_run=dry_run)
     log.info(f"[{subject}] stage0 submitted -> {jid}")

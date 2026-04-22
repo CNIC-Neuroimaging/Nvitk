@@ -289,6 +289,10 @@ def submit_subject_chain(
                 resources=resources,
                 binds=binds,
                 use_nv=resources.ngpu > 0,
+                extra_env={
+                    "PYTHONPATH": str(binds.src + "src/"),
+                    "TOTALSEG_HOME_DIR": str(binds.models),
+                }
             )
         )
     jids = submit_chain(specs, paths, base_hold=base_hold, dry_run=dry_run)
