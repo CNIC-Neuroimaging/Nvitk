@@ -223,19 +223,19 @@ WF_REFERENCE_LABELS = (
 # SGE / Singularity defaults
 # ---------------------------------------------------------------------------
 
-SGE_PROJECT    = "GPU"
-SGE_ACCOUNT    = "Prod"
-SGE_NGPU       = 1
-SGE_H_VMEM     = "50G"
-SGE_QUEUE      = None
+SGE_PROJECT     = "GPU"
+SGE_ACCOUNT     = "Prod"
+SGE_NGPU        = 1
+SGE_H_VMEM      = "50G"
+SGE_QUEUE       = None
+ 
+SGE_CPU_H_VMEM  = "32G"
+SGE_CPU_NGPU    = 0
+ 
+SGE_LOG_DIR     = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFatV5")
+SGE_ERR_DIR     = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFatV5")
 
-SGE_CPU_H_VMEM = "32G"
-SGE_CPU_NGPU   = 0
-
-SGE_LOG_DIR    = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFat")
-SGE_ERR_DIR    = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFat")
-
-CONTAINER_PATH = Path("/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif")
+CONTAINER_PATH  = Path("/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif")
 MODELS_PATH     = DEFAULT_MODEL_ROOT
 
 

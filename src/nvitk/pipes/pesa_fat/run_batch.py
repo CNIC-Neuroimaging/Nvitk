@@ -82,16 +82,25 @@ STAGE_CHOICES = ("stage0", "stage1", "stage2", "stage3")
 
 _STAGE0_BIND_DICOM = "/PESAFat/DICOM/"
 _STAGE0_BIND_NIFTI = "/PESAFat/NIFTI/"
+_STAGE0_MODULE = "nvitk.pipes.pesa_fat.common.stage0_convert"
+
+
+def _module_to_script(binds_src: str, module: str) -> str:
+    """Convert ``nvitk.pipes.foo.bar`` to the container-side script path
+    ``<binds_src>nvitk/pipes/foo/bar.py`` so workers can invoke the file
+    directly (``python <path>.py ...``) instead of ``python -m <module>``.
+    """
+    return f"{binds_src}{module.replace('.', '/')}.py"
 
 
 def _stage0_python_cmd(subject: str, lay: BatchLayout, log_level: str) -> str:
     """Stage 0 inside the container reads from the mounted DICOM root and
     writes to the mounted NIfTI root; use container paths here."""
+    script = _module_to_script(SingularityBinds().src, _STAGE0_MODULE)
     return " ".join(
         [
             "python",
-            "-m",
-            "nvitk.pipes.pesa_fat.common.stage0_convert",
+            shlex.quote(script),
             "--batch",
             shlex.quote(lay.batch),
             "--subject",
@@ -143,7 +152,7 @@ def _submit_stage0(
             queue=ctpet_cfg.SGE_QUEUE,
         ),
         binds=binds,
-        use_nv=False,
+        use_nv=True,
         extra_env={
             "PYTHONPATH": str(binds.src + "src/"),
             "TOTALSEG_HOME_DIR": str(binds.models),

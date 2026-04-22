@@ -172,6 +172,7 @@ def _build_python_cmd(
     path remapping rationale.
     """
     module = STAGE_MODULES[stage]
+    script = f"{binds.src}{module.replace('.', '/')}.py"
     c_dicom = binds.data
     c_nifti = binds.data
     c_out = binds.output
@@ -179,8 +180,7 @@ def _build_python_cmd(
 
     parts: list[str] = [
         "python",
-        "-m",
-        module,
+        shlex.quote(script),
         "--batch",
         shlex.quote(lay.batch),
         "--subject",
@@ -273,7 +273,7 @@ def submit_subject_chain(
                 ),
                 resources=resources,
                 binds=binds,
-                use_nv=resources.ngpu > 0,
+                use_nv=True,
                 extra_env={
                     "PYTHONPATH": str(binds.src + "src/"),
                     "TOTALSEG_HOME_DIR": str(binds.models),

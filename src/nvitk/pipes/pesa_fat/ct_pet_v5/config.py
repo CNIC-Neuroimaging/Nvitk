@@ -191,8 +191,8 @@ SGE_QUEUE: str | None = None
 SGE_CPU_H_VMEM: str = "32G"
 SGE_CPU_NGPU: int = 0
 
-SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFat")
-SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFat")
+SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFatV5")
+SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFatV5")
 
 CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
 MODELS_PATH: Path = DEFAULT_MODEL_ROOT

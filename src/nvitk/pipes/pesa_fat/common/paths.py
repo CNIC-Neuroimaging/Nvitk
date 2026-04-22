@@ -16,10 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-DEFAULT_DICOM_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
-DEFAULT_NIFTI_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
+DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
+DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
 DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
-DEFAULT_MODEL_ROOT = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
+DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
 SUBJECT_GLOB = "PESA*"
 
