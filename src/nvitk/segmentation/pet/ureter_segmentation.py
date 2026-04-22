@@ -239,7 +239,7 @@ def build_cost_volume(
     *,
     # ---- PET / gap-filling ----------------------------------------
     w_pet: float = 1.0,
-    suv_clip: float = 15.0,
+    suv_clip: float = 50.0,
     suv_fill_sigma_vox: float = 4.0,
     suv_fill_blend: float = 0.5,
     eps: float = 1e-3,
@@ -306,10 +306,10 @@ def build_cost_volume(
     s0, s1, s2 = spacing_xyz_mm
 
     # ---- gap-filled SUV ---------------------------------------------------
-    suv_c      = np.clip(suv, 0.0, float(suv_clip))
-    suv_smooth = ndi.gaussian_filter(
-        suv_c.astype(np.float64), sigma=float(suv_fill_sigma_vox), mode="nearest"
-    )
+    suv_c      = np.clip(suv, suv_clip, None)
+    suv_n      = (suv_c - suv_c.min()) / (suv_c.max() - suv_c.min())
+    suv_smooth = ndi.gaussian_filter(suv_c.astype(np.float64), sigma=float(suv_fill_sigma_vox), mode="nearest")
+
     # Element-wise max: hotspots preserved; dark gaps lifted by blended envelope
     suv_filled = np.maximum(suv_c, float(suv_fill_blend) * suv_smooth)
     pet_term   = float(w_pet) / (suv_filled + float(eps))
@@ -344,7 +344,7 @@ def build_cost_volume(
     dist_term = float(w_dist) * dist_mm
 
     cost = pet_term.astype(np.float64) + lateral_term + dist_term
-    return np.clip(cost, 1e-6, None)
+    return cost
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +409,6 @@ def edt_tube_mm(
 # ---------------------------------------------------------------------------
 
 def run_ureter_segmentation(
-    ct: "Image",
     pet_suv: "Image",
     kidney_r: "Image",
     kidney_l: "Image",
@@ -418,16 +417,16 @@ def run_ureter_segmentation(
     # ---- Tube geometry -------------------------------------------------
     radius_mm: float = 6.0,
     # ---- Cost weights --------------------------------------------------
-    w_pet: float = 1.0,
-    w_dist: float = 0.003,
-    w_lateral: float = 1.5,
+    w_pet: float = 5.0,
+    w_dist: float = 0.0,
+    w_lateral: float = 0.0,
     lateral_free_mm: float = 25.0,
-    lateral_slope_mm: float = 40.0,
+    lateral_slope_mm: float = 7.0,
     # ---- Gap-filling ---------------------------------------------------
-    suv_fill_sigma_vox: float = 4.0,
-    suv_fill_blend: float = 0.5,
+    suv_fill_sigma_vox: float = 0.5,
+    suv_fill_blend: float = 0.2,
     # ---- Spline --------------------------------------------------------
-    spline_s: float = 5.0,
+    spline_s: float = 1.5,
     # ---- Axis conventions — adjust if your resampled grid differs -------
     axis_x: int = 0,   # lateral (L-R) axis in the array
     axis_z: int = -1,  # IS axis in the array
@@ -460,7 +459,7 @@ def run_ureter_segmentation(
     suv = pet_suv.data
     bm  = bladder.data
 
-    sp = ct.spacing or pet_suv.spacing
+    sp = pet_suv.spacing
     if sp is None or len(sp) < 3:
         raise ValueError("CT (or PET) Image must carry spacing in metadata")
     spacing_xyz = (float(sp[0]), float(sp[1]), float(sp[2]))
@@ -496,7 +495,6 @@ def run_ureter_segmentation(
             suv_fill_blend=suv_fill_blend,
             axis_x=axis_x,
         )
-
         # ---- MCP routing ---------------------------------------------------
         path = minimum_cost_path_zyx(cost, start, end)
         log.info("Ureter-%s: MCP path length = %d voxels", side, int(path.shape[0]))
