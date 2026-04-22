@@ -135,19 +135,21 @@ def _submit_stage0(
     src_dir: Path,
     dry_run: bool,
     log_level: str,
+    device: str = "gpu",
     emit: TextIO | None = None,
 ) -> str:
     """Submit a single stage-0 SGE job and return its jid (or a shell-variable
     reference when *emit* is set, or ``'DRY_RUN'``)."""
     paths = _stage0_cluster_paths(lay, container, src_dir)
     binds = SingularityBinds(data=_STAGE0_BIND_DICOM, output=_STAGE0_BIND_NIFTI)
+    ngpu = ctpet_cfg.SGE_NGPU if device == "gpu" else ctpet_cfg.SGE_CPU_NGPU
     spec = StageSpec(
         job_name=f"PESAFat_stage0_{subject}",
         python_cmd=_stage0_python_cmd(subject, lay, log_level),
         resources=SgeResources(
             project=ctpet_cfg.SGE_PROJECT,
             account=ctpet_cfg.SGE_ACCOUNT,
-            ngpu=ctpet_cfg.SGE_CPU_NGPU,
+            ngpu=ngpu,
             h_vmem=ctpet_cfg.SGE_CPU_H_VMEM,
             queue=ctpet_cfg.SGE_QUEUE,
         ),
@@ -281,6 +283,7 @@ def _run_sge(
                 src_dir=src_dir,
                 dry_run=dry_run,
                 log_level=log_level,
+                device=device,
                 emit=emit,
             )
 

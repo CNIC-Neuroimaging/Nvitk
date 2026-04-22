@@ -61,20 +61,20 @@ def _local_runner(stage: str) -> Callable[..., Any]:
     raise ValueError(f"Unknown stage '{stage}'")
 
 
-def _stage_resources(stage: str) -> SgeResources:
-    if stage == "stage1":
-        return SgeResources(
-            project=cfg.SGE_PROJECT,
-            account=cfg.SGE_ACCOUNT,
-            ngpu=cfg.SGE_NGPU,
-            h_vmem=cfg.SGE_H_VMEM,
-            queue=cfg.SGE_QUEUE,
-        )
+def _stage_resources(stage: str, *, device: str = "gpu") -> SgeResources:
+    """Per-stage SGE resource request.
+
+    Stage 1 always uses the GPU h_vmem config. When *device* is ``"gpu"``,
+    every stage requests ``ngpu=SGE_NGPU`` (so stages 2/3 run on a GPU node
+    too); when ``"cpu"``, every stage requests ``ngpu=SGE_CPU_NGPU``.
+    """
+    ngpu = cfg.SGE_NGPU if device == "gpu" else cfg.SGE_CPU_NGPU
+    h_vmem = cfg.SGE_H_VMEM if stage == "stage1" else cfg.SGE_CPU_H_VMEM
     return SgeResources(
         project=cfg.SGE_PROJECT,
         account=cfg.SGE_ACCOUNT,
-        ngpu=cfg.SGE_CPU_NGPU,
-        h_vmem=cfg.SGE_CPU_H_VMEM,
+        ngpu=ngpu,
+        h_vmem=h_vmem,
         queue=cfg.SGE_QUEUE,
     )
 
@@ -256,7 +256,7 @@ def submit_subject_chain(
 
     specs: list[StageSpec] = []
     for s in stages_sel:
-        resources = _stage_resources(s)
+        resources = _stage_resources(s, device=device)
         specs.append(
             StageSpec(
                 job_name=f"{cfg.SGE_JOB_PREFIX}_{s}_{subject}",
