@@ -275,7 +275,7 @@ def submit_subject_chain(
                 binds=binds,
                 use_nv=True,
                 extra_env={
-                    "PYTHONPATH": str(binds.src + "src/"),
+                    "PYTHONPATH": str(binds.src),
                     "TOTALSEG_HOME_DIR": str(binds.models),
                 }
             )
