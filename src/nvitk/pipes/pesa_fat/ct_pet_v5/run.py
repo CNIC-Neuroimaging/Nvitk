@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, Callable, TextIO
 
 import click
-import pandas as pd
 
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.paths import (
@@ -49,6 +48,7 @@ from nvitk.pipes.pesa_fat.common.sge import (
     submit_chain,
     write_script_header,
 )
+from nvitk.pipes.pesa_fat.common.stage3_batch_summary import aggregate_stage3_summary
 from nvitk.pipes.pesa_fat.ct_pet_v5 import (
     config as cfg,
     stage1_segment,
@@ -138,31 +138,7 @@ def _run_local(
 
 def _aggregate_stage3(lay: BatchLayout, subjects: list[str]) -> Path | None:
     """Concatenate per-subject stage-3 xlsx files into ``<batch>_SummaryCodebook.xlsx``."""
-    per_subject = lay.results_dir / cfg.STAGE3_DIR / "per_subject"
-    if not per_subject.exists():
-        log.warning(f"Stage 3 aggregation skipped: {per_subject} not found")
-        return None
-
-    rows: list[dict[str, Any]] = []
-    for subj in subjects:
-        f = per_subject / f"{subj}.xlsx"
-        if not f.exists():
-            log.warning(f"Stage 3 aggregation: {f} missing")
-            continue
-        df = pd.read_excel(f)
-        if not df.empty:
-            rows.append(df.iloc[0].to_dict())
-
-    if not rows:
-        log.warning("Stage 3 aggregation: no per-subject rows collected")
-        return None
-
-    out = lay.results_dir / cfg.STAGE3_DIR / f"{lay.batch}_SummaryCodebook.xlsx"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    df_all = pd.DataFrame(rows, columns=stage3_measure.column_order())
-    df_all.to_excel(out, index=False)
-    log.info(f"Stage 3 aggregate written: {out}")
-    return out
+    return aggregate_stage3_summary(lay, subjects, "ct-pet-v5")
 
 
 # ---------------------------------------------------------------------------

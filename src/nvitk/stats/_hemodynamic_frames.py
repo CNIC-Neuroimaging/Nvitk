@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
+import numpy as np
 import pandas as pd
+
+from ._vessel_territory_map import parse_wide_image_column
 
 __all__ = [
     "aggregate_territory_measurements",
     "merge_subject_covariates",
     "build_analysis_df_from_repo_frames",
+    "build_analysis_df_from_territory_definitions",
+    "index_wide_image_columns_by_region_variable",
 ]
 
 
@@ -92,6 +97,132 @@ def merge_subject_covariates(
 
     cov = clinical_wide[cov_cols].drop_duplicates(subset=[subject_key], keep=dedupe)
     return long_df.merge(cov, on=subject_key, how="inner")
+
+
+def index_wide_image_columns_by_region_variable(
+    df: pd.DataFrame,
+    *,
+    id_cols: Sequence[str] | None = None,
+    include_frame_index: bool = False,
+) -> dict[tuple[str, str], list[str]]:
+    """
+    Map ``(region_id, variable_id)`` pairs to wide column names parseable by
+    :func:`~nvitk.stats.parse_wide_image_column`.
+
+    ``id_cols`` defaults to ``(\"subject_uid\",)`` when present in ``df``; otherwise
+    no id columns are assumed.
+    """
+    if id_cols is None:
+        id_cols = ("subject_uid",) if "subject_uid" in df.columns else ()
+    id_set = set(id_cols)
+    out: dict[tuple[str, str], list[str]] = {}
+    for col in df.columns:
+        if col in id_set:
+            continue
+        pw = parse_wide_image_column(col)
+        if pw is None:
+            continue
+        if not include_frame_index and pw.frame_suffix is not None:
+            continue
+        key = (pw.region_id, pw.variable_id)
+        out.setdefault(key, []).append(col)
+    return out
+
+
+def _rowwise_agg_across_columns(
+    df: pd.DataFrame,
+    cols: Sequence[str],
+    *,
+    agg: str,
+) -> pd.Series:
+    if not cols:
+        return pd.Series(np.nan, index=df.index)
+    num = df.loc[:, list(cols)].apply(pd.to_numeric, errors="coerce")
+    if agg == "mean":
+        return num.mean(axis=1)
+    if agg == "median":
+        return num.median(axis=1)
+    if agg == "sum":
+        return num.sum(axis=1)
+    if agg == "min":
+        return num.min(axis=1)
+    if agg == "max":
+        return num.max(axis=1)
+    raise ValueError(f"unsupported agg={agg!r}; use mean|median|sum|min|max")
+
+
+def build_analysis_df_from_territory_definitions(
+    image_df_wide: pd.DataFrame,
+    clinical_wide: pd.DataFrame,
+    territory_definitions: Mapping[str, Mapping[str, Sequence[str]]],
+    *,
+    flow_vars: Sequence[str],
+    asl_vars: Sequence[str],
+    covariate_cols: Sequence[str],
+    subject_key: str = "subject_uid",
+    dedupe_clinical: str = "first",
+    agg: str = "mean",
+    include_frame_index: bool = False,
+) -> pd.DataFrame:
+    """
+    One row per ``(subject_key, territory)`` using an **explicit** per-territory
+    region list for 4D flow and ASL.
+
+    Unlike :func:`melt_imaging_territories` + :func:`build_analysis_df_from_repo_frames`,
+    the same ASL ``region_id`` (e.g. ``ctx-whole-brain``) may contribute to **more
+    than one** analysis territory (e.g. ``ICA-WB`` and ``Venous-WB``) with
+    different flow region groupings, because territories are not derived from a
+    single inverted ``region → territory`` map.
+
+    Parameters
+    ----------
+    territory_definitions
+        ``{territory_name: {\"flow\": (region_ids...), \"asl\": (region_ids...)}}``.
+        Either ``flow`` or ``asl`` may be omitted or empty; missing variables for
+        that territory are filled with NaN. Region IDs must match ``region_id`` in
+        wide column names after :func:`~nvitk.stats.parse_wide_image_column`.
+    flow_vars, asl_vars
+        ``variable_id`` tokens to pull from wide columns (e.g. ``flow_mean``,
+        ``mean_cbf``).
+    include_frame_index
+        When True, include ``flow_tseries`` (and similar) columns with ``_fN``
+        suffixes in the column index; default False matches :func:`melt_imaging_territories`.
+    """
+    if subject_key not in image_df_wide.columns:
+        raise KeyError(f"{subject_key!r} not in image_df_wide")
+    col_index = index_wide_image_columns_by_region_variable(
+        image_df_wide,
+        id_cols=(subject_key,),
+        include_frame_index=include_frame_index,
+    )
+
+    chunks: list[pd.DataFrame] = []
+    for territory, spec in territory_definitions.items():
+        flow_regions = tuple(spec.get("flow", ()) or ())
+        asl_regions = tuple(spec.get("asl", ()) or ())
+        block = image_df_wide[[subject_key]].copy()
+        block["territory"] = territory
+        for var in flow_vars:
+            cols = [c for r in flow_regions for c in col_index.get((r, var), [])]
+            block[var] = _rowwise_agg_across_columns(image_df_wide, cols, agg=agg)
+        for var in asl_vars:
+            cols = [c for r in asl_regions for c in col_index.get((r, var), [])]
+            block[var] = _rowwise_agg_across_columns(image_df_wide, cols, agg=agg)
+        chunks.append(block)
+
+    if not chunks:
+        cols = [subject_key, "territory", *flow_vars, *asl_vars]
+        wide = pd.DataFrame(columns=cols)
+    else:
+        wide = pd.concat(chunks, ignore_index=True)
+
+    return merge_subject_covariates(
+        wide,
+        clinical_wide,
+        covariate_cols,
+        subject_key=subject_key,
+        dedupe=dedupe_clinical,
+    )
 
 
 def build_analysis_df_from_repo_frames(

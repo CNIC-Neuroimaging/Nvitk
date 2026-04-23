@@ -1,4 +1,5 @@
 """General mixed-effects modeling utilities built on top of statsmodels."""
+# """TODO: GPU implementation Cupy + cuDF"""
 
 from __future__ import annotations
 
@@ -347,8 +348,8 @@ def plot_mixedlm_params(
             re_x = float(re_vals.get(x, 0.0))
             y_line = (b_int + extra + re_int) + (b_x + re_x) * x_line
             ax.plot(x_line, y_line, color=cmap[g], lw=2, alpha=0.9, label=f"{group}={g}")
-            if errorbar:
-                ax.fill_between(x_line, y_line - 1.96 * se, y_line + 1.96 * se, color=cmap[g], alpha=0.2)
+            # if errorbar:
+            #     ax.fill_between(x_line, y_line - 1.96 * se, y_line + 1.96 * se, color=cmap[g], alpha=0.2)
 
     else:
         order = list(categorical_order) if categorical_order is not None else list(pd.unique(df[x].dropna()))

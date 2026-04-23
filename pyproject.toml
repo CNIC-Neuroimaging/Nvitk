@@ -115,7 +115,10 @@ conda-packages = [
 test = [
   "pytest>=8.3.5",
 ]
-full = ["nvitk[gpu,xnat,test]"]
+cluster = [
+  "paramiko>=3.4.0",
+]
+full = ["nvitk[gpu,xnat,test,cluster]"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Scripts

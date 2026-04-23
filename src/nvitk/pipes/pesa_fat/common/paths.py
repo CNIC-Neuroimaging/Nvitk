@@ -21,6 +21,18 @@ DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-
 DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
 DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
+# Default host checkout used for Singularity ``-B`` (``--src-dir`` on batch CLI).
+DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")
+
+# Default directory for emitted SGE bash scripts (``--emit-script`` when omitted).
+DEFAULT_SGE_SCRIPTS_DIR = Path(
+    "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/SCRIPTS_CLUSTER"
+)
+
+# Optional shortcuts for SSH hostnames (see ``nvitk-pesa-fat --submit sge`` remote exec).
+# Example: ``{"pegasus": "192.168.1.10"}`` — prompt accepts ``pegasus`` and resolves to the value.
+CLUSTER_HOST_ALIASES: dict[str, str] = {}
+
 SUBJECT_GLOB = "PESA*"
 
 NIFTI_EXTS: tuple[str, ...] = (".nii.gz", ".nii")
@@ -113,6 +125,11 @@ class BatchLayout:
             yield d.name
 
 
+def default_submit_script_path(batch: str) -> Path:
+    """Return ``SCRIPTS_CLUSTER/submit_<batch>.sh`` under :data:`DEFAULT_SGE_SCRIPTS_DIR`."""
+    return DEFAULT_SGE_SCRIPTS_DIR / f"submit_{batch}.sh"
+
+
 def layout(
     batch: str,
     *,
@@ -133,12 +150,16 @@ def layout(
 
 __all__ = [
     "BatchLayout",
+    "CLUSTER_HOST_ALIASES",
     "DEFAULT_DICOM_ROOT",
+    "DEFAULT_MODEL_ROOT",
+    "DEFAULT_NVITK_SRC_DIR",
     "DEFAULT_NIFTI_ROOT",
     "DEFAULT_RESULTS_ROOT",
-    "DEFAULT_MODEL_ROOT",
+    "DEFAULT_SGE_SCRIPTS_DIR",
     "SUBJECT_GLOB",
     "NIFTI_EXTS",
+    "default_submit_script_path",
     "layout",
     "parse_subjects",
     "resolve_nii",

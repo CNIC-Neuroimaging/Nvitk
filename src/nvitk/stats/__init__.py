@@ -3,6 +3,8 @@ from __future__ import annotations
 from ._hemodynamic_frames import (
     aggregate_territory_measurements,
     build_analysis_df_from_repo_frames,
+    build_analysis_df_from_territory_definitions,
+    index_wide_image_columns_by_region_variable,
     merge_subject_covariates,
 )
 from .mixedlm import (
@@ -30,6 +32,8 @@ __all__ = [
     "aggregate_territory_measurements",
     "merge_subject_covariates",
     "build_analysis_df_from_repo_frames",
+    "build_analysis_df_from_territory_definitions",
+    "index_wide_image_columns_by_region_variable",
     "fit_or_load_mixedlm",
     "print_mixedlm_info",
     "plot_mixedlm_params",
