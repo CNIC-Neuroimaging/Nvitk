@@ -52,9 +52,11 @@ def try_run_script_via_ssh(
         err_b = stderr.read()
         exit_status = stdout.channel.recv_exit_status()
         if out_b:
-            log.info("SSH stdout (tail): %s", out_b.decode(errors="replace")[-2000:])
+            log.info("SSH connection established | status: %s", exit_status)
+            log.info("SSH stdout (tail): \n %s", out_b.decode(errors="replace")[-2000:])
         if err_b:
-            log.info("SSH stderr (tail): %s", err_b.decode(errors="replace")[-2000:])
+            log.error("SSH connection established | status: %s", exit_status)
+            log.error("SSH stderr (tail): \n %s", err_b.decode(errors="replace")[-2000:])
         return exit_status == 0
     except Exception as exc:
         log.warning("SSH exec failed: %s", exc)
