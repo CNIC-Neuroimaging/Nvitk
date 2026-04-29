@@ -13,7 +13,7 @@ def try_run_script_via_ssh(
     script_path: Path,
     *,
     port: int = 22,
-    timeout: float = 30.0,
+    timeout: float | None = None,
 ) -> bool:
     """Execute ``bash -lc <script>`` on *host* via Paramiko.
 
@@ -47,7 +47,7 @@ def try_run_script_via_ssh(
             allow_agent=False,
             look_for_keys=False,
         )
-        _stdin, stdout, stderr = client.exec_command(remote_cmd, timeout=timeout)
+        _stdin, stdout, stderr = client.exec_command(remote_cmd)
         out_b = stdout.read()
         err_b = stderr.read()
         exit_status = stdout.channel.recv_exit_status()

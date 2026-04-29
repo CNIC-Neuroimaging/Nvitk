@@ -457,7 +457,7 @@ class Logger(metaclass=Singleton):
         """Return the underlying :class:`logging.Logger` (same *name* as passed to ``__init__``)."""
         return self._logger
 
-    def reset(self) -> None:
+    def reset(self, restart_progress: bool = True) -> None:
         """
         Stop progress, clear buffers, remove file handlers, and restart Rich progress in terminals.
 
@@ -467,7 +467,7 @@ class Logger(metaclass=Singleton):
             self._progress.stop()
         self._log_buffer.clear()
         self.remove_file_handlers()
-        if not in_notebook():
+        if not in_notebook() and restart_progress:
             self._progress = Progress(console=self._base_console, transient=False)
             self._progress.start()
 

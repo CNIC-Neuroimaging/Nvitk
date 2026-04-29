@@ -668,6 +668,7 @@ def main(
     if no_remote:
         return
 
+    log.reset(restart_progress=False)
     host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
     host_resolved = CLUSTER_HOST_ALIASES.get(host_key, host_key)
     user = remote_user or click.prompt("SSH user")

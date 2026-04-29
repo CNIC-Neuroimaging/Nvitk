@@ -21,17 +21,10 @@ DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-
 DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
 DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
-# Default host checkout used for Singularity ``-B`` (``--src-dir`` on batch CLI).
 DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")
+DEFAULT_SGE_SCRIPTS_DIR = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/SCRIPTS_CLUSTER")
 
-# Default directory for emitted SGE bash scripts (``--emit-script`` when omitted).
-DEFAULT_SGE_SCRIPTS_DIR = Path(
-    "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/SCRIPTS_CLUSTER"
-)
-
-# Optional shortcuts for SSH hostnames (see ``nvitk-pesa-fat --submit sge`` remote exec).
-# Example: ``{"pegasus": "192.168.1.10"}`` — prompt accepts ``pegasus`` and resolves to the value.
-CLUSTER_HOST_ALIASES: dict[str, str] = {}
+CLUSTER_HOST_ALIASES: dict[str, str] = {'samwise': '10.149.80.48'}
 
 SUBJECT_GLOB = "PESA*"
 
