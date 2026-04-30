@@ -29,12 +29,14 @@ from datetime import date
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import CellIsRule
+from nvitk.core.logger import Logger
 
 warnings.filterwarnings("ignore")
 
 sys.path.insert(0, __file__.rsplit("\\", 1)[0])
 from config import COMBINED_TABLE_PATH, METRICS_PATH, REPORT_PATH, OUT_DIR
 
+log = Logger()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Estilo gráfico
@@ -561,7 +563,7 @@ def make_heatmap(summary_df, title, out_path):
     fig.tight_layout()
     fig.savefig(out_path)
     plt.close(fig)
-    print(f"  OK {out_path}")
+    log.info(f"  OK {out_path}")
     return out_path
 
 
@@ -655,7 +657,7 @@ def export_excel(summary, comp_table, out_path):
                 ws2.column_dimensions[col_cells[0].column_letter].width = 13
         ws2.freeze_panes = "B2"
 
-    print(f"  OK {out_path}")
+    log.info(f"  OK {out_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -867,7 +869,7 @@ Scripts: <code>CODE/1_build_manual_table.py</code> &rarr; <code>2_build_combined
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(HTML)
-    print(f"  OK {out_path}")
+    log.info(f"  OK {out_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -875,17 +877,17 @@ Scripts: <code>CODE/1_build_manual_table.py</code> &rarr; <code>2_build_combined
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Paso 3 — Ejecutando an\u00e1lisis…")
+    log.info("Paso 3 — Ejecutando an\u00e1lisis…")
 
     if not os.path.exists(COMBINED_TABLE_PATH):
         sys.exit(f"ERROR: No se encuentra {COMBINED_TABLE_PATH}\n"
                  "Ejecuta primero: python 2_build_combined_table.py")
 
     df = pd.read_excel(COMBINED_TABLE_PATH, index_col=0)
-    print(f"  Tabla combinada: {df.shape[0]} participantes, {df.shape[1]} variables")
+    log.info(f"  Tabla combinada: {df.shape[0]} participantes, {df.shape[1]} variables")
 
     # ── Calcular métricas ─────────────────────────────────────────────────
-    print("  Calculando m\u00e9tricas\u2026")
+    log.info("  Calculando m\u00e9tricas\u2026")
     all_metrics = {}
     for gkey, ginfo in COMPARISONS.items():
         for comp in ginfo["pairs"]:
@@ -930,19 +932,19 @@ if __name__ == "__main__":
             pairs = [p for p in pairs
                      if (~(df[p["manual"]].isna() | df[p["auto"]].isna())).sum() >= 1]
             if not pairs:
-                print(f"  SKIP {gkey} (todos los pares n=0)")
+                log.warning(f"  SKIP {gkey} (todos los pares n=0)")
                 continue
 
         fig = _draw_group(gkey, ginfo, pairs, with_labels=False)
         out_path = os.path.join(OUT_DIR, f"{ginfo['fig_name']}.png")
         fig.savefig(out_path); plt.close(fig)
         all_fig_paths[gkey] = out_path
-        print(f"  OK {out_path}")
+        log.info(f"  OK {out_path}")
 
         fig_lbl = _draw_group(gkey, ginfo, pairs, with_labels=True)
         out_lbl = os.path.join(OUT_DIR, f"{ginfo['fig_name']}_labeled.png")
         fig_lbl.savefig(out_lbl); plt.close(fig_lbl)
-        print(f"  OK {out_lbl}")
+        log.info(f"  OK {out_lbl}")
 
     # ── Heatmaps ──────────────────────────────────────────────────────────
     summary_rows = []
@@ -987,25 +989,27 @@ if __name__ == "__main__":
     export_excel(summary, comp_table, METRICS_PATH)
 
     # ── Consola ───────────────────────────────────────────────────────────
-    print("\n" + "=" * 95)
-    print("  RESUMEN DE M\u00c9TRICAS \u2014 MANUAL vs AUTOM\u00c1TICO")
-    print("=" * 95)
+    log.info("\n" + "=" * 95)
+    log.info("  RESUMEN DE M\u00c9TRICAS \u2014 MANUAL vs AUTOM\u00c1TICO")
+    log.info("=" * 95)
     fmt = "{:<40s} {:>4s}  {:>7s}  {:>7s}  {:>7s}  {:>7s}  {:>8s}  {:>8s}"
-    print(fmt.format("Variable", "n", "r", "rho", "CCC", "ICC", "Bias", "RMSE"))
+    log.info(fmt.format("Variable", "n", "r", "rho", "CCC", "ICC", "Bias", "RMSE"))
     def _f(v): return f"{v:.3f}" if isinstance(v, float) and not np.isnan(v) else "-"
     prev_grp = None
     for _, row in summary.iterrows():
         if row["Grupo"] != prev_grp:
-            print("-" * 95); print(f"  [{row['Grupo']}]"); prev_grp = row["Grupo"]
-        print(fmt.format(
+            log.info("-" * 95)
+            log.info(f"  [{row['Grupo']}]")
+            prev_grp = row["Grupo"]
+        log.info(fmt.format(
             row["Variable"][:40].replace("\u26a0", "!"), str(row["n"]),
             _f(row["r (Pearson)"]), _f(row["rho (Spearman)"]),
             _f(row["CCC"]), _f(row["ICC (2,1)"]),
             _f(row["Bias"]), _f(row["RMSE"]),
         ))
-    print("=" * 95)
+    log.info("=" * 95)
 
     # ── HTML ──────────────────────────────────────────────────────────────
     build_html(summary, comp_table, all_fig_paths, out_sum_suv, out_sum_dix, REPORT_PATH)
 
-    print(f"\nFicheros generados en: {OUT_DIR}")
+    log.info(f"\nFicheros generados en: {OUT_DIR}")

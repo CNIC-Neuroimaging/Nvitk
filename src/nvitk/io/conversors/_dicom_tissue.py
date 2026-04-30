@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 import numpy as np
+from nvitk.core.logger import Logger
 
 try:
     import pydicom
@@ -18,15 +19,16 @@ __all__ = [
 ]
 
 _DEBUG = False
+log = Logger()
 
 
 def _warn(message: str) -> None:
-    print(message)
+    log.warning(message)
 
 
 def _debug(message: str) -> None:
     if _DEBUG:
-        print(message)
+        log.debug(message)
 
 
 def is_tissue_segmentation(ds: Any) -> bool:

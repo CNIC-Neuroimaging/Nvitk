@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import pandas as pd
+from nvitk.core.logger import Logger
 
 from .asl_atlases import regions_for_atlas
 from .t1_atlases import regions_for_t1_atlas
@@ -26,6 +27,8 @@ from .filters import apply_filters, ensure_list, merge_filters
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 from .sqlite_index import SQLiteIndex
 from .storage import coerce_bool, coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
+
+log = Logger()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -47,10 +50,10 @@ def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatC
         with open(Path(__file__).resolve().parents[3] / ".nvitk" / "settings.json", "r") as f:
             settings = json.load(f)
             if "local_fallback_root" in settings["db"] and settings["db"]["local_fallback_root"] is not None:
-                print(f"Using local root: {settings['db']['local_fallback_root']}")
+                log.info(f"Using local root: {settings['db']['local_fallback_root']}")
                 root = settings["db"]["local_fallback_root"]
             else: 
-                print(f"Using remote root: {settings['db']['root']}")
+                log.info(f"Using remote root: {settings['db']['root']}")
                 root = settings["db"]["root"]
 
             repo = DataRepo(
@@ -1128,7 +1131,7 @@ class DataRepo:
                 if cfg is None:
                     try:
                         cfg = resolve_xnat_connection(load_xnat_profile())
-                        print(f'Connected to XNAT: {cfg.server} / {cfg.project}')
+                        log.info(f"Connected to XNAT: {cfg.server} / {cfg.project}")
                     except ValueError as exc:
                         raise FilterError(
                             "get_image=True with missing local_cache_path requires XNAT credentials: "

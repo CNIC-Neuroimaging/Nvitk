@@ -8,6 +8,7 @@ import tempfile
 from typing import Any
 
 import numpy as np
+from nvitk.core.logger import Logger
 
 try:
     from PIL import Image
@@ -28,6 +29,8 @@ __all__ = [
     "extract_zeiss_raw_oct",
     "is_zeiss_raw_storage",
 ]
+
+log = Logger()
 
 
 def _is_zeiss_raw_storage(ds: Any) -> bool:
@@ -165,7 +168,7 @@ def _extract_zeiss_raw_oct(
         candidate_height = None
 
     if debug_mode:
-        print(
+        log.debug(
             "[Zeiss extractor] geometry candidates: "
             f"width={candidate_width}, height={candidate_height}"
         )
@@ -185,7 +188,7 @@ def _extract_zeiss_raw_oct(
         length_map[length] += 1
 
     if debug_mode:
-        print(
+        log.debug(
             "[Zeiss extractor] found "
             f"{len(all_blocks)} private blocks; lengths summary: "
             f"{sorted(length_map.items(), key=lambda item: -item[1])[:10]}"
@@ -465,7 +468,7 @@ def _extract_zeiss_raw_oct(
             groups[arr.shape].append((idx, tag, arr))
         chosen_shape, chosen_list = max(groups.items(), key=lambda item: len(item[1]))
         if debug_mode:
-            print(
+            log.debug(
                 "[Zeiss extractor] decoded shapes counts: "
                 f"{[(shape, len(items)) for shape, items in groups.items()]}; chosen={chosen_shape}"
             )

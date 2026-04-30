@@ -1,5 +1,8 @@
 import sys
 import time
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 
 class LoadingBar:
@@ -47,6 +50,6 @@ def timed(fun):
         end = time.time()
 
         f_name = fun.__name__
-        print(f'{f_name} took {end - start:.2f} seconds.\n')
+        log.info(f"{f_name} took {end - start:.2f} seconds.")
         return res
     return wrapper

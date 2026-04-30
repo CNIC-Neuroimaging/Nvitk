@@ -393,7 +393,7 @@ def segment_ureter(
     w_pet: float = 5.0,
     # ---- Gap-filling ---------------------------------------------------
     suv_fill_sigma_vox: float = 0.5,
-    suv_fill_blend: float = 0.2,
+    suv_fill_blend: float = 0.05,
     # ---- Spline --------------------------------------------------------
     spline_s: float = 1.5,
     # ---- Axis conventions — adjust if your resampled grid differs -------

@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import numpy as np
+from nvitk.core.logger import Logger
 
 try:
     import pydicom
@@ -47,6 +48,8 @@ __all__ = [
     "process_rtstruct_to_masks",
 ]
 
+log = Logger()
+
 
 def _sanitize_filename(value: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in str(value))
@@ -54,11 +57,15 @@ def _sanitize_filename(value: str) -> str:
 
 
 def _warn(message: str) -> None:
-    print(message)
+    log.warning(message)
 
 
 def _err(message: str) -> None:
-    print(message)
+    log.error(message)
+
+
+def _info(message: str) -> None:
+    log.info(message)
 
 
 def _debug(message: str) -> None:
@@ -276,9 +283,9 @@ def _process_manually(
         except Exception as exc:
             _debug(f"Could not save ROI information file: {exc}")
 
-        print(f"Successfully processed RT-Struct using manual method: {os.path.basename(rtstruct_path)}")
-        print(f"Saved {len(rois)} individual ROI masks and 1 combined mask")
-        print(f"Combined mask saved to: {combined_filepath}")
+        _info(f"Successfully processed RT-Struct using manual method: {os.path.basename(rtstruct_path)}")
+        _info(f"Saved {len(rois)} individual ROI masks and 1 combined mask")
+        _info(f"Combined mask saved to: {combined_filepath}")
         return True
     except Exception as exc:
         _err(f"Manual processing failed for RT-Struct {rtstruct_path}: {exc}")
@@ -612,7 +619,7 @@ def integrate_rtstruct_processing(
     Integrate RT-Struct processing into the main DICOM conversion pipeline.
     """
     rtstruct_results: dict[str, bool] = {}
-    print("Processing RT-Struct files...")
+    _info("Processing RT-Struct files...")
 
     try:
         rtstruct_files = []
@@ -628,10 +635,10 @@ def integrate_rtstruct_processing(
                         continue
 
         if not rtstruct_files:
-            print("No RT-Struct files found in input directory")
+            _info("No RT-Struct files found in input directory")
             return rtstruct_results
 
-        print(f"Found {len(rtstruct_files)} RT-Struct files to process")
+        _info(f"Found {len(rtstruct_files)} RT-Struct files to process")
         rtstruct_output_dir = os.path.join(output_folder, "rtstruct_masks")
 
         for rtstruct_file in rtstruct_files:

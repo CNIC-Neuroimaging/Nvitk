@@ -17,10 +17,12 @@ Fuentes:
 import sys
 import numpy as np
 import pandas as pd
+from nvitk.core.logger import Logger
 
 sys.path.insert(0, __file__.rsplit("\\", 1)[0])   # permite importar config.py
 from config import MANUAL_PATH, MANUAL_PATH2, MANUAL_TABLE_PATH
 
+log = Logger()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -218,7 +220,7 @@ def load_manual2(path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Paso 1 — Construyendo tabla de medidas manuales…")
+    log.info("Paso 1 — Construyendo tabla de medidas manuales…")
 
     df1 = load_manual(MANUAL_PATH)
     df2 = load_manual2(MANUAL_PATH2)
@@ -226,7 +228,7 @@ if __name__ == "__main__":
     df_manual = df1.join(df2, how="outer")
 
     df_manual.to_excel(MANUAL_TABLE_PATH, index=True)
-    print(f"  FILE1: {df1.shape[0]} participantes, {df1.shape[1]} variables")
-    print(f"  FILE2: {df2.shape[0]} participantes, {df2.shape[1]} variables")
-    print(f"  Tabla unificada: {df_manual.shape[0]} filas × {df_manual.shape[1]} columnas")
-    print(f"  OK {MANUAL_TABLE_PATH}")
+    log.info(f"  FILE1: {df1.shape[0]} participantes, {df1.shape[1]} variables")
+    log.info(f"  FILE2: {df2.shape[0]} participantes, {df2.shape[1]} variables")
+    log.info(f"  Tabla unificada: {df_manual.shape[0]} filas × {df_manual.shape[1]} columnas")
+    log.info(f"  OK {MANUAL_TABLE_PATH}")

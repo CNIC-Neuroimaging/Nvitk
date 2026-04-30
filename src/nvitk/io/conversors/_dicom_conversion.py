@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
+from nvitk.core.logger import Logger
 from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
 
 from ._dicom_rtstructs import integrate_rtstruct_processing
@@ -61,6 +62,8 @@ __all__ = [
     "load_dicom_series",
     "run_dicom2nifti",
 ]
+
+log = Logger()
 
 METADATA_TO_SAVE = [
     "PatientID",
@@ -167,15 +170,15 @@ RT_SOP_CLASS_UIDS = {
 
 
 def _info(message: str) -> None:
-    print(message)
+    log.info(message)
 
 
 def _warn(message: str) -> None:
-    print(message)
+    log.warning(message)
 
 
 def _err(message: str) -> None:
-    print(message)
+    log.error(message)
 
 
 def _debug(message: str) -> None:
@@ -1825,7 +1828,7 @@ def load_dicom_series(
                 sig = _image_type_signature(_extract_image_type_tokens(ds))
                 buckets.setdefault(sig, []).append(ds)
             if len(buckets) > 1:
-                _info(f"[info]Splitting series into {len(buckets)} subseries by ImageType[/info]")
+                _info(f"Splitting series into {len(buckets)} subseries by ImageType")
                 for _, sub in buckets.items():
                     md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=include_private_tags)
                     md_sub.update(_collect_rescale_metadata(sub))
@@ -2389,7 +2392,7 @@ def run_dicom2nifti(
                 if len(buckets) > 1:
                     if explicit_output_path:
                         raise ValidationError("Explicit output file cannot be used when a series splits into multiple subseries.")
-                    _info(f"[info]Splitting series into {len(buckets)} subseries by ImageType[/info]")
+                    _info(f"Splitting series into {len(buckets)} subseries by ImageType")
                     for sig, sub in buckets.items():
                         md_sub = _pydicom_dataset_to_dict(sub[0], include_private_tags=True)
                         md_sub.update(_collect_rescale_metadata(sub))

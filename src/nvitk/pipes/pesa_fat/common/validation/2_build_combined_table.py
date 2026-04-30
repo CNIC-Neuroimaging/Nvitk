@@ -15,11 +15,13 @@ Columnas derivadas añadidas:
 import sys
 import os
 import pandas as pd
+from nvitk.core.logger import Logger
 
 sys.path.insert(0, __file__.rsplit("\\", 1)[0])
 from config import (AUTO_BASE, AUTO_MONTH, AUTO_WEEKS,
                     MANUAL_TABLE_PATH, COMBINED_TABLE_PATH)
 
+log = Logger()
 
 _STAGE3_DIRS = {"DIXON": "res_measure_dixon", "SUV": "res_measure_suv"}
 
@@ -38,7 +40,7 @@ def load_auto_weeks(modality):
 
 
 if __name__ == "__main__":
-    print("Paso 2 — Construyendo tabla combinada…")
+    log.info("Paso 2 — Construyendo tabla combinada…")
 
     # ── Cargar manual ──────────────────────────────────────────────────────
     if not os.path.exists(MANUAL_TABLE_PATH):
@@ -46,13 +48,13 @@ if __name__ == "__main__":
                  "Ejecuta primero: python 1_build_manual_table.py")
 
     df_man = pd.read_excel(MANUAL_TABLE_PATH, index_col=0)
-    print(f"  Manual: {df_man.shape[0]} participantes, {df_man.shape[1]} variables")
+    log.info(f"  Manual: {df_man.shape[0]} participantes, {df_man.shape[1]} variables")
 
     # ── Cargar automático ──────────────────────────────────────────────────
     df_suv = load_auto_weeks("SUV")
     df_dix = load_auto_weeks("DIXON")
-    print(f"  Auto SUV : {df_suv.shape[0]} participantes, {df_suv.shape[1]} variables")
-    print(f"  Auto DIXON: {df_dix.shape[0]} participantes, {df_dix.shape[1]} variables")
+    log.info(f"  Auto SUV : {df_suv.shape[0]} participantes, {df_suv.shape[1]} variables")
+    log.info(f"  Auto DIXON: {df_dix.shape[0]} participantes, {df_dix.shape[1]} variables")
 
     # ── Unir ───────────────────────────────────────────────────────────────
     df = df_man.join(df_suv, how="outer").join(df_dix, how="outer")
@@ -65,5 +67,5 @@ if __name__ == "__main__":
     # ── Guardar ────────────────────────────────────────────────────────────
     df.index.name = "pesa_id"
     df.to_excel(COMBINED_TABLE_PATH, index=True)
-    print(f"  Tabla combinada: {df.shape[0]} filas × {df.shape[1]} columnas")
-    print(f"  OK {COMBINED_TABLE_PATH}")
+    log.info(f"  Tabla combinada: {df.shape[0]} filas × {df.shape[1]} columnas")
+    log.info(f"  OK {COMBINED_TABLE_PATH}")

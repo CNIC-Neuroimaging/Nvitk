@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import io
 import re
-from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 
 def _safe_col(name: str) -> str:
@@ -177,81 +179,82 @@ def print_mixedlm_info(
         raise ValueError(f"Object does not look like MixedLMResults. Missing attributes: {missing}")
 
     buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        print("=" * 88)
-        print(f"Mixed Linear Model - {outcome_name}")
-        print("=" * 88)
-        try:
-            print(f"Formula: {result.model.formula}")
-        except Exception:
-            pass
-        print(f"Observations: {int(result.nobs):,}")
-        ngroups = getattr(result, "ngroups", None)
-        if ngroups is None and hasattr(result, "random_effects"):
-            ngroups = len(result.random_effects)
-        if ngroups is not None:
-            print(f"{group_name} groups: {int(ngroups):,}")
-        print()
+    _w = lambda line="": buffer.write(f"{line}\n")
 
-        fe = result.fe_params
-        fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
-        fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
-        print("Fixed effects")
-        print("-" * 88)
-        print(f"{'Parameter':<34}{'Coef':>12}{'Std.Err':>12}{'P-value':>12}{'Sig':>10}")
-        for param in fe.index:
-            coef = float(fe[param])
-            se = float(fe_se.get(param, np.nan))
-            pval = float(fe_p.get(param, np.nan))
-            if np.isnan(pval):
-                sig = ""
-            elif pval < 0.001:
-                sig = "***"
-            elif pval < 0.01:
-                sig = "**"
-            elif pval < 0.05:
-                sig = "*"
-            elif pval < 0.1:
-                sig = "."
-            else:
-                sig = "NS"
-            print(f"{param:<34}{coef:>12.4f}{se:>12.4f}{pval:>12.4g}{sig:>10}")
-        print()
+    _w("=" * 88)
+    _w(f"Mixed Linear Model - {outcome_name}")
+    _w("=" * 88)
+    try:
+        _w(f"Formula: {result.model.formula}")
+    except Exception:
+        pass
+    _w(f"Observations: {int(result.nobs):,}")
+    ngroups = getattr(result, "ngroups", None)
+    if ngroups is None and hasattr(result, "random_effects"):
+        ngroups = len(result.random_effects)
+    if ngroups is not None:
+        _w(f"{group_name} groups: {int(ngroups):,}")
+    _w()
 
-        cov_re = getattr(result, "cov_re", pd.DataFrame())
-        if isinstance(cov_re, pd.DataFrame) and not cov_re.empty:
-            print(f"{group_name} random effects covariance")
-            print("-" * 88)
-            print(cov_re.to_string())
-            print()
+    fe = result.fe_params
+    fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
+    fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
+    _w("Fixed effects")
+    _w("-" * 88)
+    _w(f"{'Parameter':<34}{'Coef':>12}{'Std.Err':>12}{'P-value':>12}{'Sig':>10}")
+    for param in fe.index:
+        coef = float(fe[param])
+        se = float(fe_se.get(param, np.nan))
+        pval = float(fe_p.get(param, np.nan))
+        if np.isnan(pval):
+            sig = ""
+        elif pval < 0.001:
+            sig = "***"
+        elif pval < 0.01:
+            sig = "**"
+        elif pval < 0.05:
+            sig = "*"
+        elif pval < 0.1:
+            sig = "."
+        else:
+            sig = "NS"
+        _w(f"{param:<34}{coef:>12.4f}{se:>12.4f}{pval:>12.4g}{sig:>10}")
+    _w()
 
-        vcomp = getattr(result, "vcomp", None)
-        if vcomp is not None:
-            vc_names = getattr(result.model, "vc_names", [f"VC_{i}" for i in range(len(vcomp))])
-            print(f"Variance components ({vc_group_name})")
-            print("-" * 88)
-            for name, var in zip(vc_names, vcomp):
-                var_f = float(var)
-                print(f"{name:<24} var={var_f:.6f}  sd={np.sqrt(max(var_f, 0.0)):.6f}")
-            print()
+    cov_re = getattr(result, "cov_re", pd.DataFrame())
+    if isinstance(cov_re, pd.DataFrame) and not cov_re.empty:
+        _w(f"{group_name} random effects covariance")
+        _w("-" * 88)
+        _w(cov_re.to_string())
+        _w()
 
-        if hasattr(result, "scale"):
-            scale = float(result.scale)
-            print(f"Residual variance: {scale:.6f}")
-            print(f"Residual std dev: {np.sqrt(max(scale, 0.0)):.6f}")
-            print()
+    vcomp = getattr(result, "vcomp", None)
+    if vcomp is not None:
+        vc_names = getattr(result.model, "vc_names", [f"VC_{i}" for i in range(len(vcomp))])
+        _w(f"Variance components ({vc_group_name})")
+        _w("-" * 88)
+        for name, var in zip(vc_names, vcomp):
+            var_f = float(var)
+            _w(f"{name:<24} var={var_f:.6f}  sd={np.sqrt(max(var_f, 0.0)):.6f}")
+        _w()
 
-        print("Fit statistics")
-        print("-" * 88)
-        for attr in ("llf", "aic", "bic"):
-            if hasattr(result, attr):
-                print(f"{attr.upper():<8}: {float(getattr(result, attr)):.4f}")
-        if hasattr(result, "converged"):
-            print(f"Converged: {bool(result.converged)}")
-        print("=" * 88)
+    if hasattr(result, "scale"):
+        scale = float(result.scale)
+        _w(f"Residual variance: {scale:.6f}")
+        _w(f"Residual std dev: {np.sqrt(max(scale, 0.0)):.6f}")
+        _w()
+
+    _w("Fit statistics")
+    _w("-" * 88)
+    for attr in ("llf", "aic", "bic"):
+        if hasattr(result, attr):
+            _w(f"{attr.upper():<8}: {float(getattr(result, attr)):.4f}")
+    if hasattr(result, "converged"):
+        _w(f"Converged: {bool(result.converged)}")
+    _w("=" * 88)
 
     text = buffer.getvalue()
-    print(text)
+    log.info(text)
     if output_path is not None:
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -451,7 +454,7 @@ def plot_mixedlm_params(
         except Exception as e:
             import traceback
             traceback.print_exc()
-            print(f"Error calculating EMM: {e}")
+            log.error(f"Error calculating EMM: {e}")
 
         if include_points:
             sns.pointplot(

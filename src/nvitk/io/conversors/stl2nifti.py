@@ -10,6 +10,7 @@ except Exception:
     click = None
 
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
+from nvitk.core.logger import Logger
 
 from ._poly_stencil import list_stl_files, multilabel_from_stls, stl_to_vtk_binary, write_nifti
 
@@ -29,17 +30,19 @@ def _cli_decorator(*args, **kwargs):
 _click_command = click.command if click is not None else _cli_decorator
 _click_option = click.option if click is not None else _cli_decorator
 
+log = Logger()
+
 
 def _info(message: str) -> None:
-    print(message)
+    log.info(message)
 
 
 def _warn(message: str) -> None:
-    print(message)
+    log.warning(message)
 
 
 def _err(message: str) -> None:
-    print(message)
+    log.error(message)
 
 
 def _is_nifti_file_path(path: Path) -> bool:

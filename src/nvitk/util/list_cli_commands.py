@@ -11,8 +11,13 @@ project_root = Path(__file__).resolve().parents[3]
 src_dir = project_root / 'src' / 'nvitk'
 sys.path.insert(0, str(src_dir))
 
-print(f"Adding {src_dir} to sys.path")
 from nvitk.util.colors import bcolors as Colors
+
+
+def _get_log():
+    # Lazy import avoids triggering logger-related import cycles at module import time.
+    from nvitk.core.logger import Logger
+    return Logger()
 
 def categorize_command(cmd, module):
     """Categorize command based on its name and module path"""
@@ -71,10 +76,12 @@ def find_pyproject_toml():
 
 def list_cli_commands():
     """Parse pyproject.toml and list all defined CLI commands organized by category"""
+    log = _get_log()
+    log.info(f"Adding {src_dir} to sys.path")
 
     pyproject_path = find_pyproject_toml()
     if not pyproject_path:
-        print("Error: pyproject.toml not found")
+        log.error("Error: pyproject.toml not found")
         return
 
     with open(pyproject_path, 'r') as f:
@@ -84,7 +91,7 @@ def list_cli_commands():
     scripts_match = re.search(r'\[project\.scripts\](.*?)(?=\[|$)', content, re.DOTALL)
 
     if not scripts_match:
-        print("No [project.scripts] section found in pyproject.toml")
+        log.warning("No [project.scripts] section found in pyproject.toml")
         return
 
     scripts_content = scripts_match.group(1)
@@ -100,7 +107,7 @@ def list_cli_commands():
                 commands.append((cmd, module))
 
     if not commands:
-        print("No CLI commands found")
+        log.warning("No CLI commands found")
         return
 
     # Categorize commands
@@ -120,11 +127,11 @@ def list_cli_commands():
     ]
 
     # Display header
-    print("\n" + "=" * 80)
-    print(f"{Colors.BOLD}{Colors.OKBLUE}Nvitk CLI Commands{Colors.ENDC}")
-    print("=" * 80)
-    print(f"{Colors.WHITE}Available command-line interfaces organized by functionality{Colors.ENDC}")
-    print("=" * 80)
+    log.info("\n" + "=" * 80)
+    log.info(f"{Colors.BOLD}{Colors.OKBLUE}Nvitk CLI Commands{Colors.ENDC}")
+    log.info("=" * 80)
+    log.info(f"{Colors.WHITE}Available command-line interfaces organized by functionality{Colors.ENDC}")
+    log.info("=" * 80)
 
     total_commands = 0
     
@@ -134,8 +141,8 @@ def list_cli_commands():
             commands_in_category = categorized[category]
             total_commands += len(commands_in_category)
             
-            print(f"\n{Colors.BOLD}{category}{Colors.ENDC}")
-            print("─" * len(category))
+            log.info(f"{Colors.BOLD}{category}{Colors.ENDC}")
+            log.info("─" * len(category))
             
             for cmd, module in commands_in_category:
                 # Format module path for better readability
@@ -152,22 +159,22 @@ def list_cli_commands():
                 # Check if the line would be too long
                 line = f"  {colored_cmd:<20} → {Colors.GRAY}{module_display}{Colors.ENDC}"
                 if len(f"  {cmd:<20} → {module_display}") > 100:
-                    print(f"  {colored_cmd:<20} →")
-                    print(f"    {Colors.GRAY}{module_display}{Colors.ENDC}")
+                    log.info(f"  {colored_cmd:<20} →")
+                    log.info(f"    {Colors.GRAY}{module_display}{Colors.ENDC}")
                 else:
-                    print(line)
+                    log.info(line)
             
-            print()  # Empty line between categories
+            log.info("")  # Empty line between categories
 
     # Display footer
-    print("=" * 80)
-    print(f"{Colors.BOLD}Total commands: {Colors.OKGREEN}{total_commands}{Colors.ENDC}")
-    print("=" * 80)
-    print(f"\n{Colors.BOLD}Backend Options:{Colors.ENDC}")
-    print(f"   {Colors.WHITE}• --backend numpy  (CPU processing){Colors.ENDC}")
-    print(f"   {Colors.WHITE}• --backend cupy   (GPU processing){Colors.ENDC}")
-    print(f"   {Colors.WHITE}[• --backend gpu    (GPU processing alias for some commands){Colors.ENDC}]")
-    print("=" * 80)
+    log.info("=" * 80)
+    log.info(f"{Colors.BOLD}Total commands: {Colors.OKGREEN}{total_commands}{Colors.ENDC}")
+    log.info("=" * 80)
+    log.info(f"{Colors.BOLD}Backend Options:{Colors.ENDC}")
+    log.info(f"   {Colors.WHITE}• --backend numpy  (CPU processing){Colors.ENDC}")
+    log.info(f"   {Colors.WHITE}• --backend cupy   (GPU processing){Colors.ENDC}")
+    log.info(f"   {Colors.WHITE}[• --backend gpu    (GPU processing alias for some commands){Colors.ENDC}]")
+    log.info("=" * 80)
 
 
 def main():
