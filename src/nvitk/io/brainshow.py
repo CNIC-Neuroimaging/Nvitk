@@ -1,8 +1,12 @@
-"""Visualization helpers."""
+"""
+Backward-compatible re-exports for brain visualization helpers.
+
+Prefer importing from :mod:`nvitk.viz.brainshow`.
+"""
 
 from __future__ import annotations
 
-from .brainshow import (
+from nvitk.viz.brainshow import (
     ResolvedAtlas,
     brainshow,
     build_index_to_value,

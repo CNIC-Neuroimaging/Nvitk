@@ -4,3 +4,6 @@
 [submodule "registry/models"]
 	path = registry/models
 	url = git@bioinfo-git.cnic.es:imarcoss/bioimaging-models.git
+[submodule "src/nvitk/pipes/qvtplus/src"]
+	path = src/nvitk/pipes/qvtplus/src
+	url = git@github.com:ignacio-ms/QVTplus.git

@@ -7,12 +7,13 @@ Typical usage: ``from nvitk.io import imread, imsave`` or import conversors by n
 from __future__ import annotations
 
 from .conversors import dcm2nii, nikon2nifti, phase2volume, stl2nifti
-from .imageio import convert_image, imread, imsave, imshow, swapaxes
+from .imageio import brainshow, convert_image, imread, imsave, imshow, swapaxes
 
 __all__ = [
     "imread",
     "imsave",
     "imshow",
+    "brainshow",
     "swapaxes",
     "convert_image",
     "dcm2nii",
