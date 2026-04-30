@@ -39,6 +39,7 @@ dependencies = [
   "pyarrow>=21.0.0",
   "debugpy>=1.8.16",
   "jupyter>=1.1.1",
+  "pingouin>=0.6.1",
 
   # -----------------------------------------------------------------------------
   # Image processing dependencies
