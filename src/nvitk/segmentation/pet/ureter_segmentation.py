@@ -380,11 +380,12 @@ def edt_tube_mm(
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run_ureter_segmentation(
+def segment_ureter(
     pet_suv: "Image",
     kidney_r: "Image",
     kidney_l: "Image",
     bladder: "Image",
+    body: "Image",
     *,
     # ---- Tube geometry -------------------------------------------------
     radius_mm: float = 6.0,
