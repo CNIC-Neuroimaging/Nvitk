@@ -50,10 +50,10 @@ dependencies = [
   "nd2>=0.10.3",
   "antspyx>=0.6.1",
   "dicom2nifti>=2.6.1",
-  "pydicom>=2.4.5,<3",
+  "pydicom>=2.4.5,<=3",
   "pylibjpeg>=2.0.1",
   "vtk>=9.3.1",
-  "pyradiomics>=3.0.1",
+  # "pyradiomics>=3.0.1",
   "SimpleITK>=2.5.2",
   "scikit-image>=0.25.2",
   "opencv-python>=4.11",
@@ -96,9 +96,11 @@ dependencies = [
 # ──────────────────────────────────────────────────────────────────────────────
 [project.optional-dependencies]
 gpu = [
-  "cupy-cuda12x>=13.6.0",
-  "pytorch>=2.8.0", # +cu129
-  "torchvision>=0.23.0", # +cu129
+  "cupy-cuda13x>=13.6.0",
+  "pytorch>=2.9.0", # +cu130
+  "torchvision>=0.24.0", # +cu130
+  "cutensor-cu13>=2.3.0",
+  "nvidia-nccl-cu13>=2.27.0",
 ]
 xnat = [
   "xnat>=0.7.2",
