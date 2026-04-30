@@ -233,23 +233,16 @@ def anchor_bladder_entry_per_side(
 
 def build_cost_volume(
     suv: Any,
-    p_start: Any,
-    p_end: Any,
     spacing_xyz_mm: Tuple[float, float, float],
+    body: "Image",
     *,
     # ---- PET / gap-filling ----------------------------------------
     w_pet: float = 1.0,
-    suv_clip: float = 50.0,
+    suv_clip_l: float = 1e-2,
+    suv_clip_h: float = 15.0,
     suv_fill_sigma_vox: float = 4.0,
     suv_fill_blend: float = 0.5,
     eps: float = 1e-3,
-    # ---- Lateral hemisphere soft guardrail ------------------------
-    w_lateral: float = 1.5,
-    lateral_free_mm: float = 25.0,
-    lateral_slope_mm: float = 40.0,
-    axis_x: int = 0,
-    # ---- Distance-to-endpoint pull --------------------------------
-    w_dist: float = 0.003,
 ) -> Any:
     """
     PET-primary cost volume for ureter MCP routing — v2.1.
@@ -270,25 +263,6 @@ def build_cost_volume(
         the raw map with a smoothed version (element-wise maximum), so short
         low-uptake gaps along the ureter do not reroute the path.
 
-    lateral_term
-        A piecewise-linear (hinge) penalty in the lateral direction only.
-        Free zone: ``lateral_free_mm`` (default 25 mm) around the kidney
-        pelvis x-position — zero cost.  Ramp zone: cost rises at
-        ``w_lateral / lateral_slope_mm`` per mm over the next
-        ``lateral_slope_mm`` (default 40 mm).  Hard cap: beyond
-        ``lateral_free_mm + lateral_slope_mm`` the penalty saturates at
-        ``w_lateral``.
-
-        This acts as a guardrail that blocks grossly wrong contralateral
-        routes without pulling the path straight.  It has no opinion on
-        IS or AP movement — the ureter is free to curve in those directions.
-
-    dist_term
-        Minimal endpoint pull — genuinely just a tiebreaker (w=0.003).
-        Prevents the path from idling near a local high-SUV region by adding
-        a tiny bias toward the destination that can never override the PET
-        signal.
-
     Parameters
     ----------
     w_lateral : float
@@ -306,44 +280,41 @@ def build_cost_volume(
     s0, s1, s2 = spacing_xyz_mm
 
     # ---- gap-filled SUV ---------------------------------------------------
-    suv_c      = np.clip(suv, suv_clip, None)
-    suv_n      = (suv_c - suv_c.min()) / (suv_c.max() - suv_c.min())
-    suv_smooth = ndi.gaussian_filter(suv_c.astype(np.float64), sigma=float(suv_fill_sigma_vox), mode="nearest")
+    # 1) Body mask
+    body_mask = np.asarray(body.data) > 0
 
-    # Element-wise max: hotspots preserved; dark gaps lifted by blended envelope
+    # 2) Clip + smooth as you already do
+    suv_c = np.clip(suv, suv_clip_l, suv_clip_h)
+    suv_smooth = ndi.gaussian_filter(
+        suv_c.astype(np.float64),
+        sigma=float(suv_fill_sigma_vox),
+        mode="nearest",
+    )
     suv_filled = np.maximum(suv_c, float(suv_fill_blend) * suv_smooth)
-    pet_term   = float(w_pet) / (suv_filled + float(eps))
 
-    # ---- physical coordinate grid (per-axis spacing, no physical label assumed)
-    a0, a1, a2 = np.indices(suv.shape)
-    s_arr = np.array([s0, s1, s2], dtype=np.float64)
+    # 3) Log-compress SUV (high SUV separation improves)
+    log_suv = np.log1p(suv_filled)
 
-    # ---- lateral guardrail ------------------------------------------------
-    # Hinge penalty: zero within lateral_free_mm, linear ramp to plateau w_lateral.
-    # Operates only on axis_x; has no opinion on the other two axes.
-    axes       = [a0, a1, a2]
-    sp_x       = float(s_arr[axis_x])
-    x_start_mm = float(p_start[axis_x]) * sp_x
-    x_mm       = axes[axis_x].astype(np.float64) * sp_x
-    lat_dev_mm = np.abs(x_mm - x_start_mm)
+    # 4) Normalize ONLY inside body (important)
+    if np.any(body_mask):
+        lo, hi = np.percentile(log_suv[body_mask], [1, 99])  # robust range
+    else:
+        lo, hi = np.percentile(log_suv, [1, 99])
+    den = max(hi - lo, 1e-6)
+    score = np.clip((log_suv - lo) / den, 0.0, 1.0)  # high SUV -> score near 1
 
-    free  = float(lateral_free_mm)
-    slope = float(lateral_slope_mm)
-    # Piecewise: 0 if dev<=free, linear ramp if free<dev<=free+slope, plateau beyond
-    ramp         = np.clip((lat_dev_mm - free) / slope, 0.0, 1.0)
-    lateral_term = float(w_lateral) * ramp
+    # 5) Convert to cost: high score => very low cost
+    # gamma > 1 makes high-SUV voxels even cheaper
+    gamma = 2.5
+    cost = float(w_pet) * (1.0 - score) ** gamma + float(eps)
 
-    # ---- minimal endpoint pull --------------------------------------------
-    pe     = np.array(p_end, dtype=np.float64) * s_arr
-    phys   = np.stack([
-        a0.astype(np.float64) * s0,
-        a1.astype(np.float64) * s1,
-        a2.astype(np.float64) * s2,
-    ], axis=-1)
-    dist_mm   = np.sqrt(np.sum((phys - pe) ** 2, axis=-1))
-    dist_term = float(w_dist) * dist_mm
+    # 6) Fill outside-body with worst in-body pet cost
+    if np.any(body_mask):
+        outside_fill = np.max(cost[body_mask])
+    else:
+        outside_fill = np.max(cost)
 
-    cost = pet_term.astype(np.float64) + lateral_term + dist_term
+    cost = np.where(body_mask, cost, outside_fill)
     return cost
 
 
@@ -377,7 +348,8 @@ def spline_resample_zyx(
     pts     = p.T
     tck, _u = splprep(pts, s=float(s_smooth), k=3)
     u_new   = np.linspace(0, 1, int(n_points), dtype=np.float64)
-    z, y, x = splev(u_new, tck)
+    z, y, x = splev(to_numpy(u_new), tck)
+    x, y, z = as_backend_array(x), as_backend_array(y), as_backend_array(z)
     out     = np.stack([z, y, x], axis=1)
     out     = np.clip(out, bounds_lo, bounds_hi)
     return as_backend_array(out)
@@ -418,10 +390,6 @@ def run_ureter_segmentation(
     radius_mm: float = 6.0,
     # ---- Cost weights --------------------------------------------------
     w_pet: float = 5.0,
-    w_dist: float = 0.0,
-    w_lateral: float = 0.0,
-    lateral_free_mm: float = 25.0,
-    lateral_slope_mm: float = 7.0,
     # ---- Gap-filling ---------------------------------------------------
     suv_fill_sigma_vox: float = 0.5,
     suv_fill_blend: float = 0.2,
@@ -485,16 +453,12 @@ def run_ureter_segmentation(
 
         # ---- PET-primary cost volume ---------------------------------------
         cost = build_cost_volume(
-            suv, p_start, p_end, spacing_xyz,
+            suv, spacing_xyz, body,
             w_pet=w_pet,
-            w_dist=w_dist,
-            w_lateral=w_lateral,
-            lateral_free_mm=lateral_free_mm,
-            lateral_slope_mm=lateral_slope_mm,
             suv_fill_sigma_vox=suv_fill_sigma_vox,
             suv_fill_blend=suv_fill_blend,
-            axis_x=axis_x,
         )
+
         # ---- MCP routing ---------------------------------------------------
         path = minimum_cost_path_zyx(cost, start, end)
         log.info("Ureter-%s: MCP path length = %d voxels", side, int(path.shape[0]))
