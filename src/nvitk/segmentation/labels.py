@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from nvitk.core import as_backend_array
 from nvitk.core.array import to_numpy
-from nvitk.core.backend import setup, as_backend_array
+from nvitk.core.backend import setup
 from nvitk.types import Image
 
 setup(globals())
