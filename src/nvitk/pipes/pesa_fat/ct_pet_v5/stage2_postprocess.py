@@ -180,8 +180,8 @@ def limit_vertebrae_axial(
     ref_space: Image,
 ) -> np.ndarray:
     """Keep only axial slices between the L3 and L4 extent (biggest CC each)."""
-    bin_min = (vertebrae == min_vertebrae).astype(np.uint8)
-    bin_max = (vertebrae == max_vertebrae).astype(np.uint8)
+    bin_min = (vertebrae == min_vertebrae)
+    bin_max = (vertebrae == max_vertebrae)
     cc_min = to_numpy(biggest_cc(ref_space.with_data(bin_min)).data) > 0
     cc_max = to_numpy(biggest_cc(ref_space.with_data(bin_max)).data) > 0
     min_slices = np.where(np.any(cc_min, axis=(0, 1)))[0]
