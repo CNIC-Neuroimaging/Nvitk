@@ -305,8 +305,8 @@ def build_fat_mask(
 
     # FAT BATCH
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
-    fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total).data
-    fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total).data
+    fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L4"], MO_LABELS["L3"], total).data
+    fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L4"], MO_LABELS["L3"], total).data
 
     out_batch = np.zeros_like(tissue_types.data, dtype=np.uint8)
     out_batch[fat_v_batch > 0] = FAT_BATCH_LABELS["GRASA_V_BATCH"]
