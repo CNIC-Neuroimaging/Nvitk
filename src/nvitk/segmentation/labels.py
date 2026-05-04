@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from nvitk.core import as_backend_array
 from nvitk.core.array import to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import get_current_backend, setup
 from nvitk.types import Image
 
 setup(globals())
@@ -171,6 +171,9 @@ def append_labels(
 def biggest_cc(mask: Image | Any, *, structure: Any = None) -> Image | Any:
     """Return the largest connected component of a binary *mask* as uint8."""
     arr = _as_array(mask)
+    arr = as_backend_array(arr)
+    print(type(arr))
+    print(get_current_backend())
     labeled, _num = ndi.label(arr, structure=structure)
     sizes = np.bincount(labeled.ravel())
     sizes[0] = 0
