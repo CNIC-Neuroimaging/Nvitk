@@ -98,7 +98,7 @@ class Measurer:
         self,
         *,
         kinds: Iterable[str] = ("bw",),
-        stats: Iterable[str] = ("mean", "median", "max", "min", "std", "p95", "p5"),
+        stats: Iterable[str] = ("mean", "median", "max", "min", "std", "p95", "p5", "p99"),
         philips: bool = True,
         revert_scaling: bool = False,
         metadata: dict[str, Any] | None = None,

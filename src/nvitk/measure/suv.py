@@ -322,6 +322,8 @@ def _stats_from_values(values: Any, kind: str, stats: Iterable[str]) -> Dict[str
         out[f"{kind}_95percentile"] = _f(np.percentile(values, 95))
     if "p5" in requested:
         out[f"{kind}_5percentile"] = _f(np.percentile(values, 5))
+    if "p99" in requested:
+        out[f"{kind}_99percentile"] = _f(np.percentile(values, 99))
     if "sum" in requested:
         out[f"{kind}_sum"] = _f(np.sum(values))
     return out
@@ -333,7 +335,7 @@ def suv_stats(
     metadata: Dict[str, Any] | None = None,
     *,
     kinds: Iterable[str] = ("bw",),
-    stats: Iterable[str] = ("mean", "median", "max", "min", "std", "p95", "p5"),
+    stats: Iterable[str] = ("mean", "median", "max", "min", "std", "p95", "p5", "p99"),
     philips: bool = False,
     revert_scaling: bool = False,
 ) -> Dict[str, float]:
