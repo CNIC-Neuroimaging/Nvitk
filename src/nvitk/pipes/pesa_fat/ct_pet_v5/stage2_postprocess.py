@@ -49,6 +49,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     MO_LABELS,
     MUSCLES_LABELS,
     ORGANS_LABELS,
+    FAT_BATCH_LABELS,
 )
 from nvitk.segmentation.hemisphere import split_lr_by_cc
 from nvitk.segmentation.labels import biggest_cc, combine_labels, get_label
@@ -106,14 +107,14 @@ def _chull_organ_3d(organ: Image) -> Image:
     except Exception:
         return organ
 
-    host = to_numpy(organ.data).astype("uint8")
+    host = to_numpy(organ.data)
     for i in range(host.shape[-1]):
         if host[..., i].any():
             host[..., i] = convex_hull_image(host[..., i])
     out = host
     if get_current_backend() == "cupy":
         out = to_cupy(out)
-    return organ.with_data(out.astype(np.uint8))
+    return organ.with_data(out)
 
 
 def _process_bladder(bladder: Image, pet: Image) -> Image:
@@ -157,7 +158,7 @@ def _vertebrae_l3_l4_labels(total: Image) -> Any:
 
 def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Image:
     """Per muscle label ID, keep only the largest 3D connected component."""
-    arr = as_backend_array(out_labels).data.copy()
+    arr = as_backend_array(out_labels.data).copy()
     for lid in sorted(set(MUSCLES_LABELS.values())):
         bin_mask = (arr == lid).astype(np.uint8)
         if not np.any(bin_mask):
@@ -180,8 +181,8 @@ def limit_vertebrae_axial(
     ref_space: Image,
 ) -> np.ndarray:
     """Keep only axial slices between the L3 and L4 extent (biggest CC each)."""
-    bin_min = (vertebrae == min_vertebrae)
-    bin_max = (vertebrae == max_vertebrae)
+    bin_min = get_label(vertebrae, min_vertebrae, missing="empty")
+    bin_max = get_label(vertebrae, max_vertebrae, missing="empty")
     cc_min = biggest_cc(ref_space.with_data(bin_min)).data > 0
     cc_max = biggest_cc(ref_space.with_data(bin_max)).data > 0
     min_slices = np.where(np.any(cc_min, axis=(0, 1)))[0]
@@ -304,8 +305,8 @@ def build_fat_mask(
 
     # FAT BATCH
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
-    fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total)
-    fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total)
+    fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total).data
+    fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total).data
 
     out_batch = np.zeros_like(tissue_types.data, dtype=np.uint8)
     out_batch[fat_v_batch > 0] = FAT_BATCH_LABELS["GRASA_V_BATCH"]
@@ -328,8 +329,8 @@ def build_organs_mask(total: Image) -> Image:
 
         # If Liver, we remove the dilated kidneys from the liver mask
         if name == "liver":
-            kr = get_label(total, get_class_id("kidney_right", "total"), missing="empty").data
-            kl = get_label(total, get_class_id("kidney_left", "total"), missing="empty").data
+            kr = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
+            kl = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
             if bool(kr.data.any()):
                 kr_ch = _chull_organ_3d(kr).data
                 kr_ch_dilated = dilate(total.copy().with_data(kr_ch), footprint=5).data
