@@ -79,7 +79,7 @@ def _biggest_cc_or_empty(label_img: Image, label_id: int) -> Image:
 
 def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Image:
     """Per muscle label ID, keep only the largest 3D connected component."""
-    for lid in sorted(set(np.unique(out_labels.data))):
+    for lid in np.unique(out_labels.data):
         bin_mask = (out_labels.data == lid)
         if not np.any(bin_mask):
             continue

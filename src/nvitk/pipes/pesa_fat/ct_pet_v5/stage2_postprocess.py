@@ -182,8 +182,8 @@ def limit_vertebrae_axial(
     """Keep only axial slices between the L3 and L4 extent (biggest CC each)."""
     bin_min = (vertebrae == min_vertebrae)
     bin_max = (vertebrae == max_vertebrae)
-    cc_min = to_numpy(biggest_cc(ref_space.with_data(bin_min)).data) > 0
-    cc_max = to_numpy(biggest_cc(ref_space.with_data(bin_max)).data) > 0
+    cc_min = as_backend_array(biggest_cc(ref_space.with_data(bin_min)).data) > 0
+    cc_max = as_backend_array(biggest_cc(ref_space.with_data(bin_max)).data) > 0
     min_slices = np.where(np.any(cc_min, axis=(0, 1)))[0]
     max_slices = np.where(np.any(cc_max, axis=(0, 1)))[0]
     if min_slices.size == 0 or max_slices.size == 0:
