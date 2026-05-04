@@ -125,7 +125,7 @@ def process_subject(
             )
             suv_prefix = f"SUV{suv_kind}" if not suv_kind.startswith("SUV") else suv_kind
             for suffix, stat in _SUV_STATS:
-                key = f"{suv_prefix}_{stat}" if stat != "p95" else f"{suv_prefix}_95percentile"
+                key = f"{suv_prefix}_{stat}" if stat != "p95" and stat != "p99" else f"{suv_prefix}_95percentile" if stat == "p95" else f"{suv_prefix}_99percentile"
                 row[f"{prefix}_{suffix}"] = metrics.get(key)
         except Exception as exc:
             import traceback
