@@ -20,6 +20,8 @@ MO_LABELS: dict[str, int] = {"L4": 1, "L3": 2}
 
 FAT_LABELS: dict[str, int] = {"GRASA_V": 1, "GRASA_SC": 2}
 
+FAT_BATCH_LABELS: dict[str, int] = {"GRASA_V_BATCH": 1, "GRASA_SC_BATCH": 2}
+
 BODY_LABELS: dict[str, int] = {"BODY": 1}
 
 ORGANS_LABELS: dict[str, int] = {"HIGADO": 1, "BAZO": 2, "PANCREAS": 3}
@@ -42,6 +44,8 @@ OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
     # FAT
     "GRASA_V": [("tissue_types", "torso_fat")],
     "GRASA_SC": [("tissue_types", "subcutaneous_fat")],
+    "GRASA_V_BATCH": [("tissue_types", "torso_fat")],
+    "GRASA_SC_BATCH": [("tissue_types", "subcutaneous_fat")],
     # BODY (merged)
     "BODY_TRUNC": [("body", "body_trunc")],
     "BODY_EXT": [("body", "body_extremities")],
@@ -62,6 +66,7 @@ OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
 __all__ = [
     "MO_LABELS",
     "FAT_LABELS",
+    "FAT_BATCH_LABELS",
     "BODY_LABELS",
     "ORGANS_LABELS",
     "MUSCLES_LABELS",

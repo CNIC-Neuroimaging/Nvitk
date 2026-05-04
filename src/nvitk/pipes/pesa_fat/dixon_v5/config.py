@@ -111,7 +111,7 @@ class DixonMeasureSpec:
     region: str                    # "HEAD" | "THORAX" | "LEGS"
     mask_file: str                 # "HEAD.nii" | "THORAX.nii" | "LEGS.nii"
     label_ids: tuple[int, ...]
-    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2")
+    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2", "NSlices")
 
 
 def _lr_triplet(
@@ -122,7 +122,7 @@ def _lr_triplet(
     key_l: str,
     key_r: str,
     *,
-    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2"),
+    metrics: tuple[str, ...] = ("VOL", "FF", "T2", "R2", "NSlices"),
 ) -> tuple[DixonMeasureSpec, ...]:
     """Emit (L, R, LR-union) specs for a bilateral structures."""
     return (
@@ -163,7 +163,7 @@ MEASURE_SPECS = (
         "THORAX",
         "THORAX.nii",
         (THORAX_LABELS["LIVER"],),
-        metrics=("VOL", "FF", "T2", "R2", "WF"),
+        metrics=("VOL", "FF", "T2", "R2", "WF", "NSlices"),
     ),
     DixonMeasureSpec(
         "DIXON_PANCREAS",

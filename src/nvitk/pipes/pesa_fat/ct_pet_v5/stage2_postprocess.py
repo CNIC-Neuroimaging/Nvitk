@@ -29,6 +29,7 @@ from typing import Any
 
 import click
 
+from nvitk.core import as_backend_array
 from nvitk.core.backend import (
     get_current_backend,
     set_global_backend,
@@ -144,9 +145,55 @@ def _vertebra_narrow(vertebra: Image, radius: int = _BN_ERODE) -> Image:
     return biggest_cc(eroded)
 
 
+def _vertebrae_l3_l4_labels(total: Image) -> Any:
+    """Labeled L3/L4 mask on the ``total`` grid (values = :data:`MO_LABELS`)."""
+    out = np.zeros_like(total.data, dtype=np.uint8)
+    l4 = get_label(total, get_class_id("vertebrae_L4", "total"), missing="empty")
+    l3 = get_label(total, get_class_id("vertebrae_L3", "total"), missing="empty")
+    out[l4.data > 0] = MO_LABELS["L4"]
+    out[l3.data > 0] = MO_LABELS["L3"]
+    return total.with_data(out)
+
+
+def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Image:
+    """Per muscle label ID, keep only the largest 3D connected component."""
+    arr = as_backend_array(out_labels).data.copy()
+    for lid in sorted(set(MUSCLES_LABELS.values())):
+        bin_mask = (arr == lid).astype(np.uint8)
+        if not np.any(bin_mask):
+            continue
+        cc = biggest_cc(base_img.with_data(bin_mask)).data > 0
+        arr[arr == lid] = 0
+        arr[cc] = lid
+    return out_labels.with_data(arr)
+
+
 # ---------------------------------------------------------------------------
 # Build each output mask
 # ---------------------------------------------------------------------------
+
+def limit_vertebrae_axial(
+    img: np.ndarray,
+    vertebrae: np.ndarray,
+    min_vertebrae: int,
+    max_vertebrae: int,
+    ref_space: Image,
+) -> np.ndarray:
+    """Keep only axial slices between the L3 and L4 extent (biggest CC each)."""
+    bin_min = (vertebrae == min_vertebrae).astype(np.uint8)
+    bin_max = (vertebrae == max_vertebrae).astype(np.uint8)
+    cc_min = to_numpy(biggest_cc(ref_space.with_data(bin_min)).data) > 0
+    cc_max = to_numpy(biggest_cc(ref_space.with_data(bin_max)).data) > 0
+    min_slices = np.where(np.any(cc_min, axis=(0, 1)))[0]
+    max_slices = np.where(np.any(cc_max, axis=(0, 1)))[0]
+    if min_slices.size == 0 or max_slices.size == 0:
+        raise ValueError("No vertebrae found in the image.")
+    z0, z1 = int(np.min(min_slices)), int(np.max(max_slices))
+    if z0 > z1:
+        raise ValueError("Min slice is greater than max slice.")
+    out = np.zeros_like(img)
+    out[..., z0 : z1 + 1] = img[..., z0 : z1 + 1]
+    return ref_space.with_data(out)
 
 
 def build_mo_mask(total: Image) -> Image:
@@ -214,7 +261,7 @@ def _remove_organs(fat_arr: Any, total: Image, pet: Image) -> Any:
         dilated = dilate(
             total.with_data(single),
             footprint=radius,
-            isotropic=True,
+            isotropic=False,
             spacing=spacing,
         ).data
         organs[dilated > 0] = 1
@@ -254,7 +301,17 @@ def build_fat_mask(
     out = np.zeros_like(tissue_types.data, dtype=np.uint8)
     out[fat_v > 0] = FAT_LABELS["GRASA_V"]
     out[fat_s > 0] = FAT_LABELS["GRASA_SC"]
-    return tissue_types.with_data(out)
+
+    # FAT BATCH
+    vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
+    fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total)
+    fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L3"], MO_LABELS["L4"], total)
+
+    out_batch = np.zeros_like(tissue_types.data, dtype=np.uint8)
+    out_batch[fat_v_batch > 0] = FAT_BATCH_LABELS["GRASA_V_BATCH"]
+    out_batch[fat_s_batch > 0] = FAT_BATCH_LABELS["GRASA_SC_BATCH"]
+
+    return tissue_types.copy().with_data(out), tissue_types.copy().with_data(out_batch)
 
 
 def build_organs_mask(total: Image) -> Image:
@@ -268,6 +325,22 @@ def build_organs_mask(total: Image) -> Image:
     for name, out_id in mapping:
         m = get_label(total, get_class_id(name, "total"), missing="empty").data
         out[m > 0] = out_id
+
+        # If Liver, we remove the dilated kidneys from the liver mask
+        if name == "liver":
+            kr = get_label(total, get_class_id("kidney_right", "total"), missing="empty").data
+            kl = get_label(total, get_class_id("kidney_left", "total"), missing="empty").data
+            if bool(kr.data.any()):
+                kr_ch = _chull_organ_3d(kr).data
+                kr_ch_dilated = dilate(total.copy().with_data(kr_ch), footprint=5).data
+                m[kr_ch_dilated > 0] = 0
+                out[m > 0] = out_id
+            if bool(kl.data.any()):
+                kl_ch = _chull_organ_3d(kl).data
+                kl_ch_dilated = dilate(total.copy().with_data(kl_ch), footprint=5).data
+                m[kl_ch_dilated > 0] = 0
+                out[m > 0] = out_id
+
     return total.with_data(out)
 
 
@@ -315,8 +388,7 @@ def build_muscles_mask(total: Image, muscles: Image) -> Image:
         muscles, get_class_id("trapezius", "thigh_shoulder_muscles"), missing="empty"
     ).data
     out[trap > 0] = MUSCLES_LABELS["TRAPECIOS"]
-
-    return muscles.with_data(out)
+    return _muscles_keep_biggest_cc_per_label(total, muscles.copy().with_data(out))
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +408,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
     pet = _imread(nifti_dir, cfg.PET_STEM)
 
     mo = build_mo_mask(total)
-    fat = build_fat_mask(tissue_types, total, body, pet)
+    fat, fat_batch = build_fat_mask(tissue_types, total, body, pet)
     bod = build_body_mask(body)
     organs = build_organs_mask(total)
     muscles_out = build_muscles_mask(total, muscles)
@@ -344,6 +416,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     imsave(str(output_dir / "MO.nii.gz"), mo, axes="XYZ")
     imsave(str(output_dir / "FAT.nii.gz"), fat, axes="XYZ")
+    imsave(str(output_dir / "FAT_BATCH.nii.gz"), fat_batch, axes="XYZ")
     imsave(str(output_dir / "BODY.nii.gz"), bod, axes="XYZ")
     imsave(str(output_dir / "ORGANS.nii.gz"), organs, axes="XYZ")
     imsave(str(output_dir / "MUSCLES.nii.gz"), muscles_out, axes="XYZ")

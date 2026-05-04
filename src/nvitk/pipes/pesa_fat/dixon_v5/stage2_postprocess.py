@@ -77,6 +77,18 @@ def _biggest_cc_or_empty(label_img: Image, label_id: int) -> Image:
     return biggest_cc(m)
 
 
+def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Image:
+    """Per muscle label ID, keep only the largest 3D connected component."""
+    for lid in sorted(set(out_labels.data.unique())):
+        bin_mask = (out_labels.data == lid).astype(np.uint8)
+        if not np.any(bin_mask):
+            continue
+        cc = biggest_cc(base_img.with_data(bin_mask))
+        out_labels.data[out_labels.data == lid] = 0
+        out_labels.data[cc.data > 0] = lid
+    return out_labels
+
+
 # ---------------------------------------------------------------------------
 # Per-region mask builders
 # ---------------------------------------------------------------------------
@@ -93,7 +105,7 @@ def build_head_mask(head_total_mr: Image) -> Image:
     out = np.zeros_like(head_total_mr.data, dtype=np.uint8)
     out[left.data > 0] = HEAD_LABELS["H_PVM_L"]
     out[right.data > 0] = HEAD_LABELS["H_PVM_R"]
-    return head_total_mr.with_data(out)
+    return _muscles_keep_biggest_cc_per_label(head_total_mr, head_total_mr.with_data(out))
 
 
 def build_thorax_mask(
@@ -135,7 +147,7 @@ def build_thorax_mask(
     out[bn_l3.data > 0] = THORAX_LABELS["BN_L3"]
     out[bn_l4.data > 0] = THORAX_LABELS["BN_L4"]
 
-    return thorax_total_mr.with_data(out)
+    return _muscles_keep_biggest_cc_per_label(thorax_total_mr, thorax_total_mr.with_data(out))
 
 
 def build_legs_mask(legs_muscles_mr: Image) -> Image:
@@ -151,7 +163,7 @@ def build_legs_mask(legs_muscles_mr: Image) -> Image:
     out = np.zeros_like(legs_muscles_mr.data, dtype=np.uint8)
     out[left.data > 0] = LEGS_LABELS["L_QM_L"]
     out[right.data > 0] = LEGS_LABELS["L_QM_R"]
-    return legs_muscles_mr.with_data(out)
+    return _muscles_keep_biggest_cc_per_label(legs_muscles_mr, legs_muscles_mr.with_data(out))
 
 
 # ---------------------------------------------------------------------------

@@ -53,6 +53,7 @@ dependencies = [
   "antspyx>=0.6.1",
   "dicom2nifti>=2.6.1",
   "pydicom>=2.4.5,<=3",
+  # "pydicom>=3.0.1",
   "pylibjpeg>=2.0.1",
   "vtk>=9.3.1",
   # "pyradiomics>=3.0.1",

@@ -19,6 +19,7 @@ from nvitk.pipes.pesa_fat.common.paths import DEFAULT_MODEL_ROOT
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
     FAT_LABELS,
+    FAT_BATCH_LABELS,
     MO_LABELS,
     MUSCLES_LABELS,
     ORGANS_LABELS,
@@ -117,6 +118,7 @@ SUV_STATS: tuple[tuple[str, str], ...] = (
     ("SUVMAX", "max"),
     ("SUVmean", "mean"),
     ("SUV95p", "p95"),
+    ("SUV99p", "p99"),
 )
 
 
@@ -128,6 +130,9 @@ SUV_SPECS: tuple[SuvSpec, ...] = (
     # Fat
     SuvSpec("GRASA_V", "FAT.nii", (FAT_LABELS["GRASA_V"],)),
     SuvSpec("GRASA_SC", "FAT.nii", (FAT_LABELS["GRASA_SC"],)),
+    # Fat Batch
+    SuvSpec("GRASA_V_BATCH", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
+    SuvSpec("GRASA_SC_BATCH", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
     # Organs
     SuvSpec("HIGADO", "ORGANS.nii", (ORGANS_LABELS["HIGADO"],)),
     SuvSpec("BAZO", "ORGANS.nii", (ORGANS_LABELS["BAZO"],)),
@@ -161,6 +166,8 @@ SUV_SPECS: tuple[SuvSpec, ...] = (
 VOL_SPECS: tuple[VolSpec, ...] = (
     VolSpec("GRASA_V_VOL", "FAT.nii", (FAT_LABELS["GRASA_V"],)),
     VolSpec("GRASA_SC_VOL", "FAT.nii", (FAT_LABELS["GRASA_SC"],)),
+    VolSpec("GRASA_V_BATCH_VOL", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_V_BATCH"],)),
+    VolSpec("GRASA_SC_BATCH_VOL", "FAT_BATCH.nii", (FAT_BATCH_LABELS["GRASA_SC_BATCH"],)),
     VolSpec("CORP_VOL", "BODY.nii", (BODY_LABELS["BODY"],)),
     VolSpec("HIGADO_VOL", "ORGANS.nii", (ORGANS_LABELS["HIGADO"],)),
     VolSpec("BAZO_VOL", "ORGANS.nii", (ORGANS_LABELS["BAZO"],)),

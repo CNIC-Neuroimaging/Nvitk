@@ -117,6 +117,12 @@ def _binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
     return label_img.with_data(acc.astype("uint8"))
 
 
+def _nslices_axial_xyz(mask: Image) -> int:
+    m = as_backend_array(mask.data) > 0
+    if not m.any():
+        return 0
+    return int(m.sum(axis=(0, 1)).sum())
+
 # ---------------------------------------------------------------------------
 # Per-subject processing
 # ---------------------------------------------------------------------------
@@ -231,6 +237,9 @@ def process_subject(
                         row[f"{spec.prefix}_WF"] = None
                     else:
                         row[f"{spec.prefix}_WF"] = float((tissue_water / wf_ref) * 100.0)
+
+            if "NSlices" in spec.metrics:
+                row[f"{spec.prefix}_NSlices"] = _nslices_axial_xyz(bm)
         except Exception as exc:
             log.error(f"spec {spec.prefix} failed: {exc}")
             for metric in spec.metrics:

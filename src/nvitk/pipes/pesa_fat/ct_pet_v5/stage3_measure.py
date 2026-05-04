@@ -38,7 +38,7 @@ log = Logger()
 
 
 # ---------------------------------------------------------------------------
-# Measurement plan (single source of truth in cfg.SUV_SPECS / cfg.VOL_SPECS)
+# Measurement plan
 # ---------------------------------------------------------------------------
 
 SUV_SPECS = cfg.SUV_SPECS
@@ -53,13 +53,18 @@ def column_order() -> list[str]:
             cols.append(f"{spec.column_prefix}_{suffix}")
     for spec in VOL_SPECS:
         cols.append(spec.column)
+        cols.append(spec.column.replace("_VOL", "_NSlices"))
     return cols
 
-
 # ---------------------------------------------------------------------------
-# Per-subject processing
+# Helper functions
 # ---------------------------------------------------------------------------
 
+def _nslices_axial_xyz(mask: Image) -> int:
+    m = as_backend_array(mask.data) > 0
+    if not m.any():
+        return 0
+    return int(m.sum(axis=(0, 1)).sum())
 
 def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
     if len(label_ids) == 1:
@@ -83,6 +88,9 @@ def _load_mask(subject_stage2_dir: Path, filename: str) -> Image:
 def _load_pet(subject_nifti_dir: Path) -> Image:
     return imread(str(resolve_nii(subject_nifti_dir, cfg.PET_STEM)), axes="XYZ")
 
+# ---------------------------------------------------------------------------
+# Per-subject processing
+# ---------------------------------------------------------------------------
 
 def process_subject(
     pet: Image,
@@ -134,12 +142,13 @@ def process_subject(
             label_img = _mask_file(spec.mask_file)
             binmask = _build_binary_mask(label_img, spec.label_ids)
             row[spec.column] = Measurer(pet, binmask).volume()["volume_cc"]
+            row[spec.column.replace("_VOL", "_NSlices")] = _nslices_axial_xyz(binmask)
         except Exception as exc:
             import traceback
             traceback.print_exc()
             log.error(f"VOL[{spec.column}] failed: {exc}")
             row[spec.column] = None
-
+            row[spec.column.replace("_VOL", "_NSlices")] = None
     return row
 
 

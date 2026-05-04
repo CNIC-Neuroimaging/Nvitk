@@ -19,6 +19,7 @@ fi
 
 conda env create -f "$ENV_FILE"
 conda run -n "$ENV_NAME" pip install --no-build-isolation pyradiomics==3.0.1
+conda run -n "$ENV_NAME" pip install --no-build-isolation pydicom==3.0.1
 
 echo "Installation complete for '$MODE'."
 echo "Activate with: conda activate $ENV_NAME"
