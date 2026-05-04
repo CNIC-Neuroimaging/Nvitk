@@ -10,15 +10,18 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from nvitk.core import as_backend_array
 from nvitk.core.array import to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, as_backend_array
 from nvitk.types import Image
 
 setup(globals())
 
 
 def _as_array(img: Image | Any) -> Any:
-    return img.data if isinstance(img, Image) else img
+    if isinstance(img, Image):
+        return as_backend_array(img.data)
+    return as_backend_array(img)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:

@@ -118,10 +118,7 @@ def _binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
 
 
 def _nslices_axial_xyz(mask: Image) -> int:
-    m = as_backend_array(mask.data) > 0
-    if not m.any():
-        return 0
-    return int(m.sum(axis=(0, 1)).sum())
+    return int(np.any(mask.data > 0, axis=(0, 1)).sum())
 
 # ---------------------------------------------------------------------------
 # Per-subject processing
