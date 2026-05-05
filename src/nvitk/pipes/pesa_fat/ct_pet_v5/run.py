@@ -114,6 +114,7 @@ def _run_local(
     device: str,
     model_dir: Path | None,
     overwrite: bool,
+    exclude_ureter: bool = False,
 ) -> None:
     for subj in subjects:
         log.info(f"=== CT-PET v5 LOCAL | subject={subj} | stages={stages_sel} ===")
@@ -124,7 +125,7 @@ def _run_local(
                         subj, lay, device=device, model_dir=model_dir, overwrite=overwrite
                     )
                 elif s == "stage2":
-                    stage2_postprocess.run_subject(subj, lay, backend=backend)
+                    stage2_postprocess.run_subject(subj, lay, backend=backend, exclude_ureter=exclude_ureter)
                 elif s == "stage3":
                     stage3_measure.run_subject(subj, lay, backend=backend)
             except Exception as exc:
@@ -156,6 +157,7 @@ def _build_python_cmd(
     device: str,
     overwrite: bool,
     log_level: str,
+    exclude_ureter: bool = False,
 ) -> str:
     """Build the ``python -m nvitk.pipes...stageX --batch ... --subject ...`` cmd.
 
@@ -189,6 +191,7 @@ def _build_python_cmd(
         shlex.quote(c_out),
         "--log-level",
         log_level,
+        "--exclude-ureter" if exclude_ureter else "",
     ]
     if stage == "stage1":
         parts += ["--device", device, "--model-dir", shlex.quote(c_model)]
@@ -226,6 +229,7 @@ def submit_subject_chain(
     dry_run: bool = False,
     log_level: str = "INFO",
     emit: TextIO | None = None,
+    exclude_ureter: bool = False,
 ) -> list[str]:
     """Submit the CT-PET v5 SGE chain for a *single* subject.
 
@@ -262,6 +266,7 @@ def submit_subject_chain(
                     device=device,
                     overwrite=overwrite,
                     log_level=log_level,
+                    exclude_ureter=exclude_ureter,
                 ),
                 resources=resources,
                 binds=binds,
@@ -292,6 +297,7 @@ def _run_sge(
     dry_run: bool,
     log_level: str,
     emit: TextIO | None = None,
+    exclude_ureter: bool = False,
 ) -> dict[str, list[str]]:
     all_jids: dict[str, list[str]] = {}
     for subj in subjects:
@@ -309,6 +315,7 @@ def _run_sge(
             dry_run=dry_run,
             log_level=log_level,
             emit=emit,
+            exclude_ureter=exclude_ureter,
         )
     return all_jids
 
@@ -405,6 +412,7 @@ def main(
     emit_script: Path | None,
     log_level: str,
     debug: bool,
+    exclude_ureter: bool = False,
 ) -> None:
     """CT-PET v5 pipeline master (local or SGE dispatch)."""
     Logger(level=log_level.upper())
@@ -447,6 +455,7 @@ def main(
             device=device,
             model_dir=model_dir,
             overwrite=overwrite,
+            exclude_ureter=exclude_ureter,
         )
         return
 
@@ -478,6 +487,7 @@ def main(
                 dry_run=False,
                 log_level=log_level,
                 emit=fh,
+                exclude_ureter=exclude_ureter,
             )
         log.info(f"Wrote submission script: {emit_script}")
         return
@@ -495,6 +505,7 @@ def main(
         base_hold=base_hold,
         dry_run=dry_run,
         log_level=log_level,
+        exclude_ureter=exclude_ureter,
     )
 
 

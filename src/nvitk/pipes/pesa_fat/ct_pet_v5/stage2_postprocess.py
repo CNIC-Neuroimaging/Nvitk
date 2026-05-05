@@ -277,6 +277,7 @@ def build_fat_mask(
     total: Image,
     body: Image,
     pet: Image,
+    exclude_ureter: bool = False,
 ) -> Image:
     """Visceral/subcutaneous fat clean-up (extremities, organs, PET-guided bladder)."""
     visceral_id = get_class_id("torso_fat", "tissue_types")
@@ -284,6 +285,7 @@ def build_fat_mask(
     fat_v = (tissue_types.data == visceral_id).astype(np.uint8)
     fat_s = (tissue_types.data == subcutaneous_id).astype(np.uint8)
 
+    # ---- Body mask --------------------------------------------------------
     any_fat = (tissue_types.data > 0).astype(np.uint8)
     body_grown = dilate(
         tissue_types.with_data(any_fat),
@@ -294,8 +296,10 @@ def build_fat_mask(
     fat_v = fat_v * body_filled
     fat_s = fat_s * body_filled
 
+    # ---- Extremities exclusion --------------------------------------------
     fat_s = _remove_extremities(fat_s, body)
 
+    # ---- Organs exclusion -------------------------------------------------
     fat_v = _remove_organs(fat_v, total, pet)
     fat_s = _remove_organs(fat_s, total, pet)
 
@@ -303,7 +307,30 @@ def build_fat_mask(
     out[fat_v > 0] = FAT_LABELS["GRASA_V"]
     out[fat_s > 0] = FAT_LABELS["GRASA_SC"]
 
-    # FAT BATCH
+    # ---- Ureter segmentation & exclusion --------------------------------
+    if exclude_ureter:
+        from nvitk.segmentation.pet.ureter_segmentation import segment_ureter
+        from nvitk.transform.resampling import resample_mask_to_pet
+        log.info("Running ureter segmentation...")
+        _kidney_r = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
+        _kidney_l = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
+        _bladder = get_label(total, get_class_id("urinary_bladder", "total"), missing="empty")
+
+        _resampled_kidney_r = resample_mask_to_pet(_kidney_r, pet, order=0)
+        _resampled_kidney_l = resample_mask_to_pet(_kidney_l, pet, order=0)
+        _resampled_bladder = resample_mask_to_pet(_bladder, pet, order=0)
+        _resampled_body = resample_mask_to_pet(body, pet, order=0)
+        _mask, _, _ = segment_ureter(
+            pet,
+            _resampled_kidney_r,
+            _resampled_kidney_l,
+            _resampled_bladder,
+            _resampled_body,
+        )
+        ureter = _mask.data > 0
+        out[ureter > 0] = 0
+
+    # ---- FAT BATCH --------------------------------------------------------
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
     fat_v_batch = limit_vertebrae_axial(fat_v, vertebrae_l3_l4, MO_LABELS["L4"], MO_LABELS["L3"], total).data
     fat_s_batch = limit_vertebrae_axial(fat_s, vertebrae_l3_l4, MO_LABELS["L4"], MO_LABELS["L3"], total).data
@@ -401,7 +428,7 @@ def _imread(path_parent: Path, stem: str, axes: str = "XYZ") -> Image:
     return imread(str(resolve_nii(path_parent, stem)), axes=axes)
 
 
-def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
+def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = False) -> None:
     total = _imread(segmentation_dir, "total")
     tissue_types = _imread(segmentation_dir, "tissue_types")
     muscles = _imread(segmentation_dir, "thigh_shoulder_muscles")
@@ -409,7 +436,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path) -> None:
     pet = _imread(nifti_dir, cfg.PET_STEM)
 
     mo = build_mo_mask(total)
-    fat, fat_batch = build_fat_mask(tissue_types, total, body, pet)
+    fat, fat_batch = build_fat_mask(tissue_types, total, body, pet, exclude_ureter=exclude_ureter)
     bod = build_body_mask(body)
     organs = build_organs_mask(total)
     muscles_out = build_muscles_mask(total, muscles)
@@ -428,6 +455,7 @@ def run_subject(
     lay: BatchLayout,
     *,
     backend: str = "cupy",
+    exclude_ureter: bool = False,
 ) -> Path:
     """Build the five stage-2 outputs for a single subject."""
     try:
@@ -443,7 +471,7 @@ def run_subject(
         raise FileNotFoundError(f"Expected stage-1 outputs under {seg_dir}")
 
     log.info(f"CT-PET v5 stage 2 | subject={subject} | backend={get_current_backend()}")
-    _process(seg_dir, nifti_dir, out_dir)
+    _process(seg_dir, nifti_dir, out_dir, exclude_ureter=exclude_ureter)
     log.info(f"[{subject}] ok -> {out_dir}")
     return out_dir
 
@@ -466,6 +494,7 @@ def run_subject(
     show_default=True,
 )
 @click.option("--log-level", default="INFO")
+@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
 def main(
     batch: str,
     subject: str,
@@ -474,6 +503,7 @@ def main(
     results_root: Path | None,
     backend: str,
     log_level: str,
+    exclude_ureter: bool = False,
 ) -> None:
     """CT-PET v5 stage 2 worker (single subject)."""
     Logger(level=log_level.upper())
@@ -484,7 +514,7 @@ def main(
         nifti_root=nifti_root,
         results_root=results_root,
     )
-    run_subject(subject, lay, backend=backend)
+    run_subject(subject, lay, backend=backend, exclude_ureter=exclude_ureter)
 
 
 if __name__ == "__main__":

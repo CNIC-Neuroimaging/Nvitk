@@ -300,6 +300,7 @@ def _run_local(
     overwrite: bool,
     regions: tuple[str, ...],
     compress: bool,
+    exclude_ureter: bool = False,
 ) -> None:
     if "stage0" in stages_sel:
         log.info("=" * 78)
@@ -327,6 +328,7 @@ def _run_local(
             device=device,
             model_dir=model_dir,
             overwrite=overwrite,
+            exclude_ureter=exclude_ureter,
         )
 
     if "dixon-v5" in pipelines:
@@ -361,6 +363,7 @@ def _run_sge(
     dry_run: bool,
     log_level: str,
     emit: TextIO | None = None,
+    exclude_ureter: bool = False,
 ) -> None:
     run_stage0 = "stage0" in stages_sel
     pipe_stages = [s for s in stages_sel if s != "stage0"]
@@ -404,6 +407,7 @@ def _run_sge(
                 dry_run=dry_run,
                 log_level=log_level,
                 emit=emit,
+                exclude_ureter=exclude_ureter,
             )
             if "stage3" in pipe_stages and jids_ct:
                 stage3_hold_refs.append(jids_ct[-1])
@@ -423,6 +427,7 @@ def _run_sge(
                 dry_run=dry_run,
                 log_level=log_level,
                 emit=emit,
+                exclude_ureter=exclude_ureter,
             )
             if "stage3" in pipe_stages and jids_dx:
                 stage3_hold_refs.append(jids_dx[-1])
@@ -540,6 +545,7 @@ def _run_sge(
     default=None,
     help="(sge) SSH username (else prompt).",
 )
+@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
@@ -566,6 +572,7 @@ def main(
     remote_user: str | None,
     log_level: str,
     debug: bool,
+    exclude_ureter: bool = False,
 ) -> None:
     """Run the full PESA-Fat pipeline (stage 0 + ct-pet-v5 + dixon-v5) for a batch."""
     Logger(level=log_level.upper())
@@ -625,6 +632,7 @@ def main(
             overwrite=overwrite,
             regions=region_tuple,
             compress=not no_compress,
+            exclude_ureter=exclude_ureter,
         )
         log.info("=" * 78)
         log.info(f"PESA-Fat batch '{batch}' complete.")
@@ -659,6 +667,7 @@ def main(
             dry_run=dry_run,
             log_level=log_level,
             emit=fh,
+            exclude_ureter=exclude_ureter,
         )
     log.info("=" * 78)
     log.info("PESA-Fat batch '%s' script written: %s", batch, script_path)
