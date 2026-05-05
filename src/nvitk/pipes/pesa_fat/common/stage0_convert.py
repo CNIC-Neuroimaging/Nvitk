@@ -261,6 +261,7 @@ def run_batch(
 @click.option(
     "--no-skip-existing",
     is_flag=True,
+    default=True,
     help="Re-convert already populated subjects.",
 )
 @click.option(
