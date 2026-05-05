@@ -328,7 +328,8 @@ def build_fat_mask(
             _resampled_body,
         )
         ureter = _mask.data > 0
-        out[ureter > 0] = 0
+        resampled_ureter = resample_mask_to_pet(ureter, total, order=0).data
+        out[resampled_ureter > 0] = 0
 
     # ---- FAT BATCH --------------------------------------------------------
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
