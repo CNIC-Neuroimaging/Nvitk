@@ -314,23 +314,25 @@ def build_fat_mask(
         log.info("Running ureter segmentation...")
         _kidney_r = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
         _kidney_l = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
-        _bladder = get_label(total, get_class_id("urinary_bladder", "total"), missing="empty")
+        _bladder  = get_label(total, get_class_id("urinary_bladder", "total"), missing="empty")
 
         _resampled_kidney_r = resample_mask_to_pet(_kidney_r, pet, order=0)
         _resampled_kidney_l = resample_mask_to_pet(_kidney_l, pet, order=0)
-        _resampled_bladder = resample_mask_to_pet(_bladder, pet, order=0)
-        _resampled_body = resample_mask_to_pet(body, pet, order=0)
-        _mask, _, _ = segment_ureter(
+        _resampled_bladder  = resample_mask_to_pet(_bladder, pet, order=0)
+        _resampled_body     = resample_mask_to_pet(body, pet, order=0)
+        _mask, _, _         = segment_ureter(
             pet,
             _resampled_kidney_r,
             _resampled_kidney_l,
             _resampled_bladder,
             _resampled_body,
         )
+        
         ureter = _mask.data > 0
         ureter = total.with_data(ureter)
-        resampled_ureter = resample_mask_to_pet(ureter, total, order=0).data
-        out[resampled_ureter > 0] = 0
+        resampled_ureter = resample_mask_to_pet(ureter, total, order=0)
+        imsave(str(Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS_URETER/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")), resampled_ureter, axes="XYZ")
+        out[resampled_ureter.data > 0] = 0
 
     # ---- FAT BATCH --------------------------------------------------------
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
@@ -340,6 +342,9 @@ def build_fat_mask(
     out_batch = np.zeros_like(tissue_types.data, dtype=np.uint8)
     out_batch[fat_v_batch > 0] = FAT_BATCH_LABELS["GRASA_V_BATCH"]
     out_batch[fat_s_batch > 0] = FAT_BATCH_LABELS["GRASA_SC_BATCH"]
+
+    if exclude_ureter:
+        out_batch[resampled_ureter.data > 0] = 0
 
     return tissue_types.copy().with_data(out), tissue_types.copy().with_data(out_batch)
 
