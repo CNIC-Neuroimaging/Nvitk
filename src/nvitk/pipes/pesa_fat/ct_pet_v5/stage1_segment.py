@@ -40,7 +40,7 @@ def run_subject(
     *,
     device: str = "gpu",
     model_dir: Path | None = None,
-    overwrite: bool = False,
+    overwrite: bool = True,
 ) -> Path:
     """Run every :data:`cfg.CT_TASKS` task on a single subject's CT NIfTI.
 
@@ -110,7 +110,7 @@ def run_subject(
     show_default=True,
 )
 @click.option("--model-dir", type=click.Path(path_type=Path), default=None)
-@click.option("--overwrite", is_flag=True)
+@click.option("--overwrite", is_flag=True, default=True)
 @click.option("--log-level", default="INFO")
 def main(
     batch: str,

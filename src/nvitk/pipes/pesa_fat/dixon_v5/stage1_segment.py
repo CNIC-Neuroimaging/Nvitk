@@ -46,7 +46,7 @@ def run_subject(
     *,
     device: str = "gpu",
     model_dir: Path | None = None,
-    overwrite: bool = False,
+    overwrite: bool = True,
     regions: tuple[str, ...] = cfg.REGION_ORDER,
 ) -> dict[str, Path]:
     """Run every MR task for a single subject across the requested regions.
@@ -134,7 +134,7 @@ def run_subject(
     show_default=True,
     help="Comma-separated regions to process.",
 )
-@click.option("--overwrite", is_flag=True)
+@click.option("--overwrite", is_flag=True, default=True)
 @click.option("--log-level", default="INFO")
 def main(
     batch: str,

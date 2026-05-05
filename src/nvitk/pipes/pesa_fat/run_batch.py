@@ -493,7 +493,7 @@ def _run_sge(
     help="Device for stage 1 (TotalSegmentator).",
 )
 @click.option("--model-dir", type=click.Path(path_type=Path), default=None)
-@click.option("--overwrite", is_flag=True, help="Re-run stage 1 even when outputs exist.")
+@click.option("--overwrite", is_flag=True, default=True, help="Re-run stage 1 even when outputs exist.")
 @click.option(
     "--dixon-regions",
     default=",".join(dixon_cfg.REGION_ORDER),
