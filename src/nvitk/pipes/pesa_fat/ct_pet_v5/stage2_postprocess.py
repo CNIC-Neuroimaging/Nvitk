@@ -329,23 +329,12 @@ def build_fat_mask(
             _resampled_kidney_l,
             _resampled_bladder,
             _resampled_body,
+            radius_mm=8.0
         )
 
         ureter = _mask.data > 0
         ureter = pet.copy().with_data(ureter)
-        _ureter = ureter.copy().with_data(ureter.data.astype(np.uint8))
-        imsave(
-            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")),
-             _ureter, 
-             axes="XYZ"
-        )
         resampled_ureter = resample_mask_to_pet(ureter, total, order=0)
-        _resampled_ureter = resampled_ureter.copy().with_data(resampled_ureter.data.astype(np.uint8))
-        imsave(
-            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/r_URETER.nii.gz")),
-             _resampled_ureter, 
-             axes="XYZ"
-        )
         out[resampled_ureter.data > 0] = 0
 
     # ---- FAT BATCH --------------------------------------------------------
