@@ -32,22 +32,9 @@ I/O: nvitk.io (not SimpleITK).  Arrays: backend ``np`` / ``ndi`` after
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, Tuple
 
-import os
-import sys
-
-ROOT = Path(os.path.abspath('')).resolve().parents[2]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-
-import nvitk as nv
 from nvitk.core import setup
-
-from nvitk.transform import resample_mask_to_pet
-from nvitk.segmentation.labels import get_label
 from nvitk.core import as_backend_array, to_numpy
 
 setup(globals())
