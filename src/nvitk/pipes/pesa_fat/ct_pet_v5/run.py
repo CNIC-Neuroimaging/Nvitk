@@ -391,9 +391,9 @@ def _run_sge(
          "instead of submitting. Run it on the cluster login node with "
          "`bash <script>`; only qsub + singularity are required there.",
 )
-@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
+@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
 def main(
     batch: str,
     subjects: str | None,
@@ -411,9 +411,9 @@ def main(
     src_dir: Path | None,
     dry_run: bool,
     emit_script: Path | None,
-    exclude_ureter: bool = False,
     log_level: str,
     debug: bool,
+    exclude_ureter: bool = False,
 ) -> None:
     """CT-PET v5 pipeline master (local or SGE dispatch)."""
     Logger(level=log_level.upper())
