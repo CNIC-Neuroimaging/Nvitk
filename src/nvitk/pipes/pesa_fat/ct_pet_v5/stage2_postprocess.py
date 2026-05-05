@@ -328,6 +328,7 @@ def build_fat_mask(
             _resampled_body,
         )
         ureter = _mask.data > 0
+        ureter = total.with_data(ureter)
         resampled_ureter = resample_mask_to_pet(ureter, total, order=0).data
         out[resampled_ureter > 0] = 0
 
