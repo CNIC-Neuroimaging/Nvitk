@@ -333,7 +333,7 @@ def build_fat_mask(
         resampled_ureter = resample_mask_to_pet(ureter, total, order=0)
         _resampled_ureter = resampled_ureter.copy().with_data(resampled_ureter.data.astype(np.uint8))
         imsave(
-            str(Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS_URETER/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")),
+            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")),
              _resampled_ureter, 
              axes="XYZ"
         )
