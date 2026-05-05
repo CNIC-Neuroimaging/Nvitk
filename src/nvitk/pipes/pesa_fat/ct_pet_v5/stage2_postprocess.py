@@ -311,6 +311,8 @@ def build_fat_mask(
     if exclude_ureter:
         from nvitk.segmentation.pet.ureter_segmentation import segment_ureter
         from nvitk.transform.resampling import resample_mask_to_pet
+        from nvitk.measure.suv import suv_image
+
         log.info("Running ureter segmentation...")
         _kidney_r = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
         _kidney_l = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
@@ -320,8 +322,9 @@ def build_fat_mask(
         _resampled_kidney_l = resample_mask_to_pet(_kidney_l, pet, order=0)
         _resampled_bladder  = resample_mask_to_pet(_bladder, pet, order=0)
         _resampled_body     = resample_mask_to_pet(body, pet, order=0)
+        _raw_suv            = suv_image(pet, pet.metadata, philips=False)
         _mask, _, _         = segment_ureter(
-            pet,
+            _raw_suv,
             _resampled_kidney_r,
             _resampled_kidney_l,
             _resampled_bladder,
@@ -329,11 +332,16 @@ def build_fat_mask(
         )
 
         ureter = _mask.data > 0
-        ureter = total.with_data(ureter)
+        ureter = pet.copy().with_data(ureter)
+        imsave(
+            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")),
+             ureter, 
+             axes="XYZ"
+        )
         resampled_ureter = resample_mask_to_pet(ureter, total, order=0)
         _resampled_ureter = resampled_ureter.copy().with_data(resampled_ureter.data.astype(np.uint8))
         imsave(
-            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/URETER.nii.gz")),
+            str(Path("/PESAFat/data/202602_Week1/res_post_processing_ct/PESA11471769/CT/r_URETER.nii.gz")),
              _resampled_ureter, 
              axes="XYZ"
         )
