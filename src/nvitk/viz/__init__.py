@@ -10,6 +10,7 @@ from .brainshow import (
     resolve_atlas,
 )
 from .pet_hotspots import HotspotMode, show_hotspots
+from .flowshow import flowshow
 
 __all__ = [
     "brainshow",
@@ -19,4 +20,5 @@ __all__ = [
     "build_volume_stat_image",
     "show_hotspots",
     "HotspotMode",
+    "flowshow",
 ]

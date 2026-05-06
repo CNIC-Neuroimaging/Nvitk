@@ -16,9 +16,12 @@ except Exception:
     click = None
 
 from nvitk.core.exceptions import BackendUnavailableError
+from nvitk.core.array import as_backend_array
 from .._common import default_nifti_axes
 from ..imageio import imread, imsave
+from nvitk.core.logger import Logger
 
+log = Logger()
 
 def _cli_decorator(*args, **kwargs):
     def decorator(func):
@@ -231,10 +234,10 @@ def process_patient(
     fh_image = imread(inputs.fh_phase_path)
 
     outputs = compute_phase_derivatives(
-        np.asarray(angio_image.data),
-        np.asarray(ap_image.data),
-        np.asarray(rl_image.data),
-        np.asarray(fh_image.data),
+        angio_image.data,
+        ap_image.data,
+        rl_image.data,
+        fh_image.data,
         venc=actual_venc,
     )
     written = _write_outputs(inputs.flow_dir, outputs, dict(angio_image.metadata or {}))
@@ -249,28 +252,34 @@ def phase2volume(
     dry_run: bool = False,
     pipeline_id: str = "1.0.0",
 ) -> list[Path]:
-    source = Path(input_path)
-    if multifile:
-        written: list[Path] = []
-        for patient_dir in sorted(item for item in source.iterdir() if item.is_dir()):
-            written.extend(
-                process_patient(
-                    patient_dir,
-                    venc=venc,
-                    dry_run=dry_run,
-                    subject_uid=patient_dir.name,
-                    pipeline_id=pipeline_id,
-                )
-            )
-        return written
+    from nvitk import using
+    with using('cpu'):
+        try:
+            source = Path(input_path)
+            if multifile:
+                written: list[Path] = []
+                for patient_dir in sorted(item for item in source.iterdir() if item.is_dir()):
+                    written.extend(
+                        process_patient(
+                            patient_dir,
+                            venc=venc,
+                            dry_run=dry_run,
+                            subject_uid=patient_dir.name,
+                            pipeline_id=pipeline_id,
+                        )
+                    )
+                return written
 
-    return process_patient(
-        source,
-        venc=venc,
-        dry_run=dry_run,
-        subject_uid=source.name,
-        pipeline_id=pipeline_id,
-    )
+            return process_patient(
+                source,
+                venc=venc,
+                dry_run=dry_run,
+                subject_uid=source.name,
+                pipeline_id=pipeline_id,
+            )
+        except Exception as exc:
+            log.exception(exc)
+            raise exc
 
 
 @_click_command()
