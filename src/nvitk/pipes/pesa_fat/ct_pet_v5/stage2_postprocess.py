@@ -278,6 +278,7 @@ def build_fat_mask(
     body: Image,
     pet: Image,
     exclude_ureter: bool = False,
+    output_dir: Path | None = None,
 ) -> Image:
     """Visceral/subcutaneous fat clean-up (extremities, organs, PET-guided bladder)."""
     visceral_id = get_class_id("torso_fat", "tissue_types")
@@ -335,6 +336,9 @@ def build_fat_mask(
         ureter = _mask.data > 0
         ureter = pet.copy().with_data(ureter)
         resampled_ureter = resample_mask_to_pet(ureter, total, order=0)
+        if output_dir:
+            _resampled_ureter = resampled_ureter.copy().with_data(resampled_ureter.data.astype(np.uint8))
+            imsave(str(output_dir / "_URETER.nii.gz"), _resampled_ureter, axes="XYZ")
         out[resampled_ureter.data > 0] = 0
 
     # ---- FAT BATCH --------------------------------------------------------
@@ -446,7 +450,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_
     pet = _imread(nifti_dir, cfg.PET_STEM)
 
     mo = build_mo_mask(total)
-    fat, fat_batch = build_fat_mask(tissue_types, total, body, pet, exclude_ureter=exclude_ureter)
+    fat, fat_batch = build_fat_mask(tissue_types, total, body, pet, exclude_ureter=exclude_ureter, output_dir=output_dir)
     bod = build_body_mask(body)
     organs = build_organs_mask(total)
     muscles_out = build_muscles_mask(total, muscles)
