@@ -32,7 +32,7 @@ from typing import Iterable, Sequence
 import click
 import numpy as np
 
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.logger import Logger
 from nvitk.core.exceptions import ValidationError
 from nvitk.io import imread
@@ -43,12 +43,14 @@ from nvitk.pipes.pesa_fat.common.paths import (
     BatchLayout,
     layout,
     resolve_nii,
+    resolve_nii_optional,
 )
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 from nvitk.transform.resampling import resample_mask_to_pet
 from nvitk.types import Image
 from nvitk.viz import HotspotMode, show_suv_hotspots
+from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 
 
 log = Logger()
@@ -172,8 +174,115 @@ def _list_valid_measures() -> list[str]:
                 out.append(f"{roi}_{metric}")
     return sorted(set(out))
 
+def _require_pyvista():
+    try:
+        import pyvista as pv  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Extra mask overlays require 'pyvista'. Install it with: pip install pyvista"
+        ) from exc
+    return pv
 
-def _load_ctpet_inputs(lay: BatchLayout, subject: str, resolved: CtPetResolved) -> tuple[Image, Image, Sequence[int]]:
+
+def _surface_from_binary(pv, binary: np.ndarray):
+    binary_u8 = (binary > 0).astype(np.uint8, copy=False)
+    grid = pv.ImageData(
+        dimensions=binary_u8.shape,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+    )
+    grid.point_data["m"] = binary_u8.flatten(order="F")
+    return grid.contour([0.5], scalars="m")
+
+
+def _parse_extra_masks(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def _ctpet_load_extra_mask_on_pet_grid(
+    lay: BatchLayout,
+    subject: str,
+    name: str,
+    pet: Image,
+) -> Image | None:
+    """
+    Load an extra mask for CT-PET and resample it onto the PET grid.
+
+    - For `ureter`, load stage-2 `_URETER.nii[.gz]` if present.
+    - Otherwise load from stage-1 task outputs (`total`, `body`, `tissue_types`, `thigh_shoulder_muscles`)
+      and extract the TotalSegmentator class by name.
+    """
+    stage2_dir = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
+    if name == "ureter":
+        ureter_path = resolve_nii_optional(stage2_dir, "_URETER")
+        if ureter_path is None:
+            raise ValidationError(
+                f"Requested extra mask 'ureter' but {_stem_from_mask_file('_URETER.nii.gz')!r} not found under {stage2_dir}."
+            )
+        ureter = imread(str(ureter_path), axes="XYZ")
+        return resample_mask_to_pet(ureter, pet)
+
+    stage1_dir = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
+    tasks = ("total", "body", "tissue_types", "thigh_shoulder_muscles")
+    last_err: Exception | None = None
+    for task in tasks:
+        try:
+            cid = get_class_id(name, task)
+        except Exception as exc:
+            last_err = exc
+            continue
+        seg = imread(str(resolve_nii(stage1_dir, task)), axes="XYZ")
+        seg_np = to_numpy(seg.data)
+        bin_np = (seg_np == int(cid)).astype(np.uint8)
+        if not bool(np.any(bin_np)):
+            log.warning(f"Extra mask {name!r} found in task {task!r} but is empty; skipping.")
+            return None
+        bin_img = seg.with_data(as_backend_array(bin_np))
+        return resample_mask_to_pet(bin_img, pet)
+
+    raise ValidationError(
+        f"Could not resolve extra mask {name!r} from CT-PET stage1 tasks {tasks}. "
+        f"Last error: {last_err}"
+    )
+
+
+def _dixon_load_extra_mask_on_map_grid(
+    lay: BatchLayout,
+    subject: str,
+    region: str,
+    name: str,
+) -> Image | None:
+    """
+    Load an extra mask for Dixon from stage-1 task outputs for the given region.
+    """
+    stage1_dir = lay.results_dir / dx_cfg.STAGE1_DIR / subject / f"{dx_cfg.INPUT_PREFIX}_{region}"
+    tasks = ("total_mr", "body_mr", "vertebrae_mr", "thigh_shoulder_muscles_mr")
+    last_err: Exception | None = None
+    for task in tasks:
+        try:
+            cid = get_class_id(name, task)
+        except Exception as exc:
+            last_err = exc
+            continue
+        seg = imread(str(resolve_nii(stage1_dir, task)), axes="XYZ")
+        seg_np = to_numpy(seg.data)
+        bin_np = (seg_np == int(cid)).astype(np.uint8)
+        if not bool(np.any(bin_np)):
+            log.warning(f"Extra mask {name!r} found in task {task!r} but is empty; skipping.")
+            return None
+        return seg.with_data(as_backend_array(bin_np))
+
+    raise ValidationError(
+        f"Could not resolve extra mask {name!r} from Dixon stage1 tasks {tasks} in region {region}. "
+        f"Last error: {last_err}"
+    )
+
+
+def _load_ctpet_inputs(
+    lay: BatchLayout, subject: str, resolved: CtPetResolved
+) -> tuple[Image, Image, Sequence[int], Image]:
     subj_nifti = lay.subject_nifti_dir(subject)
     pet = imread(str(resolve_nii(subj_nifti, ct_cfg.PET_STEM)), axes="XYZ")
     suv = suv_image(pet, pet.metadata)
@@ -181,7 +290,7 @@ def _load_ctpet_inputs(lay: BatchLayout, subject: str, resolved: CtPetResolved) 
     stage2_dir = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
     mask = imread(str(resolve_nii(stage2_dir, _stem_from_mask_file(resolved.spec.mask_file))), axes="XYZ")
     mask_r = resample_mask_to_pet(mask, pet)
-    return suv, mask_r, resolved.spec.label_ids
+    return suv, mask_r, resolved.spec.label_ids, pet
 
 
 def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) -> tuple[Image, Image, Sequence[int]]:
@@ -236,6 +345,12 @@ def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) 
 @click.option("--cmap", default="turbo", show_default=True)
 @click.option("--notebook/--no-notebook", default=False, show_default=True)
 @click.option("--no-show", is_flag=True, default=False, help="Do not open a render window (for smoke tests).")
+@click.option(
+    "--extra-masks",
+    default=None,
+    help="Comma-separated extra masks to overlay as surfaces (TS class names; special: 'ureter').",
+)
+@click.option("--extra-mask-opacity", type=float, default=0.15, show_default=True)
 def main(
     subject: str,
     measure: str,
@@ -255,6 +370,8 @@ def main(
     cmap: str,
     notebook: bool,
     no_show: bool,
+    extra_masks: str | None,
+    extra_mask_opacity: float,
 ) -> None:
     Logger()
 
@@ -300,15 +417,30 @@ def main(
 
     lay = layout(batch, nifti_root=nifti_root_eff, results_root=results_root_eff)
 
+    extra_list = _parse_extra_masks(extra_masks)
+
     if ct is not None:
-        img, mask_img, label_ids = _load_ctpet_inputs(lay, subject, ct)
+        img, mask_img, label_ids, pet = _load_ctpet_inputs(lay, subject, ct)
         title = f"CT-PET {measure} | {subject} | {batch}"
+        extra_imgs: list[tuple[str, Image]] = []
+        for nm in extra_list:
+            m = _ctpet_load_extra_mask_on_pet_grid(lay, subject, nm, pet)
+            if m is not None:
+                extra_imgs.append((nm, m))
     else:
         assert dx is not None
         img, mask_img, label_ids = _load_dixon_inputs(lay, subject, dx)
         title = f"DIXON {measure} | {subject} | {batch}"
+        extra_imgs = []
+        for nm in extra_list:
+            if nm == "ureter":
+                raise ValidationError("Extra mask 'ureter' is only supported for CT-PET.")
+            m = _dixon_load_extra_mask_on_map_grid(lay, subject, dx.spec.region, nm)
+            if m is not None:
+                extra_imgs.append((nm, m))
 
-    show_suv_hotspots(
+    # Always build plotter with show=False so we can optionally overlay extra surfaces.
+    pl = show_suv_hotspots(
         img,
         mask_img,
         label_ids=label_ids,
@@ -323,9 +455,25 @@ def main(
         point_size=point_size,
         cmap=cmap,
         notebook=notebook,
-        show=not no_show,
+        show=False,
         title=title,
     )
+
+    if extra_imgs:
+        pv = _require_pyvista()
+        colors = ["#00A6FB", "#F7B801", "#F18701", "#7D53DE", "#2ECC71", "#E74C3C"]
+        for i, (nm, mimg) in enumerate(extra_imgs):
+            surf = _surface_from_binary(pv, to_numpy(mimg.data))
+            pl.add_mesh(
+                surf,
+                color=colors[i % len(colors)],
+                opacity=float(extra_mask_opacity),
+                show_scalar_bar=False,
+            )
+            pl.add_text(f"+ {nm}", position="lower_left", font_size=10)
+
+    if not no_show:
+        pl.show()
 
 
 __all__ = ["main"]
