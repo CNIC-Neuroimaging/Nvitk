@@ -84,6 +84,7 @@ dependencies = [
   "plotly>=6.3.0",
   "kaleido>=1.0.0",
   "pyvista>=0.48.0",
+  "trame>=3.6.0",
 
   # -----------------------------------------------------------------------------
   # Experimental dependencies
@@ -158,6 +159,7 @@ nvitk-pesa-fat       = "nvitk.pipes.pesa_fat.run_batch:main"
 nvitk-pesa-fat-ctpet = "nvitk.pipes.pesa_fat.ct_pet_v5.run:main"
 nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
 nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
+nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 
 # ────────────────────────────── PESA-Brain pipelines ──────────────────────────
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"

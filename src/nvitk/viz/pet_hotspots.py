@@ -38,7 +38,8 @@ show_suv_hotspots_3d(suv, m, hotspot=\"top_percent\", top_percent=0.1, max_point
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Literal, Sequence
+import logging
+from typing import Any, Literal, Sequence
 
 import numpy as np
 
@@ -47,6 +48,8 @@ from nvitk.core.exceptions import ValidationError
 from nvitk.types import Image
 
 HotspotMode = Literal["top_percent", "top_k", "threshold"]
+
+log = logging.getLogger(__name__)
 
 
 def _require_pyvista() -> Any:
@@ -137,6 +140,8 @@ def show_hotspots(
     notebook: bool = False,
     show: bool = True,
     title: str | None = None,
+    auto_threshold_fallback: bool = True,
+    allow_empty_hotspot: bool = False,
 ) -> Any:
     """
     Render SUV hotspots inside a segmentation mask.
@@ -176,6 +181,13 @@ def show_hotspots(
         If True, immediately show the interactive window.
     title
         Optional plot title.
+    auto_threshold_fallback
+        If True (default), when the first hotspot selection is empty but the ROI is
+        non-empty, retry once with ``hotspot='threshold'`` and ``threshold=0.1``.
+    allow_empty_hotspot
+        If True, when hotspots are still empty after any fallback, return a plotter
+        showing only the ROI surface with a note (for batch HTML reports). If False
+        (default), raise :class:`~nvitk.core.exceptions.ValidationError`.
 
     Returns
     -------
@@ -201,8 +213,45 @@ def show_hotspots(
         suv_threshold=threshold,
     )
 
+    if not bool(np.any(hot)) and auto_threshold_fallback:
+        if not (hotspot == "threshold" and threshold is not None and float(threshold) == 0.1):
+            log.info(
+                "Hotspot selection empty; retrying with hotspot='threshold', threshold=0.1"
+            )
+            hot = _select_hotspots(
+                suv_arr,
+                roi,
+                hotspot="threshold",
+                top_percent=top_percent,
+                top_k=top_k,
+                suv_threshold=0.1,
+            )
+
     if not bool(np.any(hot)):
-        raise ValidationError("Hotspot selection is empty (no voxels match criteria).")
+        if not allow_empty_hotspot:
+            raise ValidationError("Hotspot selection is empty (no voxels match criteria).")
+        roi_u8 = roi.astype(np.uint8, copy=False)
+        grid = pv.ImageData(
+            dimensions=roi_u8.shape,
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+        )
+        grid.point_data["roi"] = roi_u8.flatten(order="F")
+        surf = grid.contour([float(mask_iso)], scalars="roi")
+        if mask_smooth:
+            try:
+                surf = surf.smooth(n_iter=20, relaxation_factor=0.1)
+            except Exception:
+                pass
+        pl = pv.Plotter(notebook=notebook)
+        pl.enable_depth_peeling()
+        head = str(title) if title else ""
+        pl.add_text(f"{head}\n(no hotspot voxels)".strip(), position="upper_left", font_size=12)
+        pl.add_mesh(surf, color="white", opacity=float(mask_opacity), show_scalar_bar=False)
+        pl.view_isometric()
+        if show:
+            pl.show()
+        return pl
 
     # Convert hotspot voxels to a capped point cloud in voxel coordinates.
     ijk = np.argwhere(hot)  # (N, 3) in (i, j, k) == (x, y, z) for axes='XYZ'

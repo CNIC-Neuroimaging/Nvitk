@@ -2,7 +2,7 @@
 
 Single entry point that drives the *whole* PESA-Fat batch — stage 0
 (DICOM -> NIfTI + renaming), then the ct-pet-v5 and dixon-v5 pipelines
-(stages 1 / 2 / 3).
+(stages 1–3), and optional stage 4 (local HTML QC report).
 
 Two execution modes:
 
@@ -74,13 +74,14 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5 import run as ctpet_run
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dixon_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import run as dixon_run
+from nvitk.pipes.pesa_fat.common.stage4_qc import run_qc as run_stage4_qc
 
 
 log = Logger()
 
 
 PIPELINE_CHOICES = ("ct-pet-v5", "dixon-v5")
-STAGE_CHOICES = ("stage0", "stage1", "stage2", "stage3")
+STAGE_CHOICES = ("stage0", "stage1", "stage2", "stage3", "stage4")
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +313,8 @@ def _run_local(
             except Exception as exc:
                 log.error(f"[{subj}] stage 0 failed: {exc}")
 
-    pipe_stages = [s for s in stages_sel if s != "stage0"]
-    if not pipe_stages:
+    pipe_stages = [s for s in stages_sel if s not in ("stage0", "stage4")]
+    if not pipe_stages and "stage4" not in stages_sel:
         return
 
     if "ct-pet-v5" in pipelines:
@@ -346,6 +347,18 @@ def _run_local(
             regions=regions,
         )
 
+    if "stage4" in stages_sel:
+        log.info("=" * 78)
+        log.info("STAGE 4 QC (local HTML report)")
+        log.info("=" * 78)
+        run_stage4_qc(
+            lay.batch,
+            subjects,
+            pipelines=list(pipelines),
+            nifti_root=lay.nifti_root,
+            results_root=lay.results_root,
+        )
+
 
 def _run_sge(
     lay: BatchLayout,
@@ -366,7 +379,7 @@ def _run_sge(
     exclude_ureter: bool = False,
 ) -> None:
     run_stage0 = "stage0" in stages_sel
-    pipe_stages = [s for s in stages_sel if s != "stage0"]
+    pipe_stages = [s for s in stages_sel if s not in ("stage0", "stage4")]
 
     stage0_jids: dict[str, str | None] = {s: None for s in subjects}
     if run_stage0:
@@ -600,6 +613,13 @@ def main(
     if unknown_stages:
         raise click.BadParameter(
             f"Unknown stages {unknown_stages}. Valid: {STAGE_CHOICES}"
+        )
+
+    if submit == "sge" and "stage4" in stages_sel:
+        log.warning(
+            "stage4 QC is not emitted on SGE; after the batch finishes run locally: "
+            "nvitk-pesa-fat-qc --batch %s",
+            batch,
         )
 
     region_tuple = tuple(r.strip().upper() for r in dixon_regions.split(",") if r.strip())
