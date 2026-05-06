@@ -5,15 +5,16 @@ stage-3 *measure* name and launches the 3D hotspot viewer.
 
 Measure naming
 --------------
-`--measure` uses the same column naming as stage-3 outputs.
+Hotspot visualization operates on **voxelwise images** (SUV volume / Dixon maps),
+so for CT-PET the hotspot map does not depend on SUVMAX vs SUVmean vs percentiles.
 
-CT-PET examples:
-- `HIGADO_SUVMAX`
-- `GRASA_V_SUVmean`
+This CLI therefore uses the naming scheme:
 
-DIXON examples:
-- `DIXON_KIDNEY_R_FF`
-- `DIXON_LIVER_T2`
+- CT-PET: `<ROI>_SUV` (e.g. `HIGADO_SUV`, `GRASA_V_SUV`, `L4_SUV`)
+- DIXON: `<ROI>_<METRIC>` where `METRIC in {FF,T2,R2}` (e.g. `KIDNEY_R_FF`, `LIVER_T2`)
+
+For backwards compatibility, CT-PET stage-3 style names like `HIGADO_SUVMAX`
+are accepted and treated as `HIGADO_SUV`.
 
 Notes
 -----
@@ -31,6 +32,7 @@ from typing import Iterable, Sequence
 import click
 import numpy as np
 
+from nvitk.core.array import as_backend_array
 from nvitk.core.logger import Logger
 from nvitk.core.exceptions import ValidationError
 from nvitk.io import imread
@@ -91,7 +93,7 @@ def _detect_batches_for_subject(
 @dataclass(frozen=True)
 class CtPetResolved:
     spec: ct_cfg.SuvSpec
-    stat_suffix: str  # e.g. SUVMAX, SUVmean...
+    metric: str  # always "SUV" for voxelwise hotspot visualization
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,17 @@ class DixonResolved:
 
 
 def _resolve_measure_ctpet(measure: str) -> CtPetResolved | None:
+    # Preferred: <ROI>_SUV
+    if measure.endswith("_SUV"):
+        prefix = measure[: -len("_SUV")]
+        for spec in ct_cfg.SUV_SPECS:
+            if spec.column_prefix == prefix:
+                return CtPetResolved(spec=spec, metric="SUV")
+        raise ValidationError(
+            f"Unknown CT-PET ROI {prefix!r}. Use --list-measures to see valid options."
+        )
+
+    # Backward compatible: <ROI>_<SUVSTAT> e.g. HIGADO_SUVMAX, GRASA_V_SUVmean...
     suffixes = [suf for suf, _ in ct_cfg.SUV_STATS]
     for suf in suffixes:
         tail = f"_{suf}"
@@ -109,11 +122,11 @@ def _resolve_measure_ctpet(measure: str) -> CtPetResolved | None:
         prefix = measure[: -len(tail)]
         for spec in ct_cfg.SUV_SPECS:
             if spec.column_prefix == prefix:
-                return CtPetResolved(spec=spec, stat_suffix=suf)
+                return CtPetResolved(spec=spec, metric="SUV")
         raise ValidationError(
-            f"Unknown CT-PET SUV measure prefix {prefix!r}. "
-            "Use --list-measures to see valid options."
+            f"Unknown CT-PET ROI {prefix!r}. Use --list-measures to see valid options."
         )
+
     return None
 
 
@@ -125,9 +138,15 @@ def _resolve_measure_dixon(measure: str) -> DixonResolved | None:
     if metric not in ("FF", "T2", "R2"):
         return None
 
-    # Find the spec
+    # Find the spec (accept both with and without leading "DIXON_")
+    candidates = {prefix}
+    if prefix.startswith("DIXON_"):
+        candidates.add(prefix[len("DIXON_") :])
+    else:
+        candidates.add("DIXON_" + prefix)
+
     for spec in dx_cfg.MEASURE_SPECS:
-        if spec.prefix == prefix:
+        if spec.prefix in candidates:
             if metric not in spec.metrics:
                 raise ValidationError(
                     f"Measure {measure!r} exists but metric {metric!r} is not computed for it."
@@ -141,15 +160,16 @@ def _resolve_measure_dixon(measure: str) -> DixonResolved | None:
 
 def _list_valid_measures() -> list[str]:
     out: list[str] = []
-    # CT-PET SUV measures
+    # CT-PET voxelwise measure is always SUV
     for spec in ct_cfg.SUV_SPECS:
-        for suf, _stat in ct_cfg.SUV_STATS:
-            out.append(f"{spec.column_prefix}_{suf}")
+        out.append(f"{spec.column_prefix}_SUV")
     # Dixon voxelwise measures (FF/T2/R2 only)
     for spec in dx_cfg.MEASURE_SPECS:
         for metric in ("FF", "T2", "R2"):
             if metric in spec.metrics:
-                out.append(f"{spec.prefix}_{metric}")
+                # Prefer without the "DIXON_" prefix for user-facing ROI ids.
+                roi = spec.prefix[len("DIXON_") :] if spec.prefix.startswith("DIXON_") else spec.prefix
+                out.append(f"{roi}_{metric}")
     return sorted(set(out))
 
 
@@ -177,10 +197,10 @@ def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) 
     elif resolved.metric == "R2":
         stem = f"{dx_cfg.INPUT_PREFIX}_{region}_T2STAR"
         t2 = imread(str(resolve_nii(subj_nifti, stem)), axes="XYZ")
-        t2_np = np.asarray(t2.data, dtype=np.float32)
+        t2_np = as_backend_array(t2.data)
         r2_np = np.zeros_like(t2_np, dtype=np.float32)
         pos = t2_np > 0
-        r2_np[pos] = 1.0 / t2_np[pos] * 1000.0  # Hz, matches dixon stage3
+        r2_np[pos] = 1.0 / t2_np[pos] * 1000.0  # Hz
         img = t2.with_data(r2_np)
     else:
         raise ValidationError(f"Unsupported dixon metric {resolved.metric!r}.")
@@ -199,7 +219,7 @@ def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) 
 
 @click.command("nvitk-pesa-fat-hotspot")
 @click.option("--subject", required=False, help="Subject id (e.g. PESA123).")
-@click.option("--measure", required=False, help="Stage-3 measure id (use --list-measures).")
+@click.option("--measure", required=False, help="Measure id (use --list-measures).")
 @click.option("--batch", default=None, help="Batch name (optional; auto-detect if omitted).")
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
@@ -246,7 +266,7 @@ def main(
     assert subject is not None, "Missing option '--subject'"
     assert measure is not None, "Missing option '--measure'"
 
-    # Reject non-voxelwise measures early
+    # Reject non-voxelwise measures early (keep the old checks too)
     if measure.endswith("_VOL") or measure.endswith("_NSlices") or measure.endswith("_WF"):
         raise click.ClickException(
             f"Measure {measure!r} is not supported for hotspot visualization (not voxelwise)."
