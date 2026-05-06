@@ -119,7 +119,7 @@ def _select_hotspots(
     raise ValidationError(f"Unknown hotspot mode {hotspot!r}.")
 
 
-def show_suv_hotspots(
+def show_hotspots(
     suv: Image | np.ndarray,
     mask: Image | np.ndarray,
     *,
@@ -127,7 +127,7 @@ def show_suv_hotspots(
     hotspot: HotspotMode = "top_percent",
     top_percent: float = 0.1,
     top_k: int | None = None,
-    suv_threshold: float | None = None,
+    threshold: float | None = None,
     max_points: int = 50_000,
     mask_iso: float = 0.5,
     mask_opacity: float = 0.25,
@@ -198,7 +198,7 @@ def show_suv_hotspots(
         hotspot=hotspot,
         top_percent=top_percent,
         top_k=top_k,
-        suv_threshold=suv_threshold,
+        suv_threshold=threshold,
     )
 
     if not bool(np.any(hot)):
@@ -257,5 +257,5 @@ def show_suv_hotspots(
     return pl
 
 
-__all__ = ["show_suv_hotspots", "HotspotMode"]
+__all__ = ["show_hotspots", "HotspotMode"]
 

@@ -49,7 +49,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 from nvitk.transform.resampling import resample_mask_to_pet
 from nvitk.types import Image
-from nvitk.viz import HotspotMode, show_suv_hotspots
+from nvitk.viz import HotspotMode, show_hotspots
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 
 
@@ -440,14 +440,14 @@ def main(
                 extra_imgs.append((nm, m))
 
     # Always build plotter with show=False so we can optionally overlay extra surfaces.
-    pl = show_suv_hotspots(
+    pl = show_hotspots(
         img,
         mask_img,
         label_ids=label_ids,
         hotspot=hotspot,
         top_percent=top_percent,
         top_k=top_k,
-        suv_threshold=suv_threshold,
+        threshold=suv_threshold,
         max_points=max_points,
         mask_iso=mask_iso,
         mask_opacity=mask_opacity,
