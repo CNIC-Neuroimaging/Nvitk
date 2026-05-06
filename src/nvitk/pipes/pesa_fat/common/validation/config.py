@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 BASE                = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT")
-BASE_LOCAL          = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS_DIXON500/")
+BASE_LOCAL          = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS/")
 OUT_DIR             = BASE_LOCAL / "Validation_202602_v2"
 
 # ── Fuentes manuales ──────────────────────────────────────────────────────────
@@ -13,7 +13,7 @@ MANUAL_PATH         = BASE / "MANUAL" / "raw" / "análisis manual médula y fat 
 MANUAL_PATH2        = BASE / "MANUAL" / "raw" / "RefStd_FAT_PESA_PRUEBAS_manual_DJC.xlsx"
 
 # ── Datos automáticos ─────────────────────────────────────────────────────────
-AUTO_BASE           = BASE / "RESULTS_DIXON500"
+AUTO_BASE           = BASE / "RESULTS"
 AUTO_MONTH          = "202602"
 AUTO_WEEKS          = [1, 2, 3, 4]              # semanas disponibles
 AUTO_WEEK_FMT       = "202602_Week{w}"   # formato del nombre de carpeta/fichero

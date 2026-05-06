@@ -83,6 +83,7 @@ dependencies = [
   "matplotlib>=3.8.0",
   "plotly>=6.3.0",
   "kaleido>=1.0.0",
+  "pyvista>=0.48.0",
 
   # -----------------------------------------------------------------------------
   # Experimental dependencies

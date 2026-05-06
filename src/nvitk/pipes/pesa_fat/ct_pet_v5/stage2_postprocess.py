@@ -366,7 +366,6 @@ def build_organs_mask(total: Image) -> Image:
     ]
     for name, out_id in mapping:
         m = get_label(total, get_class_id(name, "total"), missing="empty").data
-        out[m > 0] = out_id
 
         # If Liver, we remove the dilated kidneys from the liver mask
         if name == "liver":
@@ -382,6 +381,9 @@ def build_organs_mask(total: Image) -> Image:
                 kl_ch_dilated = dilate(total.copy().with_data(kl_ch), footprint=5).data
                 m[kl_ch_dilated > 0] = 0
                 out[m > 0] = out_id
+            continue
+        
+        out[m > 0] = out_id
 
     return total.with_data(out)
 
