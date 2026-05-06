@@ -31,8 +31,8 @@ def categorize_command(cmd, module):
         return "Segmentation"
     
     # PESA Brain commands
-    if cmd.startswith('PB-') or any(pb in cmd for pb in []):
-        return "PESA-Brain Analysis"
+    if cmd.startswith('nvitk-pesa-fat') or any(pb in cmd for pb in []):
+        return "PESA-Fat Analysis"
     
     # Default category
     return "General"
@@ -43,7 +43,7 @@ def get_command_color(category):
     color_map = {
         "Image Conversion": Colors.OKCYAN,
         "Segmentation": Colors.OKGREEN,
-        "PESA-Brain Analysis": Colors.WARNING,
+        "PESA-Fat Analysis": Colors.WARNING,
         "General": Colors.WHITE
     }
     return color_map.get(category, Colors.WHITE)
@@ -122,7 +122,7 @@ def list_cli_commands():
     display_order = [
         "Image Conversion",
         "Segmentation", 
-        "PESA-Brain Analysis",
+        "PESA-Fat Analysis",
         "General"
     ]
 

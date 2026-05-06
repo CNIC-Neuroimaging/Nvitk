@@ -156,6 +156,7 @@ pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-pesa-fat       = "nvitk.pipes.pesa_fat.run_batch:main"
 nvitk-pesa-fat-ctpet = "nvitk.pipes.pesa_fat.ct_pet_v5.run:main"
 nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
+nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
 
 # -----------------------------------------------------------------------------
 # GUI scripts

@@ -1,5 +1,5 @@
 """
-PET SUV hotspot visualization (3D).
+suv SUV hotspot visualization (3D).
 
 The main entry point is :func:`show_suv_hotspots_3d`, which renders:
 
@@ -13,11 +13,11 @@ Example
 from nvitk.io import imread
 from nvitk.viz import show_suv_hotspots_3d
 
-pet = imread(\"/path/PT_SUV.nii.gz\", axes=\"XYZ\")        # already SUV
+suv = imread(\"/path/PT_SUV.nii.gz\", axes=\"XYZ\")        # already SUV
 mask = imread(\"/path/FAT.nii.gz\", axes=\"XYZ\")          # labels or binary
 
 show_suv_hotspots_3d(
-    pet,
+    suv,
     mask,
     label_ids=(1,),          # e.g. visceral fat label
     hotspot=\"top_percent\",
@@ -31,8 +31,8 @@ Quick CLI smoke test
 
 ```bash
 python -c 'from nvitk.io import imread; from nvitk.viz import show_suv_hotspots_3d; \
-pet=imread(\"PT_SUV.nii.gz\", axes=\"XYZ\"); m=imread(\"MASK.nii.gz\", axes=\"XYZ\"); \
-show_suv_hotspots_3d(pet, m, hotspot=\"top_percent\", top_percent=0.1, max_points=20000)'
+suv=imread(\"PT_SUV.nii.gz\", axes=\"XYZ\"); m=imread(\"MASK.nii.gz\", axes=\"XYZ\"); \
+show_suv_hotspots_3d(suv, m, hotspot=\"top_percent\", top_percent=0.1, max_points=20000)'
 ```
 """
 
@@ -54,7 +54,7 @@ def _require_pyvista() -> Any:
         import pyvista as pv  
     except ImportError as exc:
         raise ImportError(
-            "show_suv_hotspots_3d requires the optional dependency 'pyvista' (VTK). "
+            "show_suv_hotspots requires the optional dependency 'pyvista' (VTK). "
             "Install it with: pip install pyvista"
         ) from exc
     return pv
@@ -76,7 +76,7 @@ def _roi_mask(mask_arr: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarr
 
 
 def _select_hotspots(
-    pet_arr: np.ndarray,
+    suv_arr: np.ndarray,
     roi: np.ndarray,
     *,
     hotspot: HotspotMode,
@@ -88,7 +88,7 @@ def _select_hotspots(
     if not bool(np.any(roi)):
         raise ValidationError("ROI mask is empty (no voxels selected).")
 
-    vals = pet_arr[roi].astype(np.float32, copy=False)
+    vals = suv_arr[roi].astype(np.float32, copy=False)
     if vals.size == 0:
         raise ValidationError("ROI selection produced no voxels.")
 
@@ -96,7 +96,7 @@ def _select_hotspots(
         if not (0 < float(top_percent) <= 100):
             raise ValidationError("top_percent must be in (0, 100].")
         thr = float(np.percentile(vals, 100.0 - float(top_percent)))
-        return roi & (pet_arr >= thr)
+        return roi & (suv_arr >= thr)
 
     if hotspot == "top_k":
         if top_k is None:
@@ -108,19 +108,19 @@ def _select_hotspots(
         k = min(k, int(vals.size))
         # np.partition gives kth smallest; convert to kth largest
         kth = float(np.partition(vals, vals.size - k)[vals.size - k])
-        return roi & (pet_arr >= kth)
+        return roi & (suv_arr >= kth)
 
     if hotspot == "threshold":
         if suv_threshold is None:
             raise ValidationError("hotspot='threshold' requires suv_threshold.")
         thr = float(suv_threshold)
-        return roi & (pet_arr >= thr)
+        return roi & (suv_arr >= thr)
 
     raise ValidationError(f"Unknown hotspot mode {hotspot!r}.")
 
 
-def show_suv_hotspots_3d(
-    pet: Image | np.ndarray,
+def show_suv_hotspots(
+    suv: Image | np.ndarray,
     mask: Image | np.ndarray,
     *,
     label_ids: Sequence[int] | None = None,
@@ -143,10 +143,10 @@ def show_suv_hotspots_3d(
 
     Parameters
     ----------
-    pet
-        PET in **SUV units**, 3D. Either :class:`~nvitk.types.Image` or a NumPy array.
+    suv
+        suv in **SUV units**, 3D. Either :class:`~nvitk.types.Image` or a NumPy array.
     mask
-        Segmentation mask, 3D, same grid as *pet*. Binary or multi-label.
+        Segmentation mask, 3D, same grid as *suv*. Binary or multi-label.
     label_ids
         Optional subset of labels (for multi-label masks). None means \"all nonzero\".
     hotspot
@@ -184,16 +184,16 @@ def show_suv_hotspots_3d(
     """
     pv = _require_pyvista()
 
-    pet_arr = _as_numpy_3d(pet, name="pet")
+    suv_arr = _as_numpy_3d(suv, name="suv")
     mask_arr = _as_numpy_3d(mask, name="mask")
-    if pet_arr.shape != mask_arr.shape:
+    if suv_arr.shape != mask_arr.shape:
         raise ValidationError(
-            f"pet and mask must have the same shape; got {pet_arr.shape} vs {mask_arr.shape}."
+            f"suv and mask must have the same shape; got {suv_arr.shape} vs {mask_arr.shape}."
         )
 
     roi = _roi_mask(mask_arr, label_ids)
     hot = _select_hotspots(
-        pet_arr,
+        suv_arr,
         roi,
         hotspot=hotspot,
         top_percent=top_percent,
@@ -206,7 +206,7 @@ def show_suv_hotspots_3d(
 
     # Convert hotspot voxels to a capped point cloud in voxel coordinates.
     ijk = np.argwhere(hot)  # (N, 3) in (i, j, k) == (x, y, z) for axes='XYZ'
-    suv_vals = pet_arr[hot].astype(np.float32, copy=False)
+    suv_vals = suv_arr[hot].astype(np.float32, copy=False)
 
     if int(max_points) <= 0:
         raise ValidationError("max_points must be a positive integer.")
@@ -218,12 +218,13 @@ def show_suv_hotspots_3d(
 
     # ROI surface from binary ROI volume.
     roi_u8 = roi.astype(np.uint8, copy=False)
-    grid = pv.UniformGrid()
-    grid.dimensions = np.array(roi_u8.shape) + 1  # cell-centered scalars
-    grid.spacing = (1.0, 1.0, 1.0)
-    grid.origin = (0.0, 0.0, 0.0)
-    grid.cell_data["roi"] = roi_u8.flatten(order="F")
-    grid = grid.cell_data_to_point_data()
+    # PyVista's uniform-volume class is `ImageData` (preferred across versions).
+    grid = pv.ImageData(
+        dimensions=roi_u8.shape,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+    )
+    grid.point_data["roi"] = roi_u8.flatten(order="F")
     surf = grid.contour([float(mask_iso)], scalars="roi")
     if mask_smooth:
         try:
@@ -256,5 +257,5 @@ def show_suv_hotspots_3d(
     return pl
 
 
-__all__ = ["show_suv_hotspots_3d", "HotspotMode"]
+__all__ = ["show_suv_hotspots", "HotspotMode"]
 
