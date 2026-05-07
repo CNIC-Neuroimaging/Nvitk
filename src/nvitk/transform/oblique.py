@@ -6,9 +6,8 @@ NumPy+SciPy or CuPy+cupyx.scipy.ndimage depending on the current backend.
 
 from __future__ import annotations
 
-import numpy as _np
-
 from nvitk.core.backend import setup
+from nvitk.core import as_backend_array
 
 setup(globals())
 
@@ -42,17 +41,17 @@ def oblique_slice(
     """
     r = float(radius_vox)
     n = int(res)
-    center = _np.asarray(center_xyz, dtype=_np.float32)
-    u = _np.asarray(u_xyz, dtype=_np.float32)
-    v = _np.asarray(v_xyz, dtype=_np.float32)
+    center = as_backend_array(center_xyz)
+    u = as_backend_array(u_xyz)
+    v = as_backend_array(v_xyz)
 
-    lin = _np.linspace(-r, r, n, dtype=_np.float32)
-    xx, yy = _np.meshgrid(lin, lin, indexing="xy")
+    lin = as_backend_array(np.linspace(-r, r, n))
+    xx, yy = np.meshgrid(lin, lin, indexing="xy")
     pts = center[None, None, :] + xx[..., None] * u[None, None, :] + yy[..., None] * v[None, None, :]
 
     # map_coordinates expects coords per axis: (x, y, z)
-    coords = [pts[..., 0], pts[..., 1], pts[..., 2]]
-    return ndi.map_coordinates(vol, coords, order=int(order), mode=mode, cval=float(cval))
+    coords = as_backend_array([pts[..., 0], pts[..., 1], pts[..., 2]])
+    return ndi.map_coordinates(as_backend_array(vol), coords, order=int(order), mode=mode, cval=float(cval))
 
 
 __all__ = ["oblique_slice"]

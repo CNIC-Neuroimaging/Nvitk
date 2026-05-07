@@ -25,6 +25,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Sequence
+import traceback
 
 import numpy as np
 
@@ -137,7 +138,9 @@ def _unwrap_vtk_interactor(plotter: Any) -> Any | None:
         if callable(gi):
             try:
                 _add(gi())
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
     _add(getattr(plotter, "iren", None))
     ir = getattr(plotter, "iren", None)
@@ -215,7 +218,9 @@ def _mask_surface(pv: Any, roi: np.ndarray) -> Any | None:
         if surf.n_points == 0:
             return None
         return surf
-    except Exception:
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
         return None
 
 
@@ -691,7 +696,7 @@ def _add_flow_scene_single(
                 stream = grid.streamlines_from_source(
                     seed_cloud,
                     vectors="v",
-                    max_time=vec.streamline_max_time,
+                    max_length=vec.streamline_max_time,
                     integration_direction="both",
                 )
                 if stream.n_points > 0:
@@ -703,7 +708,9 @@ def _add_flow_scene_single(
                             opacity=vec.streamline_opacity,
                         )
                     )
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
 
     actors.append(plotter.add_text(f"Label={lbl}  T={tt}", position="upper_left", font_size=12))
@@ -780,7 +787,7 @@ def _add_flow_scene_all_labels(
                 stream = grid.streamlines_from_source(
                     seed_cloud,
                     vectors="v",
-                    max_time=vec.streamline_max_time,
+                    max_length=vec.streamline_max_time,
                     integration_direction="both",
                 )
                 if stream.n_points > 0:
@@ -792,7 +799,9 @@ def _add_flow_scene_all_labels(
                             opacity=vec.streamline_opacity,
                         )
                     )
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
 
     actors.append(
@@ -1004,6 +1013,7 @@ def _flowshow_desktop(
         "tt": int(np.clip(timepoint, 0, t - 1)),
         "mask": True,
         "glyphs": True,
+        "centerlines": True,
         "stream": False,
         "camera_ready": False,
         "playing": bool(anim.auto_play),
@@ -1023,7 +1033,105 @@ def _flowshow_desktop(
         r1 = plotter.renderers[1]
         r0.SetViewport(0.0, 0.0, 0.80, 1.0)
         r1.SetViewport(0.80, 0.0, 1.00, 1.0)
-    except Exception:
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
+        pass
+
+    # ---------------------------------------------------------------------
+    # Interactor strategy:
+    # Restrict interactions in the right cross-section viewport to wheel-zoom only.
+    # Left viewport keeps normal 3D trackball camera controls.
+    # ---------------------------------------------------------------------
+    try:
+        import vtk  # type: ignore
+
+        vtk_iren = _unwrap_vtk_interactor(plotter)
+        if vtk_iren is not None and hasattr(vtk_iren, "SetInteractorStyle"):
+
+            class _RightPanelWheelOnlyStyle(vtk.vtkInteractorStyleTrackballCamera):  # type: ignore[misc]
+                def __init__(self, *, left_renderer: Any, right_renderer: Any) -> None:
+                    super().__init__()
+                    self._left_renderer = left_renderer
+                    self._right_renderer = right_renderer
+                    self._img_style = vtk.vtkInteractorStyleImage()
+
+                def _in_right_viewport(self) -> bool:
+                    try:
+                        x, y = self.GetInteractor().GetEventPosition()
+                        rw = self.GetInteractor().GetRenderWindow()
+                        w, h = rw.GetSize()
+                    except Exception:
+                        return False
+                    if w <= 0 or h <= 0:
+                        return False
+                    xn = float(x) / float(w)
+                    yn = float(y) / float(h)
+                    return (0.80 <= xn <= 1.0) and (0.0 <= yn <= 1.0)
+
+                # Disable drag/click interactions on right panel.
+                def OnLeftButtonDown(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnLeftButtonDown()
+
+                def OnLeftButtonUp(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnLeftButtonUp()
+
+                def OnMiddleButtonDown(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnMiddleButtonDown()
+
+                def OnMiddleButtonUp(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnMiddleButtonUp()
+
+                def OnRightButtonDown(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnRightButtonDown()
+
+                def OnRightButtonUp(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnRightButtonUp()
+
+                def OnMouseMove(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        return
+                    super().OnMouseMove()
+
+                # Allow wheel zoom in right panel using an Image-style zoom handler.
+                def OnMouseWheelForward(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        try:
+                            self._img_style.SetInteractor(self.GetInteractor())
+                            self._img_style.SetCurrentRenderer(self._right_renderer)
+                            self._img_style.OnMouseWheelForward()
+                            return
+                        except Exception:
+                            pass
+                    super().OnMouseWheelForward()
+
+                def OnMouseWheelBackward(self) -> None:  # noqa: N802
+                    if self._in_right_viewport():
+                        try:
+                            self._img_style.SetInteractor(self.GetInteractor())
+                            self._img_style.SetCurrentRenderer(self._right_renderer)
+                            self._img_style.OnMouseWheelBackward()
+                            return
+                        except Exception:
+                            pass
+                    super().OnMouseWheelBackward()
+
+            vtk_iren.SetInteractorStyle(_RightPanelWheelOnlyStyle(left_renderer=plotter.renderers[0], right_renderer=plotter.renderers[1]))
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
         pass
 
     # Right panel placeholder (so the layout is stable and readable).
@@ -1036,7 +1144,9 @@ def _flowshow_desktop(
     try:
         plotter.view_xy()
         plotter.camera.parallel_projection = True
-    except Exception:
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
         pass
 
     # Switch back to 3D panel for the main scene.
@@ -1046,14 +1156,31 @@ def _flowshow_desktop(
     centerline_actors: list[Any] = []
     for i, lbl in enumerate(labels):
         pts = centerlines.get(int(lbl))
-        if pts is None or pts.shape[0] < 2:
+        if pts is None:
+            continue
+        pts_arr = np.asarray(pts, dtype=np.float32)
+        # Normalize centerlines to a stable ndarray shape so later picking/rendering
+        # never accidentally hits a plain Python list.
+        centerlines[int(lbl)] = pts_arr
+        if pts_arr.ndim != 2 or pts_arr.shape[1] != 3 or pts_arr.shape[0] < 2:
             continue
         try:
-            pl = pv.lines_from_points(pts.astype(np.float32), close=False)
+            pl = pv.lines_from_points(pts_arr, close=False)
             color = _TAB10_HEX[i % len(_TAB10_HEX)]
             centerline_actors.append(plotter.add_mesh(pl, color=color, line_width=3, opacity=0.9))
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
+
+    def _set_centerlines_visible(on: bool) -> None:
+        for a in centerline_actors:
+            try:
+                a.SetVisibility(bool(on))
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
 
     # Picking state: selected centerline point (label + index).
     selection: dict[str, Any] = {"label": None, "index": None, "point": None}
@@ -1067,30 +1194,47 @@ def _flowshow_desktop(
             plotter.add_text(text, position="upper_left", font_size=12)
             plotter.view_xy()
             plotter.camera.parallel_projection = True
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
         finally:
             try:
                 plotter.subplot(0, 0)
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
 
     right_plane_actors: list[Any] = []
-    cs_state: dict[str, Any] = {"mode": "VelocityMagnitude_3D"}
+    # Cross-section panel shows up to 3 slices (CD/Angio/VelMag) simultaneously.
     overlay_actors: list[Any] = []
 
     def _clear_right_planes() -> None:
         nonlocal right_plane_actors
         for a in right_plane_actors:
             try:
+                # Right panel may contain either PyVista actors or raw vtkProp (vtkImageActor).
+                try:
+                    ren = plotter.renderers[1]
+                    rm = getattr(ren, "RemoveActor", None)
+                    if callable(rm):
+                        rm(a)  # type: ignore[arg-type]
+                        continue
+                except Exception:
+                    log.exception(e)
+                    pass
                 plotter.remove_actor(a)
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
         right_plane_actors = []
 
     def _render_cross_sections() -> None:
         """Render CD/Angio/VelMag oblique slices in the right subplot."""
         if selection["point"] is None or selection["label"] is None or selection["index"] is None:
+            _set_right_panel_text("Cross-section\n(click vessel/centerline to populate)")
             return
         if not cross_section_volumes:
             _set_right_panel_text("Cross-section volumes not provided.\n(Will be loaded by CLI options.)")
@@ -1098,12 +1242,25 @@ def _flowshow_desktop(
         lbl = int(selection["label"])
         idx = int(selection["index"])
         pts = centerlines.get(lbl)
-        if pts is None or pts.shape[0] < 2:
+        if pts is None:
+            _set_right_panel_text(f"Cross-section unavailable:\nno centerline for label={lbl}")
             return
-        center = pts[idx].astype(np.float32)
-        tvec = _tangent_from_centerline(pts, idx, window=centerline_window)
+        pts_arr = np.asarray(pts, dtype=np.float32)
+        if pts_arr.ndim != 2 or pts_arr.shape[1] != 3 or pts_arr.shape[0] < 2:
+            _set_right_panel_text(f"Cross-section unavailable:\ninvalid centerline for label={lbl}")
+            return
+        if idx < 0 or idx >= int(pts_arr.shape[0]):
+            _set_right_panel_text(f"Cross-section unavailable:\ncenterline index out of range ({idx})")
+            return
+        center = pts_arr[idx].astype(np.float32, copy=False)
+        tvec = _tangent_from_centerline(pts_arr, idx, window=centerline_window)
         # flip tangent using local velocity direction (timepoint-specific)
-        vloc = vel[int(center[0]), int(center[1]), int(center[2]), int(state["tt"]), :].astype(np.float32, copy=False)
+        cx, cy, cz = int(round(float(center[0]))), int(round(float(center[1]))), int(round(float(center[2])))
+        cx = int(np.clip(cx, 0, vel.shape[0] - 1))
+        cy = int(np.clip(cy, 0, vel.shape[1] - 1))
+        cz = int(np.clip(cz, 0, vel.shape[2] - 1))
+        tt_now = int(np.clip(int(state["tt"]), 0, vel.shape[3] - 1))
+        vloc = vel[cx, cy, cz, tt_now, :].astype(np.float32, copy=False)
         if float(np.dot(vloc, tvec)) < 0:
             tvec = -tvec
         u, v = _frame_from_tangent(tvec)
@@ -1114,7 +1271,9 @@ def _flowshow_desktop(
             for a in overlay_actors:
                 try:
                     plotter.remove_actor(a)
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     pass
             overlay_actors.clear()
 
@@ -1142,7 +1301,9 @@ def _flowshow_desktop(
                 scale=float(cross_section_radius_vox) * 0.75,
             )
             overlay_actors.append(plotter.add_mesh(arr, color="red", opacity=0.9, show_scalar_bar=False))
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
         # Build selected slice + overlay mask slice (small panel).
@@ -1150,76 +1311,179 @@ def _flowshow_desktop(
         msl = _oblique_slice(mask_bin, center=center, u=u, v=v, radius_vox=cross_section_radius_vox, res=cross_section_res, order=0)
         msl = (msl > 0.5).astype(np.float32)
 
-        mode = str(cs_state["mode"])
-        if mode not in cross_section_volumes:
-            # pick first available
-            mode = next(iter(cross_section_volumes.keys()))
-            cs_state["mode"] = mode
-        sl = _oblique_slice(
-            cross_section_volumes[mode],
-            center=center,
-            u=u,
-            v=v,
-            radius_vox=cross_section_radius_vox,
-            res=cross_section_res,
-            order=1,
-        )
-
         plotter.subplot(0, 1)
         _clear_right_planes()
         plotter.camera.parallel_projection = True
 
-        plane = pv.Plane(
-            center=(0.0, 0.0, 0.0),
-            direction=(0.0, 0.0, 1.0),
-            i_size=2.0 * float(cross_section_radius_vox),
-            j_size=2.0 * float(cross_section_radius_vox),
-            i_resolution=int(cross_section_res - 1),
-            j_resolution=int(cross_section_res - 1),
-        )
-        scal = sl.T.flatten(order="C").astype(np.float32, copy=False)
-        plane.point_data["img"] = scal
-        a_img = plotter.add_mesh(plane, scalars="img", cmap="gray", opacity=1.0, show_scalar_bar=False)
+        # Strategy change: render 2D slices using VTK image actors instead of textured planes.
+        # This is more reliable across VTK/PyVista backends and avoids camera/plane issues.
+        preferred = ("ComplexDifference_3D", "Angiography_3D", "VelocityMagnitude_3D")
+        avail = [k for k in preferred if k in cross_section_volumes]
+        if not avail:
+            _set_right_panel_text("Cross-section volumes missing.\nExpected CD/Angio/VelMag.")
+            return
 
-        plane2 = plane.copy(deep=True)
-        plane2.point_data["m"] = msl.T.flatten(order="C").astype(np.float32, copy=False)
-        a_m = plotter.add_mesh(plane2, scalars="m", cmap="Reds", opacity=0.25, show_scalar_bar=False)
+        try:
+            import vtk  # type: ignore
+            from vtk.util import numpy_support  # type: ignore
 
-        # Ensure right-panel actors are not pickable.
-        for a in (a_img, a_m):
-            try:
-                a.SetPickable(False)
-            except Exception:
-                pass
+            def _vtk_image_from_2d(img2d: np.ndarray) -> Any:
+                arr = np.asarray(img2d, dtype=np.float32)
+                # VTK expects x-fastest; keep a consistent orientation for display.
+                flat = arr.T.reshape(-1, order="C").astype(np.float32, copy=False)
+                img = vtk.vtkImageData()
+                img.SetDimensions(int(arr.shape[1]), int(arr.shape[0]), 1)
+                img.AllocateScalars(vtk.VTK_FLOAT, 1)
+                vtk_arr = numpy_support.numpy_to_vtk(flat, deep=True, array_type=vtk.VTK_FLOAT)
+                img.GetPointData().SetScalars(vtk_arr)
+                return img
 
-        plotter.add_text(f"{mode}", position="upper_left", font_size=10)
-        right_plane_actors.extend([a_img, a_m])
+            def _make_lut_gray(lo: float, hi: float) -> Any:
+                lut = vtk.vtkLookupTable()
+                lut.SetNumberOfTableValues(256)
+                lut.SetRange(float(lo), float(hi))
+                lut.SetRampToLinear()
+                lut.Build()
+                for i in range(256):
+                    g = float(i) / 255.0
+                    lut.SetTableValue(i, g, g, g, 1.0)
+                return lut
+
+            def _make_lut_mask() -> Any:
+                lut = vtk.vtkLookupTable()
+                lut.SetNumberOfTableValues(2)
+                lut.SetRange(0.0, 1.0)
+                lut.Build()
+                lut.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)   # transparent
+                lut.SetTableValue(1, 1.0, 0.0, 0.0, 0.30)  # red overlay
+                return lut
+
+            # Pre-build mask overlay actor once (reused per slice with same msl).
+            mask_img = _vtk_image_from_2d(msl)
+            mask_lut = _make_lut_mask()
+
+            def _add_image_pair(img2d: np.ndarray, yoff: float) -> None:
+                base_img = _vtk_image_from_2d(img2d)
+                # intensity windowing
+                vmin = float(np.percentile(img2d, 2))
+                vmax = float(np.percentile(img2d, 98))
+                if vmax <= vmin:
+                    vmax = vmin + 1e-6
+                gray_lut = _make_lut_gray(vmin, vmax)
+
+                map_base = vtk.vtkImageMapToColors()
+                map_base.SetInputData(base_img)
+                map_base.SetLookupTable(gray_lut)
+                map_base.Update()
+
+                act_base = vtk.vtkImageActor()
+                act_base.GetMapper().SetInputConnection(map_base.GetOutputPort())
+                act_base.SetPosition(0.0, float(yoff), 0.0)
+
+                map_mask = vtk.vtkImageMapToColors()
+                map_mask.SetInputData(mask_img)
+                map_mask.SetLookupTable(mask_lut)
+                map_mask.Update()
+
+                act_mask = vtk.vtkImageActor()
+                act_mask.GetMapper().SetInputConnection(map_mask.GetOutputPort())
+                act_mask.SetPosition(0.0, float(yoff), 0.0)
+
+                # Add to renderer 1 directly to avoid subplot confusion.
+                ren = plotter.renderers[1]
+                ren.AddActor(act_base)
+                ren.AddActor(act_mask)
+                right_plane_actors.extend([act_base, act_mask])
+
+            dy_pix = float(cross_section_res) * 1.10
+            y_offsets = [dy_pix, 0.0, -dy_pix]
+            for kk, key in enumerate(avail[:3]):
+                sl = _oblique_slice(
+                    cross_section_volumes[key],
+                    center=center,
+                    u=u,
+                    v=v,
+                    radius_vox=cross_section_radius_vox,
+                    res=cross_section_res,
+                    order=1,
+                )
+                _add_image_pair(sl, float(y_offsets[kk]))
+                try:
+                    plotter.add_text(str(key), position=(8, 18 + 14 * kk), font_size=10)
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
+                    pass
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
+            # If VTK image actors fail (rare), fall back to the textured-plane method.
+            dy = 2.2 * float(cross_section_radius_vox)
+            y_offsets = [dy, 0.0, -dy]
+            for kk, key in enumerate(avail[:3]):
+                sl = _oblique_slice(
+                    cross_section_volumes[key],
+                    center=center,
+                    u=u,
+                    v=v,
+                    radius_vox=cross_section_radius_vox,
+                    res=cross_section_res,
+                    order=1,
+                )
+                yoff = float(y_offsets[kk])
+                plane = pv.Plane(
+                    center=(0.0, yoff, 0.0),
+                    direction=(0.0, 0.0, 1.0),
+                    i_size=2.0 * float(cross_section_radius_vox),
+                    j_size=2.0 * float(cross_section_radius_vox),
+                    i_resolution=int(cross_section_res - 1),
+                    j_resolution=int(cross_section_res - 1),
+                )
+                plane.point_data["img"] = sl.T.flatten(order="C").astype(np.float32, copy=False)
+                a_img = plotter.add_mesh(plane, scalars="img", cmap="gray", opacity=1.0, show_scalar_bar=False)
+                plane2 = plane.copy(deep=True)
+                plane2.point_data["m"] = msl.T.flatten(order="C").astype(np.float32, copy=False)
+                a_m = plotter.add_mesh(plane2, scalars="m", cmap="Reds", opacity=0.25, show_scalar_bar=False)
+                right_plane_actors.extend([a_img, a_m])
 
         plotter.view_xy()
         try:
             plotter.reset_camera()
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
         try:
-            plotter.camera.zoom(1.6)
-        except Exception:
+            plotter.camera.zoom(1.0)
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
         # back to 3D
         plotter.subplot(0, 0)
         try:
             plotter.render()
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
-    def _select_nearest_centerline(picked_xyz: np.ndarray) -> None:
+    def _select_nearest_centerline(picked_xyz: Any) -> None:
         nonlocal pick_marker
-        p = np.asarray(picked_xyz, dtype=np.float32).reshape(1, 3)
+        arr = np.asarray(picked_xyz, dtype=np.float32)
+        # Some pickers/callbacks return a list of points (N,3) instead of a single (3,) point.
+        if arr.ndim == 2 and arr.shape[1] == 3 and arr.shape[0] >= 1:
+            arr = arr[0]
+        p = arr.reshape(1, 3)
         best: tuple[float, int, int] | None = None  # (d2, label, idx)
         for lbl, pts in centerlines.items():
-            if pts is None or pts.shape[0] == 0:
+            if pts is None:
                 continue
-            d2 = np.sum((pts.astype(np.float32) - p) ** 2, axis=1)
+            pts_arr = np.asarray(pts, dtype=np.float32)
+            if pts_arr.ndim != 2 or pts_arr.shape[0] == 0 or pts_arr.shape[1] != 3:
+                continue
+            d2 = np.sum((pts_arr - p) ** 2, axis=1)
             j = int(np.argmin(d2))
             v = float(d2[j])
             if best is None or v < best[0]:
@@ -1227,7 +1491,7 @@ def _flowshow_desktop(
         if best is None:
             return
         _, lbl, j = best
-        pt = centerlines[lbl][j].astype(np.float32)
+        pt = np.asarray(centerlines[lbl], dtype=np.float32)[j]
         selection["label"] = lbl
         selection["index"] = j
         selection["point"] = pt
@@ -1236,12 +1500,16 @@ def _flowshow_desktop(
         try:
             if pick_marker is not None:
                 plotter.remove_actor(pick_marker)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
         try:
             sph = pv.Sphere(radius=1.5, center=tuple(float(x) for x in pt))
             pick_marker = plotter.add_mesh(sph, color="red", opacity=0.9)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pick_marker = None
 
         _render_cross_sections()
@@ -1250,7 +1518,9 @@ def _flowshow_desktop(
         # Debug hint in the HUD (helps confirm picking is firing).
         try:
             plotter.subplot(0, 0)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
     # Enable point picking (click in 3D view). We map picks to the nearest centerline point.
@@ -1272,7 +1542,7 @@ def _flowshow_desktop(
                     point = gp() if callable(gp) else None
             if point is None:
                 return
-            _select_nearest_centerline(np.asarray(point))
+            _select_nearest_centerline(point)
 
         # IMPORTANT: keep picking in the 3D renderer only (the right panel is passive).
         try:
@@ -1293,7 +1563,90 @@ def _flowshow_desktop(
                 point_size=10,
             )
     except Exception:
+        import traceback
+        log.error(traceback.format_exc())
         # Older PyVista / VTK builds may not support this API; we’ll still work without picking.
+        pass
+
+    # Robust picking fallback (VTK): observe left-clicks and run a renderer-0 cell pick.
+    # This avoids silent failures across PyVista/VTK backends where enable_point_picking
+    # might not fire or might not return a usable point.
+    try:
+        import vtk  # type: ignore
+
+        vtk_iren = _unwrap_vtk_interactor(plotter)
+        if vtk_iren is not None:
+            picker = vtk.vtkCellPicker()
+            try:
+                picker.SetTolerance(0.0025)
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
+
+            def _is_in_left_viewport(xy: tuple[int, int]) -> bool:
+                x, y = int(xy[0]), int(xy[1])
+                try:
+                    rw = vtk_iren.GetRenderWindow()
+                    w, h = rw.GetSize()
+                except Exception:
+                    try:
+                        w, h = int(plotter.window_size[0]), int(plotter.window_size[1])
+                    except Exception:
+                        w, h = 1, 1
+                if w <= 0 or h <= 0:
+                    return True
+                xn = float(x) / float(w)
+                yn = float(y) / float(h)
+                # renderer 0 viewport is [0, 0, 0.80, 1]
+                return (0.0 <= xn <= 0.80) and (0.0 <= yn <= 1.0)
+
+            def _vtk_pick_cb(_obj: Any, _evt: Any) -> None:
+                try:
+                    x, y = vtk_iren.GetEventPosition()
+                except Exception:
+                    return
+                if not _is_in_left_viewport((x, y)):
+                    # Ignore clicks on the right (cross-section) panel.
+                    try:
+                        st = vtk_iren.GetInteractorStyle()
+                        if st is not None:
+                            st.OnLeftButtonDown()
+                    except Exception as e:
+                        log.error(traceback.format_exc())
+                        log.exception(e)
+                        pass
+                    return
+                try:
+                    ok = int(picker.Pick(float(x), float(y), 0.0, plotter.renderers[0]))  # type: ignore[arg-type]
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
+                    ok = 0
+                if ok:
+                    try:
+                        pt = picker.GetPickPosition()
+                        if pt is not None:
+                            _select_nearest_centerline(np.asarray(pt, dtype=np.float32))
+                    except Exception as e:
+                        import traceback
+                        log.error(traceback.format_exc())
+                        log.exception(e)
+                        pass
+                # Preserve normal camera interaction.
+                try:
+                    st = vtk_iren.GetInteractorStyle()
+                    if st is not None:
+                        st.OnLeftButtonDown()
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
+                    pass
+
+            vtk_iren.AddObserver(vtk.vtkCommand.LeftButtonPressEvent, _vtk_pick_cb)
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
         pass
 
     # Make the 2D panel passive: lock camera and suppress interaction hints.
@@ -1302,12 +1655,16 @@ def _flowshow_desktop(
         plotter.subplot(0, 1)
         plotter.view_xy()
         plotter.camera.parallel_projection = True
-    except Exception:
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.exception(e)
         pass
     finally:
         try:
             plotter.subplot(0, 0)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
     # ---------------------------------------------------------------------
@@ -1355,7 +1712,9 @@ def _flowshow_desktop(
         for a in stream_actors:
             try:
                 plotter.remove_actor(a)
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
         stream_actors.clear()
 
@@ -1364,6 +1723,13 @@ def _flowshow_desktop(
         if not state["stream"]:
             return
         try:
+            # Always render streamlines in the left 3D panel.
+            try:
+                plotter.subplot(0, 0)
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
             x, y, z, _, _ = vel.shape
             vec_f = vel[..., int(tt0), :]
             grid = pv.ImageData(dimensions=(x, y, z), spacing=(1, 1, 1), origin=(0, 0, 0))
@@ -1379,7 +1745,7 @@ def _flowshow_desktop(
             stream = grid.streamlines_from_source(
                 seed_cloud,
                 vectors="v",
-                max_time=vec.streamline_max_time,
+                max_length=vec.streamline_max_time,
                 integration_direction="both",
             )
             if stream.n_points <= 0:
@@ -1395,14 +1761,19 @@ def _flowshow_desktop(
             )
             # Ensure the checkbox state matches actual visibility after creation.
             state["stream"] = True
-        except Exception:
+        except Exception as e:
+            import traceback
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
     def _clear_glyphs() -> None:
         for h in glyph_handles:
             try:
                 plotter.remove_actor(h)
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
         glyph_handles.clear()
         glyph_pipes.clear()
@@ -1429,7 +1800,8 @@ def _flowshow_desktop(
                     tt0=tt0,
                 )
                 glyph_pipes.append(gp)
-                glyph_handles.append(plotter.add_actor(gp.actor))
+                plotter.add_actor(gp.actor)
+                glyph_handles.append(gp.actor)
         else:
             lbl = labels[int(state["label_idx"])]
             coords = _precompute_coords_single_label(mask, int(lbl), stride, max_glyphs, stream_seed)
@@ -1442,7 +1814,8 @@ def _flowshow_desktop(
                 tt0=tt0,
             )
             glyph_pipes.append(gp)
-            glyph_handles.append(plotter.add_actor(gp.actor))
+            plotter.add_actor(gp.actor)
+            glyph_handles.append(gp.actor)
 
     hud = plotter.add_text("", position="upper_left", font_size=12)
 
@@ -1450,7 +1823,9 @@ def _flowshow_desktop(
         for a in mask_actors:
             try:
                 a.SetVisibility(bool(on))
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
 
     # Field overlays: (a) surface coloring (legacy) and (b) interior point cloud.
@@ -1470,7 +1845,9 @@ def _flowshow_desktop(
             return
         try:
             plotter.remove_actor(a)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
         interior_actor["actor"] = None
 
@@ -1494,7 +1871,9 @@ def _flowshow_desktop(
         if "radial" in str(interior_field["mode"]):
             try:
                 from scipy.ndimage import distance_transform_edt  # type: ignore
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 distance_transform_edt = None
             if distance_transform_edt is not None:
                 # radial normalized per-label
@@ -1539,7 +1918,9 @@ def _flowshow_desktop(
         for a in mask_actors:
             try:
                 plotter.remove_actor(a)
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
         mask_actors.clear()
 
@@ -1582,7 +1963,9 @@ def _flowshow_desktop(
             if mask_field["radial"]:
                 try:
                     from scipy.ndimage import distance_transform_edt  # type: ignore
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     distance_transform_edt = None
                 if distance_transform_edt is not None:
                     roi = (mask == int(lbl))
@@ -1633,11 +2016,12 @@ def _flowshow_desktop(
         else:
             if stream_actors:
                 _clear_streamlines()
+        hud_txt = f"T={tt_now} | " + ("all labels" if show_all_labels else f"label={labels[int(state['label_idx'])]}")
         try:
-            hud.SetInput(
-                f"T={tt_now} | "
-                + ("all labels" if show_all_labels else f"label={labels[int(state['label_idx'])]}")
-            )  # type: ignore[attr-defined]
+            if hasattr(hud, "SetText"):
+                hud.SetText(0, hud_txt)  # type: ignore[attr-defined]
+            elif hasattr(hud, "SetInput"):
+                hud.SetInput(hud_txt)  # type: ignore[attr-defined]
         except Exception:
             pass
         if not state["camera_ready"]:
@@ -1663,7 +2047,9 @@ def _flowshow_desktop(
             for a in mask_actors:
                 try:
                     plotter.remove_actor(a)
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     pass
             mask_actors.clear()
             mask_surfaces.clear()
@@ -1680,10 +2066,14 @@ def _flowshow_desktop(
     # Replace sliders with numeric input boxes (VTK text box widgets).
     try:
         import vtk  # type: ignore
+        # Some VTK builds do not ship interaction widgets (vtkTextBoxWidget).
+        # If missing, disable numeric text boxes gracefully.
+        if not hasattr(vtk, "vtkTextBoxWidget"):
+            vtk = None
     except Exception:
         vtk = None
 
-    cs_keys = ["ComplexDifference_3D", "Angiography_3D", "VelocityMagnitude_3D"]
+    # Cross-sections are displayed as a 3-slice panel (no mode selector needed).
 
     # Use a fixed left-middle control strip; avoids resize jitter across VTK backends.
     y0 = 520
@@ -1697,6 +2087,7 @@ def _flowshow_desktop(
         h: int,
         initial: str,
         on_commit: Callable[[str], None],
+        vtk_iren: Any,
     ) -> Any | None:
         if vtk is None:
             return None
@@ -1708,13 +2099,12 @@ def _flowshow_desktop(
             rep.GetPosition2Coordinate().SetCoordinateSystemToDisplay()
             rep.GetPosition2Coordinate().SetValue(float(w), float(h))
             box.SetRepresentation(rep)
-            vtk_iren = _unwrap_vtk_interactor(plotter)
-            if vtk_iren is None:
-                raise RuntimeError("No VTK interactor available for text box widgets.")
             box.SetInteractor(vtk_iren)
             try:
                 box.SetCurrentRenderer(plotter.renderers[0])
-            except Exception:
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
                 pass
             box.SelectableOn()
             box.SetText(initial)
@@ -1725,22 +2115,78 @@ def _flowshow_desktop(
             def _cb(_obj: Any, _evt: Any) -> None:
                 try:
                     txt = str(box.GetText())
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     txt = initial
                 on_commit(txt)
 
             box.AddObserver(vtk.vtkCommand.EndInteractionEvent, _cb)
             box.On()
             return box
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             return None
 
     # Keep refs so widgets are not garbage-collected.
     ui_boxes: list[Any] = []
+    ui_box_built = [False]
 
-    # Place boxes in the control strip.
+    # Numeric text box widgets require a live VTK interactor; on many backends it
+    # only exists after the first render/show. We queue the boxes and build them
+    # once `_unwrap_vtk_interactor` succeeds.
+    pending_boxes: list[dict[str, Any]] = []
+
+    def _queue_num_box(
+        *,
+        label: str,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        initial: str,
+        on_commit: Callable[[str], None],
+    ) -> None:
+        pending_boxes.append(
+            {
+                "label": label,
+                "x": int(x),
+                "y": int(y),
+                "w": int(w),
+                "h": int(h),
+                "initial": str(initial),
+                "on_commit": on_commit,
+            }
+        )
+
+    def _build_queued_num_boxes() -> None:
+        if ui_box_built[0]:
+            return
+        if vtk is None:
+            ui_box_built[0] = True
+            return
+        vtk_iren = _unwrap_vtk_interactor(plotter)
+        if vtk_iren is None:
+            return
+        for spec in pending_boxes:
+            b = _add_num_box(
+                label=spec["label"],
+                x=spec["x"],
+                y=spec["y"],
+                w=spec["w"],
+                h=spec["h"],
+                initial=spec["initial"],
+                on_commit=spec["on_commit"],
+                vtk_iren=vtk_iren,
+            )
+            if b is not None:
+                ui_boxes.append(b)
+        ui_box_built[0] = True
+
+    # Place boxes in the control strip (queued; built after first render).
     y_box_top = int(y0)
-    ui_boxes.append(_add_num_box(
+    _queue_num_box(
         label="Time (0..T-1)",
         x=18,
         y=y_box_top,
@@ -1748,9 +2194,9 @@ def _flowshow_desktop(
         h=20,
         initial=str(int(state["tt"])),
         on_commit=lambda s: _on_time(float(int(np.clip(int(float(s)), 0, t - 1)))) if s.strip() else None,
-    ))
+    )
     if (not show_all_labels) and len(labels) > 1:
-        ui_boxes.append(_add_num_box(
+        _queue_num_box(
             label="Label idx",
             x=18,
             y=y_box_top - 34,
@@ -1758,17 +2204,9 @@ def _flowshow_desktop(
             h=20,
             initial=str(int(state["label_idx"])),
             on_commit=lambda s: _on_label(float(int(np.clip(int(float(s)), 0, len(labels) - 1)))) if s.strip() else None,
-        ))
-    if cross_section_volumes:
-        ui_boxes.append(_add_num_box(
-            label="Cross-section (0=CD,1=Angio,2=VelMag)",
-            x=18,
-            y=y_box_top - 68,
-            w=140,
-            h=20,
-            initial=str(int(cs_keys.index(cs_state["mode"]) if cs_state["mode"] in cs_keys else 2)),
-            on_commit=lambda s: (cs_state.__setitem__("mode", cs_keys[int(np.clip(int(float(s)), 0, 2))]), _render_cross_sections(), plotter.render()) if s.strip() else None,
-        ))
+        )
+    # Note: previously there was a numeric selector for which volume to show;
+    # the panel now displays all available volumes simultaneously.
 
     def _cb_mask(val: bool):
         state["mask"] = val
@@ -1785,6 +2223,11 @@ def _flowshow_desktop(
         _build_streamlines(int(state["tt"]))
         _update_frame()
 
+    def _cb_centerlines(val: bool):
+        state["centerlines"] = bool(val)
+        _set_centerlines_visible(bool(val))
+        _update_frame()
+
     # Place buttons in the same left-middle control strip (no resize forcing).
     def _win_h() -> int:
         try:
@@ -1794,11 +2237,15 @@ def _flowshow_desktop(
                 if callable(gs):
                     _w, _h = gs()
                     return int(_h)
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
         try:
             return int(plotter.window_size[1])
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             return 800
 
     def _set_btn_pos(btn: Any, x: int, y: int) -> None:
@@ -1810,25 +2257,33 @@ def _flowshow_desktop(
                 c = pc()
                 try:
                     c.SetCoordinateSystemToDisplay()
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     pass
                 try:
                     c.SetValue(float(x), float(y))
                     return
-                except Exception:
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    log.exception(e)
                     pass
             rep.SetPosition(float(x), float(y))
-        except Exception:
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
             pass
 
     w_mask = plotter.add_checkbox_button_widget(_cb_mask, value=True, position=(18, y0 + 120), size=18, border_size=1)
     w_glyphs = plotter.add_checkbox_button_widget(_cb_glyphs, value=True, position=(18, y0 + 94), size=18, border_size=1)
-    w_stream = plotter.add_checkbox_button_widget(_cb_stream, value=False, position=(18, y0 + 68), size=18, border_size=1)
+    w_centerlines = plotter.add_checkbox_button_widget(_cb_centerlines, value=True, position=(18, y0 + 68), size=18, border_size=1)
+    w_stream = plotter.add_checkbox_button_widget(_cb_stream, value=False, position=(18, y0 + 42), size=18, border_size=1)
     t_mask = plotter.add_text("Show mask", position=(42, y0 + 118), font_size=9)
     t_glyphs = plotter.add_text("Show vectors", position=(42, y0 + 92), font_size=9)
-    t_stream = plotter.add_text("Show streamlines", position=(42, y0 + 66), font_size=9)
+    t_centerlines = plotter.add_text("Show centerlines", position=(42, y0 + 66), font_size=9)
+    t_stream = plotter.add_text("Show streamlines", position=(42, y0 + 40), font_size=9)
     plotter.add_text(
-        "Mask / Glyphs / Stream | Space: play/pause",
+        "Mask / Vectors / Centerlines / Stream | Space: play/pause",
         position="lower_left",
         font_size=9,
     )
@@ -1853,7 +2308,7 @@ def _flowshow_desktop(
         plotter.render()
 
     # Numeric inputs for vector tuning (no sliders).
-    ui_boxes.append(_add_num_box(
+    _queue_num_box(
         label="Glyph opacity (0.05..1)",
         x=18,
         y=y_box_top - 110,
@@ -1861,8 +2316,8 @@ def _flowshow_desktop(
         h=20,
         initial=str(float(vec.glyph_opacity)),
         on_commit=lambda s: _on_opacity(float(np.clip(float(s), 0.05, 1.0))) if s.strip() else None,
-    ))
-    ui_boxes.append(_add_num_box(
+    )
+    _queue_num_box(
         label="Scale factor (0.05..2)",
         x=18,
         y=y_box_top - 144,
@@ -1870,9 +2325,16 @@ def _flowshow_desktop(
         h=20,
         initial=str(float(vec.scale_factor)),
         on_commit=lambda s: _on_scale_factor(float(np.clip(float(s), 0.05, 2.0))) if s.strip() else None,
-    ))
-    w_scale_mag = plotter.add_checkbox_button_widget(_on_scale_mag, value=bool(vec.scale_by_magnitude), position=(18, y0 + 42), size=18, border_size=1)
-    t_scale_mag = plotter.add_text("Scale arrows by |v|", position=(42, y0 + 40), font_size=9)
+    )
+    # Keep vector-scale toggle away from the main visibility strip.
+    w_scale_mag = plotter.add_checkbox_button_widget(
+        _on_scale_mag,
+        value=bool(vec.scale_by_magnitude),
+        position=(18, y0 - 62),
+        size=18,
+        border_size=1,
+    )
+    t_scale_mag = plotter.add_text("Scale arrows by |v|", position=(42, y0 - 64), font_size=9)
 
     # Mask field modes.
     def _on_mask_speed(val: bool) -> None:
@@ -1957,6 +2419,11 @@ def _flowshow_desktop(
         return ok
 
     def _on_first_render(*_args: Any) -> None:
+        # Build numeric input widgets once the interactor exists.
+        try:
+            _build_queued_num_boxes()
+        except Exception:
+            pass
         if timer_installed[0]:
             return
         if _try_install_animation_timer():

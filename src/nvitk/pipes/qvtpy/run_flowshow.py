@@ -200,14 +200,14 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 )
 @click.option(
     "--vector-scale-magnitude/--no-vector-scale-magnitude",
-    default=False,
+    default=True,
     show_default=True,
     help="Scale arrow length using |v| (normalized with --speed-clim or auto percentiles).",
 )
 @click.option(
     "--vector-scale-factor",
     type=float,
-    default=0.35,
+    default=3.0,
     show_default=True,
     help="Glyph length multiplier when --vector-scale-magnitude is set.",
 )
@@ -226,7 +226,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 @click.option(
     "--glyph-opacity",
     type=float,
-    default=0.88,
+    default=0.9,
     show_default=True,
 )
 @click.option(
@@ -254,7 +254,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
     show_default=True,
     help="Enable oblique cross-section panel (ComplexDifference/Angio/VelMag) on pick.",
 )
-@click.option("--cross-section-radius-vox", type=float, default=12.0, show_default=True)
+@click.option("--cross-section-radius-vox", type=float, default=5.0, show_default=True)
 @click.option("--cross-section-res", type=int, default=112, show_default=True)
 @click.option("--centerline-window", type=click.Choice(["3", "5"]), default="5", show_default=True)
 @click.option(
