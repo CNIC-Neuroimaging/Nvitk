@@ -248,6 +248,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 )
 @click.option("--streamline-radius", type=float, default=None, help="Override streamline tube radius.")
 @click.option("--streamline-seeds", type=int, default=None, help="Override number of streamline seeds.")
+@click.option("--dt-seconds", type=float, default=None, help="Temporal resolution between frames (seconds) for pathlines.")
 @click.option(
     "--cross-section/--no-cross-section",
     default=True,
@@ -306,6 +307,7 @@ def main(
     no_loop_animation: bool,
     streamline_radius: float | None,
     streamline_seeds: int | None,
+    dt_seconds: float | None,
     cross_section: bool,
     cross_section_radius_vox: float,
     cross_section_res: int,
@@ -393,6 +395,7 @@ def main(
             depth_peeling=depth_peeling,
             vector=vec,
             animation=anim,
+            dt_seconds=dt_seconds,
             cross_section_volumes=cs_vols,
             centerline_window=int(centerline_window),
             cross_section_radius_vox=float(cross_section_radius_vox),

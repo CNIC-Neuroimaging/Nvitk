@@ -304,10 +304,62 @@ class _VtkGlyphPipeline:
         self.actor = actor
 
         self.set_scale_by_magnitude(vec.scale_by_magnitude, vec.scale_factor)
+        self.set_color_by_speed(vec.scale_by_magnitude)
         self.update_time(tt0)
 
     def set_opacity(self, opacity: float) -> None:
         self.actor.GetProperty().SetOpacity(float(opacity))
+
+    def set_color_by_speed(self, enabled: bool) -> None:
+        """When enabled, color glyphs by |v| using the 'mag' array."""
+        import vtk  # type: ignore
+
+        if enabled:
+            lo, hi = self.speed_clim_eff
+            # Prefer PyVista LUT generation (supports named cmaps like 'turbo').
+            lut = None
+            try:
+                import pyvista as pv  # type: ignore
+
+                lt = pv.LookupTable(cmap=str(getattr(self.vec, "speed_cmap", "turbo")), n_values=256)
+                # Some PyVista versions expose to_vtk(); otherwise it is already a vtkLookupTable.
+                lut = lt.to_vtk() if hasattr(lt, "to_vtk") else lt
+            except Exception:
+                lut = None
+
+            self._mapper.ScalarVisibilityOn()
+            try:
+                self._mapper.SetScalarModeToUsePointFieldData()
+            except Exception:
+                pass
+            try:
+                self._mapper.SelectColorArray("mag")
+            except Exception:
+                # VTK fallback
+                try:
+                    self._mapper.SetArrayName("mag")
+                except Exception:
+                    pass
+            if lut is not None:
+                try:
+                    self._mapper.SetLookupTable(lut)
+                except Exception:
+                    pass
+            try:
+                self._mapper.SetScalarRange(float(lo), float(hi))
+            except Exception:
+                pass
+            # Actor property color should not override scalar coloring.
+            try:
+                self.actor.GetProperty().SetColor(1.0, 1.0, 1.0)
+            except Exception:
+                pass
+        else:
+            self._mapper.ScalarVisibilityOff()
+            try:
+                self.actor.GetProperty().SetColor(_vtk_rgb(self.color))
+            except Exception:
+                pass
 
     def set_scale_by_magnitude(self, enabled: bool, scale_factor: float) -> None:
         import vtk  # type: ignore
@@ -971,6 +1023,7 @@ def _flowshow_desktop(
     vec: FlowshowVectorOptions,
     anim: FlowshowAnimationOptions,
     stream_seed: int | None,
+    dt_seconds: float | None,
     cross_section_volumes: dict[str, np.ndarray] | None,
     centerline_window: int,
     cross_section_radius_vox: float,
@@ -1015,6 +1068,7 @@ def _flowshow_desktop(
         "glyphs": True,
         "centerlines": True,
         "stream": False,
+        "pathlines": False,
         "camera_ready": False,
         "playing": bool(anim.auto_play),
     }
@@ -1707,6 +1761,11 @@ def _flowshow_desktop(
     glyph_pipes: list[_VtkGlyphPipeline] = []
     glyph_handles: list[Any] = []
     stream_actors: list[Any] = []
+    stream_cache: dict[tuple[int, int, float, float, int | None], Any] = {}
+    stream_cache_order: list[tuple[int, int, float, float, int | None]] = []
+    stream_last_key: dict[str, Any] = {"key": None}
+    stream_seeds_cache: dict[tuple[int, int | None], Any] = {}
+    stream_cache_max = 8
 
     def _clear_streamlines() -> None:
         for a in stream_actors:
@@ -1717,6 +1776,32 @@ def _flowshow_desktop(
                 log.exception(e)
                 pass
         stream_actors.clear()
+
+    def _get_stream_seed_cloud(*, nseed: int, seed: int | None) -> Any | None:
+        """Stable seed cloud so animated streamlines don't jump between frames."""
+        if nseed <= 0:
+            return None
+        key = (int(nseed), int(seed) if seed is not None else None)
+        if key in stream_seeds_cache:
+            return stream_seeds_cache[key]
+        roi_u = (mask > 0)
+        coords = np.argwhere(roi_u)
+        nseed_eff = min(int(nseed), int(coords.shape[0])) if coords.shape[0] > 0 else 0
+        if nseed_eff <= 0:
+            return None
+        rng = np.random.default_rng(seed)
+        pick = rng.choice(coords.shape[0], size=nseed_eff, replace=False)
+        seed_cloud = pv.PolyData(coords[pick].astype(np.float32))
+        stream_seeds_cache[key] = seed_cloud
+        return seed_cloud
+
+    def _cache_put_stream(key: tuple[int, int, float, float, int | None], tube: Any) -> None:
+        stream_cache[key] = tube
+        stream_cache_order.append(key)
+        # simple FIFO cap
+        if len(stream_cache_order) > int(stream_cache_max):
+            old = stream_cache_order.pop(0)
+            stream_cache.pop(old, None)
 
     def _build_streamlines(tt0: int) -> None:
         _clear_streamlines()
@@ -1734,23 +1819,30 @@ def _flowshow_desktop(
             vec_f = vel[..., int(tt0), :]
             grid = pv.ImageData(dimensions=(x, y, z), spacing=(1, 1, 1), origin=(0, 0, 0))
             grid.point_data["v"] = vec_f.reshape(-1, 3, order="F")
-            roi_u = (mask > 0)
-            coords = np.argwhere(roi_u)
-            nseed = min(vec.streamline_n_seeds, coords.shape[0]) if coords.shape[0] > 0 else 0
-            if nseed <= 0:
-                return
-            rng = np.random.default_rng(stream_seed)
-            pick = rng.choice(coords.shape[0], size=nseed, replace=False)
-            seed_cloud = pv.PolyData(coords[pick].astype(np.float32))
-            stream = grid.streamlines_from_source(
-                seed_cloud,
-                vectors="v",
-                max_length=vec.streamline_max_time,
-                integration_direction="both",
+            key = (
+                int(tt0),
+                int(vec.streamline_n_seeds),
+                float(vec.streamline_max_time),
+                float(vec.streamline_radius),
+                int(stream_seed) if stream_seed is not None else None,
             )
-            if stream.n_points <= 0:
-                return
-            tube = stream.tube(radius=vec.streamline_radius)
+            if key in stream_cache:
+                tube = stream_cache[key]
+            else:
+                seed_cloud = _get_stream_seed_cloud(nseed=int(vec.streamline_n_seeds), seed=stream_seed)
+                if seed_cloud is None:
+                    return
+                stream = grid.streamlines_from_source(
+                    seed_cloud,
+                    vectors="v",
+                    max_length=vec.streamline_max_time,
+                    integration_direction="both",
+                )
+                if stream.n_points <= 0:
+                    return
+                tube = stream.tube(radius=vec.streamline_radius)
+                _cache_put_stream(key, tube)
+            stream_last_key["key"] = key
             stream_actors.append(
                 plotter.add_mesh(
                     tube,
@@ -2011,11 +2103,55 @@ def _flowshow_desktop(
                 gp.set_scale_by_magnitude(vec.scale_by_magnitude, vec.scale_factor)
                 gp.update_time(tt_now)
         if state["stream"]:
-            if not stream_actors:
+            # Rebuild if missing OR if time/config changed.
+            want_key = (
+                int(tt_now),
+                int(vec.streamline_n_seeds),
+                float(vec.streamline_max_time),
+                float(vec.streamline_radius),
+                int(stream_seed) if stream_seed is not None else None,
+            )
+            if (not stream_actors) or (stream_last_key.get("key") != want_key):
                 _build_streamlines(tt_now)
         else:
             if stream_actors:
                 _clear_streamlines()
+
+        # Pathlines: lazily compute once per config and render when toggled on.
+        if state.get("pathlines", False):
+            dt_eff = float(dt_seconds) if dt_seconds is not None else 1.0
+            want_pkey = (
+                int(tt_now),
+                int(vec.streamline_n_seeds),
+                float(dt_eff),
+                float(vec.streamline_max_time),
+                int(stream_seed) if stream_seed is not None else None,
+            )
+            if (not path_actors) or (path_last_key.get("key") != want_pkey):
+                _clear_pathlines()
+                if want_pkey in path_cache:
+                    tube = path_cache[want_pkey]
+                else:
+                    tube = _build_pathlines(int(tt_now), dt=float(dt_eff))
+                    if tube is not None:
+                        path_cache[want_pkey] = tube
+                if tube is not None:
+                    try:
+                        plotter.subplot(0, 0)
+                    except Exception:
+                        pass
+                    path_actors.append(
+                        plotter.add_mesh(
+                            tube,
+                            color="#D81B60",
+                            opacity=0.65,
+                            pickable=False,
+                        )
+                    )
+                path_last_key["key"] = want_pkey
+        else:
+            if path_actors:
+                _clear_pathlines()
         hud_txt = f"T={tt_now} | " + ("all labels" if show_all_labels else f"label={labels[int(state['label_idx'])]}")
         try:
             if hasattr(hud, "SetText"):
@@ -2223,6 +2359,109 @@ def _flowshow_desktop(
         _build_streamlines(int(state["tt"]))
         _update_frame()
 
+    # Pathlines (true particle trajectories through time-varying field).
+    path_actors: list[Any] = []
+    path_cache: dict[tuple[int, int, float, float, int | None], Any] = {}
+    path_last_key: dict[str, Any] = {"key": None}
+
+    def _clear_pathlines() -> None:
+        for a in path_actors:
+            try:
+                plotter.remove_actor(a)
+            except Exception:
+                pass
+        path_actors.clear()
+
+    def _sample_vel_trilinear(frame: np.ndarray, pos: np.ndarray) -> np.ndarray:
+        """Trilinear sample of a (X,Y,Z,3) frame at fractional voxel position."""
+        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+        nx, ny, nz, _ = frame.shape
+        # clamp inside valid range for interpolation
+        x = float(np.clip(x, 0.0, nx - 1.001))
+        y = float(np.clip(y, 0.0, ny - 1.001))
+        z = float(np.clip(z, 0.0, nz - 1.001))
+        x0, y0, z0 = int(np.floor(x)), int(np.floor(y)), int(np.floor(z))
+        x1, y1, z1 = min(x0 + 1, nx - 1), min(y0 + 1, ny - 1), min(z0 + 1, nz - 1)
+        fx, fy, fz = x - x0, y - y0, z - z0
+
+        c000 = frame[x0, y0, z0, :]
+        c100 = frame[x1, y0, z0, :]
+        c010 = frame[x0, y1, z0, :]
+        c110 = frame[x1, y1, z0, :]
+        c001 = frame[x0, y0, z1, :]
+        c101 = frame[x1, y0, z1, :]
+        c011 = frame[x0, y1, z1, :]
+        c111 = frame[x1, y1, z1, :]
+
+        c00 = c000 * (1 - fx) + c100 * fx
+        c10 = c010 * (1 - fx) + c110 * fx
+        c01 = c001 * (1 - fx) + c101 * fx
+        c11 = c011 * (1 - fx) + c111 * fx
+        c0 = c00 * (1 - fy) + c10 * fy
+        c1 = c01 * (1 - fy) + c11 * fy
+        c = c0 * (1 - fz) + c1 * fz
+        return np.asarray(c, dtype=np.float32)
+
+    def _build_pathlines(tt_start: int, *, dt: float) -> Any | None:
+        """Integrate pathlines forward through time-varying vel field."""
+        seed_cloud = _get_stream_seed_cloud(nseed=int(vec.streamline_n_seeds), seed=stream_seed)
+        if seed_cloud is None:
+            return None
+        seeds = np.asarray(seed_cloud.points, dtype=np.float32)
+        if seeds.ndim != 2 or seeds.shape[0] == 0:
+            return None
+        _, _, _, nt, _ = vel.shape
+        if nt <= 1:
+            return None
+        dt_eff = float(dt) if float(dt) > 0 else 1.0
+        # Use streamline_max_time as a time horizon in seconds for pathlines.
+        n_steps = int(max(1, min(nt - 1, np.ceil(float(vec.streamline_max_time) / dt_eff))))
+
+        pts_all: list[np.ndarray] = []
+        lines: list[int] = []
+        idx0 = 0
+
+        for s in seeds:
+            p = s.astype(np.float32, copy=True)
+            seg: list[np.ndarray] = [p.copy()]
+            tt = int(np.clip(tt_start, 0, nt - 1))
+            for k in range(n_steps):
+                if tt >= nt:
+                    break
+                # Sample velocity at current time frame, at current position.
+                v0 = _sample_vel_trilinear(vel[..., tt, :], p)
+                # Heun / RK2: predictor then corrector
+                p1 = p + v0 * dt_eff
+                tt1 = min(tt + 1, nt - 1)
+                v1 = _sample_vel_trilinear(vel[..., tt1, :], p1)
+                v = 0.5 * (v0 + v1)
+                p = p + v * dt_eff
+                seg.append(p.copy())
+                tt = tt1
+            seg_arr = np.vstack(seg).astype(np.float32, copy=False)
+            pts_all.append(seg_arr)
+            n = int(seg_arr.shape[0])
+            lines.extend([n] + list(range(idx0, idx0 + n)))
+            idx0 += n
+
+        if not pts_all:
+            return None
+        points = np.vstack(pts_all).astype(np.float32, copy=False)
+        if points.shape[0] < 2:
+            return None
+        try:
+            poly = pv.PolyData(points)
+            poly.lines = np.asarray(lines, dtype=np.int64)
+            tube = poly.tube(radius=vec.streamline_radius)
+            return tube
+        except Exception:
+            return None
+
+    def _cb_pathlines(val: bool):
+        state["pathlines"] = bool(val)
+        # Lazy build handled in _update_frame.
+        _update_frame()
+
     def _cb_centerlines(val: bool):
         state["centerlines"] = bool(val)
         _set_centerlines_visible(bool(val))
@@ -2278,12 +2517,14 @@ def _flowshow_desktop(
     w_glyphs = plotter.add_checkbox_button_widget(_cb_glyphs, value=True, position=(18, y0 + 94), size=18, border_size=1)
     w_centerlines = plotter.add_checkbox_button_widget(_cb_centerlines, value=True, position=(18, y0 + 68), size=18, border_size=1)
     w_stream = plotter.add_checkbox_button_widget(_cb_stream, value=False, position=(18, y0 + 42), size=18, border_size=1)
+    w_pathlines = plotter.add_checkbox_button_widget(_cb_pathlines, value=False, position=(18, y0 + 16), size=18, border_size=1)
     t_mask = plotter.add_text("Show mask", position=(42, y0 + 118), font_size=9)
     t_glyphs = plotter.add_text("Show vectors", position=(42, y0 + 92), font_size=9)
     t_centerlines = plotter.add_text("Show centerlines", position=(42, y0 + 66), font_size=9)
     t_stream = plotter.add_text("Show streamlines", position=(42, y0 + 40), font_size=9)
+    t_pathlines = plotter.add_text("Show pathlines", position=(42, y0 + 14), font_size=9)
     plotter.add_text(
-        "Mask / Vectors / Centerlines / Stream | Space: play/pause",
+        "Mask / Vectors / Centerlines / Stream / Pathlines | Space: play/pause",
         position="lower_left",
         font_size=9,
     )
@@ -2305,6 +2546,7 @@ def _flowshow_desktop(
         vec.scale_by_magnitude = bool(v)
         for gp in glyph_pipes:
             gp.set_scale_by_magnitude(vec.scale_by_magnitude, vec.scale_factor)
+            gp.set_color_by_speed(vec.scale_by_magnitude)
         plotter.render()
 
     # Numeric inputs for vector tuning (no sliders).
@@ -2372,10 +2614,23 @@ def _flowshow_desktop(
             _set_mask_visible(bool(state["mask"]))
         plotter.render()
 
-    w_field_speed = plotter.add_checkbox_button_widget(_on_mask_speed, value=False, position=(18, y0 + 16), size=18, border_size=1)
-    t_field_speed = plotter.add_text("Field: speed |v|", position=(42, y0 + 14), font_size=9)
-    w_field_radial = plotter.add_checkbox_button_widget(_on_mask_radial, value=False, position=(18, y0 - 10), size=18, border_size=1)
-    t_field_radial = plotter.add_text("Field: radial", position=(42, y0 - 12), font_size=9)
+    # Field toggles (move down to avoid overlap with pathlines toggle).
+    w_field_speed = plotter.add_checkbox_button_widget(
+        _on_mask_speed,
+        value=False,
+        position=(18, y0 - 88),
+        size=18,
+        border_size=1,
+    )
+    t_field_speed = plotter.add_text("Field: speed |v|", position=(42, y0 - 90), font_size=9)
+    w_field_radial = plotter.add_checkbox_button_widget(
+        _on_mask_radial,
+        value=False,
+        position=(18, y0 - 114),
+        size=18,
+        border_size=1,
+    )
+    t_field_radial = plotter.add_text("Field: radial", position=(42, y0 - 116), font_size=9)
 
     # Interior field (dense point cloud).
     def _on_interior(val: bool) -> None:
@@ -2383,8 +2638,14 @@ def _flowshow_desktop(
         _render_interior_field()
         plotter.render()
 
-    w_interior = plotter.add_checkbox_button_widget(_on_interior, value=bool(interior_field["enabled"]), position=(18, y0 - 36), size=18, border_size=1)
-    t_interior = plotter.add_text("Show interior points", position=(42, y0 - 38), font_size=9)
+    w_interior = plotter.add_checkbox_button_widget(
+        _on_interior,
+        value=bool(interior_field["enabled"]),
+        position=(18, y0 - 140),
+        size=18,
+        border_size=1,
+    )
+    t_interior = plotter.add_text("Show interior points", position=(42, y0 - 142), font_size=9)
 
     def _toggle_play():
         state["playing"] = not state["playing"]
@@ -2472,6 +2733,7 @@ def flowshow(
     vector: FlowshowVectorOptions | None = None,
     animation: FlowshowAnimationOptions | None = None,
     stream_seed: int | None = 42,
+    dt_seconds: float | None = None,
     cross_section_volumes: dict[str, Image | np.ndarray] | None = None,
     centerline_window: int = 5,
     cross_section_radius_vox: float = 12.0,
@@ -2488,6 +2750,9 @@ def flowshow(
         Time animation and glyph index precomputation (:class:`FlowshowAnimationOptions`).
     stream_seed
         RNG seed for subsampling and streamlines.
+    dt_seconds
+        Temporal spacing (seconds) between frames for pathlines. If None and `ap_phase`
+        is an `Image`, we try `ap_phase.temporal_resolution`.
     """
     vec_eff = vector or FlowshowVectorOptions()
     anim_eff = animation or FlowshowAnimationOptions()
@@ -2500,6 +2765,13 @@ def flowshow(
 
     vel = _velocity_from_phases(ap, rl, fh)
     x, y, z, _, _ = vel.shape
+
+    dt_eff = dt_seconds
+    if dt_eff is None and isinstance(ap_phase, Image):
+        try:
+            dt_eff = ap_phase.temporal_resolution
+        except Exception:
+            dt_eff = None
 
     if mask.ndim != 3 or mask.shape != (x, y, z):
         raise ValidationError(f"vessel_mask must be 3D and match spatial dims {(x,y,z)}; got {mask.shape}.")
@@ -2551,6 +2823,7 @@ def flowshow(
         vec=vec_eff,
         anim=anim_eff,
         stream_seed=stream_seed,
+        dt_seconds=dt_eff,
         cross_section_volumes=cs_np,
         centerline_window=centerline_window,
         cross_section_radius_vox=cross_section_radius_vox,
