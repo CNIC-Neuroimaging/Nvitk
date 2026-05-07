@@ -14,7 +14,8 @@ Two execution modes:
   capture its jid. Each pipeline's per-subject chain is then submitted
   with ``-hold_jid`` pointing at that jid, so stages 1-2-3 wait for the
   subject's own stage 0 to finish. The CT-PET and Dixon chains of a given
-  subject run in parallel after stage 0.
+  subject run in parallel after stage 0. Optional ``stage4`` appends a CPU
+  QC job that holds on all stage-3 jids when stage 3 is part of the script.
 
 Examples
 --------
@@ -93,6 +94,7 @@ _STAGE0_BIND_DICOM = "/PESAFat/DICOM/"
 _STAGE0_BIND_NIFTI = "/PESAFat/NIFTI/"
 _STAGE0_MODULE = "nvitk.pipes.pesa_fat.common.stage0_convert"
 _AGGREGATE_MODULE = "nvitk.pipes.pesa_fat.common.batch_stage3_aggregate"
+_STAGE4_QC_MODULE = "nvitk.pipes.pesa_fat.common.stage4_qc"
 
 
 def _module_to_script(binds_src: str, module: str) -> str:
@@ -147,6 +149,34 @@ def _pipeline_cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) ->
         output_root=lay.results_root,
         log_dir=ctpet_cfg.SGE_LOG_DIR,
         err_dir=ctpet_cfg.SGE_ERR_DIR,
+    )
+
+
+def _stage4_qc_python_cmd(
+    lay: BatchLayout,
+    subjects_csv: str,
+    pipelines_csv: str,
+    log_level: str,
+) -> str:
+    binds = SingularityBinds()
+    script = _module_to_script(binds.src, _STAGE4_QC_MODULE)
+    return " ".join(
+        [
+            "python",
+            shlex.quote(script),
+            "--batch",
+            shlex.quote(lay.batch),
+            "--subjects",
+            shlex.quote(subjects_csv),
+            "--pipelines",
+            shlex.quote(pipelines_csv),
+            "--nifti-root",
+            shlex.quote(binds.data),
+            "--results-root",
+            shlex.quote(binds.output),
+            "--log-level",
+            shlex.quote(log_level),
+        ]
     )
 
 
@@ -221,6 +251,53 @@ def _emit_batch_aggregate_stage(
         },
     )
     submit_stage(spec, paths, hold_jid=hold_jid, dry_run=False, emit=emit)
+
+
+def _emit_stage4_qc_stage(
+    emit: TextIO,
+    lay: BatchLayout,
+    subjects: list[str],
+    pipelines_qc: list[str],
+    *,
+    container: Path,
+    src_dir: Path,
+    hold_jid: list[str] | None,
+    log_level: str,
+) -> None:
+    """Append a CPU qsub that builds the HTML QC report after stage 3 (or immediately)."""
+    if not pipelines_qc:
+        return
+    paths = _pipeline_cluster_paths(lay, container, src_dir)
+    binds = SingularityBinds()
+    spec = StageSpec(
+        job_name=f"PESAFat_stage4_qc_{lay.batch}",
+        python_cmd=_stage4_qc_python_cmd(
+            lay,
+            ",".join(subjects),
+            ",".join(pipelines_qc),
+            log_level,
+        ),
+        resources=SgeResources(
+            project=ctpet_cfg.SGE_PROJECT,
+            account=ctpet_cfg.SGE_ACCOUNT,
+            ngpu=ctpet_cfg.SGE_CPU_NGPU,
+            h_vmem=ctpet_cfg.SGE_CPU_H_VMEM,
+            queue=ctpet_cfg.SGE_QUEUE,
+        ),
+        binds=binds,
+        use_nv=False,
+        extra_env={
+            "PYTHONPATH": str(binds.src),
+            "TOTALSEG_HOME_DIR": str(binds.models),
+        },
+    )
+    submit_stage(
+        spec,
+        paths,
+        hold_jid=hold_jid if hold_jid else None,
+        dry_run=False,
+        emit=emit,
+    )
 
 
 def _submit_stage0(
@@ -400,50 +477,49 @@ def _run_sge(
 
     stage3_hold_refs: list[str] = []
 
-    if not pipe_stages:
+    if pipe_stages:
+        for subj in subjects:
+            base_hold = stage0_jids.get(subj)
+            if "ct-pet-v5" in pipelines:
+                jids_ct = ctpet_run.submit_subject_chain(
+                    subj,
+                    lay,
+                    pipe_stages,
+                    container=container,
+                    src_dir=src_dir,
+                    backend=backend,
+                    device=device,
+                    model_dir=model_dir,
+                    overwrite=overwrite,
+                    base_hold=base_hold,
+                    dry_run=dry_run,
+                    log_level=log_level,
+                    emit=emit,
+                    exclude_ureter=exclude_ureter,
+                )
+                if "stage3" in pipe_stages and jids_ct:
+                    stage3_hold_refs.append(jids_ct[-1])
+            if "dixon-v5" in pipelines:
+                jids_dx = dixon_run.submit_subject_chain(
+                    subj,
+                    lay,
+                    pipe_stages,
+                    container=container,
+                    src_dir=src_dir,
+                    backend=backend,
+                    device=device,
+                    model_dir=model_dir,
+                    overwrite=overwrite,
+                    regions=regions,
+                    base_hold=base_hold,
+                    dry_run=dry_run,
+                    log_level=log_level,
+                    emit=emit,
+                )
+                if "stage3" in pipe_stages and jids_dx:
+                    stage3_hold_refs.append(jids_dx[-1])
+    elif "stage4" not in stages_sel:
         return
-
-    for subj in subjects:
-        base_hold = stage0_jids.get(subj)
-        if "ct-pet-v5" in pipelines:
-            jids_ct = ctpet_run.submit_subject_chain(
-                subj,
-                lay,
-                pipe_stages,
-                container=container,
-                src_dir=src_dir,
-                backend=backend,
-                device=device,
-                model_dir=model_dir,
-                overwrite=overwrite,
-                base_hold=base_hold,
-                dry_run=dry_run,
-                log_level=log_level,
-                emit=emit,
-                exclude_ureter=exclude_ureter,
-            )
-            if "stage3" in pipe_stages and jids_ct:
-                stage3_hold_refs.append(jids_ct[-1])
-        if "dixon-v5" in pipelines:
-            jids_dx = dixon_run.submit_subject_chain(
-                subj,
-                lay,
-                pipe_stages,
-                container=container,
-                src_dir=src_dir,
-                backend=backend,
-                device=device,
-                model_dir=model_dir,
-                overwrite=overwrite,
-                regions=regions,
-                base_hold=base_hold,
-                dry_run=dry_run,
-                log_level=log_level,
-                emit=emit,
-                exclude_ureter=exclude_ureter,
-            )
-            if "stage3" in pipe_stages and jids_dx:
-                stage3_hold_refs.append(jids_dx[-1])
 
     if (
         emit is not None
@@ -459,6 +535,22 @@ def _run_sge(
             container=container,
             src_dir=src_dir,
             hold_jid=stage3_hold_refs,
+            log_level=log_level,
+        )
+
+    if emit is not None and "stage4" in stages_sel:
+        pipelines_qc = [p for p in pipelines if p in ("ct-pet-v5", "dixon-v5")]
+        stage4_hold = (
+            stage3_hold_refs if ("stage3" in pipe_stages and stage3_hold_refs) else None
+        )
+        _emit_stage4_qc_stage(
+            emit,
+            lay,
+            subjects,
+            pipelines_qc,
+            container=container,
+            src_dir=src_dir,
+            hold_jid=stage4_hold,
             log_level=log_level,
         )
 
@@ -613,13 +705,6 @@ def main(
     if unknown_stages:
         raise click.BadParameter(
             f"Unknown stages {unknown_stages}. Valid: {STAGE_CHOICES}"
-        )
-
-    if submit == "sge" and "stage4" in stages_sel:
-        log.warning(
-            "stage4 QC is not emitted on SGE; after the batch finishes run locally: "
-            "nvitk-pesa-fat-qc --batch %s",
-            batch,
         )
 
     region_tuple = tuple(r.strip().upper() for r in dixon_regions.split(",") if r.strip())

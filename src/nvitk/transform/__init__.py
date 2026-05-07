@@ -14,11 +14,13 @@ Submodules:
 from __future__ import annotations
 
 from .isotropy import isotropy
+from .oblique import oblique_slice
 from .resampling import resample_mask_to_pet, resample_pet_to_mask, resample_to
 from .rotation import check_and_correct_rotation, correct_z_rotation
 
 __all__ = [
     "isotropy",
+    "oblique_slice",
     "resample_to",
     "resample_pet_to_mask",
     "resample_mask_to_pet",

@@ -3,73 +3,156 @@
 from __future__ import annotations
 
 _CSS = """
-body { font-family: system-ui, sans-serif; margin: 1rem 2rem; max-width: 1400px; }
-h1 { border-bottom: 1px solid #ccc; }
-h2 { margin-top: 2rem; color: #234; }
-h3 { margin-top: 1.25rem; }
-section { margin-bottom: 2.5rem; }
-.qc-measurements { border-collapse: collapse; font-size: 0.85rem; }
-.qc-measurements th { background: #f0f4f8; position: sticky; top: 0; }
-.subsection { margin: 1rem 0; padding: 0.5rem; background: #fafafa; border-left: 3px solid #468; }
-iframe { background: #111; }
-.axial-slider { margin: 1rem 0; }
-.axial-blocks { display: flex; flex-wrap: wrap; gap: 1rem; }
+html, body { height: 100%; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  margin: 0;
+  background: #14213d;
+  color: #ffffff;
+}
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+.header {
+  margin-bottom: 18px;
+  padding: 18px 18px;
+  border: 1px solid rgba(229,229,229,0.18);
+  background: rgba(0,0,0,0.35);
+  border-radius: 14px;
+}
+.header h1 { margin: 0 0 6px 0; font-size: 22px; }
+.header .meta { color: rgba(229,229,229,0.90); font-size: 13px; }
+
+section { margin-top: 18px; }
+section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
+
+.card {
+  margin: 12px 0;
+  border: 1px solid rgba(229,229,229,0.18);
+  background: rgba(0,0,0,0.22);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.card .card-h {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(229,229,229,0.16);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.card .card-h h3 { margin: 0; font-size: 14px; letter-spacing: 0.2px; color: #ffffff; }
+.card .card-b { padding: 14px; }
+.muted { color: rgba(229,229,229,0.92); font-size: 12px; }
+
+.iframe-wrap iframe { width: 100%; height: 420px; border: 0; background: #000000; border-radius: 10px; }
+.two-col { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 980px) { .two-col { grid-template-columns: 1fr 1fr; } }
+
+.table-wrap { overflow: auto; border-radius: 10px; border: 1px solid rgba(229,229,229,0.18); background: rgba(0,0,0,0.25); }
+.qc-measurements { border-collapse: collapse; font-size: 12px; min-width: 700px; width: 100%; }
+.qc-measurements th, .qc-measurements td { padding: 6px 8px; border-bottom: 1px solid rgba(229,229,229,0.14); }
+.qc-measurements th { position: sticky; top: 0; background: rgba(20,33,61,0.92); z-index: 1; text-align: left; }
+.qc-measurements tr:hover td { background: rgba(252,163,17,0.10); }
+
+.axial-blocks { display: grid; grid-template-columns: 1fr; gap: 10px; }
 """
 
 
 def build_report_html(
     *,
     batch: str,
+    subject: str,
     ctpet_masks_html: list[str],
     dixon_masks_html: list[str],
     ctpet_measurements_table: str,
     dixon_measurements_table: str,
-    ctpet_axial_html: list[str],
-    dixon_axial_html: list[str],
     ctpet_hotspot_gallery: str,
     dixon_hotspot_gallery: str,
+    ctpet_axial_html: list[str],
+    dixon_axial_html: list[str],
 ) -> str:
-    def block(title: str, inner: str) -> str:
-        return f'<div class="subsection"><h4>{title}</h4>{inner}</div>'
-
     def join_iframes(parts: list[str]) -> str:
         if not parts:
             return "<p><em>No mask overview exports.</em></p>"
-        return "\n".join(
-            f'<iframe title="masks" style="width:100%;height:420px;border:1px solid #333" src="{p}"></iframe>'
-            for p in parts
-        )
+        out: list[str] = []
+        for p in parts:
+            if p.lstrip().startswith("<iframe") or "<iframe" in p:
+                out.append(p)
+            else:
+                out.append(f'<div class="iframe-wrap"><iframe title="masks" src="{p}"></iframe></div>')
+        return "\n".join(out)
 
     ct_masks = join_iframes(ctpet_masks_html)
     dx_masks = join_iframes(dixon_masks_html)
-    ct_ax = "\n".join(ctpet_axial_html) if ctpet_axial_html else "<p><em>No axial QC.</em></p>"
-    dx_ax = "\n".join(dixon_axial_html) if dixon_axial_html else "<p><em>No axial QC.</em></p>"
+    ct_ax = "\n".join(ctpet_axial_html) if ctpet_axial_html else "<p><em>No slice QC.</em></p>"
+    dx_ax = "\n".join(dixon_axial_html) if dixon_axial_html else "<p><em>No slice QC.</em></p>"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>PESA-Fat QC — {batch}</title>
+<title>PESA-Fat QC — {batch} — {subject}</title>
 <style>{_CSS}</style>
 </head>
 <body>
-<h1>PESA-Fat QC report — batch <code>{batch}</code></h1>
+<div class="container">
+  <div class="header">
+    <h1>PESA-Fat QC report</h1>
+    <div class="meta">Batch <code>{batch}</code> · Subject <code>{subject}</code></div>
+  </div>
 
 <section id="ctpet">
 <h2>CT-PET pipeline</h2>
-{block("1. Segmentation masks (PyVista)", ct_masks)}
-{block("2. Measurements vs expected ranges", ctpet_measurements_table)}
-{block("3. Axial PET + ROI contour", ct_ax)}
-{block("4. SUV hotspots (interactive)", ctpet_hotspot_gallery)}
+
+<div class="card">
+  <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{ct_masks}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{ctpet_hotspot_gallery}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Slice views</h3><div class="muted">axial (current)</div></div>
+  <div class="card-b">{ct_ax}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
+  <div class="card-b"><div class="table-wrap">{ctpet_measurements_table}</div></div>
+</div>
 </section>
 
 <section id="dixon">
 <h2>Dixon pipeline</h2>
-{block("1. Segmentation masks (PyVista)", dx_masks)}
-{block("2. Measurements vs expected ranges", dixon_measurements_table)}
-{block("3. Axial Dixon FF + ROI contour", dx_ax)}
-{block("4. Map hotspots (interactive)", dixon_hotspot_gallery)}
+
+<div class="card">
+  <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{dx_masks}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{dixon_hotspot_gallery}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Slice views</h3><div class="muted">axial (current)</div></div>
+  <div class="card-b">{dx_ax}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
+  <div class="card-b"><div class="table-wrap">{dixon_measurements_table}</div></div>
+</div>
 </section>
+
+</div>
 </body>
 </html>
 """

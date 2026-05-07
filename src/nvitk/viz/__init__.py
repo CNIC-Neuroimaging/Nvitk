@@ -10,7 +10,12 @@ from .brainshow import (
     resolve_atlas,
 )
 from .pet_hotspots import HotspotMode, show_hotspots
-from .flowshow import flowshow
+from .flowshow import (
+    FlowshowAnimationOptions,
+    FlowshowVectorOptions,
+    VectorColorMode,
+    flowshow,
+)
 
 __all__ = [
     "brainshow",
@@ -21,4 +26,7 @@ __all__ = [
     "show_hotspots",
     "HotspotMode",
     "flowshow",
+    "FlowshowVectorOptions",
+    "FlowshowAnimationOptions",
+    "VectorColorMode",
 ]

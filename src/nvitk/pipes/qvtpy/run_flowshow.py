@@ -23,6 +23,7 @@ matching stage0.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import click
 
@@ -32,7 +33,12 @@ from nvitk.core.logger import Logger
 from nvitk.io import imread
 from nvitk.io.conversors.phase2volume import discover_phase_inputs
 from nvitk.types import Image
-from nvitk.viz.flowshow import flowshow
+from nvitk.viz.flowshow import (
+    FlowshowAnimationOptions,
+    FlowshowVectorOptions,
+    VectorColorMode,
+    flowshow,
+)
 
 from . import config as cfg
 
@@ -121,6 +127,23 @@ def _spatial_xyz_from_phase(ap: Image) -> tuple[int, int, int]:
     return sh
 
 
+def _parse_speed_clim(value: str | None) -> tuple[float, float] | None:
+    if not value or not value.strip():
+        return None
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 2:
+        raise click.ClickException("--speed-clim must be two numbers: min,max")
+    return (float(parts[0]), float(parts[1]))
+
+
+def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
+    for name in (f"{stem}.nii.gz", f"{stem}.nii"):
+        p = folder / name
+        if p.is_file():
+            return p
+    return None
+
+
 @click.command("nvitk-qvtpy-flowshow")
 @click.option("--subject", default=None, help="Subject id (NIfTI folder name under --nifti-root).")
 @click.option(
@@ -150,6 +173,97 @@ def _spatial_xyz_from_phase(ap: Image) -> tuple[int, int, int]:
 @click.option("--stride", type=int, default=4, show_default=True, help="Stride for velocity glyph subsampling.")
 @click.option("--timepoint", type=int, default=0, show_default=True, help="Initial time index.")
 @click.option(
+    "--single-label",
+    is_flag=True,
+    default=False,
+    help="Show one vessel label at a time (slider/dropdown) instead of all labels together.",
+)
+@click.option(
+    "--max-glyphs",
+    type=int,
+    default=50_000,
+    show_default=True,
+    help="Cap on velocity arrows (shared across labels in multi-label view).",
+)
+@click.option(
+    "--depth-peeling/--no-depth-peeling",
+    default=False,
+    show_default=True,
+    help="Enable VTK depth peeling (nicer transparency; unstable on some GPU drivers).",
+)
+@click.option(
+    "--vector-color",
+    type=click.Choice(["label", "speed", "fixed"]),
+    default="label",
+    show_default=True,
+    help="Glyph coloring: by vessel label, by |v| (colormap), or fixed color.",
+)
+@click.option(
+    "--vector-scale-magnitude/--no-vector-scale-magnitude",
+    default=False,
+    show_default=True,
+    help="Scale arrow length using |v| (normalized with --speed-clim or auto percentiles).",
+)
+@click.option(
+    "--vector-scale-factor",
+    type=float,
+    default=0.35,
+    show_default=True,
+    help="Glyph length multiplier when --vector-scale-magnitude is set.",
+)
+@click.option(
+    "--vector-fixed-color",
+    default="#00A6FB",
+    show_default=True,
+    help="Arrow color when --vector-color=fixed.",
+)
+@click.option("--speed-cmap", default="turbo", show_default=True, help="Colormap when --vector-color=speed.")
+@click.option(
+    "--speed-clim",
+    default=None,
+    help="Fixed |v| range for speed colors/scale, as min,max (e.g. 0,450). Default: auto from samples.",
+)
+@click.option(
+    "--glyph-opacity",
+    type=float,
+    default=0.88,
+    show_default=True,
+)
+@click.option(
+    "--no-precompute-indices",
+    is_flag=True,
+    help="Do not cache glyph voxel indices (slower scrubbing; uses less setup memory).",
+)
+@click.option(
+    "--auto-play/--no-auto-play",
+    default=False,
+    show_default=True,
+    help="Start time animation immediately (Space pauses desktop).",
+)
+@click.option("--animation-fps", type=float, default=8.0, show_default=True)
+@click.option(
+    "--no-loop-animation",
+    is_flag=True,
+    help="Stop at last time frame instead of looping (desktop timer).",
+)
+@click.option("--streamline-radius", type=float, default=None, help="Override streamline tube radius.")
+@click.option("--streamline-seeds", type=int, default=None, help="Override number of streamline seeds.")
+@click.option(
+    "--cross-section/--no-cross-section",
+    default=True,
+    show_default=True,
+    help="Enable oblique cross-section panel (ComplexDifference/Angio/VelMag) on pick.",
+)
+@click.option("--cross-section-radius-vox", type=float, default=12.0, show_default=True)
+@click.option("--cross-section-res", type=int, default=112, show_default=True)
+@click.option("--centerline-window", type=click.Choice(["3", "5"]), default="5", show_default=True)
+@click.option(
+    "--show-gradient/--no-show-gradient",
+    default=False,
+    show_default=True,
+    help="Enable interior velocity field points by default (can also be toggled in-window).",
+)
+@click.option(
     "--notebook/--no-notebook",
     default=False,
     show_default=True,
@@ -176,6 +290,27 @@ def main(
     centerline_mask: Path | None,
     stride: int,
     timepoint: int,
+    single_label: bool,
+    max_glyphs: int,
+    depth_peeling: bool,
+    vector_color: str,
+    vector_scale_magnitude: bool,
+    vector_scale_factor: float,
+    vector_fixed_color: str,
+    speed_cmap: str,
+    speed_clim: str | None,
+    glyph_opacity: float,
+    no_precompute_indices: bool,
+    auto_play: bool,
+    animation_fps: float,
+    no_loop_animation: bool,
+    streamline_radius: float | None,
+    streamline_seeds: int | None,
+    cross_section: bool,
+    cross_section_radius_vox: float,
+    cross_section_res: int,
+    centerline_window: str,
+    show_gradient: bool,
     notebook: bool,
     no_show: bool,
     list_inputs: bool,
@@ -212,6 +347,36 @@ def main(
     cl_path = _resolve_optional_mask(patient, centerline_mask)
     centerline_img = imread(cl_path) if cl_path is not None else None
 
+    cs_vols = None
+    if cross_section:
+        flow_dir = patient / "4DFlow"
+        cs_vols = {}
+        for stem in ("ComplexDifference_3D", "Angiography_3D", "VelocityMagnitude_3D"):
+            p = _resolve_nii_optional(flow_dir, stem)
+            if p is not None:
+                cs_vols[stem] = imread(p)
+
+    vec = FlowshowVectorOptions(
+        color_mode=cast(VectorColorMode, vector_color),
+        fixed_color=vector_fixed_color,
+        scale_by_magnitude=vector_scale_magnitude,
+        scale_factor=vector_scale_factor,
+        speed_cmap=speed_cmap,
+        speed_clim=_parse_speed_clim(speed_clim),
+        glyph_opacity=glyph_opacity,
+    )
+    if streamline_radius is not None:
+        vec.streamline_radius = streamline_radius
+    if streamline_seeds is not None:
+        vec.streamline_n_seeds = streamline_seeds
+
+    anim = FlowshowAnimationOptions(
+        precompute_glyph_indices=not no_precompute_indices,
+        auto_play=auto_play,
+        animation_fps=animation_fps,
+        loop=not no_loop_animation,
+    )
+
     try:
         flowshow(
             ap,
@@ -223,6 +388,15 @@ def main(
             timepoint=timepoint,
             notebook=notebook,
             show=not no_show,
+            show_all_labels=not single_label,
+            max_glyphs=max_glyphs,
+            depth_peeling=depth_peeling,
+            vector=vec,
+            animation=anim,
+            cross_section_volumes=cs_vols,
+            centerline_window=int(centerline_window),
+            cross_section_radius_vox=float(cross_section_radius_vox),
+            cross_section_res=int(cross_section_res),
         )
     except ValidationError as exc:
         raise click.ClickException(str(exc)) from exc

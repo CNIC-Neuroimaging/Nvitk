@@ -422,6 +422,7 @@ def main(
     if ct is not None:
         img, mask_img, label_ids, pet = _load_ctpet_inputs(lay, subject, ct)
         title = f"CT-PET {measure} | {subject} | {batch}"
+        sb_title = "SUV"
         extra_imgs: list[tuple[str, Image]] = []
         for nm in extra_list:
             m = _ctpet_load_extra_mask_on_pet_grid(lay, subject, nm, pet)
@@ -431,6 +432,7 @@ def main(
         assert dx is not None
         img, mask_img, label_ids = _load_dixon_inputs(lay, subject, dx)
         title = f"DIXON {measure} | {subject} | {batch}"
+        sb_title = dx.metric
         extra_imgs = []
         for nm in extra_list:
             if nm == "ureter":
@@ -457,6 +459,7 @@ def main(
         notebook=notebook,
         show=False,
         title=title,
+        scalar_bar_title=sb_title,
     )
 
     if extra_imgs:

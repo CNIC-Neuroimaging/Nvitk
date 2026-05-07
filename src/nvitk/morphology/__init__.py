@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from ._common import make_ball_footprint
 from .binary import close, dilate, erode, fill_holes, open
+from .centerline import compute_centerlines
 
 __all__ = [
     "dilate",
@@ -20,4 +21,5 @@ __all__ = [
     "close",
     "fill_holes",
     "make_ball_footprint",
+    "compute_centerlines",
 ]

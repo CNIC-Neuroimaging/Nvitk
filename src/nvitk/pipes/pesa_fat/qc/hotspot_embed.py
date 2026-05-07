@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
+import base64
 
 from nvitk.core.exceptions import ValidationError
 from nvitk.core.logger import Logger
@@ -22,6 +24,47 @@ log = Logger()
 
 def _safe_name(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
+
+
+def _write_text_with_retries(path: Path, text: str, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, int(retries) + 1):
+        try:
+            path.write_text(text, encoding="utf-8")
+            return True
+        except OSError as exc:
+            log.warning(
+                "write_text failed (%s) [attempt %d/%d]: %s",
+                path,
+                attempt,
+                retries,
+                exc,
+            )
+            if attempt < retries:
+                time.sleep(float(sleep_s))
+    return False
+
+
+def _export_html_with_retries(pl, path: Path, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, int(retries) + 1):
+        try:
+            pl.export_html(str(path))
+            return True
+        except OSError as exc:
+            log.warning(
+                "export_html failed (%s) [attempt %d/%d]: %s",
+                path,
+                attempt,
+                retries,
+                exc,
+            )
+            if attempt < retries:
+                time.sleep(float(sleep_s))
+        except Exception as exc:
+            log.warning("export_html failed (%s): %s", path, exc)
+            break
+    return False
 
 
 def export_hotspot_gallery_for_batch(
@@ -51,6 +94,7 @@ def export_hotspot_gallery_for_batch(
         for measure in measures:
             ct = _resolve_measure_ctpet(measure)
             title = f"{'CT-PET' if ct else 'DIXON'} {measure} | {subject} | {lay.batch}"
+            sb_title = "SUV" if ct is not None else measure.rsplit("_", 1)[-1]
             try:
                 if ct is not None:
                     img, mask_img, label_ids, _pet = _load_ctpet_inputs(lay, subject, ct)
@@ -69,19 +113,21 @@ def export_hotspot_gallery_for_batch(
                     title=title,
                     auto_threshold_fallback=True,
                     allow_empty_hotspot=True,
+                    scalar_bar_title=sb_title,
                 )
                 fname = f"hotspot_{_safe_name(subject)}_{_safe_name(measure)}.html"
                 path = out_dir / fname
                 try:
-                    pl.export_html(str(path))
+                    ok = _export_html_with_retries(pl, path)
+                    if not ok:
+                        raise OSError(f"export_html failed for {path}")
                 except Exception as exc:
                     import traceback
                     log.warning(traceback.format_exc())
                     log.warning("[%s] hotspot export failed %s: %s", subject, measure, exc)
-                    path.write_text(
+                    _write_text_with_retries(
                         "<!DOCTYPE html><html><body><p>Hotspot HTML export failed: "
                         f"{exc!s}</p></body></html>",
-                        encoding="utf-8",
                     )
                 rel = f"{rel_assets_root}/{fname}"
                 entries.append((subject, measure, rel))
@@ -97,8 +143,11 @@ def export_hotspot_gallery_for_batch(
     return entries, errors
 
 
-def hotspot_gallery_control_html(entries: list[tuple[str, str, str]]) -> str:
-    """Two ``<select>`` elements + ``<iframe>``; measure list depends on subject."""
+def hotspot_gallery_control_html(entries: list[tuple[str, str, str]], *, dom_prefix: str) -> str:
+    """Two ``<select>`` elements + ``<iframe>``; measure list depends on subject.
+
+    dom_prefix is required so CT-PET and Dixon widgets don't collide in the same page.
+    """
     if not entries:
         return "<p><em>No hotspot exports generated.</em></p>"
 
@@ -117,18 +166,19 @@ def hotspot_gallery_control_html(entries: list[tuple[str, str, str]]) -> str:
     )
     subj_opts = "".join(f"<option value='{_esc(s)}'>{_esc(s)}</option>" for s in subjects)
 
+    pid = _esc(dom_prefix)
     return f"""
 <div id="hotspot-gallery">
-<label>Subject <select id="hg_sub">{subj_opts}</select></label>
-<label>Measure <select id="hg_meas">{meas_opts}</select></label>
-<iframe id="hg_frame" title="hotspot" style="width:100%;height:560px;border:1px solid #444" src="{_esc(first_rel)}"></iframe>
+<label>Subject <select id="{pid}_hg_sub">{subj_opts}</select></label>
+<label>Measure <select id="{pid}_hg_meas">{meas_opts}</select></label>
+<iframe id="{pid}_hg_frame" title="hotspot" style="width:100%;height:560px;border:1px solid rgba(255,255,255,0.15);border-radius:10px" src="{_esc(first_rel)}"></iframe>
 </div>
 <script>
 (function() {{
   var subMap = {map_json};
-  var fs = document.getElementById("hg_frame");
-  var ss = document.getElementById("hg_sub");
-  var sm = document.getElementById("hg_meas");
+  var fs = document.getElementById("{pid}_hg_frame");
+  var ss = document.getElementById("{pid}_hg_sub");
+  var sm = document.getElementById("{pid}_hg_meas");
   function refillMeasures() {{
     var sub = ss.value;
     var mm = subMap[sub];
@@ -136,6 +186,7 @@ def hotspot_gallery_control_html(entries: list[tuple[str, str, str]]) -> str:
     sm.innerHTML = keys.map(function(k) {{
       return "<option value='" + k.replace(/'/g, "&#39;") + "'>" + k.replace(/</g, "&lt;") + "</option>";
     }}).join("");
+    sm.value = keys[0];
   }}
   function upd() {{
     var sub = ss.value;
@@ -145,6 +196,89 @@ def hotspot_gallery_control_html(entries: list[tuple[str, str, str]]) -> str:
   }}
   ss.onchange = function() {{ refillMeasures(); upd(); }};
   sm.onchange = upd;
+  // Ensure initial state is coherent in case browser restores state.
+  refillMeasures(); upd();
+}})();
+</script>
+"""
+
+
+def hotspot_gallery_control_srcdoc(
+    html_map: dict[str, dict[str, str]],
+    *,
+    dom_prefix: str,
+) -> str:
+    """Hotspot gallery where each (subject,measure) maps to an iframe srcdoc HTML string.
+
+    NOTE: raw HTML must NOT be embedded directly into JS literals (it can contain quotes and
+    even `</script>`). We base64-encode values and store them in a JSON blob.
+    """
+    if not html_map:
+        return "<p><em>No hotspot exports generated.</em></p>"
+    subjects = sorted(html_map)
+    first_sub = subjects[0]
+    measures = sorted(html_map[first_sub])
+    if not measures:
+        return "<p><em>No hotspot exports generated.</em></p>"
+    first_meas = measures[0]
+    pid = _esc(dom_prefix)
+
+    # Base64 values to keep the JSON/script safe.
+    b64_map: dict[str, dict[str, str]] = {}
+    for s, mm in html_map.items():
+        b64_map[s] = {}
+        for m, html in mm.items():
+            b64_map[s][m] = base64.b64encode(str(html).encode("utf-8", errors="ignore")).decode("ascii")
+    map_json = json.dumps(b64_map)
+    subj_opts = "".join(f"<option value='{_esc(s)}'>{_esc(s)}</option>" for s in subjects)
+    meas_opts = "".join(f"<option value='{_esc(m)}'>{_esc(m)}</option>" for m in measures)
+
+    # srcdoc is set dynamically to avoid giant HTML attribute at load time
+    return f"""
+<div id="hotspot-gallery">
+<label>Subject <select id="{pid}_hg_sub">{subj_opts}</select></label>
+<label>Measure <select id="{pid}_hg_meas">{meas_opts}</select></label>
+<iframe id="{pid}_hg_frame" title="hotspot" style="width:100%;height:560px;border:1px solid rgba(255,255,255,0.15);border-radius:10px"></iframe>
+</div>
+<script type="application/json" id="{pid}_hg_blob">{map_json}</script>
+<script>
+(function() {{
+  function b64ToUtf8(b64) {{
+    // decode base64 -> utf8 string
+    try {{
+      return decodeURIComponent(escape(atob(b64)));
+    }} catch (e) {{
+      // fallback (may mangle unicode, but better than blank)
+      try {{ return atob(b64); }} catch (e2) {{ return ""; }}
+    }}
+  }}
+
+  var blob = document.getElementById("{pid}_hg_blob");
+  var subMap = JSON.parse(blob.textContent || "{{}}");
+  var fs = document.getElementById("{pid}_hg_frame");
+  var ss = document.getElementById("{pid}_hg_sub");
+  var sm = document.getElementById("{pid}_hg_meas");
+
+  function refillMeasures() {{
+    var sub = ss.value;
+    var mm = subMap[sub] || {{}};
+    var keys = Object.keys(mm).sort();
+    sm.innerHTML = keys.map(function(k) {{
+      return "<option value='" + k.replace(/'/g, \"&#39;\") + \"'>\" + k.replace(/</g, \"&lt;\") + \"</option>\";
+    }}).join(\"\");
+    if (keys.length) sm.value = keys[0];
+  }}
+
+  function upd() {{
+    var sub = ss.value;
+    var me = sm.value;
+    var b64 = subMap[sub] && subMap[sub][me];
+    if (b64) fs.srcdoc = b64ToUtf8(b64);
+  }}
+
+  ss.onchange = function() {{ refillMeasures(); upd(); }};
+  sm.onchange = upd;
+  refillMeasures(); upd();
 }})();
 </script>
 """
@@ -162,4 +296,5 @@ def _esc(s: str) -> str:
 __all__ = [
     "export_hotspot_gallery_for_batch",
     "hotspot_gallery_control_html",
+    "hotspot_gallery_control_srcdoc",
 ]

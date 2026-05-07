@@ -29,28 +29,58 @@ def dataframe_to_html_table(
     df: pd.DataFrame,
     ranges: dict[str, tuple[float, float]],
 ) -> str:
-    """Render a DataFrame as an HTML table with out-of-range cells highlighted."""
+    """Render a DataFrame as an HTML table with out-of-range cells highlighted.
+
+    v2: expects *df* to contain a single subject row and reshapes it to
+    ROI-per-row, metric-per-column for readability.
+    """
     if df.empty:
         return "<p><em>No measurement rows loaded.</em></p>"
 
-    cols = list(df.columns)
+    row = df.iloc[0].to_dict()
+    # Remove pesa_id if present
+    row.pop("pesa_id", None)
+    if not row:
+        return "<p><em>No measurement columns.</em></p>"
+
+    # Parse columns into (roi, metric)
+    parsed: list[tuple[str, str, str, object]] = []
+    for col, val in row.items():
+        c = str(col)
+        if "_" not in c:
+            continue
+        roi, metric = c.rsplit("_", 1)
+        parsed.append((roi, metric, c, val))
+
+    if not parsed:
+        return "<p><em>No parseable measurement columns.</em></p>"
+
+    rois = sorted({p[0] for p in parsed})
+    metrics = sorted({p[1] for p in parsed}, key=lambda x: ("VOL" not in x, x))
+    # Build lookup
+    lut: dict[tuple[str, str], tuple[str, object]] = {}
+    for roi, metric, full_col, val in parsed:
+        lut[(roi, metric)] = (full_col, val)
+
+    cols = ["ROI"] + metrics
     thead = "<thead><tr>" + "".join(f"<th>{_esc(c)}</th>" for c in cols) + "</tr></thead>"
     body_rows: list[str] = []
-    for _, row in df.iterrows():
-        tds: list[str] = []
-        for c in cols:
-            val = row[c]
+    for roi in rois:
+        tds = [f"<td><strong>{_esc(roi)}</strong></td>"]
+        for metric in metrics:
+            full_col, val = lut.get((roi, metric), ("", None))
             style = ""
-            if cell_out_of_range(c, val, ranges):
+            if full_col and cell_out_of_range(full_col, val, ranges):
                 style = f' style="background-color:{WARN_BG}"'
-            if pd.isna(val):
+            if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
                 disp = ""
             else:
                 disp = _esc(_format_cell(val))
             tds.append(f"<td{style}>{disp}</td>")
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
+
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
-    return f'<table class="qc-measurements" border="1" cellspacing="0" cellpadding="4">{thead}{tbody}</table>'
+    return f'<table class="qc-measurements" border="0" cellspacing="0" cellpadding="0">{thead}{tbody}</table>'
 
 
 def _esc(s: str) -> str:

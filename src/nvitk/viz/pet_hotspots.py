@@ -142,6 +142,8 @@ def show_hotspots(
     title: str | None = None,
     auto_threshold_fallback: bool = True,
     allow_empty_hotspot: bool = False,
+    scalar_bar_title: str = "SUV",
+    show_min_max_text: bool = True,
 ) -> Any:
     """
     Render SUV hotspots inside a segmentation mask.
@@ -290,6 +292,18 @@ def show_hotspots(
     if title:
         pl.add_text(str(title), position="upper_left", font_size=12)
 
+    if show_min_max_text:
+        try:
+            vmin = float(np.min(suv_vals))
+            vmax = float(np.max(suv_vals))
+            pl.add_text(
+                f"{scalar_bar_title}: min={vmin:.4g}  max={vmax:.4g}",
+                position="lower_right",
+                font_size=10,
+            )
+        except Exception:
+            pass
+
     pl.add_mesh(surf, color="white", opacity=float(mask_opacity), show_scalar_bar=False)
     pl.add_mesh(
         cloud,
@@ -297,7 +311,7 @@ def show_hotspots(
         cmap=cmap,
         point_size=float(point_size),
         render_points_as_spheres=True,
-        scalar_bar_args={"title": "SUV"},
+        scalar_bar_args={"title": str(scalar_bar_title)},
     )
     pl.view_isometric()
 
