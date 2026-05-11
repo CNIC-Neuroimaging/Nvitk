@@ -147,6 +147,7 @@ def _default_emit_script(input_path: Path) -> Path:
 )
 @click.option("--remote-host", default=None, help="(sge) SSH host or alias.")
 @click.option("--remote-user", default=None, help="(sge) SSH username.")
+@click.option("--display-progress/--no-progress", default=True, help="Display output in terminal.")
 @click.option("--dry-run", is_flag=True, help="(sge) Build command only (no qsub / no SSH).")
 @click.option("--log-level", default="INFO", show_default=True)
 def main(
@@ -178,6 +179,7 @@ def main(
     no_remote: bool,
     remote_host: str | None,
     remote_user: str | None,
+    display_progress: bool,
     dry_run: bool,
     log_level: str,
 ) -> None:
@@ -218,6 +220,7 @@ def main(
             tmp_dir=tmp,
             keep_aux_outputs=keep_aux_outputs,
             vasculature_host_path=vas_host,
+            capture_output=not display_progress,
         )
         log.info("eICAB local run finished: output -> %s", output_path)
         return

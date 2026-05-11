@@ -116,7 +116,7 @@ class Logger(metaclass=Singleton):
         "DEBUG": logging.DEBUG
     }
 
-    def __init__(self, level: str = 'INFO', name: str = 'nvitk'):
+    def __init__(self, level: str = 'INFO', name: str = 'nvitk', start_progress: bool = False):
         """
         Configure the singleton: console handler, optional Rich progress (terminal only).
 
@@ -151,8 +151,10 @@ class Logger(metaclass=Singleton):
                 markup=False,
                 theme=None,
             )
-            self._progress = Progress(console=self._base_console, transient=False)
-            self._progress.start()
+            self._progress = None
+            if start_progress: 
+                self._progress = Progress(console=self._base_console, transient=False)
+                self._progress.start()
 
         # Internal log buffer.
         self._log_buffer: list[str] = []
@@ -377,8 +379,12 @@ class Logger(metaclass=Singleton):
             Task id for :meth:`update_progress`, or None if progress is disabled.
         """
         if self._progress is None:
-            self._logger.info("Progress tasks are disabled in notebook mode.")
-            return None
+            if in_notebook():
+                self._logger.info("Progress tasks are disabled in notebook mode.")
+                return None
+            else:
+                self._progress = Progress(console=self._base_console, transient=False)
+                self._progress.start()
         task_id = self._progress.add_task(
             description,
             total=total,

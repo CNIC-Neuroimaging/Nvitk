@@ -187,6 +187,7 @@ def _default_emit_script(task: str) -> Path:
 )
 @click.option("--remote-host", default=None, help="(sge) SSH host or alias.")
 @click.option("--remote-user", default=None, help="(sge) SSH username.")
+@click.option("--display-progress/--no-progress", default=True, help="Display output in terminal.")
 @click.option(
     "--dry-run",
     is_flag=True,
@@ -222,6 +223,7 @@ def main(
     no_remote: bool,
     remote_host: str | None,
     remote_user: str | None,
+    display_progress: bool,
     dry_run: bool,
 ) -> None:
     """Run TotalSegmentator either locally or on SGE."""
@@ -247,6 +249,7 @@ def main(
             fast=fast,
             preview=preview,
             model_dir=model_dir,
+            capture_output=not display_progress,
         )
         if result.returncode != 0:
             raise click.ClickException(
