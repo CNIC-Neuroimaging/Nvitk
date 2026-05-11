@@ -164,7 +164,7 @@ def export_ctpet_overview_html(
         log.warning("[%s] CT-PET mask QC: no mask files found", subject)
         return None
 
-    pl = pv.Plotter(shape=(1, 2), notebook=notebook)
+    pl = pv.Plotter(shape=(1, 3), notebook=notebook)
 
     # View A: FAT + vertebrae
     pl.subplot(0, 0)
@@ -189,6 +189,40 @@ def export_ctpet_overview_html(
         img = imread(str(pth), axes="XYZ")
         spacing, origin, direction = _spacing_origin_direction(img.metadata)
         _add_label_volume_surfaces(pl, pv, to_numpy(img.data), spacing=spacing, origin=origin, direction=direction, mask_opacity=op)
+    pl.view_isometric()
+
+    # View C: raw vertebrae from TotalSegmentator 'total' (available labels only)
+    pl.subplot(0, 2)
+    pl.add_text("Vertebrae (raw total)", font_size=10, position="upper_edge")
+    if total_p is not None:
+        img = imread(str(total_p), axes="XYZ")
+        spacing, origin, direction = _spacing_origin_direction(img.metadata)
+        seg = to_numpy(img.data).astype(np.int32, copy=False)
+        cmap = get_class_map("total")
+        vert_items = [(int(i), str(nm)) for i, nm in cmap.items() if str(nm).startswith("vertebrae_")]
+        if not vert_items:
+            vbin = (seg > 0).astype(np.uint8)
+            _add_label_volume_surfaces(
+                pl, pv, vbin, spacing=spacing, origin=origin, direction=direction, mask_opacity=0.35
+            )
+        else:
+            colors = _distinct_colors(len(vert_items), sat=0.75, val=0.98)
+            idx = 0
+            for lid, _nm in sorted(vert_items, key=lambda t: t[0]):
+                bin_u8 = (seg == int(lid)).astype(np.uint8, copy=False)
+                if not bool(np.any(bin_u8)):
+                    continue
+                grid = _grid_from_binary(pv, bin_u8, spacing=spacing, origin=origin, direction=direction)
+                surf = grid.contour([0.5], scalars="m")
+                if surf.n_points == 0:
+                    continue
+                pl.add_mesh(
+                    surf,
+                    color=colors[idx % len(colors)],
+                    opacity=0.45,
+                    show_scalar_bar=False,
+                )
+                idx += 1
     pl.view_isometric()
 
     return out_html if _export_html_with_retries(pl, out_html) else None

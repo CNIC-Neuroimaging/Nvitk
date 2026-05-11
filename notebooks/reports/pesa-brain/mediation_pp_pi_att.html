@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Análisis de Mediación: PP → PI → ATT</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #f7f5f0;
+    --surface:   #ffffff;
+    --ink:       #1c1c1c;
+    --ink-soft:  #555550;
+    --ink-faint: #999990;
+    --blue:      #2a6496;
+    --blue-lt:   #d6e8f7;
+    --green:     #2e7d4f;
+    --green-lt:  #d5ecd5;
+    --orange:    #b85c1a;
+    --orange-lt: #fdebd0;
+    --red:       #c0392b;
+    --red-lt:    #fdecea;
+    --rule:      #e0ddd6;
+    --mono:      'JetBrains Mono', monospace;
+    --serif:     'Lora', Georgia, serif;
+    --sans:      'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    padding: 0 0 80px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--ink);
+    color: #fff;
+    padding: 64px 48px 52px;
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 40px,
+      rgba(255,255,255,0.025) 40px,
+      rgba(255,255,255,0.025) 41px
+    );
+    pointer-events: none;
+  }
+  .header-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #aaa;
+    margin-bottom: 18px;
+  }
+  header h1 {
+    font-family: var(--serif);
+    font-size: clamp(26px, 4vw, 42px);
+    font-weight: 700;
+    line-height: 1.2;
+    max-width: 700px;
+    margin-bottom: 20px;
+  }
+  header h1 em { color: #7ec8a0; font-style: normal; }
+  .header-sub {
+    font-size: 15px;
+    color: #ccc;
+    max-width: 620px;
+    font-weight: 300;
+  }
+  .badges {
+    display: flex;
+    gap: 10px;
+    margin-top: 28px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #ddd;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border-radius: 4px;
+  }
+
+  /* ── LAYOUT ── */
+  .container { max-width: 860px; margin: 0 auto; padding: 0 32px; }
+
+  /* ── SECTION ── */
+  section { padding: 56px 0 0; }
+  section + section { border-top: 1px solid var(--rule); margin-top: 56px; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-size: clamp(20px, 3vw, 28px);
+    font-weight: 700;
+    line-height: 1.25;
+    margin-bottom: 24px;
+    color: var(--ink);
+  }
+  h3 {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    margin: 36px 0 14px;
+    color: var(--ink);
+  }
+  p { color: var(--ink-soft); margin-bottom: 16px; font-size: 15.5px; }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--ink); font-weight: 600; }
+
+  /* ── DIAGRAM ── */
+  .diagram-wrap {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 16px;
+    padding: 48px 32px 40px;
+    margin: 32px 0;
+    overflow-x: auto;
+  }
+  .diagram-wrap svg { display: block; margin: 0 auto; }
+
+  /* ── EFFECT CARDS ── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin: 32px 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    border-radius: 12px 12px 0 0;
+  }
+  .card.blue::before  { background: var(--blue); }
+  .card.green::before { background: var(--green); }
+  .card.red::before   { background: var(--red); }
+  .card.gold::before  { background: #b8860b; }
+
+  .card-path {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+    letter-spacing: 0.05em;
+  }
+  .card-coef {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .card.blue  .card-coef { color: var(--blue); }
+  .card.green .card-coef { color: var(--green); }
+  .card.red   .card-coef { color: var(--red); }
+  .card.gold  .card-coef { color: #8b6800; }
+  .card-sig {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin-bottom: 12px;
+  }
+  .card-desc {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    border-top: 1px solid var(--rule);
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+
+  /* ── MODELS TABLE ── */
+  .model-table-wrap {
+    overflow-x: auto;
+    margin: 28px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  thead {
+    background: var(--ink);
+    color: #fff;
+  }
+  thead th {
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    text-align: right;
+  }
+  thead th:first-child { text-align: left; border-radius: 8px 0 0 0; }
+  thead th:last-child  { border-radius: 0 8px 0 0; }
+  tbody tr { border-bottom: 1px solid var(--rule); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #f2f0eb; }
+  td {
+    padding: 11px 16px;
+    color: var(--ink-soft);
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  td:first-child {
+    text-align: left;
+    font-family: var(--sans);
+    font-weight: 500;
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .sig-star { color: var(--green); font-weight: 600; }
+  .sig-ns   { color: var(--ink-faint); }
+  .sig-one  { color: #7b5ea7; font-weight: 600; }
+  .row-key  { background: rgba(42,100,150,0.04); }
+  .row-key td:first-child { color: var(--blue); font-weight: 600; }
+
+  /* ── CALLOUT ── */
+  .callout {
+    border-left: 4px solid;
+    padding: 20px 24px;
+    border-radius: 0 10px 10px 0;
+    margin: 28px 0;
+    font-size: 15px;
+  }
+  .callout.info   { border-color: var(--blue);  background: var(--blue-lt); }
+  .callout.warn   { border-color: var(--orange); background: var(--orange-lt); }
+  .callout.key    { border-color: var(--green);  background: var(--green-lt); }
+  .callout.danger { border-color: var(--red);    background: var(--red-lt); }
+  .callout-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 8px;
+    opacity: 0.7;
+  }
+  .callout p { color: var(--ink); margin: 0; }
+
+  /* ── PATHWAY DIAGRAM (text-based) ── */
+  .pathway {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 28px 0;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 2.2;
+    overflow-x: auto;
+  }
+  .path-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 4px 0;
+  }
+  .path-node {
+    background: var(--ink);
+    color: #fff;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .path-node.blue   { background: var(--blue); }
+  .path-node.green  { background: var(--green); }
+  .path-node.orange { background: var(--orange); }
+  .path-arrow { font-size: 18px; color: var(--ink-faint); }
+  .path-coef  { font-size: 12px; }
+  .path-coef.pos { color: var(--green); font-weight: 600; }
+  .path-coef.neg { color: var(--red);   font-weight: 600; }
+
+  /* ── SUMMARY BOX ── */
+  .summary {
+    background: var(--ink);
+    color: #eee;
+    border-radius: 16px;
+    padding: 40px;
+    margin: 40px 0 0;
+  }
+  .summary h3 {
+    color: #7ec8a0;
+    font-family: var(--serif);
+    font-size: 20px;
+    margin-top: 0;
+  }
+  .summary p { color: #ccc; font-size: 15px; }
+  .summary ul {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0;
+  }
+  .summary li {
+    color: #ddd;
+    font-size: 15px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .summary li:last-child { border-bottom: none; }
+  .summary li::before {
+    content: '→';
+    color: #7ec8a0;
+    font-family: var(--mono);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    margin-top: 80px;
+    border-top: 1px solid var(--rule);
+    padding: 32px 0;
+    text-align: center;
+    font-size: 13px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-up { animation: fadeUp 0.6s ease both; }
+  .delay-1 { animation-delay: 0.1s; }
+  .delay-2 { animation-delay: 0.2s; }
+  .delay-3 { animation-delay: 0.3s; }
+</style>
+</head>
+<body>
+
+<!-- ─────────────────────── HEADER ─────────────────────── -->
+<header>
+  <div class="container">
+    <div class="header-tag fade-up">Análisis de Mediación · Neuroimagen Cuantitativa</div>
+    <h1 class="fade-up delay-1">¿Cómo conecta la <em>rigidez arterial</em> con el tránsito cerebrovascular?</h1>
+    <p class="header-sub fade-up delay-2">
+      Un modelo de mediación mixto para explorar la cadena PP → PI → ATT en 1.367 observaciones
+      sobre 4 territorios vasculares cerebrales.
+    </p>
+    <div class="badges fade-up delay-3">
+      <span class="badge">n = 1.367 obs (361 sujetos).</span>
+      <span class="badge">4 territorios</span>
+      <span class="badge">Modelo lineal mixto</span>
+      <span class="badge">Mediación competitiva</span>
+      <span class="badge">4D flow MRI + ASL</span>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ─────────────────────── 1. INTRODUCCIÓN ─────────────────────── -->
+  <section>
+    <div class="section-label">01 · Introducción</div>
+
+    <p>
+      Lo que sabiamos en base a la literatura (y esperabamos en relacion al PI) sobre la relación entre
+      rigidez arterial y flujo cerebral::
+    </p>
+
+    <div class="pathway">
+      <div class="path-row">
+        <span class="path-node blue">↑ PP</span>
+        <span class="path-arrow">→</span>
+        <span style="color:#555">mayor rigidez arterial sistémica</span>
+        <span class="path-arrow">→</span>
+        <span style="color:#555">↑ PWV</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node orange">↓ ATT</span>
+        <span class="path-coef neg">(flujo más rápido)</span>
+      </div>
+      <div class="path-row" style="margin-top:8px">
+        <span class="path-node blue">↑ PP</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node green">↑ PI</span>
+        <span class="path-arrow">→</span>
+        <span style="color:#555">mayor rigidez</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node orange">↓ ATT</span>
+        <span class="path-coef neg">(esperábamos este efecto)</span>
+      </div>
+    </div>
+
+    <p>
+      La <strong>Pulse Pressure (PP)</strong> es la diferencia entre presión sistólica y diastólica
+      medida en clínica, un proxy ampliamente validado de la rigidez de las grandes arterias.
+      La <strong>Pulsatility Index (PI)</strong>, medida por 4D flow MRI territorio a territorio,
+      refleja cuánto varía el flujo arterial a lo largo del ciclo cardíaco en el árbol vascular
+      cerebral. El <strong>Arterial Transit Time (ATT)</strong>, cuantificado mediante ASL perfusion MRI,
+      mide el tiempo que tarda la sangre arterial en llegar desde la arteria de etiquetado hasta el
+      parénquima cerebral: un ATT menor indica un tránsito más rápido.
+    </p>
+
+    <div class="callout info">
+      <div class="callout-title">Hipótesis previa</div>
+      <p>
+        Si PP y PI están asociadas positivamente (más rigidez → más pulsatilidad), entonces
+        PI → ATT debería ser también negativa: mayor PI → mayor rigidez → mayor PWV → menor ATT.
+        Esto es lo que predecía el modelo teórico.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── 2. LOS MODELOS ─────────────────────── -->
+  <section>
+    <div class="section-label">02 · Modelos estadísticos</div>
+    <h2>Resultados de los cuatro modelos lineales mixtos</h2>
+
+    <p>
+      Se ajustaron cuatro modelos lineales mixtos con efectos aleatorios por territorio y por sujeto
+      (<code style="font-family:var(--mono);font-size:13px">+ (1|territory) + (1|subject)</code>),
+      controlando por edad, sexo, hematocrito y puntuación cognitiva (score2).
+    </p>
+
+    <h3>Modelo 1 — Predictor de PI <span style="font-size:14px;color:var(--ink-faint);font-weight:400">(pi ~ pp + covariables)</span></h3>
+    <div class="model-table-wrap">
+      <table>
+        <thead><tr>
+          <th>Parámetro</th><th>Coef.</th><th>Std.Err</th><th>P-valor</th><th>Sig.</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>Intercept</td><td>0.7366</td><td>0.0678</td><td>1.759e−27</td><td class="sig-star">***</td></tr>
+          <tr class="row-key"><td>pp</td><td>0.0045</td><td>0.0005</td><td>6.015e−17</td><td class="sig-star">***</td></tr>
+          <tr><td>age_c</td><td>0.0086</td><td>0.0012</td><td>7.353e−12</td><td class="sig-star">***</td></tr>
+          <tr><td>sex</td><td>−0.0495</td><td>0.0126</td><td>9.144e−05</td><td class="sig-star">***</td></tr>
+          <tr><td>hematocrit</td><td>−0.0012</td><td>0.0013</td><td>0.3531</td><td class="sig-ns">NS</td></tr>
+          <tr><td>score2</td><td>−0.0010</td><td>0.0037</td><td>0.7956</td><td class="sig-ns">NS</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px;color:var(--ink-faint);margin-top:-12px;">
+      Varianza residual: 0.010497 · LLF: 517.48 · Convergido: Sí
+    </p>
+
+    <h3>Modelo 2 — ATT predicho por PP <span style="font-size:14px;color:var(--ink-faint);font-weight:400">(att_mean ~ pp + covariables)</span></h3>
+    <div class="model-table-wrap">
+      <table>
+        <thead><tr>
+          <th>Parámetro</th><th>Coef.</th><th>Std.Err</th><th>P-valor</th><th>Sig.</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>Intercept</td><td>1.0512</td><td>0.0341</td><td>1.896e−208</td><td class="sig-star">***</td></tr>
+          <tr class="row-key"><td>pp</td><td>−0.0008</td><td>0.0002</td><td>0.0001401</td><td class="sig-star">***</td></tr>
+          <tr><td>age_c</td><td>0.0024</td><td>0.0005</td><td>4.014e−07</td><td class="sig-star">***</td></tr>
+          <tr><td>sex</td><td>0.0453</td><td>0.0049</td><td>1.817e−20</td><td class="sig-star">***</td></tr>
+          <tr><td>hematocrit</td><td>0.0035</td><td>0.0005</td><td>5.621e−12</td><td class="sig-star">***</td></tr>
+          <tr><td>score2</td><td>0.0003</td><td>0.0014</td><td>0.8355</td><td class="sig-ns">NS</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px;color:var(--ink-faint);margin-top:-12px;">
+      Varianza residual: 0.002035 · LLF: 1809.89 · Convergido: Sí
+    </p>
+
+    <h3>Modelo 3 — ATT predicho por PI <span style="font-size:14px;color:var(--ink-faint);font-weight:400">(att_mean ~ pi + covariables)</span></h3>
+    <div class="model-table-wrap">
+      <table>
+        <thead><tr>
+          <th>Parámetro</th><th>Coef.</th><th>Std.Err</th><th>P-valor</th><th>Sig.</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>Intercept</td><td>1.0008</td><td>0.0340</td><td>6.985e−191</td><td class="sig-star">***</td></tr>
+          <tr class="row-key"><td>pi</td><td>0.0146</td><td>0.0103</td><td>0.1541</td><td class="sig-ns">NS</td></tr>
+          <tr><td>age_c</td><td>0.0025</td><td>0.0005</td><td>3.742e−07</td><td class="sig-star">***</td></tr>
+          <tr><td>sex</td><td>0.0440</td><td>0.0049</td><td>2.863e−19</td><td class="sig-star">***</td></tr>
+          <tr><td>hematocrit</td><td>0.0038</td><td>0.0005</td><td>1.796e−13</td><td class="sig-star">***</td></tr>
+          <tr><td>score2</td><td>−0.0020</td><td>0.0013</td><td>0.1312</td><td class="sig-ns">NS</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <div class="callout-title">Hallazgo inesperado</div>
+      <p>PI no predice significativamente ATT en el modelo simple (p = 0.154). Esto contradice la
+      hipótesis inicial y es la señal de que algo más complejo ocurre en la estructura de confusión.</p>
+    </div>
+
+    <h3>Modelo 4 — ATT predicho por PI + PP <span style="font-size:14px;color:var(--ink-faint);font-weight:400">(modelo de mediación completo)</span></h3>
+    <div class="model-table-wrap">
+      <table>
+        <thead><tr>
+          <th>Parámetro</th><th>Coef.</th><th>Std.Err</th><th>P-valor</th><th>Sig.</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>Intercept</td><td>1.0332</td><td>0.0345</td><td>1.73e−196</td><td class="sig-star">***</td></tr>
+          <tr class="row-key"><td>pi</td><td>+0.0244</td><td>0.0105</td><td>0.01948</td><td class="sig-one">*</td></tr>
+          <tr class="row-key"><td>pp</td><td>−0.0009</td><td>0.0002</td><td>2.271e−05</td><td class="sig-star">***</td></tr>
+          <tr><td>age_c</td><td>0.0022</td><td>0.0005</td><td>5.02e−06</td><td class="sig-star">***</td></tr>
+          <tr><td>sex</td><td>0.0465</td><td>0.0049</td><td>2.494e−21</td><td class="sig-star">***</td></tr>
+          <tr><td>hematocrit</td><td>0.0036</td><td>0.0005</td><td>3.487e−12</td><td class="sig-star">***</td></tr>
+          <tr><td>score2</td><td>0.0003</td><td>0.0014</td><td>0.8225</td><td class="sig-ns">NS</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px;color:var(--ink-faint);margin-top:-12px;">
+      Varianza residual: 0.002009 · LLF: 1808.98 · Convergido: Sí
+    </p>
+  </section>
+
+  <!-- ─────────────────────── 3. DIAGRAMA ─────────────────────── -->
+  <section>
+    <div class="section-label">03 · Modelo de mediación</div>
+    <h2>Diagrama de efectos con coeficientes y significancia</h2>
+
+    <div class="diagram-wrap">
+      <svg width="780" height="185" xmlns="http://www.w3.org/2000/svg" font-family="'DM Sans',Arial,sans-serif" viewBox="0 0 780 185">
+        <!-- PP box -->
+        <rect x="10" y="30" width="180" height="100" rx="12" fill="#D6E8F7" stroke="#2a6496" stroke-width="2.2"/>
+        <text x="100" y="57" text-anchor="middle" font-weight="700" font-size="16" fill="#1a3a5a">PP</text>
+        <text x="100" y="74" text-anchor="middle" font-size="11" fill="#1a3a5a">(Pulse Pressure)</text>
+        <text x="100" y="90" text-anchor="middle" font-size="10" fill="#2a6496">Medido por paciente</text>
+        <text x="100" y="104" text-anchor="middle" font-size="10" fill="#2a6496">(BPXSYM – BPXDIM)</text>
+
+        <!-- PI box -->
+        <rect x="300" y="30" width="180" height="100" rx="12" fill="#D5ECD5" stroke="#2e7d4f" stroke-width="2.2"/>
+        <text x="390" y="57" text-anchor="middle" font-weight="700" font-size="16" fill="#1a4a1a">PI</text>
+        <text x="390" y="74" text-anchor="middle" font-size="11" fill="#1a4a1a">(Pulsatility Index)</text>
+        <text x="390" y="90" text-anchor="middle" font-size="10" fill="#2e7d4f">Medido por territorio</text>
+        <text x="390" y="104" text-anchor="middle" font-size="10" fill="#2e7d4f">(4D flow MRI)</text>
+
+        <!-- ATT box -->
+        <rect x="590" y="30" width="180" height="100" rx="12" fill="#FDEBD0" stroke="#b85c1a" stroke-width="2.2"/>
+        <text x="680" y="57" text-anchor="middle" font-weight="700" font-size="16" fill="#6b2d0a">ATT</text>
+        <text x="680" y="74" text-anchor="middle" font-size="11" fill="#6b2d0a">(Arterial Transit Time)</text>
+        <text x="680" y="90" text-anchor="middle" font-size="10" fill="#b85c1a">Medido por territorio</text>
+        <text x="680" y="104" text-anchor="middle" font-size="10" fill="#b85c1a">(ASL perfusión)</text>
+
+        <!-- Arrow markers -->
+        <defs>
+          <marker id="arr-g" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0,9 3,0 6" fill="#2e7d4f"/>
+          </marker>
+          <marker id="arr-r" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0,9 3,0 6" fill="#c0392b"/>
+          </marker>
+          <marker id="arr-d" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0,9 3,0 6" fill="#888"/>
+          </marker>
+        </defs>
+
+        <!-- a: PP → PI (green, positive) -->
+        <line x1="191" y1="80" x2="298" y2="80" stroke="#2e7d4f" stroke-width="2.2" marker-end="url(#arr-g)"/>
+        <text x="245" y="60" text-anchor="middle" font-style="italic" font-size="12" fill="#555">a</text>
+        <text x="245" y="74" text-anchor="middle" font-size="11" fill="#2e7d4f" font-weight="600">+0.0045 ***</text>
+
+        <!-- b: PI → ATT (green, positive) -->
+        <line x1="481" y1="80" x2="588" y2="80" stroke="#2e7d4f" stroke-width="2.2" marker-end="url(#arr-g)"/>
+        <text x="535" y="60" text-anchor="middle" font-style="italic" font-size="12" fill="#555">b</text>
+        <text x="535" y="74" text-anchor="middle" font-size="11" fill="#2e7d4f" font-weight="600">+0.0244 *</text>
+
+        <!-- c': PP → ATT direct (dashed, red, negative) -->
+        <line x1="191" y1="145" x2="588" y2="145" stroke="#c0392b" stroke-width="1.8"
+              stroke-dasharray="7,4" marker-end="url(#arr-r)"/>
+        <text x="390" y="163" text-anchor="middle" font-style="italic" font-size="12" fill="#888">c′ (efecto directo)</text>
+        <text x="390" y="178" text-anchor="middle" font-size="11" fill="#c0392b" font-weight="600">−0.0009 ***</text>
+      </svg>
+    </div>
+
+    <!-- Effect cards -->
+    <div class="cards">
+      <div class="card blue">
+        <div class="card-path">Efecto a · PP → PI</div>
+        <div class="card-coef">+0.0045</div>
+        <div class="card-sig">p = 6.0×10⁻¹⁷ · ***</div>
+        <div class="card-desc">Por cada mmHg adicional de PP, el PI cerebral aumenta 0.0045 unidades. Efecto positivo, muy robusto.</div>
+      </div>
+      <div class="card green">
+        <div class="card-path">Efecto b · PI → ATT | PP</div>
+        <div class="card-coef">+0.0244</div>
+        <div class="card-sig">p = 0.019 · *</div>
+        <div class="card-desc">Controlando PP, mayor PI se asocia a mayor ATT (tránsito más lento). Solo emerge al controlar PP.</div>
+      </div>
+      <div class="card red">
+        <div class="card-path">Efecto c′ · PP → ATT | PI</div>
+        <div class="card-coef">−0.0009</div>
+        <div class="card-sig">p = 2.3×10⁻⁵ · ***</div>
+        <div class="card-desc">PP reduce ATT directamente (tránsito más rápido), independientemente del nivel de PI.</div>
+      </div>
+      <div class="card gold">
+        <div class="card-path">Efecto indirecto · a × b</div>
+        <div class="card-coef">+0.000109</div>
+        <div class="card-sig">Mediación competitiva</div>
+        <div class="card-desc">PP aumenta PI, que a su vez aumenta ATT. Este efecto <em>contrarresta parcialmente</em> el efecto directo.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── 4. INTERPRETACIÓN ─────────────────────── -->
+  <section>
+    <div class="section-label">04 · Interpretación</div>
+    <h2>¿Por qué PI → ATT era no significativo en el modelo simple?</h2>
+
+    <p>
+      Este es el hallazgo metodológicamente más relevante del análisis. En el modelo simple
+      <code style="font-family:var(--mono);font-size:13px">att_mean ~ pi</code>, el efecto de PI es
+      positivo pero no significativo (β = 0.0146, p = 0.154). Esto no significa que PI sea irrelevante,
+      sino que la señal está siendo cancelada por dos fuerzas opuestas que PI arrastra consigo.
+    </p>
+
+    <h3>La variable supresora: PP como confundidor activo</h3>
+
+    <p>
+      PI está positivamente correlacionado con PP: a más rigidez sistémica, más pulsatilidad cerebral
+      (efecto <em>a</em>, muy significativo). Pero PP también reduce el ATT directamente por la vía
+      hemodinámica global (efecto <em>c'</em>). Esto significa que en el modelo simple, PI "lleva
+      consigo" la influencia de PP, y esa influencia es de signo contrario al efecto intrínseco de PI.
+    </p>
+
+    <div class="callout key">
+      <div class="callout-title">Mecanismo de cancelación</div>
+      <p>
+        En el modelo simple <code style="font-family:var(--mono);font-size:13px">att ~ pi</code>,
+        PI mezcla dos señales:<br><br>
+        <strong>① Señal macro (compartida con PP):</strong> PI alto → PP alta → PWV rápida → ATT baja (negativo)<br>
+        <strong>② Señal micro (local cerebrovascular):</strong> PI alto → resistencia local → ATT alta (positivo)<br><br>
+        Estas dos señales se <strong>anulan mutuamente</strong>, produciendo un efecto neto no significativo.
+        Al introducir PP en el modelo, PP "absorbe" la señal macro y PI queda libre para expresar
+        únicamente su señal microvascular.
+      </p>
+    </div>
+
+    <h3>PP y PI capturan la rigidez a escalas distintas</h3>
+
+    <p>
+      La interpretación fisiopatológica más coherente con estos resultados es que las dos variables
+      reflejan fenómenos biológicamente distintos a pesar de estar correlacionadas:
+    </p>
+
+    <p>
+      <strong>PP</strong> es una medida <strong>sistémica y periférica</strong> de la rigidez.
+      Refleja fundamentalmente la compliance de las grandes arterias (aorta, carótidas). Una PP
+      elevada implica que la onda de pulso se propaga más rápido por toda la vasculatura → el frente
+      de onda llega antes al parénquima cerebral → ATT disminuye. Este es el mecanismo clásico bien
+      conocido: <em>mayor PWV global → menor tiempo de tránsito</em>.
+    </p>
+
+    <p>
+      <strong>PI</strong> medido por 4D flow MRI territorio a territorio es una medida
+      <strong>local y cerebrovascular</strong>. Un PI elevado en un territorio específico no solo
+      significa que "la onda llega más rápido", sino que refleja <strong>mayor resistencia
+      microvascular local o menor compliance cerebrovascular en ese territorio</strong>. Una microvasculatura
+      más rígida o con mayor tono vasomotor impone mayor resistencia al flujo → el tránsito de la sangre
+      <em>dentro</em> de ese territorio es más lento → ATT aumenta.
+    </p>
+
+    <div class="callout info">
+      <div class="callout-title">Analogía intuitiva</div>
+      <p>
+        Imagina una red de tuberías: la PP mide la presión en la entrada del edificio (¿llega la
+        presión con fuerza?), mientras que el PI mide la rigidez de las tuberías individuales de
+        cada piso (¿fluye bien una vez dentro?). Una entrada a presión alta puede hacer llegar el
+        agua más rápido, pero si los tubos internos están calcificados, el agua circula peor por
+        ellos una vez llegada.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── 5. MEDIACIÓN ─────────────────────── -->
+  <section>
+    <div class="section-label">05 · Mediación competitiva</div>
+    <h2>Dos mecanismos opuestos: la mediación competitiva</h2>
+
+    <p>
+      El modelo de mediación revela que PP activa simultáneamente dos mecanismos sobre ATT con
+      signos contrarios. Esto se denomina <strong>mediación competitiva</strong> (también llamada
+      mediación supresora parcial).
+    </p>
+
+    <div class="pathway">
+      <div style="color:#888;font-size:12px;margin-bottom:16px;letter-spacing:0.05em">VÍA 1 · EFECTO DIRECTO (hemodinámico global)</div>
+      <div class="path-row">
+        <span class="path-node blue">↑ PP</span>
+        <span class="path-arrow">→</span>
+        <span style="color:#555;font-size:13px">↑ PWV sistémica</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node orange">↓ ATT</span>
+        <span class="path-coef neg">c′ = −0.0009 ***</span>
+      </div>
+
+      <div style="color:#888;font-size:12px;margin-top:24px;margin-bottom:16px;letter-spacing:0.05em">VÍA 2 · EFECTO INDIRECTO (microvascular cerebral)</div>
+      <div class="path-row">
+        <span class="path-node blue">↑ PP</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node green">↑ PI</span>
+        <span class="path-coef pos">a = +0.0045 ***</span>
+      </div>
+      <div class="path-row" style="padding-left:60px;margin-top:8px">
+        <span class="path-node green">↑ PI</span>
+        <span class="path-arrow">→</span>
+        <span style="color:#555;font-size:13px">↑ resistencia microvascular local</span>
+        <span class="path-arrow">→</span>
+        <span class="path-node orange">↑ ATT</span>
+        <span class="path-coef pos">b = +0.0244 *</span>
+      </div>
+      <div class="path-row" style="padding-left:60px;margin-top:4px">
+        <span style="color:#888;font-size:12px">Efecto indirecto neto: a × b = +0.000109</span>
+      </div>
+    </div>
+
+    <p>
+      El <strong>efecto total</strong> de PP sobre ATT es la suma del efecto directo (c′) y el
+      indirecto (a×b): −0.0009 + 0.000109 ≈ <strong>−0.00079</strong>. El efecto neto es negativo
+      (tránsito más rápido a mayor PP), pero el componente indirecto lo amortigua parcialmente.
+    </p>
+
+    <div class="callout danger">
+      <div class="callout-title">Implicación clínica</div>
+      <p>
+        La pulsatilidad excesiva transmitida al cerebro no es solo un epifenómeno pasivo de la
+        rigidez sistémica. Los resultados sugieren que es un <strong>mecanismo activo de daño
+        microvascular</strong>: cuanta más pulsatilidad recibe un territorio cerebral, más lento
+        es el tránsito dentro de ese territorio, lo que podría comprometer la perfusión y favorecer
+        lesiones de sustancia blanca, independientemente del efecto global de velocidad de onda.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── 6. RESUMEN ─────────────────────── -->
+  <section>
+    <div class="section-label">06 · Conclusiones</div>
+    <h2>Síntesis y lectura integradora</h2>
+
+    <div class="summary">
+      <h3>Lo que el modelo de mediación nos enseña</h3>
+      <ul>
+        <li>PP y PI están positivamente asociadas, confirmando que la rigidez sistémica se transmite al árbol cerebrovascular como mayor pulsatilidad local.</li>
+        <li>PP reduce ATT directamente (flujo más rápido) a través del efecto clásico de PWV — confirmado y robusto (***). Este es el mecanismo esperado.</li>
+        <li>PI, controlando PP, <em>aumenta</em> ATT (flujo más lento). Esto contradice la hipótesis simple pero es coherente con un rol de PI como marcador de resistencia microvascular local, no solo de velocidad de onda.</li>
+        <li>El efecto aparentemente nulo de PI en el modelo simple (p = 0.154) es un artefacto de confusión supresora: PP cancela el efecto de PI al estar correlacionada con él y tener efecto de signo opuesto sobre ATT.</li>
+        <li>El efecto indirecto (a×b = +0.000109) es pequeño pero conceptualmente crucial: PP genera pulsatilidad que daña la microvasculatura, un mecanismo que contrarresta parcialmente su propio efecto acelerador del flujo.</li>
+        <li>PP y PI son proxies de la rigidez arterial a <strong>escalas distintas</strong>: PP es sistémica/periférica; PI es local/cerebrovascular. Esta distinción de escala es la clave para entender los signos opuestos.</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="container">
+    Análisis de mediación · Modelos lineales mixtos · Neuroimagen cuantitativa · 4D flow MRI + ASL perfusion
+  </div>
+</footer>
+
+</body>
+</html>

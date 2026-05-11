@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from nvitk.pipes.pesa_fat.qc.expected_ranges import cell_out_of_range
+from nvitk.pipes.pesa_fat.qc.expected_ranges import cell_level
 
-WARN_BG = "#ffcccc"
+WARN_BG = "#fca311"
+BAD_BG = "#ff4d4d"
 
 
 def load_per_subject_tables(per_subject_dir: Path, subjects: list[str]) -> pd.DataFrame:
@@ -50,6 +51,11 @@ def dataframe_to_html_table(
         if "_" not in c:
             continue
         roi, metric = c.rsplit("_", 1)
+        # CT-PET aliasing: MO_L3/MO_L4 volume+nslices should appear under L3/L4 rows.
+        if roi == "MO_L3" and metric in ("VOL", "NSlices"):
+            roi = "L3"
+        elif roi == "MO_L4" and metric in ("VOL", "NSlices"):
+            roi = "L4"
         parsed.append((roi, metric, c, val))
 
     if not parsed:
@@ -70,8 +76,12 @@ def dataframe_to_html_table(
         for metric in metrics:
             full_col, val = lut.get((roi, metric), ("", None))
             style = ""
-            if full_col and cell_out_of_range(full_col, val, ranges):
-                style = f' style="background-color:{WARN_BG}"'
+            if full_col:
+                lvl = cell_level(full_col, val, ranges)
+                if lvl == "warn":
+                    style = f' style="background-color:{WARN_BG};color:#000000"'
+                elif lvl == "bad":
+                    style = f' style="background-color:{BAD_BG};color:#000000"'
             if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
                 disp = ""
             else:

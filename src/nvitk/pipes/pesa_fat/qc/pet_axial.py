@@ -106,11 +106,15 @@ def _render_slice_png(
     mask_2d: np.ndarray,
     *,
     title: str,
+    rotate90: bool = False,
 ) -> bytes:
     # same as axial helper but shared for sagittal
-    fig, ax = plt.subplots(figsize=(4, 4))
+    fig, ax = plt.subplots(figsize=(5.2, 5.2))
     v = np.asarray(vol_2d, dtype=np.float64)
     m = mask_2d > 0
+    if rotate90:
+        v = np.rot90(v, k=1)
+        m = np.rot90(m, k=1)
     if np.any(np.isfinite(v)) and v.size:
         lo, hi = np.nanpercentile(v[m] if np.any(m) else v, (2, 98))
         if hi <= lo:
@@ -123,7 +127,7 @@ def _render_slice_png(
     ax.set_title(title, fontsize=8)
     ax.axis("off")
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", pad_inches=0.05)
+    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
     return buf.getvalue()
 
@@ -133,9 +137,12 @@ def _viewer_html(
     title: str,
     roi_names: list[str],
     roi_to_axial: dict[str, list[str]],
+    roi_to_cor: dict[str, list[str]],
     roi_to_sag: dict[str, list[str]],
     roi_to_ax_mid: dict[str, int],
+    roi_to_cor_mid: dict[str, int],
     roi_to_sag_mid: dict[str, int],
+    default_roi: str | None = None,
 ) -> str:
     # Build JS object literal safely via repr (strings are data URIs).
     def js_map(d: dict[str, list[str]]) -> str:
@@ -154,16 +161,21 @@ def _viewer_html(
     <strong>{title}</strong>
     <label>ROI <select id="{dom_id}_roi">{roi_opts}</select></label>
   </div>
-  <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px">
-    <div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;align-items:start">
+    <div style="grid-column:1">
       <div class="muted">Axial</div>
-      <img id="{dom_id}_ax_img" style="max-width:420px;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
+      <img id="{dom_id}_ax_img" style="max-width:560px;width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
       <div><input type="range" id="{dom_id}_ax_r" min="0" max="0" value="0" step="1"/></div>
     </div>
-    <div>
+    <div style="grid-column:2">
       <div class="muted">Sagittal</div>
-      <img id="{dom_id}_sg_img" style="max-width:420px;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
+      <img id="{dom_id}_sg_img" style="max-width:560px;width:100%;max-height:420px;object-fit:contain;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
       <div><input type="range" id="{dom_id}_sg_r" min="0" max="0" value="0" step="1"/></div>
+    </div>
+    <div style="grid-column:1 / span 2">
+      <div class="muted">Coronal</div>
+      <img id="{dom_id}_co_img" style="max-width:560px;width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
+      <div><input type="range" id="{dom_id}_co_r" min="0" max="0" value="0" step="1"/></div>
     </div>
   </div>
 </div>
@@ -171,25 +183,33 @@ def _viewer_html(
 (function() {{
   var keyToRoi = {key_js};
   var axial = {js_map(roi_to_axial)};
+  var cor = {js_map(roi_to_cor)};
   var sag = {js_map(roi_to_sag)};
   var axMid = {roi_to_ax_mid!r};
+  var coMid = {roi_to_cor_mid!r};
   var sgMid = {roi_to_sag_mid!r};
   var sel = document.getElementById("{dom_id}_roi");
   var axImg = document.getElementById("{dom_id}_ax_img");
+  var coImg = document.getElementById("{dom_id}_co_img");
   var sgImg = document.getElementById("{dom_id}_sg_img");
   var axR = document.getElementById("{dom_id}_ax_r");
+  var coR = document.getElementById("{dom_id}_co_r");
   var sgR = document.getElementById("{dom_id}_sg_r");
 
   function updRoi() {{
     var key = sel.value;
     var roi = keyToRoi[key];
     var ax = axial[roi] || [];
+    var co = cor[roi] || [];
     var sg = sag[roi] || [];
     axR.max = Math.max(0, ax.length - 1);
+    coR.max = Math.max(0, co.length - 1);
     sgR.max = Math.max(0, sg.length - 1);
     axR.value = Math.min(axR.max, (axMid[roi] || 0));
+    coR.value = Math.min(coR.max, (coMid[roi] || 0));
     sgR.value = Math.min(sgR.max, (sgMid[roi] || 0));
     axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
+    coImg.src = co.length ? co[parseInt(coR.value,10)] : "";
     sgImg.src = sg.length ? sg[parseInt(sgR.value,10)] : "";
   }}
 
@@ -198,6 +218,11 @@ def _viewer_html(
     var ax = axial[roi] || [];
     axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
   }};
+  coR.oninput = function() {{
+    var roi = keyToRoi[sel.value];
+    var co = cor[roi] || [];
+    coImg.src = co.length ? co[parseInt(coR.value,10)] : "";
+  }};
   sgR.oninput = function() {{
     var roi = keyToRoi[sel.value];
     var sg = sag[roi] || [];
@@ -205,6 +230,10 @@ def _viewer_html(
   }};
 
   sel.onchange = updRoi;
+  var preferred = {default_roi!r};
+  if (preferred && Object.values(keyToRoi).indexOf(preferred) >= 0) {{
+    for (var k in keyToRoi) {{ if (keyToRoi[k] === preferred) {{ sel.value = k; break; }} }}
+  }}
   updRoi();
 }})();
 </script>
@@ -229,8 +258,10 @@ def build_ctpet_slice_viewer_html(
     cache: dict[str, Image] = {}
     roi_names: list[str] = []
     roi_to_ax: dict[str, list[str]] = {}
+    roi_to_co: dict[str, list[str]] = {}
     roi_to_sg: dict[str, list[str]] = {}
     roi_ax_mid: dict[str, int] = {}
+    roi_co_mid: dict[str, int] = {}
     roi_sg_mid: dict[str, int] = {}
 
     for disp, mask_file, label_ids in _ctpet_roi_specs():
@@ -251,34 +282,41 @@ def build_ctpet_slice_viewer_html(
 
         coords = np.argwhere(m)
         z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
-        x0, x1 = int(coords[:, 0].min()), int(coords[:, 0].max())
-        y0, y1 = int(coords[:, 1].min()), int(coords[:, 1].max())
-        x0 = max(0, x0 - margin_vox)
-        y0 = max(0, y0 - margin_vox)
+        # Only crop in Z (show full XY with neighbors)
         z0 = max(0, z0 - margin_vox)
-        x1 = min(ct_arr.shape[0] - 1, x1 + margin_vox)
-        y1 = min(ct_arr.shape[1] - 1, y1 + margin_vox)
         z1 = min(ct_arr.shape[2] - 1, z1 + margin_vox)
 
         # axial slices over z
-        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[x0 : x1 + 1, y0 : y1 + 1, z])]
+        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
         if not z_indices:
             continue
         ax_uris: list[str] = []
         for z in z_indices:
-            sl = ct_arr[x0 : x1 + 1, y0 : y1 + 1, z]
-            sl_m = m[x0 : x1 + 1, y0 : y1 + 1, z]
+            sl = ct_arr[:, :, z]
+            sl_m = m[:, :, z]
             ax_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} axial z={z}")))
         roi_to_ax[disp] = ax_uris
         roi_ax_mid[disp] = len(ax_uris) // 2
 
+        # coronal slices over y (X x Z plane)
+        y_indices = [y for y in range(0, ct_arr.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]
+        if not y_indices:
+            y_indices = [ct_arr.shape[1] // 2]
+        co_uris: list[str] = []
+        for y in y_indices:
+            sl = ct_arr[:, y, z0 : z1 + 1]
+            sl_m = m[:, y, z0 : z1 + 1]
+            co_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} coronal y={y}")))
+        roi_to_co[disp] = co_uris
+        roi_co_mid[disp] = len(co_uris) // 2
+
         # sagittal slices over x
-        x_indices = [x for x in range(x0, x1 + 1) if np.any(m[x, y0 : y1 + 1, z0 : z1 + 1])]
+        x_indices = [x for x in range(0, ct_arr.shape[0]) if np.any(m[x, :, z0 : z1 + 1])]
         sg_uris: list[str] = []
         for x in x_indices:
-            sl = ct_arr[x, y0 : y1 + 1, z0 : z1 + 1]
-            sl_m = m[x, y0 : y1 + 1, z0 : z1 + 1]
-            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}")))
+            sl = ct_arr[x, :, z0 : z1 + 1]
+            sl_m = m[x, :, z0 : z1 + 1]
+            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}", rotate90=True)))
         roi_to_sg[disp] = sg_uris
         roi_sg_mid[disp] = len(sg_uris) // 2
 
@@ -290,9 +328,12 @@ def build_ctpet_slice_viewer_html(
         title="CT-PET slices (CT underlay)",
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
+        roi_to_cor=roi_to_co,
         roi_to_sag=roi_to_sg,
         roi_to_ax_mid=roi_ax_mid,
+        roi_to_cor_mid=roi_co_mid,
         roi_to_sag_mid=roi_sg_mid,
+        default_roi="HIGADO",
     )
 
 
@@ -331,8 +372,10 @@ def build_dixon_slice_viewer_html(
     cache_water: dict[str, np.ndarray] = {}
     roi_names: list[str] = []
     roi_to_ax: dict[str, list[str]] = {}
+    roi_to_co: dict[str, list[str]] = {}
     roi_to_sg: dict[str, list[str]] = {}
     roi_ax_mid: dict[str, int] = {}
+    roi_co_mid: dict[str, int] = {}
     roi_sg_mid: dict[str, int] = {}
 
     for disp, region, mask_file, label_ids in _dixon_roi_specs():
@@ -356,33 +399,40 @@ def build_dixon_slice_viewer_html(
 
         coords = np.argwhere(m)
         z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
-        x0, x1 = int(coords[:, 0].min()), int(coords[:, 0].max())
-        y0, y1 = int(coords[:, 1].min()), int(coords[:, 1].max())
-        x0 = max(0, x0 - margin_vox)
-        y0 = max(0, y0 - margin_vox)
+        # Only crop in Z (show full XY with neighbors)
         z0 = max(0, z0 - margin_vox)
-        x1 = min(vol.shape[0] - 1, x1 + margin_vox)
-        y1 = min(vol.shape[1] - 1, y1 + margin_vox)
         z1 = min(vol.shape[2] - 1, z1 + margin_vox)
 
-        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[x0 : x1 + 1, y0 : y1 + 1, z])]
+        z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
         if not z_indices:
             continue
 
         ax_uris: list[str] = []
         for z in z_indices:
-            sl = vol[x0 : x1 + 1, y0 : y1 + 1, z]
-            sl_m = m[x0 : x1 + 1, y0 : y1 + 1, z]
+            sl = vol[:, :, z]
+            sl_m = m[:, :, z]
             ax_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} axial z={z}")))
         roi_to_ax[disp] = ax_uris
         roi_ax_mid[disp] = len(ax_uris) // 2
 
-        x_indices = [x for x in range(x0, x1 + 1) if np.any(m[x, y0 : y1 + 1, z0 : z1 + 1])]
+        # coronal slices over y
+        y_indices = [y for y in range(0, vol.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]
+        if not y_indices:
+            y_indices = [vol.shape[1] // 2]
+        co_uris: list[str] = []
+        for y in y_indices:
+            sl = vol[:, y, z0 : z1 + 1]
+            sl_m = m[:, y, z0 : z1 + 1]
+            co_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} coronal y={y}")))
+        roi_to_co[disp] = co_uris
+        roi_co_mid[disp] = len(co_uris) // 2
+
+        x_indices = [x for x in range(0, vol.shape[0]) if np.any(m[x, :, z0 : z1 + 1])]
         sg_uris: list[str] = []
         for x in x_indices:
-            sl = vol[x, y0 : y1 + 1, z0 : z1 + 1]
-            sl_m = m[x, y0 : y1 + 1, z0 : z1 + 1]
-            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}")))
+            sl = vol[x, :, z0 : z1 + 1]
+            sl_m = m[x, :, z0 : z1 + 1]
+            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}", rotate90=True)))
         roi_to_sg[disp] = sg_uris
         roi_sg_mid[disp] = len(sg_uris) // 2
 
@@ -394,9 +444,12 @@ def build_dixon_slice_viewer_html(
         title="Dixon slices (WATER underlay)",
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
+        roi_to_cor=roi_to_co,
         roi_to_sag=roi_to_sg,
         roi_to_ax_mid=roi_ax_mid,
+        roi_to_cor_mid=roi_co_mid,
         roi_to_sag_mid=roi_sg_mid,
+        default_roi="LIVER",
     )
 
 

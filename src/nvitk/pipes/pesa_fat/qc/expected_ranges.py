@@ -1,8 +1,13 @@
-"""Expected value ranges for QC table highlighting (placeholders until populated).
+"""Expected value thresholds for QC table highlighting.
 
 Keys match spreadsheet column names from stage-3 ``column_order()`` (excluding ``pesa_id``).
-Values are ``(min_expected, max_expected)``. Use ``float('nan')`` for either bound to mean
-\"no limit\" on that side; if either bound is non-finite, the cell is not highlighted.
+Values are ``(floor, warn_high, bad_high)``:
+
+- red if value < floor (when floor finite)
+- orange if value > warn_high (when warn_high finite) AND value <= bad_high (when bad_high finite)
+- red if value > bad_high (when bad_high finite)
+
+Use ``None`` or ``nan`` to disable any threshold.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 
 _NAN = float("nan")
+Threshold = tuple[float | None, float | None, float | None]
 
 
 def _ctpet_measurement_columns() -> list[str]:
@@ -34,42 +40,67 @@ def _dixon_measurement_columns() -> list[str]:
     return cols
 
 
-def _placeholder_map(columns: list[str]) -> dict[str, tuple[float, float]]:
-    return {c: (_NAN, _NAN) for c in columns}
+def _placeholder_map(columns: list[str]) -> dict[str, Threshold]:
+    return {c: (None, None, None) for c in columns}
 
 
-EXPECTED_RANGES_CTPET: dict[str, tuple[float, float]] = _placeholder_map(
-    _ctpet_measurement_columns()
-)
-EXPECTED_RANGES_DIXON: dict[str, tuple[float, float]] = _placeholder_map(
-    _dixon_measurement_columns()
-)
+EXPECTED_RANGES_CTPET: dict[str, Threshold] = _placeholder_map(_ctpet_measurement_columns())
+EXPECTED_RANGES_DIXON: dict[str, Threshold] = _placeholder_map(_dixon_measurement_columns())
+
+# ---------------------------------------------------------------------------
+# Concrete thresholds requested (v2 incremental)
+# ---------------------------------------------------------------------------
+
+# Fat SUV thresholds (all SUV stats)
+_FAT_ROIS = ("GRASA_V", "GRASA_SC", "GRASA_V_BATCH", "GRASA_SC_BATCH")
+_SUV_SUFFIXES = tuple(suf for suf, _ in ct_cfg.SUV_STATS)  # SUVMAX, SUVmean, SUV95p, SUV99p
+for roi in _FAT_ROIS:
+    for suf in _SUV_SUFFIXES:
+        EXPECTED_RANGES_CTPET[f"{roi}_{suf}"] = (0.0, 5.0, 6.0)
+
+# Dixon FF thresholds (exclude bone narrow BN_*)
+for col in list(EXPECTED_RANGES_DIXON.keys()):
+    if not str(col).endswith("_FF"):
+        continue
+    if str(col).startswith("DIXON_BN_"):
+        continue
+    EXPECTED_RANGES_DIXON[col] = (0.0, 50.0, 100.0)
 
 
-def cell_out_of_range(
+def cell_level(
     column: str,
     value: float | int | None,
-    ranges: dict[str, tuple[float, float]],
-) -> bool:
-    """Return True if *value* is outside ``ranges[column]`` when both bounds are finite."""
+    ranges: dict[str, Threshold],
+) -> str | None:
+    """Return 'warn' | 'bad' | None for the given cell."""
     if column == "pesa_id" or column not in ranges:
-        return False
+        return None
     if value is None:
-        return False
+        return None
     try:
         v = float(value)
     except (TypeError, ValueError):
-        return False
+        return None
     if not math.isfinite(v):
-        return False
-    lo, hi = ranges[column]
-    if not math.isfinite(lo) or not math.isfinite(hi):
-        return False
-    return v < lo or v > hi
+        return None
+
+    floor, warn_high, bad_high = ranges[column]
+
+    def _finite(x: float | None) -> bool:
+        return x is not None and math.isfinite(float(x))
+
+    if _finite(floor) and v < float(floor):
+        return "bad"
+    if _finite(bad_high) and v > float(bad_high):
+        return "bad"
+    if _finite(warn_high) and v > float(warn_high):
+        # warn zone only makes sense when we also have a bad_high, but keep warn regardless
+        return "warn"
+    return None
 
 
 __all__ = [
     "EXPECTED_RANGES_CTPET",
     "EXPECTED_RANGES_DIXON",
-    "cell_out_of_range",
+    "cell_level",
 ]
