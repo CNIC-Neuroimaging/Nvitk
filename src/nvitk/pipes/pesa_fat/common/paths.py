@@ -20,10 +20,8 @@ from typing import Iterator
 from nvitk.cluster import sge_json as _sj
 
 DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
-# DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
-# DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
-DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
+DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
+DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
 DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
 DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")

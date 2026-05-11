@@ -38,10 +38,14 @@
         "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
       },
       "pesa_fat_ct_pet": {
+        "log_subdir": "PESAFatV5-CT-PET",
+        "err_subdir": "PESAFatV5-CT-PET",
         "default_sge_model_root":     "/references/AI_models/totalsegmentator",
         "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
       },
       "pesa_fat_dixon": {
+        "log_subdir": "PESAFatV5-DIXON",
+        "err_subdir": "PESAFatV5-DIXON",
         "default_sge_model_root":     "/references/AI_models/totalsegmentator",
         "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
       }
