@@ -27,20 +27,35 @@ def _is_nifti(p: Path) -> bool:
     return p.is_file() and (p.suffix == ".gz" and p.name.endswith(".nii.gz") or p.suffix == ".nii")
 
 
+def _stem_endswith_resampled(p: Path) -> bool:
+    """True for ``<img>_resampled.nii`` / ``<img>_resampled.nii.gz`` style outputs."""
+    name = p.name
+    if name.lower().endswith(".nii.gz"):
+        stem = name[: -len(".nii.gz")]
+    elif name.lower().endswith(".nii"):
+        stem = name[: -len(".nii")]
+    else:
+        return False
+    return stem.lower().endswith("_resampled")
+
+
 def segmentation_outputs_to_keep(out_dir: Path) -> list[Path]:
-    """Pick CoW + whole-brain eICAB NIfTIs; ignore resampled / non-segmentation."""
+    """Pick CoW, whole-brain, and ``*_resampled`` NIfTIs; drop other intermediates."""
     kept: list[Path] = []
     for p in sorted(out_dir.rglob("*")):
         if not _is_nifti(p):
             continue
         name = p.name
+        if _stem_endswith_resampled(p):
+            kept.append(p)
+            continue
         if _RESAMPLED_RE.search(name):
             continue
         if _COW_RE.search(name):
             kept.append(p)
         elif _WB_RE.search(name):
             kept.append(p)
-    return kept
+    return list(dict.fromkeys(kept))
 
 
 def prune_eicab_outputs(
