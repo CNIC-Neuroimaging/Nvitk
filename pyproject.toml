@@ -145,6 +145,7 @@ nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 # Segmentation scripts
 # -----------------------------------------------------------------------------
 nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
+nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 
 # -----------------------------------------------------------------------------
 # Miscellaneous scripts

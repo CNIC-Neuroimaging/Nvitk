@@ -20,18 +20,18 @@ from typing import Iterable, Sequence
 class SingularityBinds:
     """Container bind-points used by the PESA-Fat cluster pipeline."""
 
-    src: str = "/PESAFat/src/"
-    data: str = "/PESAFat/data/"
-    output: str = "/PESAFat/output/"
-    models: str = "/models/"
+    src: str = "/nvitk/src/"
+    data: str = "/nvitk/data/"
+    output: str = "/nvitk/output/"
+    models: str = "/nvitk/models/"
 
 
 @dataclass
 class SgeResources:
     """SGE submission resources."""
 
-    project: str = "GPU"
-    account: str = "Prod"
+    project: str = "MCC_GPU"
+    account: str = "MCC_GPU"
     ngpu: int = 1
     h_vmem: str = "50G"
     queue: str | None = None
@@ -81,8 +81,10 @@ def build_singularity_command(
     The returned string is what BioImaging piped into ``qsub`` via ``echo "$cmd" | qsub ...``.
     """
     binds = binds or SingularityBinds()
-    bind_input = f"{binds.data}{job.subject_input.name}"
-    bind_output = f"{binds.output}{job.subject_output.name}"
+    rel_in = job.subject_input.resolve().relative_to(paths.input_root.resolve())
+    rel_out = job.subject_output.resolve().relative_to(paths.output_root.resolve())
+    bind_input = f"{binds.data}{rel_in.as_posix()}"
+    bind_output = f"{binds.output}{rel_out.as_posix()}"
     subset_str = " ".join(job.roi_subset)
 
     script_path = f"{binds.src}{paths.inference_script}"

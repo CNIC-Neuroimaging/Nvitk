@@ -1,0 +1,49 @@
+{
+    "schema": "nvitk.sge.v1",
+    "defaults": {
+      "sge_project":    "GPU",
+      "sge_account":    "Prod",
+      "sge_queue":      null,
+      "sge_ngpu":       1,
+      "sge_h_vmem":     "50G",
+      "sge_cpu_ngpu":   0,
+      "sge_cpu_h_vmem": "32G",
+    },
+    "paths": {
+      "nvitk_src_dir":   "/data3/BIOIT_IMAGE/nvitk/src",
+      "sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
+      "sge_log_root":    "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/",
+      "sge_err_root":    "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/",
+      "cluster_host_aliases": {
+        "samwise": "10.149.80.48"
+      }
+    },
+    "pipelines": {
+      "eicab": {
+        "sge_project": "MCC",
+        "sge_ngpu":    0,
+        "sge_h_vmem":  "25G",
+        "log_subdir":  "eICAB",
+        "err_subdir":  "eICAB",
+        "default_sge_scripts_dir":    "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
+        "default_sge_container_root": "/images/eicab3.sif",
+        "default_vasculature_host_dir": "/programs/Neuro/vasculature2"
+      },
+      "totalsegmentator": {
+        "sge_project": "MCC_GPU",
+        "sge_account": "MCC_GPU",
+        "log_subdir": "totalseg",
+        "err_subdir": "totalseg",
+        "default_sge_model_root":     "/references/AI_models/totalsegmentator",
+        "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      },
+      "pesa_fat_ct_pet": {
+        "default_sge_model_root":     "/references/AI_models/totalsegmentator",
+        "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      },
+      "pesa_fat_dixon": {
+        "default_sge_model_root":     "/references/AI_models/totalsegmentator",
+        "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      }
+    }
+  }

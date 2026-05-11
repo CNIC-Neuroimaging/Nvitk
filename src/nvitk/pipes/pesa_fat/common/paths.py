@@ -12,9 +12,12 @@ All pipelines derive their per-subject paths from :class:`BatchLayout`.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+
+from nvitk.cluster import sge_json as _sj
 
 DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
 # DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
@@ -27,6 +30,16 @@ DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")
 DEFAULT_SGE_SCRIPTS_DIR = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/SCRIPTS_CLUSTER")
 
 CLUSTER_HOST_ALIASES: dict[str, str] = {'samwise': '10.149.80.48'}
+
+_ppaths = _sj.paths_section()
+_ppipe_paths = _sj.pipeline_section("pesa_fat_paths")
+if (v := _ppaths.get("nvitk_src_dir")):
+    DEFAULT_NVITK_SRC_DIR = Path(os.path.expanduser(str(v)))
+if (v := _ppaths.get("sge_scripts_dir")):
+    DEFAULT_SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
+CLUSTER_HOST_ALIASES = _sj.merge_cluster_host_aliases(
+    CLUSTER_HOST_ALIASES, _ppaths, _ppipe_paths
+)
 
 SUBJECT_GLOB = "PESA*"
 

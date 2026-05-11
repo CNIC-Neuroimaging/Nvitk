@@ -17,6 +17,9 @@ docs/
 .config/
 .config/*
 
+# Site-local SGE overrides
+# .nvitk/sge.json
+
 src/nvitk.egg-info/
 
 # Byte-compiled / optimized / DLL files

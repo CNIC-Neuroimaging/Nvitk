@@ -61,7 +61,8 @@ from nvitk.pipes.pesa_fat.common.paths import (
     layout,
     parse_subjects,
 )
-from nvitk.pipes.pesa_fat.common.sge import (
+from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
     SingularityBinds,
@@ -70,7 +71,6 @@ from nvitk.pipes.pesa_fat.common.sge import (
     write_script_header,
 )
 from nvitk.pipes.pesa_fat.common import stage0_convert
-from nvitk.pipes.pesa_fat.common.remote_submit import try_run_script_via_ssh
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5 import run as ctpet_run
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dixon_cfg
@@ -787,7 +787,7 @@ def main(
     host_resolved = CLUSTER_HOST_ALIASES.get(host_key, host_key)
     user = remote_user or click.prompt("SSH user")
     password = getpass.getpass("SSH password: ")
-    ok = try_run_script_via_ssh(host_resolved, user, password, script_path)
+    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
     if not ok:
         log.warning(
             "Remote execution did not complete successfully. Run manually on the "

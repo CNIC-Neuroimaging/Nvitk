@@ -1,0 +1,448 @@
+"""SGE + Singularity helpers shared across nvitk pipelines and segmentation CLIs.
+
+Generalises the ``echo <singularity exec ...> | qsub ...`` pattern so each stage
+(conversion, segmentation, post-processing, measurement) can be submitted as a
+self-contained Singularity job on an SGE cluster.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Iterable, Sequence, TextIO
+
+
+@dataclass
+class SingularityBinds:
+    """Container bind-points used by cluster pipelines."""
+
+    src: str = "/nvitk/src/"
+    data: str = "/nvitk/data/"
+    output: str = "/nvitk/output/"
+    models: str = "/models/"
+
+
+@dataclass
+class SgeResources:
+    """SGE submission resources."""
+
+    project: str = "GPU"
+    account: str = "Prod"
+    ngpu: int = 1
+    h_vmem: str = "50G"
+    queue: str | None = None
+
+
+@dataclass
+class ClusterPaths:
+    """Host-side paths that must exist before submission."""
+
+    src: Path
+    container: Path
+    models: Path | None
+    data_root: Path
+    output_root: Path
+    log_dir: Path
+    err_dir: Path
+
+    def ensure_dirs(self) -> None:
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.err_dir.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class StageSpec:
+    """A single SGE-submitted pipeline stage.
+
+    ``python_cmd`` is the literal command run *inside* the Singularity
+    container. Host paths referenced inside the command must fall within the
+    bind mounts defined by :class:`ClusterPaths` and :class:`SingularityBinds`.
+    """
+
+    job_name: str
+    python_cmd: str
+    resources: SgeResources = field(default_factory=SgeResources)
+    binds: SingularityBinds = field(default_factory=SingularityBinds)
+    extra_env: dict[str, str] = field(default_factory=dict)
+    use_nv: bool = True
+    #: Additional ``singularity exec -B host:container`` pairs (host paths only).
+    extra_host_binds: tuple[tuple[Path, str], ...] = field(default_factory=tuple)
+
+
+def build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str:
+    """Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds."""
+    env_exports = " ".join(
+        f'export {k}="{v}" &&' for k, v in spec.extra_env.items()
+    )
+    inner = f"{env_exports} {spec.python_cmd}".strip()
+    nv = "--nv " if spec.use_nv else ""
+    parts: list[str] = [
+        f"singularity exec {nv}",
+        f"-B {shlex.quote(str(paths.src))}:{shlex.quote(spec.binds.src)} ",
+        f"-B {shlex.quote(str(paths.data_root))}:{shlex.quote(spec.binds.data)} ",
+        f"-B {shlex.quote(str(paths.output_root))}:{shlex.quote(spec.binds.output)} ",
+    ]
+    if paths.models is not None:
+        parts.append(
+            f"-B {shlex.quote(str(paths.models))}:{shlex.quote(spec.binds.models)} "
+        )
+    for host, mnt in spec.extra_host_binds:
+        parts.append(
+            f"-B {shlex.quote(str(host))}:{shlex.quote(mnt)} "
+        )
+    parts.append(f"{shlex.quote(str(paths.container))} bash -c ")
+    parts.append(shlex.quote(inner))
+    return "".join(parts)
+
+
+def build_qsub_command(
+    spec: StageSpec,
+    paths: ClusterPaths,
+    *,
+    hold_jid: str | Sequence[str] | None = None,
+) -> list[str]:
+    """Build the ``qsub`` argv for *spec*."""
+    log_file = paths.log_dir / f"{spec.job_name}.log"
+    err_file = paths.err_dir / f"{spec.job_name}.err"
+
+    argv = [
+        "qsub",
+        "-P", spec.resources.project,
+        "-terse",
+        "-N", spec.job_name,
+        "-A", spec.resources.account,
+        "-l", f"ngpu={spec.resources.ngpu}",
+        "-l", f"h_vmem={spec.resources.h_vmem}",
+        "-o", str(log_file),
+        "-e", str(err_file),
+    ]
+    if spec.resources.queue:
+        argv.extend(["-q", spec.resources.queue])
+
+    if hold_jid:
+        if isinstance(hold_jid, str):
+            joined = hold_jid.strip()
+        else:
+            joined = ",".join(str(j).strip() for j in hold_jid if j)
+        if joined:
+            argv.extend(["-hold_jid", joined])
+
+    return argv
+
+
+def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
+    if hold_jid is None:
+        return "none"
+    if isinstance(hold_jid, str):
+        return hold_jid.strip() or "none"
+    joined = ",".join(str(h).strip() for h in hold_jid if h)
+    return joined or "none"
+
+
+def format_sge_submission_summary(
+    spec: StageSpec,
+    paths: ClusterPaths,
+    *,
+    hold_jid: str | Sequence[str] | None,
+    qsub_argv: Sequence[str],
+    singularity_cmd: str,
+    max_singularity_chars: int = 4000,
+) -> str:
+    """Human-readable lines for logging (qsub argv, resources, bind mounts)."""
+    r = spec.resources
+    lines: list[str] = [
+        "[nvitk|SGE] stage submission",
+        f"  job_name:        {spec.job_name}",
+        f"  hold_jid:        {_hold_jid_repr(hold_jid)}",
+        f"  sge_project (-P): {r.project}",
+        f"  sge_account (-A): {r.account}",
+        f"  sge_ngpu (-l):    {r.ngpu}",
+        f"  sge_h_vmem (-l):  {r.h_vmem}",
+        f"  sge_queue (-q):   {r.queue if r.queue else '(default)'}",
+        f"  use_nv (outer):   {spec.use_nv}",
+        "  bind mounts (host -> container):",
+        f"    src:          {paths.src} -> {spec.binds.src}",
+        f"    data:         {paths.data_root} -> {spec.binds.data}",
+        f"    output:       {paths.output_root} -> {spec.binds.output}",
+    ]
+    if paths.models is not None:
+        lines.append(
+            f"    models:       {paths.models} -> {spec.binds.models}"
+        )
+    else:
+        lines.append("    models:       (no -B models bind)")
+    for host, mnt in spec.extra_host_binds:
+        lines.append(f"    extra:        {host} -> {mnt}")
+    lines.extend(
+        [
+            f"  outer_container: {paths.container}",
+            f"  log_file:        {paths.log_dir / f'{spec.job_name}.log'}",
+            f"  err_file:        {paths.err_dir / f'{spec.job_name}.err'}",
+        ]
+    )
+    if spec.extra_env:
+        lines.append(f"  extra_env:       {spec.extra_env}")
+    qsub_s = " ".join(shlex.quote(str(a)) for a in qsub_argv)
+    lines.append(f"  qsub argv:       {qsub_s}")
+    sing = singularity_cmd
+    if len(sing) > max_singularity_chars:
+        sing = sing[:max_singularity_chars] + "\n  ... [singularity command truncated] ..."
+    lines.append("  singularity (piped to qsub stdin):")
+    for part in sing.split("\n"):
+        lines.append(f"    {part}")
+    return "\n".join(lines)
+
+
+def emit_sge_submission_summary_to_terminal(
+    spec: StageSpec,
+    paths: ClusterPaths,
+    *,
+    hold_jid: str | Sequence[str] | None,
+    qsub_argv: Sequence[str],
+    singularity_cmd: str,
+) -> None:
+    """Print :func:`format_sge_submission_summary` to stderr unless silenced."""
+    quiet = os.environ.get("NVITK_QUIET_SGE_SUMMARY", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if quiet:
+        return
+    print(
+        format_sge_submission_summary(
+            spec,
+            paths,
+            hold_jid=hold_jid,
+            qsub_argv=qsub_argv,
+            singularity_cmd=singularity_cmd,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+_HEADER_ASSIGN_RE = re.compile(
+    r"^(?P<key>log_dir|err_dir)=(?P<val>.+)$",
+    re.MULTILINE,
+)
+_FIRST_QSUB_ARRAY_RE = re.compile(
+    r"^qsub_\w+=\(\n(?P<body>.*?)^\)\s*$",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _bash_single_quoted_tokens(qbody: str) -> list[str]:
+    tokens: list[str] = []
+    for line in qbody.splitlines():
+        s = line.strip()
+        if len(s) >= 2 and s[0] == "'" and s.endswith("'"):
+            tokens.append(s[1:-1])
+    return tokens
+
+
+def format_sge_driver_script_variables(
+    script_text: str,
+    script_path: Path | None = None,
+) -> str:
+    """Extract ``log_dir`` / ``err_dir`` / first ``qsub_*=(…)`` flags for terminal echo."""
+    lines: list[str] = ["[nvitk|SGE] remote submission (variables)"]
+    if script_path is not None:
+        lines.append(f"  script_path={script_path}")
+    n_stage = len(re.findall(r"^# --- .+ ---$", script_text, re.MULTILINE))
+    if n_stage:
+        lines.append(f"  num_stages={n_stage}")
+    for m in _HEADER_ASSIGN_RE.finditer(script_text):
+        raw = m.group("val").strip()
+        try:
+            (vv,) = shlex.split(raw, posix=True)
+        except ValueError:
+            vv = raw.strip().strip("'\"")
+        lines.append(f"  {m.group('key')}={vv}")
+    if n_stage > 1:
+        lines.append(
+            "  (multi-stage script; per-stage qsub/singularity details are in the file)"
+        )
+        return "\n".join(lines)
+    qm = _FIRST_QSUB_ARRAY_RE.search(script_text)
+    if not qm:
+        lines.append("  (no qsub_*=(…) block found in script)")
+        return "\n".join(lines)
+    tokens = _bash_single_quoted_tokens(qm.group("body"))
+    flag_to_key = {
+        "-P": "qsub_project",
+        "-A": "qsub_account",
+        "-N": "qsub_job_name",
+        "-o": "qsub_stdout",
+        "-e": "qsub_stderr",
+        "-q": "qsub_queue",
+        "-hold_jid": "qsub_hold_jid",
+    }
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t in flag_to_key and i + 1 < len(tokens):
+            lines.append(f"  {flag_to_key[t]}={tokens[i + 1]}")
+            i += 2
+        elif t == "-l" and i + 1 < len(tokens):
+            lines.append(f"  qsub_resource={tokens[i + 1]}")
+            i += 2
+        elif t == "-terse":
+            lines.append("  qsub_terse=true")
+            i += 1
+        elif t == "qsub":
+            i += 1
+        else:
+            i += 1
+    return "\n".join(lines)
+
+
+_SHELL_VAR_SAFE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _shell_var(job_name: str) -> str:
+    return _SHELL_VAR_SAFE.sub("_", job_name)
+
+
+def _quote_qsub_arg(arg: str) -> str:
+    if arg.startswith("$"):
+        return f'"{arg}"'
+    return shlex.quote(arg)
+
+
+def _emit_stage_block(
+    emit: TextIO,
+    spec: StageSpec,
+    inner: str,
+    qsub_argv: Sequence[str],
+    hold_jid: str | Sequence[str] | None,
+) -> str:
+    var = _shell_var(spec.job_name)
+    jid_var = f"jid_{var}"
+    singcmd_var = f"singcmd_{var}"
+    qsub_var = f"qsub_{var}"
+
+    if hold_jid is None:
+        hold_descr = "none"
+    elif isinstance(hold_jid, str):
+        hold_descr = hold_jid
+    else:
+        hold_descr = ",".join(str(h) for h in hold_jid if h) or "none"
+
+    qsub_lines = "\n  ".join(_quote_qsub_arg(a) for a in qsub_argv)
+
+    emit.write(
+        f"# --- {spec.job_name} (hold: {hold_descr}) ---\n"
+        f"read -r -d '' {singcmd_var} << 'SINGULARITY_EOF' || true\n"
+        f"{inner}\n"
+        f"SINGULARITY_EOF\n"
+        f"\n"
+        f"{qsub_var}=(\n"
+        f"  {qsub_lines}\n"
+        f")\n"
+        f'{jid_var}=$(echo "${singcmd_var}" | "${{{qsub_var}[@]}}")\n'
+        f'echo "{spec.job_name} -> ${jid_var}"\n'
+        f"\n"
+    )
+    return f"${jid_var}"
+
+
+def write_script_header(
+    emit: TextIO,
+    *,
+    log_dir: Path,
+    err_dir: Path,
+    title: str,
+) -> None:
+    """Write the common preamble for an emitted submission script."""
+    ts = datetime.now().isoformat(timespec="seconds")
+    emit.write(
+        "#!/usr/bin/env bash\n"
+        f"# Auto-generated by nvitk ({title}) on {ts}\n"
+        "# Run this on the cluster login node:\n"
+        "#     bash <this_file>\n"
+        "# Only `bash`, `qsub` and `singularity` are required on the host.\n"
+        "set -euo pipefail\n"
+        "\n"
+        f'log_dir={shlex.quote(str(log_dir))}\n'
+        f'err_dir={shlex.quote(str(err_dir))}\n'
+        'mkdir -p "$log_dir" "$err_dir"\n'
+        "\n"
+    )
+
+
+def submit_stage(
+    spec: StageSpec,
+    paths: ClusterPaths,
+    *,
+    hold_jid: str | Sequence[str] | None = None,
+    dry_run: bool = False,
+    emit: TextIO | None = None,
+) -> str:
+    """Submit *spec* to SGE by piping the Singularity command into ``qsub``."""
+    inner = build_singularity_command(spec, paths)
+    qsub_argv = build_qsub_command(spec, paths, hold_jid=hold_jid)
+    emit_sge_submission_summary_to_terminal(
+        spec,
+        paths,
+        hold_jid=hold_jid,
+        qsub_argv=qsub_argv,
+        singularity_cmd=inner,
+    )
+
+    if emit is not None:
+        return _emit_stage_block(emit, spec, inner, qsub_argv, hold_jid)
+
+    if dry_run:
+        return "DRY_RUN"
+
+    paths.ensure_dirs()
+    result = subprocess.run(
+        qsub_argv,
+        input=inner,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def submit_chain(
+    stages: Iterable[StageSpec],
+    paths: ClusterPaths,
+    *,
+    base_hold: str | Sequence[str] | None = None,
+    dry_run: bool = False,
+    emit: TextIO | None = None,
+) -> list[str]:
+    """Submit a linear chain of *stages* for a single subject."""
+    jids: list[str] = []
+    prev: str | Sequence[str] | None = base_hold
+    for s in stages:
+        jid = submit_stage(s, paths, hold_jid=prev, dry_run=dry_run, emit=emit)
+        jids.append(jid)
+        prev = jid
+    return jids
+
+
+__all__ = [
+    "ClusterPaths",
+    "SgeResources",
+    "SingularityBinds",
+    "StageSpec",
+    "build_qsub_command",
+    "build_singularity_command",
+    "emit_sge_submission_summary_to_terminal",
+    "format_sge_submission_summary",
+    "submit_chain",
+    "submit_stage",
+    "format_sge_driver_script_variables",
+    "write_script_header",
+]

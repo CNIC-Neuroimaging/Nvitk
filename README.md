@@ -74,6 +74,7 @@ Same list as **`pyhelp`** and `src/nvitk/util/list_cli_commands.py` parse from `
 | `phase2volume` | Phase data -> volume |
 | `nikon2nifti` | Nikon -> NIfTI |
 | `nvitk-totalseg` | TotalSegmentator wrapper (local / SGE) |
+| `nvitk-eicab` | eICAB TOF / Circle-of-Willis segmentation (local / SGE) |
 | `pyhelp` | List commands + backend reminder |
 | `nvitk-pesa-fat` | PESA fat batch driver |
 | `nvitk-pesa-fat-ctpet` | PESA fat CT/PET pipeline |
@@ -112,10 +113,11 @@ summary = Measurer(pet, mask).volume() | Measurer(pet, mask).suv(kinds=("bw",))
 
 ### Segmentation
 
-`nvitk.segmentation` includes `labels`, `hemisphere`, and `total_segmentator`.
+`nvitk.segmentation` includes `labels`, `hemisphere`, `total_segmentator`, and `eicab`.
 
 ```bash
-nvitk-totalseg   --input ct.nii.gz   --output out/totalseg   --task total   --backend local   --device gpu
+nvitk-totalseg   --input ct.nii.gz   --output out/totalseg   --task total   --submit local   --device gpu
+nvitk-eicab      --input tof.nii.gz  --output out/eicab       --submit local --container /path/to/eicab.sif
 ```
 
 ### Geometric transforms

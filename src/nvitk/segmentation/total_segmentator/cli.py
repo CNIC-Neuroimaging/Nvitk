@@ -2,49 +2,36 @@
 Dedicated ``nvitk-totalseg`` CLI for the TotalSegmentator integration.
 
 Runs either locally (thin wrapper over :func:`run_totalsegmentator`) or on an
-SGE cluster by submitting a Singularity-wrapped ``TotalSegmentator`` command.
-
-Examples
---------
-Run locally::
-
-    nvitk-totalseg \
-        --input ct.nii.gz --output out/ \
-        --task total --roi-subset vertebrae_L4 --roi-subset vertebrae_L3
-
-Submit to SGE (dry-run)::
-
-    nvitk-totalseg \
-        --input /nfs/input/SUBJ --output /nfs/output/SUBJ \
-        --task total_mr --backend sge \
-        --container /path/to/TotalSegmentator.sif \
-        --models-dir /data_local/ai_models/imaging/TotalSegmentator/v2.0.0/ \
-        --src-dir /nfs/src --input-root /nfs/input --output-root /nfs/output \
-        --log-dir /nfs/logs --err-dir /nfs/errs \
-        --project GPU --account Prod --ngpu 1 --h-vmem 50G \
-        --job-name totalseg_SUBJ --dry-run
+SGE cluster via ``qsub`` + ``singularity exec`` (PESA-Fat style), optionally
+emitting a bash script and running it over SSH.
 """
 
 from __future__ import annotations
 
+import getpass
+from datetime import datetime
 from pathlib import Path
 
 import click
 
 from nvitk.core.logger import Logger
+from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.sge import SgeResources, write_script_header
 
 from .class_maps import AVAILABLE_TASKS
-from .cluster import (
-    ClusterPaths,
-    SegmentationJob,
-    SgeResources,
-    SingularityBinds,
-    submit_job,
-)
+from .cluster import ClusterPaths, SegmentationJob
+from . import config as ts_cfg
 from .runner import run_totalsegmentator
+from .sge_stage import submit_totalsegmentator_stage
 
 
 log = Logger()
+
+
+def _default_emit_script(task: str) -> Path:
+    ts_cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return ts_cfg.DEFAULT_SGE_SCRIPTS_DIR / f"submit_totalseg_{task}_{ts}.sh"
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -79,14 +66,14 @@ log = Logger()
     type=click.Choice(["gpu", "cpu"], case_sensitive=False),
     default="gpu",
     show_default=True,
-    help="Device for local inference (ignored for --backend sge).",
+    help="Device for local inference; maps to TotalSegmentator --backend on SGE.",
 )
 @click.option(
-    "--backend",
+    "--submit",
     type=click.Choice(["local", "sge"], case_sensitive=False),
     default="local",
     show_default=True,
-    help="Run locally via TotalSegmentator CLI or submit a Singularity/qsub job.",
+    help="Run locally via TotalSegmentator CLI or prepare/submit on SGE.",
 )
 @click.option(
     "--multilabel/--per-class",
@@ -115,7 +102,7 @@ log = Logger()
     "--container",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Path to the Singularity container with TotalSegmentator.",
+    help="(sge) Outer Singularity image (GPU stack with TotalSegmentator CLI).",
 )
 @click.option(
     "--models-dir",
@@ -136,14 +123,14 @@ log = Logger()
     "input_root",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Host path mounted as the data root (parent of --input).",
+    help="(sge) Host path mounted as the data root; --input must lie under it.",
 )
 @click.option(
     "--output-root",
     "output_root",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Host path mounted as the output root (parent of --output).",
+    help="(sge) Host path mounted as the output root; --output must lie under it.",
 )
 @click.option(
     "--log-dir",
@@ -159,20 +146,59 @@ log = Logger()
     default=None,
     help="(sge) Host path for qsub stderr logs (.err files).",
 )
-@click.option("--project", default="GPU", show_default=True, help="(sge) qsub -P project.")
-@click.option("--account", default="Prod", show_default=True, help="(sge) qsub -A account.")
-@click.option("--ngpu", default=1, show_default=True, type=int, help="(sge) qsub -l ngpu.")
-@click.option("--h-vmem", default="50G", show_default=True, help="(sge) qsub -l h_vmem.")
+@click.option(
+    "--project",
+    default=None,
+    help="(sge) qsub -P project (default from total_segmentator.config).",
+)
+@click.option(
+    "--account",
+    default=None,
+    help="(sge) qsub -A account (default from total_segmentator.config).",
+)
+@click.option(
+    "--ngpu",
+    default=None,
+    type=int,
+    help="(sge) qsub -l ngpu (default from total_segmentator.config).",
+)
+@click.option(
+    "--h-vmem",
+    default=None,
+    help="(sge) qsub -l h_vmem (default from total_segmentator.config).",
+)
 @click.option("--queue", default=None, help="(sge) optional qsub -q queue.")
 @click.option("--job-name", default=None, help="(sge) SGE job name (defaults to totalseg_<task>).")
-@click.option("--dry-run", is_flag=True, help="(sge) Build and echo the command but do not submit.")
+@click.option(
+    "--emit-script",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="(sge) Bash submission script path (default: total_segmentator.config).",
+)
+@click.option(
+    "--direct-submit",
+    is_flag=True,
+    help="(sge) Submit with qsub immediately instead of writing a bash script first.",
+)
+@click.option(
+    "--no-remote",
+    is_flag=True,
+    help="(sge) After writing the submission script, do not run it via SSH.",
+)
+@click.option("--remote-host", default=None, help="(sge) SSH host or alias.")
+@click.option("--remote-user", default=None, help="(sge) SSH username.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="(sge) With --direct-submit: do not actually qsub. Otherwise ignored for script mode.",
+)
 def main(
     input_path: Path,
     output_path: Path,
     task: str,
     roi_subset: tuple[str, ...],
     device: str,
-    backend: str,
+    submit: str,
     multilabel: bool,
     statistics: bool,
     fast: bool,
@@ -185,22 +211,30 @@ def main(
     output_root: Path | None,
     log_dir: Path | None,
     err_dir: Path | None,
-    project: str,
-    account: str,
-    ngpu: int,
-    h_vmem: str,
+    project: str | None,
+    account: str | None,
+    ngpu: int | None,
+    h_vmem: str | None,
     queue: str | None,
     job_name: str | None,
+    emit_script: Path | None,
+    direct_submit: bool,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
     dry_run: bool,
 ) -> None:
     """Run TotalSegmentator either locally or on SGE."""
     Logger(level="INFO")
 
-    backend_l = backend.lower()
-    if backend_l == "local":
+    submit_l = submit.lower()
+    if submit_l == "local":
         log.info(
-            f"Running TotalSegmentator locally: input={input_path} output={output_path} "
-            f"task={task} device={device}"
+            "Running TotalSegmentator locally: input=%s output=%s task=%s device=%s",
+            input_path,
+            output_path,
+            task,
+            device,
         )
         result = run_totalsegmentator(
             input=input_path,
@@ -221,41 +255,41 @@ def main(
             )
         return
 
-    missing = [
-        name
-        for name, val in (
-            ("--container", container),
-            ("--models-dir", models_dir),
-            ("--src-dir", src_dir),
-            ("--input-root", input_root),
-            ("--output-root", output_root),
-            ("--log-dir", log_dir),
-            ("--err-dir", err_dir),
-        )
-        if val is None
-    ]
-    if missing:
-        raise click.UsageError(
-            "--backend sge requires: " + ", ".join(missing)
+    # SGE defaults
+    in_root = (
+        Path(input_root)
+        if input_root is not None
+        else (input_path.parent if input_path.is_file() else input_path)
+    )
+    out_root = Path(output_root) if output_root is not None else output_path.parent
+    src_p = Path(src_dir) if src_dir is not None else ts_cfg.DEFAULT_NVITK_SRC_DIR
+    cont = Path(container) if container is not None else ts_cfg.CONTAINER_PATH
+    models_p = Path(models_dir) if models_dir is not None else ts_cfg.MODELS_DIR
+    log_p = Path(log_dir) if log_dir is not None else ts_cfg.SGE_LOG_DIR
+    err_p = Path(err_dir) if err_dir is not None else ts_cfg.SGE_ERR_DIR
+
+    if not cont.is_file():
+        raise click.ClickException(
+            f"Singularity container not found: {cont}. Pass --container or fix "
+            "`nvitk.segmentation.total_segmentator.config.CONTAINER_PATH`."
         )
 
     paths = ClusterPaths(
-        src=src_dir,  # type: ignore[arg-type]
-        container=container,  # type: ignore[arg-type]
-        models=models_dir,  # type: ignore[arg-type]
-        input_root=input_root,  # type: ignore[arg-type]
-        output_root=output_root,  # type: ignore[arg-type]
-        log_dir=log_dir,  # type: ignore[arg-type]
-        err_dir=err_dir,  # type: ignore[arg-type]
+        src=src_p,
+        container=cont,
+        models=models_p,
+        input_root=in_root,
+        output_root=out_root,
+        log_dir=log_p,
+        err_dir=err_p,
     )
     resources = SgeResources(
-        project=project,
-        account=account,
-        ngpu=ngpu,
-        h_vmem=h_vmem,
-        queue=queue,
+        project=project or ts_cfg.SGE_PROJECT,
+        account=account or ts_cfg.SGE_ACCOUNT,
+        ngpu=ngpu if ngpu is not None else ts_cfg.SGE_NGPU,
+        h_vmem=h_vmem or ts_cfg.SGE_H_VMEM,
+        queue=queue if queue is not None else ts_cfg.SGE_QUEUE,
     )
-    binds = SingularityBinds()
     job = SegmentationJob(
         job_name=job_name or f"totalseg_{task}",
         subject_input=input_path,
@@ -266,25 +300,59 @@ def main(
         backend="gpu" if device.lower() == "gpu" else "cpu",
     )
 
-    job_id = submit_job(
-        job,
-        paths,
-        resources=resources,
-        binds=binds,
-        dry_run=dry_run,
-    )
-    if dry_run:
-        # Show what would have been submitted.
-        from .cluster import build_qsub_command, build_singularity_command
+    if direct_submit:
+        jid = submit_totalsegmentator_stage(
+            job,
+            paths,
+            resources=resources,
+            hold_jid=None,
+            dry_run=dry_run,
+            emit=None,
+        )
+        click.echo(jid)
+        return
 
-        qsub_cmd = build_qsub_command(job, paths, resources)
-        inner_cmd = build_singularity_command(job, paths, binds)
-        click.echo("=== qsub ===")
-        click.echo(" ".join(qsub_cmd))
-        click.echo("=== singularity (piped to qsub stdin) ===")
-        click.echo(inner_cmd)
-        click.echo("=== job id ===")
-    click.echo(job_id)
+    script_path = Path(emit_script) if emit_script is not None else _default_emit_script(task)
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(script_path, "w", encoding="utf-8") as fh:
+        write_script_header(
+            fh,
+            log_dir=log_p,
+            err_dir=err_p,
+            title=f"totalseg task={task} job={job.job_name}",
+        )
+        submit_totalsegmentator_stage(
+            job,
+            paths,
+            resources=resources,
+            hold_jid=None,
+            dry_run=False,
+            emit=fh,
+        )
+    log.info("Wrote SGE submission script: %s", script_path)
+
+    if dry_run:
+        log.info("Dry-run: script written; skipping SSH execution.")
+        return
+
+    if no_remote:
+        log.info(
+            "Skipping remote SSH (--no-remote). Run on the login node: bash %s",
+            script_path,
+        )
+        return
+
+    log.reset(restart_progress=False)
+    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+    host_resolved = ts_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
+    user = remote_user or click.prompt("SSH user")
+    password = getpass.getpass("SSH password: ")
+    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    if not ok:
+        log.warning(
+            "Remote execution did not complete successfully. Run manually: bash %s",
+            script_path,
+        )
 
 
 if __name__ == "__main__":

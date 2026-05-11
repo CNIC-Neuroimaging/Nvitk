@@ -27,7 +27,7 @@ def categorize_command(cmd, module):
         return "Image Conversion"
     
     # Segmentation commands
-    if any(seg in cmd for seg in []):
+    if any(seg in cmd for seg in ['nvitk-totalseg', 'nvitk-eicab']):
         return "Segmentation"
     
     # PESA Fat commands

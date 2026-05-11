@@ -40,7 +40,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
     layout,
     parse_subjects,
 )
-from nvitk.pipes.pesa_fat.common.sge import (
+from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
     SingularityBinds,
