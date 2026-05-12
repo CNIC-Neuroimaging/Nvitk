@@ -168,7 +168,7 @@ def classify_scan(series_description: str | None, quality: str | None = None) ->
             "sequence": "TOF",
         }
 
-    if re.search(r"4d.?q?flow", description, flags=re.IGNORECASE):
+    if re.search(r"4d.?q?flow|^\s*(?:AP|RL|FH)\s*$", description, flags=re.IGNORECASE):
         orientation = infer_flow_orientation(description)
         sequence = f"4DFLOW_{orientation}" if orientation != "GENERIC" else "4DFLOW_GENERIC"
         return {
