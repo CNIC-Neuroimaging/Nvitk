@@ -1,30 +1,48 @@
 """qvtpy pipeline master.
 
-This mirrors the PESA-Fat runner shape: local execution vs. SGE submission.
+This mirrors the PESA-Fat runner shape: local execution vs. SGE submission via
+a bash script + SSH to the cluster login node.
 
 Stages (select with ``--stages``; default ``stage0_c,stage1``)
 --------------------------------------------------------------
-- ``stage0_d`` (``stage0_download``) — XNAT -> DICOM into ``--dicom-root``
+- ``stage0_d`` (``stage0_download``) -- XNAT -> DICOM into ``--dicom-root``
   (see :mod:`nvitk.pipes.qvtpy.stage0_download`). Requires ``--subjects`` or
-  ``--subjects-file``.
-- ``stage0_c`` (``stage0_convert``) — DICOM -> NIfTI conversion and
-  reorganization (see :mod:`nvitk.pipes.qvtpy.stage0_convert`).
-- ``stage1`` (``stage1_eicab``) — eICAB CoW/TOF segmentation on the
+  ``--subjects-file``. Runs locally even when ``--submit sge`` (XNAT pull is
+  network/credentials bound and isn't a cluster job).
+- ``stage0_c`` (``stage0_convert``) -- DICOM -> NIfTI conversion + reorg
+  (see :mod:`nvitk.pipes.qvtpy.stage0_convert`).
+- ``stage1`` (``stage1_eicab``) -- eICAB CoW/TOF segmentation on the
   reorganized ``TOF/TOF.nii.gz`` per subject
-  (see :mod:`nvitk.pipes.qvtpy.stage1_eicab`). In ``--submit sge`` mode each
-  stage1 job is held on the corresponding stage0_c job id (when stage0_c
-  also runs in the same invocation).
+  (see :mod:`nvitk.pipes.qvtpy.stage1_eicab`).
+
+SGE submission (``--submit sge``) writes one bash script under
+``DEFAULT_SGE_SCRIPTS_DIR`` (one block per subject per stage, with
+``-hold_jid`` chaining stage1 onto stage0_c) and then SSHes the script to a
+login node via :func:`nvitk.cluster.remote_submit.run_sge_script_ssh`.
 """
 
 from __future__ import annotations
 
+import getpass
 import shlex
-import subprocess
+from datetime import datetime
 from pathlib import Path
+from typing import TextIO
 
 import click
 
+import nvitk
+from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.sge import (
+    ClusterPaths,
+    SgeResources,
+    SingularityBinds,
+    StageSpec,
+    submit_stage,
+    write_script_header,
+)
 from nvitk.core.logger import Logger
+from nvitk.segmentation.eicab import config as eicab_cfg
 
 from . import config as cfg
 from . import stage0_convert, stage0_download, stage1_eicab
@@ -86,75 +104,72 @@ def _iter_subjects(root: Path) -> list[str]:
     return sorted([p.name for p in root.iterdir() if p.is_dir()])
 
 
-def _qsub_stage0_convert(
-    *,
+def _default_nvitk_src_dir() -> Path:
+    """Host directory mounted at ``/nvitk/src/`` (contains a ``nvitk/`` package tree)."""
+    return Path(nvitk.__file__).resolve().parent.parent
+
+
+def _default_submit_script_path() -> Path:
+    """Default bash submission script path under :data:`cfg.SGE_SCRIPTS_DIR`."""
+    cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return cfg.SGE_SCRIPTS_DIR / f"submit_qvtpy_{ts}.sh"
+
+
+def _emit_stage0_convert(
+    fh: TextIO,
     subject: str,
+    *,
     dicom_root: Path,
     nifti_root: Path,
+    container: Path,
+    src_dir: Path,
     compute_phase_derived: bool,
     skip_existing: bool,
-    container: Path,
 ) -> str:
-    """Submit one stage0_convert job. Minimal implementation; can be upgraded later."""
-    job = f"{cfg.SGE_JOB_PREFIX}_stage0c_{subject}"
-    cfg.SGE_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    cfg.SGE_ERR_DIR.mkdir(parents=True, exist_ok=True)
-
-    inner = " ".join(
-        [
-            "python",
-            "-m",
-            "nvitk.pipes.qvtpy.stage0_convert",
-            "--subject",
-            shlex.quote(subject),
-            "--dicom-root",
-            shlex.quote(str(dicom_root)),
-            "--nifti-root",
-            shlex.quote(str(nifti_root)),
-            "--compute-phase-derived" if compute_phase_derived else "",
-            "--skip-existing" if skip_existing else "",
-        ]
-    ).strip()
-
-    sing = (
-        "singularity exec "
-        + "--nv " * 0
-        + "-B "
-        + shlex.quote(str(dicom_root))
-        + ":/DICOM "
-        + "-B "
-        + shlex.quote(str(nifti_root))
-        + ":/NIFTI "
-        + shlex.quote(str(container))
-        + " bash -c "
-        + shlex.quote(inner)
-    )
-
-    argv = [
-        "qsub",
-        "-P",
-        cfg.SGE_PROJECT,
-        "-terse",
-        "-N",
-        job,
-        "-A",
-        cfg.SGE_ACCOUNT,
-        "-l",
-        f"ngpu={cfg.SGE_CPU_NGPU}",
-        "-l",
-        f"h_vmem={cfg.SGE_CPU_H_VMEM}",
-        "-o",
-        str(cfg.SGE_LOG_DIR / f"{job}.log"),
-        "-e",
-        str(cfg.SGE_ERR_DIR / f"{job}.err"),
+    """Append a stage0_c SGE block to *fh*; returns the bash jid var ref."""
+    binds = SingularityBinds()
+    script = f"{binds.src}nvitk/pipes/qvtpy/stage0_convert.py"
+    cmd_parts: list[str] = [
+        "python",
+        shlex.quote(script),
+        "--subject",
+        shlex.quote(subject),
+        "--dicom-root",
+        shlex.quote(binds.data),
+        "--nifti-root",
+        shlex.quote(binds.output),
     ]
-    if cfg.SGE_QUEUE:
-        argv += ["-q", cfg.SGE_QUEUE]
+    if compute_phase_derived:
+        cmd_parts.append("--compute-phase-derived")
+    if skip_existing:
+        cmd_parts.append("--skip-existing")
+    python_cmd = " ".join(cmd_parts)
 
-    proc = subprocess.run(argv, input=sing, text=True, capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"qsub failed: {proc.stderr.strip()}")
-    return proc.stdout.strip()
+    paths = ClusterPaths(
+        src=src_dir,
+        container=container,
+        models=None,
+        data_root=dicom_root,
+        output_root=nifti_root,
+        log_dir=cfg.SGE_LOG_DIR,
+        err_dir=cfg.SGE_ERR_DIR,
+    )
+    spec = StageSpec(
+        job_name=f"{cfg.SGE_JOB_PREFIX}_stage0c_{subject}",
+        python_cmd=python_cmd,
+        resources=SgeResources(
+            project=cfg.SGE_PROJECT,
+            account=cfg.SGE_ACCOUNT,
+            ngpu=cfg.SGE_NGPU,
+            h_vmem=cfg.SGE_H_VMEM,
+            queue=cfg.SGE_QUEUE,
+        ),
+        binds=binds,
+        use_nv=False,
+        extra_env={"PYTHONPATH": str(binds.src)},
+    )
+    return submit_stage(spec, paths, emit=fh)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +202,18 @@ def _qsub_stage0_convert(
     help="Text/CSV/XLSX file with subject IDs.",
 )
 @click.option("--submit", type=click.Choice(["local", "sge"]), default="local", show_default=True)
-@click.option("--container", type=click.Path(path_type=Path), default=cfg.CONTAINER_PATH)
+@click.option(
+    "--container",
+    type=click.Path(path_type=Path),
+    default=cfg.CONTAINER_PATH,
+    help="Pipeline Singularity image used to run stage0_c on SGE.",
+)
+@click.option(
+    "--src-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="(sge) Host tree mounted at /nvitk/src/ (default: parent of the installed nvitk package).",
+)
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--compute-phase-derived", is_flag=True, default=False)
 @click.option(
@@ -242,6 +268,19 @@ def _qsub_stage0_convert(
     show_default=True,
     help="eICAB target isotropic resolution in mm (stage1).",
 )
+@click.option(
+    "--emit-script",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="(sge) Bash submission script path (default: under eicab.config.DEFAULT_SGE_SCRIPTS_DIR).",
+)
+@click.option(
+    "--no-remote",
+    is_flag=True,
+    help="(sge) After writing the submission script, do not run it via SSH.",
+)
+@click.option("--remote-host", default=None, help="(sge) SSH hostname or alias from CLUSTER_HOST_ALIASES.")
+@click.option("--remote-user", default=None, help="(sge) SSH username (else prompt).")
 def main(
     dicom_root: Path,
     nifti_root: Path,
@@ -250,6 +289,7 @@ def main(
     subjects_file: Path | None,
     submit: str,
     container: Path,
+    src_dir: Path | None,
     skip_existing: bool,
     compute_phase_derived: bool,
     sequences: str,
@@ -260,6 +300,10 @@ def main(
     vasculature_dir: Path | None,
     eicab_device: str,
     eicab_resolution: float,
+    emit_script: Path | None,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
 ) -> None:
     Logger()
 
@@ -290,7 +334,10 @@ def main(
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
 
+    # stage0_d always runs locally (XNAT pull is network/credentials-bound).
     if run_dl:
+        if submit == "sge":
+            log.info("stage0_d (XNAT download) always runs locally; SGE script will cover stage0_c/stage1.")
         from nvitk.db.xnat import requested_sequence_set
         from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
@@ -333,39 +380,77 @@ def main(
         return
 
     # SGE
-    for subj in subject_list:
-        stage0_jid: str | None = None
-        if run_conv:
-            stage0_jid = _qsub_stage0_convert(
-                subject=subj,
-                dicom_root=dicom_root,
-                nifti_root=nifti_root,
-                compute_phase_derived=compute_phase_derived,
-                skip_existing=skip_existing,
-                container=container,
-            )
-            log.info(f"[{subj}] submitted stage0_c jid={stage0_jid}")
+    if not (run_conv or run_eicab):
+        log.info("Nothing to submit to SGE (only stage0_d was selected). Done.")
+        return
 
-        if run_eicab:
-            try:
-                eicab_jid = stage1_eicab.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root,
-                    output_root=output_root,
-                    skip_existing=skip_existing,
-                    resolution=eicab_resolution,
-                    device=eicab_device,
-                    eicab_container=eicab_container,
-                    vasculature_dir=vasculature_dir,
-                    hold_jid=stage0_jid or None,
-                )
-                if eicab_jid:
-                    log.info(
-                        f"[{subj}] submitted stage1 eICAB jid={eicab_jid}"
-                        + (f" (hold_jid={stage0_jid})" if stage0_jid else "")
+    src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
+    script_path = Path(emit_script) if emit_script is not None else _default_submit_script_path()
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(script_path, "w", encoding="utf-8") as fh:
+        write_script_header(
+            fh,
+            log_dir=cfg.SGE_LOG_DIR,
+            err_dir=cfg.SGE_ERR_DIR,
+            title=f"qvtpy stages={','.join(stages)} n_subjects={len(subject_list)}",
+        )
+        for subj in subject_list:
+            stage0_jid: str | None = None
+            if run_conv:
+                try:
+                    stage0_jid = _emit_stage0_convert(
+                        fh,
+                        subj,
+                        dicom_root=dicom_root,
+                        nifti_root=nifti_root,
+                        container=container,
+                        src_dir=src_p,
+                        compute_phase_derived=compute_phase_derived,
+                        skip_existing=skip_existing,
                     )
-            except (FileNotFoundError, OSError) as exc:
-                log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
+                except Exception as exc:
+                    log.warning(f"[{subj}] stage0_c emit skipped: {exc}")
+
+            if run_eicab:
+                try:
+                    stage1_eicab.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                        resolution=eicab_resolution,
+                        device=eicab_device,
+                        eicab_container=eicab_container,
+                        pipeline_container=None,
+                        src_dir=src_p,
+                        vasculature_dir=vasculature_dir,
+                        hold_jid=stage0_jid or None,
+                        dry_run=False,
+                        emit=fh,
+                    )
+                except (FileNotFoundError, OSError) as exc:
+                    log.warning(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+
+    log.info("=" * 78)
+    log.info(f"qvtpy SGE script written: {script_path}")
+    log.info(f"On the cluster login node: bash {script_path}")
+    log.info("=" * 78)
+
+    if no_remote:
+        log.info("Skipping remote SSH (--no-remote).")
+        return
+
+    log.reset(restart_progress=False)
+    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+    host_resolved = eicab_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
+    user = remote_user or click.prompt("SSH user")
+    password = getpass.getpass("SSH password: ")
+    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    if not ok:
+        log.warning(
+            f"Remote execution did not complete successfully. Run manually: bash {script_path}"
+        )
 
 
 __all__ = ["main", "DEFAULT_STAGES", "STAGE_DOWNLOAD", "STAGE_CONVERT", "STAGE_EICAB"]

@@ -16,6 +16,7 @@ Two submission modes (mirroring stage0 + ``nvitk-eicab``):
 
 from __future__ import annotations
 
+import getpass
 import re
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import TextIO
 import click
 
 import nvitk
+from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.sge import SgeResources, write_script_header
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
@@ -42,8 +44,8 @@ def _default_nvitk_src_dir() -> Path:
     return Path(nvitk.__file__).resolve().parent.parent
 
 
-def _default_emit_script(subject: str) -> Path:
-    stem = _SAFE.sub("_", subject)[:60] or "subject"
+def _default_emit_script(label: str) -> Path:
+    stem = _SAFE.sub("_", label)[:60] or "batch"
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     eicab_cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     return eicab_cfg.DEFAULT_SGE_SCRIPTS_DIR / f"submit_qvtpy_eicab_{stem}_{ts}.sh"
@@ -181,15 +183,20 @@ def submit_subject_sge(
     emit: TextIO | None = None,
     job_name: str | None = None,
 ) -> str:
-    """Submit one stage1 eICAB SGE job. Returns the qsub job id (or '' when *emit* is set)."""
-    subj_nifti = nifti_root / subject
-    if not subj_nifti.is_dir():
-        raise FileNotFoundError(f"NIfTI subject dir not found: {subj_nifti}")
+    """Submit one stage1 eICAB SGE job. Returns the qsub job id (or '' when *emit* is set).
 
-    tof = find_tof_volume(subj_nifti)
+    The local TOF file does not need to exist yet: when a stage0_c job is
+    chained via ``hold_jid``, the TOF is produced on the cluster before this
+    job starts. We discover the actual file when present, otherwise fall back
+    to the canonical stage0_c output path ``{nifti_root}/{subject}/TOF/TOF.nii.gz``.
+    """
+    subj_nifti = nifti_root / subject
+    tof = find_tof_volume(subj_nifti) if subj_nifti.is_dir() else None
     if tof is None:
-        raise FileNotFoundError(
-            f"No TOF NIfTI under {subj_nifti / 'TOF'} (expected TOF/TOF.nii.gz from stage0)."
+        tof = subj_nifti / "TOF" / "TOF.nii.gz"
+        log.info(
+            f"[{subject}] stage1 eICAB: input TOF not present yet; "
+            f"emitting predicted path {tof} (produced by stage0_c at run time)."
         )
 
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
@@ -343,9 +350,16 @@ def submit_subject_sge(
     "--emit-script",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Write a bash submission script instead of qsubbing directly.",
+    help="(sge) Bash submission script path (default: under eicab.config.DEFAULT_SGE_SCRIPTS_DIR).",
 )
-@click.option("--dry-run", is_flag=True, default=False, help="(sge) Build the command but do not qsub.")
+@click.option(
+    "--no-remote",
+    is_flag=True,
+    help="(sge) After writing the submission script, do not run it via SSH.",
+)
+@click.option("--remote-host", default=None, help="(sge) SSH hostname or alias from CLUSTER_HOST_ALIASES.")
+@click.option("--remote-user", default=None, help="(sge) SSH username (else prompt).")
+@click.option("--dry-run", is_flag=True, default=False, help="(sge) Write the script but do not SSH-execute it.")
 def main(
     nifti_root: Path,
     output_root: Path,
@@ -366,6 +380,9 @@ def main(
     err_dir: Path | None,
     keep_aux_outputs: bool,
     emit_script: Path | None,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
     dry_run: bool,
 ) -> None:
     Logger()
@@ -400,23 +417,21 @@ def main(
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
         return
 
-    fh: TextIO | None = None
-    script_path: Path | None = None
-    if emit_script is not None:
-        script_path = Path(emit_script)
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(script_path, "w", encoding="utf-8")
+    # SGE: always emit a script, then SSH-execute (unless --no-remote / --dry-run).
+    label = subjects[0] if len(subjects) == 1 else f"batch_{len(subjects)}"
+    script_path = Path(emit_script) if emit_script is not None else _default_emit_script(label)
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(script_path, "w", encoding="utf-8") as fh:
         write_script_header(
             fh,
             log_dir=Path(log_dir) if log_dir is not None else eicab_cfg.SGE_LOG_DIR,
             err_dir=Path(err_dir) if err_dir is not None else eicab_cfg.SGE_ERR_DIR,
             title=f"qvtpy stage1 eICAB (n={len(subjects)})",
         )
-
-    try:
         for subj in subjects:
             try:
-                jid = submit_subject_sge(
+                submit_subject_sge(
                     subj,
                     nifti_root=nifti_root,
                     output_root=output_root,
@@ -434,17 +449,35 @@ def main(
                     log_dir=log_dir,
                     err_dir=err_dir,
                     keep_aux_outputs=keep_aux_outputs,
-                    dry_run=dry_run,
+                    dry_run=False,
                     emit=fh,
                 )
-                if jid:
-                    log.info(f"[{subj}] stage1 eICAB submitted jid={jid}")
             except (FileNotFoundError, OSError) as exc:
-                log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
-    finally:
-        if fh is not None:
-            fh.close()
-            log.info(f"Wrote SGE submission script: {script_path}")
+                log.warning(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+
+    log.info("=" * 78)
+    log.info(f"qvtpy stage1 SGE script written: {script_path}")
+    log.info(f"On the cluster login node: bash {script_path}")
+    log.info("=" * 78)
+
+    if dry_run:
+        log.info("Dry-run: script written; skipping SSH execution.")
+        return
+
+    if no_remote:
+        log.info("Skipping remote SSH (--no-remote).")
+        return
+
+    log.reset(restart_progress=False)
+    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+    host_resolved = eicab_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
+    user = remote_user or click.prompt("SSH user")
+    password = getpass.getpass("SSH password: ")
+    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    if not ok:
+        log.warning(
+            f"Remote execution did not complete successfully. Run manually: bash {script_path}"
+        )
 
 
 __all__ = ["find_tof_volume", "run_subject", "submit_subject_sge", "main"]

@@ -1,12 +1,14 @@
-"""qvtpy configuration (stage0: DICOM -> NIfTI + reorg).
+"""qvtpy configuration (stage0: DICOM -> NIfTI + reorg; stage1: eICAB).
 
-This is intentionally minimal for now. The goal is to mirror the PESA-Fat
-pipeline structure: one config module as a single source of truth for paths,
-SGE defaults, and stage directory names.
+Single source of truth for host-side paths, stage directory names, SGE
+defaults, and the pipeline Singularity image. Optional overrides come from
+``.nvitk/sge.json`` (see :mod:`nvitk.cluster.sge_json`) under the ``qvtpy``
+pipeline key.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nvitk.cluster import sge_json as _sj
@@ -38,8 +40,23 @@ STAGE1_EICAB_DIR: str = "eicab"
 
 
 # ---------------------------------------------------------------------------
-# SGE defaults (placeholder; adapt later)
+# SGE defaults (overridable via .nvitk/sge.json `pipelines.qvtpy`)
 # ---------------------------------------------------------------------------
+
+SGE_PROJECT: str = "MCC"
+SGE_ACCOUNT: str = "MCC"
+SGE_NGPU: int = 0
+SGE_H_VMEM: str = "25G"
+SGE_QUEUE: str | None = None
+
+SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/QVTPY")
+SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/QVTPY")
+
+# Default location for emitted submission scripts (parallels eicab.config).
+SGE_SCRIPTS_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/")
+
+CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
+
 
 _pipe = _sj.merged_pipeline_flat("qvtpy")
 _paths = _sj.paths_section()
@@ -51,11 +68,9 @@ if (v := _pipe.get("sge_ngpu")) is not None:
     SGE_NGPU = int(v)
 if (v := _pipe.get("sge_h_vmem")) is not None:
     SGE_H_VMEM = str(v)
-if (v := _pipe.get("sge_queue")) is not None:
-    SGE_QUEUE = str(v)
+if "sge_queue" in _pipe:
+    SGE_QUEUE = _pipe["sge_queue"]
 
-SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/QVTPY")
-SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/QVTPY")
 _lg_qvt, _er_qvt = _sj.resolve_log_err_dirs(
     paths=_paths,
     pipe=_pipe,
@@ -63,10 +78,11 @@ _lg_qvt, _er_qvt = _sj.resolve_log_err_dirs(
     fallback_err=SGE_ERR_DIR,
 )
 SGE_LOG_DIR, SGE_ERR_DIR = _lg_qvt, _er_qvt
+
 if (v := _pipe.get("default_sge_scripts_dir")):
     SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
-
-CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
+if (v := _pipe.get("container_path")):
+    CONTAINER_PATH = Path(os.path.expanduser(str(v)))
 
 
 __all__ = [
@@ -79,11 +95,11 @@ __all__ = [
     "STAGE1_EICAB_DIR",
     "SGE_PROJECT",
     "SGE_ACCOUNT",
-    "SGE_CPU_H_VMEM",
-    "SGE_CPU_NGPU",
+    "SGE_NGPU",
+    "SGE_H_VMEM",
     "SGE_QUEUE",
     "SGE_LOG_DIR",
     "SGE_ERR_DIR",
+    "SGE_SCRIPTS_DIR",
     "CONTAINER_PATH",
 ]
-
