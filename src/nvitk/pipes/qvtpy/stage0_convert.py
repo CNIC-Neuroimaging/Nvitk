@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import shutil
+import traceback
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import click
 
@@ -21,6 +22,17 @@ from nvitk.io.conversors.dcm2nii import dcm2nii
 from nvitk.io.conversors.phase2volume import phase2volume
 
 from . import config as cfg
+
+
+REQUIRED_FLOW_DIRS: tuple[str, ...] = ("AP", "RL", "FH")
+DERIVED_FILES: tuple[str, ...] = (
+    "Angiography_3D",
+    "Angiography_4D",
+    "ComplexDifference_3D",
+    "ComplexDifference_4D",
+    "VelocityMagnitude_3D",
+    "VelocityMagnitude_4D",
+)
 
 log = Logger()
 
@@ -229,6 +241,130 @@ def run_subject(
     return subj_nifti
 
 
+def _glob_first(directory: Path, *patterns: str) -> Path | None:
+    """Return the first sorted glob hit under *directory* across *patterns*, else None."""
+    if not directory.is_dir():
+        return None
+    for pat in patterns:
+        hits = sorted(directory.glob(pat))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _iter_subjects_nifti(nifti_root: Path) -> list[str]:
+    """Subject ids found under *nifti_root* (one folder per subject)."""
+    if not nifti_root.exists():
+        return []
+    return sorted(p.name for p in nifti_root.iterdir() if p.is_dir())
+
+
+def print_nifti_qc_report(
+    nifti_root: str | Path,
+    subjects: Iterable[str],
+    *,
+    check_derived: bool = False,
+) -> dict[str, Any]:
+    """Print a brief QC report of the stage0_convert NIfTI layout.
+
+    For every subject id under *nifti_root* (each ``{nifti_root}/{subject}``), check:
+
+    - ``4DFlow/{AP,RL,FH}/`` exists and contains both ``*_m.nii*`` and ``*_ph.nii*``
+    - ``TOF/TOF.nii*`` is present
+
+    When ``check_derived=True``, additionally list per-subject missing optional
+    derived images under ``4DFlow/`` (informational only — derived misses do not
+    flag a subject as incomplete).
+
+    Returns a summary dict with ``root``, ``complete``, ``incomplete``,
+    ``derived_missing`` and ``total`` keys.
+    """
+    root = Path(nifti_root)
+    subj_list = sorted({s for s in subjects if s})
+
+    complete: list[str] = []
+    incomplete: dict[str, list[str]] = {}
+    derived_missing: dict[str, list[str]] = {}
+
+    for subj in subj_list:
+        subj_dir = root / subj
+        missing: list[str] = []
+
+        flow_root = subj_dir / "4DFlow"
+        for d in REQUIRED_FLOW_DIRS:
+            dd = flow_root / d
+            if not dd.is_dir():
+                missing.extend([f"{d}_m[missing dir]", f"{d}_ph[missing dir]"])
+                continue
+            if _glob_first(dd, "*_m.nii.gz", "*_m.nii") is None:
+                missing.append(f"{d}_m[missing]")
+            if _glob_first(dd, "*_ph.nii.gz", "*_ph.nii") is None:
+                missing.append(f"{d}_ph[missing]")
+
+        tof_dir = subj_dir / "TOF"
+        if not tof_dir.is_dir():
+            missing.append("TOF[missing dir]")
+        elif _glob_first(tof_dir, "TOF.nii.gz", "TOF.nii") is None:
+            missing.append("TOF[missing]")
+
+        if check_derived:
+            d_missing: list[str] = []
+            for f in DERIVED_FILES:
+                if not ((flow_root / f"{f}.nii.gz").is_file() or (flow_root / f"{f}.nii").is_file()):
+                    d_missing.append(f"{f}[missing]")
+            if d_missing:
+                derived_missing[subj] = d_missing
+
+        if missing:
+            incomplete[subj] = missing
+        else:
+            complete.append(subj)
+
+    total = len(subj_list)
+
+    print("=" * 60)
+    print("NIfTI completeness report")
+    print(f"  root          : {root}")
+    print(
+        "  required      : "
+        + " ".join(f"{d}_m+ph" for d in REQUIRED_FLOW_DIRS)
+        + " TOF.nii*"
+    )
+    if check_derived:
+        print(f"  derived check : {' '.join(DERIVED_FILES)}")
+    print("=" * 60)
+    print(f"Subjects scanned : {total}")
+    print(f"Complete         : {len(complete)}")
+    print(f"Incomplete       : {len(incomplete)}")
+    print()
+
+    if incomplete:
+        print("-- Incomplete subjects (missing required) --")
+        for subj in sorted(incomplete):
+            print(f"  {subj:<20s}  ->  {' '.join(incomplete[subj])}")
+        print()
+
+    if complete:
+        print("-- Complete subjects --")
+        for subj in complete:
+            print(f"  {subj}")
+        print()
+
+    if check_derived and derived_missing:
+        print("-- Derived (optional) missing --")
+        for subj in sorted(derived_missing):
+            print(f"  {subj:<20s}  ->  {' '.join(derived_missing[subj])}")
+        print()
+
+    return {
+        "root": str(root),
+        "complete": complete,
+        "incomplete": incomplete,
+        "derived_missing": derived_missing if check_derived else {},
+        "total": total,
+    }
+
+
 @click.command("qvtpy-stage0")
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_DICOM_ROOT)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_NIFTI_ROOT)
@@ -239,12 +375,26 @@ def run_subject(
 )
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--compute-phase-derived", is_flag=True, default=False)
+@click.option(
+    "--report",
+    is_flag=True,
+    default=False,
+    help="After conversion, print a NIfTI completeness report against --nifti-root.",
+)
+@click.option(
+    "--report-derived",
+    is_flag=True,
+    default=False,
+    help="When combined with --report, also list missing optional derived 4DFlow images.",
+)
 def main(
     dicom_root: Path,
     nifti_root: Path,
     subject: str | None,
     skip_existing: bool,
     compute_phase_derived: bool,
+    report: bool,
+    report_derived: bool,
 ) -> None:
     Logger()
     if subject:
@@ -255,22 +405,41 @@ def main(
             compute_phase_derived=compute_phase_derived,
             skip_existing=skip_existing,
         )
-        return
+        report_subjects = [subject]
+    else:
+        subjects = _iter_subjects(dicom_root)
+        if not subjects:
+            if report:
+                report_subjects = _iter_subjects_nifti(nifti_root)
+                if not report_subjects:
+                    raise click.ClickException(
+                        f"No subject folders found under dicom_root={dicom_root} "
+                        f"or nifti_root={nifti_root}."
+                    )
+            else:
+                raise click.ClickException(
+                    f"No subject folders found under dicom_root={dicom_root}. "
+                    "Pass --subject or point --dicom-root at a directory of subject subfolders."
+                )
+        else:
+            for subj in subjects:
+                run_subject(
+                    subj,
+                    dicom_root=dicom_root,
+                    nifti_root=nifti_root,
+                    compute_phase_derived=compute_phase_derived,
+                    skip_existing=skip_existing,
+                )
+            report_subjects = subjects
 
-    subjects = _iter_subjects(dicom_root)
-    if not subjects:
-        raise click.ClickException(
-            f"No subject folders found under dicom_root={dicom_root}. "
-            "Pass --subject or point --dicom-root at a directory of subject subfolders."
-        )
-    for subj in subjects:
-        run_subject(
-            subj,
-            dicom_root=dicom_root,
-            nifti_root=nifti_root,
-            compute_phase_derived=compute_phase_derived,
-            skip_existing=skip_existing,
-        )
+    if report:
+        print_nifti_qc_report(nifti_root, report_subjects, check_derived=report_derived)
 
 
-__all__ = ["run_subject", "main"]
+__all__ = [
+    "REQUIRED_FLOW_DIRS",
+    "DERIVED_FILES",
+    "run_subject",
+    "print_nifti_qc_report",
+    "main",
+]

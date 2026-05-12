@@ -233,7 +233,16 @@ def _emit_stage0_convert(
     "--report",
     is_flag=True,
     default=False,
-    help="Print a brief QC report after stage0_d (ignored otherwise).",
+    help=(
+        "Print QC after stage0_d (DICOM tree) and/or after stage0_c "
+        "(NIfTI tree, local submit only)."
+    ),
+)
+@click.option(
+    "--report-derived",
+    is_flag=True,
+    default=False,
+    help="With --report, also list optional derived 4DFlow images missing per subject.",
 )
 @click.option(
     "--output-root",
@@ -295,6 +304,7 @@ def main(
     sequences: str,
     xnat_config_path: Path | None,
     report: bool,
+    report_derived: bool,
     output_root: Path,
     eicab_container: Path | None,
     vasculature_dir: Path | None,
@@ -377,6 +387,10 @@ def main(
                     )
                 except (FileNotFoundError, OSError) as exc:
                     log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
+        if run_conv and report:
+            stage0_convert.print_nifti_qc_report(
+                nifti_root, subject_list, check_derived=report_derived
+            )
         return
 
     # SGE
@@ -436,6 +450,9 @@ def main(
     log.info(f"qvtpy SGE script written: {script_path}")
     log.info(f"On the cluster login node: bash {script_path}")
     log.info("=" * 78)
+
+    if run_conv and report:
+        log.info("NIfTI report skipped: conversion is queued on the cluster (run with --submit local to print it).")
 
     if no_remote:
         log.info("Skipping remote SSH (--no-remote).")

@@ -485,16 +485,46 @@ def connect_xnat(config: XnatConnectionConfig):
     return xnat.connect(**kwargs)
 
 
-def _download_scan_bundle(scan: Any, zip_path: Path) -> Path:
+def _download_scan_bundle(scan: Any, zip_path: Path, *, resource_label: str = "DICOM") -> Path:
+    """Download a single scan resource bundle (``DICOM`` by default).
+
+    Prefers the per-resource ``scan.resources[resource_label].download(...)`` so
+    that only the requested asset type is transferred (XNAT's whole-scan
+    ``scan.download()`` bundles every resource — DICOM, NIFTI, SNAPSHOTS, ...).
+    Falls back to the whole-scan download only when the resource isn't exposed;
+    callers are responsible for filtering non-target members in that case.
+    """
+    resources = getattr(scan, "resources", None)
+    if resources and resource_label in resources:
+        result = resources[resource_label].download(zip_path, verbose=False)
+        return Path(result) if result is not None else zip_path
     if hasattr(scan, "download"):
         result = scan.download(zip_path, verbose=False)
         return Path(result) if result is not None else zip_path
+    raise RuntimeError(
+        f"Scan object does not expose a downloadable resource {resource_label!r} "
+        f"and has no scan.download method."
+    )
 
-    resources = getattr(scan, "resources", None)
-    if resources and "DICOM" in resources:
-        result = resources["DICOM"].download(zip_path, verbose=False)
-        return Path(result) if result is not None else zip_path
-    raise RuntimeError("Scan object does not expose a downloadable DICOM resource.")
+
+def _is_non_dicom_member(member_name: str) -> bool:
+    """Reject obvious non-DICOM archive members (NIfTI, JSON sidecars, snapshots, ...)."""
+    base = Path(member_name).name.lower()
+    if base.endswith(".nii") or base.endswith(".nii.gz"):
+        return True
+    if base.endswith((".json", ".bval", ".bvec", ".xml")):
+        return True
+    if base.endswith((".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff")):
+        return True
+    parts = [p.lower() for p in Path(member_name).parts]
+    if "resources" in parts:
+        try:
+            label = parts[parts.index("resources") + 1]
+        except IndexError:
+            label = ""
+        if label and label not in {"dicom", "secondary"}:
+            return True
+    return False
 
 
 def _download_resource_bundle(scan: Any, zip_path: Path, resource_label: str) -> Path:
@@ -579,17 +609,33 @@ def _list_local_nifti_files(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.is_file() and _is_nifti_filename(p.name))
 
 
-def download_scan_dicoms(scan: Any, output_dir: str | Path, *, keep_zip: bool = False) -> list[Path]:
+def download_scan_dicoms(
+    scan: Any,
+    output_dir: str | Path,
+    *,
+    keep_zip: bool = False,
+    resource_label: str = "DICOM",
+) -> list[Path]:
+    """Download a scan's DICOM resource (only) and extract it flat under ``output_dir``.
+
+    The default ``resource_label="DICOM"`` ensures only DICOM files are pulled
+    from XNAT, even when the scan also has a sibling ``NIFTI`` resource. As a
+    safety net, NIfTI / JSON / sidecar members are dropped from the extracted
+    archive (relevant if the per-resource download isn't available and the
+    fallback to ``scan.download()`` includes other resources).
+    """
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="nvitk_xnat_") as tmp_dir:
         zip_path = Path(tmp_dir) / "scan.zip"
-        bundle_path = _download_scan_bundle(scan, zip_path)
+        bundle_path = _download_scan_bundle(scan, zip_path, resource_label=resource_label)
         extracted: list[Path] = []
         with zipfile.ZipFile(bundle_path) as archive:
             for member in archive.infolist():
                 if member.is_dir():
+                    continue
+                if _is_non_dicom_member(member.filename):
                     continue
                 target = destination / Path(member.filename).name
                 stem = target.stem

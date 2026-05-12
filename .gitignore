@@ -13,9 +13,10 @@ test/
 tests/
 !tests/
 !tests/**/*.py
-docs/
+# docs/
 .config/
 .config/*
+.nvitk/xnat.json
 
 # Site-local SGE overrides
 # .nvitk/sge.json
