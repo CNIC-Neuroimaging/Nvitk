@@ -26,9 +26,9 @@ SGE_JOB_PREFIX: str = "QVTPY"
 # Roots (host-side)
 # ---------------------------------------------------------------------------
 
-DEFAULT_DICOM_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM")
-DEFAULT_NIFTI_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA-Brain/RESULTS")
+DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM")
+DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
+DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS")
 
 
 # ---------------------------------------------------------------------------

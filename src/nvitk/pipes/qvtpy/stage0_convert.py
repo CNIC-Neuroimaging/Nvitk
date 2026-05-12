@@ -60,12 +60,29 @@ def _nifti_stem(path: Path) -> str:
 
 
 def _flow_direction(stem: str) -> str | None:
+    """Infer 4DFlow encoding direction from the dcm2nii series stem.
+
+    Supports two naming styles seen in the field:
+
+    - **Embedded** (Philips-style): ``..._AP_...``, ``..._RL_...``, ``..._FH_...``
+    - **Prefix** (some sites): ``AP_<series>_...``, ``RL_<series>_...``, ``FH_<series>_...``
+
+    Embedded tokens are checked first so mixed strings still resolve predictably.
+    Prefix detection is strict (``AP_`` at start, etc.) to avoid substring hits
+    like ``ref DTI AP-P`` in unrelated series descriptions.
+    """
     u = stem.upper()
     if "_AP_" in u:
         return "AP"
     if "_RL_" in u:
         return "RL"
     if "_FH_" in u:
+        return "FH"
+    if u.startswith("AP_"):
+        return "AP"
+    if u.startswith("RL_"):
+        return "RL"
+    if u.startswith("FH_"):
         return "FH"
     return None
 
