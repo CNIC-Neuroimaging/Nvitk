@@ -54,6 +54,8 @@ if (v := _pipe.get("sge_h_vmem")) is not None:
 if (v := _pipe.get("sge_queue")) is not None:
     SGE_QUEUE = str(v)
 
+SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/QVTPY")
+SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/QVTPY")
 _lg_qvt, _er_qvt = _sj.resolve_log_err_dirs(
     paths=_paths,
     pipe=_pipe,
