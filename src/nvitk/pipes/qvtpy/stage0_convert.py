@@ -3,9 +3,9 @@
 - conversion (dicom2nifti) with specific flags
 - reorganization into a layout compatible with :mod:`nvitk.io.conversors.phase2volume`:
 
-  * ``4DFlow/AP``, ``4DFlow/RL``, ``4DFlow/FH`` — magnitude ``*_m.nii`` and phase ``*_ph.nii``
+  * ``4DFlow/AP``, ``4DFlow/RL``, ``4DFlow/FH`` — magnitude ``*_m.nii.gz`` and phase ``*_ph.nii.gz``
     (from ``*_M_FFE`` / ``*_PHASE`` NIfTI), with matching ``*.json`` metadata beside them
-  * ``TOF/TOF.nii`` plus any TOF-series ``*.json`` (original names)
+  * ``TOF/TOF.nii.gz`` plus any TOF-series ``*.json`` (original names)
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def _flow_dest_nifti_name(stem: str, kind: str) -> str:
         if not su.endswith("_PHASE"):
             raise ValueError(stem)
         base = stem[: len(stem) - len("_PHASE")]
-    return f"{base}_{kind}.nii"
+    return f"{base}_{kind}.nii.gz"
 
 
 def _is_tof_stem(stem: str) -> bool:
@@ -103,7 +103,8 @@ def _is_tof_stem(stem: str) -> bool:
 
 
 def _export_nifti_move(src: Path, dst: Path) -> None:
-    """Write *dst* as uncompressed NIfTI (.nii), then remove *src* if different path."""
+    """Write *dst* as a NIfTI file (compression inferred from extension, e.g. ``.nii.gz``),
+    then remove *src* if different path."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         log.warning(f"Replacing existing file: {dst}")
@@ -165,7 +166,7 @@ def reorganize_subject(subject_out_dir: Path) -> None:
             continue
 
         if _is_tof_stem(stem):
-            dest = tof_dir / "TOF.nii"
+            dest = tof_dir / "TOF.nii.gz"
             if dest.exists() and src.resolve() != dest.resolve():
                 log.warning(f"Multiple TOF-like series; overwriting {dest} with {src.name}")
             _export_nifti_move(src, dest)

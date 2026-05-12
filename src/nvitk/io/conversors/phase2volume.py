@@ -192,7 +192,7 @@ def _write_outputs(flow_dir: Path, outputs: dict[str, np.ndarray], metadata: dic
     for name, array in outputs.items():
         if array is None:
             continue
-        output_path = flow_dir / f"{name}.nii"
+        output_path = flow_dir / f"{name}.nii.gz"
         output_metadata = dict(metadata)
         output_metadata["axes"] = default_nifti_axes(array.ndim)
         output_metadata["shape"] = tuple(array.shape)

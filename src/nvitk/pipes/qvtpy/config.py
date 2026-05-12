@@ -34,6 +34,9 @@ DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA-Brain/RESULTS")
 
 STAGE0_DIR: str = "res_convert_qvtpy"
 
+# eICAB (stage1): outputs live under ``{DEFAULT_RESULTS_ROOT}/{subject}/{STAGE1_EICAB_DIR}/``.
+STAGE1_EICAB_DIR: str = "eicab"
+
 
 # ---------------------------------------------------------------------------
 # SGE defaults (placeholder; adapt later)
@@ -58,6 +61,7 @@ __all__ = [
     "DEFAULT_NIFTI_ROOT",
     "DEFAULT_RESULTS_ROOT",
     "STAGE0_DIR",
+    "STAGE1_EICAB_DIR",
     "SGE_PROJECT",
     "SGE_ACCOUNT",
     "SGE_CPU_H_VMEM",
