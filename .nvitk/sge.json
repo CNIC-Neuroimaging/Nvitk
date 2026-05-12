@@ -48,6 +48,16 @@
         "err_subdir": "PESAFatV5-DIXON",
         "default_sge_model_root":     "/references/AI_models/totalsegmentator",
         "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      },
+      "qvtpy": {
+        "log_subdir": "QVTPY",
+        "err_subdir": "QVTPY",
+        "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif",
+        "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
+        "sge_project": "MCC_GPU",
+        "sge_account": "MCC_GPU",
+        "sge_ngpu": 1,
+        "sge_h_vmem": "25G",
       }
     }
   }
