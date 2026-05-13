@@ -23,6 +23,7 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
+from nvitk.pipes.qvtpy.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
 from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
@@ -58,15 +59,6 @@ def _find_eicab_labels(eicab_dir: Path) -> Path:
     raise FileNotFoundError(f"No eICAB CW/WB NIfTI under {eicab_dir}")
 
 
-def _venous_region(shape: tuple[int, int, int]) -> np.ndarray:
-    """Inferior third along axis 1 (volume shape ``(nx, ny, nz)``): slab ``[:, :round(ny/3), :]``."""
-    _, ny, _ = shape
-    third_y = max(1, int(round(ny / 3.0)))
-    ven = np.zeros(shape, dtype=bool)
-    ven[:, :third_y, :] = True
-    return ven
-
-
 def _bwareaopen_bool(mask: np.ndarray, *, min_size: int, connectivity: int = 1) -> np.ndarray:
     """Remove connected foreground components smaller than *min_size* (3D area opening).
 
@@ -78,92 +70,6 @@ def _bwareaopen_bool(mask: np.ndarray, *, min_size: int, connectivity: int = 1) 
     if min_size <= 1:
         return m
     return as_backend_array(remove_small_objects(m, min_size=int(min_size), connectivity=int(connectivity)))
-
-
-def _binary_mask_sliding_threshold(
-    image2segment: np.ndarray,
-    *,
-    step: float = 0.001,
-    up_thresh: float = 0.8,
-    smf: int = 10,
-    shift_hm_flag: bool = True,
-    med_filt_flag: bool = True,
-) -> tuple[np.ndarray, float]:
-    """Sliding-threshold binary mask on a 3D contrast volume (e.g. complex-difference angiogram).
-
-    Returns a boolean mask the same shape as the input and the absolute intensity cutoff
-    (``volume > cutoff``). Heavy steps run on host NumPy after :func:`to_numpy`.
-    """
-    cd = as_backend_array(image2segment).astype(np.float64, copy=False)
-    if med_filt_flag:
-        cdcrop = ndi.median_filter(cd, size=3, mode="constant", cval=0.0)
-    else:
-        cdcrop = cd
-    max_val = float(np.max(cdcrop))
-    if max_val <= 0.0:
-        return np.zeros(cd.shape, dtype=bool), 0.0
-
-    x = np.arange(0.0, up_thresh + step * 0.5, step, dtype=np.float64)
-    sval = np.empty(x.shape, dtype=np.float32)
-    for i, n in enumerate(x):
-        sval[i] = float(np.count_nonzero(cdcrop > (max_val * n)))
-
-    smf = int(max(1, smf))
-    kernel = np.ones(smf, dtype=np.float64) / float(smf)
-    y = np.convolve(sval.astype(np.float64), kernel, mode="same")
-    ymax = float(np.max(y))
-    if ymax <= 0.0:
-        return np.zeros(cd.shape, dtype=bool), 0.0
-    y = y / ymax
-
-    dx = np.gradient(x)
-    dy = np.gradient(y)
-    ddy = np.gradient(dy)
-    num = dx * ddy
-    denom = dx * dx + dy * dy
-    curvature_sm = num / (np.sqrt(denom) ** 3)
-    curvature_sm = np.nan_to_num(curvature_sm, nan=0.0, posinf=0.0, neginf=0.0)
-    curvature_sm = np.maximum(curvature_sm, 0.0)
-    curvature_sm = np.convolve(curvature_sm, kernel, mode="same")
-
-    idx = int(np.argmax(curvature_sm))
-    if shift_hm_flag:
-        cmax = float(np.max(curvature_sm))
-        if cmax <= 0.0:
-            opt_frac = float(x[idx])
-        else:
-            above = curvature_sm >= (cmax * 0.5)
-            positions = np.flatnonzero(above)
-            if positions.size == 0:
-                full_width = 0
-            else:
-                full_width = int(positions[-1] - positions[0])
-            j = min(idx + full_width, x.size - 1)
-            opt_frac = float(x[j])
-    else:
-        opt_frac = float(x[idx])
-
-    opt_thresh = max_val * opt_frac
-    segment = cdcrop > opt_thresh
-    return segment.astype(bool, copy=False), float(opt_thresh)
-
-
-def _binary_segment_4dflow(cd: np.ndarray) -> tuple[np.ndarray, float]:
-    """Global 4D-flow binary vessel mask: sliding-threshold on CD, then small-component removal."""
-    segment, opt_thresh = _binary_mask_sliding_threshold(
-        cd,
-        step=0.001,
-        up_thresh=0.8,
-        smf=10,
-        shift_hm_flag=True,
-        med_filt_flag=True,
-    )
-    n_fg = int(np.count_nonzero(segment))
-    area_thresh = max(1, int(round(0.005 * n_fg)))
-    from skimage.morphology import remove_small_objects  # type: ignore
-
-    segment = as_backend_array(remove_small_objects(to_numpy(segment), min_size=area_thresh, connectivity=1))
-    return segment.astype(bool, copy=False), float(opt_thresh)
 
 
 def _rasterize_centerlines_mask(
@@ -237,9 +143,8 @@ def run_subject(
     cd_img = imread(_cd_path(nifti_root, subject))
     cd = as_backend_array(cd_img.data).astype(np.float64)
 
-    venous_region = _venous_region(shape3)
-    ven_np = venous_region
-    vessel_bin, sliding_opt_thresh = _binary_segment_4dflow(cd)
+    venous_region = venous_search_region(shape3)
+    vessel_bin, sliding_opt_thresh = binary_vessel_segment_cd(cd)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
     # Arterial multilabel: eICAB labels cleared in the venous slab, then area opening on the hull.
     arterial_vol = np.where(venous_region, 0, labels_np)
@@ -252,7 +157,7 @@ def run_subject(
     arterial = compute_centerlines(as_backend_array(arterial_vol), min_points=5)
 
     # Venous: global vessel mask restricted to the venous slab, then area opening.
-    venous_mask = vessel_bin & ven_np
+    venous_mask = vessel_bin & venous_region
     min_ven = max(1, int(round(0.005 * int(np.count_nonzero(venous_mask)))))
     venous_clean = _bwareaopen_bool(venous_mask, min_size=min_ven, connectivity=1)
 

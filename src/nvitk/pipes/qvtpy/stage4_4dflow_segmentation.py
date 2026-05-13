@@ -1,4 +1,4 @@
-"""qvtpy stage 4: multilabel vessel segmentation in 4Dflow space (initial heuristics)."""
+"""qvtpy stage 4: multilabel ``seg_4dflow`` (arterial eICAB + four venous regions in the CD venous slab)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, TextIO
 import click
 
 import nvitk
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -21,8 +21,18 @@ from nvitk.cluster.sge import (
 )
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
+from skimage.morphology import remove_small_objects  # type: ignore
+
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL
+from nvitk.pipes.qvtpy.flow_volume_masks import (
+    binary_vessel_segment_cd,
+    venous_four_region_labels,
+    venous_search_region,
+)
+from nvitk.pipes.qvtpy.labels import (
+    MATLAB_QVT_VENOUS_VESSEL_NAMES,
+    VENOUS_REGION_BASE,
+)
 
 setup(globals())
 
@@ -68,19 +78,40 @@ def run_subject(
         log.info(f"[{subject}] stage4 seg: skip -> {out_dir}")
         return out_dir
 
-    e_lab = as_backend_array(imread(eicab_in).data)
+    e_lab = as_backend_array(imread(eicab_in).data).astype(np.int32, copy=False)
     cd = as_backend_array(imread(cd_p).data).astype(np.float64)
-    pos = cd[cd > 0]
-    thr = float(np.percentile(pos, 70.0)) if pos.size else 0.0
-    vessel_bin = cd >= thr
-    seg = np.where(vessel_bin, e_lab, 0).astype(np.int32)
-    ven = vessel_bin & (e_lab == 0)
-    seg[ven] = VENOUS_UNKNOWN_LABEL
+    shape3 = e_lab.shape
+
+    vessel_bin, sliding_opt_thresh = binary_vessel_segment_cd(cd)
+    ven_slab = venous_search_region(shape3)
+
+    # Arterial: keep warped eICAB where positive.
+    seg = np.where(e_lab > 0, e_lab, 0).astype(np.int32, copy=False)
+
+    # Venous: CD-based foreground ∩ venous slab ∩ no arterial label; clean; four largest CCs → 31–34.
+    ven_raw = vessel_bin & ven_slab & (e_lab == 0)
+    n_raw = int(np.count_nonzero(ven_raw))
+    min_ven = max(1, int(round(0.005 * max(n_raw, 1))))
+
+    ven_clean = as_backend_array(remove_small_objects(to_numpy(ven_raw), min_size=min_ven, connectivity=1))
+    ven_labels = venous_four_region_labels(ven_clean, region_label_base=VENOUS_REGION_BASE, n_regions=4)
+    seg = np.where(ven_labels > 0, ven_labels, seg).astype(np.int32, copy=False)
 
     ref_img = imread(eicab_in)
     imsave(seg_path, seg, metadata=dict(ref_img.metadata or {}))
     meta_path.write_text(
-        json.dumps({"subject": subject, "cd_threshold_percentile": 70, "thr": thr}, indent=2),
+        json.dumps(
+            {
+                "subject": subject,
+                "binary_vessel_sliding_threshold_opt": float(sliding_opt_thresh),
+                "venous_slab_axis1_third": int(max(1, round(shape3[1] / 3.0))),
+                "venous_area_open_fraction_of_raw": 0.005,
+                "venous_label_ids": [int(VENOUS_REGION_BASE + i) for i in range(4)],
+                "venous_name_hints_size_order": list(MATLAB_QVT_VENOUS_VESSEL_NAMES),
+                "note": "Venous IDs 31–34 are the four largest CCs in the venous slab (size rank), not atlas-matched to name hints.",
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     log.info(f"[{subject}] stage4 segmentation -> {seg_path}")

@@ -11,6 +11,7 @@ Pipeline code: `src/nvitk/pipes/qvtpy/`. This document tracks **what each stage 
 | 2026-05-12 | `phase2volume`: single QVTplus-aligned derivative path; VENC from JSON → NIfTI metadata → DICOM → 700 mm/s + warning; default polynomial background correction (`fit_order` default 2). |
 | 2026-05-12 | qvtpy stages / `phase2volume` / `hemodynamics` / `_phase2volume_bg`: use `nvitk.core.backend.setup(globals())` and `as_backend_array` so heavy array ops follow `NVITK_BACKEND` (NumPy or CuPy). Venous `skeletonize` (skimage) stays CPU via `to_numpy` before skimage. |
 | 2026-05-12 | Stage 2: FLIRT **moving** image is eICAB ``TOF_resampled`` under ``--output-root/<subject>/eicab/`` (not raw ``TOF/TOF.nii.gz``). ``registration_meta.json`` records ``moving_kind: eicab_tof_resampled``. Optional CLI ``--eicab-subdir`` on ``qvtpy-stage2-registration``. |
+| 2026-05-12 | Stage 4: ``seg_4dflow`` uses the same CD sliding-threshold vessel mask as stage 3 (via ``flow_volume_masks``); venous voxels are only inside the **venous slab** (first third along axis 1), with 0.5% area opening, then the **four largest** connected components receive ids **31–34** (``VENOUS_REGION_BASE``…); no global fill with label 30. |
 | 2026-05-12 | Stage 3: global binary mask on ``ComplexDifference_3D`` via sliding-threshold curve (median 3³, step 0.001 up to 0.8×max, FWHM-shifted curvature pick, smooth width 10) + 0.5% foreground area filter; venous slab = first third along axis 1; venous mask = global mask ∧ slab + second 0.5% filter; skeleton venous centerlines. |
 
 ## Backend (GPU vs CPU)
@@ -23,7 +24,7 @@ nvitk selects the array stack via `NVITK_BACKEND` / `nvitk.using("cupy")` (see [
 | Stage 1 eICAB | External container (separate from this table) | Not governed by nvitk `np` proxy. |
 | Stage 2 FLIRT | No | FSL `flirt` is a CPU binary; moving image is read from stage 1 eICAB outputs on the host. |
 | Stage 3 centerlines | Partial: multilabel arterial on GPU where applicable | Global ``slidingThreshold`` + CC filtering and venous ``bwareaopen`` on CPU NumPy; ``scipy.ndimage.median_filter``; ``skimage`` ``remove_small_objects`` / ``skeletonize`` on CPU. |
-| Stage 4 segmentation | Yes: percentile, `np.where`, integer labels | Writes NIfTI on CPU. |
+| Stage 4 segmentation | Partial: ``as_backend_array`` for CD read | Masking and CC labeling on CPU NumPy; ``flow_volume_masks`` + ``skimage``. |
 | Stage 5 LOC | Mostly trivial (reads `.npz` on CPU) | CSV I/O on CPU. |
 | Stage 6 measure | Yes: phase volumes, `velocity_mm_s_from_phases`, PI/RI reductions | Per-LOC loop builds small NumPy vectors for dot products; negligible. |
 
@@ -98,7 +99,7 @@ Under `--output-root/<subject>/`:
 - `qvtpy/stage5_loc_generation/` — `locs.csv`, `loc_meta.json`.
 - `qvtpy/stage6_measure/` — `loc_measurements.csv`, `measure_meta.json`.
 
-Label constants (see `src/nvitk/pipes/qvtpy/labels.py`): eICAB vessel integers `1–18` (see `EICAB_ID_TO_NAME`); qvtpy extensions `QVTPY_VENOUS_UNKNOWN_LABEL` (30), optional venous region base 31, `QVTPY_UNKNOWN_LABEL` (35). Venous branch *names* SSSV/LTSV/RTSV/STRV are strings for LOC, not eICAB voxel values.
+Label constants (see `src/nvitk/pipes/qvtpy/labels.py`): eICAB vessel integers `1–18` (see `EICAB_ID_TO_NAME`); qvtpy extensions `QVTPY_VENOUS_UNKNOWN_LABEL` (30), venous region ids **31–34** (``VENOUS_REGION_BASE`` + rank in stage 4 largest components), `QVTPY_UNKNOWN_LABEL` (35). Venous branch *names* SSSV/LTSV/RTSV/STRV are strings for LOC; stage 4 assigns 31–34 by **component size** (see ``segmentation_meta.json`` note), not guaranteed anatomy order.
 
 ## Stages
 
@@ -130,7 +131,7 @@ Apply the stage-2 rigid transform (nearest neighbour) to warp eICAB multilabels 
 
 ### Stage 4 — segmentation
 
-Heuristic multilabel from CD percentile and warped eICAB labels.
+Build ``seg_4dflow.nii.gz`` from warped eICAB (stage 3) and ``ComplexDifference_3D``. **Arterial:** voxels copy ``eicab_in_4dflow`` where label > 0. **Venous:** same global vessel boolean mask as stage 3 (``flow_volume_masks.binary_vessel_segment_cd``), restricted to the **venous slab** (first ``round(ny/3)`` along axis 1) and where eICAB is zero; **0.5% area opening** on that raw venous foreground; then the **four largest** 3D connected components are labeled **31–34** in size order. CD positives outside the venous slab with no eICAB label are **not** written to the segmentation (no whole-volume label 30).
 
 ### Stage 5 — LOC generation
 

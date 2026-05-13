@@ -10,7 +10,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
 - ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
 - ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines.
-- ``stage4`` — Multilabel ``seg_4dflow`` (heuristic).
+- ``stage4`` — Multilabel ``seg_4dflow`` (CD sliding-threshold mask + four venous CC ids 31–34 in slab).
 - ``stage5`` — Per-vessel LOC CSV from centerlines.
 - ``stage6`` — LOC-wise velocity / PI / RI from phase volumes.
 
