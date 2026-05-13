@@ -12,6 +12,9 @@ import numpy as np
 
 from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import ValidationError
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 
 def _require_skeletonize():
@@ -148,5 +151,29 @@ def compute_centerlines(
     return out
 
 
-__all__ = ["compute_centerlines"]
+def centerline_tangents(points_xyz: np.ndarray, *, k_half: int = 2) -> np.ndarray:
+    """Unit tangent vectors along an ordered polyline (voxel coordinates).
+
+    Uses central differences with ``k_half`` samples on each side; endpoints
+    use one-sided differences. ``points_xyz`` shape ``(N, 3)``.
+    """
+    p = np.asarray(points_xyz, dtype=np.float64)
+    if p.ndim != 2 or p.shape[1] != 3:
+        raise ValidationError("points_xyz must be (N, 3).")
+    n = p.shape[0]
+    if n < 2:
+        return np.zeros_like(p)
+
+    kh = max(1, int(k_half))
+    tang = np.zeros_like(p)
+    for i in range(n):
+        i0 = max(0, i - kh)
+        i1 = min(n - 1, i + kh)
+        d = p[i1] - p[i0]
+        norm = np.linalg.norm(d)
+        tang[i] = d / norm if norm > 1e-9 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    return tang.astype(np.float32, copy=False)
+
+
+__all__ = ["compute_centerlines", "centerline_tangents"]
 

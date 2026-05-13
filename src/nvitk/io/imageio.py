@@ -122,7 +122,7 @@ def imsave(
     data = image
     merged_meta = dict(metadata or {})
 
-    if hasattr(image, "data"):
+    if hasattr(image, "data") and isinstance(image, Image):
         data = image.data
     if hasattr(image, "metadata") and isinstance(getattr(image, "metadata"), dict):
         tmp = dict(image.metadata)

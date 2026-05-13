@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import shutil
-import traceback
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -32,6 +31,7 @@ DERIVED_FILES: tuple[str, ...] = (
     "ComplexDifference_4D",
     "VelocityMagnitude_3D",
     "VelocityMagnitude_4D",
+    "VelocityMeanComponents",
 )
 
 log = Logger()
@@ -144,6 +144,7 @@ def _export_nifti_move(src: Path, dst: Path) -> None:
         img = nib.load(str(src))
         nib.save(img, str(dst))
     except Exception as exc:
+        log.exception(f"Failed to convert NIfTI {src} -> {dst}: {exc}")
         raise RuntimeError(f"Failed to convert NIfTI {src} -> {dst}: {exc}") from exc
     if src.resolve() != dst.resolve():
         src.unlink(missing_ok=True)
@@ -234,6 +235,9 @@ def run_subject(
     nifti_root: Path,
     compute_phase_derived: bool = False,
     skip_existing: bool = False,
+    phase_background_correction: bool = True,
+    phase_bg_poly_order: int = 2,
+    phase_bg_static_percentile: float = 25.0,
 ) -> Path:
     """Convert + reorganize for one subject. Returns the subject NIfTI folder."""
     subj_dicom = dicom_root / subject
@@ -250,10 +254,16 @@ def run_subject(
 
     if compute_phase_derived:
         try:
-            phase2volume(subj_nifti, multifile=False)
+            phase2volume(
+                subj_nifti,
+                multifile=False,
+                dicom_search_dir=subj_dicom,
+                background_phase_correction=phase_background_correction,
+                bg_poly_order=phase_bg_poly_order,
+                bg_static_percentile=phase_bg_static_percentile,
+            )
         except Exception as exc:
-            print(traceback.format_exc())
-            log.warning(f"[{subject}] phase2volume failed: {exc}")
+            log.exception(f"[{subject}] phase2volume failed: {exc}")
 
     return subj_nifti
 
@@ -393,6 +403,16 @@ def print_nifti_qc_report(
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--compute-phase-derived", is_flag=True, default=False)
 @click.option(
+    "--phase-background-correction/--no-phase-background-correction",
+    "phase_background_correction",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Polynomial spatial background on PC velocity (QVTplus-style; default on).",
+)
+@click.option("--phase-bg-poly-order", type=int, default=2, show_default=True)
+@click.option("--phase-bg-static-percentile", type=float, default=25.0, show_default=True)
+@click.option(
     "--report",
     is_flag=True,
     default=False,
@@ -410,6 +430,9 @@ def main(
     subject: str | None,
     skip_existing: bool,
     compute_phase_derived: bool,
+    phase_background_correction: bool,
+    phase_bg_poly_order: int,
+    phase_bg_static_percentile: float,
     report: bool,
     report_derived: bool,
 ) -> None:
@@ -421,6 +444,9 @@ def main(
             nifti_root=nifti_root,
             compute_phase_derived=compute_phase_derived,
             skip_existing=skip_existing,
+            phase_background_correction=phase_background_correction,
+            phase_bg_poly_order=phase_bg_poly_order,
+            phase_bg_static_percentile=phase_bg_static_percentile,
         )
         report_subjects = [subject]
     else:
@@ -446,6 +472,9 @@ def main(
                     nifti_root=nifti_root,
                     compute_phase_derived=compute_phase_derived,
                     skip_existing=skip_existing,
+                    phase_background_correction=phase_background_correction,
+                    phase_bg_poly_order=phase_bg_poly_order,
+                    phase_bg_static_percentile=phase_bg_static_percentile,
                 )
             report_subjects = subjects
 

@@ -75,6 +75,41 @@ def find_tof_volume(subject_nifti_dir: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def _stem_without_suffix(p: Path) -> str:
+    if p.name.lower().endswith(".nii.gz"):
+        return p.name[: -len(".nii.gz")]
+    if p.name.lower().endswith(".nii"):
+        return p.name[: -len(".nii")]
+    return p.stem
+
+
+def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
+    """Return path to eICAB ``TOF_resampled`` NIfTI under *eicab_output_dir*, or None.
+
+    Used as the moving image for stage-2 FLIRT (same grid and contrast as multilabel outputs).
+    Prefers ``TOF_resampled.nii.gz`` / ``TOF_resampled.nii``, then any ``*TOF*`` stem ending
+    in ``_resampled`` (case-insensitive), shallow then recursive under *eicab_output_dir*.
+    """
+    if not eicab_output_dir.is_dir():
+        return None
+    for name in ("TOF_resampled.nii.gz", "TOF_resampled.nii"):
+        p = eicab_output_dir / name
+        if p.is_file():
+            return p
+    hits: list[Path] = []
+    for p in sorted(eicab_output_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if not (p.suffix == ".nii" or p.name.endswith(".nii.gz")):
+            continue
+        stem = _stem_without_suffix(p).lower()
+        if not stem.endswith("_resampled"):
+            continue
+        if "tof" in stem:
+            hits.append(p)
+    return hits[0] if hits else None
+
+
 def _output_has_segmentation(out_dir: Path) -> bool:
     if not out_dir.is_dir():
         return False
@@ -480,7 +515,7 @@ def main(
         )
 
 
-__all__ = ["find_tof_volume", "run_subject", "submit_subject_sge", "main"]
+__all__ = ["find_tof_resampled_volume", "find_tof_volume", "run_subject", "submit_subject_sge", "main"]
 
 
 if __name__ == "__main__":

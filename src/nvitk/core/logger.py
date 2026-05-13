@@ -36,9 +36,14 @@ except ImportError:
 
 def in_notebook() -> bool:
     """Return True when running inside a Jupyter / IPython ZMQ kernel (no Rich progress)."""
+    if get_ipython is None:
+        return False
     try:
-        shell = get_ipython().__class__.__name__
-        return shell == 'ZMQInteractiveShell'
+        ip = get_ipython()
+        if ip is None:
+            return False
+        shell = ip.__class__.__name__
+        return shell == "ZMQInteractiveShell"
     except NameError:
         return False
 

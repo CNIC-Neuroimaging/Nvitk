@@ -5,20 +5,17 @@ a bash script + SSH to the cluster login node.
 
 Stages (select with ``--stages``; default ``stage0_c,stage1``)
 --------------------------------------------------------------
-- ``stage0_d`` (``stage0_download``) -- XNAT -> DICOM into ``--dicom-root``
-  (see :mod:`nvitk.pipes.qvtpy.stage0_download`). Requires ``--subjects`` or
-  ``--subjects-file``. Runs locally even when ``--submit sge`` (XNAT pull is
-  network/credentials bound and isn't a cluster job).
-- ``stage0_c`` (``stage0_convert``) -- DICOM -> NIfTI conversion + reorg
-  (see :mod:`nvitk.pipes.qvtpy.stage0_convert`).
-- ``stage1`` (``stage1_eicab``) -- eICAB CoW/TOF segmentation on the
-  reorganized ``TOF/TOF.nii.gz`` per subject
-  (see :mod:`nvitk.pipes.qvtpy.stage1_eicab`).
+- ``stage0_d`` — XNAT → DICOM (local only).
+- ``stage0_c`` — DICOM → NIfTI + reorg + optional ``phase2volume`` derivatives.
+- ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
+- ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
+- ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines.
+- ``stage4`` — Multilabel ``seg_4dflow`` (heuristic).
+- ``stage5`` — Per-vessel LOC CSV from centerlines.
+- ``stage6`` — LOC-wise velocity / PI / RI from phase volumes.
 
-SGE submission (``--submit sge``) writes one bash script under
-``DEFAULT_SGE_SCRIPTS_DIR`` (one block per subject per stage, with
-``-hold_jid`` chaining stage1 onto stage0_c) and then SSHes the script to a
-login node via :func:`nvitk.cluster.remote_submit.run_sge_script_ssh`.
+SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
+:func:`nvitk.cluster.sge.submit_stage`).
 """
 
 from __future__ import annotations
@@ -45,18 +42,27 @@ from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
 
 from . import config as cfg
-from . import stage0_convert, stage0_download, stage1_eicab
+from . import (
+    stage0_convert,
+    stage0_download,
+    stage1_eicab,
+    stage2_registration,
+    stage3_centerline,
+    stage4_4dflow_segmentation,
+    stage5_loc_generation,
+    stage6_measure,
+)
 
 log = Logger()
-
-
-# ---------------------------------------------------------------------------
-# Stage selection
-# ---------------------------------------------------------------------------
 
 STAGE_DOWNLOAD = "stage0_d"
 STAGE_CONVERT = "stage0_c"
 STAGE_EICAB = "stage1"
+STAGE_REG = "stage2"
+STAGE_CENTERLINE = "stage3"
+STAGE_SEG = "stage4"
+STAGE_LOC = "stage5"
+STAGE_MEASURE = "stage6"
 
 _STAGE_ALIASES: dict[str, str] = {
     "stage0_d": STAGE_DOWNLOAD,
@@ -71,14 +77,39 @@ _STAGE_ALIASES: dict[str, str] = {
     "stage1": STAGE_EICAB,
     "stage1_eicab": STAGE_EICAB,
     "eicab": STAGE_EICAB,
+    "stage2": STAGE_REG,
+    "stage2_registration": STAGE_REG,
+    "registration": STAGE_REG,
+    "stage3": STAGE_CENTERLINE,
+    "stage3_centerline": STAGE_CENTERLINE,
+    "centerline": STAGE_CENTERLINE,
+    "stage4": STAGE_SEG,
+    "stage4_4dflow_segmentation": STAGE_SEG,
+    "segmentation": STAGE_SEG,
+    "stage5": STAGE_LOC,
+    "stage5_loc_generation": STAGE_LOC,
+    "loc": STAGE_LOC,
+    "stage6": STAGE_MEASURE,
+    "stage6_measure": STAGE_MEASURE,
+    "measure": STAGE_MEASURE,
 }
 
-_ALL_STAGES: tuple[str, ...] = (STAGE_DOWNLOAD, STAGE_CONVERT, STAGE_EICAB)
-DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB}"
+_STAGES_ORDERED: tuple[str, ...] = (
+    STAGE_DOWNLOAD,
+    STAGE_CONVERT,
+    STAGE_EICAB,
+    STAGE_REG,
+    STAGE_CENTERLINE,
+    STAGE_SEG,
+    STAGE_LOC,
+    STAGE_MEASURE,
+)
+
+_ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
+DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB},{STAGE_REG},{STAGE_CENTERLINE},{STAGE_SEG},{STAGE_LOC},{STAGE_MEASURE}"
 
 
 def _parse_stages(spec: str) -> list[str]:
-    """Normalize ``--stages`` to canonical names, preserving pipeline order."""
     tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]
     if not tokens:
         raise click.ClickException("--stages cannot be empty.")
@@ -87,15 +118,10 @@ def _parse_stages(spec: str) -> list[str]:
         key = tok.replace("-", "_")
         if key not in _STAGE_ALIASES:
             raise click.ClickException(
-                f"Unknown stage {tok!r}. Valid: {', '.join(_ALL_STAGES)}."
+                f"Unknown stage {tok!r}. Valid: {', '.join(sorted(set(_STAGE_ALIASES.keys())))}."
             )
         canonical.add(_STAGE_ALIASES[key])
-    return [s for s in _ALL_STAGES if s in canonical]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+    return [s for s in _STAGES_ORDERED if s in canonical]
 
 
 def _iter_subjects(root: Path) -> list[str]:
@@ -105,12 +131,10 @@ def _iter_subjects(root: Path) -> list[str]:
 
 
 def _default_nvitk_src_dir() -> Path:
-    """Host directory mounted at ``/nvitk/src/`` (contains a ``nvitk/`` package tree)."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _default_submit_script_path() -> Path:
-    """Default bash submission script path under :data:`cfg.SGE_SCRIPTS_DIR`."""
     cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return cfg.SGE_SCRIPTS_DIR / f"submit_qvtpy_{ts}.sh"
@@ -126,8 +150,10 @@ def _emit_stage0_convert(
     src_dir: Path,
     compute_phase_derived: bool,
     skip_existing: bool,
+    phase_background_correction: bool,
+    phase_bg_poly_order: int,
+    phase_bg_static_percentile: float,
 ) -> str:
-    """Append a stage0_c SGE block to *fh*; returns the bash jid var ref."""
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage0_convert.py"
     cmd_parts: list[str] = [
@@ -139,9 +165,15 @@ def _emit_stage0_convert(
         shlex.quote(binds.data),
         "--nifti-root",
         shlex.quote(binds.output),
+        "--phase-bg-poly-order",
+        str(int(phase_bg_poly_order)),
+        "--phase-bg-static-percentile",
+        str(float(phase_bg_static_percentile)),
     ]
     if compute_phase_derived:
         cmd_parts.append("--compute-phase-derived")
+    if phase_background_correction:
+        cmd_parts.append("--phase-background-correction")
     if skip_existing:
         cmd_parts.append("--skip-existing")
     python_cmd = " ".join(cmd_parts)
@@ -172,11 +204,6 @@ def _emit_stage0_convert(
     return submit_stage(spec, paths, emit=fh)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
 @click.command("nvitk-qvtpy")
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_DICOM_ROOT)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_NIFTI_ROOT)
@@ -185,16 +212,9 @@ def _emit_stage0_convert(
     "stages_spec",
     default=DEFAULT_STAGES,
     show_default=True,
-    help=(
-        "Comma-separated stages to run. Choices: "
-        f"{', '.join(_ALL_STAGES)} (aliases: stage0_download, stage0_convert, stage1_eicab)."
-    ),
+    help="Comma-separated stages (see module docstring for names and aliases).",
 )
-@click.option(
-    "--subjects",
-    default=None,
-    help="Comma-separated subject list. If omitted, falls back to listing subfolders of the input root for the first selected stage.",
-)
+@click.option("--subjects", default=None, help="Comma-separated subject list.")
 @click.option(
     "--subjects-file",
     type=click.Path(path_type=Path),
@@ -206,90 +226,64 @@ def _emit_stage0_convert(
     "--container",
     type=click.Path(path_type=Path),
     default=cfg.CONTAINER_PATH,
-    help="Pipeline Singularity image used to run stage0_c on SGE.",
+    help="Pipeline Singularity image for SGE stages.",
 )
 @click.option(
     "--src-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Host tree mounted at /nvitk/src/ (default: parent of the installed nvitk package).",
+    help="(sge) Host tree mounted at /nvitk/src/.",
 )
 @click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--compute-phase-derived", is_flag=True, default=False)
+@click.option("--compute-phase-derived", is_flag=True, default=True)
+@click.option(
+    "--phase-background-correction/--no-phase-background-correction",
+    "phase_background_correction",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="phase2volume: polynomial velocity background correction (default on).",
+)
+@click.option("--phase-bg-poly-order", type=int, default=2, show_default=True)
+@click.option("--phase-bg-static-percentile", type=float, default=25.0, show_default=True)
 @click.option(
     "--sequences",
     default=",".join(stage0_download.DEFAULT_SEQUENCES),
     show_default=True,
-    help="Sequences to download (only used when stages include stage0_d).",
+    help="Sequences for stage0_d.",
 )
-@click.option(
-    "--xnat-config",
-    "xnat_config_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="XNAT profile (YAML/JSON). Falls back to NVITK_XNAT_CONFIG / ~/.config/nvitk/xnat.*.",
-)
-@click.option(
-    "--report",
-    is_flag=True,
-    default=False,
-    help=(
-        "Print QC after stage0_d (DICOM tree) and/or after stage0_c "
-        "(NIfTI tree, local submit only)."
-    ),
-)
-@click.option(
-    "--report-derived",
-    is_flag=True,
-    default=False,
-    help="With --report, also list optional derived 4DFlow images missing per subject.",
-)
+@click.option("--xnat-config", "xnat_config_path", type=click.Path(path_type=Path), default=None)
+@click.option("--report", is_flag=True, default=False)
+@click.option("--report-derived", is_flag=True, default=False)
 @click.option(
     "--output-root",
     type=click.Path(path_type=Path),
     default=cfg.DEFAULT_RESULTS_ROOT,
     show_default=True,
-    help="Parent directory for stage1 outputs.",
+    help="Results root (eICAB + qvtpy stages).",
 )
-@click.option(
-    "--eicab-container",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="eICAB Singularity image override (stage1; default from eicab.config).",
-)
-@click.option(
-    "--vasculature-dir",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Host tree mounted at /programs/Neuro/vasculature2 (stage1; default from eicab.config).",
-)
+@click.option("--eicab-container", type=click.Path(path_type=Path), default=None)
+@click.option("--vasculature-dir", type=click.Path(path_type=Path), default=None)
 @click.option(
     "--eicab-device",
     type=click.Choice(["cpu", "gpu"], case_sensitive=False),
     default="cpu",
     show_default=True,
-    help="eICAB inference device (stage1).",
 )
+@click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
 @click.option(
-    "--eicab-resolution",
-    type=float,
-    default=0.5,
+    "--stage2-reference",
+    type=click.Choice(["angio", "cd"]),
+    default="angio",
     show_default=True,
-    help="eICAB target isotropic resolution in mm (stage1).",
+    help="Fixed image for FLIRT (stage2).",
 )
-@click.option(
-    "--emit-script",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="(sge) Bash submission script path (default: under eicab.config.DEFAULT_SGE_SCRIPTS_DIR).",
-)
-@click.option(
-    "--no-remote",
-    is_flag=True,
-    help="(sge) After writing the submission script, do not run it via SSH.",
-)
-@click.option("--remote-host", default=None, help="(sge) SSH hostname or alias from CLUSTER_HOST_ALIASES.")
-@click.option("--remote-user", default=None, help="(sge) SSH username (else prompt).")
+@click.option("--stage2-dof", type=int, default=6, show_default=True)
+@click.option("--stage2-cost", type=str, default="normmi", show_default=True)
+@click.option("--emit-script", type=click.Path(path_type=Path), default=None)
+@click.option("--no-remote", is_flag=True)
+@click.option("--remote-host", default=None)
+@click.option("--remote-user", default=None)
 def main(
     dicom_root: Path,
     nifti_root: Path,
@@ -301,6 +295,9 @@ def main(
     src_dir: Path | None,
     skip_existing: bool,
     compute_phase_derived: bool,
+    phase_background_correction: bool,
+    phase_bg_poly_order: int,
+    phase_bg_static_percentile: float,
     sequences: str,
     xnat_config_path: Path | None,
     report: bool,
@@ -310,6 +307,9 @@ def main(
     vasculature_dir: Path | None,
     eicab_device: str,
     eicab_resolution: float,
+    stage2_reference: str,
+    stage2_dof: int,
+    stage2_cost: str,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
@@ -321,6 +321,12 @@ def main(
     run_dl = STAGE_DOWNLOAD in stages
     run_conv = STAGE_CONVERT in stages
     run_eicab = STAGE_EICAB in stages
+    run_s2 = STAGE_REG in stages
+    run_s3 = STAGE_CENTERLINE in stages
+    run_s4 = STAGE_SEG in stages
+    run_s5 = STAGE_LOC in stages
+    run_s6 = STAGE_MEASURE in stages
+
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
     if subjects or subjects_file:
@@ -330,9 +336,7 @@ def main(
         )
     else:
         if run_dl:
-            raise click.ClickException(
-                "stage0_d (XNAT download) requires --subjects or --subjects-file."
-            )
+            raise click.ClickException("stage0_d requires --subjects or --subjects-file.")
         fallback_root = dicom_root if run_conv else nifti_root
         subject_list = _iter_subjects(fallback_root)
         if not subject_list:
@@ -344,10 +348,9 @@ def main(
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
 
-    # stage0_d always runs locally (XNAT pull is network/credentials-bound).
     if run_dl:
         if submit == "sge":
-            log.info("stage0_d (XNAT download) always runs locally; SGE script will cover stage0_c/stage1.")
+            log.info("stage0_d runs locally; SGE covers other selected stages.")
         from nvitk.db.xnat import requested_sequence_set
         from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
@@ -372,6 +375,9 @@ def main(
                     nifti_root=nifti_root,
                     compute_phase_derived=compute_phase_derived,
                     skip_existing=skip_existing,
+                    phase_background_correction=phase_background_correction,
+                    phase_bg_poly_order=phase_bg_poly_order,
+                    phase_bg_static_percentile=phase_bg_static_percentile,
                 )
             if run_eicab:
                 try:
@@ -386,15 +392,82 @@ def main(
                         vasculature_dir=vasculature_dir,
                     )
                 except (FileNotFoundError, OSError) as exc:
-                    log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage1 eICAB skipped: {exc}")
+            if run_s2:
+                try:
+                    stage2_registration.run_subject(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                        reference=stage2_reference,  # type: ignore[arg-type]
+                        dof=stage2_dof,
+                        cost=stage2_cost,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage2 skipped: {exc}")
+            if run_s3:
+                try:
+                    stage3_centerline.run_subject(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage3 skipped: {exc}")
+            if run_s4:
+                try:
+                    stage4_4dflow_segmentation.run_subject(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4 skipped: {exc}")
+            if run_s5:
+                try:
+                    stage5_loc_generation.run_subject(
+                        subj,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage5 skipped: {exc}")
+            if run_s6:
+                try:
+                    stage6_measure.run_subject(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage6 skipped: {exc}")
+
         if run_conv and report:
             stage0_convert.print_nifti_qc_report(
                 nifti_root, subject_list, check_derived=report_derived
             )
         return
 
-    # SGE
-    if not (run_conv or run_eicab):
+    cluster_stages = (
+        run_conv or run_eicab or run_s2 or run_s3 or run_s4 or run_s5 or run_s6
+    )
+    if not cluster_stages:
         log.info("Nothing to submit to SGE (only stage0_d was selected). Done.")
         return
 
@@ -410,10 +483,10 @@ def main(
             title=f"qvtpy stages={','.join(stages)} n_subjects={len(subject_list)}",
         )
         for subj in subject_list:
-            stage0_jid: str | None = None
+            prev_jid: str | None = None
             if run_conv:
                 try:
-                    stage0_jid = _emit_stage0_convert(
+                    prev_jid = _emit_stage0_convert(
                         fh,
                         subj,
                         dicom_root=dicom_root,
@@ -422,13 +495,18 @@ def main(
                         src_dir=src_p,
                         compute_phase_derived=compute_phase_derived,
                         skip_existing=skip_existing,
+                        phase_background_correction=phase_background_correction,
+                        phase_bg_poly_order=phase_bg_poly_order,
+                        phase_bg_static_percentile=phase_bg_static_percentile,
                     )
                 except Exception as exc:
-                    log.warning(f"[{subj}] stage0_c emit skipped: {exc}")
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage0_c emit skipped: {exc}")
 
             if run_eicab:
                 try:
-                    stage1_eicab.submit_subject_sge(
+                    jid = stage1_eicab.submit_subject_sge(
                         subj,
                         nifti_root=nifti_root,
                         output_root=output_root,
@@ -439,12 +517,103 @@ def main(
                         pipeline_container=None,
                         src_dir=src_p,
                         vasculature_dir=vasculature_dir,
-                        hold_jid=stage0_jid or None,
+                        hold_jid=prev_jid,
                         dry_run=False,
                         emit=fh,
                     )
+                    prev_jid = jid or prev_jid
                 except (FileNotFoundError, OSError) as exc:
-                    log.warning(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+
+            if run_s2:
+                try:
+                    prev_jid = stage2_registration.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        reference=stage2_reference,  # type: ignore[arg-type]
+                        dof=stage2_dof,
+                        cost=stage2_cost,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage2 emit skipped: {exc}")
+
+            if run_s3:
+                try:
+                    prev_jid = stage3_centerline.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage3 emit skipped: {exc}")
+
+            if run_s4:
+                try:
+                    prev_jid = stage4_4dflow_segmentation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4 emit skipped: {exc}")
+
+            if run_s5:
+                try:
+                    prev_jid = stage5_loc_generation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage5 emit skipped: {exc}")
+
+            if run_s6:
+                try:
+                    stage6_measure.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage6 emit skipped: {exc}")
 
     log.info("=" * 78)
     log.info(f"qvtpy SGE script written: {script_path}")
@@ -452,7 +621,7 @@ def main(
     log.info("=" * 78)
 
     if run_conv and report:
-        log.info("NIfTI report skipped: conversion is queued on the cluster (run with --submit local to print it).")
+        log.info("NIfTI report skipped: conversion is queued on the cluster.")
 
     if no_remote:
         log.info("Skipping remote SSH (--no-remote).")
@@ -470,4 +639,15 @@ def main(
         )
 
 
-__all__ = ["main", "DEFAULT_STAGES", "STAGE_DOWNLOAD", "STAGE_CONVERT", "STAGE_EICAB"]
+__all__ = [
+    "main",
+    "DEFAULT_STAGES",
+    "STAGE_DOWNLOAD",
+    "STAGE_CONVERT",
+    "STAGE_EICAB",
+    "STAGE_REG",
+    "STAGE_CENTERLINE",
+    "STAGE_SEG",
+    "STAGE_LOC",
+    "STAGE_MEASURE",
+]

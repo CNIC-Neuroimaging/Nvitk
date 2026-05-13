@@ -28,7 +28,7 @@ SGE_JOB_PREFIX: str = "QVTPY"
 
 DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM")
 DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS")
+DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
 
 
 # ---------------------------------------------------------------------------
@@ -37,16 +37,22 @@ DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/
 
 STAGE0_DIR: str = "res_convert_qvtpy"
 STAGE1_EICAB_DIR: str = "eicab"
+QVT_SUBDIR: str = "qvtpy"
+STAGE2_REGISTRATION_DIR: str = "stage2_registration"
+STAGE3_CENTERLINE_DIR: str = "stage3_centerline"
+STAGE4_SEG_DIR: str = "stage4_4dflow_segmentation"
+STAGE5_LOC_DIR: str = "stage5_loc_generation"
+STAGE6_MEASURE_DIR: str = "stage6_measure"
 
 
 # ---------------------------------------------------------------------------
 # SGE defaults (overridable via .nvitk/sge.json `pipelines.qvtpy`)
 # ---------------------------------------------------------------------------
 
-SGE_PROJECT: str = "MCC"
-SGE_ACCOUNT: str = "MCC"
+SGE_PROJECT: str = "MCC_GPU"
+SGE_ACCOUNT: str = "MCC_GPU"
 SGE_NGPU: int = 0
-SGE_H_VMEM: str = "25G"
+SGE_H_VMEM: str = "30G"
 SGE_QUEUE: str | None = None
 
 SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/QVTPY")
@@ -93,6 +99,12 @@ __all__ = [
     "DEFAULT_RESULTS_ROOT",
     "STAGE0_DIR",
     "STAGE1_EICAB_DIR",
+    "QVT_SUBDIR",
+    "STAGE2_REGISTRATION_DIR",
+    "STAGE3_CENTERLINE_DIR",
+    "STAGE4_SEG_DIR",
+    "STAGE5_LOC_DIR",
+    "STAGE6_MEASURE_DIR",
     "SGE_PROJECT",
     "SGE_ACCOUNT",
     "SGE_NGPU",
