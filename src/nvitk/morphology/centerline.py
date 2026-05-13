@@ -157,7 +157,7 @@ def centerline_tangents(points_xyz: np.ndarray, *, k_half: int = 2) -> np.ndarra
     Uses central differences with ``k_half`` samples on each side; endpoints
     use one-sided differences. ``points_xyz`` shape ``(N, 3)``.
     """
-    p = np.asarray(points_xyz, dtype=np.float64)
+    p = to_numpy(points_xyz).astype(np.float64)
     if p.ndim != 2 or p.shape[1] != 3:
         raise ValidationError("points_xyz must be (N, 3).")
     n = p.shape[0]

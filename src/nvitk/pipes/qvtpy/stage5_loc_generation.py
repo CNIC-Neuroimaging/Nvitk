@@ -20,10 +20,12 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.logger import Logger
+from nvitk.core.array import as_backend_array
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy import config as cfg
 
 setup(globals())
+import numpy as _np
 
 log = Logger()
 
@@ -58,18 +60,18 @@ def run_subject(
         log.info(f"[{subject}] stage5 loc: skip -> {out_dir}")
         return out_dir
 
-    z = np.load(npz_path)
+    z = _np.load(npz_path)
     rows: list[dict[str, float | int]] = []
     for key in sorted(z.files):
         if not key.startswith("arterial_"):
             continue
         label = int(key.split("_", 1)[1])
-        pts = z[key]
+        pts = as_backend_array(z[key])
         if pts.shape[0] < 3:
             continue
         mid = pts.shape[0] // 2
         tangents = centerline_tangents(pts, k_half=tangent_k_half)
-        i, j, k = (int(round(pts[mid, 0])), int(round(pts[mid, 1])), int(round(pts[mid, 2])))
+        i, j, k = (int(np.round(pts[mid, 0])), int(np.round(pts[mid, 1])), int(np.round(pts[mid, 2])))
         tx, ty, tz = (float(tangents[mid, 0]), float(tangents[mid, 1]), float(tangents[mid, 2]))
         rows.append(
             {
