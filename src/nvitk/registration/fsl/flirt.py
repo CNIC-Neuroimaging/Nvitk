@@ -68,7 +68,7 @@ def flirt_register_rigid(
     if searchr_x is not None and hasattr(fl.inputs, "searchr_x"):
         fl.inputs.searchr_x = [float(searchr_x), float(searchr_x)]
 
-    log.info(f"FLIRT rigid: moving={moving_p} reference={fixed_p} dof={dof}, cost={cost}, cost_func={cost_func}")
+    log.info(f"FLIRT rigid: moving={moving_p} reference={fixed_p} dof={dof}, cost={cost}")
     runtime = fl.run()
     if not mat_path.is_file():
         raise RuntimeError(f"FLIRT did not produce matrix file: {mat_path}")

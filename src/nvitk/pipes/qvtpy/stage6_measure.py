@@ -11,7 +11,7 @@ from typing import TextIO
 import click
 
 import nvitk
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -31,10 +31,14 @@ from nvitk.measure.hemodynamics import (
     velocity_mm_s_from_phases,
 )
 from nvitk.pipes.qvtpy import config as cfg
+from nvitk.pipes.qvtpy.labels import eicab_vessel_name
 
 setup(globals())
 
 log = Logger()
+
+# Disk radius (voxels) for cross-sectional flow proxy, consistent with MATLAB QVT-style planes.
+_LOC_CROSS_SECTION_RADIUS_VOX: float = 10.0
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -47,6 +51,18 @@ def _stage5_dir(output_root: Path, subject: str) -> Path:
 
 def _stage6_out(output_root: Path, subject: str) -> Path:
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR
+
+
+def _min_voxel_spacing_mm(ap_img_path: Path) -> float:
+    ap_img = imread(ap_img_path)
+    sp = ap_img.spacing
+    if sp is not None and len(sp) >= 3:
+        return min(float(sp[0]), float(sp[1]), float(sp[2]))
+    aff = ap_img.affine
+    if aff is not None:
+        a = np.asarray(aff, dtype=np.float64)
+        return float(min(np.linalg.norm(a[:3, 0]), np.linalg.norm(a[:3, 1]), np.linalg.norm(a[:3, 2])))
+    return 1.0
 
 
 def run_subject(
@@ -67,14 +83,34 @@ def run_subject(
         return out_dir
 
     inputs = discover_phase_inputs(nifti_root / subject)
+    min_sp = _min_voxel_spacing_mm(inputs.ap_phase_path)
+    radius_mm = float(_LOC_CROSS_SECTION_RADIUS_VOX) * min_sp
+    area_mm2 = float(np.pi) * radius_mm * radius_mm
+
     ap = as_backend_array(imread(inputs.ap_phase_path).data).astype(np.float64)
     rl = as_backend_array(imread(inputs.rl_phase_path).data).astype(np.float64)
     fh = as_backend_array(imread(inputs.fh_phase_path).data).astype(np.float64)
     vx, vy, vz = velocity_mm_s_from_phases(ap, rl, fh)
     if vx.ndim != 4:
         raise ValueError("Expected 4D phase volumes for LOC-wise time series.")
+    nt = int(vx.shape[3])
 
-    rows_out: list[dict[str, float | int]] = []
+    vel_cols = [f"loc_velocity_mm_s_t{t}" for t in range(nt)]
+    flow_cols = [f"loc_flow_ml_s_t{t}" for t in range(nt)]
+    fieldnames = [
+        "vessel_id",
+        "vessel_name",
+        "loc_cross_section_radius_vox",
+        "loc_cross_section_area_mm2",
+        "loc_mean_velocity_mm_s",
+        "loc_mean_flow_ml_s",
+        "loc_pi",
+        "loc_ri",
+        *vel_cols,
+        *flow_cols,
+    ]
+
+    rows_out: list[dict[str, float | int | str]] = []
     with loc_csv.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
@@ -82,31 +118,39 @@ def run_subject(
             j = int(row["j"])
             k = int(row["k"])
             vid = int(row["vessel_id"])
+            vname = (row.get("vessel_name") or "").strip() or eicab_vessel_name(vid)
             tang = np.array(
                 [float(row["tangent_x"]), float(row["tangent_y"]), float(row["tangent_z"])],
                 dtype=np.float64,
             )
             ts = through_plane_velocity_series(vx, vy, vz, i=i, j=j, k=k, tangent=tang)
-            ts2 = ts.reshape(1, -1)
-            rows_out.append(
-                {
-                    "vessel_id": vid,
-                    "loc_mean_velocity_mm_s": float(mean_flow_ml_s(ts2, None)[0]),
-                    "loc_pi": float(pulsatility_index(ts2)[0]),
-                    "loc_ri": float(resistivity_index(ts2)[0]),
-                }
-            )
+            ts_np = as_backend_array(ts).astype(np.float64).reshape(-1)
+            ts_pos = np.abs(ts_np)
+            ts2 = ts_pos.reshape(1, -1)
+            q_series = ts_pos * (area_mm2 / 1000.0)
+
+            rec: dict[str, float | int | str] = {
+                "vessel_id": vid,
+                "vessel_name": vname,
+                "loc_cross_section_radius_vox": float(_LOC_CROSS_SECTION_RADIUS_VOX),
+                "loc_cross_section_area_mm2": float(area_mm2),
+                "loc_mean_velocity_mm_s": float(mean_flow_ml_s(ts2, None)[0]),
+                "loc_mean_flow_ml_s": float(np.mean(q_series)),
+                "loc_pi": float(pulsatility_index(ts2)[0]),
+                "loc_ri": float(resistivity_index(ts2)[0]),
+            }
+            for t in range(nt):
+                rec[f"loc_velocity_mm_s_t{t}"] = float(ts_pos[t])
+                rec[f"loc_flow_ml_s_t{t}"] = float(q_series[t])
+            rows_out.append(rec)
 
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(
-            fh,
-            fieldnames=["vessel_id", "loc_mean_velocity_mm_s", "loc_pi", "loc_ri"],
-        )
+        w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows_out)
 
     (out_dir / "measure_meta.json").write_text(
-        json.dumps({"n_rows": len(rows_out)}, indent=2), encoding="utf-8"
+        json.dumps({"n_rows": len(rows_out), "n_timepoints": nt}, indent=2), encoding="utf-8"
     )
     log.info(f"[{subject}] stage6 measure -> {meas_csv}")
     return out_dir

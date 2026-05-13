@@ -15,6 +15,12 @@ subject folder. If omitted, the CLI looks for, in order:
 ``vessels.nii.gz``, ``vessel_mask.nii.gz``, ``VesselSeg.nii.gz``, ``vessels.nii``
 under the subject directory.
 
+If none of those exist, the CLI then looks for QVTPy pipeline outputs under
+``<pipeline-output-root>/<subject>/qvtpy/stage4_4dflow_segmentation/seg_4dflow.nii.gz``.
+When ``--pipeline-output-root`` is omitted, :data:`nvitk.pipes.qvtpy.config.DEFAULT_RESULTS_ROOT`
+is tried (same layout as ``nvitk-qvtpy`` / stage4). From that tree it can also
+load ``locs.csv`` and ``centerlines_mask.nii.gz`` for the viewer.
+
 Optional ``--batch`` uses ``<nifti_root>/<batch>/<subject>`` (when data are
 nested by batch). Otherwise the subject folder is ``<nifti_root>/<subject>``,
 matching stage0.
@@ -22,10 +28,12 @@ matching stage0.
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import cast
 
 import click
+import numpy as np
 
 from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import ValidationError
@@ -76,13 +84,20 @@ def _patient_dir(
     return p
 
 
+def _find_nifti_default_vessel_mask(patient: Path) -> Path | None:
+    for name in _DEFAULT_VESSEL_REL_NAMES:
+        cand = patient / name
+        if cand.is_file():
+            return cand
+    return None
+
+
 def _resolve_vessel_mask(patient: Path, vessel_mask: Path | None) -> Path:
     if vessel_mask is None:
-        for name in _DEFAULT_VESSEL_REL_NAMES:
-            cand = patient / name
-            if cand.is_file():
-                log.info(f"Using default vessel mask: {cand.name}")
-                return cand
+        hit = _find_nifti_default_vessel_mask(patient)
+        if hit is not None:
+            log.info(f"Using default vessel mask: {hit.name}")
+            return hit
         raise click.ClickException(
             f"No vessel mask found under {patient}. "
             f"Tried: {', '.join(_DEFAULT_VESSEL_REL_NAMES)}. "
@@ -94,6 +109,64 @@ def _resolve_vessel_mask(patient: Path, vessel_mask: Path | None) -> Path:
     if not vm.is_file():
         raise click.ClickException(f"Vessel mask not found: {vm}")
     return vm
+
+
+def _qvtpy_subject_dir(results_root: Path, sub_key: str) -> Path:
+    return results_root / sub_key / cfg.QVT_SUBDIR
+
+
+def _seg_4dflow_path(qvt_dir: Path) -> Path:
+    return qvt_dir / cfg.STAGE4_SEG_DIR / "seg_4dflow.nii.gz"
+
+
+def _resolve_vessel_mask_and_results_root(
+    patient: Path,
+    sub_key: str,
+    vessel_mask: Path | None,
+    pipeline_output_root: Path | None,
+) -> tuple[Path, Path | None]:
+    """Return (vessel_mask_path, pipeline_results_root_for_sidecars).
+
+    *pipeline_results_root_for_sidecars* is the directory that contains
+    ``<subject>/qvtpy/`` (e.g. ``.../RESULTS/res_QVTPy``). It is set when
+    ``--pipeline-output-root`` is passed, or when a segmentation was taken from
+    the default results root, or when only ``--pipeline-output-root`` is needed
+    to load LOCs while the mask comes from NIfTI.
+    """
+    explicit_root = (
+        Path(pipeline_output_root).expanduser().resolve() if pipeline_output_root is not None else None
+    )
+
+    if vessel_mask is not None:
+        return _resolve_vessel_mask(patient, vessel_mask), explicit_root
+
+    nifti_hit = _find_nifti_default_vessel_mask(patient)
+    if nifti_hit is not None:
+        log.info(f"Using default vessel mask: {nifti_hit}")
+        return nifti_hit, explicit_root
+
+    if explicit_root is not None:
+        seg = _seg_4dflow_path(_qvtpy_subject_dir(explicit_root, sub_key))
+        if not seg.is_file():
+            raise click.ClickException(
+                f"--pipeline-output-root: missing segmentation for subject {sub_key!r}: {seg}"
+            )
+        log.info(f"Using pipeline segmentation as vessel mask: {seg}")
+        return seg, explicit_root
+
+    default_root = Path(cfg.DEFAULT_RESULTS_ROOT).expanduser().resolve()
+    seg = _seg_4dflow_path(_qvtpy_subject_dir(default_root, sub_key))
+    if seg.is_file():
+        log.info(f"Using pipeline segmentation as vessel mask: {seg}")
+        return seg, default_root
+
+    tried = ", ".join(_DEFAULT_VESSEL_REL_NAMES)
+    raise click.ClickException(
+        f"No vessel mask under {patient} (tried: {tried}).\n"
+        f"No seg_4dflow.nii.gz for subject {sub_key!r} under default pipeline results:\n  {seg}\n"
+        f"(config DEFAULT_RESULTS_ROOT = {default_root}).\n"
+        "Pass --vessel-mask or --pipeline-output-root, or run the qvtpy pipeline through stage 4."
+    )
 
 
 def _resolve_optional_mask(patient: Path, path: Path | None) -> Path | None:
@@ -145,6 +218,18 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 
 
 @click.command("nvitk-qvtpy-flowshow")
+@click.option(
+    "--pipeline-output-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "QVTPy pipeline *results* root (directory that contains ``<subject>/qvtpy/``), "
+        "e.g. the parent of your ``res_QVTPy`` folder. When set, loads stage5 locs.csv "
+        "and stage3 centerlines_mask if present; if --vessel-mask is omitted and there is "
+        "no mask under the NIfTI subject folder, uses stage4 seg_4dflow.nii.gz from this tree. "
+        "When omitted, the same is attempted using nvitk.pipes.qvtpy.config.DEFAULT_RESULTS_ROOT."
+    ),
+)
 @click.option("--subject", default=None, help="Subject id (NIfTI folder name under --nifti-root).")
 @click.option(
     "--batch",
@@ -256,7 +341,13 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
     help="Enable oblique cross-section panel (ComplexDifference/Angio/VelMag) on pick.",
 )
 @click.option("--cross-section-radius-vox", type=float, default=5.0, show_default=True)
-@click.option("--cross-section-res", type=int, default=112, show_default=True)
+@click.option(
+    "--cross-section-res",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Optional max oblique slice edge length (pixels); 0 = auto from --cross-section-radius-vox (~1 voxel/sample).",
+)
 @click.option("--centerline-window", type=click.Choice(["3", "5"]), default="5", show_default=True)
 @click.option(
     "--show-gradient/--no-show-gradient",
@@ -287,6 +378,7 @@ def main(
     batch: str | None,
     patient_dir: Path | None,
     nifti_root: Path,
+    pipeline_output_root: Path | None,
     vessel_mask: Path | None,
     centerline_mask: Path | None,
     stride: int,
@@ -323,6 +415,7 @@ def main(
         batch=batch,
         patient_dir=patient_dir,
     )
+    sub_key = subject or patient.name
 
     try:
         inputs = discover_phase_inputs(patient)
@@ -337,16 +430,52 @@ def main(
         click.echo(f"  angio_magnitude={inputs.angio_path}")
         return
 
+    log.info(f"Loading phase volumes from:")
+    log.info(f"  ap_phase={inputs.ap_phase_path}")
+    log.info(f"  rl_phase={inputs.rl_phase_path}")
+    log.info(f"  fh_phase={inputs.fh_phase_path}")
+    log.info(f"  angio_magnitude={inputs.angio_path}")
     ap = imread(inputs.ap_phase_path)
     rl = imread(inputs.rl_phase_path)
     fh = imread(inputs.fh_phase_path)
     spatial = _spatial_xyz_from_phase(ap)
 
-    vm_path = _resolve_vessel_mask(patient, vessel_mask)
+    voxel_sp_tuple: tuple[float, float, float] | None = None
+    sp = ap.spacing
+    if sp is not None and len(sp) >= 3:
+        voxel_sp_tuple = (float(sp[0]), float(sp[1]), float(sp[2]))
+    elif ap.affine is not None:
+        a = np.asarray(ap.affine, dtype=np.float64)
+        voxel_sp_tuple = (
+            float(np.linalg.norm(a[:3, 0])),
+            float(np.linalg.norm(a[:3, 1])),
+            float(np.linalg.norm(a[:3, 2])),
+        )
+
+    vm_path, pipeline_sidecar_root = _resolve_vessel_mask_and_results_root(
+        patient, sub_key, vessel_mask, pipeline_output_root
+    )
+
+    loc_rows: list[dict[str, str]] | None = None
+    single_label_eff = single_label
+    centerline_mask_eff: Path | None = centerline_mask
+
+    if pipeline_sidecar_root is not None:
+        qd = _qvtpy_subject_dir(pipeline_sidecar_root, sub_key)
+        loc_p = qd / cfg.STAGE5_LOC_DIR / "locs.csv"
+        if loc_p.is_file():
+            with loc_p.open(newline="", encoding="utf-8") as file_handler:
+                loc_rows = list(csv.DictReader(file_handler))
+            log.info(f"Loaded {len(loc_rows)} LOC row(s) from {loc_p}")
+        cl_stage3 = qd / cfg.STAGE3_CENTERLINE_DIR / "centerlines_mask.nii.gz"
+        if centerline_mask_eff is None and cl_stage3.is_file():
+            centerline_mask_eff = cl_stage3
+            log.info(f"Using pipeline stage3 centerline mask: {cl_stage3}")
+
     mask_img = imread(vm_path)
     mask_img = _mask_to_xyz_3d(mask_img, spatial)
 
-    cl_path = _resolve_optional_mask(patient, centerline_mask)
+    cl_path = _resolve_optional_mask(patient, centerline_mask_eff)
     centerline_img = imread(cl_path) if cl_path is not None else None
 
     cs_vols = None
@@ -390,7 +519,7 @@ def main(
             timepoint=timepoint,
             notebook=notebook,
             show=not no_show,
-            show_all_labels=not single_label,
+            show_all_labels=not single_label_eff,
             max_glyphs=max_glyphs,
             depth_peeling=depth_peeling,
             vector=vec,
@@ -400,8 +529,13 @@ def main(
             centerline_window=int(centerline_window),
             cross_section_radius_vox=float(cross_section_radius_vox),
             cross_section_res=int(cross_section_res),
+            show_gradient=show_gradient,
+            loc_records=loc_rows,
+            voxel_spacing_mm=voxel_sp_tuple,
         )
     except ValidationError as exc:
+        import traceback
+        log.exception(traceback.format_exc())
         raise click.ClickException(str(exc)) from exc
 
 

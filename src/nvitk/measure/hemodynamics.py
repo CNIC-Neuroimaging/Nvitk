@@ -51,9 +51,9 @@ def velocity_mm_s_from_phases(ap, rl, fh):
     ap = as_backend_array(ap).astype(np.float64)
     rl = as_backend_array(rl).astype(np.float64)
     fh = as_backend_array(fh).astype(np.float64)
-    vx = -rl * 10.0
-    vy = -ap * 10.0
-    vz = fh * 10.0
+    vx = -rl * 10.0  # R (Left 2 Right) -> RL (Right 2 Left)
+    vy = -ap * 10.0  # A (Posterior 2 Anterior) -> AP (Anterior 2
+    vz = fh * 10.0   # S (Inferior 2 Superior) = FH (Feet 2 Head)
     return vx, vy, vz
 
 

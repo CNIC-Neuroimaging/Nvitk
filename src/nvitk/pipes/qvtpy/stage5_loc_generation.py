@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 import click
+import pandas as pd
 
 import nvitk
 from nvitk.core.backend import setup
@@ -23,6 +24,7 @@ from nvitk.core.logger import Logger
 from nvitk.core.array import as_backend_array
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy import config as cfg
+from nvitk.pipes.qvtpy.labels import eicab_vessel_name
 
 setup(globals())
 import numpy as _np
@@ -61,7 +63,7 @@ def run_subject(
         return out_dir
 
     z = _np.load(npz_path)
-    rows: list[dict[str, float | int]] = []
+    rows: list[dict[str, float | int | str]] = []
     for key in sorted(z.files):
         if not key.startswith("arterial_"):
             continue
@@ -71,27 +73,49 @@ def run_subject(
             continue
         mid = pts.shape[0] // 2
         tangents = centerline_tangents(pts, k_half=tangent_k_half)
-        i, j, k = (int(np.round(pts[mid, 0])), int(np.round(pts[mid, 1])), int(np.round(pts[mid, 2])))
+        cx, cy, cz = float(pts[mid, 0]), float(pts[mid, 1]), float(pts[mid, 2])
+        i, j, k = (
+            int(_np.round(pts[mid, 0])),
+            int(_np.round(pts[mid, 1])),
+            int(_np.round(pts[mid, 2])),
+        )
         tx, ty, tz = (float(tangents[mid, 0]), float(tangents[mid, 1]), float(tangents[mid, 2]))
         rows.append(
             {
                 "vessel_id": label,
+                "vessel_name": eicab_vessel_name(label),
                 "i": i,
                 "j": j,
                 "k": k,
+                "centerline_x": cx,
+                "centerline_y": cy,
+                "centerline_z": cz,
                 "tangent_x": tx,
                 "tangent_y": ty,
                 "tangent_z": tz,
             }
         )
 
+    fieldnames = [
+        "vessel_id",
+        "vessel_name",
+        "i",
+        "j",
+        "k",
+        "centerline_x",
+        "centerline_y",
+        "centerline_z",
+        "tangent_x",
+        "tangent_y",
+        "tangent_z",
+    ]
     with loc_csv.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(
-            fh,
-            fieldnames=["vessel_id", "i", "j", "k", "tangent_x", "tangent_y", "tangent_z"],
-        )
+        w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows)
+
+    loc_xlsx = out_dir / "locs.xlsx"
+    pd.DataFrame(rows).to_excel(loc_xlsx, index=False)
 
     (out_dir / "loc_meta.json").write_text(json.dumps({"n_locs": len(rows)}, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage5 loc -> {loc_csv}")

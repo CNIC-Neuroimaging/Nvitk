@@ -7,7 +7,9 @@ This is an initial interactive viewer for 4DFlow phase volumes:
 - **animate** over cardiac phases with optional precomputed glyph sample sites
 
 By default **all nonzero labels** are shown together (distinct colors). Pass
-``show_all_labels=False`` to focus on one label at a time (legacy behavior).
+``show_all_labels=False`` to focus on one label at a time. With pipeline LOCs,
+``show_all_labels=True`` still shows every vessel; use the **Vessel focus** box
+to choose which label's LOC drives the cross-section and metric plot.
 
 The velocity field ``(vx, vy, vz)`` is **precomputed once** from AP/RL/FH for all
 time indices ``(X, Y, Z, T, 3)``. When ``precompute_glyph_indices=True`` (default),
@@ -24,7 +26,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence
 import traceback
 
 import numpy as np
@@ -1029,6 +1031,8 @@ def _flowshow_desktop(
     cross_section_radius_vox: float,
     cross_section_res: int,
     show_gradient: bool,
+    loc_records: Sequence[Mapping[str, Any]] | None,
+    voxel_spacing_mm: tuple[float, float, float] | None,
 ) -> Any:
     pv = _require_pyvista()
 
@@ -1048,6 +1052,28 @@ def _flowshow_desktop(
             cl_np = np.asarray(centerline_mask)
     centerlines = compute_centerlines(mask, centerline_mask=cl_np, labels=labels)
 
+    loc_pts = np.zeros((0, 3), dtype=np.float32)
+    loc_tang = np.zeros((0, 3), dtype=np.float64)
+    loc_vlbl = np.zeros((0,), dtype=np.int32)
+    if loc_records:
+        lp: list[list[float]] = []
+        lt: list[list[float]] = []
+        lv: list[int] = []
+        for r in loc_records:
+            lp.append([float(r["i"]), float(r["j"]), float(r["k"])])
+            lt.append([float(r["tangent_x"]), float(r["tangent_y"]), float(r["tangent_z"])])
+            lv.append(int(r["vessel_id"]))
+        if lp:
+            loc_pts = np.asarray(lp, dtype=np.float32)
+            loc_tang = np.asarray(lt, dtype=np.float64)
+            loc_vlbl = np.asarray(lv, dtype=np.int32)
+
+    min_voxel_sp = (
+        min(float(voxel_spacing_mm[0]), float(voxel_spacing_mm[1]), float(voxel_spacing_mm[2]))
+        if voxel_spacing_mm is not None
+        else 1.0
+    )
+
     cache_all = (
         _precompute_coords_all_labels(mask, labels, stride, max_glyphs, stream_seed)
         if anim.precompute_glyph_indices and show_all_labels
@@ -1061,6 +1087,18 @@ def _flowshow_desktop(
     else:
         speed_clim_eff = _estimate_speed_clim(vel, coord_blocks)
 
+    ts_metric_labels: tuple[str, ...] = (
+        "|v_through| (mm/s)",
+        "Q (mL/s)",
+        "|v| (mm/s)",
+        "vx (mm/s)",
+        "vy (mm/s)",
+        "vz (mm/s)",
+        "phase AP (rad)",
+        "phase RL (rad)",
+        "phase FH (rad)",
+    )
+
     state: dict[str, Any] = {
         "label_idx": 0,
         "tt": int(np.clip(timepoint, 0, t - 1)),
@@ -1071,6 +1109,7 @@ def _flowshow_desktop(
         "pathlines": False,
         "camera_ready": False,
         "playing": bool(anim.auto_play),
+        "ts_metric": ts_metric_labels[0],
     }
 
     # 1 row × 2 columns:
@@ -1227,6 +1266,29 @@ def _flowshow_desktop(
             log.exception(e)
             pass
 
+    loc_actor: Any | None = None
+    if loc_pts.shape[0] > 0:
+        try:
+            pdata = pv.PolyData(loc_pts)
+            cidx = np.zeros(loc_pts.shape[0], dtype=np.int32)
+            for ii in range(loc_pts.shape[0]):
+                vid = int(loc_vlbl[ii])
+                cidx[ii] = int(labels.index(vid)) if vid in labels else 0
+            pdata["lc"] = cidx
+            spheres = pdata.glyph(scale=False, geom=pv.Sphere(radius=0.95, phi_resolution=10, theta_resolution=10))
+            loc_actor = plotter.add_mesh(
+                spheres,
+                scalars="lc",
+                cmap="tab10",
+                opacity=0.95,
+                show_scalar_bar=False,
+                pickable=False,
+            )
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
+            loc_actor = None
+
     def _set_centerlines_visible(on: bool) -> None:
         for a in centerline_actors:
             try:
@@ -1235,9 +1297,23 @@ def _flowshow_desktop(
                 log.error(traceback.format_exc())
                 log.exception(e)
                 pass
+        if loc_actor is not None:
+            try:
+                loc_actor.SetVisibility(bool(on))
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
 
-    # Picking state: selected centerline point (label + index).
-    selection: dict[str, Any] = {"label": None, "index": None, "point": None}
+    # Picking state: selected centerline or LOC (label + centerline index, or LOC tangent).
+    selection: dict[str, Any] = {
+        "label": None,
+        "index": None,
+        "point": None,
+        "loc_tangent": None,
+        "tangent_eff": None,
+        "voxel_ijk": None,
+    }
     pick_marker = None
 
     def _set_right_panel_text(text: str) -> None:
@@ -1276,7 +1352,7 @@ def _flowshow_desktop(
                         rm(a)  # type: ignore[arg-type]
                         continue
                 except Exception:
-                    log.exception(e)
+                    log.exception("RemoveActor failed in _clear_right_planes")
                     pass
                 plotter.remove_actor(a)
             except Exception as e:
@@ -1285,29 +1361,146 @@ def _flowshow_desktop(
                 pass
         right_plane_actors = []
 
+    ts_ui: dict[str, Any] = {"fig": None, "ax": None, "radio": None}
+
+    def _ensure_ts_metric_figure() -> None:
+        if ts_ui["fig"] is not None:
+            return
+        try:
+            import matplotlib.pyplot as plt
+            from matplotlib.widgets import RadioButtons
+        except Exception:
+            return
+        plt.ion()
+        fig = plt.figure(num="nvitk flowshow — LOC metrics", figsize=(6.0, 6.2))
+        ax = fig.add_axes((0.12, 0.30, 0.82, 0.60))
+        rax = fig.add_axes((0.08, 0.04, 0.84, 0.20))
+        radio = RadioButtons(rax, list(ts_metric_labels), active=0)
+
+        def _on_radio_clicked(label: str) -> None:
+            state["ts_metric"] = str(label)
+            _draw_ts_metric_axes()
+            try:
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                plt.pause(0.001)
+            except Exception:
+                pass
+
+        radio.on_clicked(_on_radio_clicked)
+        ts_ui["fig"] = fig
+        ts_ui["ax"] = ax
+        ts_ui["radio"] = radio
+        try:
+            fig.show()
+        except Exception:
+            pass
+
+    def _draw_ts_metric_axes() -> None:
+        ax = ts_ui["ax"]
+        if ax is None or selection.get("tangent_eff") is None or selection.get("voxel_ijk") is None:
+            return
+        cx = int(np.clip(int(selection["voxel_ijk"][0]), 0, vel.shape[0] - 1))
+        cy = int(np.clip(int(selection["voxel_ijk"][1]), 0, vel.shape[1] - 1))
+        cz = int(np.clip(int(selection["voxel_ijk"][2]), 0, vel.shape[2] - 1))
+        te = np.asarray(selection["tangent_eff"], dtype=np.float64).reshape(3)
+        nt = int(vel.shape[3])
+        t_axis = np.arange(nt, dtype=np.float64)
+        mk = str(state.get("ts_metric", ts_metric_labels[0]))
+        area_mm2 = float(np.pi) * (float(cross_section_radius_vox) * float(min_voxel_sp)) ** 2
+        try:
+            if mk.startswith("|v_through|"):
+                ser = np.array([float(np.dot(vel[cx, cy, cz, ti, :], te)) for ti in range(nt)], dtype=np.float64)
+                ylab, yplot = "|v_through| (mm/s)", np.abs(ser)
+            elif mk.startswith("Q"):
+                vtp = np.array([float(np.dot(vel[cx, cy, cz, ti, :], te)) for ti in range(nt)], dtype=np.float64)
+                ylab, yplot = "Q (mL/s)", np.abs(vtp) * (area_mm2 / 1000.0)
+            elif mk.startswith("|v|"):
+                ylab, yplot = "|v| (mm/s)", np.array(
+                    [float(np.linalg.norm(vel[cx, cy, cz, ti, :])) for ti in range(nt)], dtype=np.float64
+                )
+            elif mk.startswith("vx"):
+                ylab, yplot = "vx (mm/s)", np.array([float(vel[cx, cy, cz, ti, 0]) for ti in range(nt)], dtype=np.float64)
+            elif mk.startswith("vy"):
+                ylab, yplot = "vy (mm/s)", np.array([float(vel[cx, cy, cz, ti, 1]) for ti in range(nt)], dtype=np.float64)
+            elif mk.startswith("vz"):
+                ylab, yplot = "vz (mm/s)", np.array([float(vel[cx, cy, cz, ti, 2]) for ti in range(nt)], dtype=np.float64)
+            elif mk.startswith("phase AP"):
+                ylab, yplot = "phase AP (rad)", np.array([float(ap[cx, cy, cz, ti]) for ti in range(nt)], dtype=np.float64)
+            elif mk.startswith("phase RL"):
+                ylab, yplot = "phase RL (rad)", np.array([float(rl[cx, cy, cz, ti]) for ti in range(nt)], dtype=np.float64)
+            elif mk.startswith("phase FH"):
+                ylab, yplot = "phase FH (rad)", np.array([float(fh[cx, cy, cz, ti]) for ti in range(nt)], dtype=np.float64)
+            else:
+                ylab, yplot = ts_metric_labels[0], np.zeros(nt, dtype=np.float64)
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
+            return
+        ax.clear()
+        ax.plot(t_axis, yplot, "-o", markersize=4, linewidth=1.2)
+        ax.set_xlabel("time index")
+        ax.set_ylabel(ylab)
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f"LOC voxel ({cx},{cy},{cz}) label={selection.get('label')}")
+
+    def _update_metric_ts_figure() -> None:
+        if selection.get("tangent_eff") is None:
+            return
+        _ensure_ts_metric_figure()
+        if ts_ui["fig"] is None:
+            return
+        _draw_ts_metric_axes()
+        try:
+            fig = ts_ui["fig"]
+            if fig is not None:
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                import matplotlib.pyplot as plt
+
+                plt.pause(0.001)
+        except Exception:
+            pass
+
     def _render_cross_sections() -> None:
         """Render CD/Angio/VelMag oblique slices in the right subplot."""
-        if selection["point"] is None or selection["label"] is None or selection["index"] is None:
+        if selection["point"] is None or selection["label"] is None:
+            selection["tangent_eff"] = None
+            selection["voxel_ijk"] = None
             _set_right_panel_text("Cross-section\n(click vessel/centerline to populate)")
             return
-        if not cross_section_volumes:
-            _set_right_panel_text("Cross-section volumes not provided.\n(Will be loaded by CLI options.)")
+        use_loc_t = selection.get("loc_tangent") is not None
+        if not use_loc_t and selection["index"] is None:
+            selection["tangent_eff"] = None
+            selection["voxel_ijk"] = None
+            _set_right_panel_text("Cross-section\n(click vessel/centerline to populate)")
             return
         lbl = int(selection["label"])
-        idx = int(selection["index"])
-        pts = centerlines.get(lbl)
-        if pts is None:
-            _set_right_panel_text(f"Cross-section unavailable:\nno centerline for label={lbl}")
-            return
-        pts_arr = np.asarray(pts, dtype=np.float32)
-        if pts_arr.ndim != 2 or pts_arr.shape[1] != 3 or pts_arr.shape[0] < 2:
-            _set_right_panel_text(f"Cross-section unavailable:\ninvalid centerline for label={lbl}")
-            return
-        if idx < 0 or idx >= int(pts_arr.shape[0]):
-            _set_right_panel_text(f"Cross-section unavailable:\ncenterline index out of range ({idx})")
-            return
-        center = pts_arr[idx].astype(np.float32, copy=False)
-        tvec = _tangent_from_centerline(pts_arr, idx, window=centerline_window)
+        if use_loc_t:
+            center = np.asarray(selection["point"], dtype=np.float32).reshape(3)
+            tvec = np.asarray(selection["loc_tangent"], dtype=np.float64).reshape(3)
+            tvec = tvec / (float(np.linalg.norm(tvec)) + 1e-12)
+        else:
+            idx = int(selection["index"])
+            pts = centerlines.get(lbl)
+            if pts is None:
+                selection["tangent_eff"] = None
+                selection["voxel_ijk"] = None
+                _set_right_panel_text(f"Cross-section unavailable:\nno centerline for label={lbl}")
+                return
+            pts_arr = np.asarray(pts, dtype=np.float32)
+            if pts_arr.ndim != 2 or pts_arr.shape[1] != 3 or pts_arr.shape[0] < 2:
+                selection["tangent_eff"] = None
+                selection["voxel_ijk"] = None
+                _set_right_panel_text(f"Cross-section unavailable:\ninvalid centerline for label={lbl}")
+                return
+            if idx < 0 or idx >= int(pts_arr.shape[0]):
+                selection["tangent_eff"] = None
+                selection["voxel_ijk"] = None
+                _set_right_panel_text(f"Cross-section unavailable:\ncenterline index out of range ({idx})")
+                return
+            center = pts_arr[idx].astype(np.float32, copy=False)
+            tvec = _tangent_from_centerline(pts_arr, idx, window=centerline_window)
         # flip tangent using local velocity direction (timepoint-specific)
         cx, cy, cz = int(round(float(center[0]))), int(round(float(center[1]))), int(round(float(center[2])))
         cx = int(np.clip(cx, 0, vel.shape[0] - 1))
@@ -1317,7 +1510,14 @@ def _flowshow_desktop(
         vloc = vel[cx, cy, cz, tt_now, :].astype(np.float32, copy=False)
         if float(np.dot(vloc, tvec)) < 0:
             tvec = -tvec
+        selection["tangent_eff"] = np.asarray(tvec, dtype=np.float64).copy()
+        selection["voxel_ijk"] = (int(cx), int(cy), int(cz))
         u, v = _frame_from_tangent(tvec)
+        # Sampling resolution: ~one step per voxel across the measurement disk (see transform.oblique_slice).
+        d = 2.0 * float(cross_section_radius_vox)
+        res_auto = int(max(8, min(1024, int(np.ceil(d)) + 1)))
+        res_slab = res_auto if int(cross_section_res) <= 0 else min(res_auto, int(cross_section_res))
+        _update_metric_ts_figure()
 
         # 3D overlays (red): plane + flow-direction arrow. Keep them updated.
         try:
@@ -1360,9 +1560,22 @@ def _flowshow_desktop(
             log.exception(e)
             pass
 
+        if not cross_section_volumes:
+            _set_right_panel_text("Cross-section volumes not provided.\n(Will be loaded by CLI options.)")
+            plotter.subplot(0, 0)
+            try:
+                plotter.render()
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
+            return
+
         # Build selected slice + overlay mask slice (small panel).
         mask_bin = (mask == lbl).astype(np.uint8, copy=False)
-        msl = _oblique_slice(mask_bin, center=center, u=u, v=v, radius_vox=cross_section_radius_vox, res=cross_section_res, order=0)
+        msl = _oblique_slice(
+            mask_bin, center=center, u=u, v=v, radius_vox=cross_section_radius_vox, res=res_slab, order=0
+        )
         msl = (msl > 0.5).astype(np.float32)
 
         plotter.subplot(0, 1)
@@ -1375,6 +1588,13 @@ def _flowshow_desktop(
         avail = [k for k in preferred if k in cross_section_volumes]
         if not avail:
             _set_right_panel_text("Cross-section volumes missing.\nExpected CD/Angio/VelMag.")
+            plotter.subplot(0, 0)
+            try:
+                plotter.render()
+            except Exception as e:
+                log.error(traceback.format_exc())
+                log.exception(e)
+                pass
             return
 
         try:
@@ -1449,7 +1669,7 @@ def _flowshow_desktop(
                 ren.AddActor(act_mask)
                 right_plane_actors.extend([act_base, act_mask])
 
-            dy_pix = float(cross_section_res) * 1.10
+            dy_pix = float(res_slab) * 1.10
             y_offsets = [dy_pix, 0.0, -dy_pix]
             for kk, key in enumerate(avail[:3]):
                 sl = _oblique_slice(
@@ -1458,7 +1678,7 @@ def _flowshow_desktop(
                     u=u,
                     v=v,
                     radius_vox=cross_section_radius_vox,
-                    res=cross_section_res,
+                    res=res_slab,
                     order=1,
                 )
                 _add_image_pair(sl, float(y_offsets[kk]))
@@ -1481,7 +1701,7 @@ def _flowshow_desktop(
                     u=u,
                     v=v,
                     radius_vox=cross_section_radius_vox,
-                    res=cross_section_res,
+                    res=res_slab,
                     order=1,
                 )
                 yoff = float(y_offsets[kk])
@@ -1490,8 +1710,8 @@ def _flowshow_desktop(
                     direction=(0.0, 0.0, 1.0),
                     i_size=2.0 * float(cross_section_radius_vox),
                     j_size=2.0 * float(cross_section_radius_vox),
-                    i_resolution=int(cross_section_res - 1),
-                    j_resolution=int(cross_section_res - 1),
+                    i_resolution=max(1, int(res_slab) - 1),
+                    j_resolution=max(1, int(res_slab) - 1),
                 )
                 plane.point_data["img"] = sl.T.flatten(order="C").astype(np.float32, copy=False)
                 a_img = plotter.add_mesh(plane, scalars="img", cmap="gray", opacity=1.0, show_scalar_bar=False)
@@ -1523,34 +1743,8 @@ def _flowshow_desktop(
             log.exception(e)
             pass
 
-    def _select_nearest_centerline(picked_xyz: Any) -> None:
+    def _set_pick_marker(pt: np.ndarray | None) -> None:
         nonlocal pick_marker
-        arr = np.asarray(picked_xyz, dtype=np.float32)
-        # Some pickers/callbacks return a list of points (N,3) instead of a single (3,) point.
-        if arr.ndim == 2 and arr.shape[1] == 3 and arr.shape[0] >= 1:
-            arr = arr[0]
-        p = arr.reshape(1, 3)
-        best: tuple[float, int, int] | None = None  # (d2, label, idx)
-        for lbl, pts in centerlines.items():
-            if pts is None:
-                continue
-            pts_arr = np.asarray(pts, dtype=np.float32)
-            if pts_arr.ndim != 2 or pts_arr.shape[0] == 0 or pts_arr.shape[1] != 3:
-                continue
-            d2 = np.sum((pts_arr - p) ** 2, axis=1)
-            j = int(np.argmin(d2))
-            v = float(d2[j])
-            if best is None or v < best[0]:
-                best = (v, int(lbl), j)
-        if best is None:
-            return
-        _, lbl, j = best
-        pt = np.asarray(centerlines[lbl], dtype=np.float32)[j]
-        selection["label"] = lbl
-        selection["index"] = j
-        selection["point"] = pt
-
-        # Update marker (small red sphere).
         try:
             if pick_marker is not None:
                 plotter.remove_actor(pick_marker)
@@ -1558,14 +1752,89 @@ def _flowshow_desktop(
             log.error(traceback.format_exc())
             log.exception(e)
             pass
+        pick_marker = None
+        if pt is None:
+            return
+        pta = np.asarray(pt, dtype=np.float32).reshape(3)
         try:
-            sph = pv.Sphere(radius=1.5, center=tuple(float(x) for x in pt))
+            sph = pv.Sphere(radius=0.85, center=tuple(float(x) for x in pta))
             pick_marker = plotter.add_mesh(sph, color="red", opacity=0.9)
         except Exception as e:
             log.error(traceback.format_exc())
             log.exception(e)
             pick_marker = None
 
+    def _snap_to_loc_for_current_label() -> None:
+        if loc_pts.shape[0] == 0:
+            return
+        lbl = int(labels[int(state["label_idx"])])
+        idxs = np.flatnonzero(loc_vlbl == lbl).astype(int)
+        if idxs.size == 0:
+            selection["label"] = None
+            selection["index"] = None
+            selection["point"] = None
+            selection["loc_tangent"] = None
+            selection["tangent_eff"] = None
+            selection["voxel_ijk"] = None
+            _set_pick_marker(None)
+            _render_cross_sections()
+            plotter.render()
+            return
+        if idxs.size == 1:
+            ii = int(idxs[0])
+        else:
+            roi = mask == int(lbl)
+            if not np.any(roi):
+                ii = int(idxs[0])
+            else:
+                com = np.argwhere(roi).astype(np.float64).mean(axis=0)
+                dists = np.sum((loc_pts[idxs] - com.astype(np.float32)) ** 2, axis=1)
+                ii = int(idxs[int(np.argmin(dists))])
+        selection["label"] = lbl
+        selection["index"] = -1
+        selection["point"] = loc_pts[ii].copy()
+        selection["loc_tangent"] = loc_tang[ii].copy()
+        _set_pick_marker(selection["point"])
+        _render_cross_sections()
+        plotter.render()
+
+    def _select_nearest_centerline(picked_xyz: Any) -> None:
+        arr = np.asarray(picked_xyz, dtype=np.float32)
+        if arr.ndim == 2 and arr.shape[1] == 3 and arr.shape[0] >= 1:
+            arr = arr[0]
+        p = arr.reshape(1, 3)
+        candidates: list[tuple[float, str, tuple[Any, ...]]] = []
+        if loc_pts.shape[0] > 0:
+            d2l = np.sum((loc_pts - p) ** 2, axis=1)
+            for ii in range(int(loc_pts.shape[0])):
+                candidates.append((float(d2l[ii]), "loc", (ii,)))
+        for lbl, pts in centerlines.items():
+            if pts is None:
+                continue
+            pts_arr = np.asarray(pts, dtype=np.float32)
+            if pts_arr.ndim != 2 or pts_arr.shape[0] == 0 or pts_arr.shape[1] != 3:
+                continue
+            d2 = np.sum((pts_arr - p) ** 2, axis=1)
+            for j in range(int(pts_arr.shape[0])):
+                candidates.append((float(d2[j]), "cl", (int(lbl), j)))
+        if not candidates:
+            return
+        _best_d2, kind, payload = min(candidates, key=lambda x: x[0])
+        if kind == "loc":
+            ii = int(payload[0])
+            lbl = int(loc_vlbl[ii])
+            selection["label"] = lbl
+            selection["index"] = -1
+            selection["point"] = loc_pts[ii].copy()
+            selection["loc_tangent"] = loc_tang[ii].copy()
+        else:
+            lbl, j = int(payload[0]), int(payload[1])
+            pt = np.asarray(centerlines[lbl], dtype=np.float32)[j]
+            selection["label"] = lbl
+            selection["index"] = j
+            selection["point"] = pt.copy()
+            selection["loc_tangent"] = None
+        _set_pick_marker(selection["point"])
         _render_cross_sections()
         plotter.render()
 
@@ -2153,6 +2422,10 @@ def _flowshow_desktop(
             if path_actors:
                 _clear_pathlines()
         hud_txt = f"T={tt_now} | " + ("all labels" if show_all_labels else f"label={labels[int(state['label_idx'])]}")
+        if show_all_labels and len(labels) > 1:
+            hud_txt += f" | focus={labels[int(state['label_idx'])]}"
+        if selection.get("loc_tangent") is not None:
+            hud_txt += " | LOC"
         try:
             if hasattr(hud, "SetText"):
                 hud.SetText(0, hud_txt)  # type: ignore[attr-defined]
@@ -2173,13 +2446,15 @@ def _flowshow_desktop(
         else:
             _render_interior_field()
         _update_frame()
+        if selection["point"] is not None and selection["label"] is not None:
+            if selection.get("loc_tangent") is not None or selection.get("index") is not None:
+                _render_cross_sections()
 
     def _on_label(value: float):
         state["label_idx"] = int(round(value))
         state["label_idx"] = int(np.clip(state["label_idx"], 0, len(labels) - 1))
-        # rebuild glyphs (and surface in single-label mode)
         if not show_all_labels:
-            # replace mask surface
+            # replace mask surface (single-label mode)
             for a in mask_actors:
                 try:
                     plotter.remove_actor(a)
@@ -2194,8 +2469,15 @@ def _flowshow_desktop(
             if surf is not None:
                 mask_surfaces.append((int(labels[int(state["label_idx"])]), surf, "white"))
                 mask_actors.append(plotter.add_mesh(surf, color="white", opacity=0.25, smooth_shading=True))
-        _build_glyphs(int(state["tt"]))
-        _update_frame()
+            _build_glyphs(int(state["tt"]))
+            _update_frame()
+        else:
+            if loc_pts.shape[0]:
+                _snap_to_loc_for_current_label()
+            else:
+                _update_frame()
+        if (not show_all_labels) and loc_pts.shape[0]:
+            _snap_to_loc_for_current_label()
 
     # ── Widgets layout (avoid overlaps): keep time controls on the left,
     # vector controls on the right.
@@ -2331,9 +2613,9 @@ def _flowshow_desktop(
         initial=str(int(state["tt"])),
         on_commit=lambda s: _on_time(float(int(np.clip(int(float(s)), 0, t - 1)))) if s.strip() else None,
     )
-    if (not show_all_labels) and len(labels) > 1:
+    if len(labels) > 1:
         _queue_num_box(
-            label="Label idx",
+            label="Vessel focus (label id)",
             x=18,
             y=y_box_top - 34,
             w=140,
@@ -2711,6 +2993,8 @@ def _flowshow_desktop(
     _set_mask_visible(True)
     _build_glyphs(int(state["tt"]))
     _update_frame()
+    if loc_pts.shape[0]:
+        _snap_to_loc_for_current_label()
     if show:
         plotter.show()
     return plotter
@@ -2737,8 +3021,10 @@ def flowshow(
     cross_section_volumes: dict[str, Image | np.ndarray] | None = None,
     centerline_window: int = 5,
     cross_section_radius_vox: float = 12.0,
-    cross_section_res: int = 112,
+    cross_section_res: int = 0,
     show_gradient: bool = False,
+    loc_records: Sequence[Mapping[str, Any]] | None = None,
+    voxel_spacing_mm: tuple[float, float, float] | None = None,
 ) -> Any:
     """Interactive 4DFlow viewer.
 
@@ -2753,6 +3039,9 @@ def flowshow(
     dt_seconds
         Temporal spacing (seconds) between frames for pathlines. If None and `ap_phase`
         is an `Image`, we try `ap_phase.temporal_resolution`.
+    cross_section_res
+        If > 0, caps oblique slice grid size; if 0 (default), grid size follows the
+        measurement disk radius (~one sample per voxel across the disk diameter).
     """
     vec_eff = vector or FlowshowVectorOptions()
     anim_eff = animation or FlowshowAnimationOptions()
@@ -2791,7 +3080,32 @@ def flowshow(
                     f"cross_section_volumes[{k!r}] shape {arr.shape} does not match phase spatial dims {(x, y, z)}."
                 )
 
+    voxel_sp_eff = voxel_spacing_mm
+    if voxel_sp_eff is None and isinstance(ap_phase, Image):
+        sp = ap_phase.spacing
+        if sp is not None and len(sp) >= 3:
+            voxel_sp_eff = (float(sp[0]), float(sp[1]), float(sp[2]))
+        else:
+            aff = ap_phase.affine
+            if aff is not None:
+                a = np.asarray(aff, dtype=np.float64)
+                voxel_sp_eff = (
+                    float(np.linalg.norm(a[:3, 0])),
+                    float(np.linalg.norm(a[:3, 1])),
+                    float(np.linalg.norm(a[:3, 2])),
+                )
+
+    loc_list: list[dict[str, Any]] | None = None
+    if loc_records is not None:
+        loc_list = [dict(r) for r in loc_records]
+
     if notebook:
+        if loc_list:
+            warnings.warn(
+                "loc_records / pipeline LOCs are only supported in desktop (PyVista) mode; "
+                "notebook UI will ignore them.",
+                stacklevel=2,
+            )
         return _flowshow_notebook(
             ap=ap,
             rl=rl,
@@ -2829,6 +3143,8 @@ def flowshow(
         cross_section_radius_vox=cross_section_radius_vox,
         cross_section_res=cross_section_res,
         show_gradient=show_gradient,
+        loc_records=loc_list,
+        voxel_spacing_mm=voxel_sp_eff,
     )
 
 

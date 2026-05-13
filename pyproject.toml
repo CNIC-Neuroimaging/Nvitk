@@ -152,6 +152,11 @@ nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
 nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 
 # -----------------------------------------------------------------------------
+# Registration scripts
+# -----------------------------------------------------------------------------
+nvitk-flirt = "nvitk.registration.cli:main"
+
+# -----------------------------------------------------------------------------
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"

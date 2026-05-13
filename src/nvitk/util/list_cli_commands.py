@@ -29,6 +29,10 @@ def categorize_command(cmd, module):
     # Segmentation commands
     if any(seg in cmd for seg in ['nvitk-totalseg', 'nvitk-eicab']):
         return "Segmentation"
+
+    # Registration commands
+    if 'nvitk-flirt' in cmd:
+        return "Registration"
     
     # PESA Fat commands
     if cmd.startswith('nvitk-pesa-fat') or any(pesa in cmd for pesa in []):
@@ -47,6 +51,7 @@ def get_command_color(category):
     color_map = {
         "Image Conversion": Colors.OKCYAN,
         "Segmentation": Colors.OKGREEN,
+        "Registration": Colors.HEADER,
         "PESA-Fat Analysis": Colors.WARNING,
         "PESA-Brain Analysis": Colors.OKBLUE,
         "General": Colors.WHITE
@@ -127,13 +132,14 @@ def list_cli_commands():
     display_order = [
         "Image Conversion",
         "Segmentation", 
+        "Registration",
         "PESA-Fat Analysis",
         "PESA-Brain Analysis",
         "General"
     ]
 
     # Display header
-    log.info("\n" + "=" * 80)
+    log.info("=" * 80)
     log.info(f"{Colors.BOLD}{Colors.OKBLUE}Nvitk CLI Commands{Colors.ENDC}")
     log.info("=" * 80)
     log.info(f"{Colors.WHITE}Available command-line interfaces organized by functionality{Colors.ENDC}")
