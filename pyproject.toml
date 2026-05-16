@@ -172,6 +172,9 @@ nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
 nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 
 # ────────────────────────────── PESA-Brain pipelines ──────────────────────────
+nvitk-pesa-brain = "nvitk.pipes.pesa_brain.run:main"
+nvitk-pesa-brain-bb-reg = "nvitk.pipes.pesa_brain.black_blood.stage1_registration:main"
+nvitk-pesa-brain-bb-seg = "nvitk.pipes.pesa_brain.black_blood.stage2_bb_segmentation:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 
