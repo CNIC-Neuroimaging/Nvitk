@@ -192,7 +192,7 @@ def run_subject(
 
     arterial = compute_centerlines(arterial_vol, min_points=5)
 
-    # ---- Venous: CD binary ∧ superior slab → skeleton branch assignment -------
+    # ---- Venous: CD ∧ slab → clean → junction-split skeleton → name/label ----
     venous_mask = vessel_bin.astype(bool) & venous_region
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)

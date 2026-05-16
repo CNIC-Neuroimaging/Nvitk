@@ -128,11 +128,27 @@ NAME_LCOMM: str = "LCOMM"
 NAME_COMM: str = "COMM"
 
 NAME_SSSV: str = "SSSV"
+NAME_STRV: str = "STRV"
 NAME_LTSV: str = "LTSV"
 NAME_RTSV: str = "RTSV"
-NAME_STRV: str = "STRV"
 
-MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_LTSV, NAME_RTSV, NAME_STRV)
+# Fixed venous centerline / segmentation ids (stage 3+).
+VENOUS_LABEL_SSSV: int = 31
+VENOUS_LABEL_STRV: int = 32
+VENOUS_LABEL_LTSV: int = 33
+VENOUS_LABEL_RTSV: int = 34
+
+VENOUS_LABEL_BY_NAME: dict[str, int] = {
+    NAME_SSSV: VENOUS_LABEL_SSSV,
+    NAME_STRV: VENOUS_LABEL_STRV,
+    NAME_LTSV: VENOUS_LABEL_LTSV,
+    NAME_RTSV: VENOUS_LABEL_RTSV,
+}
+
+VENOUS_NAME_BY_LABEL: dict[int, str] = {v: k for k, v in VENOUS_LABEL_BY_NAME.items()}
+
+# Greedy assignment order in :func:`~nvitk.pipes.qvtpy.util.venous_heuristics.assign_venous_branches`.
+MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_STRV, NAME_LTSV, NAME_RTSV)
 
 # ---------------------------------------------------------------------------
 # qvtpy-specific extensions (do not collide with typical eICAB small integers)
@@ -161,8 +177,8 @@ def eicab_vessel_name(label_id: int) -> str:
         return "QVTPY_VENOUS_UNKNOWN"
     if lid == QVTPY_UNKNOWN_LABEL:
         return "QVTPY_UNKNOWN"
-    if QVTPY_VENOUS_REGION_BASE <= lid < QVTPY_VENOUS_REGION_BASE + 4:
-        return f"QVTPY_VENOUS_REGION_{lid - QVTPY_VENOUS_REGION_BASE + 1}"
+    if lid in VENOUS_NAME_BY_LABEL:
+        return VENOUS_NAME_BY_LABEL[lid]
     return f"EICAB_OR_EXTENDED_{lid}"
 
 
@@ -206,6 +222,12 @@ __all__ = [
     "NAME_RTSV",
     "NAME_SSSV",
     "NAME_STRV",
+    "VENOUS_LABEL_BY_NAME",
+    "VENOUS_LABEL_LTSV",
+    "VENOUS_LABEL_RTSV",
+    "VENOUS_LABEL_SSSV",
+    "VENOUS_LABEL_STRV",
+    "VENOUS_NAME_BY_LABEL",
     "QVTPY_UNKNOWN_LABEL",
     "QVTPY_VENOUS_REGION_BASE",
     "QVTPY_VENOUS_UNKNOWN_LABEL",
