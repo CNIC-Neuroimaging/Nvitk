@@ -15,7 +15,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_STRV,
 )
 from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
-from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
+from nvitk.segmentation.local_cd import (
     VESSEL_EXTRA_PADDING,
     BboxFacePadding,
     bbox_padding_for_label,
@@ -188,7 +188,7 @@ def test_strv_region_growing_disabled() -> None:
 
 def test_venous_rg_intensity_frac_per_sinus() -> None:
     from nvitk.pipes.qvtpy.labels import QVTPY_LTSV, QVTPY_RTSV, QVTPY_SSSV
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import resolve_venous_rg_intensity_fracs
+    from nvitk.segmentation.local_cd import resolve_venous_rg_intensity_fracs
 
     merged = resolve_venous_rg_intensity_fracs({QVTPY_SSSV: 0.33})
     assert merged[QVTPY_SSSV] == 0.33
@@ -216,10 +216,8 @@ def test_strv_skips_region_growing() -> None:
 def test_aca_sequential_second_grow_can_overlap_first() -> None:
     """RACA RG may overlap LACA; final seg labels are disjoint after correction."""
     from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
-        VesselSegStats,
-        _region_grow_acas_sequential,
-    )
+    from nvitk.pipes.qvtpy.util.aca_sequential_grow import _region_grow_acas_sequential
+    from nvitk.segmentation.local_cd import VesselSegStats
 
     shape = (51, 51, 51)
     clm = np.zeros(shape, dtype=np.int32)
@@ -277,7 +275,7 @@ def test_aca_sequential_second_grow_can_overlap_first() -> None:
 
 def test_aca_plane_split_disjoint_near_junction() -> None:
     from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+    from nvitk.pipes.qvtpy.util.aca_sequential_grow import _split_aca_merged_by_junction_plane
 
     shape = (51, 51, 51)
     clm = np.zeros(shape, dtype=np.int32)
@@ -302,7 +300,7 @@ def test_aca_plane_split_disjoint_near_junction() -> None:
 
 def test_aca_plane_split_assigns_by_axis_side() -> None:
     from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+    from nvitk.pipes.qvtpy.util.aca_sequential_grow import _split_aca_merged_by_junction_plane
 
     shape = (51, 51, 51)
     clm = np.zeros(shape, dtype=np.int32)
@@ -331,7 +329,7 @@ def test_aca_plane_split_assigns_by_axis_side() -> None:
 def test_aca_stray_raca_island_reassigned_to_laca() -> None:
     """RACA CC with no RACA seeds (plane mislabel) is moved to LACA."""
     from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+    from nvitk.pipes.qvtpy.util.aca_sequential_grow import _split_aca_merged_by_junction_plane
 
     shape = (51, 51, 51)
     clm = np.zeros(shape, dtype=np.int32)
@@ -420,7 +418,7 @@ def test_single_aca_uses_standard_region_growing() -> None:
 
 
 def test_mca_explore_frac_lower_than_default() -> None:
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import rg_intensity_frac_for_label
+    from nvitk.segmentation.local_cd import rg_intensity_frac_for_label
 
     assert rg_intensity_frac_for_label(QVTPY_LMCA, default_frac=0.5, explore_frac=0.35) == 0.35
     assert rg_intensity_frac_for_label(QVTPY_LICA, default_frac=0.5, explore_frac=0.35) == 0.5

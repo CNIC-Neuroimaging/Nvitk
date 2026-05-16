@@ -255,6 +255,18 @@ def _emit_stage0_convert(
     help="(sge) Host tree mounted at /nvitk/src/.",
 )
 @click.option("--skip-existing", is_flag=True, default=False)
+@click.option(
+    "--output-root",
+    type=click.Path(path_type=Path),
+    default=cfg.DEFAULT_RESULTS_ROOT,
+    show_default=True,
+    help="Results root (eICAB + qvtpy stages).",
+)
+@click.option("--emit-script", type=click.Path(path_type=Path), default=None)
+@click.option("--no-remote", is_flag=True)
+@click.option("--remote-host", default=None)
+@click.option("--remote-user", default=None)
+# --- stage 0 ---
 @click.option("--compute-phase-derived", is_flag=True, default=True)
 @click.option(
     "--phase-background-correction/--no-phase-background-correction",
@@ -275,13 +287,7 @@ def _emit_stage0_convert(
 @click.option("--xnat-config", "xnat_config_path", type=click.Path(path_type=Path), default=None)
 @click.option("--report", is_flag=True, default=False)
 @click.option("--report-derived", is_flag=True, default=False)
-@click.option(
-    "--output-root",
-    type=click.Path(path_type=Path),
-    default=cfg.DEFAULT_RESULTS_ROOT,
-    show_default=True,
-    help="Results root (eICAB + qvtpy stages).",
-)
+# --- stage 1 ---
 @click.option("--eicab-container", type=click.Path(path_type=Path), default=None)
 @click.option("--vasculature-dir", type=click.Path(path_type=Path), default=None)
 @click.option(
@@ -291,6 +297,7 @@ def _emit_stage0_convert(
     show_default=True,
 )
 @click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
+# --- stage 2 ---
 @click.option(
     "--stage2-reference",
     type=click.Choice(["angio", "cd"]),
@@ -300,6 +307,7 @@ def _emit_stage0_convert(
 )
 @click.option("--stage2-dof", type=int, default=6, show_default=True)
 @click.option("--stage2-cost", type=str, default="normmi", show_default=True)
+# --- stage 3 ---
 @click.option(
     "--eicab-mask",
     type=click.Choice(["cw", "wb"], case_sensitive=False),
@@ -317,6 +325,7 @@ def _emit_stage0_convert(
 @click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
 @click.option("--venous-min-branch-points", type=int, default=5, show_default=True)
+# --- stage 4 ---
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
     "--4dflow-thr-algorithm",
@@ -359,24 +368,23 @@ def _emit_stage0_convert(
 @click.option("--rg-intensity-frac-sssv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for SSSV.")
 @click.option("--rg-intensity-frac-ltsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for LTSV.")
 @click.option("--rg-intensity-frac-rtsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for RTSV (STRV never grows).")
-@click.option("--cross-section-res", type=int, default=0, show_default=True)
-@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
+# --- stage 5 ---
 @click.option(
     "--loc-arterial-strategy",
-    type=click.Choice(["qvtplus", "midpoint"]),
-    default="qvtplus",
+    type=click.Choice(["qvtpy", "midpoint"]),
+    default="qvtpy",
     show_default=True,
 )
 @click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
+@click.option("--loc-endpoint-inset-frac", type=float, default=0.08, show_default=True, help="Stage5: dual LOC inset from polyline ends.")
+# --- stage 6 ---
 @click.option(
     "--measure-resegment/--no-measure-resegment",
     default=True,
     show_default=True,
 )
-@click.option("--emit-script", type=click.Path(path_type=Path), default=None)
-@click.option("--no-remote", is_flag=True)
-@click.option("--remote-host", default=None)
-@click.option("--remote-user", default=None)
+@click.option("--cross-section-res", type=int, default=0, show_default=True)
+@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 def main(
     dicom_root: Path,
     nifti_root: Path,
@@ -387,6 +395,11 @@ def main(
     container: Path,
     src_dir: Path | None,
     skip_existing: bool,
+    output_root: Path,
+    emit_script: Path | None,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
     compute_phase_derived: bool,
     phase_background_correction: bool,
     phase_bg_poly_order: int,
@@ -395,7 +408,6 @@ def main(
     xnat_config_path: Path | None,
     report: bool,
     report_derived: bool,
-    output_root: Path,
     eicab_container: Path | None,
     vasculature_dir: Path | None,
     eicab_device: str,
@@ -423,15 +435,12 @@ def main(
     rg_intensity_frac_sssv: float,
     rg_intensity_frac_ltsv: float,
     rg_intensity_frac_rtsv: float,
-    cross_section_res: int,
-    cross_section_plane_interp: int,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
+    loc_endpoint_inset_frac: float,
     measure_resegment: bool,
-    emit_script: Path | None,
-    no_remote: bool,
-    remote_host: str | None,
-    remote_user: str | None,
+    cross_section_res: int,
+    cross_section_plane_interp: int,
 ) -> None:
     Logger()
 
@@ -582,6 +591,7 @@ def main(
                         loc_arterial_strategy=loc_arterial_strategy,
                         cross_section_radius_vox=cross_section_radius_vox,
                         venous_min_component_frac=venous_min_component_frac,
+                        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
                     )
                 except Exception as exc:
                     import traceback
@@ -597,6 +607,7 @@ def main(
                         cross_section_radius_vox=cross_section_radius_vox,
                         measure_resegment=measure_resegment,
                         cross_section_res=cross_section_res,
+                        cross_section_plane_interp=cross_section_plane_interp,
                     )
                 except Exception as exc:
                     import traceback
@@ -760,6 +771,7 @@ def main(
                         loc_arterial_strategy=loc_arterial_strategy,
                         cross_section_radius_vox=cross_section_radius_vox,
                         venous_min_component_frac=venous_min_component_frac,
+                        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
                     )
                 except Exception as exc:
                     import traceback
@@ -779,6 +791,8 @@ def main(
                         emit=fh,
                         cross_section_radius_vox=cross_section_radius_vox,
                         measure_resegment=measure_resegment,
+                        cross_section_res=cross_section_res,
+                        cross_section_plane_interp=cross_section_plane_interp,
                     )
                 except Exception as exc:
                     import traceback

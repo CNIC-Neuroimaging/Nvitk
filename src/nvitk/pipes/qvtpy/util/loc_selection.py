@@ -9,11 +9,12 @@ import numpy as np
 
 from nvitk.core.array import to_numpy
 from nvitk.morphology.centerline import centerline_tangents
-from nvitk.pipes.qvtpy.util.cross_section import CrossSectionResult, segment_at_point
+from nvitk.measure.cross_section import CrossSectionResult, segment_at_point
 from nvitk.pipes.qvtpy.labels import (
-    QVTPY_BASILAR,
-    QVTPY_LICA,
-    QVTPY_RICA,
+    QVTPY_ACA_IDS,
+    QVTPY_ICA_BASILAR_IDS,
+    QVTPY_MCA_IDS,
+    QVTPY_PCA_IDS,
     NAME_LTSV,
     NAME_RTSV,
     NAME_SSSV,
@@ -25,6 +26,11 @@ from nvitk.pipes.qvtpy.labels import (
 # ---------------------------------------------------------------------------
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
+
+# ICA, ACA, MCA, PCA: dual init/fin LOCs under qvtpy strategy.
+QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = (
+    QVTPY_ICA_BASILAR_IDS | QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -49,6 +55,7 @@ class LocRecord:
     tangent_z: float
     loc_circularity: float = 0.0
     loc_cross_section_area_mm2: float = 0.0
+    loc_role: str = "mid"
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +75,27 @@ def split_into_parts(points: np.ndarray, n_parts: int) -> list[np.ndarray]:
         if seg.shape[0] > 0:
             parts.append(seg)
     return parts
+
+
+def pick_endpoint_indices(
+    n: int,
+    *,
+    inset_frac: float = 0.08,
+    min_inset_pts: int = 5,
+) -> tuple[int, int] | None:
+    """Return ``(init_idx, fin_idx)`` near polyline ends, inset from extremes."""
+    if n < 1:
+        return None
+    if n < 2 * min_inset_pts + 3:
+        return None
+    mid = n // 2
+    init_idx = min(max(int(min_inset_pts), 0), mid)
+    fin_from_end = max(int(min_inset_pts), int(round(n * float(inset_frac))))
+    fin_idx = max(min(n - 1 - fin_from_end, n - 1 - int(min_inset_pts)), mid)
+    fin_idx = min(max(fin_idx, mid), n - 1)
+    if init_idx >= fin_idx:
+        return None
+    return init_idx, fin_idx
 
 
 def pick_masked_midpoint(
@@ -122,6 +150,7 @@ def _record_from_polyline(
     vessel_id: int,
     vessel_name: str,
     segment_id: int = 0,
+    loc_role: str = "mid",
     xs: CrossSectionResult | None = None,
 ) -> LocRecord:
     pts = to_numpy(points)
@@ -145,6 +174,7 @@ def _record_from_polyline(
         tangent_z=tz,
         loc_circularity=float(xs.circularity) if xs else 0.0,
         loc_cross_section_area_mm2=float(xs.area_mm2) if xs else 0.0,
+        loc_role=str(loc_role),
     )
 
 
@@ -172,66 +202,6 @@ def _cross_section_at(
         voxel_spacing=voxel_spacing,
         radius_vox=radius_vox,
     )
-
-
-# ---------------------------------------------------------------------------
-# Arterial LOC heuristics (QVTplus)
-# ---------------------------------------------------------------------------
-
-
-def select_ica_ba_loc(
-    polylines: dict[int, np.ndarray],
-    *,
-    ica_ids: tuple[int, ...] = (QVTPY_LICA, QVTPY_RICA),
-    ba_id: int = QVTPY_BASILAR,
-    mag: np.ndarray | None = None,
-    cd: np.ndarray | None = None,
-    vel_mag: np.ndarray | None = None,
-    voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
-    radius_vox: float = 10.0,
-    name_for_id: Any = None,
-) -> list[LocRecord]:
-    """Pick ICA/BA LOCs near common Z with best circularity."""
-    from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
-
-    targets = [i for i in (*ica_ids, ba_id) if i in polylines and polylines[i].shape[0] >= 3]
-    if not targets:
-        return []
-    z_vals = [float(np.median(to_numpy(polylines[i])[:, 2])) for i in targets]
-    z_common = float(np.median(z_vals))
-    out: list[LocRecord] = []
-    for vid in targets:
-        pts = to_numpy(polylines[vid])
-        z = pts[:, 2]
-        order = np.argsort(np.abs(z - z_common))
-        best_idx = int(order[0])
-        best_circ = -1.0
-        for idx in order[: min(15, order.size)]:
-            xs = _cross_section_at(
-                pts,
-                int(idx),
-                mag=mag,
-                cd=cd,
-                vel_mag=vel_mag,
-                voxel_spacing=voxel_spacing,
-                radius_vox=radius_vox,
-            )
-            circ = xs.circularity if xs else 0.0
-            if circ >= best_circ:
-                best_circ = circ
-                best_idx = int(idx)
-        vname = name_for_id(vid) if callable(name_for_id) else qvtpy_vessel_name(vid)
-        xs_final = _cross_section_at(
-            pts,
-            best_idx,
-            mag=mag,
-            cd=cd,
-            vel_mag=vel_mag,
-            voxel_spacing=voxel_spacing,
-            radius_vox=radius_vox,
-        )
-        out.append(_record_from_polyline(pts, best_idx, vessel_id=vid, vessel_name=vname, xs=xs_final))
-    return out
 
 
 def select_main_vessel_loc(
@@ -412,6 +382,40 @@ def select_venous_locs(
 # ---------------------------------------------------------------------------
 
 
+def _arterial_loc_at_index(
+    pts: np.ndarray,
+    idx: int,
+    *,
+    vessel_id: int,
+    vessel_name: str,
+    segment_id: int,
+    loc_role: str,
+    mag: np.ndarray | None,
+    cd: np.ndarray | None,
+    vel_mag: np.ndarray | None,
+    voxel_spacing: tuple[float, float, float],
+    radius_vox: float,
+) -> LocRecord:
+    xs = _cross_section_at(
+        pts,
+        idx,
+        mag=mag,
+        cd=cd,
+        vel_mag=vel_mag,
+        voxel_spacing=voxel_spacing,
+        radius_vox=radius_vox,
+    )
+    return _record_from_polyline(
+        pts,
+        idx,
+        vessel_id=vessel_id,
+        vessel_name=vessel_name,
+        segment_id=segment_id,
+        loc_role=loc_role,
+        xs=xs,
+    )
+
+
 def select_arterial_locs(
     arterial_polylines: dict[int, np.ndarray],
     *,
@@ -421,45 +425,71 @@ def select_arterial_locs(
     vel_mag: np.ndarray | None = None,
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     radius_vox: float = 10.0,
-    strategy: str = "qvtplus",
-) -> list[LocRecord]:
+    strategy: str = "qvtpy",
+    endpoint_inset_frac: float = 0.08,
+) -> tuple[list[LocRecord], dict[str, Any]]:
+    """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json."""
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
-    if strategy != "qvtplus":
-        out: list[LocRecord] = []
-        for vid, pts in sorted(arterial_polylines.items()):
-            rec = select_main_vessel_loc(
-                pts,
-                vessel_id=vid,
-                vessel_name=qvtpy_vessel_name(vid),
-                mask=venous_mask,
-                mag=mag,
-                cd=cd,
-                vel_mag=vel_mag,
-                voxel_spacing=voxel_spacing,
-                radius_vox=radius_vox,
+    meta_extra: dict[str, Any] = {
+        "dual_loc_fallback_vessels": [],
+    }
+    out: list[LocRecord] = []
+    use_dual = strategy == "qvtpy"
+
+    for vid, pts in sorted(arterial_polylines.items()):
+        pts_np = to_numpy(pts)
+        vname = qvtpy_vessel_name(vid)
+        if pts_np.shape[0] < 3:
+            continue
+
+        if use_dual and int(vid) in QVTPY_DUAL_LOC_ARTERIAL_IDS:
+            endpoints = pick_endpoint_indices(
+                pts_np.shape[0],
+                inset_frac=float(endpoint_inset_frac),
             )
-            if rec:
-                out.append(rec)
-        return out
+            if endpoints is None:
+                meta_extra["dual_loc_fallback_vessels"].append(vname)
+                rec = select_main_vessel_loc(
+                    pts_np,
+                    vessel_id=vid,
+                    vessel_name=vname,
+                    mask=venous_mask,
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
+                )
+                if rec:
+                    out.append(rec)
+                continue
+            init_idx, fin_idx = endpoints
+            for seg_id, idx, role in (
+                (0, init_idx, "init"),
+                (1, fin_idx, "fin"),
+            ):
+                out.append(
+                    _arterial_loc_at_index(
+                        pts_np,
+                        idx,
+                        vessel_id=vid,
+                        vessel_name=vname,
+                        segment_id=seg_id,
+                        loc_role=role,
+                        mag=mag,
+                        cd=cd,
+                        vel_mag=vel_mag,
+                        voxel_spacing=voxel_spacing,
+                        radius_vox=radius_vox,
+                    )
+                )
+            continue
 
-    ica_ba = {QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR}
-    ica_polys = {k: v for k, v in arterial_polylines.items() if k in ica_ba}
-    rest = {k: v for k, v in arterial_polylines.items() if k not in ica_ba}
-
-    out = select_ica_ba_loc(
-        ica_polys,
-        mag=mag,
-        cd=cd,
-        vel_mag=vel_mag,
-        voxel_spacing=voxel_spacing,
-        radius_vox=radius_vox,
-    )
-    for vid, pts in sorted(rest.items()):
         rec = select_main_vessel_loc(
-            pts,
+            pts_np,
             vessel_id=vid,
-            vessel_name=qvtpy_vessel_name(vid),
+            vessel_name=vname,
             mask=venous_mask,
             mag=mag,
             cd=cd,
@@ -469,7 +499,8 @@ def select_arterial_locs(
         )
         if rec:
             out.append(rec)
-    return out
+
+    return out, meta_extra
 
 
 # ---- CSV / serialization -----------------------------------------------------
@@ -492,6 +523,7 @@ def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:
         "tangent_z": rec.tangent_z,
         "loc_circularity": rec.loc_circularity,
         "loc_cross_section_area_mm2": rec.loc_cross_section_area_mm2,
+        "loc_role": rec.loc_role,
     }
 
 

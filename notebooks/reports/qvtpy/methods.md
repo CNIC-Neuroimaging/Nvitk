@@ -136,7 +136,8 @@ Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on
 | `--rg-intensity-frac-ltsv` | 4 | 0.38 |
 | `--rg-intensity-frac-rtsv` | 4 | 0.38 |
 | `--cross-section-res`, `--cross-section-plane-interp` | 6 | 0 / 1 |
-| `--loc-arterial-strategy {qvtplus,midpoint}` | 5 | `qvtplus` |
+| `--loc-arterial-strategy {qvtpy,midpoint}` | 5 | `qvtpy` |
+| `--loc-endpoint-inset-frac` | 5 | `0.08` |
 | `--cross-section-radius-vox` | 5, 6 | 10 |
 | `--measure-resegment` / `--no-measure-resegment` | 6 | resegment on |
 
@@ -426,7 +427,9 @@ flowchart TB
 
 Reads stage-3 centerlines and contrast volumes; writes `locs.csv` / `locs.xlsx`.
 
-**Arterial** (`--loc-arterial-strategy qvtplus`, default): ICA/BA near common Z with best circularity; other arteries at masked midpoint along the polyline.
+**Arterial** (`--loc-arterial-strategy qvtpy`, default): masked midpoint along each polyline; for ICA, ACA, MCA, and PCA also emit **init** (`segment_id=0`) and **fin** (`segment_id=1`) LOCs near the proximal/distal ends (inset via `--loc-endpoint-inset-frac`, default `0.08`). Basilar and communicating arteries keep a single midpoint LOC.
+
+**Stage 6 reporting:** `loc_mean_velocity_mm_s`, `loc_mean_flow_ml_s`, and per-timepoint velocity/flow columns are stored as **magnitudes** (absolute values); PI/RI are sign-invariant. Optional QC PNGs are written under `stage6_measure/cross-sections/` (CD oblique slice, segmentation overlay, LOC and ±2 centerline neighbors).
 
 **Venous:** rebuilds a venous slab mask (CD binary ∧ superior slab, area-open) for midpoint/heuristic masks; applies QVTplus-style rules for SSSV/STRV (6-part split, SVD alignment vs `[0,1,1]`, swap validation) and LTSV/RTSV (long-segment Z-structure rules). Cross-section metrics at each LOC: `loc_circularity`, `loc_cross_section_area_mm2`.
 

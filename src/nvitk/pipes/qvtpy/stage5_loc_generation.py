@@ -100,9 +100,10 @@ def run_subject(
     output_root: Path,
     skip_existing: bool = False,
     tangent_k_half: int = 2,
-    loc_arterial_strategy: str = "qvtplus",
+    loc_arterial_strategy: str = "qvtpy",
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
+    loc_endpoint_inset_frac: float = 0.08,
 ) -> Path:
     del tangent_k_half  # tangents computed inside loc_selection
     # ---- Prerequisites: stage3 centerlines -----------------------------------
@@ -139,7 +140,7 @@ def run_subject(
 
     # ---- QVTplus-style LOC selection (arterial + venous) ---------------------
     rows: list[dict[str, float | int | str]] = []
-    for rec in select_arterial_locs(
+    arterial_recs, arterial_meta = select_arterial_locs(
         arterial,
         mag=mag,
         cd=cd,
@@ -147,7 +148,9 @@ def run_subject(
         voxel_spacing=voxel_spacing,
         radius_vox=cross_section_radius_vox,
         strategy=loc_arterial_strategy,
-    ):
+        endpoint_inset_frac=loc_endpoint_inset_frac,
+    )
+    for rec in arterial_recs:
         rows.append(loc_record_to_dict(rec))
     for rec in select_venous_locs(
         venous,
@@ -166,6 +169,7 @@ def run_subject(
         "vessel_id",
         "vessel_name",
         "segment_id",
+        "loc_role",
         "centerline_index",
         "i",
         "j",
@@ -190,7 +194,9 @@ def run_subject(
             {
                 "n_locs": len(rows),
                 "loc_arterial_strategy": loc_arterial_strategy,
+                "loc_endpoint_inset_frac": float(loc_endpoint_inset_frac),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
+                **arterial_meta,
             },
             indent=2,
         ),
@@ -215,9 +221,10 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
-    loc_arterial_strategy: str = "qvtplus",
+    loc_arterial_strategy: str = "qvtpy",
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
+    loc_endpoint_inset_frac: float = 0.08,
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -237,6 +244,8 @@ def submit_subject_sge(
         str(float(cross_section_radius_vox)),
         "--venous-min-component-frac",
         str(float(venous_min_component_frac)),
+        "--loc-endpoint-inset-frac",
+        str(float(loc_endpoint_inset_frac)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
@@ -275,12 +284,13 @@ def submit_subject_sge(
 @click.option("--tangent-k-half", type=int, default=2, show_default=True)
 @click.option(
     "--loc-arterial-strategy",
-    type=click.Choice(["qvtplus", "midpoint"]),
-    default="qvtplus",
+    type=click.Choice(["qvtpy", "midpoint"]),
+    default="qvtpy",
     show_default=True,
 )
 @click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
+@click.option("--loc-endpoint-inset-frac", type=float, default=0.08, show_default=True)
 def main(
     subject: str,
     nifti_root: Path,
@@ -290,6 +300,7 @@ def main(
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     venous_min_component_frac: float,
+    loc_endpoint_inset_frac: float,
 ) -> None:
     Logger()
     run_subject(
@@ -301,6 +312,7 @@ def main(
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         venous_min_component_frac=venous_min_component_frac,
+        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
     )
 
 

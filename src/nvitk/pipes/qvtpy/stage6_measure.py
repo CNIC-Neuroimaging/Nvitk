@@ -31,11 +31,13 @@ from nvitk.measure.hemodynamics import (
     velocity_mm_s_from_phases,
 )
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.cross_section import (
+from nvitk.measure.cross_section import (
     flow_series_ml_s,
     masked_plane_velocity_series,
     segment_at_point,
 )
+from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines
+from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
 from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
 setup(globals())
@@ -56,6 +58,10 @@ _DEFAULT_RADIUS_VOX = 10.0
 
 def _default_nvitk_src_dir() -> Path:
     return Path(nvitk.__file__).resolve().parent.parent
+
+
+def _stage3_dir(output_root: Path, subject: str) -> Path:
+    return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _stage5_dir(output_root: Path, subject: str) -> Path:
@@ -113,6 +119,8 @@ def run_subject(
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
     measure_resegment: bool = True,
     cross_section_res: int = 0,
+    cross_section_plane_interp: int = 1,
+    write_cross_section_qc: bool = True,
 ) -> Path:
     # ---- Prerequisites: stage5 locs.csv --------------------------------------
     loc_csv = _stage5_dir(output_root, subject) / "locs.csv"
@@ -153,8 +161,22 @@ def run_subject(
         *flow_cols,
     ]
 
+    # ---- Optional centerlines for QC -------------------------------------------
+    arterial_cls: dict[int, np.ndarray] | None = None
+    qc_dir = out_dir / "cross-sections"
+    if write_cross_section_qc:
+        s3 = _stage3_dir(output_root, subject)
+        try:
+            arterial_cls = {
+                int(k): np.asarray(v)
+                for k, v in load_arterial_centerlines(s3, min_points=3).items()
+            }
+        except FileNotFoundError:
+            log.warning(f"[{subject}] stage6 QC: missing stage3 centerlines, skipping PNGs")
+
     # ---- Per-LOC: resegment, masked-plane flow, PI / RI ----------------------
     rows_out: list[dict[str, float | int | str]] = []
+    qc_paths: list[str] = []
     with loc_csv.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
@@ -188,7 +210,13 @@ def run_subject(
             else:
                 area_mm2 = float(area_csv)
 
-            vel_ts = masked_plane_velocity_series(vx, vy, vz, xs)
+            vel_ts = masked_plane_velocity_series(
+                vx,
+                vy,
+                vz,
+                xs,
+                plane_interp_order=int(cross_section_plane_interp),
+            )
             flow_ts = flow_series_ml_s(vel_ts, area_mm2)
             flow_2d = flow_ts.reshape(1, -1)
 
@@ -197,15 +225,43 @@ def run_subject(
                 "vessel_name": vname,
                 "loc_cross_section_radius_vox": float(cross_section_radius_vox),
                 "loc_cross_section_area_mm2": float(area_mm2),
-                "loc_mean_velocity_mm_s": float(mean_velocity_mm_s(vel_ts)),
-                "loc_mean_flow_ml_s": float(np.mean(flow_ts)),
+                "loc_mean_velocity_mm_s": float(abs(mean_velocity_mm_s(vel_ts))),
+                "loc_mean_flow_ml_s": float(abs(np.mean(flow_ts))),
                 "loc_pi": float(pulsatility_index(flow_2d)[0]),
                 "loc_ri": float(resistivity_index(flow_2d)[0]),
             }
             for t in range(nt):
-                rec[f"loc_velocity_mm_s_t{t}"] = float(vel_ts[t])
-                rec[f"loc_flow_ml_s_t{t}"] = float(flow_ts[t])
+                rec[f"loc_velocity_mm_s_t{t}"] = float(abs(vel_ts[t]))
+                rec[f"loc_flow_ml_s_t{t}"] = float(abs(flow_ts[t]))
             rows_out.append(rec)
+
+            if arterial_cls is not None and vid in arterial_cls:
+                seg_id = int(row.get("segment_id") or 0)
+                loc_role = str(row.get("loc_role") or "mid")
+                cl_idx = int(row.get("centerline_index") or 0)
+                qc_name = f"{vname}_seg{seg_id}.png"
+                qc_path = qc_dir / qc_name
+                try:
+                    save_loc_cross_section_qc_png(
+                        qc_path,
+                        cd=cd,
+                        centerline_pts=arterial_cls[vid],
+                        loc_index=cl_idx,
+                        center_xyz=center,
+                        tangent=tang,
+                        vessel_name=vname,
+                        segment_id=seg_id,
+                        loc_role=loc_role,
+                        voxel_spacing=voxel_spacing,
+                        radius_vox=cross_section_radius_vox,
+                        cross_section_res=cross_section_res,
+                        plane_interp_order=int(cross_section_plane_interp),
+                    )
+                    qc_paths.append(str(qc_path.relative_to(out_dir)))
+                except Exception as exc:
+                    import traceback
+                    traceback.print_exc()
+                    log.warning(f"[{subject}] QC PNG failed for {vname}: {exc}")
 
     # ---- Write loc_measurements.csv + measure_meta.json ----------------------
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
@@ -220,6 +276,10 @@ def run_subject(
                 "n_timepoints": nt,
                 "measure_resegment": bool(measure_resegment),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
+                "cross_section_plane_interp": int(cross_section_plane_interp),
+                "reported_flow_velocity_as_magnitude": True,
+                "cross_section_qc_dir": "cross-sections",
+                "cross_section_qc_pngs": qc_paths,
             },
             indent=2,
         ),
@@ -246,6 +306,8 @@ def submit_subject_sge(
     emit: TextIO | None = None,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
     measure_resegment: bool = True,
+    cross_section_res: int = 0,
+    cross_section_plane_interp: int = 1,
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -261,6 +323,10 @@ def submit_subject_sge(
         shlex.quote(binds.output),
         "--cross-section-radius-vox",
         str(float(cross_section_radius_vox)),
+        "--cross-section-res",
+        str(int(cross_section_res)),
+        "--cross-section-plane-interp",
+        str(int(cross_section_plane_interp)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
@@ -306,6 +372,7 @@ def submit_subject_sge(
     help="Recompute in-plane segmentation at each LOC (default on).",
 )
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
+@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 def main(
     subject: str,
     nifti_root: Path,
@@ -314,6 +381,7 @@ def main(
     cross_section_radius_vox: float,
     measure_resegment: bool,
     cross_section_res: int,
+    cross_section_plane_interp: int,
 ) -> None:
     Logger()
     run_subject(
@@ -324,6 +392,7 @@ def main(
         cross_section_radius_vox=cross_section_radius_vox,
         measure_resegment=measure_resegment,
         cross_section_res=cross_section_res,
+        cross_section_plane_interp=cross_section_plane_interp,
     )
 
 
