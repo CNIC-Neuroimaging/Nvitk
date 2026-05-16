@@ -6,11 +6,15 @@ import numpy as np
 import pytest
 
 from nvitk.core.array import as_backend_array
-from nvitk.pipes.qvtpy.labels import QVTPY_LMCA, QVTPY_LICA
+from nvitk.pipes.qvtpy.labels import QVTPY_LMCA, QVTPY_LICA, QVTPY_LPCOMM, QVTPY_STRV
+from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     VESSEL_EXTRA_PADDING,
     bbox_padding_for_label,
     build_seg_4dflow_local,
+    crop_min_fraction_for_label,
+    region_growing_enabled_for_label,
+    rg_intensity_frac_for_label,
     _bbox_with_padding,
     _bbox_with_vessel_padding,
 )
@@ -141,26 +145,73 @@ def test_centerline_barrier_reduces_overlap_with_other_skeleton() -> None:
     assert overlap_b < overlap_n
 
 
-def test_island_clean_removes_small_blob() -> None:
-    shape = (30, 30, 30)
+def test_largest_cc_keeps_main_blob_only() -> None:
+    seg = np.zeros((20, 20, 20), dtype=np.int32)
+    seg[10, 10, 8:18] = 1
+    seg[2, 2, 2] = 1
+    out = keep_largest_component_per_label(seg)
+    assert int(np.count_nonzero(out == 1)) == 10
+    assert out[2, 2, 2] == 0
+
+
+def test_small_vessel_uses_zero_crop_min_fraction() -> None:
+    assert crop_min_fraction_for_label(QVTPY_LPCOMM) == 0.0
+    assert crop_min_fraction_for_label(QVTPY_LICA) > 0
+
+
+def test_strv_region_growing_disabled() -> None:
+    assert not region_growing_enabled_for_label(QVTPY_STRV)
+
+
+def test_venous_rg_intensity_frac_per_sinus() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_LTSV, QVTPY_RTSV, QVTPY_SSSV
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import resolve_venous_rg_intensity_fracs
+
+    merged = resolve_venous_rg_intensity_fracs({QVTPY_SSSV: 0.33})
+    assert merged[QVTPY_SSSV] == 0.33
+    assert merged[QVTPY_LTSV] == rg_intensity_frac_for_label(QVTPY_LTSV, venous_fracs=merged)
+    assert QVTPY_STRV not in merged
+    assert rg_intensity_frac_for_label(QVTPY_SSSV, venous_fracs=merged) == 0.33
+    assert rg_intensity_frac_for_label(QVTPY_RTSV, venous_fracs=merged) == merged[QVTPY_RTSV]
+
+
+def test_strv_skips_region_growing() -> None:
+    shape = (40, 40, 40)
     cd = np.zeros(shape, dtype=np.float64)
     clm = np.zeros(shape, dtype=np.int32)
-    clm[15, 15, 10:20] = 1
-    cd[13:18, 13:18, 8:22] = 100.0
-    cd[25, 25, 15] = 100.0
-
+    clm[20, 20, 10:30] = QVTPY_STRV
+    cd[18:22, 18:22, 8:32] = 100.0
     res = build_seg_4dflow_local(
-        cd,
-        clm,
-        crop_padding_bbox=3,
-        region_growing=False,
-        seg_min_island_fraction=0.05,
-        thr_algorithm="lsthr",
+        cd, clm, crop_padding_bbox=3, region_growing=True, thr_algorithm="lsthr"
     )
-    seg = np.asarray(res.segmentation)
-    assert not np.any(seg[25, 25, 15] == 1)
     st = res.vessel_stats[0]
-    assert st.n_voxels_after_island_clean <= st.n_voxels_after_threshold
+    assert st.label_id == QVTPY_STRV
+    assert not st.region_growing_applied
+    assert st.n_voxels_after_region_growing == st.n_voxels_after_island_clean
+
+
+def test_aca_eicab_barrier_includes_acomm_and_contralateral() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_ACOMM, QVTPY_LACA, QVTPY_RACA
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _aca_eicab_region_growing_barrier
+
+    shape = (50, 40, 40)
+    eicab = np.zeros(shape, dtype=np.int32)
+    eicab[28:32, 18:22, 12:28] = QVTPY_ACOMM
+    eicab[8:18, 18:22, 10:30] = QVTPY_LACA
+    eicab[38:48, 18:22, 10:30] = QVTPY_RACA
+    forb = _aca_eicab_region_growing_barrier(
+        eicab, QVTPY_LACA, acomm_radius=2, contra_radius=2
+    )
+    assert forb[30, 20, 20]
+    assert forb[42, 20, 20]
+    assert not forb[12, 20, 20]
+
+
+def test_mca_explore_frac_lower_than_default() -> None:
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import rg_intensity_frac_for_label
+
+    assert rg_intensity_frac_for_label(QVTPY_LMCA, default_frac=0.5, explore_frac=0.35) == 0.35
+    assert rg_intensity_frac_for_label(QVTPY_LICA, default_frac=0.5, explore_frac=0.35) == 0.5
 
 
 def test_otsu_smoke() -> None:

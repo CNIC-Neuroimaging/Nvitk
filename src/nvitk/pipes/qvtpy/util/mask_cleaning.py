@@ -84,8 +84,32 @@ def clean_venous_slab_mask(
     )
 
 
+def keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray:
+    """Keep only the largest connected component for each positive label id."""
+    arr = as_backend_array(labels).astype(np.int32, copy=False)
+    out = np.zeros_like(arr)
+    for lid in sorted(int(v) for v in np.unique(arr) if int(v) != 0):
+        roi = arr == lid
+        n_fg = int(np.count_nonzero(roi))
+        if n_fg == 0:
+            continue
+        labeled, num = label_connected(roi, connectivity=1)
+        labeled_np = as_backend_array(labeled)
+        if int(num) <= 1:
+            out[roi] = lid
+            continue
+        counts = np.bincount(labeled_np.ravel())
+        if counts.size <= 1:
+            out[roi] = lid
+            continue
+        largest_comp = int(1 + np.argmax(counts[1:]))
+        out[labeled_np == largest_comp] = lid
+    return as_backend_array(out.astype(np.int32, copy=False))
+
+
 __all__ = [
     "clean_binary_mask",
     "clean_multilabel_islands",
     "clean_venous_slab_mask",
+    "keep_largest_component_per_label",
 ]

@@ -1,6 +1,13 @@
 """Per-vessel local CD crop, threshold, and optional region growing for stage 4.
 
 Array indices ``(i, j, k)`` are treated as **(X, Y, Z)** for asymmetric bbox padding.
+
+Region-growing intensity gate (per vessel ``L``)::
+
+    grow_thresh = max(mean(CD on seg==L) * rg_intensity_frac(L), opt_thresh_local)
+
+A **lower** ``rg_intensity_frac`` admits dimmer neighbours (more growth). A **higher**
+value is stricter. MCA/ACA/PCA use a reduced default fraction to explore further.
 """
 
 from __future__ import annotations
@@ -9,25 +16,38 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.morphology import dilate
 from nvitk.morphology.components import remove_small_components_by_fraction
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_ACA_IDS,
+    QVTPY_ACOMM,
     QVTPY_ICA_BASILAR_IDS,
+    QVTPY_LACA,
     QVTPY_LICA,
     QVTPY_LMCA,
+    QVTPY_RACA,
+    QVTPY_RG_EXPLORE_MORE_IDS,
+    QVTPY_RG_INTENSITY_FRAC_VENOUS,
+    QVTPY_RG_SKIP_LABEL_IDS,
     QVTPY_RMCA,
+    QVTPY_SMALL_ARTERIAL_IDS,
+    QVTPY_VENOUS_LABEL_IDS,
 )
 from nvitk.pipes.qvtpy.util.flow_volume_masks import _binary_mask_sliding_threshold
-from nvitk.pipes.qvtpy.util.mask_cleaning import clean_multilabel_islands
+from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
 
 setup(globals())
 
 ThrAlgorithm = Literal["lsthr", "lthr", "otsu"]
 _CROP_MIN_COMPONENT_FRAC = 0.005
+_CROP_MIN_COMPONENT_FRAC_SMALL = 0.0
 VESSEL_EXTRA_PADDING: int = 10
+_DEFAULT_RG_INTENSITY_FRAC: float = 0.45
+_RG_INTENSITY_FRAC_EXPLORE: float = 0.35
+_ACOMM_BARRIER_RADIUS_DEFAULT: int = 2
+_ACA_CONTRA_BARRIER_RADIUS_DEFAULT: int = 3
 
 
 @dataclass(frozen=True)
@@ -64,6 +84,8 @@ class VesselSegStats:
     n_voxels_after_threshold: int
     n_voxels_after_island_clean: int
     n_voxels_after_region_growing: int
+    region_growing_applied: bool = False
+    rg_intensity_frac_used: float | None = None
     warning: str | None = None
 
 
@@ -73,6 +95,47 @@ class LocalSegResult:
 
     segmentation: np.ndarray
     vessel_stats: list[VesselSegStats] = field(default_factory=list)
+
+
+def crop_min_fraction_for_label(label_id: int) -> float:
+    """Min CC fraction inside the CD crop (0 for small comm/PCA vessels)."""
+    if int(label_id) in QVTPY_SMALL_ARTERIAL_IDS:
+        return _CROP_MIN_COMPONENT_FRAC_SMALL
+    return _CROP_MIN_COMPONENT_FRAC
+
+
+def resolve_venous_rg_intensity_fracs(
+    overrides: dict[int, float] | None = None,
+) -> dict[int, float]:
+    """Merged per-sinus RG fractions (SSSV/LTSV/RTSV); STRV is never included."""
+    out = dict(QVTPY_RG_INTENSITY_FRAC_VENOUS)
+    if overrides:
+        for lid, frac in overrides.items():
+            if int(lid) in QVTPY_VENOUS_LABEL_IDS and int(lid) not in QVTPY_RG_SKIP_LABEL_IDS:
+                out[int(lid)] = float(frac)
+    return out
+
+
+def rg_intensity_frac_for_label(
+    label_id: int,
+    *,
+    default_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    explore_frac: float = _RG_INTENSITY_FRAC_EXPLORE,
+    venous_fracs: dict[int, float] | None = None,
+) -> float:
+    """Per-vessel RG intensity factor (lower → more growth)."""
+    lid = int(label_id)
+    venous = venous_fracs if venous_fracs is not None else QVTPY_RG_INTENSITY_FRAC_VENOUS
+    if lid in venous:
+        return float(venous[lid])
+    if lid in QVTPY_RG_EXPLORE_MORE_IDS:
+        return float(explore_frac)
+    return float(default_frac)
+
+
+def region_growing_enabled_for_label(label_id: int) -> bool:
+    """Whether region growing runs for this label (STRV is skipped)."""
+    return int(label_id) not in QVTPY_RG_SKIP_LABEL_IDS
 
 
 def bbox_padding_for_label(label_id: int, default_pad: int) -> BboxFacePadding:
@@ -126,6 +189,16 @@ def _bbox_with_padding(
     return None if out is None else out[0]
 
 
+def _dilate_bool_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
+    m = np.asarray(mask, dtype=bool)
+    if radius <= 0 or not np.any(m):
+        return m
+    return np.asarray(
+        as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)),
+        dtype=bool,
+    )
+
+
 def _dilated_other_centerlines_barrier(
     centerlines_mask: np.ndarray,
     label_id: int,
@@ -137,13 +210,7 @@ def _dilated_other_centerlines_barrier(
     i0, i1, j0, j1, k0, k1 = bbox
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
     other = np.asarray((clm != 0) & (clm != int(label_id)), dtype=bool)
-    if radius > 0:
-        other = np.asarray(
-            as_backend_array(
-                dilate(other.astype(np.uint8), footprint=int(radius), connectivity=1)
-            ),
-            dtype=bool,
-        )
+    other = _dilate_bool_mask(other, radius=radius)
     return other[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
 
 
@@ -158,22 +225,51 @@ def _dilated_other_segmentation_barrier(
     other = np.asarray((seg_np != 0) & (seg_np != int(label_id)), dtype=bool)
     if not np.any(other):
         return np.zeros(seg_np.shape, dtype=bool)
-    if radius > 0:
-        other = np.asarray(
-            as_backend_array(
-                dilate(other.astype(np.uint8), footprint=int(radius), connectivity=1)
-            ),
-            dtype=bool,
-        )
-    return other
+    return _dilate_bool_mask(other, radius=radius)
+
+
+def _aca_eicab_region_growing_barrier(
+    eicab_qvtpy: np.ndarray,
+    label_id: int,
+    *,
+    acomm_radius: int,
+    contra_radius: int,
+) -> np.ndarray:
+    """Forbidden mask for ACA RG: dilated AComm + contralateral ACA from warped eICAB."""
+    lid = int(label_id)
+    if lid not in QVTPY_ACA_IDS:
+        return np.zeros(eicab_qvtpy.shape, dtype=bool)
+    eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+    forb = np.zeros(eq.shape, dtype=bool)
+    acomm = eq == int(QVTPY_ACOMM)
+    if np.any(acomm):
+        forb |= _dilate_bool_mask(acomm, radius=acomm_radius)
+    contra_id = int(QVTPY_RACA) if lid == int(QVTPY_LACA) else int(QVTPY_LACA)
+    contra = eq == contra_id
+    if np.any(contra):
+        forb |= _dilate_bool_mask(contra, radius=contra_radius)
+    return forb
+
+
+def _merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None:
+    merged: np.ndarray | None = None
+    for m in masks:
+        if m is None:
+            continue
+        b = np.asarray(m, dtype=bool)
+        merged = b if merged is None else (merged | b)
+    return merged
 
 
 def _threshold_crop(
     cd_crop: np.ndarray,
     algorithm: ThrAlgorithm,
+    *,
+    min_component_frac: float,
 ) -> tuple[np.ndarray, float | None, str | None]:
     """Binary mask on *cd_crop*. Returns ``(mask, opt_thresh, warning)``."""
     cd_crop = as_backend_array(cd_crop).astype(np.float64)
+    min_frac = float(min_component_frac)
     warn: str | None = None
     if algorithm == "otsu":
         pos = cd_crop[cd_crop > 0]
@@ -188,11 +284,12 @@ def _threshold_crop(
         except ValueError as exc:
             return np.zeros(cd_crop.shape, dtype=bool), None, f"otsu failed: {exc}"
         mask = (cd_crop > t).astype(bool, copy=False)
-        mask = remove_small_components_by_fraction(
-            mask,
-            min_fraction=_CROP_MIN_COMPONENT_FRAC,
-            connectivity=1,
-        )
+        if min_frac > 0:
+            mask = remove_small_components_by_fraction(
+                mask,
+                min_fraction=min_frac,
+                connectivity=1,
+            )
         return as_backend_array(mask).astype(bool), t, warn
 
     shift_hm = algorithm == "lthr"
@@ -201,11 +298,12 @@ def _threshold_crop(
         shift_hm_flag=shift_hm,
         med_filt_flag=True,
     )
-    mask = remove_small_components_by_fraction(
-        mask,
-        min_fraction=_CROP_MIN_COMPONENT_FRAC,
-        connectivity=1,
-    )
+    if min_frac > 0:
+        mask = remove_small_components_by_fraction(
+            mask,
+            min_fraction=min_frac,
+            connectivity=1,
+        )
     return as_backend_array(mask).astype(bool), float(opt_thresh), warn
 
 
@@ -293,18 +391,26 @@ def build_seg_4dflow_local(
     cd: np.ndarray,
     centerlines_mask: np.ndarray,
     *,
+    eicab_qvtpy: np.ndarray | None = None,
     crop_padding_bbox: int = 3,
-    thr_algorithm: ThrAlgorithm = "otsu",
+    thr_algorithm: ThrAlgorithm = "lsthr",
     region_growing: bool = True,
-    rg_intensity_frac: float = 0.45,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    venous_rg_intensity_fracs: dict[int, float] | None = None,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
-    seg_min_island_fraction: float = 0.05,
-    seg_bridge_open_radius: int = 0,
+    acomm_barrier_radius: int = _ACOMM_BARRIER_RADIUS_DEFAULT,
+    aca_contra_barrier_radius: int = _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
 ) -> LocalSegResult:
     """Build multilabel ``seg_4dflow`` from CD and per-label centerline backbone."""
     cd = as_backend_array(cd).astype(np.float64)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    eicab = (
+        None
+        if eicab_qvtpy is None
+        else as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+    )
     shape = tuple(int(s) for s in clm.shape[:3])
     seg = np.zeros(shape, dtype=np.int32)
 
@@ -313,6 +419,7 @@ def build_seg_4dflow_local(
     opt_thresh_by_label: dict[int, float | None] = {}
     cl_rad = max(0, int(cl_barrier_radius))
     rg_rad = max(0, int(rg_barrier_radius))
+    venous_rg = resolve_venous_rg_intensity_fracs(venous_rg_intensity_fracs)
 
     for lid in label_ids:
         roi = clm == lid
@@ -329,6 +436,7 @@ def build_seg_4dflow_local(
                     n_voxels_after_threshold=0,
                     n_voxels_after_island_clean=0,
                     n_voxels_after_region_growing=0,
+                    region_growing_applied=False,
                     warning="empty centerline mask for label",
                 )
             )
@@ -338,7 +446,11 @@ def build_seg_4dflow_local(
         bbox, face_pad = bbox_out
         i0, i1, j0, j1, k0, k1 = bbox
         cd_crop = cd[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
-        crop_mask, opt_t, warn = _threshold_crop(cd_crop, thr_algorithm)
+        crop_mask, opt_t, warn = _threshold_crop(
+            cd_crop,
+            thr_algorithm,
+            min_component_frac=crop_min_fraction_for_label(lid),
+        )
         opt_thresh_by_label[lid] = opt_t
         cl_barrier = _dilated_other_centerlines_barrier(
             clm, lid, bbox, radius=cl_rad
@@ -355,31 +467,51 @@ def build_seg_4dflow_local(
                 n_voxels_after_threshold=n_thr,
                 n_voxels_after_island_clean=n_thr,
                 n_voxels_after_region_growing=n_thr,
+                region_growing_applied=False,
                 warning=warn,
             )
         )
 
-    seg = clean_multilabel_islands(
-        seg,
-        min_fraction=float(seg_min_island_fraction),
-        bridge_open_radius=int(seg_bridge_open_radius),
-    )
+    seg = keep_largest_component_per_label(seg)
     for st in stats:
         st.n_voxels_after_island_clean = int(np.count_nonzero(seg == st.label_id))
 
     if region_growing:
         for st in stats:
             lid = st.label_id
+            if not region_growing_enabled_for_label(lid):
+                st.region_growing_applied = False
+                st.rg_intensity_frac_used = None
+                st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
+                continue
+
+            frac = rg_intensity_frac_for_label(
+                lid,
+                default_frac=rg_intensity_frac,
+                explore_frac=rg_intensity_frac_explore,
+                venous_fracs=venous_rg,
+            )
             floor = opt_thresh_by_label.get(lid)
             rg_forbidden = _dilated_other_segmentation_barrier(seg, lid, radius=rg_rad)
+            if eicab is not None and lid in QVTPY_ACA_IDS:
+                aca_forb = _aca_eicab_region_growing_barrier(
+                    eicab,
+                    lid,
+                    acomm_radius=acomm_barrier_radius,
+                    contra_radius=aca_contra_barrier_radius,
+                )
+                rg_forbidden = _merge_forbidden(rg_forbidden, aca_forb)
+
             _region_grow_vessel(
                 seg,
                 cd,
                 lid,
-                rg_intensity_frac=rg_intensity_frac,
+                rg_intensity_frac=frac,
                 rg_abs_floor=floor,
                 forbidden=rg_forbidden,
             )
+            st.region_growing_applied = True
+            st.rg_intensity_frac_used = float(frac)
             st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
 
     return LocalSegResult(
@@ -404,8 +536,11 @@ def vessel_stats_to_dict(st: VesselSegStats) -> dict[str, Any]:
         "thr_algorithm": st.thr_algorithm,
         "opt_thresh": st.opt_thresh,
         "n_voxels_after_threshold": st.n_voxels_after_threshold,
+        "n_voxels_after_largest_cc": st.n_voxels_after_island_clean,
         "n_voxels_after_island_clean": st.n_voxels_after_island_clean,
         "n_voxels_after_region_growing": st.n_voxels_after_region_growing,
+        "region_growing_applied": st.region_growing_applied,
+        "rg_intensity_frac_used": st.rg_intensity_frac_used,
         "warning": st.warning,
     }
 
@@ -416,8 +551,14 @@ __all__ = [
     "ThrAlgorithm",
     "VESSEL_EXTRA_PADDING",
     "VesselSegStats",
+    "_DEFAULT_RG_INTENSITY_FRAC",
+    "_RG_INTENSITY_FRAC_EXPLORE",
     "bbox_padding_for_label",
     "build_seg_4dflow_local",
+    "crop_min_fraction_for_label",
+    "region_growing_enabled_for_label",
+    "resolve_venous_rg_intensity_fracs",
+    "rg_intensity_frac_for_label",
     "vessel_stats_to_dict",
     "_bbox_with_padding",
 ]

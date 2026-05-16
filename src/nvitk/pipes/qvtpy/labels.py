@@ -155,6 +155,12 @@ QVTPY_ARTERIAL_LABEL_IDS: frozenset[int] = frozenset(
 # Vessel groups for stage-4 bbox padding (array axes i=X, j=Y, k=Z).
 QVTPY_ICA_BASILAR_IDS: frozenset[int] = frozenset({QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR})
 QVTPY_ACA_IDS: frozenset[int] = frozenset({QVTPY_LACA, QVTPY_RACA})
+QVTPY_MCA_IDS: frozenset[int] = frozenset({QVTPY_LMCA, QVTPY_RMCA})
+QVTPY_PCA_IDS: frozenset[int] = frozenset({QVTPY_LPCA, QVTPY_RPCA})
+QVTPY_COMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM, QVTPY_ACOMM})
+
+# Stage 4: gentler crop filtering (PCA/PComm/AComm) — see QVTPY_SMALL_ARTERIAL_IDS below.
+QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_COMM_IDS
 
 # =============================================================================
 # qvtpy — venous labels (fixed 31–34)
@@ -191,6 +197,17 @@ VENOUS_NAME_BY_LABEL: dict[int, str] = {v: k for k, v in VENOUS_LABEL_BY_NAME.it
 MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_STRV, NAME_LTSV, NAME_RTSV)
 
 QVTPY_VENOUS_LABEL_IDS: frozenset[int] = frozenset(VENOUS_NAME_BY_LABEL.keys())
+
+# Stage 4 region growing: more exploration on ACA/MCA/PCA; STRV never grows.
+QVTPY_RG_EXPLORE_MORE_IDS: frozenset[int] = QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
+QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = frozenset({QVTPY_STRV})
+
+# Per-sinus RG intensity fractions (lower → more growth). STRV omitted (RG disabled).
+QVTPY_RG_INTENSITY_FRAC_VENOUS: dict[int, float] = {
+    QVTPY_SSSV: 0.40,
+    QVTPY_LTSV: 0.38,
+    QVTPY_RTSV: 0.38,
+}
 
 # =============================================================================
 # qvtpy — reserved / unused on backbone+seg
@@ -368,7 +385,14 @@ __all__ = [
     "QVTPY_ARTERIAL_ID_TO_NAME",
     "QVTPY_ARTERIAL_LABEL_IDS",
     "QVTPY_ARTERIAL_NAME_TO_ID",
+    "QVTPY_COMM_IDS",
     "QVTPY_ICA_BASILAR_IDS",
+    "QVTPY_MCA_IDS",
+    "QVTPY_PCA_IDS",
+    "QVTPY_RG_EXPLORE_MORE_IDS",
+    "QVTPY_RG_INTENSITY_FRAC_VENOUS",
+    "QVTPY_RG_SKIP_LABEL_IDS",
+    "QVTPY_SMALL_ARTERIAL_IDS",
     "QVTPY_BACKGROUND",
     "QVTPY_BASILAR",
     "QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID",

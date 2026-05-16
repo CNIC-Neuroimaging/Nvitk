@@ -23,16 +23,29 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
+from nvitk.pipes.qvtpy.labels import (
+    QVTPY_LTSV,
+    QVTPY_RTSV,
+    QVTPY_RG_INTENSITY_FRAC_VENOUS,
+    QVTPY_SSSV,
+)
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     ThrAlgorithm,
     VESSEL_EXTRA_PADDING,
+    _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+    _ACOMM_BARRIER_RADIUS_DEFAULT,
+    _DEFAULT_RG_INTENSITY_FRAC,
+    _RG_INTENSITY_FRAC_EXPLORE,
     build_seg_4dflow_local,
+    resolve_venous_rg_intensity_fracs,
     vessel_stats_to_dict,
 )
 
 setup(globals())
 
 log = Logger()
+
+EICAB_IN_4DFLOW_NIFTI = "eicab_in_4dflow.nii.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -67,35 +80,46 @@ def _segmentation_meta(
     subject: str,
     nifti_root: Path,
     cl_path: Path,
+    eicab_in_4dflow: str | None,
     crop_padding_bbox: int,
     thr_algorithm: str,
     region_growing: bool,
     rg_intensity_frac: float,
+    rg_intensity_frac_explore: float,
+    venous_rg_intensity_fracs: dict[int, float],
     cl_barrier_radius: int,
     rg_barrier_radius: int,
-    seg_min_island_fraction: float,
-    seg_bridge_open_radius: int,
+    acomm_barrier_radius: int,
+    aca_contra_barrier_radius: int,
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "subject": subject,
         "complex_difference": str(_cd_path(nifti_root, subject)),
         "centerlines_mask": str(cl_path),
+        "eicab_in_4dflow": eicab_in_4dflow,
         "crop_padding_bbox": int(crop_padding_bbox),
         "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
         "thr_algorithm": thr_algorithm,
         "region_growing": bool(region_growing),
         "rg_intensity_frac": float(rg_intensity_frac),
+        "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
+        "rg_intensity_frac_explore_labels": "ACA,MCA,PCA (ids 4-9)",
+        "rg_skip_labels": "STRV (id 32)",
+        "venous_rg_intensity_frac": {
+            str(int(k)): float(v) for k, v in venous_rg_intensity_fracs.items()
+        },
+        "post_threshold_clean": "largest_cc_per_label",
         "cl_barrier_radius": int(cl_barrier_radius),
         "rg_barrier_radius": int(rg_barrier_radius),
-        "seg_min_island_fraction": float(seg_min_island_fraction),
-        "seg_bridge_open_radius": int(seg_bridge_open_radius),
+        "acomm_barrier_radius": int(acomm_barrier_radius),
+        "aca_contra_barrier_radius": int(aca_contra_barrier_radius),
         "vessels": vessels,
     }
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: local CD crop + threshold + island clean + region growing
+# Stage 4: local CD crop + threshold + largest-CC clean + region growing
 # ---------------------------------------------------------------------------
 
 
@@ -108,16 +132,27 @@ def run_subject(
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
     region_growing: bool = True,
-    rg_intensity_frac: float = 0.45,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
-    seg_min_island_fraction: float = 0.005,
-    seg_bridge_open_radius: int = 0,
+    acomm_barrier_radius: int = _ACOMM_BARRIER_RADIUS_DEFAULT,
+    aca_contra_barrier_radius: int = _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+    rg_intensity_frac_sssv: float | None = None,
+    rg_intensity_frac_ltsv: float | None = None,
+    rg_intensity_frac_rtsv: float | None = None,
 ) -> Path:
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
     if not cl_path.is_file():
         raise FileNotFoundError(f"Missing {cl_path} (run stage3)")
+
+    eicab_path = s3 / EICAB_IN_4DFLOW_NIFTI
+    eicab_qvtpy = None
+    if eicab_path.is_file():
+        eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
+    else:
+        log.warning(f"[{subject}] stage4: missing {eicab_path}; ACA AComm barriers disabled")
 
     out_dir = _stage4_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -134,17 +169,29 @@ def run_subject(
     cl_img = imread(cl_path)
     centerlines_mask = as_backend_array(cl_img.data).astype(np.int32, copy=False)
 
+    venous_overrides: dict[int, float] = {}
+    if rg_intensity_frac_sssv is not None:
+        venous_overrides[QVTPY_SSSV] = float(rg_intensity_frac_sssv)
+    if rg_intensity_frac_ltsv is not None:
+        venous_overrides[QVTPY_LTSV] = float(rg_intensity_frac_ltsv)
+    if rg_intensity_frac_rtsv is not None:
+        venous_overrides[QVTPY_RTSV] = float(rg_intensity_frac_rtsv)
+    venous_rg = resolve_venous_rg_intensity_fracs(venous_overrides or None)
+
     result = build_seg_4dflow_local(
         cd,
         centerlines_mask,
+        eicab_qvtpy=eicab_qvtpy,
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
         region_growing=bool(region_growing),
         rg_intensity_frac=float(rg_intensity_frac),
+        rg_intensity_frac_explore=float(rg_intensity_frac_explore),
+        venous_rg_intensity_fracs=venous_rg,
         cl_barrier_radius=int(cl_barrier_radius),
         rg_barrier_radius=int(rg_barrier_radius),
-        seg_min_island_fraction=float(seg_min_island_fraction),
-        seg_bridge_open_radius=int(seg_bridge_open_radius),
+        acomm_barrier_radius=int(acomm_barrier_radius),
+        aca_contra_barrier_radius=int(aca_contra_barrier_radius),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
@@ -154,14 +201,17 @@ def run_subject(
                 subject=subject,
                 nifti_root=nifti_root,
                 cl_path=cl_path,
+                eicab_in_4dflow=str(eicab_path) if eicab_path.is_file() else None,
                 crop_padding_bbox=crop_padding_bbox,
                 thr_algorithm=thr_algorithm,
                 region_growing=region_growing,
                 rg_intensity_frac=rg_intensity_frac,
+                rg_intensity_frac_explore=rg_intensity_frac_explore,
+                venous_rg_intensity_fracs=venous_rg,
                 cl_barrier_radius=cl_barrier_radius,
                 rg_barrier_radius=rg_barrier_radius,
-                seg_min_island_fraction=seg_min_island_fraction,
-                seg_bridge_open_radius=seg_bridge_open_radius,
+                acomm_barrier_radius=acomm_barrier_radius,
+                aca_contra_barrier_radius=aca_contra_barrier_radius,
                 vessels=[vessel_stats_to_dict(st) for st in result.vessel_stats],
             ),
             indent=2,
@@ -195,11 +245,55 @@ def _stage4_cli_options(func):  # type: ignore[no-untyped-def]
         default=True,
         show_default=True,
     )(func)
-    func = click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True)(func)
+    func = click.option(
+        "--rg-intensity-frac",
+        type=float,
+        default=_DEFAULT_RG_INTENSITY_FRAC,
+        show_default=True,
+        help="RG gate: grow_thresh = max(mean(CD_seeds)*frac, local_thr). Lower = more growth.",
+    )(func)
+    func = click.option(
+        "--rg-intensity-frac-explore",
+        type=float,
+        default=_RG_INTENSITY_FRAC_EXPLORE,
+        show_default=True,
+        help="RG frac for ACA/MCA/PCA (lower = explore more).",
+    )(func)
     func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
     func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)
-    func = click.option("--seg-min-island-fraction", type=float, default=0.005, show_default=True)(func)
-    func = click.option("--seg-bridge-open-radius", type=int, default=0, show_default=True)(func)
+    func = click.option(
+        "--acomm-barrier-radius",
+        type=int,
+        default=_ACOMM_BARRIER_RADIUS_DEFAULT,
+        show_default=True,
+        help="Dilate AComm (eICAB) forbidden zone for ACA region growing.",
+    )(func)
+    func = click.option(
+        "--aca-contra-barrier-radius",
+        type=int,
+        default=_ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+        show_default=True,
+        help="Dilate contralateral ACA (eICAB) forbidden zone for ACA region growing.",
+    )(func)
+    func = click.option(
+        "--rg-intensity-frac-sssv",
+        type=float,
+        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_SSSV],
+        show_default=True,
+        help="RG intensity frac for SSSV (STRV never grows).",
+    )(func)
+    func = click.option(
+        "--rg-intensity-frac-ltsv",
+        type=float,
+        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_LTSV],
+        show_default=True,
+    )(func)
+    func = click.option(
+        "--rg-intensity-frac-rtsv",
+        type=float,
+        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_RTSV],
+        show_default=True,
+    )(func)
     return func
 
 
@@ -216,11 +310,15 @@ def submit_subject_sge(
     crop_padding_bbox: int = 3,
     thr_algorithm: str = "lsthr",
     region_growing: bool = True,
-    rg_intensity_frac: float = 0.45,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
-    seg_min_island_fraction: float = 0.005,
-    seg_bridge_open_radius: int = 0,
+    acomm_barrier_radius: int = _ACOMM_BARRIER_RADIUS_DEFAULT,
+    aca_contra_barrier_radius: int = _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+    rg_intensity_frac_sssv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_SSSV],
+    rg_intensity_frac_ltsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_LTSV],
+    rg_intensity_frac_rtsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_RTSV],
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -240,14 +338,22 @@ def submit_subject_sge(
         shlex.quote(str(thr_algorithm).lower()),
         "--rg-intensity-frac",
         str(float(rg_intensity_frac)),
+        "--rg-intensity-frac-explore",
+        str(float(rg_intensity_frac_explore)),
         "--cl-barrier-radius",
         str(int(cl_barrier_radius)),
         "--rg-barrier-radius",
         str(int(rg_barrier_radius)),
-        "--seg-min-island-fraction",
-        str(float(seg_min_island_fraction)),
-        "--seg-bridge-open-radius",
-        str(int(seg_bridge_open_radius)),
+        "--acomm-barrier-radius",
+        str(int(acomm_barrier_radius)),
+        "--aca-contra-barrier-radius",
+        str(int(aca_contra_barrier_radius)),
+        "--rg-intensity-frac-sssv",
+        str(float(rg_intensity_frac_sssv)),
+        "--rg-intensity-frac-ltsv",
+        str(float(rg_intensity_frac_ltsv)),
+        "--rg-intensity-frac-rtsv",
+        str(float(rg_intensity_frac_rtsv)),
     ]
     if region_growing:
         parts.append("--region-growing")
@@ -293,10 +399,14 @@ def main(
     thr_algorithm: str,
     region_growing: bool,
     rg_intensity_frac: float,
+    rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
-    seg_min_island_fraction: float,
-    seg_bridge_open_radius: int,
+    acomm_barrier_radius: int,
+    aca_contra_barrier_radius: int,
+    rg_intensity_frac_sssv: float,
+    rg_intensity_frac_ltsv: float,
+    rg_intensity_frac_rtsv: float,
 ) -> None:
     Logger()
     run_subject(
@@ -308,11 +418,15 @@ def main(
         thr_algorithm=thr_algorithm.lower(),  # type: ignore[arg-type]
         region_growing=region_growing,
         rg_intensity_frac=rg_intensity_frac,
+        rg_intensity_frac_explore=rg_intensity_frac_explore,
         cl_barrier_radius=cl_barrier_radius,
         rg_barrier_radius=rg_barrier_radius,
-        seg_min_island_fraction=seg_min_island_fraction,
-        seg_bridge_open_radius=seg_bridge_open_radius,
+        acomm_barrier_radius=acomm_barrier_radius,
+        aca_contra_barrier_radius=aca_contra_barrier_radius,
+        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
+        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
+        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
     )
 
 
-__all__ = ["main", "run_subject", "submit_subject_sge"]
+__all__ = ["EICAB_IN_4DFLOW_NIFTI", "main", "run_subject", "submit_subject_sge"]

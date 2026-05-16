@@ -127,10 +127,14 @@ Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on
 | `--4dflow-thr-algorithm {lsthr,lthr,otsu}` | 4 | `lsthr` |
 | `--region-growing` / `--no-region-growing` | 4 | growing **on** |
 | `--rg-intensity-frac` | 4 | 0.45 |
+| `--rg-intensity-frac-explore` | 4 | 0.35 (ACA/MCA/PCA) |
 | `--cl-barrier-radius` | 4 | 2 |
 | `--rg-barrier-radius` | 4 | 3 |
-| `--seg-min-island-fraction` | 4 | 0.005 |
-| `--seg-bridge-open-radius` | 4 | 0 |
+| `--acomm-barrier-radius` | 4 | 2 |
+| `--aca-contra-barrier-radius` | 4 | 3 |
+| `--rg-intensity-frac-sssv` | 4 | 0.40 |
+| `--rg-intensity-frac-ltsv` | 4 | 0.38 |
+| `--rg-intensity-frac-rtsv` | 4 | 0.38 |
 | `--cross-section-res`, `--cross-section-plane-interp` | 6 | 0 / 1 |
 | `--loc-arterial-strategy {qvtplus,midpoint}` | 5 | `qvtplus` |
 | `--cross-section-radius-vox` | 5, 6 | 10 |
@@ -326,6 +330,7 @@ Stage 4 builds a multilabel `seg_4dflow.nii.gz` from the full-volume **ComplexDi
 |-------|------|
 | `4DFlow/ComplexDifference_3D.nii.gz` | Intensity volume for thresholding and region growing |
 | `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Defines which labels exist and the spatial extent (bbox) of each vessel |
+| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz` | Warped qvtpy arterial mask (incl. **AComm** id 12) for ACA region-growing barriers |
 
 Every integer label `> 0` in the centerline mask is processed (qvtpy arterial ids **1–12** and venous ids **31–34**; see `labels.py`). Labels with no mask voxels are skipped.
 
@@ -348,7 +353,7 @@ Array indices `(i, j, k)` are **(X, Y, Z)**. For each label `L` (ascending order
 
 ### 4.3 Local thresholding (`--4dflow-thr-algorithm`)
 
-Thresholding runs **inside the crop only**. Small islands below **0.5%** of crop foreground are removed before pasting.
+Thresholding runs **inside the crop only**. For PCA/PComm/AComm labels, crop area-opening is **disabled** (min fraction **0**) so small comms are not erased before paste; other vessels still drop components below **0.5%** of crop foreground.
 
 | Algorithm | Description |
 |-----------|-------------|
@@ -360,21 +365,26 @@ Thresholding runs **inside the crop only**. Small islands below **0.5%** of crop
 
 Paste assigns `seg = L` only where `seg == 0` and not forbidden. Lower label ids still claim overlap first.
 
-### 4.4 Per-label island cleaning
+### 4.4 Largest connected component per label
 
-After all vessels are pasted, `clean_multilabel_islands` runs on the full `seg` volume (`--seg-min-island-fraction`, default **0.005**; optional `--seg-bridge-open-radius`). Each label’s small disconnected components are removed before region growing.
+After all vessels are pasted, each label keeps **only its largest 3D connected component** (other components for that id are cleared). This replaces fractional island cleaning and preserves small vessels that still have a single main blob.
 
 ### 4.5 Region growing (`--region-growing`, default on)
 
-Second pass (ascending label order):
+Second pass (ascending label order). **STRV (id 32) never region-grows** (threshold footprint only). **SSSV / LTSV / RTSV** use per-sinus `--rg-intensity-frac-sssv`, `--rg-intensity-frac-ltsv`, `--rg-intensity-frac-rtsv` (defaults **0.40 / 0.38 / 0.38**).
 
-1. **Seeds** = voxels with `seg == L` (after island clean).
-2. **6-connected BFS** on the full CD volume. A neighbour is eligible if:
-   - `seg[neighbour] == 0`
-   - **not** inside `dilate(seg == other_label)` (`--rg-barrier-radius`, default **3**) — blocks growth into bright rims beside other vessels
-   - `CD[neighbour] >= grow_thresh` with  
-     `grow_thresh = max(mean(CD on seeds) × rg_intensity_frac, opt_thresh_local)`  
-     (`--rg-intensity-frac` default **0.45**; `opt_thresh_local` from the crop threshold step).
+**Intensity gate (`--rg-intensity-frac`):** for each vessel, seeds are current `seg == L` voxels. Let `μ` = mean CD on seeds and `t_loc` = local threshold from §4.3. A neighbour is intensity-eligible when:
+
+`CD[neighbour] >= grow_thresh` with `grow_thresh = max(μ × frac, t_loc)`.
+
+- **Lower `frac`** → lower threshold → **more** growth (explore further into dimmer CD).
+- **Higher `frac`** → stricter growth.
+
+Defaults: **`--rg-intensity-frac` 0.45** (most vessels); **`--rg-intensity-frac-explore` 0.35** for **ACA, MCA, PCA** (ids 4–9).
+
+**Spatial gates (6-connected BFS):** a neighbour is accepted only if `seg[neighbour] == 0`, not inside `dilate(other_seg)` (`--rg-barrier-radius`, default **3**), and intensity-eligible.
+
+**ACA hemispheres:** when `eicab_in_4dflow.nii.gz` is present, LACA/RACA growing is also forbidden inside dilated **AComm** (`--acomm-barrier-radius`, default **2**) and dilated **contralateral ACA** territory from the warped eICAB mask (`--aca-contra-barrier-radius`, default **3**), reducing cross-hemisphere stealing at the anterior junction.
 
 Growing never overwrites another label id. Disable with `--no-region-growing`.
 
@@ -397,9 +407,9 @@ flowchart TB
     Crop[CD crop + threshold]
     Paste["seg=L where free and not barrier"]
   end
-  Loop --> Clean[clean_multilabel_islands]
+  Loop --> Clean[largest CC per label]
   Clean --> RG{region growing?}
-  RG -->|yes| Grow["BFS: seg==0, not dilate other seg, CD gate"]
+  RG -->|yes| Grow["BFS: STRV off; venous per-sinus frac"]
   RG -->|no| Out[seg_4dflow.nii.gz]
   Grow --> Out
 ```
