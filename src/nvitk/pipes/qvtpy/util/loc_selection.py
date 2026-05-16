@@ -20,7 +20,16 @@ from nvitk.pipes.qvtpy.labels import (
     NAME_STRV,
 )
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,11 @@ class LocRecord:
     tangent_z: float
     loc_circularity: float = 0.0
     loc_cross_section_area_mm2: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Polyline utilities
+# ---------------------------------------------------------------------------
 
 
 def split_into_parts(points: np.ndarray, n_parts: int) -> list[np.ndarray]:
@@ -94,6 +108,11 @@ def local_direction_alignment(points: np.ndarray, idx: int, *, window: int = 5) 
 
 def _z_std(points: np.ndarray) -> float:
     return float(np.std(to_numpy(points)[:, 2]))
+
+
+# ---------------------------------------------------------------------------
+# LocRecord construction + cross-section at station
+# ---------------------------------------------------------------------------
 
 
 def _record_from_polyline(
@@ -153,6 +172,11 @@ def _cross_section_at(
         voxel_spacing=voxel_spacing,
         radius_vox=radius_vox,
     )
+
+
+# ---------------------------------------------------------------------------
+# Arterial LOC heuristics (QVTplus)
+# ---------------------------------------------------------------------------
 
 
 def select_ica_ba_loc(
@@ -236,6 +260,11 @@ def select_main_vessel_loc(
         radius_vox=radius_vox,
     )
     return _record_from_polyline(pts, idx, vessel_id=vessel_id, vessel_name=vessel_name, xs=xs)
+
+
+# ---------------------------------------------------------------------------
+# Venous LOC heuristics (SSSV / STRV / LTSV / RTSV)
+# ---------------------------------------------------------------------------
 
 
 def resolve_sssv_strv(
@@ -378,6 +407,11 @@ def select_venous_locs(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Combined arterial / venous LOC selection
+# ---------------------------------------------------------------------------
+
+
 def select_arterial_locs(
     arterial_polylines: dict[int, np.ndarray],
     *,
@@ -436,6 +470,9 @@ def select_arterial_locs(
         if rec:
             out.append(rec)
     return out
+
+
+# ---- CSV / serialization -----------------------------------------------------
 
 
 def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:

@@ -147,6 +147,11 @@ VENOUS_REGION_BASE: int = QVTPY_VENOUS_REGION_BASE
 UNKNOWN_LABEL: int = QVTPY_UNKNOWN_LABEL
 
 
+# ---------------------------------------------------------------------------
+# Lookup helpers
+# ---------------------------------------------------------------------------
+
+
 def eicab_vessel_name(label_id: int) -> str:
     """Human-readable name for an eICAB mask integer, or a stable fallback string."""
     lid = int(label_id)

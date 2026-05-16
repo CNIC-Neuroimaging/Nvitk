@@ -42,7 +42,16 @@ setup(globals())
 
 log = Logger()
 
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+
 _DEFAULT_RADIUS_VOX = 10.0
+
+
+# ---------------------------------------------------------------------------
+# Path helpers + contrast / phase I/O
+# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -90,6 +99,11 @@ def _load_contrast(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarr
     return mag, cd, vel
 
 
+# ---------------------------------------------------------------------------
+# Stage 6: per-LOC flow, PI, RI
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -100,6 +114,7 @@ def run_subject(
     measure_resegment: bool = True,
     cross_section_res: int = 0,
 ) -> Path:
+    # ---- Prerequisites: stage5 locs.csv --------------------------------------
     loc_csv = _stage5_dir(output_root, subject) / "locs.csv"
     if not loc_csv.is_file():
         raise FileNotFoundError(f"Missing {loc_csv} (run stage5)")
@@ -110,6 +125,7 @@ def run_subject(
         log.info(f"[{subject}] stage6 measure: skip -> {out_dir}")
         return out_dir
 
+    # ---- Phase volumes → mm/s velocity time series ---------------------------
     inputs = discover_phase_inputs(nifti_root / subject)
     voxel_spacing = _voxel_spacing(inputs.ap_phase_path)
     mag, cd, vel_mag = _load_contrast(nifti_root, subject)
@@ -137,6 +153,7 @@ def run_subject(
         *flow_cols,
     ]
 
+    # ---- Per-LOC: resegment, masked-plane flow, PI / RI ----------------------
     rows_out: list[dict[str, float | int | str]] = []
     with loc_csv.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
@@ -190,6 +207,7 @@ def run_subject(
                 rec[f"loc_flow_ml_s_t{t}"] = float(flow_ts[t])
             rows_out.append(rec)
 
+    # ---- Write loc_measurements.csv + measure_meta.json ----------------------
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
@@ -209,6 +227,11 @@ def run_subject(
     )
     log.info(f"[{subject}] stage6 measure -> {meas_csv}")
     return out_dir
+
+
+# ---------------------------------------------------------------------------
+# CLI + SGE submission
+# ---------------------------------------------------------------------------
 
 
 def submit_subject_sge(

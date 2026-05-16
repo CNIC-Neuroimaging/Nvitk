@@ -10,7 +10,13 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
+
 EicabMaskKind = Literal["cw", "wb"]
+
+# ---- Filename patterns -------------------------------------------------------
 
 _CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
 _WB_PATTERNS = ("*_eICAB_WB.nii.gz", "*_eICAB_WB.nii")
@@ -25,6 +31,11 @@ class EicabMaskResolution:
     used: EicabMaskKind
     fallback: bool
     fallback_reason: str | None
+
+
+# ---------------------------------------------------------------------------
+# Resolve CW / WB multilabel path
+# ---------------------------------------------------------------------------
 
 
 def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:

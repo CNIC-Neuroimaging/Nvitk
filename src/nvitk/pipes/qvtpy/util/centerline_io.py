@@ -13,8 +13,17 @@ from nvitk.morphology.centerline import compute_centerlines
 
 setup(globals())
 
+# ---------------------------------------------------------------------------
+# Stage-3 artifact names
+# ---------------------------------------------------------------------------
+
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
 CENTERLINE_META_JSON = "centerline_meta.json"
+
+
+# ---------------------------------------------------------------------------
+# Path helpers + meta JSON
+# ---------------------------------------------------------------------------
 
 
 def centerlines_mask_path(stage3_dir: Path) -> Path:
@@ -30,6 +39,11 @@ def load_centerline_meta(stage3_dir: Path) -> dict[str, Any]:
     if not p.is_file():
         raise FileNotFoundError(f"Missing {p}")
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Polyline extraction from multilabel centerline mask
+# ---------------------------------------------------------------------------
 
 
 def _polyline_for_label(
@@ -50,6 +64,9 @@ def _polyline_for_label(
         min_points=int(min_points),
     )
     return cl.get(int(label_id))
+
+
+# ---- Arterial / venous loaders ------------------------------------------------
 
 
 def load_arterial_centerlines(

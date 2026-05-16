@@ -52,12 +52,21 @@ from . import config as cfg
 
 log = Logger()
 
+# ---------------------------------------------------------------------------
+# Default vessel mask search names
+# ---------------------------------------------------------------------------
+
 _DEFAULT_VESSEL_REL_NAMES: tuple[str, ...] = (
     "vessels.nii.gz",
     "vessel_mask.nii.gz",
     "VesselSeg.nii.gz",
     "vessels.nii",
 )
+
+
+# ---------------------------------------------------------------------------
+# Subject / mask path resolution
+# ---------------------------------------------------------------------------
 
 
 def _patient_dir(
@@ -215,6 +224,11 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+# ---------------------------------------------------------------------------
+# CLI (flowshow viewer)
+# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-qvtpy-flowshow")

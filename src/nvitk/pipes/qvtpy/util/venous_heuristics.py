@@ -17,8 +17,17 @@ from nvitk.pipes.qvtpy.labels import (
     MATLAB_QVT_VENOUS_VESSEL_NAMES,
 )
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 _MIN_BRANCH_POINTS = 12
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,11 @@ class VenousBranch:
     name: str
     points: np.ndarray  # (N, 3) float32 voxel coords
     score: float
+
+
+# ---------------------------------------------------------------------------
+# Geometry helpers
+# ---------------------------------------------------------------------------
 
 
 def _principal_direction(points: np.ndarray) -> np.ndarray:
@@ -45,6 +59,11 @@ def _alignment_score(direction: np.ndarray, reference: np.ndarray) -> float:
     d = direction / (float(np.linalg.norm(direction)) + 1e-12)
     r = reference / (float(np.linalg.norm(reference)) + 1e-12)
     return float(abs(np.dot(d, r)))
+
+
+# ---------------------------------------------------------------------------
+# Skeleton branch extraction
+# ---------------------------------------------------------------------------
 
 
 def extract_branch_polylines(
@@ -69,6 +88,11 @@ def extract_branch_polylines(
         if poly.shape[0] >= int(min_points):
             polylines.append(poly.astype(np.float32, copy=False))
     return polylines
+
+
+# ---------------------------------------------------------------------------
+# Greedy SSSV / STRV / LTSV / RTSV assignment
+# ---------------------------------------------------------------------------
 
 
 def _score_branch(
@@ -129,6 +153,9 @@ def assign_venous_branches(
             assigned[name] = candidates[best_idx]
             used.add(best_idx)
     return assigned
+
+
+# ---- Label id mapping --------------------------------------------------------
 
 
 def venous_name_to_label_id(name: str, name_to_id: dict[str, int] | None = None) -> int:

@@ -56,6 +56,10 @@ from . import (
 
 log = Logger()
 
+# ---------------------------------------------------------------------------
+# Stage identifiers and aliases
+# ---------------------------------------------------------------------------
+
 STAGE_DOWNLOAD = "stage0_d"
 STAGE_CONVERT = "stage0_c"
 STAGE_EICAB = "stage1"
@@ -110,6 +114,11 @@ _ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
 DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB},{STAGE_REG},{STAGE_CENTERLINE},{STAGE_SEG},{STAGE_LOC},{STAGE_MEASURE}"
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
 def _parse_stages(spec: str) -> list[str]:
     tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]
     if not tokens:
@@ -139,6 +148,11 @@ def _default_submit_script_path() -> Path:
     cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return cfg.SGE_SCRIPTS_DIR / f"submit_qvtpy_{ts}.sh"
+
+
+# ---------------------------------------------------------------------------
+# SGE script emission (per-stage submit_stage)
+# ---------------------------------------------------------------------------
 
 
 def _emit_stage0_convert(
@@ -203,6 +217,11 @@ def _emit_stage0_convert(
         extra_env={"PYTHONPATH": str(binds.src)},
     )
     return submit_stage(spec, paths, emit=fh)
+
+
+# ---------------------------------------------------------------------------
+# Master CLI (local + SGE)
+# ---------------------------------------------------------------------------
 
 
 @click.command("nvitk-qvtpy")

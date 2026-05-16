@@ -158,12 +158,12 @@ def anchor_bladder_entry_per_side(
     if axis_z < 0:
         axis_z = m.ndim + axis_z
 
-    # 1. Lateral centroid of kidney → which side of the volume it occupies
+    # ---- 1. Lateral centroid of kidney → which side of the volume it occupies ----
     k_coords  = np.argwhere(km)
     k_x_mean  = float(k_coords[:, axis_x].mean())
     vol_x_mid = m.shape[axis_x] / 2.0
 
-    # 2. Build an ipsilateral lateral mask for the bladder
+    # ---- 2. Build an ipsilateral lateral mask for the bladder --------------------
     x_arr     = np.arange(m.shape[axis_x], dtype=np.float64)
     x_in_side = (x_arr >= vol_x_mid) if (k_x_mean >= vol_x_mid) else (x_arr < vol_x_mid)
 
@@ -181,7 +181,7 @@ def anchor_bladder_entry_per_side(
         )
         cand = m.copy()
 
-    # 3. Top ``superior_fraction`` in IS direction (trigone corners are superior)
+    # ---- 3. Top ``superior_fraction`` in IS direction (trigone corners are superior) ----
     other_axes = tuple(i for i in range(m.ndim) if i != axis_z)
     z_present  = np.where(cand.any(axis=other_axes))[0]
     z_min_c, z_max_c = int(z_present.min()), int(z_present.max())
@@ -201,7 +201,7 @@ def anchor_bladder_entry_per_side(
         )
         region = cand
 
-    # 4. Largest CC centroid
+    # ---- 4. Largest CC centroid ----
     if structure is None:
         structure = np.ones((3, 3, 3), dtype=bool)
     lab, n = ndi.label(region, structure=structure)

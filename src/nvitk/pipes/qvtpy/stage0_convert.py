@@ -22,6 +22,11 @@ from nvitk.io.conversors.phase2volume import phase2volume
 
 from . import config as cfg
 
+log = Logger()
+
+# ---------------------------------------------------------------------------
+# Constants (expected layout / derivatives)
+# ---------------------------------------------------------------------------
 
 REQUIRED_FLOW_DIRS: tuple[str, ...] = ("AP", "RL", "FH")
 DERIVED_FILES: tuple[str, ...] = (
@@ -34,7 +39,9 @@ DERIVED_FILES: tuple[str, ...] = (
     "VelocityMeanComponents",
 )
 
-log = Logger()
+# ---------------------------------------------------------------------------
+# DICOM stem classification + NIfTI export
+# ---------------------------------------------------------------------------
 
 
 def _iter_subjects(dicom_root: Path) -> list[str]:
@@ -150,6 +157,11 @@ def _export_nifti_move(src: Path, dst: Path) -> None:
         src.unlink(missing_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# Per-subject convert + reorganize + phase2volume
+# ---------------------------------------------------------------------------
+
+
 def convert_subject(
     subject_dicom_dir: Path,
     subject_out_dir: Path,
@@ -228,6 +240,11 @@ def reorganize_subject(subject_out_dir: Path) -> None:
         log.warning(f"[{subject_out_dir.name}] leaving unclassified JSON at subject root: {js.name}")
 
 
+# ---------------------------------------------------------------------------
+# Stage 0 convert entrypoint
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -284,6 +301,11 @@ def _iter_subjects_nifti(nifti_root: Path) -> list[str]:
     if not nifti_root.exists():
         return []
     return sorted(p.name for p in nifti_root.iterdir() if p.is_dir())
+
+
+# ---------------------------------------------------------------------------
+# QC report
+# ---------------------------------------------------------------------------
 
 
 def print_nifti_qc_report(
@@ -390,6 +412,11 @@ def print_nifti_qc_report(
         "derived_missing": derived_missing if check_derived else {},
         "total": total,
     }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 @click.command("qvtpy-stage0")

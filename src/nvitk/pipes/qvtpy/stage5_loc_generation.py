@@ -38,6 +38,11 @@ setup(globals())
 log = Logger()
 
 
+# ---------------------------------------------------------------------------
+# Path helpers + contrast volume I/O
+# ---------------------------------------------------------------------------
+
+
 def _default_nvitk_src_dir() -> Path:
     return Path(nvitk.__file__).resolve().parent.parent
 
@@ -83,6 +88,11 @@ def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[Any, Any, An
     return mag, cd, vel, sp
 
 
+# ---------------------------------------------------------------------------
+# Stage 5: LOC generation (arterial + venous)
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -95,6 +105,7 @@ def run_subject(
     venous_min_component_frac: float = 0.005,
 ) -> Path:
     del tangent_k_half  # tangents computed inside loc_selection
+    # ---- Prerequisites: stage3 centerlines -----------------------------------
     s3 = _stage3_dir(output_root, subject)
     from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
 
@@ -112,6 +123,7 @@ def run_subject(
 
     mag, cd, vel_mag, voxel_spacing = _load_contrast_volumes(nifti_root, subject)
 
+    # ---- Venous mask for LOC heuristics (CD binary ∧ superior slab) ----------
     venous_mask = None
     shape3 = cd.shape
     venous_region = venous_search_region(shape3)
@@ -125,6 +137,7 @@ def run_subject(
 
     name_to_id = {str(k): int(v) for k, v in (meta.get("venous_label_by_name") or {}).items()}
 
+    # ---- QVTplus-style LOC selection (arterial + venous) ---------------------
     rows: list[dict[str, float | int | str]] = []
     for rec in select_arterial_locs(
         arterial,
@@ -148,6 +161,7 @@ def run_subject(
     ):
         rows.append(loc_record_to_dict(rec))
 
+    # ---- Write locs.csv, locs.xlsx, loc_meta.json ----------------------------
     fieldnames = [
         "vessel_id",
         "vessel_name",
@@ -184,6 +198,11 @@ def run_subject(
     )
     log.info(f"[{subject}] stage5 loc -> {loc_csv}")
     return out_dir
+
+
+# ---------------------------------------------------------------------------
+# CLI + SGE submission
+# ---------------------------------------------------------------------------
 
 
 def submit_subject_sge(

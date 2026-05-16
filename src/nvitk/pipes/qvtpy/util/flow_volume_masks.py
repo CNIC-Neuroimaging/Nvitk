@@ -9,6 +9,11 @@ from nvitk.morphology.components import remove_small_components_by_fraction
 setup(globals())
 
 
+# ---------------------------------------------------------------------------
+# Venous search region (superior Y-slab)
+# ---------------------------------------------------------------------------
+
+
 def venous_search_region(shape: tuple[int, int, int]) -> np.ndarray:
     """Boolean slab: first ``round(ny/3)`` planes along axis 1 (shape ``(nx, ny, nz)``)."""
     _, ny, _ = shape
@@ -16,6 +21,11 @@ def venous_search_region(shape: tuple[int, int, int]) -> np.ndarray:
     ven = np.zeros(shape, dtype=bool)
     ven[:, :third_y, :] = True
     return ven
+
+
+# ---------------------------------------------------------------------------
+# Sliding threshold on 3D complex-difference (MATLAB slidingThreshold.m)
+# ---------------------------------------------------------------------------
 
 
 def _binary_mask_sliding_threshold(
@@ -28,6 +38,7 @@ def _binary_mask_sliding_threshold(
     med_filt_flag: bool = True,
 ) -> tuple[np.ndarray, float]:
     """Sliding-threshold binary mask on CD (NumPy float volume). Returns ``(mask, opt_thresh)``."""
+    # ---- Preprocess + occupancy curve Sval(threshold) ------------------------
     cd = as_backend_array(cd).astype(np.float64, order="C")
     if med_filt_flag:
         cdcrop = ndi.median_filter(cd, size=3, mode="constant", cval=0.0)
@@ -42,6 +53,7 @@ def _binary_mask_sliding_threshold(
     for i, n in enumerate(x):
         sval[i] = float(np.count_nonzero(cdcrop > (max_val * n)))
 
+    # ---- Smooth Sval, curvature knee, optional FWHM shift --------------------
     smf = int(max(1, smf))
     kernel = np.ones(smf, dtype=np.float64) / float(smf)
     y = np.convolve(sval.astype(np.float64), kernel, mode="same")
@@ -77,9 +89,13 @@ def _binary_mask_sliding_threshold(
     else:
         opt_frac = float(x[idx])
 
+    # ---- Binarize at optimized absolute threshold ----------------------------
     opt_thresh = max_val * opt_frac
     segment = cdcrop > opt_thresh
     return segment.astype(bool, copy=False), float(opt_thresh)
+
+
+# ---- Public API: global vessel mask + area opening ---------------------------
 
 
 def binary_vessel_segment_cd(

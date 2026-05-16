@@ -38,6 +38,11 @@ setup(globals())
 log = Logger()
 
 
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+
 def _default_nvitk_src_dir() -> Path:
     return Path(nvitk.__file__).resolve().parent.parent
 
@@ -55,6 +60,9 @@ def _load_stage2_meta(output_root: Path, subject: str) -> dict[str, Any]:
     if not p.is_file():
         raise FileNotFoundError(f"Missing stage2 meta: {p}")
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+# ---- Centerline mask rasterization -------------------------------------------
 
 
 def _rasterize_centerlines_mask(
@@ -100,6 +108,11 @@ def _cd_path(nifti_root: Path, subject: str) -> Path:
     raise FileNotFoundError(f"Missing ComplexDifference_3D for {subject}")
 
 
+# ---------------------------------------------------------------------------
+# Stage 3: eICAB warp, CD threshold, arterial + venous centerlines
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -115,6 +128,7 @@ def run_subject(
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
 ) -> Path:
+    # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
     meta = _load_stage2_meta(output_root, subject)
     mat = Path(meta["matrix"])
     fixed = Path(meta["fixed"])
@@ -129,6 +143,7 @@ def run_subject(
         log.info(f"[{subject}] stage3 centerline: skip -> {out_dir}")
         return out_dir
 
+    # ---- Warp eICAB labels into 4D-flow space (nearest neighbour) ----------
     warped_labels = out_dir / "eicab_in_4dflow.nii.gz"
     flirt_apply_rigid(
         eicab_res.path,
@@ -138,6 +153,7 @@ def run_subject(
         interp="nearestneighbour",
     )
 
+    # ---- Global CD vessel mask (sliding threshold + area opening) ------------
     lab_img = imread(warped_labels)
     labels_arr = as_backend_array(lab_img.data)
     shape3 = tuple(int(x) for x in labels_arr.shape[:3])
@@ -154,6 +170,7 @@ def run_subject(
     )
     vessel_bin = as_backend_array(vessel_bin.astype(np.uint8, copy=False))
 
+    # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
     labels_np =  (
@@ -175,6 +192,7 @@ def run_subject(
 
     arterial = compute_centerlines(arterial_vol, min_points=5)
 
+    # ---- Venous: CD binary ∧ superior slab → skeleton branch assignment -------
     venous_mask = vessel_bin.astype(bool) & venous_region
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
@@ -187,6 +205,7 @@ def run_subject(
         name: venous_name_to_label_id(name) for name in venous_branches
     }
 
+    # ---- Outputs: centerlines mask, CD QC NIfTI, centerline_meta.json --------
     cl_mask = _rasterize_centerlines_mask(
         shape3,
         arterial,
@@ -230,6 +249,11 @@ def run_subject(
     done.write_text(json.dumps(meta_out, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage3 centerline -> {out_dir}")
     return out_dir
+
+
+# ---------------------------------------------------------------------------
+# CLI + SGE submission
+# ---------------------------------------------------------------------------
 
 
 def _stage3_cli_options(func):  # type: ignore[no-untyped-def]

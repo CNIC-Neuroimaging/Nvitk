@@ -12,10 +12,18 @@ from nvitk.transform.oblique import oblique_slice
 
 setup(globals())
 
-# MATLAB segment_cross_section_thresh fusion weights (MAG, CD, velocity).
+# ---------------------------------------------------------------------------
+# Defaults (MATLAB segment_cross_section_thresh fusion weights)
+# ---------------------------------------------------------------------------
+
 _FUSE_WEIGHTS = (0.2, 0.8, 0.2)
 _DEFAULT_RADIUS_VOX = 10.0
 _DEFAULT_INTERP_VALS = 4
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,11 @@ class CrossSectionResult:
     v: np.ndarray
     pixel_spacing_mm: tuple[float, float]
     plane_res: int
+
+
+# ---------------------------------------------------------------------------
+# Oblique plane geometry
+# ---------------------------------------------------------------------------
 
 
 def plane_basis_from_tangent(tangent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -67,6 +80,11 @@ def tilt_corrected_spacing_mm(
     slice_sp = sz
     px = res + (slice_sp - res) * sin_ang
     return px, px
+
+
+# ---------------------------------------------------------------------------
+# In-plane sliding threshold + segmentation
+# ---------------------------------------------------------------------------
 
 
 def _normalize_slice(sl: Any) -> Any:
@@ -162,6 +180,11 @@ def _circularity_proxy(mask: np.ndarray) -> float:
     if rout <= 0.0:
         return 0.0
     return float((rin / rout) ** 2)
+
+
+# ---------------------------------------------------------------------------
+# Per-station and along-polyline segmentation
+# ---------------------------------------------------------------------------
 
 
 def _plane_res(radius_vox: float, interp_vals: int, cross_section_res: int) -> int:
@@ -266,6 +289,11 @@ def segment_along_polyline(
         )
         out.append(res)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Masked-plane flow (stage 6)
+# ---------------------------------------------------------------------------
 
 
 def masked_plane_velocity_series(

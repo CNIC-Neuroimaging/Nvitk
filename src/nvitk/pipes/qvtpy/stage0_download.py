@@ -77,6 +77,11 @@ _SUBJECT_COLUMN_CANDIDATES: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Subject list parsing
+# ---------------------------------------------------------------------------
+
+
 def _normalize_header(value: str) -> str:
     return re.sub(r"[^0-9a-z]+", "", str(value).lower())
 

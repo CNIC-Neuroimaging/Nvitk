@@ -25,7 +25,16 @@ from nvitk.registration.fsl.flirt import flirt_register_rigid
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
+
 ReferenceKind = Literal["angio", "cd"]
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -56,6 +65,11 @@ def _stage2_out(output_root: Path, subject: str) -> Path:
 
 def _done_marker(out_dir: Path) -> Path:
     return out_dir / "registration_meta.json"
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: FLIRT rigid registration
+# ---------------------------------------------------------------------------
 
 
 def run_subject(
@@ -115,6 +129,11 @@ def run_subject(
     }
     _done_marker(out_dir).write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return out_dir
+
+
+# ---------------------------------------------------------------------------
+# CLI + SGE submission
+# ---------------------------------------------------------------------------
 
 
 def submit_subject_sge(

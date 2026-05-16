@@ -13,6 +13,11 @@ from nvitk.pipes.qvtpy.util.mask_cleaning import clean_multilabel_islands
 AssemblyMode = Literal["voxel", "mesh"]
 
 
+# ---------------------------------------------------------------------------
+# Stamp 2D cross-section masks into 3D volume
+# ---------------------------------------------------------------------------
+
+
 def _stamp_plane_mask(
     vol: np.ndarray,
     result: CrossSectionResult,
@@ -76,6 +81,11 @@ def _interpolate_stations(
             )
             _stamp_plane_mask(vol, blended, label, radius_vox=radius_vox)
     _stamp_plane_mask(vol, results[-1], label, radius_vox=radius_vox)
+
+
+# ---------------------------------------------------------------------------
+# Voxel / mesh assembly along centerlines
+# ---------------------------------------------------------------------------
 
 
 def assemble_voxel_segmentation(
@@ -158,6 +168,9 @@ def assemble_mesh_segmentation(
         sparse[fill] = np.maximum(sparse[fill], np.uint8(lid))
     out = sparse.astype(np.int32, copy=False)
     return out, stats
+
+
+# ---- Post-process ------------------------------------------------------------
 
 
 def postprocess_segmentation(

@@ -34,7 +34,16 @@ setup(globals())
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
+
 SegAssembly = Literal["voxel", "mesh"]
+
+
+# ---------------------------------------------------------------------------
+# Path helpers + volume I/O
+# ---------------------------------------------------------------------------
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -77,6 +86,11 @@ def _load_volumes(nifti_root: Path, subject: str) -> tuple[Any, Any, Any, tuple[
     return mag, cd, vel, voxel_spacing, meta
 
 
+# ---------------------------------------------------------------------------
+# Stage 4: centerline-backbone seg_4dflow
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -90,6 +104,7 @@ def run_subject(
     cross_section_plane_interp: int = 1,
     radius_vox: float = 10.0,
 ) -> Path:
+    # ---- Prerequisites: stage3 centerlines + output paths --------------------
     s3 = _stage3_dir(output_root, subject)
     meta_s3 = s3 / "centerline_meta.json"
     from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
@@ -105,6 +120,7 @@ def run_subject(
         log.info(f"[{subject}] stage4 seg: skip -> {out_dir}")
         return out_dir
 
+    # ---- Load polylines + contrast volumes -----------------------------------
     arterial, venous, _ = load_centerlines(s3, min_points=5)
     mag, cd, vel, voxel_spacing, ref_meta = _load_volumes(nifti_root, subject)
     shape3 = cd.shape
@@ -114,12 +130,14 @@ def run_subject(
         meta_json = json.loads(meta_s3.read_text(encoding="utf-8"))
         name_to_id = {str(k): int(v) for k, v in (meta_json.get("venous_label_by_name") or {}).items()}
 
+    # ---- Merge arterial + venous vessels for multilabel assembly -------------
     vessels: dict[int | str, np.ndarray] = {int(k): v for k, v in arterial.items()}
     label_for_key: dict[int | str, int] = {int(k): int(k) for k in arterial}
     for name, poly in venous.items():
         vessels[name] = poly
         label_for_key[name] = venous_name_to_label_id(name, name_to_id)
 
+    # ---- Cross-section stamp (voxel or mesh) + island cleanup ----------------
     assemble_fn = assemble_voxel_segmentation if seg_assembly == "voxel" else assemble_mesh_segmentation
     seg, asm_stats = assemble_fn(
         shape3,
@@ -136,6 +154,7 @@ def run_subject(
         plane_interp_order=cross_section_plane_interp,
     )
 
+    # ---- Write seg_4dflow.nii.gz + segmentation_meta.json --------------------
     seg = postprocess_segmentation(seg)
     imsave(seg_path, seg, metadata=ref_meta)
     meta_path.write_text(
@@ -157,6 +176,11 @@ def run_subject(
     )
     log.info(f"[{subject}] stage4 segmentation -> {seg_path}")
     return out_dir
+
+
+# ---------------------------------------------------------------------------
+# CLI + SGE submission
+# ---------------------------------------------------------------------------
 
 
 def submit_subject_sge(

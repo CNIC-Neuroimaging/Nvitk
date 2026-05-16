@@ -72,20 +72,26 @@ Order: JSON in `4DFlow/AP/*.json` (`VelocityEncoding` / `PhaseEncodingVelocity` 
 ### Code references (snippets)
 
 ```python
+# ──────────────────────────────────────────────────────────────────────────────
 # phase2volume._calc_angio — CD magnitude
+# ──────────────────────────────────────────────────────────────────────────────
 vm = np.clip(as_backend_array(v_mag).astype(np.float64), 0.0, float(venc))
 return as_backend_array(angio_mag).astype(np.float64) * np.sin((np.pi / 2.0 * vm) / float(venc))
 ```
 
 ```python
+# ──────────────────────────────────────────────────────────────────────────────
 # phase2volume.compute_phase_derivatives — velocity mm/s
+# ──────────────────────────────────────────────────────────────────────────────
 vx = -rl_phase * 10.0
 vy = -ap_phase * 10.0
 vz = fh_phase * 10.0
 ```
 
 ```python
+# ──────────────────────────────────────────────────────────────────────────────
 # _phase2volume_bg.fit_polynomial_background_3vector (after setup(globals()))
+# ──────────────────────────────────────────────────────────────────────────────
 cx, *_ = np.linalg.lstsq(A, bvx, rcond=None)
 ```
 
