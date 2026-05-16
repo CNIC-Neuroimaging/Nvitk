@@ -6,7 +6,7 @@ import csv
 import json
 import shlex
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 import click
 import numpy as np
@@ -32,9 +32,10 @@ from nvitk.measure.hemodynamics import (
 )
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.measure.cross_section import (
+    ThrAlgorithm,
+    cross_section_at_loc,
     flow_series_ml_s,
     masked_plane_velocity_series,
-    segment_at_point,
 )
 from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines
 from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
@@ -68,8 +69,19 @@ def _stage5_dir(output_root: Path, subject: str) -> Path:
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE5_LOC_DIR
 
 
+def _stage4_dir(output_root: Path, subject: str) -> Path:
+    return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
+
+
 def _stage6_out(output_root: Path, subject: str) -> Path:
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR
+
+
+def _load_seg_4dflow(output_root: Path, subject: str) -> np.ndarray:
+    seg_p = _stage4_dir(output_root, subject) / "seg_4dflow.nii.gz"
+    if not seg_p.is_file():
+        raise FileNotFoundError(f"Missing {seg_p} (run stage4; required when --no-measure-resegment)")
+    return as_backend_array(imread(seg_p).data).astype(np.int32)
 
 
 def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
@@ -118,6 +130,7 @@ def run_subject(
     skip_existing: bool = False,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
     measure_resegment: bool = True,
+    measure_thr_algorithm: ThrAlgorithm = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
     write_cross_section_qc: bool = True,
@@ -137,6 +150,9 @@ def run_subject(
     inputs = discover_phase_inputs(nifti_root / subject)
     voxel_spacing = _voxel_spacing(inputs.ap_phase_path)
     mag, cd, vel_mag = _load_contrast(nifti_root, subject)
+    volume_seg: np.ndarray | None = None
+    if not measure_resegment:
+        volume_seg = _load_seg_4dflow(output_root, subject)
 
     ap = as_backend_array(imread(inputs.ap_phase_path).data).astype(np.float64)
     rl = as_backend_array(imread(inputs.rl_phase_path).data).astype(np.float64)
@@ -194,8 +210,7 @@ def run_subject(
                 [float(row["tangent_x"]), float(row["tangent_y"]), float(row["tangent_z"])],
                 dtype=np.float64,
             )
-            area_csv = row.get("loc_cross_section_area_mm2")
-            xs = segment_at_point(
+            xs = cross_section_at_loc(
                 center,
                 tang,
                 mag=mag,
@@ -204,11 +219,13 @@ def run_subject(
                 voxel_spacing=voxel_spacing,
                 radius_vox=cross_section_radius_vox,
                 cross_section_res=cross_section_res,
+                plane_interp_order=int(cross_section_plane_interp),
+                measure_resegment=measure_resegment,
+                thr_algorithm=measure_thr_algorithm,
+                volume_seg=volume_seg,
+                volume_label_id=vid,
             )
-            if measure_resegment or not area_csv:
-                area_mm2 = float(xs.area_mm2)
-            else:
-                area_mm2 = float(area_csv)
+            area_mm2 = float(xs.area_mm2)
 
             vel_ts = masked_plane_velocity_series(
                 vx,
@@ -245,10 +262,10 @@ def run_subject(
                     save_loc_cross_section_qc_png(
                         qc_path,
                         cd=cd,
+                        mag=mag,
+                        vel_mag=vel_mag,
                         centerline_pts=arterial_cls[vid],
                         loc_index=cl_idx,
-                        center_xyz=center,
-                        tangent=tang,
                         vessel_name=vname,
                         segment_id=seg_id,
                         loc_role=loc_role,
@@ -256,6 +273,10 @@ def run_subject(
                         radius_vox=cross_section_radius_vox,
                         cross_section_res=cross_section_res,
                         plane_interp_order=int(cross_section_plane_interp),
+                        measure_resegment=measure_resegment,
+                        thr_algorithm=measure_thr_algorithm,
+                        volume_seg=volume_seg,
+                        volume_label_id=vid,
                     )
                     qc_paths.append(str(qc_path.relative_to(out_dir)))
                 except Exception as exc:
@@ -275,6 +296,7 @@ def run_subject(
                 "n_rows": len(rows_out),
                 "n_timepoints": nt,
                 "measure_resegment": bool(measure_resegment),
+                "measure_thr_algorithm": str(measure_thr_algorithm),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
                 "cross_section_plane_interp": int(cross_section_plane_interp),
                 "reported_flow_velocity_as_magnitude": True,
@@ -306,6 +328,7 @@ def submit_subject_sge(
     emit: TextIO | None = None,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
     measure_resegment: bool = True,
+    measure_thr_algorithm: str = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
 ) -> str:
@@ -327,6 +350,8 @@ def submit_subject_sge(
         str(int(cross_section_res)),
         "--cross-section-plane-interp",
         str(int(cross_section_plane_interp)),
+        "--measure-thr-algorithm",
+        shlex.quote(str(measure_thr_algorithm)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
@@ -371,6 +396,13 @@ def submit_subject_sge(
     show_default=True,
     help="Recompute in-plane segmentation at each LOC (default on).",
 )
+@click.option(
+    "--measure-thr-algorithm",
+    type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
+    default="lsthr",
+    show_default=True,
+    help="In-plane threshold when --measure-resegment (ignored if resegment off).",
+)
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 def main(
@@ -380,6 +412,7 @@ def main(
     skip_existing: bool,
     cross_section_radius_vox: float,
     measure_resegment: bool,
+    measure_thr_algorithm: str,
     cross_section_res: int,
     cross_section_plane_interp: int,
 ) -> None:
@@ -391,6 +424,7 @@ def main(
         skip_existing=skip_existing,
         cross_section_radius_vox=cross_section_radius_vox,
         measure_resegment=measure_resegment,
+        measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
         cross_section_res=cross_section_res,
         cross_section_plane_interp=cross_section_plane_interp,
     )

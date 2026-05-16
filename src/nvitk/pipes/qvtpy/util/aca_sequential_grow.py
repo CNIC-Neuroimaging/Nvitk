@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
 from nvitk.core.array import as_backend_array, to_numpy
@@ -15,12 +14,13 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_LACA,
     QVTPY_RACA,
 )
-from nvitk.segmentation.local_cd import (
+from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     AcaSequentialGrowInfo,
     VesselSegStats,
     _dilated_other_segmentation_barrier_excluding,
     rg_intensity_frac_for_label,
 )
+from nvitk.segmentation.region_growing import region_grow_binary_mask
 
 setup(globals())
 
@@ -382,61 +382,6 @@ def _relabel_aca_masks_by_hemisphere(
     return res.laca_mask, res.raca_mask, res.junction
 
 
-def _region_grow_binary_mask(
-    vessel_mask: np.ndarray,
-    cd: np.ndarray,
-    *,
-    rg_intensity_frac: float,
-    rg_abs_floor: float | None,
-    forbidden: np.ndarray | None = None,
-) -> int:
-    """6-connected RG on a boolean mask (may grow into voxels already True)."""
-    mask = np.asarray(vessel_mask, dtype=bool)
-    cd_np = as_backend_array(cd).astype(np.float64)
-    forb = None if forbidden is None else np.asarray(forbidden, dtype=bool)
-    seeds = np.argwhere(mask)
-    if seeds.size == 0:
-        return 0
-
-    seed_vals = cd_np[seeds[:, 0], seeds[:, 1], seeds[:, 2]]
-    floor = float(rg_abs_floor) if rg_abs_floor is not None else 0.0
-    grow_thresh = max(float(np.mean(seed_vals)) * float(rg_intensity_frac), floor)
-
-    nx, ny, nz = mask.shape
-    q: deque[tuple[int, int, int]] = deque(
-        (int(i), int(j), int(k)) for i, j, k in seeds
-    )
-    seen = set(q)
-    n_added = 0
-
-    while q:
-        i, j, k = q.popleft()
-        for di, dj, dk in (
-            (1, 0, 0),
-            (-1, 0, 0),
-            (0, 1, 0),
-            (0, -1, 0),
-            (0, 0, 1),
-            (0, 0, -1),
-        ):
-            ni, nj, nk = i + di, j + dj, k + dk
-            if ni < 0 or ni >= nx or nj < 0 or nj >= ny or nk < 0 or nk >= nz:
-                continue
-            if (ni, nj, nk) in seen:
-                continue
-            seen.add((ni, nj, nk))
-            if forb is not None and forb[ni, nj, nk]:
-                continue
-            if cd_np[ni, nj, nk] < grow_thresh:
-                continue
-            if not mask[ni, nj, nk]:
-                mask[ni, nj, nk] = True
-                n_added += 1
-            q.append((ni, nj, nk))
-
-    return n_added
-
-
 def _write_aca_masks_to_seg(
     seg: np.ndarray,
     laca_mask: np.ndarray,
@@ -493,22 +438,22 @@ def _region_grow_acas_sequential(
     forb_laca = _dilated_other_segmentation_barrier_excluding(
         seg, QVTPY_LACA, exclude_label_ids=exclude_raca, radius=rg_rad
     )
-    _region_grow_binary_mask(
+    region_grow_binary_mask(
         laca_mask,
         cd,
-        rg_intensity_frac=frac_l,
-        rg_abs_floor=opt_thresh_by_label.get(QVTPY_LACA),
+        intensity_frac=frac_l,
+        abs_floor=opt_thresh_by_label.get(QVTPY_LACA),
         forbidden=forb_laca,
     )
     forb_raca = _dilated_other_segmentation_barrier_excluding(
         seg, QVTPY_RACA, exclude_label_ids=exclude_laca, radius=rg_rad
     )
     forb_raca = np.asarray(forb_raca, dtype=bool) & ~laca_mask
-    _region_grow_binary_mask(
+    region_grow_binary_mask(
         raca_mask,
         cd,
-        rg_intensity_frac=frac_r,
-        rg_abs_floor=opt_thresh_by_label.get(QVTPY_RACA),
+        intensity_frac=frac_r,
+        abs_floor=opt_thresh_by_label.get(QVTPY_RACA),
         forbidden=forb_raca,
     )
 

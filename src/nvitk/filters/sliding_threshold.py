@@ -78,6 +78,7 @@ def binary_mask_sliding_threshold_2d(
     step: float = 0.001,
     up_thresh: float = 0.8,
     smf: int = 90,
+    shift_hm_flag: bool = True,
 ) -> np.ndarray:
     """2D sliding-threshold binary mask on normalized fused contrast."""
     img = as_backend_array(fused).astype(np.float64)
@@ -94,11 +95,34 @@ def binary_mask_sliding_threshold_2d(
     if ymax <= 0.0:
         return np.zeros(img.shape, dtype=bool)
     y = y / ymax
+
+    dx = np.gradient(x)
     dy = np.gradient(y)
     ddy = np.gradient(dy)
-    curvature = np.maximum(ddy, 0.0)
-    idx = int(np.argmax(curvature))
-    opt_frac = float(x[idx])
+    num = dx * ddy
+    denom = dx * dx + dy * dy
+    curvature_sm = num / (np.sqrt(denom) ** 3)
+    curvature_sm = np.nan_to_num(curvature_sm, nan=0.0, posinf=0.0, neginf=0.0)
+    curvature_sm = np.maximum(curvature_sm, 0.0)
+    curvature_sm = np.convolve(curvature_sm, kernel, mode="same")
+
+    idx = int(np.argmax(curvature_sm))
+    if shift_hm_flag:
+        cmax = float(np.max(curvature_sm))
+        if cmax <= 0.0:
+            opt_frac = float(x[idx])
+        else:
+            above = curvature_sm >= (cmax * 0.5)
+            positions = np.flatnonzero(above)
+            if positions.size == 0:
+                full_width = 0
+            else:
+                full_width = int(positions[-1] - positions[0])
+            j = min(idx + full_width, x.size - 1)
+            opt_frac = float(x[j])
+    else:
+        opt_frac = float(x[idx])
+
     thresh = max_val * opt_frac
     return (img > thresh).astype(bool, copy=False)
 

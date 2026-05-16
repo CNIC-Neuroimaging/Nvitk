@@ -383,8 +383,15 @@ def _emit_stage0_convert(
     default=True,
     show_default=True,
 )
+@click.option(
+    "--measure-thr-algorithm",
+    type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
+    default="lthr",
+    show_default=True,
+    help="Stage6: in-plane threshold when --measure-resegment.",
+)
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
-@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
+@click.option("--cross-section-plane-interp", type=int, default=2, show_default=True)
 def main(
     dicom_root: Path,
     nifti_root: Path,
@@ -439,6 +446,7 @@ def main(
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
     measure_resegment: bool,
+    measure_thr_algorithm: str,
     cross_section_res: int,
     cross_section_plane_interp: int,
 ) -> None:
@@ -606,6 +614,7 @@ def main(
                         skip_existing=skip_existing,
                         cross_section_radius_vox=cross_section_radius_vox,
                         measure_resegment=measure_resegment,
+                        measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
                     )
@@ -791,6 +800,7 @@ def main(
                         emit=fh,
                         cross_section_radius_vox=cross_section_radius_vox,
                         measure_resegment=measure_resegment,
+                        measure_thr_algorithm=measure_thr_algorithm,
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
                     )

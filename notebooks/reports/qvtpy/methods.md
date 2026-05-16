@@ -429,7 +429,13 @@ Reads stage-3 centerlines and contrast volumes; writes `locs.csv` / `locs.xlsx`.
 
 **Arterial** (`--loc-arterial-strategy qvtpy`, default): masked midpoint along each polyline; for ICA, ACA, MCA, and PCA also emit **init** (`segment_id=0`) and **fin** (`segment_id=1`) LOCs near the proximal/distal ends (inset via `--loc-endpoint-inset-frac`, default `0.08`). Basilar and communicating arteries keep a single midpoint LOC.
 
-**Stage 6 reporting:** `loc_mean_velocity_mm_s`, `loc_mean_flow_ml_s`, and per-timepoint velocity/flow columns are stored as **magnitudes** (absolute values); PI/RI are sign-invariant. Optional QC PNGs are written under `stage6_measure/cross-sections/` (CD oblique slice, segmentation overlay, LOC and ±2 centerline neighbors).
+**Stage 6 reporting:** `loc_mean_velocity_mm_s`, `loc_mean_flow_ml_s`, and per-timepoint velocity/flow columns are stored as **magnitudes** (absolute values); PI/RI are sign-invariant.
+
+**Stage 6 cross-section:** With `--measure-resegment` (default), each LOC uses in-plane fusion + `--measure-thr-algorithm` (`lsthr` / `lthr` / `otsu`, same family as stage 4). With `--no-measure-resegment`, the stage-4 `seg_4dflow` label is interpolated onto the oblique plane (nearest) for area and velocity masking.
+
+**QC PNGs** (`stage6_measure/cross-sections/`): one row of **five** panels per LOC — centerline indices `loc-2`, `loc-1`, **LOC**, `loc+1`, `loc+2` — each showing CD with the cross-section mask contour.
+
+**Shared RG:** generic 6-connected growing lives in `nvitk.segmentation.region_growing`; full qvtpy CD segmentation remains in `pipes/qvtpy/util/vessel_cd_segmentation.py`.
 
 **Venous:** rebuilds a venous slab mask (CD binary ∧ superior slab, area-open) for midpoint/heuristic masks; applies QVTplus-style rules for SSSV/STRV (6-part split, SVD alignment vs `[0,1,1]`, swap validation) and LTSV/RTSV (long-segment Z-structure rules). Cross-section metrics at each LOC: `loc_circularity`, `loc_cross_section_area_mm2`.
 
