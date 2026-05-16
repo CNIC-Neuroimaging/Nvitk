@@ -11,6 +11,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
 - ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
 - ``stage4`` — Local CD crop per vessel + threshold + optional region growing → ``seg_4dflow``.
+- ``stage4t`` — Same as stage 4 on each ``ComplexDifference_4D`` frame → ``seg_4dflow_4d`` (opt-in).
 - ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
 - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
 
@@ -49,6 +50,7 @@ from . import (
     stage2_registration,
     stage3_centerline,
     stage4_4dflow_segmentation,
+    stage4t_4dflow_t_segmentation,
     stage5_loc_generation,
     stage6_measure,
 )
@@ -66,6 +68,7 @@ STAGE_EICAB = "stage1"
 STAGE_REG = "stage2"
 STAGE_CENTERLINE = "stage3"
 STAGE_SEG = "stage4"
+STAGE_SEG_T = "stage4t"
 STAGE_LOC = "stage5"
 STAGE_MEASURE = "stage6"
 
@@ -91,6 +94,10 @@ _STAGE_ALIASES: dict[str, str] = {
     "stage4": STAGE_SEG,
     "stage4_4dflow_segmentation": STAGE_SEG,
     "segmentation": STAGE_SEG,
+    "stage4t": STAGE_SEG_T,
+    "stage4t_4dflow_t_segmentation": STAGE_SEG_T,
+    "segmentation_t": STAGE_SEG_T,
+    "seg_t": STAGE_SEG_T,
     "stage5": STAGE_LOC,
     "stage5_loc_generation": STAGE_LOC,
     "loc": STAGE_LOC,
@@ -106,6 +113,7 @@ _STAGES_ORDERED: tuple[str, ...] = (
     STAGE_REG,
     STAGE_CENTERLINE,
     STAGE_SEG,
+    STAGE_SEG_T,
     STAGE_LOC,
     STAGE_MEASURE,
 )
@@ -459,6 +467,7 @@ def main(
     run_s2 = STAGE_REG in stages
     run_s3 = STAGE_CENTERLINE in stages
     run_s4 = STAGE_SEG in stages
+    run_s4t = STAGE_SEG_T in stages
     run_s5 = STAGE_LOC in stages
     run_s6 = STAGE_MEASURE in stages
 
@@ -589,6 +598,31 @@ def main(
                     import traceback
                     log.exception(traceback.format_exc())
                     log.exception(f"[{subj}] stage4 skipped: {exc}")
+            if run_s4t:
+                try:
+                    stage4t_4dflow_t_segmentation.run_subject(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        skip_existing=skip_existing,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
+                        rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
+                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
+                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
+                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4t skipped: {exc}")
             if run_s5:
                 try:
                     stage5_loc_generation.run_subject(
@@ -630,7 +664,7 @@ def main(
         return
 
     cluster_stages = (
-        run_conv or run_eicab or run_s2 or run_s3 or run_s4 or run_s5 or run_s6
+        run_conv or run_eicab or run_s2 or run_s3 or run_s4 or run_s4t or run_s5 or run_s6
     )
     if not cluster_stages:
         log.info("Nothing to submit to SGE (only stage0_d was selected). Done.")
@@ -766,6 +800,36 @@ def main(
                     log.exception(traceback.format_exc())
                     log.exception(f"[{subj}] stage4 emit skipped: {exc}")
 
+            if run_s4t:
+                try:
+                    prev_jid = stage4t_4dflow_t_segmentation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow,
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
+                        rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
+                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
+                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
+                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4t emit skipped: {exc}")
+
             if run_s5:
                 try:
                     prev_jid = stage5_loc_generation.submit_subject_sge(
@@ -842,6 +906,7 @@ __all__ = [
     "STAGE_REG",
     "STAGE_CENTERLINE",
     "STAGE_SEG",
+    "STAGE_SEG_T",
     "STAGE_LOC",
     "STAGE_MEASURE",
 ]

@@ -423,6 +423,35 @@ flowchart TB
 
 ---
 
+## Stage 4t — per-timepoint segmentation (`seg_4dflow_4d`)
+
+**Module:** `stage4t_4dflow_t_segmentation.py`  
+**Core logic:** same as stage 4 (`util/vessel_cd_segmentation.build_seg_4dflow_local`), applied independently to each frame of `ComplexDifference_4D.nii.gz` (typically **T=15**).
+
+### 4t.1 Inputs
+
+| Input | Role |
+|-------|------|
+| `4DFlow/ComplexDifference_4D.nii.gz` | Per-cardiac-phase CD (from stage 0 `phase2volume`) |
+| `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Same time-invariant backbone as stage 4 |
+| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz` | Optional ACA/AComm context for region growing |
+
+Thresholds and region growing are **recomputed per timepoint** (not shared with stage 4 or across frames). This is intentional for assessing whether temporal resolution changes segmentation masks.
+
+### 4t.2 Outputs
+
+| File | Content |
+|------|---------|
+| `seg_4dflow_4d.nii.gz` | Multilabel 4D segmentation `(X,Y,Z,T)` |
+| `segmentation_meta_t{00..}.json` | Per-frame stage-4-style metadata |
+| `temporal_seg_summary.json` | Per-label voxel counts over T, Dice vs t=0, mean pairwise Dice; multilabel Dice vs t=0 |
+
+### 4t.3 Pipeline usage
+
+Opt-in stage (not in default `nvitk-qvtpy` stages): `--stages stage3,stage4t`. Stages 5–6 still use stage-4 `seg_4dflow.nii.gz`.
+
+---
+
 ## Stage 5 — LOC generation
 
 Reads stage-3 centerlines and contrast volumes; writes `locs.csv` / `locs.xlsx`.

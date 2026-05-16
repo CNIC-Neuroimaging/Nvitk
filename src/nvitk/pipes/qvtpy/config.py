@@ -41,6 +41,7 @@ QVT_SUBDIR: str = "qvtpy"
 STAGE2_REGISTRATION_DIR: str = "stage2_registration"
 STAGE3_CENTERLINE_DIR: str = "stage3_centerline"
 STAGE4_SEG_DIR: str = "stage4_4dflow_segmentation"
+STAGE4T_SEG_DIR: str = "stage4t_4dflow_t_segmentation"
 STAGE5_LOC_DIR: str = "stage5_loc_generation"
 STAGE6_MEASURE_DIR: str = "stage6_measure"
 
@@ -103,6 +104,7 @@ __all__ = [
     "STAGE2_REGISTRATION_DIR",
     "STAGE3_CENTERLINE_DIR",
     "STAGE4_SEG_DIR",
+    "STAGE4T_SEG_DIR",
     "STAGE5_LOC_DIR",
     "STAGE6_MEASURE_DIR",
     "SGE_PROJECT",
