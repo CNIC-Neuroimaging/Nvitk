@@ -130,8 +130,8 @@ Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on
 | `--rg-intensity-frac-explore` | 4 | 0.35 (ACA/MCA/PCA) |
 | `--cl-barrier-radius` | 4 | 2 |
 | `--rg-barrier-radius` | 4 | 3 |
-| `--acomm-barrier-radius` | 4 | 2 |
-| `--aca-contra-barrier-radius` | 4 | 3 |
+| `--aca-sequential-grow` / `--no-aca-sequential-grow` | 4 | grow on |
+| `--aca-overlap-min-voxels` | 4 | 5 |
 | `--rg-intensity-frac-sssv` | 4 | 0.40 |
 | `--rg-intensity-frac-ltsv` | 4 | 0.38 |
 | `--rg-intensity-frac-rtsv` | 4 | 0.38 |
@@ -346,7 +346,7 @@ Array indices `(i, j, k)` are **(X, Y, Z)**. For each label `L` (ascending order
 | ICA + Basilar | 1, 2, 3 | default on all faces except **Z+** (`pad_k_max = 0`) |
 | LMCA | 6 | **X−** restricted (`pad_i_min = 0`); **X+** extra **10** vox |
 | RMCA | 7 | **X+** restricted; **X−** extra **10** vox |
-| ACA | 4, 5 | **X−** and **X+** restricted; **Y−** extra **10** vox |
+| ACA | 4, 5 | symmetric default padding on all faces (thin centerlines along i or j) |
 | PCA, PComm, AComm, venous | 8–12, 31–34 | symmetric default padding |
 
 3. **CD crop** = `CD[i0:i1+1, j0:j1+1, k0:k1+1]`.
@@ -384,7 +384,7 @@ Defaults: **`--rg-intensity-frac` 0.45** (most vessels); **`--rg-intensity-frac-
 
 **Spatial gates (6-connected BFS):** a neighbour is accepted only if `seg[neighbour] == 0`, not inside `dilate(other_seg)` (`--rg-barrier-radius`, default **3**), and intensity-eligible.
 
-**ACA hemispheres:** when `eicab_in_4dflow.nii.gz` is present, LACA/RACA growing is also forbidden inside dilated **AComm** (`--acomm-barrier-radius`, default **2**) and dilated **contralateral ACA** territory from the warped eICAB mask (`--aca-contra-barrier-radius`, default **3**), reducing cross-hemisphere stealing at the anterior junction.
+**ACA close approach at AComm:** when both LACA and RACA are present, **`--aca-sequential-grow`** (default **on**) runs region growing in order: **LACA first**, then **RACA** without treating the LACA mask as an RG barrier (other vessels still block). Near AComm the two arteries often come within a few voxels (X-like on the slice) without swapping hemispheres. If the grown masks intersect in at least **`--aca-overlap-min-voxels`** (default **5**) voxels, voxels within **`--acomm-junction-radius`** (default **10** vox) of the junction are plane-split on the merged **LACA∪RACA** blob (`<` / `>` on **X** or **Y**); voxels farther out keep the label from a single grow pass. Then each ACA mask is cleaned by **connected components**: only components that touch that vessel's centerline seeds are kept; stray **RACA** islands (no RACA seeds) are reassigned to **LACA**, and stray **LACA** islands to **RACA**. Junction from eICAB **AComm** when present, else ACA midpoint. Smaller total overlap only strips RACA from dual-claim voxels. A single ACA uses the standard per-vessel RG path unchanged.
 
 Growing never overwrites another label id. Disable with `--no-region-growing`.
 

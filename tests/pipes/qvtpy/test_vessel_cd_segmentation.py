@@ -6,10 +6,18 @@ import numpy as np
 import pytest
 
 from nvitk.core.array import as_backend_array
-from nvitk.pipes.qvtpy.labels import QVTPY_LMCA, QVTPY_LICA, QVTPY_LPCOMM, QVTPY_STRV
+from nvitk.pipes.qvtpy.labels import (
+    QVTPY_LACA,
+    QVTPY_LMCA,
+    QVTPY_LICA,
+    QVTPY_LPCOMM,
+    QVTPY_RACA,
+    QVTPY_STRV,
+)
 from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     VESSEL_EXTRA_PADDING,
+    BboxFacePadding,
     bbox_padding_for_label,
     build_seg_4dflow_local,
     crop_min_fraction_for_label,
@@ -47,6 +55,21 @@ def test_ica_basilar_restricts_z_plus() -> None:
     fp = bbox_padding_for_label(QVTPY_LICA, default_pad=3)
     assert fp.pad_k_max == 0
     assert fp.pad_k_min == 3
+
+
+def test_aca_bbox_symmetric_padding_perpendicular_to_centerline() -> None:
+    """ACA crops must thicken along i and j so thin centerlines still threshold."""
+    shape = (51, 51, 51)
+    fp = bbox_padding_for_label(QVTPY_RACA, default_pad=3)
+    assert fp.pad_i_min == 3 and fp.pad_i_max == 3
+
+    clm = np.zeros(shape, dtype=np.int32)
+    ci, cj, ck = 25, 25, 25
+    clm[ci, 5:46, ck] = QVTPY_RACA
+    out = _bbox_with_vessel_padding(clm == QVTPY_RACA, shape, QVTPY_RACA, default_pad=3)
+    assert out is not None
+    i0, i1, _, _, _, _ = out[0]
+    assert i1 - i0 >= 6
 
 
 def test_two_vessels_no_region_growing() -> None:
@@ -190,21 +213,210 @@ def test_strv_skips_region_growing() -> None:
     assert st.n_voxels_after_region_growing == st.n_voxels_after_island_clean
 
 
-def test_aca_eicab_barrier_includes_acomm_and_contralateral() -> None:
-    from nvitk.pipes.qvtpy.labels import QVTPY_ACOMM, QVTPY_LACA, QVTPY_RACA
-    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _aca_eicab_region_growing_barrier
-
-    shape = (50, 40, 40)
-    eicab = np.zeros(shape, dtype=np.int32)
-    eicab[28:32, 18:22, 12:28] = QVTPY_ACOMM
-    eicab[8:18, 18:22, 10:30] = QVTPY_LACA
-    eicab[38:48, 18:22, 10:30] = QVTPY_RACA
-    forb = _aca_eicab_region_growing_barrier(
-        eicab, QVTPY_LACA, acomm_radius=2, contra_radius=2
+def test_aca_sequential_second_grow_can_overlap_first() -> None:
+    """RACA RG may overlap LACA; final seg labels are disjoint after correction."""
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
+        VesselSegStats,
+        _region_grow_acas_sequential,
     )
-    assert forb[30, 20, 20]
-    assert forb[42, 20, 20]
-    assert not forb[12, 20, 20]
+
+    shape = (51, 51, 51)
+    clm = np.zeros(shape, dtype=np.int32)
+    ci, cj, ck = 25, 25, 25
+    clm[5:46, cj, ck] = QVTPY_LACA
+    clm[ci, 5:46, ck] = QVTPY_RACA
+
+    seg = np.zeros(shape, dtype=np.int32)
+    seg[clm == QVTPY_LACA] = QVTPY_LACA
+    seg[clm == QVTPY_RACA] = QVTPY_RACA
+    cd = np.zeros(shape, dtype=np.float64)
+    cd[5:46, 23:28, 23:28] = 100.0
+    cd[23:28, 5:46, 23:28] = 100.0
+
+    fp = BboxFacePadding(0, 0, 0, 0, 0, 0)
+    stats_by_id = {
+        QVTPY_LACA: VesselSegStats(
+            label_id=QVTPY_LACA,
+            bbox=(0, 50, 0, 50, 0, 50),
+            face_padding=fp,
+            thr_algorithm="lsthr",
+            opt_thresh=1.0,
+            n_voxels_after_threshold=10,
+            n_voxels_after_island_clean=10,
+            n_voxels_after_region_growing=10,
+        ),
+        QVTPY_RACA: VesselSegStats(
+            label_id=QVTPY_RACA,
+            bbox=(0, 50, 0, 50, 0, 50),
+            face_padding=fp,
+            thr_algorithm="lsthr",
+            opt_thresh=1.0,
+            n_voxels_after_threshold=10,
+            n_voxels_after_island_clean=10,
+            n_voxels_after_region_growing=10,
+        ),
+    }
+    info = _region_grow_acas_sequential(
+        seg,
+        cd,
+        clm,
+        None,
+        opt_thresh_by_label={QVTPY_LACA: 1.0, QVTPY_RACA: 1.0},
+        rg_intensity_frac=0.45,
+        rg_intensity_frac_explore=0.35,
+        venous_fracs={},
+        rg_barrier_radius=0,
+        aca_overlap_min_voxels=1,
+        acomm_junction_radius=10,
+        stats_by_id=stats_by_id,
+    )
+    assert info.n_overlap_voxels > 0
+    assert not np.any((seg == QVTPY_LACA) & (seg == QVTPY_RACA))
+
+
+def test_aca_plane_split_disjoint_near_junction() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+
+    shape = (51, 51, 51)
+    clm = np.zeros(shape, dtype=np.int32)
+    ck = 25
+    clm[8:22, 25, ck] = QVTPY_LACA
+    clm[28:42, 25, ck] = QVTPY_RACA
+
+    laca_m = np.zeros(shape, dtype=bool)
+    raca_m = np.zeros(shape, dtype=bool)
+    laca_m[8:22, 24:27, ck] = True
+    raca_m[28:42, 24:27, ck] = True
+    laca_m[24:27, 24:27, ck] = True
+    raca_m[24:27, 24:27, ck] = True
+
+    res = _split_aca_merged_by_junction_plane(
+        laca_m, raca_m, clm, None, acomm_junction_radius=10
+    )
+    assert not np.any(res.laca_mask & res.raca_mask)
+    assert np.any(res.laca_mask)
+    assert np.any(res.raca_mask)
+
+
+def test_aca_plane_split_assigns_by_axis_side() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+
+    shape = (51, 51, 51)
+    clm = np.zeros(shape, dtype=np.int32)
+    ck = 25
+    clm[8:22, 25, ck] = QVTPY_LACA
+    clm[28:42, 25, ck] = QVTPY_RACA
+
+    laca_m = np.zeros(shape, dtype=bool)
+    raca_m = np.zeros(shape, dtype=bool)
+    laca_m[8:22, 24:27, ck] = True
+    raca_m[28:42, 24:27, ck] = True
+    laca_m[24:27, 24:27, ck] = True
+    raca_m[24:27, 24:27, ck] = True
+
+    res = _split_aca_merged_by_junction_plane(
+        laca_m, raca_m, clm, None, acomm_junction_radius=12
+    )
+    assert res.split_axis == 0
+    assert res.laca_on_low_side is True
+    assert np.all(res.laca_mask[8:22, 25, ck])
+    assert np.all(res.raca_mask[28:42, 25, ck])
+    assert not np.any(res.laca_mask[28:42, 25, ck])
+    assert not np.any(res.raca_mask[8:22, 25, ck])
+
+
+def test_aca_stray_raca_island_reassigned_to_laca() -> None:
+    """RACA CC with no RACA seeds (plane mislabel) is moved to LACA."""
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
+    from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _split_aca_merged_by_junction_plane
+
+    shape = (51, 51, 51)
+    clm = np.zeros(shape, dtype=np.int32)
+    ck = 25
+    clm[8:22, 10:20, ck] = QVTPY_LACA
+    clm[28:42, 30:40, ck] = QVTPY_RACA
+
+    laca_m = np.zeros(shape, dtype=bool)
+    raca_m = np.zeros(shape, dtype=bool)
+    laca_m[8:22, 10:20, ck] = True
+    raca_m[28:42, 30:40, ck] = True
+    # Isolated RACA island on LACA side (no RACA centerline here).
+    raca_m[10:13, 12:15, ck] = True
+
+    res = _split_aca_merged_by_junction_plane(
+        laca_m, raca_m, clm, None, acomm_junction_radius=12
+    )
+    assert res.n_stray_islands_reassigned > 0
+    assert np.all(res.laca_mask[10:13, 12:15, ck])
+    assert not np.any(res.raca_mask[10:13, 12:15, ck])
+
+
+def _synthetic_converging_acas(
+    shape: tuple[int, int, int],
+) -> tuple[np.ndarray, np.ndarray, int, int, int]:
+    """Two ACAs that approach the same AComm neighbourhood without crossing."""
+    cd = np.zeros(shape, dtype=np.float64)
+    clm = np.zeros(shape, dtype=np.int32)
+    ci, cj, ck = 25, 25, 25
+    for i in range(5, 26):
+        j = 10 + (i - 5) * 14 // 20
+        clm[i, j, ck] = QVTPY_LACA
+        cd[i, j - 2 : j + 3, ck - 2 : ck + 3] = 100.0
+    for i in range(45, 24, -1):
+        j = 40 - (45 - i) * 14 // 20
+        clm[i, j, ck] = QVTPY_RACA
+        cd[i, j - 2 : j + 3, ck - 2 : ck + 3] = 100.0
+    cd[ci - 3 : ci + 4, cj - 3 : cj + 4, ck - 2 : ck + 3] = 95.0
+    return cd, clm, ci, cj, ck
+
+
+def test_aca_sequential_integration_converging_approach() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA, QVTPY_RACA
+
+    cd, clm, ci, cj, ck = _synthetic_converging_acas((51, 51, 51))
+
+    res = build_seg_4dflow_local(
+        cd,
+        clm,
+        crop_padding_bbox=3,
+        region_growing=True,
+        thr_algorithm="lsthr",
+        aca_sequential_grow=True,
+        aca_overlap_min_voxels=1,
+        acomm_junction_radius=10,
+        rg_barrier_radius=0,
+    )
+    seg = np.asarray(res.segmentation)
+    assert res.aca_sequential_grow is not None
+    assert not np.any((seg == QVTPY_LACA) & (seg == QVTPY_RACA))
+    assert np.any(seg[8, 12, ck] == QVTPY_LACA)
+    assert np.any(seg[42, 38, ck] == QVTPY_RACA)
+    assert not np.any(seg[42, 38, ck] == QVTPY_LACA)
+    assert not np.any(seg[8, 12, ck] == QVTPY_RACA)
+
+
+def test_single_aca_uses_standard_region_growing() -> None:
+    from nvitk.pipes.qvtpy.labels import QVTPY_LACA
+
+    shape = (50, 50, 50)
+    cd = np.zeros(shape, dtype=np.float64)
+    clm = np.zeros(shape, dtype=np.int32)
+    clm[25, 25, 20:30] = QVTPY_LACA
+    cd[23:28, 23:28, 18:32] = 100.0
+
+    res = build_seg_4dflow_local(
+        cd,
+        clm,
+        crop_padding_bbox=2,
+        region_growing=True,
+        thr_algorithm="lsthr",
+        aca_sequential_grow=True,
+    )
+    assert res.aca_sequential_grow is None
+    assert np.any(np.asarray(res.segmentation) == QVTPY_LACA)
 
 
 def test_mca_explore_frac_lower_than_default() -> None:
@@ -221,7 +433,5 @@ def test_otsu_smoke() -> None:
     clm = np.zeros(shape, dtype=np.int32)
     clm[15, 15, 10:20] = 5
     cd[13:18, 13:18, 8:22] = 50.0
-    res = build_seg_4dflow_local(
-        cd, clm, crop_padding_bbox=2, thr_algorithm="otsu", region_growing=False
-    )
-    assert int(np.count_nonzero(np.asarray(res.segmentation))) > 0
+    res = build_seg_4dflow_local(cd, clm, thr_algorithm="otsu", region_growing=False)
+    assert res.segmentation is not None

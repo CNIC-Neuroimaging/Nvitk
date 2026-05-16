@@ -32,8 +32,8 @@ from nvitk.pipes.qvtpy.labels import (
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     ThrAlgorithm,
     VESSEL_EXTRA_PADDING,
-    _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
-    _ACOMM_BARRIER_RADIUS_DEFAULT,
+    _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    _ACOMM_JUNCTION_RADIUS_DEFAULT,
     _DEFAULT_RG_INTENSITY_FRAC,
     _RG_INTENSITY_FRAC_EXPLORE,
     build_seg_4dflow_local,
@@ -89,8 +89,10 @@ def _segmentation_meta(
     venous_rg_intensity_fracs: dict[int, float],
     cl_barrier_radius: int,
     rg_barrier_radius: int,
-    acomm_barrier_radius: int,
-    aca_contra_barrier_radius: int,
+    aca_sequential_grow: bool,
+    aca_overlap_min_voxels: int,
+    acomm_junction_radius: int,
+    aca_sequential_grow_info: dict[str, Any] | None,
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -112,8 +114,10 @@ def _segmentation_meta(
         "post_threshold_clean": "largest_cc_per_label",
         "cl_barrier_radius": int(cl_barrier_radius),
         "rg_barrier_radius": int(rg_barrier_radius),
-        "acomm_barrier_radius": int(acomm_barrier_radius),
-        "aca_contra_barrier_radius": int(aca_contra_barrier_radius),
+        "aca_sequential_grow": bool(aca_sequential_grow),
+        "aca_overlap_min_voxels": int(aca_overlap_min_voxels),
+        "acomm_junction_radius": int(acomm_junction_radius),
+        "aca_sequential_grow_info": aca_sequential_grow_info,
         "vessels": vessels,
     }
 
@@ -136,8 +140,9 @@ def run_subject(
     rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
-    acomm_barrier_radius: int = _ACOMM_BARRIER_RADIUS_DEFAULT,
-    aca_contra_barrier_radius: int = _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
     rg_intensity_frac_sssv: float | None = None,
     rg_intensity_frac_ltsv: float | None = None,
     rg_intensity_frac_rtsv: float | None = None,
@@ -152,7 +157,7 @@ def run_subject(
     if eicab_path.is_file():
         eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
     else:
-        log.warning(f"[{subject}] stage4: missing {eicab_path}; ACA AComm barriers disabled")
+        log.warning(f"[{subject}] stage4: missing {eicab_path}; ACA Voronoi uses centerlines only")
 
     out_dir = _stage4_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -190,8 +195,9 @@ def run_subject(
         venous_rg_intensity_fracs=venous_rg,
         cl_barrier_radius=int(cl_barrier_radius),
         rg_barrier_radius=int(rg_barrier_radius),
-        acomm_barrier_radius=int(acomm_barrier_radius),
-        aca_contra_barrier_radius=int(aca_contra_barrier_radius),
+        aca_sequential_grow=bool(aca_sequential_grow),
+        aca_overlap_min_voxels=int(aca_overlap_min_voxels),
+        acomm_junction_radius=int(acomm_junction_radius),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
@@ -210,8 +216,14 @@ def run_subject(
                 venous_rg_intensity_fracs=venous_rg,
                 cl_barrier_radius=cl_barrier_radius,
                 rg_barrier_radius=rg_barrier_radius,
-                acomm_barrier_radius=acomm_barrier_radius,
-                aca_contra_barrier_radius=aca_contra_barrier_radius,
+                aca_sequential_grow=aca_sequential_grow,
+                aca_overlap_min_voxels=aca_overlap_min_voxels,
+                acomm_junction_radius=acomm_junction_radius,
+                aca_sequential_grow_info=(
+                    None
+                    if result.aca_sequential_grow is None
+                    else result.aca_sequential_grow.as_dict()
+                ),
                 vessels=[vessel_stats_to_dict(st) for st in result.vessel_stats],
             ),
             indent=2,
@@ -262,18 +274,24 @@ def _stage4_cli_options(func):  # type: ignore[no-untyped-def]
     func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
     func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)
     func = click.option(
-        "--acomm-barrier-radius",
-        type=int,
-        default=_ACOMM_BARRIER_RADIUS_DEFAULT,
+        "--aca-sequential-grow/--no-aca-sequential-grow",
+        default=True,
         show_default=True,
-        help="Dilate AComm (eICAB) forbidden zone for ACA region growing.",
+        help="Grow LACA then RACA; second ACA ignores first as RG barrier; fix overlap at junction.",
     )(func)
     func = click.option(
-        "--aca-contra-barrier-radius",
+        "--aca-overlap-min-voxels",
         type=int,
-        default=_ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+        default=_ACA_OVERLAP_MIN_VOXELS_DEFAULT,
         show_default=True,
-        help="Dilate contralateral ACA (eICAB) forbidden zone for ACA region growing.",
+        help="Min LACA∩RACA voxels to apply convergence correction at AComm.",
+    )(func)
+    func = click.option(
+        "--acomm-junction-radius",
+        type=int,
+        default=_ACOMM_JUNCTION_RADIUS_DEFAULT,
+        show_default=True,
+        help="Vox: only overlap within this distance of AComm junction is Voronoi-split.",
     )(func)
     func = click.option(
         "--rg-intensity-frac-sssv",
@@ -314,8 +332,9 @@ def submit_subject_sge(
     rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
-    acomm_barrier_radius: int = _ACOMM_BARRIER_RADIUS_DEFAULT,
-    aca_contra_barrier_radius: int = _ACA_CONTRA_BARRIER_RADIUS_DEFAULT,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
     rg_intensity_frac_sssv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_SSSV],
     rg_intensity_frac_ltsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_LTSV],
     rg_intensity_frac_rtsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_RTSV],
@@ -344,10 +363,10 @@ def submit_subject_sge(
         str(int(cl_barrier_radius)),
         "--rg-barrier-radius",
         str(int(rg_barrier_radius)),
-        "--acomm-barrier-radius",
-        str(int(acomm_barrier_radius)),
-        "--aca-contra-barrier-radius",
-        str(int(aca_contra_barrier_radius)),
+        "--aca-overlap-min-voxels",
+        str(int(aca_overlap_min_voxels)),
+        "--acomm-junction-radius",
+        str(int(acomm_junction_radius)),
         "--rg-intensity-frac-sssv",
         str(float(rg_intensity_frac_sssv)),
         "--rg-intensity-frac-ltsv",
@@ -359,6 +378,10 @@ def submit_subject_sge(
         parts.append("--region-growing")
     else:
         parts.append("--no-region-growing")
+    if aca_sequential_grow:
+        parts.append("--aca-sequential-grow")
+    else:
+        parts.append("--no-aca-sequential-grow")
     if skip_existing:
         parts.append("--skip-existing")
     python_cmd = " ".join(parts)
@@ -402,8 +425,9 @@ def main(
     rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
-    acomm_barrier_radius: int,
-    aca_contra_barrier_radius: int,
+    aca_sequential_grow: bool,
+    aca_overlap_min_voxels: int,
+    acomm_junction_radius: int,
     rg_intensity_frac_sssv: float,
     rg_intensity_frac_ltsv: float,
     rg_intensity_frac_rtsv: float,
@@ -421,8 +445,9 @@ def main(
         rg_intensity_frac_explore=rg_intensity_frac_explore,
         cl_barrier_radius=cl_barrier_radius,
         rg_barrier_radius=rg_barrier_radius,
-        acomm_barrier_radius=acomm_barrier_radius,
-        aca_contra_barrier_radius=aca_contra_barrier_radius,
+        aca_sequential_grow=aca_sequential_grow,
+        aca_overlap_min_voxels=aca_overlap_min_voxels,
+        acomm_junction_radius=acomm_junction_radius,
         rg_intensity_frac_sssv=rg_intensity_frac_sssv,
         rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
         rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,

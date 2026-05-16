@@ -333,14 +333,32 @@ def _emit_stage0_convert(
     help="Stage4: grow labels into unassigned high-CD voxels.",
 )
 @click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True, help="Stage4: RG intensity factor (default vessels).")
-@click.option("--rg-intensity-frac-explore", type=float, default=0.25, show_default=True, help="Stage4: RG frac for ACA/MCA/PCA.")
-@click.option("--cl-barrier-radius", type=int, default=2, show_default=True, help="Stage4: dilate other centerlines (vox).")
-@click.option("--rg-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other seg during RG (vox).")
-@click.option("--acomm-barrier-radius", type=int, default=1, show_default=True, help="Stage4: AComm eICAB barrier for ACA RG.")
-@click.option("--aca-contra-barrier-radius", type=int, default=1, show_default=True, help="Stage4: contralateral ACA eICAB barrier.")
-@click.option("--rg-intensity-frac-sssv", type=float, default=0.85, show_default=True, help="Stage4: RG frac for SSSV.")
-@click.option("--rg-intensity-frac-ltsv", type=float, default=0.85, show_default=True, help="Stage4: RG frac for LTSV.")
-@click.option("--rg-intensity-frac-rtsv", type=float, default=0.85, show_default=True, help="Stage4: RG frac for RTSV (STRV never grows).")
+@click.option("--rg-intensity-frac-explore", type=float, default=0.05, show_default=True, help="Stage4: RG frac for ACA/MCA/PCA.")
+@click.option("--cl-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other centerlines (vox).")
+@click.option("--rg-barrier-radius", type=int, default=1, show_default=True, help="Stage4: dilate other seg during RG (vox).")
+@click.option(
+    "--aca-sequential-grow/--no-aca-sequential-grow",
+    default=True,
+    show_default=True,
+    help="Stage4: LACA then RACA grow; overlap corrected at junction when needed.",
+)
+@click.option(
+    "--aca-overlap-min-voxels",
+    type=int,
+    default=10,
+    show_default=True,
+    help="Stage4: min LACA∩RACA voxels to apply convergence correction at AComm.",
+)
+@click.option(
+    "--acomm-junction-radius",
+    type=int,
+    default=10,
+    show_default=True,
+    help="Stage4: Voronoi-split overlap only within this many vox of AComm junction.",
+)
+@click.option("--rg-intensity-frac-sssv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for SSSV.")
+@click.option("--rg-intensity-frac-ltsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for LTSV.")
+@click.option("--rg-intensity-frac-rtsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for RTSV (STRV never grows).")
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 @click.option(
@@ -399,8 +417,9 @@ def main(
     rg_intensity_frac_explore: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
-    acomm_barrier_radius: int,
-    aca_contra_barrier_radius: int,
+    aca_sequential_grow: bool,
+    aca_overlap_min_voxels: int,
+    acomm_junction_radius: int,
     rg_intensity_frac_sssv: float,
     rg_intensity_frac_ltsv: float,
     rg_intensity_frac_rtsv: float,
@@ -542,8 +561,9 @@ def main(
                         rg_intensity_frac_explore=rg_intensity_frac_explore,
                         cl_barrier_radius=cl_barrier_radius,
                         rg_barrier_radius=rg_barrier_radius,
-                        acomm_barrier_radius=acomm_barrier_radius,
-                        aca_contra_barrier_radius=aca_contra_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
                         rg_intensity_frac_sssv=rg_intensity_frac_sssv,
                         rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
                         rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
@@ -714,8 +734,9 @@ def main(
                         rg_intensity_frac_explore=rg_intensity_frac_explore,
                         cl_barrier_radius=cl_barrier_radius,
                         rg_barrier_radius=rg_barrier_radius,
-                        acomm_barrier_radius=acomm_barrier_radius,
-                        aca_contra_barrier_radius=aca_contra_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
                         rg_intensity_frac_sssv=rg_intensity_frac_sssv,
                         rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
                         rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
