@@ -38,12 +38,19 @@ def resistivity_index(flow_t, *, eps: float = 1e-9):
     return (np.abs(mx - mn) / den).astype(np.float64)
 
 
-def mean_flow_ml_s(flow_t, temporal_resolution_s: float | None):
+def mean_flow_ml_s(flow_t, temporal_resolution_s: float | None = None):
     """Time-mean flow proxy (same units as *flow_t* per frame)."""
+    del temporal_resolution_s
     x = as_backend_array(flow_t).astype(np.float64)
     if x.ndim == 1:
         x = x.reshape(1, -1)
     return np.mean(x, axis=1)
+
+
+def mean_velocity_mm_s(velocity_t):
+    """Temporal mean of a 1D through-plane velocity series (mm/s)."""
+    x = as_backend_array(velocity_t).astype(np.float64).reshape(-1)
+    return float(np.mean(x))
 
 
 def velocity_mm_s_from_phases(ap, rl, fh):
@@ -80,6 +87,7 @@ def through_plane_velocity_series(
 
 __all__ = [
     "mean_flow_ml_s",
+    "mean_velocity_mm_s",
     "pulsatility_index",
     "resistivity_index",
     "through_plane_velocity_series",

@@ -12,6 +12,7 @@ import click
 import pandas as pd
 
 import nvitk
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -21,13 +22,18 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.logger import Logger
-from nvitk.core.array import as_backend_array
-from nvitk.morphology.centerline import centerline_tangents
+from nvitk.io.imageio import imread
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.labels import eicab_vessel_name
+from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
+from nvitk.pipes.qvtpy.util.loc_selection import (
+    loc_record_to_dict,
+    select_arterial_locs,
+    select_venous_locs,
+)
+from nvitk.pipes.qvtpy.util.centerline_io import load_centerline_meta, load_centerlines
+from nvitk.pipes.qvtpy.util.mask_cleaning import clean_venous_slab_mask
 
 setup(globals())
-import numpy as _np
 
 log = Logger()
 
@@ -44,17 +50,56 @@ def _stage5_out(output_root: Path, subject: str) -> Path:
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE5_LOC_DIR
 
 
+def _cd_path(nifti_root: Path, subject: str) -> Path:
+    p = nifti_root / subject / "4DFlow" / "ComplexDifference_3D.nii.gz"
+    if p.is_file():
+        return p
+    return nifti_root / subject / "4DFlow" / "ComplexDifference_3D.nii"
+
+
+def _voxel_spacing_from_meta(meta: dict) -> tuple[float, float, float]:
+    sp = meta.get("spacing")
+    if sp and len(sp) >= 3:
+        return (float(sp[0]), float(sp[1]), float(sp[2]))
+    return (1.0, 1.0, 1.0)
+
+
+def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[Any, Any, Any, tuple[float, float, float]]:
+    sub = nifti_root / subject / "4DFlow"
+    cd_p = _cd_path(nifti_root, subject)
+    cd_img = imread(cd_p)
+    cd = as_backend_array(cd_img.data).astype(np.float64)
+    sp = _voxel_spacing_from_meta(dict(cd_img.metadata or {}))
+
+    mag = cd
+    angio = sub / "Angiography_3D.nii.gz"
+    if angio.is_file():
+        mag = as_backend_array(imread(angio).data).astype(np.float64)
+
+    vel = np.abs(cd)
+    vmag = sub / "VelocityMagnitude_3D.nii.gz"
+    if vmag.is_file():
+        vel = as_backend_array(imread(vmag).data).astype(np.float64)
+    return mag, cd, vel, sp
+
+
 def run_subject(
     subject: str,
     *,
+    nifti_root: Path,
     output_root: Path,
     skip_existing: bool = False,
     tangent_k_half: int = 2,
+    loc_arterial_strategy: str = "qvtplus",
+    cross_section_radius_vox: float = 10.0,
+    venous_min_component_frac: float = 0.005,
 ) -> Path:
+    del tangent_k_half  # tangents computed inside loc_selection
     s3 = _stage3_dir(output_root, subject)
-    npz_path = s3 / "centerlines.npz"
-    if not npz_path.is_file():
-        raise FileNotFoundError(f"Missing {npz_path}")
+    from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
+
+    if not centerlines_mask_path(s3).is_file():
+        raise FileNotFoundError(f"Missing {centerlines_mask_path(s3)} (run stage3)")
     out_dir = _stage5_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
     loc_csv = out_dir / "locs.csv"
@@ -62,43 +107,52 @@ def run_subject(
         log.info(f"[{subject}] stage5 loc: skip -> {out_dir}")
         return out_dir
 
-    z = _np.load(npz_path)
+    meta = load_centerline_meta(s3)
+    arterial, venous, _ = load_centerlines(s3, min_points=5)
+
+    mag, cd, vel_mag, voxel_spacing = _load_contrast_volumes(nifti_root, subject)
+
+    venous_mask = None
+    shape3 = cd.shape
+    venous_region = venous_search_region(shape3)
+    vessel_bin, _ = binary_vessel_segment_cd(cd)
+    venous_mask = as_backend_array(
+        clean_venous_slab_mask(
+            vessel_bin.astype(bool) & venous_region,
+            min_fraction=venous_min_component_frac,
+        )
+    )
+
+    name_to_id = {str(k): int(v) for k, v in (meta.get("venous_label_by_name") or {}).items()}
+
     rows: list[dict[str, float | int | str]] = []
-    for key in sorted(z.files):
-        if not key.startswith("arterial_"):
-            continue
-        label = int(key.split("_", 1)[1])
-        pts = as_backend_array(z[key])
-        if pts.shape[0] < 3:
-            continue
-        mid = pts.shape[0] // 2
-        tangents = centerline_tangents(pts, k_half=tangent_k_half)
-        cx, cy, cz = float(pts[mid, 0]), float(pts[mid, 1]), float(pts[mid, 2])
-        i, j, k = (
-            int(_np.round(pts[mid, 0])),
-            int(_np.round(pts[mid, 1])),
-            int(_np.round(pts[mid, 2])),
-        )
-        tx, ty, tz = (float(tangents[mid, 0]), float(tangents[mid, 1]), float(tangents[mid, 2]))
-        rows.append(
-            {
-                "vessel_id": label,
-                "vessel_name": eicab_vessel_name(label),
-                "i": i,
-                "j": j,
-                "k": k,
-                "centerline_x": cx,
-                "centerline_y": cy,
-                "centerline_z": cz,
-                "tangent_x": tx,
-                "tangent_y": ty,
-                "tangent_z": tz,
-            }
-        )
+    for rec in select_arterial_locs(
+        arterial,
+        mag=mag,
+        cd=cd,
+        vel_mag=vel_mag,
+        voxel_spacing=voxel_spacing,
+        radius_vox=cross_section_radius_vox,
+        strategy=loc_arterial_strategy,
+    ):
+        rows.append(loc_record_to_dict(rec))
+    for rec in select_venous_locs(
+        venous,
+        venous_mask=venous_mask,
+        name_to_id=name_to_id,
+        mag=mag,
+        cd=cd,
+        vel_mag=vel_mag,
+        voxel_spacing=voxel_spacing,
+        radius_vox=cross_section_radius_vox,
+    ):
+        rows.append(loc_record_to_dict(rec))
 
     fieldnames = [
         "vessel_id",
         "vessel_name",
+        "segment_id",
+        "centerline_index",
         "i",
         "j",
         "k",
@@ -108,16 +162,26 @@ def run_subject(
         "tangent_x",
         "tangent_y",
         "tangent_z",
+        "loc_circularity",
+        "loc_cross_section_area_mm2",
     ]
     with loc_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows)
 
-    loc_xlsx = out_dir / "locs.xlsx"
-    pd.DataFrame(rows).to_excel(loc_xlsx, index=False)
-
-    (out_dir / "loc_meta.json").write_text(json.dumps({"n_locs": len(rows)}, indent=2), encoding="utf-8")
+    pd.DataFrame(rows).to_excel(out_dir / "locs.xlsx", index=False)
+    (out_dir / "loc_meta.json").write_text(
+        json.dumps(
+            {
+                "n_locs": len(rows),
+                "loc_arterial_strategy": loc_arterial_strategy,
+                "cross_section_radius_vox": float(cross_section_radius_vox),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     log.info(f"[{subject}] stage5 loc -> {loc_csv}")
     return out_dir
 
@@ -132,6 +196,9 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
+    loc_arterial_strategy: str = "qvtplus",
+    cross_section_radius_vox: float = 10.0,
+    venous_min_component_frac: float = 0.005,
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -145,6 +212,12 @@ def submit_subject_sge(
         shlex.quote(binds.data),
         "--output-root",
         shlex.quote(binds.output),
+        "--loc-arterial-strategy",
+        shlex.quote(loc_arterial_strategy),
+        "--cross-section-radius-vox",
+        str(float(cross_section_radius_vox)),
+        "--venous-min-component-frac",
+        str(float(venous_min_component_frac)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
@@ -181,19 +254,34 @@ def submit_subject_sge(
 @click.option("--output-root", type=click.Path(path_type=Path), required=True)
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--tangent-k-half", type=int, default=2, show_default=True)
+@click.option(
+    "--loc-arterial-strategy",
+    type=click.Choice(["qvtplus", "midpoint"]),
+    default="qvtplus",
+    show_default=True,
+)
+@click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
+@click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
 def main(
     subject: str,
     nifti_root: Path,
     output_root: Path,
     skip_existing: bool,
     tangent_k_half: int,
+    loc_arterial_strategy: str,
+    cross_section_radius_vox: float,
+    venous_min_component_frac: float,
 ) -> None:
     Logger()
     run_subject(
         subject,
+        nifti_root=nifti_root,
         output_root=output_root,
         skip_existing=skip_existing,
         tangent_k_half=tangent_k_half,
+        loc_arterial_strategy=loc_arterial_strategy,
+        cross_section_radius_vox=cross_section_radius_vox,
+        venous_min_component_frac=venous_min_component_frac,
     )
 
 

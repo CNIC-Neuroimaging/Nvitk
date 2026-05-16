@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from skimage.measure import label as sk_label
-from skimage.morphology import remove_small_objects
-
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
+from nvitk.morphology.components import remove_small_components_by_fraction
 
 setup(globals())
 
@@ -84,54 +82,31 @@ def _binary_mask_sliding_threshold(
     return segment.astype(bool, copy=False), float(opt_thresh)
 
 
-def binary_vessel_segment_cd(cd: np.ndarray) -> tuple[np.ndarray, float]:
-    """Global vessel boolean mask: sliding threshold on CD, then 0.5% area opening (face 3D)."""
+def binary_vessel_segment_cd(
+    cd: np.ndarray,
+    *,
+    up_thresh: float = 0.8,
+    shift_hm_flag: bool = True,
+    min_component_fraction: float = 0.005,
+) -> tuple[np.ndarray, float]:
+    """Global vessel boolean mask: sliding threshold on CD, then area opening (face 3D)."""
     segment, opt_thresh = _binary_mask_sliding_threshold(
         cd,
         step=0.001,
-        up_thresh=0.8,
+        up_thresh=float(up_thresh),
         smf=10,
-        shift_hm_flag=True,
-        med_filt_flag=True,
+        shift_hm_flag=bool(shift_hm_flag),
+        med_filt_flag=False,
     )
-    n_fg = int(np.count_nonzero(segment))
-    area_thresh = max(1, int(round(0.005 * n_fg)))
-    segment = as_backend_array(remove_small_objects(to_numpy(segment), min_size=area_thresh, connectivity=1))
-    return segment.astype(bool, copy=False), float(opt_thresh)
-
-
-def venous_four_region_labels(
-    ven_binary: np.ndarray,
-    *,
-    region_label_base: int,
-    n_regions: int = 4,
-) -> np.ndarray:
-    """Label the *n_regions* largest connected components of *ven_binary* with ``region_label_base..+k``.
-
-    Smaller components and background are 0. *ven_binary* must be boolean same shape as output.
-    """
-    out = np.zeros(ven_binary.shape, dtype=np.int32)
-    if not np.any(ven_binary):
-        return out
-    lab = as_backend_array(sk_label(to_numpy(ven_binary), connectivity=1))
-    if lab.max() == 0:
-        return out
-    counts = np.bincount(lab.ravel())
-    # label ids 1..max with areas counts[1], ...
-    nlab = int(lab.max())
-    if nlab == 0:
-        return out
-    areas = [(counts[i], i) for i in range(1, nlab + 1) if counts[i] > 0]
-    areas.sort(key=lambda t: t[0], reverse=True)
-    k = min(int(n_regions), len(areas))
-    for rank in range(k):
-        _, comp_id = areas[rank]
-        out[lab == comp_id] = int(region_label_base + rank)
-    return out
+    segment = remove_small_components_by_fraction(
+        segment,
+        min_fraction=float(min_component_fraction),
+        connectivity=1,
+    )
+    return as_backend_array(to_numpy(segment).astype(bool, copy=False)), float(opt_thresh)
 
 
 __all__ = [
     "binary_vessel_segment_cd",
-    "venous_four_region_labels",
     "venous_search_region",
 ]

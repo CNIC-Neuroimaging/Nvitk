@@ -36,6 +36,7 @@ build/
 dist/
 *.egg-info/
 .eggs/
+*.mat
 
 # Virtual environments
 # .env

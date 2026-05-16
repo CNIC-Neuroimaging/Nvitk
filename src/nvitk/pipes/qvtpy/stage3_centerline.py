@@ -1,4 +1,4 @@
-"""qvtpy stage 3: centerlines (eICAB in 4Dflow space + venous proxy from CD)."""
+"""qvtpy stage 3: centerlines (eICAB in 4Dflow space + venous branches from CD)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, TextIO
 import click
 
 import nvitk
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -23,8 +23,14 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
 from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL
+from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskKind, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
+from nvitk.pipes.qvtpy.util.mask_cleaning import (
+    clean_multilabel_islands,
+    clean_venous_slab_mask,
+)
+from nvitk.pipes.qvtpy.util.venous_heuristics import assign_venous_branches, venous_name_to_label_id
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 setup(globals())
@@ -51,47 +57,36 @@ def _load_stage2_meta(output_root: Path, subject: str) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def _find_eicab_labels(eicab_dir: Path) -> Path:
-    for pat in ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii", "*_eICAB_WB.nii.gz", "*_eICAB_WB.nii"):
-        hits = sorted(eicab_dir.glob(pat))
-        if hits:
-            return hits[0]
-    raise FileNotFoundError(f"No eICAB CW/WB NIfTI under {eicab_dir}")
-
-
-def _bwareaopen_bool(mask: np.ndarray, *, min_size: int, connectivity: int = 1) -> np.ndarray:
-    """Remove connected foreground components smaller than *min_size* (3D area opening).
-
-    *connectivity=1* selects face-adjacent neighbors in 3D (6-neighborhood).
-    """
-    from skimage.morphology import remove_small_objects  # type: ignore
-
-    m = to_numpy(mask.astype(bool, copy=False))
-    if min_size <= 1:
-        return m
-    return as_backend_array(remove_small_objects(m, min_size=int(min_size), connectivity=int(connectivity)))
-
-
 def _rasterize_centerlines_mask(
     shape: tuple[int, int, int],
     arterial: dict[int, Any],
-    ven_sk_cpu: np.ndarray,
+    venous: dict[str, np.ndarray],
     *,
-    ven_label_id: int,
+    venous_label_by_name: dict[str, int],
 ) -> np.ndarray:
-    """Voxel mask: **eICAB vessel_id** on arterial centerline points; *ven_label_id* on venous skeleton."""
+    """Voxel mask: eICAB id on arterial points; venous region id on venous polylines."""
     mask = np.zeros(shape, dtype=np.int32)
     for vid, pts in sorted(arterial.items()):
-        p = to_numpy(pts)
+        p = as_backend_array(pts)
         for row in p:
-            i, j, k = int(round(float(row[0]))), int(round(float(row[1]))), int(round(float(row[2])))
+            i, j, k = (
+                int(round(float(row[0]))),
+                int(round(float(row[1]))),
+                int(round(float(row[2]))),
+            )
             if 0 <= i < shape[0] and 0 <= j < shape[1] and 0 <= k < shape[2]:
                 mask[i, j, k] = int(vid)
-    ven = ven_sk_cpu.astype(bool, copy=False)
-    vi, vj, vk = np.nonzero(ven)
-    for i, j, k in zip(vi.tolist(), vj.tolist(), vk.tolist()):
-        if mask[i, j, k] == 0:
-            mask[i, j, k] = int(ven_label_id)
+    for name, pts in venous.items():
+        lid = int(venous_label_by_name.get(name, VENOUS_UNKNOWN_LABEL))
+        p = as_backend_array(pts)
+        for row in p:
+            i, j, k = (
+                int(round(float(row[0]))),
+                int(round(float(row[1]))),
+                int(round(float(row[2]))),
+            )
+            if 0 <= i < shape[0] and 0 <= j < shape[1] and 0 <= k < shape[2] and mask[i, j, k] == 0:
+                mask[i, j, k] = lid
     return mask
 
 
@@ -111,14 +106,21 @@ def run_subject(
     nifti_root: Path,
     output_root: Path,
     eicab_subdir: str | None = None,
+    eicab_mask: EicabMaskKind = "cw",
     skip_existing: bool = False,
+    cd_up_thresh: float | None = None,
+    cd_shift_hm: bool | None = None,
+    venous_min_component_frac: float = 0.005,
+    eicab_min_island_fraction: float = 0.005,
+    eicab_bridge_open_radius: int = 1,
+    venous_min_branch_points: int = 12,
 ) -> Path:
     meta = _load_stage2_meta(output_root, subject)
     mat = Path(meta["matrix"])
     fixed = Path(meta["fixed"])
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
     eicab_dir = output_root / subject / subdir
-    eicab_labels = _find_eicab_labels(eicab_dir)
+    eicab_res = resolve_eicab_mask(eicab_dir, preference=eicab_mask)
 
     out_dir = _stage3_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -129,7 +131,7 @@ def run_subject(
 
     warped_labels = out_dir / "eicab_in_4dflow.nii.gz"
     flirt_apply_rigid(
-        eicab_labels,
+        eicab_res.path,
         fixed,
         mat,
         warped_labels,
@@ -143,64 +145,115 @@ def run_subject(
     cd_img = imread(_cd_path(nifti_root, subject))
     cd = as_backend_array(cd_img.data).astype(np.float64)
 
+    up_thresh = 0.8 if cd_up_thresh is None else float(cd_up_thresh)
+    shift_hm = True if cd_shift_hm is None else bool(cd_shift_hm)
+    vessel_bin, sliding_opt_thresh = binary_vessel_segment_cd(
+        cd,
+        up_thresh=up_thresh,
+        shift_hm_flag=shift_hm,
+    )
+    vessel_bin = as_backend_array(vessel_bin.astype(np.uint8, copy=False))
+
     venous_region = venous_search_region(shape3)
-    vessel_bin, sliding_opt_thresh = binary_vessel_segment_cd(cd)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
-    # Arterial multilabel: eICAB labels cleared in the venous slab, then area opening on the hull.
-    arterial_vol = np.where(venous_region, 0, labels_np)
-    art_bin = arterial_vol > 0
-    min_art = max(1, int(round(0.005 * int(np.count_nonzero(art_bin)))))
-    art_bin = _bwareaopen_bool(art_bin, min_size=min_art, connectivity=1)
-    arterial_vol = np.where(art_bin, arterial_vol, 0).astype(np.int32, copy=False)
-
-    # Per-vessel centerlines in 4D flow: skeleton per label → ordered polyline; ``vid`` = eICAB vessel id.
-    arterial = compute_centerlines(as_backend_array(arterial_vol), min_points=5)
-
-    # Venous: global vessel mask restricted to the venous slab, then area opening.
-    venous_mask = vessel_bin & venous_region
-    min_ven = max(1, int(round(0.005 * int(np.count_nonzero(venous_mask)))))
-    venous_clean = _bwareaopen_bool(venous_mask, min_size=min_ven, connectivity=1)
-
-    from skimage.morphology import skeletonize  # type: ignore
-
-    ven_sk = as_backend_array(skeletonize(to_numpy(venous_clean.astype(np.uint8, copy=False))))
-    ven_coords = np.argwhere(ven_sk > 0).astype(np.float32)
-    ven_ids = np.full(ven_coords.shape[0], VENOUS_UNKNOWN_LABEL, dtype=np.int32)
-
-    np.savez_compressed(
-        out_dir / "centerlines.npz",
-        **{f"arterial_{k}": v.astype(np.float32) for k, v in arterial.items()},
-        venous_xyz=ven_coords,
-        venous_vessel_id=ven_ids,
+    labels_np =  (
+        clean_multilabel_islands(
+            labels_np,
+            min_fraction=eicab_min_island_fraction,
+            bridge_open_radius=eicab_bridge_open_radius,
+        )
     )
 
-    cl_mask = _rasterize_centerlines_mask(shape3, arterial, ven_sk, ven_label_id=VENOUS_UNKNOWN_LABEL)
-    mask_path = out_dir / "centerlines_mask.nii.gz"
+    arterial_vol = np.where(venous_region, 0, labels_np)
+    art_bin = arterial_vol > 0
+    from nvitk.morphology.components import remove_small_components
+
+    min_art = max(1, int(round(eicab_min_island_fraction * int(np.count_nonzero(art_bin)))))
+    art_bin = as_backend_array(remove_small_components(art_bin, min_size=min_art, connectivity=1)).astype(bool)
+    arterial_vol = np.where(art_bin, arterial_vol, 0).astype(np.int32, copy=False)
+    imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))
+
+    arterial = compute_centerlines(arterial_vol, min_points=5)
+
+    venous_mask = vessel_bin.astype(bool) & venous_region
+    venous_clean = as_backend_array(
+        clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
+    )
+    venous_branches = assign_venous_branches(
+        venous_clean,
+        min_points=venous_min_branch_points,
+    )
+    venous_label_by_name = {
+        name: venous_name_to_label_id(name) for name in venous_branches
+    }
+
+    cl_mask = _rasterize_centerlines_mask(
+        shape3,
+        arterial,
+        venous_branches,
+        venous_label_by_name=venous_label_by_name,
+    )
+    from nvitk.pipes.qvtpy.util.centerline_io import CENTERLINES_MASK_NIFTI
+
+    mask_path = out_dir / CENTERLINES_MASK_NIFTI
     imsave(mask_path, cl_mask, metadata=dict(lab_img.metadata or {}))
+
+    qc_path = out_dir / "cd_vessel_binary_qc.nii.gz"
+    imsave(qc_path, vessel_bin.astype(np.uint8), metadata=dict(lab_img.metadata or {}))
 
     meta_out = {
         "subject": subject,
         "eicab_in_4dflow": str(warped_labels),
+        "eicab_mask_requested": eicab_res.requested,
+        "eicab_mask_used": eicab_res.used,
+        "eicab_mask_fallback": eicab_res.fallback,
+        "eicab_mask_fallback_reason": eicab_res.fallback_reason,
+        "eicab_labels_source": str(eicab_res.path),
         "arterial_labels": [int(k) for k in sorted(arterial.keys())],
-        "n_venous_points": int(ven_coords.shape[0]),
+        "venous_vessels": list(venous_branches.keys()),
+        "venous_label_by_name": venous_label_by_name,
+        "n_venous_points": int(sum(p.shape[0] for p in venous_branches.values())),
         "centerlines_mask_nifti": str(mask_path),
+        "cd_vessel_binary_qc": str(qc_path),
         "binary_segmentation_sliding_threshold": True,
-        "sliding_threshold_step": 0.001,
-        "sliding_threshold_up_thresh": 0.8,
-        "sliding_threshold_smf": 10,
-        "sliding_threshold_shift_hm": True,
-        "sliding_threshold_med_filt": True,
+        "sliding_threshold_up_thresh": up_thresh,
+        "sliding_threshold_shift_hm": shift_hm,
         "sliding_threshold_opt_absolute": float(sliding_opt_thresh),
         "global_bwareaopen_fraction_of_foreground": 0.005,
-        "venous_bwareaopen_fraction_of_venous_mask": 0.005,
+        "venous_min_component_frac": float(venous_min_component_frac),
+        "eicab_min_island_fraction": float(eicab_min_island_fraction),
+        "eicab_bridge_open_radius": int(eicab_bridge_open_radius),
         "venous_region_axis1_third": int(max(1, round(shape3[1] / 3.0))),
         "min_points_per_vessel": 5,
-        "mask_value_arterial": "eICAB_label_id",
-        "mask_value_venous": int(VENOUS_UNKNOWN_LABEL),
+        "venous_min_branch_points": int(venous_min_branch_points),
     }
     done.write_text(json.dumps(meta_out, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage3 centerline -> {out_dir}")
     return out_dir
+
+
+def _stage3_cli_options(func):  # type: ignore[no-untyped-def]
+    func = click.option("--subject", required=True)(func)
+    func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--skip-existing", is_flag=True, default=False)(func)
+    func = click.option(
+        "--eicab-mask",
+        type=click.Choice(["cw", "wb"], case_sensitive=False),
+        default="cw",
+        show_default=True,
+    )(func)
+    func = click.option("--cd-up-thresh", type=float, default=None, help="CD sliding-threshold upper fraction.")
+    func = click.option(
+        "--cd-shift-hm/--no-cd-shift-hm",
+        default=None,
+        help="FWHM shift along threshold curve (default on).",
+    )(func)
+    func = click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)(func)
+    func = click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)(func)
+    func = click.option("--eicab-bridge-open-radius", type=int, default=1, show_default=True)(func)
+    func = click.option("--venous-min-branch-points", type=int, default=12, show_default=True)(func)
+    return func
 
 
 def submit_subject_sge(
@@ -213,6 +266,13 @@ def submit_subject_sge(
     skip_existing: bool = False,
     hold_jid: str | None = None,
     emit: TextIO | None = None,
+    eicab_mask: str = "cw",
+    cd_up_thresh: float | None = None,
+    cd_shift_hm: bool | None = None,
+    venous_min_component_frac: float = 0.005,
+    eicab_min_island_fraction: float = 0.005,
+    eicab_bridge_open_radius: int = 1,
+    venous_min_branch_points: int = 12,
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -226,9 +286,23 @@ def submit_subject_sge(
         shlex.quote(binds.data),
         "--output-root",
         shlex.quote(binds.output),
+        "--eicab-mask",
+        shlex.quote(str(eicab_mask).lower()),
+        "--venous-min-component-frac",
+        str(float(venous_min_component_frac)),
+        "--eicab-min-island-fraction",
+        str(float(eicab_min_island_fraction)),
+        "--eicab-bridge-open-radius",
+        str(int(eicab_bridge_open_radius)),
+        "--venous-min-branch-points",
+        str(int(venous_min_branch_points)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
+    if cd_up_thresh is not None:
+        parts.extend(["--cd-up-thresh", str(float(cd_up_thresh))])
+    if cd_shift_hm is not None:
+        parts.append("--cd-shift-hm" if cd_shift_hm else "--no-cd-shift-hm")
     python_cmd = " ".join(parts)
     paths = ClusterPaths(
         src=src_p,
@@ -257,13 +331,34 @@ def submit_subject_sge(
 
 
 @click.command("qvtpy-stage3-centerline")
-@click.option("--subject", required=True)
-@click.option("--nifti-root", type=click.Path(path_type=Path), required=True)
-@click.option("--output-root", type=click.Path(path_type=Path), required=True)
-@click.option("--skip-existing", is_flag=True, default=False)
-def main(subject: str, nifti_root: Path, output_root: Path, skip_existing: bool) -> None:
+@_stage3_cli_options
+def main(
+    subject: str,
+    nifti_root: Path,
+    output_root: Path,
+    skip_existing: bool,
+    eicab_mask: str,
+    cd_up_thresh: float | None,
+    cd_shift_hm: bool | None,
+    venous_min_component_frac: float,
+    eicab_min_island_fraction: float,
+    eicab_bridge_open_radius: int,
+    venous_min_branch_points: int,
+) -> None:
     Logger()
-    run_subject(subject, nifti_root=nifti_root, output_root=output_root, skip_existing=skip_existing)
+    run_subject(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        skip_existing=skip_existing,
+        eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+        cd_up_thresh=cd_up_thresh,
+        cd_shift_hm=cd_shift_hm,
+        venous_min_component_frac=venous_min_component_frac,
+        eicab_min_island_fraction=eicab_min_island_fraction,
+        eicab_bridge_open_radius=eicab_bridge_open_radius,
+        venous_min_branch_points=venous_min_branch_points,
+    )
 
 
 __all__ = ["main", "run_subject", "submit_subject_sge"]

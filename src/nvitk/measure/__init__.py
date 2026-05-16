@@ -45,6 +45,7 @@ from .suv import suv_image, suv_stats
 from .volume import volume_cc, volume_mm3
 from .hemodynamics import (
     mean_flow_ml_s,
+    mean_velocity_mm_s,
     pulsatility_index,
     resistivity_index,
     through_plane_velocity_series,

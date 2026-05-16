@@ -1110,6 +1110,7 @@ def _flowshow_desktop(
         "camera_ready": False,
         "playing": bool(anim.auto_play),
         "ts_metric": ts_metric_labels[0],
+        "loc_dots": True,
     }
 
     # 1 row × 2 columns:
@@ -1275,7 +1276,7 @@ def _flowshow_desktop(
                 vid = int(loc_vlbl[ii])
                 cidx[ii] = int(labels.index(vid)) if vid in labels else 0
             pdata["lc"] = cidx
-            spheres = pdata.glyph(scale=False, geom=pv.Sphere(radius=0.95, phi_resolution=10, theta_resolution=10))
+            spheres = pdata.glyph(scale=False, geom=pv.Sphere(radius=0.55, phi_resolution=8, theta_resolution=8))
             loc_actor = plotter.add_mesh(
                 spheres,
                 scalars="lc",
@@ -1297,13 +1298,16 @@ def _flowshow_desktop(
                 log.error(traceback.format_exc())
                 log.exception(e)
                 pass
-        if loc_actor is not None:
-            try:
-                loc_actor.SetVisibility(bool(on))
-            except Exception as e:
-                log.error(traceback.format_exc())
-                log.exception(e)
-                pass
+
+    def _set_loc_dots_visible(on: bool) -> None:
+        if loc_actor is None:
+            return
+        try:
+            loc_actor.SetVisibility(bool(on))
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.exception(e)
+            pass
 
     # Picking state: selected centerline or LOC (label + centerline index, or LOC tangent).
     selection: dict[str, Any] = {
@@ -2795,6 +2799,18 @@ def _flowshow_desktop(
             log.exception(e)
             pass
 
+    if loc_actor is not None:
+
+        def _cb_loc_dots(val: bool) -> None:
+            state["loc_dots"] = bool(val)
+            _set_loc_dots_visible(bool(val))
+            plotter.render()
+
+        plotter.add_checkbox_button_widget(
+            _cb_loc_dots, value=bool(state.get("loc_dots", True)), position=(18, y0 + 146), size=18, border_size=1
+        )
+        plotter.add_text("Show LOC points", position=(42, y0 + 144), font_size=9)
+
     w_mask = plotter.add_checkbox_button_widget(_cb_mask, value=True, position=(18, y0 + 120), size=18, border_size=1)
     w_glyphs = plotter.add_checkbox_button_widget(_cb_glyphs, value=True, position=(18, y0 + 94), size=18, border_size=1)
     w_centerlines = plotter.add_checkbox_button_widget(_cb_centerlines, value=True, position=(18, y0 + 68), size=18, border_size=1)
@@ -2806,7 +2822,7 @@ def _flowshow_desktop(
     t_stream = plotter.add_text("Show streamlines", position=(42, y0 + 40), font_size=9)
     t_pathlines = plotter.add_text("Show pathlines", position=(42, y0 + 14), font_size=9)
     plotter.add_text(
-        "Mask / Vectors / Centerlines / Stream / Pathlines | Space: play/pause",
+        "Mask / Vectors / Centerlines / Stream / Pathlines / LOC | Space: play/pause",
         position="lower_left",
         font_size=9,
     )

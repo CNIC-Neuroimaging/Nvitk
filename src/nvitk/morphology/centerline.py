@@ -8,13 +8,24 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import numpy as np
-
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import setup
 from nvitk.core.exceptions import ValidationError
 from nvitk.core.logger import Logger
 
+setup(globals())
+
 log = Logger()
+
+
+def skeletonize_binary(mask) -> Any:
+    """3D/2D skeletonization (CPU skimage; returns backend array of bool)."""
+    skeletonize = _require_skeletonize()
+    m = to_numpy(mask)
+    if m.ndim not in (2, 3):
+        raise ValidationError("skeletonize_binary expects a 2D or 3D mask.")
+    sk = skeletonize(m.astype(np.uint8, copy=False))
+    return as_backend_array(np.asarray(sk, dtype=bool))
 
 
 def _require_skeletonize():
@@ -120,14 +131,14 @@ def compute_centerlines(
     min_points
         Skip labels whose centerline has fewer than this many voxels.
     """
-    arr = np.asarray(to_numpy(vessel_mask))
+    arr = as_backend_array(vessel_mask)
     if arr.ndim != 3:
         raise ValidationError("vessel_mask must be 3D for centerline computation.")
     labs = labels or sorted(int(v) for v in np.unique(arr) if int(v) != 0)
     out: dict[int, np.ndarray] = {}
 
     if centerline_mask is not None:
-        cl = np.asarray(to_numpy(centerline_mask))
+        cl = as_backend_array(centerline_mask)
         if cl.shape != arr.shape:
             raise ValidationError("centerline_mask must match vessel_mask shape.")
         cl_bin = cl > 0
@@ -143,21 +154,21 @@ def compute_centerlines(
         roi = (arr == int(lbl))
         if not np.any(roi):
             continue
-        sk = skeletonize(roi.astype(np.uint8, copy=False))
-        coords = np.argwhere(sk > 0)
+        sk = skeletonize(to_numpy(roi).astype(np.uint8, copy=False))
+        coords = np.argwhere(as_backend_array(sk) > 0)
         if coords.shape[0] < int(min_points):
             continue
         out[int(lbl)] = _centerline_longest_path(coords)
     return out
 
 
-def centerline_tangents(points_xyz: np.ndarray, *, k_half: int = 2) -> np.ndarray:
+def centerline_tangents(points_xyz: Any, *, k_half: int = 2) -> Any:
     """Unit tangent vectors along an ordered polyline (voxel coordinates).
 
     Uses central differences with ``k_half`` samples on each side; endpoints
     use one-sided differences. ``points_xyz`` shape ``(N, 3)``.
     """
-    p = to_numpy(points_xyz).astype(np.float64)
+    p = as_backend_array(points_xyz).astype(np.float64)
     if p.ndim != 2 or p.shape[1] != 3:
         raise ValidationError("points_xyz must be (N, 3).")
     n = p.shape[0]
@@ -175,5 +186,5 @@ def centerline_tangents(points_xyz: np.ndarray, *, k_half: int = 2) -> np.ndarra
     return tang.astype(np.float32, copy=False)
 
 
-__all__ = ["compute_centerlines", "centerline_tangents"]
+__all__ = ["centerline_tangents", "compute_centerlines", "skeletonize_binary"]
 

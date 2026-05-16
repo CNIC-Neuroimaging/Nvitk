@@ -303,9 +303,9 @@ def compute_phase_derivatives(
     angio_tr = angio_data
     angio_mean = np.mean(angio_data, axis=-1) if angio_data.ndim == 4 else as_backend_array(angio_data)
 
-    vx = -rl_phase * 10.0
-    vy = -ap_phase * 10.0
-    vz = fh_phase * 10.0
+    vx = -rl_phase * 10.0 # R (Left 2 Right) -> RL (Right 2 Left)
+    vy = -ap_phase * 10.0 # A (Posterior 2 Anterior) -> AP (Anterior 2 Posterior)
+    vz =  fh_phase * 10.0 # S (Inferior 2 Superior) = FH (Feet 2 Head)
 
     if background_phase_correction and vx.ndim == 4:
         vx_m = np.mean(vx, axis=-1)

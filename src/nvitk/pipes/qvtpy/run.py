@@ -9,10 +9,10 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage0_c`` — DICOM → NIfTI + reorg + optional ``phase2volume`` derivatives.
 - ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
 - ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
-- ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines.
-- ``stage4`` — Multilabel ``seg_4dflow`` (CD sliding-threshold mask + four venous CC ids 31–34 in slab).
-- ``stage5`` — Per-vessel LOC CSV from centerlines.
-- ``stage6`` — LOC-wise velocity / PI / RI from phase volumes.
+- ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
+- ``stage4`` — Centerline-backbone ``seg_4dflow`` (cross-section assembly; default voxel).
+- ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
+- ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
 
 SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
 :func:`nvitk.cluster.sge.submit_stage`).
@@ -52,6 +52,7 @@ from . import (
     stage5_loc_generation,
     stage6_measure,
 )
+
 
 log = Logger()
 
@@ -280,6 +281,45 @@ def _emit_stage0_convert(
 )
 @click.option("--stage2-dof", type=int, default=6, show_default=True)
 @click.option("--stage2-cost", type=str, default="normmi", show_default=True)
+@click.option(
+    "--eicab-mask",
+    type=click.Choice(["cw", "wb"], case_sensitive=False),
+    default="cw",
+    show_default=True,
+    help="Stage3: prefer Circle-of-Willis or whole-brain eICAB mask.",
+)
+@click.option("--cd-up-thresh", type=float, default=None, help="Stage3: CD sliding-threshold upper fraction.")
+@click.option(
+    "--cd-shift-hm/--no-cd-shift-hm",
+    default=None,
+    help="Stage3: FWHM shift on threshold curve (default on).",
+)
+@click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
+@click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)
+@click.option("--eicab-bridge-open-radius", type=int, default=1, show_default=True)
+@click.option("--venous-min-branch-points", type=int, default=12, show_default=True)
+@click.option(
+    "--seg-assembly",
+    type=click.Choice(["voxel", "mesh"]),
+    default="voxel",
+    show_default=True,
+)
+@click.option("--seg-interp-level", type=int, default=0, show_default=True)
+@click.option("--seg-stride", type=int, default=1, show_default=True)
+@click.option("--cross-section-res", type=int, default=0, show_default=True)
+@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
+@click.option(
+    "--loc-arterial-strategy",
+    type=click.Choice(["qvtplus", "midpoint"]),
+    default="qvtplus",
+    show_default=True,
+)
+@click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
+@click.option(
+    "--measure-resegment/--no-measure-resegment",
+    default=True,
+    show_default=True,
+)
 @click.option("--emit-script", type=click.Path(path_type=Path), default=None)
 @click.option("--no-remote", is_flag=True)
 @click.option("--remote-host", default=None)
@@ -310,6 +350,21 @@ def main(
     stage2_reference: str,
     stage2_dof: int,
     stage2_cost: str,
+    eicab_mask: str,
+    cd_up_thresh: float | None,
+    cd_shift_hm: bool | None,
+    venous_min_component_frac: float,
+    eicab_min_island_fraction: float,
+    eicab_bridge_open_radius: int,
+    venous_min_branch_points: int,
+    seg_assembly: str,
+    seg_interp_level: int,
+    seg_stride: int,
+    cross_section_res: int,
+    cross_section_plane_interp: int,
+    loc_arterial_strategy: str,
+    cross_section_radius_vox: float,
+    measure_resegment: bool,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
@@ -417,6 +472,13 @@ def main(
                         nifti_root=nifti_root,
                         output_root=output_root,
                         skip_existing=skip_existing,
+                        eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+                        cd_up_thresh=cd_up_thresh,
+                        cd_shift_hm=cd_shift_hm,
+                        venous_min_component_frac=venous_min_component_frac,
+                        eicab_min_island_fraction=eicab_min_island_fraction,
+                        eicab_bridge_open_radius=eicab_bridge_open_radius,
+                        venous_min_branch_points=venous_min_branch_points,
                     )
                 except Exception as exc:
                     import traceback
@@ -429,6 +491,12 @@ def main(
                         nifti_root=nifti_root,
                         output_root=output_root,
                         skip_existing=skip_existing,
+                        seg_assembly=seg_assembly,  # type: ignore[arg-type]
+                        seg_interp_level=seg_interp_level,
+                        seg_stride=seg_stride,
+                        cross_section_res=cross_section_res,
+                        cross_section_plane_interp=cross_section_plane_interp,
+                        radius_vox=cross_section_radius_vox,
                     )
                 except Exception as exc:
                     import traceback
@@ -438,8 +506,12 @@ def main(
                 try:
                     stage5_loc_generation.run_subject(
                         subj,
+                        nifti_root=nifti_root,
                         output_root=output_root,
                         skip_existing=skip_existing,
+                        loc_arterial_strategy=loc_arterial_strategy,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        venous_min_component_frac=venous_min_component_frac,
                     )
                 except Exception as exc:
                     import traceback
@@ -452,6 +524,9 @@ def main(
                         nifti_root=nifti_root,
                         output_root=output_root,
                         skip_existing=skip_existing,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        measure_resegment=measure_resegment,
+                        cross_section_res=cross_section_res,
                     )
                 except Exception as exc:
                     import traceback
@@ -558,6 +633,13 @@ def main(
                         skip_existing=skip_existing,
                         hold_jid=prev_jid,
                         emit=fh,
+                        eicab_mask=eicab_mask,
+                        cd_up_thresh=cd_up_thresh,
+                        cd_shift_hm=cd_shift_hm,
+                        venous_min_component_frac=venous_min_component_frac,
+                        eicab_min_island_fraction=eicab_min_island_fraction,
+                        eicab_bridge_open_radius=eicab_bridge_open_radius,
+                        venous_min_branch_points=venous_min_branch_points,
                     )
                 except Exception as exc:
                     import traceback
@@ -575,6 +657,11 @@ def main(
                         skip_existing=skip_existing,
                         hold_jid=prev_jid,
                         emit=fh,
+                        seg_assembly=seg_assembly,
+                        seg_interp_level=seg_interp_level,
+                        seg_stride=seg_stride,
+                        cross_section_res=cross_section_res,
+                        cross_section_plane_interp=cross_section_plane_interp,
                     )
                 except Exception as exc:
                     import traceback
@@ -592,6 +679,9 @@ def main(
                         skip_existing=skip_existing,
                         hold_jid=prev_jid,
                         emit=fh,
+                        loc_arterial_strategy=loc_arterial_strategy,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        venous_min_component_frac=venous_min_component_frac,
                     )
                 except Exception as exc:
                     import traceback
@@ -609,6 +699,8 @@ def main(
                         skip_existing=skip_existing,
                         hold_jid=prev_jid,
                         emit=fh,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        measure_resegment=measure_resegment,
                     )
                 except Exception as exc:
                     import traceback

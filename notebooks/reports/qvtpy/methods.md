@@ -6,12 +6,13 @@ Pipeline code: `src/nvitk/pipes/qvtpy/`. This document tracks **what each stage 
 
 | Date | Summary |
 |------|---------|
+| 2026-05-15 | Stages 3–6 MATLAB-aligned overhaul: `--eicab-mask cw\|wb` with fallback; mask cleaning + `cd_vessel_binary_qc.nii.gz`; geometry-based venous centerlines (`venous_SSSV`, …); centerline-backbone `seg_4dflow` (default voxel assembly); QVTplus-style LOC heuristics; per-LOC cross-sectional area and masked-plane flow / PI / RI. |
 | 2026-05-12 | Initial stages 2–6, NiPype FLIRT registration module, `measure.hemodynamics` helpers, SGE `hold_jid` chain in `run.py`. |
 | 2026-05-12 | `pipes/qvtpy/labels.py`: full eICAB ID table (1–18 plus basilar / AComm), canonical names (LICA, RICA, BASILAR, …), QVT venous name strings (SSSV, LTSV, RTSV, STRV), and qvtpy extension label ints (`QVTPY_VENOUS_UNKNOWN_LABEL`, …). |
 | 2026-05-12 | `phase2volume`: single QVTplus-aligned derivative path; VENC from JSON → NIfTI metadata → DICOM → 700 mm/s + warning; default polynomial background correction (`fit_order` default 2). |
 | 2026-05-12 | qvtpy stages / `phase2volume` / `hemodynamics` / `_phase2volume_bg`: use `nvitk.core.backend.setup(globals())` and `as_backend_array` so heavy array ops follow `NVITK_BACKEND` (NumPy or CuPy). Venous `skeletonize` (skimage) stays CPU via `to_numpy` before skimage. |
 | 2026-05-12 | Stage 2: FLIRT **moving** image is eICAB ``TOF_resampled`` under ``--output-root/<subject>/eicab/`` (not raw ``TOF/TOF.nii.gz``). ``registration_meta.json`` records ``moving_kind: eicab_tof_resampled``. Optional CLI ``--eicab-subdir`` on ``qvtpy-stage2-registration``. |
-| 2026-05-12 | Stage 4: ``seg_4dflow`` uses the same CD sliding-threshold vessel mask as stage 3 (via ``flow_volume_masks``); venous voxels are only inside the **venous slab** (first third along axis 1), with 0.5% area opening, then the **four largest** connected components receive ids **31–34** (``VENOUS_REGION_BASE``…); no global fill with label 30. |
+| 2026-05-12 | Stage 4: ``seg_4dflow`` uses the same CD sliding-threshold vessel mask as stage 3 (via ``util.flow_volume_masks``); venous voxels are only inside the **venous slab** (first third along axis 1), with 0.5% area opening, then the **four largest** connected components receive ids **31–34** (``VENOUS_REGION_BASE``…); no global fill with label 30. |
 | 2026-05-12 | Stage 3: global binary mask on ``ComplexDifference_3D`` via sliding-threshold curve (median 3³, step 0.001 up to 0.8×max, FWHM-shifted curvature pick, smooth width 10) + 0.5% foreground area filter; venous slab = first third along axis 1; venous mask = global mask ∧ slab + second 0.5% filter; skeleton venous centerlines. |
 
 ## Backend (GPU vs CPU)
@@ -23,8 +24,8 @@ nvitk selects the array stack via `NVITK_BACKEND` / `nvitk.using("cupy")` (see [
 | Stage 0 convert + `phase2volume` | Yes: CD/MAG/velocity math, polynomial BG fit (`np.linalg.lstsq`, `ndi` not required there) | DICOM/NIfTI I/O ends on CPU for writers; `imsave` materializes NumPy for NIfTI. |
 | Stage 1 eICAB | External container (separate from this table) | Not governed by nvitk `np` proxy. |
 | Stage 2 FLIRT | No | FSL `flirt` is a CPU binary; moving image is read from stage 1 eICAB outputs on the host. |
-| Stage 3 centerlines | Partial: multilabel arterial on GPU where applicable | Global ``slidingThreshold`` + CC filtering and venous ``bwareaopen`` on CPU NumPy; ``scipy.ndimage.median_filter``; ``skimage`` ``remove_small_objects`` / ``skeletonize`` on CPU. |
-| Stage 4 segmentation | Partial: ``as_backend_array`` for CD read | Masking and CC labeling on CPU NumPy; ``flow_volume_masks`` + ``skimage``. |
+| Stage 3 centerlines | Partial: multilabel arterial on GPU where applicable | ``ndi`` median filter + ``nvitk.morphology.components`` area opening; venous skeleton via ``skeletonize_binary`` (CPU skimage). |
+| Stage 4 segmentation | Partial: ``as_backend_array`` for CD read | Cross-section seg + ``nvitk.morphology.components``; oblique reslicing via ``ndi``. |
 | Stage 5 LOC | Mostly trivial (reads `.npz` on CPU) | CSV I/O on CPU. |
 | Stage 6 measure | Yes: phase volumes, `velocity_mm_s_from_phases`, PI/RI reductions | Per-LOC loop builds small NumPy vectors for dot products; negligible. |
 
@@ -94,12 +95,27 @@ Under `--output-root/<subject>/`:
 
 - `eicab/` — stage 1 eICAB outputs (multilabel in TOF space, plus ``TOF_resampled.nii.gz`` used as the FLIRT moving image in stage 2).
 - `qvtpy/stage2_registration/` — FLIRT `tof_to_4dflow.mat`, `TOF_warped_to_4dflow_ref.nii.gz`, `registration_meta.json`.
-- `qvtpy/stage3_centerline/` — `eicab_in_4dflow.nii.gz`, `centerlines.npz`, `centerlines_mask.nii.gz`, `centerline_meta.json`.
+- `qvtpy/stage3_centerline/` — `eicab_in_4dflow.nii.gz`, `centerlines_mask.nii.gz`, `cd_vessel_binary_qc.nii.gz`, `centerline_meta.json`.
 - `qvtpy/stage4_4dflow_segmentation/` — `seg_4dflow.nii.gz`, `segmentation_meta.json`.
 - `qvtpy/stage5_loc_generation/` — `locs.csv`, `loc_meta.json`.
 - `qvtpy/stage6_measure/` — `loc_measurements.csv`, `measure_meta.json`.
 
-Label constants (see `src/nvitk/pipes/qvtpy/labels.py`): eICAB vessel integers `1–18` (see `EICAB_ID_TO_NAME`); qvtpy extensions `QVTPY_VENOUS_UNKNOWN_LABEL` (30), venous region ids **31–34** (``VENOUS_REGION_BASE`` + rank in stage 4 largest components), `QVTPY_UNKNOWN_LABEL` (35). Venous branch *names* SSSV/LTSV/RTSV/STRV are strings for LOC; stage 4 assigns 31–34 by **component size** (see ``segmentation_meta.json`` note), not guaranteed anatomy order.
+Label constants (see `src/nvitk/pipes/qvtpy/labels.py`): eICAB vessel integers `1–18` (see `EICAB_ID_TO_NAME`); qvtpy extensions `QVTPY_VENOUS_UNKNOWN_LABEL` (30), venous region ids **31–34** (`VENOUS_REGION_BASE` + geometry assignment in stage 3), `QVTPY_UNKNOWN_LABEL` (35). Venous branch names SSSV/LTSV/RTSV/STRV are assigned in stage 3 by skeleton geometry.
+
+### qvtpy CLI flags (stages 3–6, `nvitk-qvtpy`)
+
+| Flag | Stage | Default |
+|------|-------|---------|
+| `--eicab-mask {cw,wb}` | 3 | `cw` (warn + use alternate if missing) |
+| `--cd-up-thresh`, `--cd-shift-hm` / `--no-cd-shift-hm` | 3 | auto / on |
+| `--venous-min-component-frac`, `--eicab-min-island-fraction`, `--eicab-bridge-open-radius` | 3 | 0.005 / 0.005 / 1 |
+| `--venous-min-branch-points` | 3 | 12 |
+| `--seg-assembly {voxel,mesh}` | 4 | `voxel` |
+| `--seg-interp-level`, `--seg-stride` | 4 | 0 / 1 |
+| `--cross-section-res`, `--cross-section-plane-interp` | 4, 6 | 0 / 1 |
+| `--loc-arterial-strategy {qvtplus,midpoint}` | 5 | `qvtplus` |
+| `--cross-section-radius-vox` | 5, 6 | 10 |
+| `--measure-resegment` / `--no-measure-resegment` | 6 | resegment on |
 
 ## Stages
 
@@ -127,19 +143,24 @@ TOF-based multilabel segmentation; outputs used as moving labels for stage 3.
 
 ### Stage 3 — centerline
 
-Apply the stage-2 rigid transform (nearest neighbour) to warp eICAB multilabels into 4D flow space. **Global vessel binary mask** on ``ComplexDifference_3D``: sliding-threshold selection (3³ median pre-filter, normalized threshold axis 0–0.8 in steps of 0.001, smoothed occupancy vs threshold, curvature maximum with optional FWHM-based shift along the axis, mean smooth width 10) followed by removing connected components smaller than 0.5% of foreground voxels (face-adjacent 3D connectivity). **Venous slab** = first ``round(ny/3)`` planes along axis 1; **venous mask** = global mask restricted to that slab, then the same 0.5% component filter. **Arterial multilabel** = warped labels cleared inside the venous slab and 0.5% area opening on the arterial binary hull; per-label centerlines via ``compute_centerlines`` (``min_points=5``). Venous centerline points from the skeleton of the cleaned venous mask. ``centerlines_mask.nii.gz`` stores eICAB ids on arterial centerline voxels and ``VENOUS_UNKNOWN_LABEL`` on venous skeleton voxels.
+Resolve eICAB with ``--eicab-mask`` (`cw` or `wb`); if the requested mask is missing and the other exists, log a warning and continue (recorded in ``centerline_meta.json``). Warp labels to 4D-flow space (nearest neighbour). **Cleaning:** per-label island removal (default 0.5% of label foreground), optional per-label binary opening (`--eicab-bridge-open-radius`) to suppress thin communicating-artery bridges. **CD binary QC:** ``cd_vessel_binary_qc.nii.gz`` from global sliding-threshold on ``ComplexDifference_3D`` (tunable via ``--cd-up-thresh``, ``--cd-shift-hm``). **Arterial:** labels cleared in venous slab → per-label centerlines (`compute_centerlines`, ``min_points=5``). **Venous:** mask = CD binary ∧ superior Y-slab → area opening → skeleton branches scored by position/orientation and assigned to **0–4** of SSSV/STRV/LTSV/RTSV. **IO:** ordered polylines are stored only in ``centerlines_mask.nii.gz`` (multilabel raster); stages 4–5 reload via ``util.centerline_io`` (no NPZ).
 
 ### Stage 4 — segmentation
 
-Build ``seg_4dflow.nii.gz`` from warped eICAB (stage 3) and ``ComplexDifference_3D``. **Arterial:** voxels copy ``eicab_in_4dflow`` where label > 0. **Venous:** same global vessel boolean mask as stage 3 (``flow_volume_masks.binary_vessel_segment_cd``), restricted to the **venous slab** (first ``round(ny/3)`` along axis 1) and where eICAB is zero; **0.5% area opening** on that raw venous foreground; then the **four largest** 3D connected components are labeled **31–34** in size order. CD positives outside the venous slab with no eICAB label are **not** written to the segmentation (no whole-volume label 30).
+**Centerline-backbone** ``seg_4dflow`` (does not paste raw eICAB). For each arterial/venous polyline loaded from ``centerlines_mask.nii.gz``, sample oblique cross-sections (default radius 10 vox), in-plane segmentation (fused MAG/CD/|V|, sliding threshold, 5% area open, central CC), then assemble into 3D:
+
+- ``--seg-assembly voxel`` (default): stamp masks along the centerline; optional between-plane blend via ``--seg-interp-level``.
+- ``--seg-assembly mesh``: sparse voxel stamp + distance-transform fill (~radius).
+
+Post-process with per-label 0.5% island removal. Venous vessels use stage-3 geometry-assigned centerlines and label ids.
 
 ### Stage 5 — LOC generation
 
-Per arterial label: midpoint voxel and tangent (`centerline_tangents`).
+QVTplus-style heuristics (`--loc-arterial-strategy qvtplus`, default): ICA/BA near common Z with circularity; main arteries at masked midpoint; venous SSSV/STRV/LTSV/RTSV with segment disambiguation (6-part Z-std, SVD alignment vs ``[0,1,1]``, swap validation). ``locs.csv`` includes ``segment_id``, ``centerline_index``, ``loc_circularity``, ``loc_cross_section_area_mm2``.
 
 ### Stage 6 — measurements
 
-Through-plane velocity time series and PI/RI via `nvitk.measure.hemodynamics`.
+Per LOC: in-plane segmentation at the LOC station → **per-vessel** ``loc_cross_section_area_mm2``; masked mean through-plane velocity on the plane per cardiac frame; flow \(Q = \bar{v}_\mathrm{plane} \cdot A / 1000\) ml/s; PI/RI on the flow time series. ``--no-measure-resegment`` can reuse area from stage 5 CSV when present.
 
 ## Cluster (SGE)
 
