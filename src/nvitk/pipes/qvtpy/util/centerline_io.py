@@ -75,7 +75,7 @@ def load_arterial_centerlines(
     min_points: int = 5,
     meta: dict[str, Any] | None = None,
 ) -> dict[int, Any]:
-    """Arterial centerlines keyed by eICAB label id."""
+    """Arterial centerlines keyed by qvtpy label id (see ``labels.QVTPY_ARTERIAL_LABEL_IDS``)."""
     stage3_dir = Path(stage3_dir)
     meta = meta or load_centerline_meta(stage3_dir)
     mask_path = centerlines_mask_path(stage3_dir)

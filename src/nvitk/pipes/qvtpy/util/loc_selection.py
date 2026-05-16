@@ -11,9 +11,9 @@ from nvitk.core.array import to_numpy
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy.util.cross_section import CrossSectionResult, segment_at_point
 from nvitk.pipes.qvtpy.labels import (
-    EICAB_BASILAR,
-    EICAB_LICA,
-    EICAB_RICA,
+    QVTPY_BASILAR,
+    QVTPY_LICA,
+    QVTPY_RICA,
     NAME_LTSV,
     NAME_RTSV,
     NAME_SSSV,
@@ -182,8 +182,8 @@ def _cross_section_at(
 def select_ica_ba_loc(
     polylines: dict[int, np.ndarray],
     *,
-    ica_ids: tuple[int, ...] = (EICAB_LICA, EICAB_RICA),
-    ba_id: int = EICAB_BASILAR,
+    ica_ids: tuple[int, ...] = (QVTPY_LICA, QVTPY_RICA),
+    ba_id: int = QVTPY_BASILAR,
     mag: np.ndarray | None = None,
     cd: np.ndarray | None = None,
     vel_mag: np.ndarray | None = None,
@@ -192,7 +192,7 @@ def select_ica_ba_loc(
     name_for_id: Any = None,
 ) -> list[LocRecord]:
     """Pick ICA/BA LOCs near common Z with best circularity."""
-    from nvitk.pipes.qvtpy.labels import eicab_vessel_name
+    from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
     targets = [i for i in (*ica_ids, ba_id) if i in polylines and polylines[i].shape[0] >= 3]
     if not targets:
@@ -220,7 +220,7 @@ def select_ica_ba_loc(
             if circ >= best_circ:
                 best_circ = circ
                 best_idx = int(idx)
-        vname = name_for_id(vid) if callable(name_for_id) else eicab_vessel_name(vid)
+        vname = name_for_id(vid) if callable(name_for_id) else qvtpy_vessel_name(vid)
         xs_final = _cross_section_at(
             pts,
             best_idx,
@@ -423,7 +423,7 @@ def select_arterial_locs(
     radius_vox: float = 10.0,
     strategy: str = "qvtplus",
 ) -> list[LocRecord]:
-    from nvitk.pipes.qvtpy.labels import eicab_vessel_name
+    from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
     if strategy != "qvtplus":
         out: list[LocRecord] = []
@@ -431,7 +431,7 @@ def select_arterial_locs(
             rec = select_main_vessel_loc(
                 pts,
                 vessel_id=vid,
-                vessel_name=eicab_vessel_name(vid),
+                vessel_name=qvtpy_vessel_name(vid),
                 mask=venous_mask,
                 mag=mag,
                 cd=cd,
@@ -443,7 +443,7 @@ def select_arterial_locs(
                 out.append(rec)
         return out
 
-    ica_ba = {EICAB_LICA, EICAB_RICA, EICAB_BASILAR}
+    ica_ba = {QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR}
     ica_polys = {k: v for k, v in arterial_polylines.items() if k in ica_ba}
     rest = {k: v for k, v in arterial_polylines.items() if k not in ica_ba}
 
@@ -459,7 +459,7 @@ def select_arterial_locs(
         rec = select_main_vessel_loc(
             pts,
             vessel_id=vid,
-            vessel_name=eicab_vessel_name(vid),
+            vessel_name=qvtpy_vessel_name(vid),
             mask=venous_mask,
             mag=mag,
             cd=cd,

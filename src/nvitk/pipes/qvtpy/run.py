@@ -10,7 +10,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
 - ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
 - ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
-- ``stage4`` — Centerline-backbone ``seg_4dflow`` (cross-section assembly; default voxel).
+- ``stage4`` — Local CD crop per vessel + threshold + optional region growing → ``seg_4dflow``.
 - ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
 - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
 
@@ -314,17 +314,25 @@ def _emit_stage0_convert(
     help="Stage3: FWHM shift on threshold curve (default on).",
 )
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
-@click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)
-@click.option("--eicab-bridge-open-radius", type=int, default=1, show_default=True)
+@click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
+@click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
 @click.option("--venous-min-branch-points", type=int, default=12, show_default=True)
+@click.option("--crop-padding-bbox", type=int, default=0, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
-    "--seg-assembly",
-    type=click.Choice(["voxel", "mesh"]),
-    default="voxel",
+    "--4dflow-thr-algorithm",
+    "thr_algorithm_4dflow",
+    type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
+    default="lsthr",
     show_default=True,
+    help="Stage4: local threshold on CD crop.",
 )
-@click.option("--seg-interp-level", type=int, default=0, show_default=True)
-@click.option("--seg-stride", type=int, default=1, show_default=True)
+@click.option(
+    "--region-growing/--no-region-growing",
+    default=True,
+    show_default=True,
+    help="Stage4: grow labels into unassigned high-CD voxels.",
+)
+@click.option("--rg-intensity-frac", type=float, default=0.5, show_default=True, help="Stage4: RG intensity factor.")
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 @click.option(
@@ -376,9 +384,10 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
-    seg_assembly: str,
-    seg_interp_level: int,
-    seg_stride: int,
+    crop_padding_bbox: int,
+    thr_algorithm_4dflow: str,
+    region_growing: bool,
+    rg_intensity_frac: float,
     cross_section_res: int,
     cross_section_plane_interp: int,
     loc_arterial_strategy: str,
@@ -510,12 +519,10 @@ def main(
                         nifti_root=nifti_root,
                         output_root=output_root,
                         skip_existing=skip_existing,
-                        seg_assembly=seg_assembly,  # type: ignore[arg-type]
-                        seg_interp_level=seg_interp_level,
-                        seg_stride=seg_stride,
-                        cross_section_res=cross_section_res,
-                        cross_section_plane_interp=cross_section_plane_interp,
-                        radius_vox=cross_section_radius_vox,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
                     )
                 except Exception as exc:
                     import traceback
@@ -676,11 +683,10 @@ def main(
                         skip_existing=skip_existing,
                         hold_jid=prev_jid,
                         emit=fh,
-                        seg_assembly=seg_assembly,
-                        seg_interp_level=seg_interp_level,
-                        seg_stride=seg_stride,
-                        cross_section_res=cross_section_res,
-                        cross_section_plane_interp=cross_section_plane_interp,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow,
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
                     )
                 except Exception as exc:
                     import traceback

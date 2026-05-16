@@ -1,4 +1,4 @@
-"""Shared 4D-flow contrast masks (complex-difference angiogram) for qvtpy stages 3–4."""
+"""Shared 4D-flow contrast masks (complex-difference angiogram) for qvtpy stage 3."""
 
 from __future__ import annotations
 

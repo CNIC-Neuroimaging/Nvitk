@@ -23,7 +23,7 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL
+from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL, relabel_eicab_mask_to_qvtpy
 from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskKind, resolve_eicab_mask
 from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
 from nvitk.pipes.qvtpy.util.mask_cleaning import (
@@ -72,7 +72,7 @@ def _rasterize_centerlines_mask(
     *,
     venous_label_by_name: dict[str, int],
 ) -> np.ndarray:
-    """Voxel mask: eICAB id on arterial points; venous region id on venous polylines."""
+    """Voxel mask: qvtpy arterial id on arterial points; venous id on venous polylines."""
     mask = np.zeros(shape, dtype=np.int32)
     for vid, pts in sorted(arterial.items()):
         p = as_backend_array(pts)
@@ -124,8 +124,8 @@ def run_subject(
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
-    eicab_min_island_fraction: float = 0.005,
-    eicab_bridge_open_radius: int = 1,
+    eicab_min_island_fraction: float = 0.05,
+    eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
 ) -> Path:
     # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
@@ -173,12 +173,11 @@ def run_subject(
     # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
-    labels_np =  (
-        clean_multilabel_islands(
-            labels_np,
-            min_fraction=eicab_min_island_fraction,
-            bridge_open_radius=eicab_bridge_open_radius,
-        )
+    labels_np = relabel_eicab_mask_to_qvtpy(labels_np)
+    labels_np = clean_multilabel_islands(
+        labels_np,
+        min_fraction=eicab_min_island_fraction,
+        bridge_open_radius=eicab_bridge_open_radius,
     )
 
     arterial_vol = np.where(venous_region, 0, labels_np)
@@ -228,6 +227,7 @@ def run_subject(
         "eicab_mask_fallback": eicab_res.fallback,
         "eicab_mask_fallback_reason": eicab_res.fallback_reason,
         "eicab_labels_source": str(eicab_res.path),
+        "arterial_label_scheme": "qvtpy",
         "arterial_labels": [int(k) for k in sorted(arterial.keys())],
         "venous_vessels": list(venous_branches.keys()),
         "venous_label_by_name": venous_label_by_name,

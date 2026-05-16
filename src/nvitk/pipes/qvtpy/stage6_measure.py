@@ -36,7 +36,7 @@ from nvitk.pipes.qvtpy.util.cross_section import (
     masked_plane_velocity_series,
     segment_at_point,
 )
-from nvitk.pipes.qvtpy.labels import eicab_vessel_name
+from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
 setup(globals())
 
@@ -159,7 +159,7 @@ def run_subject(
         reader = csv.DictReader(fh)
         for row in reader:
             vid = int(row["vessel_id"])
-            vname = (row.get("vessel_name") or "").strip() or eicab_vessel_name(vid)
+            vname = (row.get("vessel_name") or "").strip() or qvtpy_vessel_name(vid)
             center = np.array(
                 [
                     float(row["centerline_x"]),
