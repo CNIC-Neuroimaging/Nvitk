@@ -35,6 +35,7 @@ from typing import cast
 import click
 import numpy as np
 
+from nvitk.core.backend import using
 from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import ValidationError
 from nvitk.core.logger import Logger
@@ -523,30 +524,31 @@ def main(
     )
 
     try:
-        flowshow(
-            ap,
-            rl,
-            fh,
-            mask_img,
-            centerline_mask=centerline_img,
-            stride=stride,
-            timepoint=timepoint,
-            notebook=notebook,
-            show=not no_show,
-            show_all_labels=not single_label_eff,
-            max_glyphs=max_glyphs,
-            depth_peeling=depth_peeling,
-            vector=vec,
-            animation=anim,
-            dt_seconds=dt_seconds,
-            cross_section_volumes=cs_vols,
-            centerline_window=int(centerline_window),
-            cross_section_radius_vox=float(cross_section_radius_vox),
-            cross_section_res=int(cross_section_res),
-            show_gradient=show_gradient,
-            loc_records=loc_rows,
-            voxel_spacing_mm=voxel_sp_tuple,
-        )
+        with using("cpu"):
+            flowshow(
+                to_numpy(ap),
+                to_numpy(rl),
+                to_numpy(fh),
+                to_numpy(mask_img),
+                centerline_mask=to_numpy(centerline_img),
+                stride=stride,
+                timepoint=timepoint,
+                notebook=notebook,
+                show=not no_show,
+                show_all_labels=not single_label_eff,
+                max_glyphs=max_glyphs,
+                depth_peeling=depth_peeling,
+                vector=vec,
+                animation=anim,
+                dt_seconds=dt_seconds,
+                cross_section_volumes=cs_vols,
+                centerline_window=int(centerline_window),
+                cross_section_radius_vox=float(cross_section_radius_vox),
+                cross_section_res=int(cross_section_res),
+                show_gradient=show_gradient,
+                loc_records=loc_rows,
+                voxel_spacing_mm=voxel_sp_tuple,
+            )
     except ValidationError as exc:
         import traceback
         log.exception(traceback.format_exc())

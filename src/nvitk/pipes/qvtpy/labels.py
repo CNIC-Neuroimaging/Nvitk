@@ -152,6 +152,10 @@ QVTPY_ARTERIAL_LABEL_IDS: frozenset[int] = frozenset(
     lid for lid in QVTPY_ARTERIAL_ID_TO_NAME if int(lid) > 0
 )
 
+# Vessel groups for stage-4 bbox padding (array axes i=X, j=Y, k=Z).
+QVTPY_ICA_BASILAR_IDS: frozenset[int] = frozenset({QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR})
+QVTPY_ACA_IDS: frozenset[int] = frozenset({QVTPY_LACA, QVTPY_RACA})
+
 # =============================================================================
 # qvtpy — venous labels (fixed 31–34)
 # =============================================================================
@@ -360,9 +364,11 @@ __all__ = [
     "NAME_SSSV",
     "NAME_STRV",
     "QVTPY_ACOMM",
+    "QVTPY_ACA_IDS",
     "QVTPY_ARTERIAL_ID_TO_NAME",
     "QVTPY_ARTERIAL_LABEL_IDS",
     "QVTPY_ARTERIAL_NAME_TO_ID",
+    "QVTPY_ICA_BASILAR_IDS",
     "QVTPY_BACKGROUND",
     "QVTPY_BASILAR",
     "QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID",

@@ -316,13 +316,13 @@ def _emit_stage0_convert(
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
 @click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
-@click.option("--venous-min-branch-points", type=int, default=12, show_default=True)
-@click.option("--crop-padding-bbox", type=int, default=0, show_default=True, help="Stage4: bbox padding (vox).")
+@click.option("--venous-min-branch-points", type=int, default=5, show_default=True)
+@click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
     "--4dflow-thr-algorithm",
     "thr_algorithm_4dflow",
     type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
-    default="lsthr",
+    default="otsu",
     show_default=True,
     help="Stage4: local threshold on CD crop.",
 )
@@ -332,7 +332,11 @@ def _emit_stage0_convert(
     show_default=True,
     help="Stage4: grow labels into unassigned high-CD voxels.",
 )
-@click.option("--rg-intensity-frac", type=float, default=0.5, show_default=True, help="Stage4: RG intensity factor.")
+@click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True, help="Stage4: RG intensity factor.")
+@click.option("--cl-barrier-radius", type=int, default=2, show_default=True, help="Stage4: dilate other centerlines (vox).")
+@click.option("--rg-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other seg during RG (vox).")
+@click.option("--seg-min-island-fraction", type=float, default=0.05, show_default=True, help="Stage4: per-label island clean.")
+@click.option("--seg-bridge-open-radius", type=int, default=0, show_default=True, help="Stage4: bridge open before island clean.")
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 @click.option(
@@ -388,6 +392,10 @@ def main(
     thr_algorithm_4dflow: str,
     region_growing: bool,
     rg_intensity_frac: float,
+    cl_barrier_radius: int,
+    rg_barrier_radius: int,
+    seg_min_island_fraction: float,
+    seg_bridge_open_radius: int,
     cross_section_res: int,
     cross_section_plane_interp: int,
     loc_arterial_strategy: str,
@@ -523,6 +531,10 @@ def main(
                         thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
                         region_growing=region_growing,
                         rg_intensity_frac=rg_intensity_frac,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        seg_min_island_fraction=seg_min_island_fraction,
+                        seg_bridge_open_radius=seg_bridge_open_radius,
                     )
                 except Exception as exc:
                     import traceback
@@ -687,6 +699,10 @@ def main(
                         thr_algorithm=thr_algorithm_4dflow,
                         region_growing=region_growing,
                         rg_intensity_frac=rg_intensity_frac,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        seg_min_island_fraction=seg_min_island_fraction,
+                        seg_bridge_open_radius=seg_bridge_open_radius,
                     )
                 except Exception as exc:
                     import traceback

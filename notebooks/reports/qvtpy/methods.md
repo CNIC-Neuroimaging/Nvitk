@@ -126,7 +126,11 @@ Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on
 | `--crop-padding-bbox` | 4 | 3 |
 | `--4dflow-thr-algorithm {lsthr,lthr,otsu}` | 4 | `lsthr` |
 | `--region-growing` / `--no-region-growing` | 4 | growing **on** |
-| `--rg-intensity-frac` | 4 | 0.5 |
+| `--rg-intensity-frac` | 4 | 0.45 |
+| `--cl-barrier-radius` | 4 | 2 |
+| `--rg-barrier-radius` | 4 | 3 |
+| `--seg-min-island-fraction` | 4 | 0.005 |
+| `--seg-bridge-open-radius` | 4 | 0 |
 | `--cross-section-res`, `--cross-section-plane-interp` | 6 | 0 / 1 |
 | `--loc-arterial-strategy {qvtplus,midpoint}` | 5 | `qvtplus` |
 | `--cross-section-radius-vox` | 5, 6 | 10 |
@@ -323,17 +327,24 @@ Stage 4 builds a multilabel `seg_4dflow.nii.gz` from the full-volume **ComplexDi
 | `4DFlow/ComplexDifference_3D.nii.gz` | Intensity volume for thresholding and region growing |
 | `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Defines which labels exist and the spatial extent (bbox) of each vessel |
 
-Every integer label `> 0` in the centerline mask is processed (eICAB arterial ids **1–18** and venous ids **31–34**). Labels with no mask voxels are skipped.
+Every integer label `> 0` in the centerline mask is processed (qvtpy arterial ids **1–12** and venous ids **31–34**; see `labels.py`). Labels with no mask voxels are skipped.
 
-### 4.2 Per-vessel local crop
+### 4.2 Per-vessel local crop (asymmetric bbox)
 
-For each label `L` (processed in **ascending label order**):
+Array indices `(i, j, k)` are **(X, Y, Z)**. For each label `L` (ascending order):
 
-1. **ROI** = voxels where `centerlines_mask == L` (sparse centerline backbone from stage 3).
-2. **Bounding box** = axis-aligned min/max of ROI indices `(i, j, k)`, expanded by `--crop-padding-bbox` (default **3** voxels) and clamped to the volume.
+1. **ROI** = voxels where `centerlines_mask == L`.
+2. **Bounding box** = ROI min/max on each axis, expanded per face by vessel-specific padding (base `--crop-padding-bbox`, default **3** voxels) and clamped to the volume. Effective per-face values are stored in `segmentation_meta.json` under `face_padding`.
+
+| Vessel group | Label ids | Padding policy |
+|--------------|-----------|----------------|
+| ICA + Basilar | 1, 2, 3 | default on all faces except **Z+** (`pad_k_max = 0`) |
+| LMCA | 6 | **X−** restricted (`pad_i_min = 0`); **X+** extra **10** vox |
+| RMCA | 7 | **X+** restricted; **X−** extra **10** vox |
+| ACA | 4, 5 | **X−** and **X+** restricted; **Y−** extra **10** vox |
+| PCA, PComm, AComm, venous | 8–12, 31–34 | symmetric default padding |
+
 3. **CD crop** = `CD[i0:i1+1, j0:j1+1, k0:k1+1]`.
-
-The crop limits the intensity histogram to the vessel neighbourhood so thresholding is **local**, not dominated by the global CD dynamic range.
 
 ### 4.3 Local thresholding (`--4dflow-thr-algorithm`)
 
@@ -341,60 +352,63 @@ Thresholding runs **inside the crop only**. Small islands below **0.5%** of crop
 
 | Algorithm | Description |
 |-----------|-------------|
-| **`lsthr`** (default) | 3D sliding threshold on the crop (same method as stage 3 global CD: median 3³, occupancy curve, smooth width 10), **without** FWHM shift (`shift_hm_flag=False`). Uses the crop’s own maximum intensity. |
-| **`lthr`** | Same sliding threshold **with** FWHM shift on the curvature trace (more conservative, smaller mask). |
-| **`otsu`** | Otsu threshold on positive crop voxels (`skimage`). Failures (flat/empty crop) skip the vessel with a warning in `segmentation_meta.json`. |
+| **`lsthr`** (default) | 3D sliding threshold on the crop (median 3³, occupancy curve), **without** FWHM shift. |
+| **`lthr`** | Same with FWHM shift (more conservative). |
+| **`otsu`** | Otsu on positive crop voxels (`skimage`). |
 
-The binary crop mask is mapped back to full-volume indices. Voxels are assigned `seg = L` **only where `seg == 0`**. Because labels are processed in ascending order, **lower label ids claim overlapping space first**; later labels never overwrite existing segmentation.
+**Centerline barrier (paste):** before writing, voxels inside a **dilated** mask of *other* vessels’ centerlines (`--cl-barrier-radius`, default **2**) are forbidden even if `seg == 0`. This reduces threshold footprints crossing neighbouring skeleton corridors.
 
-### 4.4 Region growing (`--region-growing`, default on)
+Paste assigns `seg = L` only where `seg == 0` and not forbidden. Lower label ids still claim overlap first.
 
-Optional second pass: expand each vessel along high-CD paths into **unlabeled** voxels only.
+### 4.4 Per-label island cleaning
 
-After all vessels receive their threshold masks:
+After all vessels are pasted, `clean_multilabel_islands` runs on the full `seg` volume (`--seg-min-island-fraction`, default **0.005**; optional `--seg-bridge-open-radius`). Each label’s small disconnected components are removed before region growing.
 
-1. Process labels again in **ascending id order**.
-2. **Seeds** = all voxels currently labeled `L`.
-3. **6-connected BFS** on the full CD volume:
-   - A neighbour is eligible only if `seg[neighbour] == 0` (no interference with other vessels).
-   - Intensity gate: `CD[neighbour] >= grow_thresh` with  
+### 4.5 Region growing (`--region-growing`, default on)
+
+Second pass (ascending label order):
+
+1. **Seeds** = voxels with `seg == L` (after island clean).
+2. **6-connected BFS** on the full CD volume. A neighbour is eligible if:
+   - `seg[neighbour] == 0`
+   - **not** inside `dilate(seg == other_label)` (`--rg-barrier-radius`, default **3**) — blocks growth into bright rims beside other vessels
+   - `CD[neighbour] >= grow_thresh` with  
      `grow_thresh = max(mean(CD on seeds) × rg_intensity_frac, opt_thresh_local)`  
-     where `opt_thresh_local` is the sliding/Otsu threshold from step 4.3 for that vessel (or `0` if unavailable), and `--rg-intensity-frac` defaults to **0.5**.
+     (`--rg-intensity-frac` default **0.45**; `opt_thresh_local` from the crop threshold step).
 
-Accepted voxels are set to `L`. Growing cannot cross into another vessel’s territory because those voxels are already nonzero.
+Growing never overwrites another label id. Disable with `--no-region-growing`.
 
-Disable with `--no-region-growing` to keep only the local threshold footprints.
-
-### 4.5 Outputs
+### 4.6 Outputs
 
 | File | Content |
 |------|---------|
 | `seg_4dflow.nii.gz` | Multilabel 3D segmentation in 4D-flow grid |
-| `segmentation_meta.json` | `crop_padding_bbox`, `thr_algorithm`, `region_growing`, `rg_intensity_frac`, per-vessel `bbox`, `opt_thresh`, voxel counts before/after growing, warnings |
+| `segmentation_meta.json` | Global stage-4 flags + per-vessel `bbox`, `face_padding`, `opt_thresh`, voxel counts after threshold / island clean / growing |
 
-### 4.6 Stage 4 flow (diagram)
+### 4.7 Stage 4 flow (diagram)
 
 ```mermaid
 flowchart TB
   CD[ComplexDifference_3D] --> Loop
   CLM[centerlines_mask] --> Loop
   subgraph perLabel [Each label L ascending]
-    BBox[bbox from mask + padding]
-    Crop[CD crop]
-    Thr[lsthr / lthr / otsu]
-    Paste["seg=L where seg==0"]
+    BBox[asymmetric bbox]
+    BarrierCL[dilate other centerlines]
+    Crop[CD crop + threshold]
+    Paste["seg=L where free and not barrier"]
   end
-  Loop --> RG{region growing?}
-  RG -->|yes| Grow[BFS on CD into seg==0]
+  Loop --> Clean[clean_multilabel_islands]
+  Clean --> RG{region growing?}
+  RG -->|yes| Grow["BFS: seg==0, not dilate other seg, CD gate"]
   RG -->|no| Out[seg_4dflow.nii.gz]
   Grow --> Out
 ```
 
-### 4.7 Practical notes
+### 4.8 Practical notes
 
-- **Sparse centerline bbox:** padding is required so the crop includes vessel surroundings; default 3 voxels.
-- **Order effects:** ascending label id controls both paste priority and which vessel expands first into shared high-CD corridors.
-- **Partial field of view:** only labels present in `centerlines_mask` are segmented; absent sinuses produce no `seg` voxels for that id.
+- **Sparse centerline bbox:** per-vessel face padding limits crops extending into neighbouring territories (especially ICA/Basilar superior, MCA/ACA lateral).
+- **Order effects:** ascending label id controls paste priority; barriers reduce but do not remove all order sensitivity.
+- **Partial field of view:** only labels present in `centerlines_mask` are segmented.
 
 ---
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 import click
 
@@ -25,6 +25,7 @@ from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     ThrAlgorithm,
+    VESSEL_EXTRA_PADDING,
     build_seg_4dflow_local,
     vessel_stats_to_dict,
 )
@@ -61,8 +62,40 @@ def _cd_path(nifti_root: Path, subject: str) -> Path:
     raise FileNotFoundError(f"Missing ComplexDifference_3D for {subject}")
 
 
+def _segmentation_meta(
+    *,
+    subject: str,
+    nifti_root: Path,
+    cl_path: Path,
+    crop_padding_bbox: int,
+    thr_algorithm: str,
+    region_growing: bool,
+    rg_intensity_frac: float,
+    cl_barrier_radius: int,
+    rg_barrier_radius: int,
+    seg_min_island_fraction: float,
+    seg_bridge_open_radius: int,
+    vessels: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "subject": subject,
+        "complex_difference": str(_cd_path(nifti_root, subject)),
+        "centerlines_mask": str(cl_path),
+        "crop_padding_bbox": int(crop_padding_bbox),
+        "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
+        "thr_algorithm": thr_algorithm,
+        "region_growing": bool(region_growing),
+        "rg_intensity_frac": float(rg_intensity_frac),
+        "cl_barrier_radius": int(cl_barrier_radius),
+        "rg_barrier_radius": int(rg_barrier_radius),
+        "seg_min_island_fraction": float(seg_min_island_fraction),
+        "seg_bridge_open_radius": int(seg_bridge_open_radius),
+        "vessels": vessels,
+    }
+
+
 # ---------------------------------------------------------------------------
-# Stage 4: local CD crop + threshold + region growing
+# Stage 4: local CD crop + threshold + island clean + region growing
 # ---------------------------------------------------------------------------
 
 
@@ -75,7 +108,11 @@ def run_subject(
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
     region_growing: bool = True,
-    rg_intensity_frac: float = 0.5,
+    rg_intensity_frac: float = 0.45,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    seg_min_island_fraction: float = 0.005,
+    seg_bridge_open_radius: int = 0,
 ) -> Path:
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
@@ -104,21 +141,29 @@ def run_subject(
         thr_algorithm=thr_algorithm,
         region_growing=bool(region_growing),
         rg_intensity_frac=float(rg_intensity_frac),
+        cl_barrier_radius=int(cl_barrier_radius),
+        rg_barrier_radius=int(rg_barrier_radius),
+        seg_min_island_fraction=float(seg_min_island_fraction),
+        seg_bridge_open_radius=int(seg_bridge_open_radius),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
     meta_path.write_text(
         json.dumps(
-            {
-                "subject": subject,
-                "complex_difference": str(_cd_path(nifti_root, subject)),
-                "centerlines_mask": str(cl_path),
-                "crop_padding_bbox": int(crop_padding_bbox),
-                "thr_algorithm": thr_algorithm,
-                "region_growing": bool(region_growing),
-                "rg_intensity_frac": float(rg_intensity_frac),
-                "vessels": [vessel_stats_to_dict(st) for st in result.vessel_stats],
-            },
+            _segmentation_meta(
+                subject=subject,
+                nifti_root=nifti_root,
+                cl_path=cl_path,
+                crop_padding_bbox=crop_padding_bbox,
+                thr_algorithm=thr_algorithm,
+                region_growing=region_growing,
+                rg_intensity_frac=rg_intensity_frac,
+                cl_barrier_radius=cl_barrier_radius,
+                rg_barrier_radius=rg_barrier_radius,
+                seg_min_island_fraction=seg_min_island_fraction,
+                seg_bridge_open_radius=seg_bridge_open_radius,
+                vessels=[vessel_stats_to_dict(st) for st in result.vessel_stats],
+            ),
             indent=2,
         ),
         encoding="utf-8",
@@ -130,6 +175,32 @@ def run_subject(
 # ---------------------------------------------------------------------------
 # CLI + SGE submission
 # ---------------------------------------------------------------------------
+
+
+def _stage4_cli_options(func):  # type: ignore[no-untyped-def]
+    func = click.option("--subject", required=True)(func)
+    func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
+    func = click.option("--skip-existing", is_flag=True, default=False)(func)
+    func = click.option("--crop-padding-bbox", type=int, default=3, show_default=True)(func)
+    func = click.option(
+        "--4dflow-thr-algorithm",
+        "thr_algorithm",
+        type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
+        default="lsthr",
+        show_default=True,
+    )(func)
+    func = click.option(
+        "--region-growing/--no-region-growing",
+        default=True,
+        show_default=True,
+    )(func)
+    func = click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True)(func)
+    func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
+    func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)
+    func = click.option("--seg-min-island-fraction", type=float, default=0.005, show_default=True)(func)
+    func = click.option("--seg-bridge-open-radius", type=int, default=0, show_default=True)(func)
+    return func
 
 
 def submit_subject_sge(
@@ -145,7 +216,11 @@ def submit_subject_sge(
     crop_padding_bbox: int = 3,
     thr_algorithm: str = "lsthr",
     region_growing: bool = True,
-    rg_intensity_frac: float = 0.5,
+    rg_intensity_frac: float = 0.45,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    seg_min_island_fraction: float = 0.005,
+    seg_bridge_open_radius: int = 0,
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -165,6 +240,14 @@ def submit_subject_sge(
         shlex.quote(str(thr_algorithm).lower()),
         "--rg-intensity-frac",
         str(float(rg_intensity_frac)),
+        "--cl-barrier-radius",
+        str(int(cl_barrier_radius)),
+        "--rg-barrier-radius",
+        str(int(rg_barrier_radius)),
+        "--seg-min-island-fraction",
+        str(float(seg_min_island_fraction)),
+        "--seg-bridge-open-radius",
+        str(int(seg_bridge_open_radius)),
     ]
     if region_growing:
         parts.append("--region-growing")
@@ -200,26 +283,7 @@ def submit_subject_sge(
 
 
 @click.command("qvtpy-stage4-seg")
-@click.option("--subject", required=True)
-@click.option("--nifti-root", type=click.Path(path_type=Path), required=True)
-@click.option("--output-root", type=click.Path(path_type=Path), required=True)
-@click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--crop-padding-bbox", type=int, default=0, show_default=True)
-@click.option(
-    "--4dflow-thr-algorithm",
-    "thr_algorithm",
-    type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
-    default="lsthr",
-    show_default=True,
-    help="lsthr: local sliding threshold (no FWHM); lthr: with FWHM; otsu: Otsu on crop.",
-)
-@click.option(
-    "--region-growing/--no-region-growing",
-    default=True,
-    show_default=True,
-    help="Expand each label along high CD into unlabeled voxels only.",
-)
-@click.option("--rg-intensity-frac", type=float, default=0.5, show_default=True)
+@_stage4_cli_options
 def main(
     subject: str,
     nifti_root: Path,
@@ -229,6 +293,10 @@ def main(
     thr_algorithm: str,
     region_growing: bool,
     rg_intensity_frac: float,
+    cl_barrier_radius: int,
+    rg_barrier_radius: int,
+    seg_min_island_fraction: float,
+    seg_bridge_open_radius: int,
 ) -> None:
     Logger()
     run_subject(
@@ -240,6 +308,10 @@ def main(
         thr_algorithm=thr_algorithm.lower(),  # type: ignore[arg-type]
         region_growing=region_growing,
         rg_intensity_frac=rg_intensity_frac,
+        cl_barrier_radius=cl_barrier_radius,
+        rg_barrier_radius=rg_barrier_radius,
+        seg_min_island_fraction=seg_min_island_fraction,
+        seg_bridge_open_radius=seg_bridge_open_radius,
     )
 
 
