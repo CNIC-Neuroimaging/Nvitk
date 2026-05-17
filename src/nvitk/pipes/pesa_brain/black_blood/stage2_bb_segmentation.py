@@ -40,7 +40,7 @@ def run_subject(
     eicab_results_root: Path,
     seg_strategy: SegStrategy,
     skip_existing: bool = False,
-    wvi_rel: str | None = None,
+    vwi_bb_rel: str | None = None,
     eicab_subdir: str | None = None,
     thr_algorithm: ThrAlgorithm = "otsu",
     crop_padding_bbox: int = 3,
@@ -50,15 +50,15 @@ def run_subject(
     rg_barrier_radius: int = 2,
     min_centerline_points: int = 5,
 ) -> Path:
-    """Build centerlines and segment WVI in TOF space."""
+    """Build centerlines and segment vwi_bb in TOF space."""
     meta = _load_stage1_meta(output_root, subject)
     fixed = Path(meta["fixed"])
     mat = Path(meta["matrix"])
-    wvi_warped = paths.wvi_warped_path(output_root, subject)
-    if not wvi_warped.is_file():
-        wvi_warped = Path(meta.get("warped") or "")
-    if not wvi_warped.is_file():
-        raise FileNotFoundError(f"Missing warped WVI for {subject}: {wvi_warped}")
+    vwi_warped = paths.vwi_bb_warped_path(output_root, subject)
+    if not vwi_warped.is_file():
+        vwi_warped = Path(meta.get("warped") or "")
+    if not vwi_warped.is_file():
+        raise FileNotFoundError(f"Missing warped vwi_bb for {subject}: {vwi_warped}")
 
     eicab_cw = paths.eicab_cw_mask_path(
         eicab_results_root, subject, eicab_subdir=eicab_subdir
@@ -77,11 +77,11 @@ def run_subject(
         skip_existing=skip_existing,
     )
 
-    wvi_img = imread(wvi_warped)
+    vwi_img = imread(vwi_warped)
     cl_img = imread(out_dir / "centerlines_mask.nii.gz")
 
     run_bb_segmentation(
-        wvi_img.data,
+        vwi_img.data,
         cl_img.data,
         out_dir,
         strategy=seg_strategy,
@@ -118,7 +118,8 @@ def run_subject(
     type=click.Path(path_type=Path, exists=True),
     default=None,
 )
-@click.option("--wvi-rel-path", default=None)
+@click.option("--vwi-bb-rel-path", default=None)
+@click.option("--wvi-rel-path", default=None, hidden=True)
 @click.option("--eicab-subdir", default=None)
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option(
@@ -137,6 +138,7 @@ def main(
     nifti_root: Path | None,
     output_root: Path | None,
     eicab_results_root: Path | None,
+    vwi_bb_rel_path: str | None,
     wvi_rel_path: str | None,
     eicab_subdir: str | None,
     skip_existing: bool,
@@ -150,9 +152,8 @@ def main(
     """CLI: BB segmentation in TOF space."""
     nifti = paths.require_path(nifti_root or cfg.DEFAULT_NIFTI_ROOT, "nifti_root")
     out = paths.require_path(output_root or cfg.DEFAULT_RESULTS_ROOT, "output_root")
-    eicab = paths.require_path(
-        eicab_results_root or cfg.DEFAULT_EICAB_RESULTS_ROOT, "eicab_results_root"
-    )
+    eicab = paths.resolve_eicab_results_root(eicab_results_root)
+    rel = vwi_bb_rel_path or wvi_rel_path
     run_subject(
         subject,
         nifti_root=nifti,
@@ -160,7 +161,7 @@ def main(
         eicab_results_root=eicab,
         seg_strategy=seg_strategy,  # type: ignore[arg-type]
         skip_existing=skip_existing,
-        wvi_rel=wvi_rel_path,
+        vwi_bb_rel=rel,
         eicab_subdir=eicab_subdir,
         thr_algorithm=thr_algorithm,  # type: ignore[arg-type]
         crop_padding_bbox=crop_padding_bbox,

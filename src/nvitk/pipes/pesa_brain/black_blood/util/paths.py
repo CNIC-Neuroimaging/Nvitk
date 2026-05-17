@@ -8,6 +8,10 @@ from nvitk.pipes.pesa_brain.black_blood import config as cfg
 
 _CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
 
+# Legacy stage1 output names (pre vwi_bb rename).
+_LEGACY_WARPED = "WVI_warped_to_tof.nii.gz"
+_LEGACY_MATRIX = "wvi_to_tof.mat"
+
 
 def _stem_without_suffix(p: Path) -> str:
     if p.name.endswith(".nii.gz"):
@@ -56,7 +60,7 @@ def require_path(value: Path | None, name: str) -> Path:
     if value is None:
         raise ValueError(
             f"{name} is not set. Pass --{name.replace('_', '-')} on the CLI or set "
-            f"nvitk.pipes.pesa_brain.black_blood.config.{name.upper()}."
+            f"nvitk.pipes.pesa_brain.black_blood.config."
         )
     p = Path(value)
     if not p.exists():
@@ -64,25 +68,58 @@ def require_path(value: Path | None, name: str) -> Path:
     return p
 
 
-def require_wvi_rel_path(wvi_rel: str | None) -> str:
-    rel = (wvi_rel or cfg.WVI_REL_PATH or "").strip()
+def resolve_eicab_results_root(eicab_results_root: Path | None) -> Path:
+    root = eicab_results_root or cfg.DEFAULT_EICAB_RESULTS_ROOT or cfg.DEFAULT_QVTPY_RESULTS_ROOT
+    return require_path(root, "eicab_results_root")
+
+
+def require_vwi_bb_rel_path(vwi_bb_rel: str | None) -> str:
+    rel = (vwi_bb_rel or cfg.VWI_BB_REL_PATH or cfg.WVI_REL_PATH or "").strip()
     if not rel:
         raise ValueError(
-            "WVI relative path is not set. Pass --wvi-rel-path or set "
-            "black_blood.config.WVI_REL_PATH (e.g. BlackBlood/WVI.nii.gz)."
+            "VWI_BB relative path is not set. Pass --vwi-bb-rel-path or set "
+            "black_blood.config.VWI_BB_REL_PATH."
         )
     return rel
 
 
-def wvi_path(nifti_root: Path, subject: str, *, wvi_rel: str | None = None) -> Path:
-    rel = require_wvi_rel_path(wvi_rel)
+def vwi_bb_path(
+    nifti_root: Path,
+    subject: str,
+    *,
+    vwi_bb_rel: str | None = None,
+) -> Path:
+    rel = require_vwi_bb_rel_path(vwi_bb_rel)
     p = nifti_root / subject / rel
     if not p.is_file():
-        alt = p.with_suffix("") if p.suffix == ".gz" else None
-        if alt is not None and alt.is_file():
-            return alt
-        raise FileNotFoundError(f"WVI not found for {subject}: {p}")
+        raise FileNotFoundError(f"vwi_bb not found for {subject}: {p}")
     return p
+
+
+def wvi_path(
+    nifti_root: Path,
+    subject: str,
+    *,
+    wvi_rel: str | None = None,
+) -> Path:
+    """Deprecated alias for :func:`vwi_bb_path`."""
+    return vwi_bb_path(nifti_root, subject, vwi_bb_rel=wvi_rel)
+
+
+def require_wvi_rel_path(wvi_rel: str | None) -> str:
+    """Deprecated alias for :func:`require_vwi_bb_rel_path`."""
+    return require_vwi_bb_rel_path(wvi_rel)
+
+
+def qvtpy_tof_path(qvtpy_nifti_root: Path, subject: str) -> Path:
+    """qvtpy stage0 TOF magnitude (validation / QC)."""
+    for name in ("TOF.nii.gz", "TOF.nii"):
+        p = qvtpy_nifti_root / subject / "TOF" / name
+        if p.is_file():
+            return p
+    raise FileNotFoundError(
+        f"No qvtpy TOF under {qvtpy_nifti_root / subject / 'TOF'}"
+    )
 
 
 def eicab_subject_dir(
@@ -91,7 +128,7 @@ def eicab_subject_dir(
     *,
     eicab_subdir: str | None = None,
 ) -> Path:
-    sub = (eicab_subdir or cfg.EICAB_SUBDIR).strip() or "eicab"
+    sub = (eicab_subdir or cfg.QVTPY_EICAB_SUBDIR or cfg.EICAB_SUBDIR).strip() or "eicab"
     return eicab_results_root / subject / sub
 
 
@@ -139,9 +176,28 @@ def registration_meta_path(output_root: Path, subject: str) -> Path:
     return stage1_dir(output_root, subject) / "registration_meta.json"
 
 
-def wvi_warped_path(output_root: Path, subject: str) -> Path:
-    return stage1_dir(output_root, subject) / "WVI_warped_to_tof.nii.gz"
+def vwi_bb_warped_path(output_root: Path, subject: str) -> Path:
+    stage1 = stage1_dir(output_root, subject)
+    p = stage1 / "vwi_bb_warped_to_tof.nii.gz"
+    if p.is_file():
+        return p
+    legacy = stage1 / _LEGACY_WARPED
+    if legacy.is_file():
+        return legacy
+    return p
 
 
 def registration_matrix_path(output_root: Path, subject: str) -> Path:
-    return stage1_dir(output_root, subject) / "wvi_to_tof.mat"
+    stage1 = stage1_dir(output_root, subject)
+    p = stage1 / "vwi_bb_to_tof.mat"
+    if p.is_file():
+        return p
+    legacy = stage1 / _LEGACY_MATRIX
+    if legacy.is_file():
+        return legacy
+    return p
+
+
+def wvi_warped_path(output_root: Path, subject: str) -> Path:
+    """Deprecated alias for :func:`vwi_bb_warped_path`."""
+    return vwi_bb_warped_path(output_root, subject)

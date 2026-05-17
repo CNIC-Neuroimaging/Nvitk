@@ -24,10 +24,13 @@ from nvitk.morphology.components import label_connected, remove_small_components
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
+    QVTPY_BASILAR,
+    QVTPY_COMM_IDS,
     QVTPY_ICA_BASILAR_IDS,
     QVTPY_LACA,
     QVTPY_LICA,
     QVTPY_LMCA,
+    QVTPY_NON_COMM_ARTERIAL_IDS,
     QVTPY_RACA,
     QVTPY_RG_EXPLORE_MORE_IDS,
     QVTPY_RG_INTENSITY_FRAC_VENOUS,
@@ -36,6 +39,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_SMALL_ARTERIAL_IDS,
     QVTPY_VENOUS_LABEL_IDS,
 )
+from nvitk.pipes.qvtpy.util.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
 from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
 from nvitk.segmentation.region_growing import region_grow_into_label_volume
@@ -134,6 +138,7 @@ class LocalSegResult:
     segmentation: np.ndarray
     vessel_stats: list[VesselSegStats] = field(default_factory=list)
     aca_sequential_grow: AcaSequentialGrowInfo | None = None
+    vertebral_split: VertebralSplitResult | None = None
 
 
 def crop_min_fraction_for_label(label_id: int) -> float:
@@ -173,8 +178,11 @@ def rg_intensity_frac_for_label(
 
 
 def region_growing_enabled_for_label(label_id: int) -> bool:
-    """Whether region growing runs for this label (STRV is skipped)."""
-    return int(label_id) not in QVTPY_RG_SKIP_LABEL_IDS
+    """Whether region growing runs for this label (all venous and comm are skipped)."""
+    lid = int(label_id)
+    if lid in QVTPY_RG_SKIP_LABEL_IDS or lid in QVTPY_COMM_IDS:
+        return False
+    return True
 
 
 def bbox_padding_for_label(label_id: int, default_pad: int) -> BboxFacePadding:
@@ -386,6 +394,52 @@ def _region_grow_vessel(
     )
 
 
+def _other_segmentation_barrier_undilated(seg: np.ndarray, label_id: int) -> np.ndarray:
+    """Forbidden mask: any other label (no dilation)."""
+    return _dilated_other_segmentation_barrier(seg, label_id, radius=0)
+
+
+def _segment_communicating_rg_only(
+    seg: np.ndarray,
+    cd: np.ndarray,
+    centerlines_mask: np.ndarray,
+    *,
+    comm_label_ids: list[int],
+    rg_intensity_frac: float,
+    rg_intensity_frac_explore: float,
+    stats_by_id: dict[int, VesselSegStats],
+) -> None:
+    """Seed comm arteries from centerlines and region-grow with undilated barriers."""
+    clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    for lid in comm_label_ids:
+        if not np.any(clm == lid):
+            continue
+        seg[clm == lid] = int(lid)
+        frac = rg_intensity_frac_for_label(
+            lid,
+            default_frac=rg_intensity_frac,
+            explore_frac=rg_intensity_frac_explore,
+            venous_fracs=None,
+        )
+        forbidden = _other_segmentation_barrier_undilated(seg, lid)
+        _region_grow_vessel(
+            seg,
+            cd,
+            lid,
+            rg_intensity_frac=frac,
+            rg_abs_floor=None,
+            forbidden=forbidden,
+        )
+        st = stats_by_id.get(lid)
+        if st is not None:
+            st.thr_algorithm = "centerline_rg_only"
+            st.region_growing_applied = True
+            st.rg_intensity_frac_used = float(frac)
+            st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
+            st.n_voxels_after_threshold = int(np.count_nonzero(seg == lid))
+            st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
+
+
 def build_seg_4dflow_local(
     cd: np.ndarray,
     centerlines_mask: np.ndarray,
@@ -415,13 +469,15 @@ def build_seg_4dflow_local(
     seg = np.zeros(shape, dtype=np.int32)
 
     label_ids = sorted(int(v) for v in np.unique(clm) if int(v) > 0)
+    phase1_ids = [lid for lid in label_ids if lid not in QVTPY_COMM_IDS]
+    comm_ids = [lid for lid in label_ids if lid in QVTPY_COMM_IDS]
     stats: list[VesselSegStats] = []
     opt_thresh_by_label: dict[int, float | None] = {}
     cl_rad = max(0, int(cl_barrier_radius))
     rg_rad = max(0, int(rg_barrier_radius))
     venous_rg = resolve_venous_rg_intensity_fracs(venous_rg_intensity_fracs)
 
-    for lid in label_ids:
+    for lid in phase1_ids:
         roi = clm == lid
         bbox_out = _bbox_with_vessel_padding(roi, shape, lid, default_pad=crop_padding_bbox)
         if bbox_out is None:
@@ -507,7 +563,14 @@ def build_seg_4dflow_local(
 
         for st in stats:
             lid = st.label_id
+            if lid in QVTPY_COMM_IDS:
+                continue
             if use_aca_sequential and lid in QVTPY_ACA_IDS:
+                continue
+            if lid not in QVTPY_NON_COMM_ARTERIAL_IDS:
+                st.region_growing_applied = False
+                st.rg_intensity_frac_used = None
+                st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
                 continue
             if not region_growing_enabled_for_label(lid):
                 st.region_growing_applied = False
@@ -536,10 +599,47 @@ def build_seg_4dflow_local(
             st.rg_intensity_frac_used = float(frac)
             st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
 
+    vertebral_info: VertebralSplitResult | None = None
+    if int(QVTPY_BASILAR) in stats_by_id and np.any(seg == int(QVTPY_BASILAR)):
+        seg, vertebral_info = split_vertebral_from_basilar(seg)
+        for lid in (QVTPY_BASILAR,):
+            st = stats_by_id.get(int(lid))
+            if st is not None:
+                st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
+                st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
+
+    if region_growing and comm_ids:
+        for lid in comm_ids:
+            fp = bbox_padding_for_label(lid, crop_padding_bbox)
+            stats.append(
+                VesselSegStats(
+                    label_id=lid,
+                    bbox=(0, 0, 0, 0, 0, 0),
+                    face_padding=fp,
+                    thr_algorithm="centerline_rg_only",
+                    opt_thresh=None,
+                    n_voxels_after_threshold=0,
+                    n_voxels_after_island_clean=0,
+                    n_voxels_after_region_growing=0,
+                    region_growing_applied=False,
+                )
+            )
+            stats_by_id[lid] = stats[-1]
+        _segment_communicating_rg_only(
+            seg,
+            cd,
+            clm,
+            comm_label_ids=comm_ids,
+            rg_intensity_frac=rg_intensity_frac,
+            rg_intensity_frac_explore=rg_intensity_frac_explore,
+            stats_by_id=stats_by_id,
+        )
+
     return LocalSegResult(
         segmentation=as_backend_array(seg.astype(np.int32, copy=False)),
         vessel_stats=stats,
         aca_sequential_grow=aca_sequential_info,
+        vertebral_split=vertebral_info,
     )
 
 

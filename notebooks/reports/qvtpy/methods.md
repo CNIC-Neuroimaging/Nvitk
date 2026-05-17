@@ -372,7 +372,9 @@ After all vessels are pasted, each label keeps **only its largest 3D connected c
 
 ### 4.5 Region growing (`--region-growing`, default on)
 
-Second pass (ascending label order). **STRV (id 32) never region-grows** (threshold footprint only). **SSSV / LTSV / RTSV** use per-sinus `--rg-intensity-frac-sssv`, `--rg-intensity-frac-ltsv`, `--rg-intensity-frac-rtsv` (defaults **0.40 / 0.38 / 0.38**).
+Second pass on **non-communicating arterial** labels (ICA, ACA, MCA, PCA, Basilar). **All venous labels (31–34) never region-grow** (local threshold + largest-CC only). **Communicating arteries (LPCOMM, RPCOMM, ACOMM)** are handled in §4.5b after vertebral split.
+
+Per-sinus `--rg-intensity-frac-*` CLI flags are **deprecated no-ops**.
 
 **Intensity gate (`--rg-intensity-frac`):** for each vessel, seeds are current `seg == L` voxels. Let `μ` = mean CD on seeds and `t_loc` = local threshold from §4.3. A neighbour is intensity-eligible when:
 
@@ -389,12 +391,17 @@ Defaults: **`--rg-intensity-frac` 0.45** (most vessels); **`--rg-intensity-frac-
 
 Growing never overwrites another label id. Disable with `--no-region-growing`.
 
+### 4.5b Communicating arteries, vertebral split, comm RG
+
+**Order:** (1) threshold + paste for all labels except comm; (2) largest-CC; (3) arterial RG + ACA sequential; (4) **vertebral split** on Basilar (`util/vertebral_split.py`): skeleton bifurcation at inferior **k**, branches assigned **LVA (13)** / **RVA (14)** by **Y midline** (`j < ny/2` → LVA); writes `vertebral_split.json` when split applies; (5) **comm arteries last**: centerline voxels seeded, 6-connected RG only, barriers = other labels **without dilation**.
+
 ### 4.6 Outputs
 
 | File | Content |
 |------|---------|
 | `seg_4dflow.nii.gz` | Multilabel 3D segmentation in 4D-flow grid |
 | `segmentation_meta.json` | Global stage-4 flags + per-vessel `bbox`, `face_padding`, `opt_thresh`, voxel counts after threshold / island clean / growing |
+| `vertebral_split.json` | Optional LVA/RVA bifurcation metadata and centerline polylines for stage 5 |
 
 ### 4.7 Stage 4 flow (diagram)
 
@@ -456,7 +463,7 @@ Opt-in stage (not in default `nvitk-qvtpy` stages): `--stages stage3,stage4t`. S
 
 Reads stage-3 centerlines and contrast volumes; writes `locs.csv` / `locs.xlsx`.
 
-**Arterial** (`--loc-arterial-strategy qvtpy`, default): masked midpoint along each polyline; for ICA, ACA, MCA, and PCA also emit **init** (`segment_id=0`) and **fin** (`segment_id=1`) LOCs near the proximal/distal ends (inset via `--loc-endpoint-inset-frac`, default `0.08`). Basilar and communicating arteries keep a single midpoint LOC.
+**Arterial** (`--loc-arterial-strategy qvtpy`, default): ordered centerline indices split into equal-length sections — **three** sections for ICA/ACA/MCA/PCA/Basilar/LVA/RVA (init at 1st|2nd boundary, fin at 2nd|3rd); **two** sections for other arteries (single LOC at the half boundary). Stage 5 merges **LVA/RVA** polylines from `stage4_4dflow_segmentation/vertebral_split.json` when present. `--loc-endpoint-inset-frac` is deprecated.
 
 **Stage 6 reporting:** `loc_mean_velocity_mm_s`, `loc_mean_flow_ml_s`, and per-timepoint velocity/flow columns are stored as **magnitudes** (absolute values); PI/RI are sign-invariant.
 

@@ -119,8 +119,9 @@ def run_subject(
         log.info(f"[{subject}] stage5 loc: skip -> {out_dir}")
         return out_dir
 
+    s4 = output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
+    arterial, venous, cl_meta = load_centerlines(s3, min_points=5, stage4_dir=s4)
     meta = load_centerline_meta(s3)
-    arterial, venous, _ = load_centerlines(s3, min_points=5)
 
     mag, cd, vel_mag, voxel_spacing = _load_contrast_volumes(nifti_root, subject)
 
@@ -196,6 +197,7 @@ def run_subject(
                 "loc_arterial_strategy": loc_arterial_strategy,
                 "loc_endpoint_inset_frac": float(loc_endpoint_inset_frac),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
+                "centerline_meta_source": cl_meta.get("source", "stage3"),
                 **arterial_meta,
             },
             indent=2,

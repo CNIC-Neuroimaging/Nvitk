@@ -12,6 +12,7 @@ from nvitk.morphology.centerline import centerline_tangents
 from nvitk.measure.cross_section import CrossSectionResult, segment_at_point
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_ACA_IDS,
+    QVTPY_BASILAR,
     QVTPY_ICA_BASILAR_IDS,
     QVTPY_MCA_IDS,
     QVTPY_PCA_IDS,
@@ -27,9 +28,9 @@ from nvitk.pipes.qvtpy.labels import (
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
-# ICA, ACA, MCA, PCA: dual init/fin LOCs under qvtpy strategy.
-QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = (
-    QVTPY_ICA_BASILAR_IDS | QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
+# ICA, ACA, MCA, PCA: dual init/fin LOCs; basilar and vertebral arteries use midpoint only.
+QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset(
+    (QVTPY_ICA_BASILAR_IDS - {QVTPY_BASILAR}) | QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
 )
 
 
@@ -77,47 +78,134 @@ def split_into_parts(points: np.ndarray, n_parts: int) -> list[np.ndarray]:
     return parts
 
 
+def pick_equal_section_boundary_indices(n: int, n_sections: int) -> list[int]:
+    """Return ``n_sections - 1`` boundary indices between equal-length index groups."""
+    if n < 1 or n_sections < 2:
+        return []
+    edges = np.linspace(0, n, int(n_sections) + 1, dtype=int)
+    boundaries = [int(edges[i]) for i in range(1, int(n_sections))]
+    return [min(max(0, b), n - 1) for b in boundaries]
+
+
+def polyline_cumulative_arc_length(points: np.ndarray) -> np.ndarray:
+    """Cumulative Euclidean arc length along *points* (N,3), starting at 0."""
+    pts = to_numpy(points).astype(np.float64)
+    if pts.shape[0] < 2:
+        return np.zeros(pts.shape[0], dtype=np.float64)
+    seg_len = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(seg_len)])
+
+
+def pick_index_at_arc_fraction(points: np.ndarray, frac: float) -> int:
+    """Polyline index closest to *frac* of total arc length (0=start, 1=end)."""
+    pts = to_numpy(points)
+    n = pts.shape[0]
+    if n < 1:
+        return 0
+    cum = polyline_cumulative_arc_length(pts)
+    total = float(cum[-1])
+    if total <= 0.0:
+        return int(n // 2)
+    target = float(np.clip(frac, 0.0, 1.0)) * total
+    idx = int(np.searchsorted(cum, target, side="left"))
+    return int(np.clip(idx, 0, n - 1))
+
+
+def pick_dual_loc_indices(n: int, points: np.ndarray | None = None) -> tuple[int, int] | None:
+    """Init/fin LOCs at ⅓ and ⅔ arc length (falls back to equal index tertiles)."""
+    if points is not None:
+        pts = to_numpy(points)
+        if pts.shape[0] >= 3:
+            init_idx = pick_index_at_arc_fraction(pts, 1.0 / 3.0)
+            fin_idx = pick_index_at_arc_fraction(pts, 2.0 / 3.0)
+            if init_idx < fin_idx:
+                return init_idx, fin_idx
+    if n < 3:
+        return None
+    bounds = pick_equal_section_boundary_indices(n, 3)
+    if len(bounds) != 2:
+        return None
+    init_idx, fin_idx = bounds[0], bounds[1]
+    if init_idx >= fin_idx:
+        return None
+    return init_idx, fin_idx
+
+
+def pick_mid_loc_index(n: int, points: np.ndarray | None = None) -> int:
+    """Mid LOC at 50% arc length (falls back to equal index halves)."""
+    if points is not None:
+        pts = to_numpy(points)
+        if pts.shape[0] >= 1:
+            return pick_index_at_arc_fraction(pts, 0.5)
+    if n < 1:
+        return 0
+    bounds = pick_equal_section_boundary_indices(n, 2)
+    if bounds:
+        return int(bounds[0])
+    return n // 2
+
+
 def pick_endpoint_indices(
     n: int,
     *,
     inset_frac: float = 0.08,
     min_inset_pts: int = 5,
 ) -> tuple[int, int] | None:
-    """Return ``(init_idx, fin_idx)`` near polyline ends, inset from extremes."""
+    """Legacy inset endpoints (superseded by :func:`pick_dual_loc_indices`)."""
+    del inset_frac, min_inset_pts
+    return pick_dual_loc_indices(n)
+
+
+def _vertex_in_mask(row: np.ndarray, mask: np.ndarray) -> bool:
+    i, j, k = int(round(float(row[0]))), int(round(float(row[1]))), int(round(float(row[2])))
+    return (
+        0 <= i < mask.shape[0]
+        and 0 <= j < mask.shape[1]
+        and 0 <= k < mask.shape[2]
+        and bool(mask[i, j, k])
+    )
+
+
+def pick_arc_midpoint_in_mask(
+    points: np.ndarray,
+    mask: np.ndarray | None,
+    *,
+    frac: float = 0.5,
+) -> int:
+    """Arc-length station along *points*; segments count when either endpoint is in *mask*."""
+    pts = to_numpy(points).astype(np.float64)
+    n = pts.shape[0]
     if n < 1:
-        return None
-    if n < 2 * min_inset_pts + 3:
-        return None
-    mid = n // 2
-    init_idx = min(max(int(min_inset_pts), 0), mid)
-    fin_from_end = max(int(min_inset_pts), int(round(n * float(inset_frac))))
-    fin_idx = max(min(n - 1 - fin_from_end, n - 1 - int(min_inset_pts)), mid)
-    fin_idx = min(max(fin_idx, mid), n - 1)
-    if init_idx >= fin_idx:
-        return None
-    return init_idx, fin_idx
+        return 0
+    if mask is None:
+        return pick_index_at_arc_fraction(pts, frac)
+
+    m = to_numpy(mask).astype(bool)
+    in_mask = np.array([_vertex_in_mask(pts[i], m) for i in range(n)], dtype=bool)
+    if not in_mask.any():
+        return pick_index_at_arc_fraction(pts, frac)
+
+    cum = np.zeros(n, dtype=np.float64)
+    for i in range(1, n):
+        seg_len = float(np.linalg.norm(pts[i] - pts[i - 1]))
+        if in_mask[i - 1] or in_mask[i]:
+            cum[i] = cum[i - 1] + seg_len
+        else:
+            cum[i] = cum[i - 1]
+    total = float(cum[-1])
+    if total <= 0.0:
+        return pick_index_at_arc_fraction(pts, frac)
+    target = float(np.clip(frac, 0.0, 1.0)) * total
+    idx = int(np.searchsorted(cum, target, side="left"))
+    return int(np.clip(idx, 0, n - 1))
 
 
 def pick_masked_midpoint(
     points: np.ndarray,
     mask: np.ndarray | None,
 ) -> int:
-    """Index along polyline preferring in-mask midpoint."""
-    pts = to_numpy(points)
-    n = pts.shape[0]
-    if n == 0:
-        return 0
-    if mask is None:
-        return n // 2
-    m = to_numpy(mask).astype(bool)
-    inside = []
-    for idx, row in enumerate(pts):
-        i, j, k = int(round(row[0])), int(round(row[1])), int(round(row[2]))
-        if 0 <= i < m.shape[0] and 0 <= j < m.shape[1] and 0 <= k < m.shape[2] and m[i, j, k]:
-            inside.append(idx)
-    if inside:
-        return inside[len(inside) // 2]
-    return n // 2
+    """Venous-style midpoint at 50% arc length (optionally weighted by *mask*)."""
+    return pick_arc_midpoint_in_mask(points, mask, frac=0.5)
 
 
 def local_direction_alignment(points: np.ndarray, idx: int, *, window: int = 5) -> np.ndarray:
@@ -243,29 +331,11 @@ def resolve_sssv_strv(
     *,
     mask: np.ndarray | None,
 ) -> tuple[int, int]:
-    """Return (sssv_idx, strv_idx) using SVD alignment vs STRV reference."""
-    parts_s = split_into_parts(sssv_pts, 6)
-    parts_t = split_into_parts(strv_pts, 6)
-    if not parts_s or not parts_t:
-        return pick_masked_midpoint(sssv_pts, mask), pick_masked_midpoint(strv_pts, mask)
-
-    def _best_part(parts: list[np.ndarray], ref: np.ndarray, maximize: bool) -> np.ndarray:
-        best = parts[0]
-        best_sc = -np.inf if maximize else np.inf
-        for p in parts:
-            c = p - np.mean(p, axis=0, keepdims=True)
-            _, _, vt = np.linalg.svd(c, full_matrices=False)
-            d = vt[0] / (float(np.linalg.norm(vt[0])) + 1e-12)
-            sc = float(np.dot(d, ref / (float(np.linalg.norm(ref)) + 1e-12)))
-            if (maximize and sc > best_sc) or (not maximize and sc < best_sc):
-                best_sc = sc
-                best = p
-        return best
-
-    ref = _STRV_REF / (float(np.linalg.norm(_STRV_REF)) + 1e-12)
-    strv_part = _best_part(parts_t, ref, maximize=True)
-    sssv_part = _best_part(parts_s, ref, maximize=False)
-    return pick_masked_midpoint(sssv_part, mask), pick_masked_midpoint(strv_part, mask)
+    """Return (sssv_idx, strv_idx) at arc-length midpoints (swap validated downstream)."""
+    return (
+        pick_arc_midpoint_in_mask(sssv_pts, mask, frac=0.5),
+        pick_arc_midpoint_in_mask(strv_pts, mask, frac=0.5),
+    )
 
 
 def validate_sssv_strv_swap(
@@ -290,12 +360,9 @@ def resolve_long_venous_segment(
     mask: np.ndarray | None,
     vertical: bool,
 ) -> int:
-    parts = split_into_parts(long_pts, 6)
-    if not parts:
-        return pick_masked_midpoint(long_pts, mask)
-    scored = [( _z_std(p), i) for i, p in enumerate(parts)]
-    scored.sort(key=lambda t: t[0], reverse=vertical)
-    return pick_masked_midpoint(parts[scored[0][1]], mask)
+    """Arc-length midpoint (``vertical`` kept for API compatibility)."""
+    del vertical
+    return pick_arc_midpoint_in_mask(long_pts, mask, frac=0.5)
 
 
 def select_venous_locs(
@@ -318,14 +385,7 @@ def select_venous_locs(
     for name, pts in venous_polylines.items():
         if pts.shape[0] < 3:
             continue
-        if name == NAME_SSSV:
-            indices[name] = pick_masked_midpoint(pts, venous_mask)
-        elif name == NAME_STRV:
-            indices[name] = pick_masked_midpoint(pts, venous_mask)
-        else:
-            indices[name] = resolve_long_venous_segment(
-                pts, mask=venous_mask, vertical=False
-            )
+        indices[name] = pick_arc_midpoint_in_mask(pts, venous_mask, frac=0.5)
 
     if NAME_SSSV in indices and NAME_STRV in indices and NAME_SSSV in venous_polylines and NAME_STRV in venous_polylines:
         si, ti = resolve_sssv_strv(
@@ -433,6 +493,9 @@ def select_arterial_locs(
 
     meta_extra: dict[str, Any] = {
         "dual_loc_fallback_vessels": [],
+        "loc_boundary_method_dual": "arc_length_tertiles",
+        "loc_boundary_method_mid": "arc_length_midpoint",
+        "arterial_centerline_source": "stage4_seg",
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
@@ -444,25 +507,25 @@ def select_arterial_locs(
             continue
 
         if use_dual and int(vid) in QVTPY_DUAL_LOC_ARTERIAL_IDS:
-            endpoints = pick_endpoint_indices(
-                pts_np.shape[0],
-                inset_frac=float(endpoint_inset_frac),
-            )
+            endpoints = pick_dual_loc_indices(pts_np.shape[0], pts_np)
             if endpoints is None:
                 meta_extra["dual_loc_fallback_vessels"].append(vname)
-                rec = select_main_vessel_loc(
-                    pts_np,
-                    vessel_id=vid,
-                    vessel_name=vname,
-                    mask=venous_mask,
-                    mag=mag,
-                    cd=cd,
-                    vel_mag=vel_mag,
-                    voxel_spacing=voxel_spacing,
-                    radius_vox=radius_vox,
+                mid_idx = pick_mid_loc_index(pts_np.shape[0], pts_np)
+                out.append(
+                    _arterial_loc_at_index(
+                        pts_np,
+                        mid_idx,
+                        vessel_id=vid,
+                        vessel_name=vname,
+                        segment_id=0,
+                        loc_role="mid",
+                        mag=mag,
+                        cd=cd,
+                        vel_mag=vel_mag,
+                        voxel_spacing=voxel_spacing,
+                        radius_vox=radius_vox,
+                    )
                 )
-                if rec:
-                    out.append(rec)
                 continue
             init_idx, fin_idx = endpoints
             for seg_id, idx, role in (
@@ -486,19 +549,22 @@ def select_arterial_locs(
                 )
             continue
 
-        rec = select_main_vessel_loc(
-            pts_np,
-            vessel_id=vid,
-            vessel_name=vname,
-            mask=venous_mask,
-            mag=mag,
-            cd=cd,
-            vel_mag=vel_mag,
-            voxel_spacing=voxel_spacing,
-            radius_vox=radius_vox,
+        mid_idx = pick_mid_loc_index(pts_np.shape[0], pts_np)
+        out.append(
+            _arterial_loc_at_index(
+                pts_np,
+                mid_idx,
+                vessel_id=vid,
+                vessel_name=vname,
+                segment_id=0,
+                loc_role="mid",
+                mag=mag,
+                cd=cd,
+                vel_mag=vel_mag,
+                voxel_spacing=voxel_spacing,
+                radius_vox=radius_vox,
+            )
         )
-        if rec:
-            out.append(rec)
 
     return out, meta_extra
 
@@ -530,6 +596,12 @@ def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:
 __all__ = [
     "LocRecord",
     "loc_record_to_dict",
+    "pick_dual_loc_indices",
+    "pick_equal_section_boundary_indices",
+    "pick_arc_midpoint_in_mask",
+    "pick_index_at_arc_fraction",
+    "pick_mid_loc_index",
+    "polyline_cumulative_arc_length",
     "select_arterial_locs",
     "select_venous_locs",
 ]

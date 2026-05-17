@@ -1,24 +1,32 @@
-"""Black-blood pipeline defaults (fill paths before batch use)."""
+"""Black-blood pipeline defaults."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# User-filled roots (None until configured).
-DEFAULT_NIFTI_ROOT: Path | None = None
-DEFAULT_RESULTS_ROOT: Path | None = None
-DEFAULT_EICAB_RESULTS_ROOT: Path | None = None
+# Host paths (aligned with qvtpy layout; no qvtpy import).
+_PESA_BRAIN_DATA = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain")
 
-# Relative path under ``{nifti_root}/{subject}/`` for WVI (e.g. ``BlackBlood/WVI.nii.gz``).
-WVI_REL_PATH: str | None = None
+DEFAULT_DICOM_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "DICOM"
+DEFAULT_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
+DEFAULT_RESULTS_ROOT: Path | None = _PESA_BRAIN_DATA / "RESULTS" / "res_PESABrain"
 
+# qvtpy TOF / eICAB (notebooks/reports/qvtpy methods layout).
+DEFAULT_QVTPY_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
+DEFAULT_QVTPY_RESULTS_ROOT: Path = _PESA_BRAIN_DATA / "RESULTS" / "res_QVTPy"
+
+DEFAULT_EICAB_RESULTS_ROOT: Path | None = DEFAULT_QVTPY_RESULTS_ROOT
+
+WVI_REL_PATH: str | None = "BlackBlood/vwi_bb.nii.gz"
+
+STAGE0_DICOM_SLOT: str = "vwi_bb"
 EICAB_SUBDIR: str = "eicab"
+QVTPY_EICAB_SUBDIR: str = EICAB_SUBDIR
 PIPELINE_SUBDIR: str = "pesa_brain"
 BLACK_BLOOD_SUBDIR: str = "black_blood"
 STAGE1_REG_DIR: str = "stage1_registration"
 STAGE2_SEG_DIR: str = "stage2_bb_segmentation"
 
-# Optional cluster placeholders (unused in v1 local runner).
 SGE_LOG_DIR: Path | None = None
 SGE_ERR_DIR: Path | None = None
 CONTAINER_PATH: Path | None = None

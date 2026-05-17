@@ -77,19 +77,20 @@ def _infer_aca_junction(
         j = _acomm_junction_voxel(eicab_qvtpy)
         if j is not None:
             return j, "eicab_acomm"
-    lc = np.asarray(np.argwhere(laca_seeds), dtype=np.float64)
-    rc = np.asarray(np.argwhere(raca_seeds), dtype=np.float64)
+    lc = np.asarray(to_numpy(np.argwhere(laca_seeds)), dtype=np.float64)
+    rc = np.asarray(to_numpy(np.argwhere(raca_seeds)), dtype=np.float64)
     if lc.size == 0 or rc.size == 0:
         return None, None
     d2 = np.sum((lc[:, None, :] - rc[None, :, :]) ** 2, axis=2)
-    li, ri = np.unravel_index(int(np.argmin(d2)), d2.shape)
+    flat_idx = int(np.argmin(d2))
+    li, ri = np.unravel_index(flat_idx, d2.shape)
     mid = 0.5 * (lc[int(li)] + rc[int(ri)])
     nx, ny, nz = laca_seeds.shape
     return (
         (
-            int(max(0, min(nx - 1, round(mid[0])))),
-            int(max(0, min(ny - 1, round(mid[1])))),
-            int(max(0, min(nz - 1, round(mid[2])))),
+            int(max(0, min(nx - 1, np.round(mid[0])))),
+            int(max(0, min(ny - 1, np.round(mid[1])))),
+            int(max(0, min(nz - 1, np.round(mid[2])))),
         ),
         "aca_midpoint",
     )

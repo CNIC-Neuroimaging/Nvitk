@@ -1,4 +1,4 @@
-"""Black-blood stage 1: rigid WVI → eICAB TOF_resampled (FSL FLIRT)."""
+"""Black-blood stage 1: rigid vwi_bb → eICAB TOF_resampled (FSL FLIRT)."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ def run_subject(
     output_root: Path,
     eicab_results_root: Path,
     skip_existing: bool = False,
-    wvi_rel: str | None = None,
+    vwi_bb_rel: str | None = None,
     eicab_subdir: str | None = None,
     dof: int = 6,
     cost: str = "normmi",
 ) -> Path:
-    """Register WVI (moving) to TOF_resampled (fixed)."""
-    wvi = paths.wvi_path(nifti_root, subject, wvi_rel=wvi_rel)
+    """Register vwi_bb (moving) to TOF_resampled (fixed)."""
+    moving = paths.vwi_bb_path(nifti_root, subject, vwi_bb_rel=vwi_bb_rel)
     fixed = paths.tof_resampled_path(
         eicab_results_root, subject, eicab_subdir=eicab_subdir
     )
@@ -43,22 +43,22 @@ def run_subject(
         return out_dir
 
     log.info(f"pesa_brain stage1 FLIRT | subject={subject}")
-    log.info(f"  moving (WVI): {wvi}")
+    log.info(f"  moving (vwi_bb): {moving}")
     log.info(f"  fixed (TOF_resampled): {fixed}")
 
     res = flirt_register_rigid(
-        wvi,
+        moving,
         fixed,
         out_dir,
         dof=dof,
         cost=cost,
-        warped_name="WVI_warped_to_tof.nii.gz",
-        matrix_name="wvi_to_tof.mat",
+        warped_name="vwi_bb_warped_to_tof.nii.gz",
+        matrix_name="vwi_bb_to_tof.mat",
     )
     meta: dict[str, Any] = {
         "subject": subject,
-        "moving": str(wvi),
-        "moving_kind": "black_blood_wvi",
+        "moving": str(moving),
+        "moving_kind": "black_blood_vwi_bb",
         "fixed": str(fixed),
         "fixed_kind": "eicab_tof_resampled",
         "matrix": str(res.matrix_path),
@@ -73,23 +73,11 @@ def run_subject(
 
 @click.command("nvitk-pesa-brain-bb-reg")
 @click.option("--subject", required=True)
-@click.option(
-    "--nifti-root",
-    type=click.Path(path_type=Path, exists=True),
-    default=None,
-    help="Subject NIfTI tree (WVI).",
-)
-@click.option(
-    "--output-root",
-    type=click.Path(path_type=Path, exists=True),
-    default=None,
-)
-@click.option(
-    "--eicab-results-root",
-    type=click.Path(path_type=Path, exists=True),
-    default=None,
-)
-@click.option("--wvi-rel-path", default=None, help="Relative WVI path under subject.")
+@click.option("--nifti-root", type=click.Path(path_type=Path, exists=True), default=None)
+@click.option("--output-root", type=click.Path(path_type=Path, exists=True), default=None)
+@click.option("--eicab-results-root", type=click.Path(path_type=Path, exists=True), default=None)
+@click.option("--vwi-bb-rel-path", default=None)
+@click.option("--wvi-rel-path", default=None, hidden=True)
 @click.option("--eicab-subdir", default=None)
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--dof", type=int, default=6)
@@ -99,25 +87,25 @@ def main(
     nifti_root: Path | None,
     output_root: Path | None,
     eicab_results_root: Path | None,
+    vwi_bb_rel_path: str | None,
     wvi_rel_path: str | None,
     eicab_subdir: str | None,
     skip_existing: bool,
     dof: int,
     cost: str,
 ) -> None:
-    """CLI: WVI → TOF_resampled registration."""
+    """CLI: vwi_bb → TOF_resampled registration."""
     nifti = paths.require_path(nifti_root or cfg.DEFAULT_NIFTI_ROOT, "nifti_root")
     out = paths.require_path(output_root or cfg.DEFAULT_RESULTS_ROOT, "output_root")
-    eicab = paths.require_path(
-        eicab_results_root or cfg.DEFAULT_EICAB_RESULTS_ROOT, "eicab_results_root"
-    )
+    eicab = paths.resolve_eicab_results_root(eicab_results_root)
+    rel = vwi_bb_rel_path or wvi_rel_path
     run_subject(
         subject,
         nifti_root=nifti,
         output_root=out,
         eicab_results_root=eicab,
         skip_existing=skip_existing,
-        wvi_rel=wvi_rel_path,
+        vwi_bb_rel=rel,
         eicab_subdir=eicab_subdir,
         dof=dof,
         cost=cost,

@@ -24,12 +24,11 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
-from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
-from nvitk.pipes.qvtpy.labels import (
-    QVTPY_LTSV,
-    QVTPY_RTSV,
-    QVTPY_RG_INTENSITY_FRAC_VENOUS,
-    QVTPY_SSSV,
+from nvitk.pipes.qvtpy.util.centerline_io import (
+    centerline_meta_path,
+    centerlines_mask_path,
+    export_centerlines_from_segmentation,
+    load_venous_centerlines,
 )
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     ThrAlgorithm,
@@ -39,7 +38,6 @@ from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     _DEFAULT_RG_INTENSITY_FRAC,
     _RG_INTENSITY_FRAC_EXPLORE,
     build_seg_4dflow_local,
-    resolve_venous_rg_intensity_fracs,
     vessel_stats_to_dict,
 )
 
@@ -140,7 +138,6 @@ def build_temporal_seg_summary(
     region_growing: bool,
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
-    venous_rg_intensity_fracs: dict[int, float],
     cl_barrier_radius: int,
     rg_barrier_radius: int,
     aca_sequential_grow: bool,
@@ -191,9 +188,6 @@ def build_temporal_seg_summary(
         "region_growing": bool(region_growing),
         "rg_intensity_frac": float(rg_intensity_frac),
         "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
-        "venous_rg_intensity_frac": {
-            str(int(k)): float(v) for k, v in venous_rg_intensity_fracs.items()
-        },
         "cl_barrier_radius": int(cl_barrier_radius),
         "rg_barrier_radius": int(rg_barrier_radius),
         "aca_sequential_grow": bool(aca_sequential_grow),
@@ -217,7 +211,6 @@ def _segmentation_meta_for_timepoint(
     region_growing: bool,
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
-    venous_rg_intensity_fracs: dict[int, float],
     cl_barrier_radius: int,
     rg_barrier_radius: int,
     aca_sequential_grow: bool,
@@ -240,10 +233,9 @@ def _segmentation_meta_for_timepoint(
         "rg_intensity_frac": float(rg_intensity_frac),
         "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
         "rg_intensity_frac_explore_labels": "ACA,MCA,PCA (ids 4-9)",
-        "rg_skip_labels": "STRV (id 32)",
-        "venous_rg_intensity_frac": {
-            str(int(k)): float(v) for k, v in venous_rg_intensity_fracs.items()
-        },
+        "rg_skip_labels": "all venous (ids 31-34)",
+        "venous_region_growing": False,
+        "comm_segmentation_strategy": "centerline_rg_only",
         "post_threshold_clean": "largest_cc_per_label",
         "cl_barrier_radius": int(cl_barrier_radius),
         "rg_barrier_radius": int(rg_barrier_radius),
@@ -276,9 +268,6 @@ def run_subject(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
-    rg_intensity_frac_sssv: float | None = None,
-    rg_intensity_frac_ltsv: float | None = None,
-    rg_intensity_frac_rtsv: float | None = None,
 ) -> Path:
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
@@ -311,15 +300,6 @@ def run_subject(
     cl_img = imread(cl_path)
     centerlines_mask = as_backend_array(cl_img.data).astype(np.int32, copy=False)
 
-    venous_overrides: dict[int, float] = {}
-    if rg_intensity_frac_sssv is not None:
-        venous_overrides[QVTPY_SSSV] = float(rg_intensity_frac_sssv)
-    if rg_intensity_frac_ltsv is not None:
-        venous_overrides[QVTPY_LTSV] = float(rg_intensity_frac_ltsv)
-    if rg_intensity_frac_rtsv is not None:
-        venous_overrides[QVTPY_RTSV] = float(rg_intensity_frac_rtsv)
-    venous_rg = resolve_venous_rg_intensity_fracs(venous_overrides or None)
-
     label_ids = sorted(int(v) for v in np.unique(centerlines_mask) if int(v) > 0)
     seg_stack = np.zeros((*cd4d.shape[:3], n_t), dtype=np.int32)
     cd4d_str = str(cd4d_path)
@@ -333,7 +313,6 @@ def run_subject(
         region_growing=bool(region_growing),
         rg_intensity_frac=float(rg_intensity_frac),
         rg_intensity_frac_explore=float(rg_intensity_frac_explore),
-        venous_rg_intensity_fracs=venous_rg,
         cl_barrier_radius=int(cl_barrier_radius),
         rg_barrier_radius=int(rg_barrier_radius),
         aca_sequential_grow=bool(aca_sequential_grow),
@@ -341,9 +320,12 @@ def run_subject(
         acomm_junction_radius=int(acomm_junction_radius),
     )
 
+    vertebral_split_t0 = None
     for t in range(n_t):
         result = build_seg_4dflow_local(cd4d[..., t], **build_kw)
         seg_stack[..., t] = as_backend_array(result.segmentation).astype(np.int32, copy=False)
+        if t == 0 and result.vertebral_split is not None:
+            vertebral_split_t0 = result.vertebral_split
         meta_t = _segmentation_meta_for_timepoint(
             subject=subject,
             timepoint=t,
@@ -356,7 +338,6 @@ def run_subject(
             region_growing=region_growing,
             rg_intensity_frac=rg_intensity_frac,
             rg_intensity_frac_explore=rg_intensity_frac_explore,
-            venous_rg_intensity_fracs=venous_rg,
             cl_barrier_radius=cl_barrier_radius,
             rg_barrier_radius=rg_barrier_radius,
             aca_sequential_grow=aca_sequential_grow,
@@ -391,7 +372,6 @@ def run_subject(
         region_growing=region_growing,
         rg_intensity_frac=rg_intensity_frac,
         rg_intensity_frac_explore=rg_intensity_frac_explore,
-        venous_rg_intensity_fracs=venous_rg,
         cl_barrier_radius=cl_barrier_radius,
         rg_barrier_radius=rg_barrier_radius,
         aca_sequential_grow=aca_sequential_grow,
@@ -399,6 +379,27 @@ def run_subject(
         acomm_junction_radius=acomm_junction_radius,
     )
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if vertebral_split_t0 is not None:
+        (out_dir / "vertebral_split.json").write_text(
+            json.dumps(vertebral_split_t0.as_dict(), indent=2),
+            encoding="utf-8",
+        )
+
+    # venous_polylines: dict[str, Any] = {}
+    # venous_label_by_name: dict[str, int] = {}
+    # if centerline_meta_path(s3).is_file():
+    #     meta3 = json.loads(centerline_meta_path(s3).read_text(encoding="utf-8"))
+    #     venous_label_by_name = {
+    #         str(k): int(v) for k, v in (meta3.get("venous_label_by_name") or {}).items()
+    #     }
+    #     venous_polylines = load_venous_centerlines(s3, min_points=3, meta=meta3)
+    # export_centerlines_from_segmentation(
+    #     seg_stack[..., 0],
+    #     out_dir,
+    #     metadata=ref_meta,
+    #     venous_polylines=venous_polylines,
+    #     venous_label_by_name=venous_label_by_name,
+    # )
 
     log.info(f"[{subject}] stage4t segmentation ({n_t} frames) -> {seg_path}")
     return out_dir
@@ -463,25 +464,6 @@ def _stage4t_cli_options(func):  # type: ignore[no-untyped-def]
         show_default=True,
         help="Vox: only overlap within this distance of AComm junction is Voronoi-split.",
     )(func)
-    func = click.option(
-        "--rg-intensity-frac-sssv",
-        type=float,
-        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_SSSV],
-        show_default=True,
-        help="RG intensity frac for SSSV (STRV never grows).",
-    )(func)
-    func = click.option(
-        "--rg-intensity-frac-ltsv",
-        type=float,
-        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_LTSV],
-        show_default=True,
-    )(func)
-    func = click.option(
-        "--rg-intensity-frac-rtsv",
-        type=float,
-        default=QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_RTSV],
-        show_default=True,
-    )(func)
     return func
 
 
@@ -505,9 +487,6 @@ def submit_subject_sge(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
-    rg_intensity_frac_sssv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_SSSV],
-    rg_intensity_frac_ltsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_LTSV],
-    rg_intensity_frac_rtsv: float = QVTPY_RG_INTENSITY_FRAC_VENOUS[QVTPY_RTSV],
 ) -> str:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
@@ -537,12 +516,6 @@ def submit_subject_sge(
         str(int(aca_overlap_min_voxels)),
         "--acomm-junction-radius",
         str(int(acomm_junction_radius)),
-        "--rg-intensity-frac-sssv",
-        str(float(rg_intensity_frac_sssv)),
-        "--rg-intensity-frac-ltsv",
-        str(float(rg_intensity_frac_ltsv)),
-        "--rg-intensity-frac-rtsv",
-        str(float(rg_intensity_frac_rtsv)),
     ]
     if region_growing:
         parts.append("--region-growing")
@@ -598,9 +571,6 @@ def main(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
-    rg_intensity_frac_sssv: float,
-    rg_intensity_frac_ltsv: float,
-    rg_intensity_frac_rtsv: float,
 ) -> None:
     Logger()
     run_subject(
@@ -618,9 +588,6 @@ def main(
         aca_sequential_grow=aca_sequential_grow,
         aca_overlap_min_voxels=aca_overlap_min_voxels,
         acomm_junction_radius=acomm_junction_radius,
-        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
-        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
-        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
     )
 
 

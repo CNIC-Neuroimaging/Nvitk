@@ -127,6 +127,8 @@ QVTPY_RPCA: int = 9
 QVTPY_LPCOMM: int = 10
 QVTPY_RPCOMM: int = 11
 QVTPY_ACOMM: int = 12
+QVTPY_LVA: int = 13
+QVTPY_RVA: int = 14
 
 QVTPY_ARTERIAL_ID_TO_NAME: dict[int, str] = {
     QVTPY_BACKGROUND: "BACKGROUND",
@@ -142,6 +144,8 @@ QVTPY_ARTERIAL_ID_TO_NAME: dict[int, str] = {
     QVTPY_LPCOMM: "LPCOMM",
     QVTPY_RPCOMM: "RPCOMM",
     QVTPY_ACOMM: "ACOMM",
+    QVTPY_LVA: "LVA",
+    QVTPY_RVA: "RVA",
 }
 
 QVTPY_ARTERIAL_NAME_TO_ID: dict[str, int] = {
@@ -158,6 +162,10 @@ QVTPY_ACA_IDS: frozenset[int] = frozenset({QVTPY_LACA, QVTPY_RACA})
 QVTPY_MCA_IDS: frozenset[int] = frozenset({QVTPY_LMCA, QVTPY_RMCA})
 QVTPY_PCA_IDS: frozenset[int] = frozenset({QVTPY_LPCA, QVTPY_RPCA})
 QVTPY_COMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM, QVTPY_ACOMM})
+QVTPY_VERTEBRAL_IDS: frozenset[int] = frozenset({QVTPY_LVA, QVTPY_RVA})
+QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
+    QVTPY_ARTERIAL_LABEL_IDS - QVTPY_COMM_IDS - QVTPY_VERTEBRAL_IDS
+)
 
 # Stage 4: gentler crop filtering (PCA/PComm/AComm) — see QVTPY_SMALL_ARTERIAL_IDS below.
 QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_COMM_IDS
@@ -198,9 +206,9 @@ MATLAB_QVT_VENOUS_VESSEL_NAMES: tuple[str, ...] = (NAME_SSSV, NAME_STRV, NAME_LT
 
 QVTPY_VENOUS_LABEL_IDS: frozenset[int] = frozenset(VENOUS_NAME_BY_LABEL.keys())
 
-# Stage 4 region growing: more exploration on ACA/MCA/PCA; STRV never grows.
+# Stage 4 region growing: more exploration on ACA/MCA/PCA; all venous skip RG.
 QVTPY_RG_EXPLORE_MORE_IDS: frozenset[int] = QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
-QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = frozenset({QVTPY_STRV})
+QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = QVTPY_VENOUS_LABEL_IDS
 
 # Per-sinus RG intensity fractions (lower → more growth). STRV omitted (RG disabled).
 QVTPY_RG_INTENSITY_FRAC_VENOUS: dict[int, float] = {
@@ -387,6 +395,10 @@ __all__ = [
     "QVTPY_ARTERIAL_NAME_TO_ID",
     "QVTPY_COMM_IDS",
     "QVTPY_ICA_BASILAR_IDS",
+    "QVTPY_LVA",
+    "QVTPY_NON_COMM_ARTERIAL_IDS",
+    "QVTPY_RVA",
+    "QVTPY_VERTEBRAL_IDS",
     "QVTPY_MCA_IDS",
     "QVTPY_PCA_IDS",
     "QVTPY_RG_EXPLORE_MORE_IDS",

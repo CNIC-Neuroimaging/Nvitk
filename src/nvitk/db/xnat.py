@@ -25,6 +25,9 @@ except Exception:
     click = None
 
 from nvitk.core.exceptions import BackendUnavailableError
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 from .importers import upsert_cohort_membership_for_subjects
 from .repo import DEFAULT_COHORT_ID, DataRepo
@@ -145,6 +148,61 @@ def _normalize_sequence_request_token(token: str) -> str:
     return t.upper()
 
 
+_BRAINVIEW_SERIES_RE = re.compile(
+    r"csai.*brainview|brainview.*t1w",
+    flags=re.IGNORECASE,
+)
+_BRAINVIEW_VARIANT_PREFIX_RE = re.compile(
+    r"^\s*(strong|weak|default)\b",
+    flags=re.IGNORECASE,
+)
+
+VWI_BB_VARIANT_PRIORITY: tuple[str, ...] = ("strong", "default", "weak")
+
+
+def parse_brainview_variant(
+    series_description: str | None,
+    quality: str | None = None,
+) -> str | None:
+    """Return ``strong`` / ``default`` / ``weak`` for BrainVIEW T1W, else None."""
+    description = (series_description or "").strip()
+    if not _BRAINVIEW_SERIES_RE.search(description):
+        return None
+    prefix = _BRAINVIEW_VARIANT_PREFIX_RE.match(description)
+    if prefix:
+        return prefix.group(1).lower()
+    q = (quality or "").strip().lower()
+    if q in VWI_BB_VARIANT_PRIORITY:
+        return q
+    return None
+
+
+def select_preferred_vwi_bb_scan(
+    candidates: list[dict[str, Any]],
+    *,
+    subject_label: str = "",
+) -> dict[str, Any] | None:
+    """Pick one VWI_BB scan: strong, then default, then weak."""
+    if not candidates:
+        return None
+    by_variant: dict[str, dict[str, Any]] = {}
+    for item in candidates:
+        variant = str(item.get("variant") or "").strip().lower()
+        if variant in VWI_BB_VARIANT_PRIORITY:
+            by_variant[variant] = item
+    for variant in VWI_BB_VARIANT_PRIORITY:
+        if variant not in by_variant:
+            continue
+        chosen = by_variant[variant]
+        if variant != "strong":
+            log.warning(
+                f"[{subject_label}] strong VWI_BB (BrainVIEW) missing; "
+                f"using {variant!r} instead."
+            )
+        return chosen
+    return None
+
+
 def infer_flow_orientation(description: str) -> str:
     desc = description.upper()
     if any(token in desc for token in ("AP", "PA", "FA")):
@@ -158,6 +216,15 @@ def infer_flow_orientation(description: str) -> str:
 
 def classify_scan(series_description: str | None, quality: str | None = None) -> dict[str, Any] | None:
     description = series_description or ""
+    brainview_variant = parse_brainview_variant(description, quality)
+    if brainview_variant is not None:
+        return {
+            "modality": "mri",
+            "orientation": None,
+            "sequence": "VWI_BB",
+            "variant": brainview_variant,
+        }
+
     if quality is not None and str(quality).lower() != "usable":
         return None
 
@@ -309,6 +376,7 @@ def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
         "QSM": "qsm",
         "CAROTID_QF": "carotid_qf",
         "RESTING_STATE_MB": "resting_state_mb",
+        "VWI_BB": "vwi_bb",
     }
     if key in mapping:
         return mapping[key]
@@ -327,6 +395,8 @@ def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
             normalized.update({"4DFLOW_AP", "4DFLOW_RL", "4DFLOW_FH"})
         elif upper == "TOF":
             normalized.add("TOF")
+        elif upper in {"VWI_BB", "BRAINVIEW", "VWI", "BLACK_BLOOD"}:
+            normalized.add("VWI_BB")
         else:
             normalized.add(upper)
     return normalized

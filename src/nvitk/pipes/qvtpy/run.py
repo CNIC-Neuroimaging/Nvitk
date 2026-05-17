@@ -373,9 +373,6 @@ def _emit_stage0_convert(
     show_default=True,
     help="Stage4: Voronoi-split overlap only within this many vox of AComm junction.",
 )
-@click.option("--rg-intensity-frac-sssv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for SSSV.")
-@click.option("--rg-intensity-frac-ltsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for LTSV.")
-@click.option("--rg-intensity-frac-rtsv", type=float, default=1.5, show_default=True, help="Stage4: RG frac for RTSV (STRV never grows).")
 # --- stage 5 ---
 @click.option(
     "--loc-arterial-strategy",
@@ -447,9 +444,6 @@ def main(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
-    rg_intensity_frac_sssv: float,
-    rg_intensity_frac_ltsv: float,
-    rg_intensity_frac_rtsv: float,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -590,9 +584,6 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
-                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
-                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
-                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
                     )
                 except Exception as exc:
                     import traceback
@@ -615,9 +606,6 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
-                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
-                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
-                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
                     )
                 except Exception as exc:
                     import traceback
@@ -791,9 +779,6 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
-                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
-                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
-                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
                     )
                 except Exception as exc:
                     import traceback
@@ -821,9 +806,6 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
-                        rg_intensity_frac_sssv=rg_intensity_frac_sssv,
-                        rg_intensity_frac_ltsv=rg_intensity_frac_ltsv,
-                        rg_intensity_frac_rtsv=rg_intensity_frac_rtsv,
                     )
                 except Exception as exc:
                     import traceback
