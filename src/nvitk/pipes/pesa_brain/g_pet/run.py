@@ -9,7 +9,7 @@ from nvitk.core.logger import Logger
 log = Logger()
 
 
-@click.command("nvitk-pesa-brain-g-pet")
+@click.command("nvitk-pesa-brain-gpet")
 def main() -> None:
     """Placeholder for future g_pet pipeline."""
     log.error("g_pet pipeline is not implemented yet.")

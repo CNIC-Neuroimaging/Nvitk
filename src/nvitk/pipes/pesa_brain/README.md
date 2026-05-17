@@ -2,34 +2,44 @@
 
 Independent pipelines under `nvitk.pipes.pesa_brain` (no qvtpy / pesa_fat imports).
 
+## CLI entry points
+
+| Command | Purpose |
+|---------|---------|
+| `nvitk-pesa-brain` | Master dispatcher (`--pipeline black_blood` or `g_pet`) |
+| `nvitk-pesa-brain-bb` | Black-blood: all stages via `--stages` |
+| `nvitk-pesa-brain-gpet` | g_pet stub (not implemented) |
+
+Per-stage commands (`nvitk-pesa-brain-bb-reg`, etc.) are **not** exposed; use `--stages` on `nvitk-pesa-brain-bb`.
+
+### Black-blood stages (`--stages`)
+
+| Stage | Aliases | Description |
+|-------|---------|-------------|
+| `stage0_d` | `download` | XNAT → DICOM (`vwi_bb/`) |
+| `stage0_c` | `convert`, `stage0` | DICOM → `BlackBlood/vwi_bb.nii.gz` |
+| `stage1` | `reg`, `registration` | vwi_bb → eICAB TOF_resampled (FLIRT) |
+| `stage2` | `seg`, `segmentation` | Centerlines + artery segmentation |
+
+Default: `stage0_c,stage1,stage2`. Add `stage0_d` or use `--with-download`.
+
+### eICAB mask (`--eicab-mask {cw,wb}`)
+
+Stage 2 uses the requested eICAB Circle-of-Willis (`cw`) or whole-brain (`wb`) multilabel under `{qvtpy_results}/{subject}/eicab/`. If the requested mask is missing, the other is used with a warning (same policy as qvtpy).
+
 ## Config (`black_blood/config.py`)
 
-| Key | Purpose |
-|-----|---------|
-| `DEFAULT_DICOM_ROOT` | XNAT download target |
-| `DEFAULT_NIFTI_ROOT` | `BlackBlood/vwi_bb.nii.gz` per subject |
-| `DEFAULT_QVTPY_RESULTS_ROOT` | eICAB outputs (`<subject>/eicab/`) |
-| `DEFAULT_RESULTS_ROOT` | `pesa_brain` pipeline outputs |
-| `VWI_BB_REL_PATH` | `BlackBlood/vwi_bb.nii.gz` |
+- `DEFAULT_DICOM_ROOT`, `DEFAULT_NIFTI_ROOT`, `DEFAULT_RESULTS_ROOT`
+- `DEFAULT_QVTPY_RESULTS_ROOT` — eICAB / TOF_resampled from qvtpy layout
+- `VWI_BB_REL_PATH` — `BlackBlood/vwi_bb.nii.gz`
 
-TOF and eICAB use the **qvtpy** layout under the same PESA-Brain data tree (see `notebooks/reports/qvtpy/methods.md`).
-
-## BrainVIEW download (stage0_d)
-
-XNAT series `csAI_3D_BrainVIEW_T1W` with variant **strong** > **default** > **weak** (one scan per subject). If `strong` is missing, a warning is logged and the next available variant is used.
-
-## Example commands
+## Example
 
 ```bash
-# Full chain with XNAT download
-nvitk-pesa-brain --pipeline black_blood --subjects PESA001 \
+nvitk-pesa-brain-bb --subjects PESA001 \
   --with-download --stages stage0_d,stage0_c,stage1,stage2 \
-  --seg-strategy crop-resegment
+  --eicab-mask cw --seg-strategy crop-resegment
 
-# Convert + register + segment (DICOM already local)
-nvitk-pesa-brain-bb-convert --subject PESA001
-nvitk-pesa-brain-bb-reg --subject PESA001
-nvitk-pesa-brain-bb-seg --subject PESA001 --seg-strategy centerline-growth
+nvitk-pesa-brain --pipeline black_blood --subjects PESA001 \
+  --stages stage1,stage2 --eicab-mask wb
 ```
-
-`g_pet` is a stub (`NotImplementedError`).

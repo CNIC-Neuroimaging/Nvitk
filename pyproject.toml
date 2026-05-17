@@ -173,10 +173,8 @@ nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 
 # ────────────────────────────── PESA-Brain pipelines ──────────────────────────
 nvitk-pesa-brain = "nvitk.pipes.pesa_brain.run:main"
-nvitk-pesa-brain-bb-download = "nvitk.pipes.pesa_brain.black_blood.stage0_download:main"
-nvitk-pesa-brain-bb-convert = "nvitk.pipes.pesa_brain.black_blood.stage0_convert:main"
-nvitk-pesa-brain-bb-reg = "nvitk.pipes.pesa_brain.black_blood.stage1_registration:main"
-nvitk-pesa-brain-bb-seg = "nvitk.pipes.pesa_brain.black_blood.stage2_bb_segmentation:main"
+nvitk-pesa-brain-bb = "nvitk.pipes.pesa_brain.black_blood.run:main"
+nvitk-pesa-brain-gpet = "nvitk.pipes.pesa_brain.g_pet.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 

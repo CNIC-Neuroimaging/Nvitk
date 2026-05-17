@@ -7,8 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import click
-
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_brain.black_blood import config as cfg
 from nvitk.pipes.pesa_brain.black_blood.util import paths
@@ -69,48 +67,3 @@ def run_subject(
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return out_dir
-
-
-@click.command("nvitk-pesa-brain-bb-reg")
-@click.option("--subject", required=True)
-@click.option("--nifti-root", type=click.Path(path_type=Path, exists=True), default=None)
-@click.option("--output-root", type=click.Path(path_type=Path, exists=True), default=None)
-@click.option("--eicab-results-root", type=click.Path(path_type=Path, exists=True), default=None)
-@click.option("--vwi-bb-rel-path", default=None)
-@click.option("--wvi-rel-path", default=None, hidden=True)
-@click.option("--eicab-subdir", default=None)
-@click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--dof", type=int, default=6)
-@click.option("--cost", default="normmi")
-def main(
-    subject: str,
-    nifti_root: Path | None,
-    output_root: Path | None,
-    eicab_results_root: Path | None,
-    vwi_bb_rel_path: str | None,
-    wvi_rel_path: str | None,
-    eicab_subdir: str | None,
-    skip_existing: bool,
-    dof: int,
-    cost: str,
-) -> None:
-    """CLI: vwi_bb → TOF_resampled registration."""
-    nifti = paths.require_path(nifti_root or cfg.DEFAULT_NIFTI_ROOT, "nifti_root")
-    out = paths.require_path(output_root or cfg.DEFAULT_RESULTS_ROOT, "output_root")
-    eicab = paths.resolve_eicab_results_root(eicab_results_root)
-    rel = vwi_bb_rel_path or wvi_rel_path
-    run_subject(
-        subject,
-        nifti_root=nifti,
-        output_root=out,
-        eicab_results_root=eicab,
-        skip_existing=skip_existing,
-        vwi_bb_rel=rel,
-        eicab_subdir=eicab_subdir,
-        dof=dof,
-        cost=cost,
-    )
-
-
-if __name__ == "__main__":
-    main()

@@ -1,4 +1,4 @@
-"""eICAB CW mask → BB relabel, optional warp, centerlines, rasterized mask."""
+"""eICAB CW/WB mask → BB relabel, optional warp, centerlines, rasterized mask."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from nvitk.pipes.pesa_brain.black_blood.labels import (
     bb_vessel_name,
     relabel_eicab_to_bb,
 )
+from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskResolution
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
@@ -57,15 +58,16 @@ def _grids_match(a_shape: tuple[int, ...], b_shape: tuple[int, ...]) -> bool:
 
 
 def build_centerlines_from_eicab(
-    eicab_cw_path: Path,
+    eicab_mask_path: Path,
     tof_ref_path: Path,
     out_dir: Path,
     *,
     transform_mat: Path | None = None,
     min_points: int = 5,
     skip_existing: bool = False,
+    eicab_mask_info: EicabMaskResolution | None = None,
 ) -> CenterlineArtifacts:
-    """Relabel eICAB CW, warp to TOF grid if needed, compute and write centerlines."""
+    """Relabel eICAB labels, warp to TOF grid if needed, compute and write centerlines."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     mask_path = out_dir / CENTERLINES_MASK_NIFTI
@@ -92,7 +94,7 @@ def build_centerlines_from_eicab(
     ref_img = imread(tof_ref_path)
     ref_shape = tuple(int(x) for x in ref_img.data.shape[:3])
 
-    labels_native = as_backend_array(imread(eicab_cw_path).data).astype(np.int32, copy=False)
+    labels_native = as_backend_array(imread(eicab_mask_path).data).astype(np.int32, copy=False)
     warped_path = out_dir / "_eicab_warped_tmp.nii.gz"
     if _grids_match(labels_native.shape, ref_shape):
         labels_in_ref = labels_native
@@ -103,7 +105,7 @@ def build_centerlines_from_eicab(
                 "eICAB mask grid differs from TOF_resampled; stage1 matrix required."
             )
         flirt_apply_rigid(
-            eicab_cw_path,
+            eicab_mask_path,
             tof_ref_path,
             transform_mat,
             warped_path,
@@ -126,7 +128,19 @@ def build_centerlines_from_eicab(
     imsave(mask_path, cl_mask, metadata=dict(ref_img.metadata or {}))
 
     meta: dict[str, Any] = {
-        "eicab_cw": str(eicab_cw_path),
+        "eicab_mask_source": str(eicab_mask_path),
+        "eicab_mask_requested": (
+            eicab_mask_info.requested if eicab_mask_info is not None else None
+        ),
+        "eicab_mask_used": (
+            eicab_mask_info.used if eicab_mask_info is not None else None
+        ),
+        "eicab_mask_fallback": (
+            eicab_mask_info.fallback if eicab_mask_info is not None else False
+        ),
+        "eicab_mask_fallback_reason": (
+            eicab_mask_info.fallback_reason if eicab_mask_info is not None else None
+        ),
         "tof_reference": str(tof_ref_path),
         "warped_eicab": warped,
         "transform_matrix": str(transform_mat) if transform_mat else None,

@@ -39,7 +39,7 @@ def categorize_command(cmd, module):
         return "PESA-Fat Analysis"
     
     # PESA Brain commands
-    if cmd.startswith('nvitk-qvtpy') or any(qvt in cmd for qvt in []):
+    if cmd.startswith('nvitk-qvtpy') or cmd.startswith('nvitk-pesa-brain') or any(qvt in cmd for qvt in []):
         return "PESA-Brain Analysis"
     
     # Default category

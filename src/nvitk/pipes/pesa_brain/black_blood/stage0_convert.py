@@ -6,8 +6,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Iterable
 
-import click
-
 from nvitk.core.logger import Logger
 from nvitk.io.conversors.dcm2nii import dcm2nii
 
@@ -154,55 +152,3 @@ def report_subjects(nifti_root: Path, subjects: Iterable[str]) -> dict[str, Any]
         for subj in incomplete:
             print(f"  {subj}")
     return {"complete": complete, "incomplete": incomplete}
-
-
-@click.command("nvitk-pesa-brain-bb-convert")
-@click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
-@click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
-@click.option("--subject", default=None, help="Single subject; default all under dicom-root.")
-@click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--report", is_flag=True, default=False)
-def main(
-    dicom_root: Path | None,
-    nifti_root: Path | None,
-    subject: str | None,
-    skip_existing: bool,
-    report: bool,
-) -> None:
-    """Convert VWI_BB DICOMs to ``BlackBlood/vwi_bb.nii.gz``."""
-    dicom = dicom_root or cfg.DEFAULT_DICOM_ROOT
-    nifti = nifti_root or cfg.DEFAULT_NIFTI_ROOT
-    if dicom is None or nifti is None:
-        raise click.ClickException(
-            "Set --dicom-root and --nifti-root (or config DEFAULT_*_ROOT)."
-        )
-    dicom_p = Path(dicom)
-    nifti_p = Path(nifti)
-
-    if subject:
-        subj_list = [subject.strip()]
-    else:
-        subj_list = _iter_subjects(dicom_p)
-    if not subj_list:
-        raise click.ClickException(f"No subjects under {dicom_p}")
-
-    for subj in subj_list:
-        try:
-            run_subject(
-                subj,
-                dicom_root=dicom_p,
-                nifti_root=nifti_p,
-                skip_existing=skip_existing,
-            )
-        except Exception as exc:
-            import traceback
-
-            traceback.print_exc()
-            log.error(f"[{subj}] convert failed: {exc}")
-
-    if report:
-        report_subjects(nifti_p, subj_list)
-
-
-if __name__ == "__main__":
-    main()

@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from nvitk.pipes.pesa_brain.black_blood import config as cfg
-
-_CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
+from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import (
+    EicabMaskKind,
+    EicabMaskResolution,
+    resolve_eicab_mask,
+)
 
 # Legacy stage1 output names (pre vwi_bb rename).
 _LEGACY_WARPED = "WVI_warped_to_tof.nii.gz"
@@ -41,19 +44,44 @@ def find_tof_resampled_volume(eicab_dir: Path) -> Path | None:
     return hits[0] if hits else None
 
 
-def find_eicab_cw_mask(eicab_dir: Path) -> Path | None:
-    """Return first ``*_eICAB_CW`` multilabel NIfTI under *eicab_dir*, or None."""
-    if not eicab_dir.is_dir():
-        return None
-    for pat in _CW_PATTERNS:
-        hits = sorted(eicab_dir.glob(pat))
-        if hits:
-            return hits[0]
-    for pat in _CW_PATTERNS:
-        hits = sorted(eicab_dir.rglob(pat))
-        if hits:
-            return hits[0]
-    return None
+def eicab_mask_resolution(
+    eicab_results_root: Path,
+    subject: str,
+    *,
+    eicab_mask: EicabMaskKind = "cw",
+    eicab_subdir: str | None = None,
+) -> EicabMaskResolution:
+    """Resolve CW or WB eICAB multilabel under the subject eICAB output dir."""
+    eicab_dir = eicab_subject_dir(eicab_results_root, subject, eicab_subdir=eicab_subdir)
+    return resolve_eicab_mask(eicab_dir, preference=eicab_mask)
+
+
+def eicab_mask_path(
+    eicab_results_root: Path,
+    subject: str,
+    *,
+    eicab_mask: EicabMaskKind = "cw",
+    eicab_subdir: str | None = None,
+) -> Path:
+    """Path to requested eICAB CW/WB mask (with fallback logging)."""
+    return eicab_mask_resolution(
+        eicab_results_root,
+        subject,
+        eicab_mask=eicab_mask,
+        eicab_subdir=eicab_subdir,
+    ).path
+
+
+def eicab_cw_mask_path(
+    eicab_results_root: Path,
+    subject: str,
+    *,
+    eicab_subdir: str | None = None,
+) -> Path:
+    """Deprecated: use :func:`eicab_mask_path` with ``eicab_mask='cw'``."""
+    return eicab_mask_path(
+        eicab_results_root, subject, eicab_mask="cw", eicab_subdir=eicab_subdir
+    )
 
 
 def require_path(value: Path | None, name: str) -> Path:
@@ -74,11 +102,11 @@ def resolve_eicab_results_root(eicab_results_root: Path | None) -> Path:
 
 
 def require_vwi_bb_rel_path(vwi_bb_rel: str | None) -> str:
-    rel = (vwi_bb_rel or cfg.VWI_BB_REL_PATH or cfg.WVI_REL_PATH or "").strip()
+    rel = (vwi_bb_rel or cfg.VWI_BB_REL_PATH or "").strip()
     if not rel:
         raise ValueError(
             "VWI_BB relative path is not set. Pass --vwi-bb-rel-path or set "
-            "black_blood.config.VWI_BB_REL_PATH."
+            "nvitk.pipes.pesa_brain.black_blood.config.VWI_BB_REL_PATH."
         )
     return rel
 
@@ -144,19 +172,6 @@ def tof_resampled_path(
         raise FileNotFoundError(
             f"No eICAB TOF_resampled under {eicab_dir} (expected TOF_resampled.nii.gz or similar)."
         )
-    return p
-
-
-def eicab_cw_mask_path(
-    eicab_results_root: Path,
-    subject: str,
-    *,
-    eicab_subdir: str | None = None,
-) -> Path:
-    eicab_dir = eicab_subject_dir(eicab_results_root, subject, eicab_subdir=eicab_subdir)
-    p = find_eicab_cw_mask(eicab_dir)
-    if p is None:
-        raise FileNotFoundError(f"No *_eICAB_CW multilabel under {eicab_dir}.")
     return p
 
 

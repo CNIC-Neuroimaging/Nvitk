@@ -16,8 +16,10 @@ log = Logger()
     "--pipeline",
     type=click.Choice(["black_blood", "g_pet"]),
     required=True,
+    help="Sub-pipeline to run (or use nvitk-pesa-brain-bb / nvitk-pesa-brain-gpet directly).",
 )
 @click.option("--subjects", default=None)
+@click.option("--subjects-file", type=click.Path(path_type=Path), default=None)
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--output-root", type=click.Path(path_type=Path), default=None)
@@ -26,6 +28,7 @@ log = Logger()
 @click.option("--vwi-bb-rel-path", default=None)
 @click.option("--wvi-rel-path", default=None, hidden=True)
 @click.option("--eicab-subdir", default=None)
+@click.option("--eicab-mask", type=click.Choice(["cw", "wb"]), default="cw")
 @click.option("--stages", default="stage0_c,stage1,stage2")
 @click.option("--with-download", is_flag=True, default=False)
 @click.option("--skip-existing", is_flag=True, default=False)
@@ -34,6 +37,8 @@ log = Logger()
 @click.option("--project", type=str, default=None)
 @click.option("--user", type=str, default=None)
 @click.option("--password", type=str, default=None)
+@click.option("--netrc-file", type=click.Path(path_type=Path), default=None)
+@click.option("--report", is_flag=True, default=False)
 @click.option("--dof", type=int, default=6)
 @click.option("--cost", default="normmi")
 @click.option(
@@ -68,6 +73,7 @@ def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
     ctx.invoke(
         bb_run.main,
         subjects=kwargs.get("subjects"),
+        subjects_file=kwargs.get("subjects_file"),
         dicom_root=kwargs.get("dicom_root"),
         nifti_root=kwargs.get("nifti_root"),
         output_root=kwargs.get("output_root"),
@@ -76,6 +82,7 @@ def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
         vwi_bb_rel_path=kwargs.get("vwi_bb_rel_path"),
         wvi_rel_path=kwargs.get("wvi_rel_path"),
         eicab_subdir=kwargs.get("eicab_subdir"),
+        eicab_mask=kwargs.get("eicab_mask"),
         stages=kwargs.get("stages"),
         with_download=kwargs.get("with_download"),
         skip_existing=kwargs.get("skip_existing"),
@@ -84,6 +91,8 @@ def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
         project=kwargs.get("project"),
         user=kwargs.get("user"),
         password=kwargs.get("password"),
+        netrc_file=kwargs.get("netrc_file"),
+        report=kwargs.get("report"),
         dof=kwargs.get("dof"),
         cost=kwargs.get("cost"),
         seg_strategy=kwargs.get("seg_strategy"),

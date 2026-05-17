@@ -17,7 +17,7 @@ DEFAULT_QVTPY_RESULTS_ROOT: Path = _PESA_BRAIN_DATA / "RESULTS" / "res_QVTPy"
 
 DEFAULT_EICAB_RESULTS_ROOT: Path | None = DEFAULT_QVTPY_RESULTS_ROOT
 
-WVI_REL_PATH: str | None = "BlackBlood/vwi_bb.nii.gz"
+VWI_BB_REL_PATH: str | None = "BlackBlood/vwi_bb.nii.gz"
 
 STAGE0_DICOM_SLOT: str = "vwi_bb"
 EICAB_SUBDIR: str = "eicab"
