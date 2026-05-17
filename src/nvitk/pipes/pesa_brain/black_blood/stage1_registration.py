@@ -1,4 +1,4 @@
-"""Black-blood stage 1: rigid vwi_bb → eICAB TOF_resampled (FSL FLIRT)."""
+"""Black-blood stage 1: rigid eICAB TOF_resampled → vwi_bb (FSL FLIRT)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from nvitk.core.logger import Logger
-from nvitk.pipes.pesa_brain.black_blood import config as cfg
 from nvitk.pipes.pesa_brain.black_blood.util import paths
 from nvitk.registration.fsl.flirt import flirt_register_rigid
 
@@ -27,11 +26,11 @@ def run_subject(
     dof: int = 6,
     cost: str = "normmi",
 ) -> Path:
-    """Register vwi_bb (moving) to TOF_resampled (fixed)."""
-    moving = paths.vwi_bb_path(nifti_root, subject, vwi_bb_rel=vwi_bb_rel)
-    fixed = paths.tof_resampled_path(
+    """Register TOF_resampled (moving) into vwi_bb space (fixed); segment in vwi_bb."""
+    moving = paths.tof_resampled_path(
         eicab_results_root, subject, eicab_subdir=eicab_subdir
     )
+    fixed = paths.vwi_bb_path(nifti_root, subject, vwi_bb_rel=vwi_bb_rel)
     out_dir = paths.stage1_dir(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
     meta_path = paths.registration_meta_path(output_root, subject)
@@ -41,8 +40,9 @@ def run_subject(
         return out_dir
 
     log.info(f"pesa_brain stage1 FLIRT | subject={subject}")
-    log.info(f"  moving (vwi_bb): {moving}")
-    log.info(f"  fixed (TOF_resampled): {fixed}")
+    log.info(f"  moving (TOF_resampled): {moving}")
+    log.info(f"  fixed (vwi_bb): {fixed}")
+    log.info("  segmentation space: native vwi_bb")
 
     res = flirt_register_rigid(
         moving,
@@ -50,17 +50,19 @@ def run_subject(
         out_dir,
         dof=dof,
         cost=cost,
-        warped_name="vwi_bb_warped_to_tof.nii.gz",
-        matrix_name="vwi_bb_to_tof.mat",
+        warped_name="tof_resampled_warped_to_vwi_bb.nii.gz",
+        matrix_name="tof_to_vwi_bb.mat",
     )
     meta: dict[str, Any] = {
         "subject": subject,
         "moving": str(moving),
-        "moving_kind": "black_blood_vwi_bb",
+        "moving_kind": "eicab_tof_resampled",
         "fixed": str(fixed),
-        "fixed_kind": "eicab_tof_resampled",
+        "fixed_kind": "black_blood_vwi_bb",
+        "segmentation_space": "vwi_bb",
         "matrix": str(res.matrix_path),
         "warped": str(res.warped_path) if res.warped_path else None,
+        "warped_kind": "tof_resampled_in_vwi_bb_grid",
         "dof": dof,
         "cost": cost,
         "created": datetime.now().isoformat(timespec="seconds"),

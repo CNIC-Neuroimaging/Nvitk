@@ -138,7 +138,7 @@ def _parse_subjects(
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True)
 @click.option("--cl-barrier-radius", type=int, default=2, show_default=True)
 @click.option("--min-component-frac", type=float, default=0.005, show_default=True)
-@click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True)
+@click.option("--rg-intensity-frac", type=float, default=1.5, show_default=True)
 @click.option("--rg-barrier-radius", type=int, default=2, show_default=True)
 def main(
     subjects: str | None,

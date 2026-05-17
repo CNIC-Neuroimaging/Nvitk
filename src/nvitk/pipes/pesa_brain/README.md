@@ -18,8 +18,8 @@ Per-stage commands (`nvitk-pesa-brain-bb-reg`, etc.) are **not** exposed; use `-
 |-------|---------|-------------|
 | `stage0_d` | `download` | XNAT → DICOM (`vwi_bb/`) |
 | `stage0_c` | `convert`, `stage0` | DICOM → `BlackBlood/vwi_bb.nii.gz` |
-| `stage1` | `reg`, `registration` | vwi_bb → eICAB TOF_resampled (FLIRT) |
-| `stage2` | `seg`, `segmentation` | Centerlines + artery segmentation |
+| `stage1` | `reg`, `registration` | eICAB TOF_resampled → **vwi_bb** (FLIRT); segmentation in BB space |
+| `stage2` | `seg`, `segmentation` | eICAB centerlines warped to vwi_bb + segmentation on native vwi_bb |
 
 Default: `stage0_c,stage1,stage2`. Add `stage0_d` or use `--with-download`.
 

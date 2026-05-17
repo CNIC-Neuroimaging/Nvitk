@@ -1,4 +1,4 @@
-"""Black-blood stage 2: centerlines from eICAB + BB artery segmentation."""
+"""Black-blood stage 2: centerlines in vwi_bb space + BB artery segmentation."""
 
 from __future__ import annotations
 
@@ -49,15 +49,10 @@ def run_subject(
     rg_barrier_radius: int = 2,
     min_centerline_points: int = 5,
 ) -> Path:
-    """Build centerlines and segment vwi_bb in TOF space."""
-    meta = _load_stage1_meta(output_root, subject)
-    fixed = Path(meta["fixed"])
-    mat = Path(meta["matrix"])
-    vwi_warped = paths.vwi_bb_warped_path(output_root, subject)
-    if not vwi_warped.is_file():
-        vwi_warped = Path(meta.get("warped") or "")
-    if not vwi_warped.is_file():
-        raise FileNotFoundError(f"Missing warped vwi_bb for {subject}: {vwi_warped}")
+    """Build centerlines and segment in native vwi_bb space."""
+    _load_stage1_meta(output_root, subject)
+    vwi_bb_ref = paths.vwi_bb_path(nifti_root, subject, vwi_bb_rel=vwi_bb_rel)
+    mat = paths.registration_matrix_path(output_root, subject)
 
     mask_res = paths.eicab_mask_resolution(
         eicab_results_root,
@@ -70,12 +65,12 @@ def run_subject(
 
     log.info(
         f"pesa_brain stage2 | subject={subject} strategy={seg_strategy} "
-        f"eicab_mask={mask_res.used} (requested={mask_res.requested})"
+        f"space=vwi_bb eicab_mask={mask_res.used} (requested={mask_res.requested})"
     )
 
     build_centerlines_from_eicab(
         mask_res.path,
-        fixed,
+        vwi_bb_ref,
         out_dir,
         transform_mat=mat,
         min_points=min_centerline_points,
@@ -83,7 +78,7 @@ def run_subject(
         eicab_mask_info=mask_res,
     )
 
-    vwi_img = imread(vwi_warped)
+    vwi_img = imread(vwi_bb_ref)
     cl_img = imread(out_dir / "centerlines_mask.nii.gz")
 
     run_bb_segmentation(

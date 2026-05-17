@@ -8,13 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
-
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import using, setup
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
 from nvitk.morphology.binary import dilate
 from nvitk.morphology.components import remove_small_components_by_fraction
 from nvitk.segmentation.region_growing import region_grow_into_label_volume
+
+setup(globals())
 
 ThrAlgorithm = Literal["otsu", "lsthr", "lthr"]
 SegStrategy = Literal["crop-resegment", "centerline-growth"]
@@ -52,13 +53,10 @@ def _bbox_with_symmetric_padding(
 
 
 def _dilate_bool_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
-    m = np.asarray(mask, dtype=bool)
+    m = as_backend_array(mask).astype(bool, copy=False)
     if radius <= 0 or not np.any(m):
         return m
-    return np.asarray(
-        as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)),
-        dtype=bool,
-    )
+    return as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)).astype(bool, copy=False)
 
 
 def _dilated_other_centerlines_barrier(
@@ -70,7 +68,7 @@ def _dilated_other_centerlines_barrier(
 ) -> np.ndarray:
     i0, i1, j0, j1, k0, k1 = bbox
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
-    other = np.asarray((clm != 0) & (clm != int(label_id)), dtype=bool)
+    other = as_backend_array((clm != 0) & (clm != int(label_id))).astype(bool, copy=False)
     other = _dilate_bool_mask(other, radius=radius)
     return other[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
 
@@ -87,7 +85,7 @@ def _dilated_other_segmentation_barrier(
         oid = int(other_id)
         if oid == 0 or oid == int(label_id):
             continue
-        other |= np.asarray(seg_np == oid, dtype=bool)
+        other |= as_backend_array(seg_np == oid).astype(bool, copy=False)
     if not np.any(other):
         return other
     return _dilate_bool_mask(other, radius=radius)

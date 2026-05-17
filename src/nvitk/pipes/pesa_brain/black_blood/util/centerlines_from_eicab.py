@@ -1,4 +1,4 @@
-"""eICAB CW/WB mask → BB relabel, optional warp, centerlines, rasterized mask."""
+"""eICAB CW/WB mask → BB relabel, warp to vwi_bb space, centerlines, rasterized mask."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
 CENTERLINE_META_JSON = "centerline_meta.json"
+EICAB_BB_IN_VWI_BB_NIFTI = "eicab_bb_in_vwi_bb.nii.gz"
+# Legacy stage2 artifact (TOF-space pipeline).
 EICAB_BB_IN_TOF_NIFTI = "eicab_bb_in_tof.nii.gz"
 
 
@@ -59,7 +61,7 @@ def _grids_match(a_shape: tuple[int, ...], b_shape: tuple[int, ...]) -> bool:
 
 def build_centerlines_from_eicab(
     eicab_mask_path: Path,
-    tof_ref_path: Path,
+    vwi_bb_ref_path: Path,
     out_dir: Path,
     *,
     transform_mat: Path | None = None,
@@ -67,15 +69,14 @@ def build_centerlines_from_eicab(
     skip_existing: bool = False,
     eicab_mask_info: EicabMaskResolution | None = None,
 ) -> CenterlineArtifacts:
-    """Relabel eICAB labels, warp to TOF grid if needed, compute and write centerlines."""
+    """Relabel eICAB labels, warp into vwi_bb grid if needed, compute centerlines in BB space."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     mask_path = out_dir / CENTERLINES_MASK_NIFTI
     meta_path = out_dir / CENTERLINE_META_JSON
-    bb_path = out_dir / EICAB_BB_IN_TOF_NIFTI
+    bb_path = out_dir / EICAB_BB_IN_VWI_BB_NIFTI
 
     if skip_existing and mask_path.is_file() and meta_path.is_file():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
         cl_img = imread(mask_path)
         clm = as_backend_array(cl_img.data).astype(np.int32, copy=False)
         centerlines = compute_centerlines(
@@ -91,32 +92,32 @@ def build_centerlines_from_eicab(
             eicab_bb_path=bb_path if bb_path.is_file() else bb_path,
         )
 
-    ref_img = imread(tof_ref_path)
+    ref_img = imread(vwi_bb_ref_path)
     ref_shape = tuple(int(x) for x in ref_img.data.shape[:3])
 
     labels_native = as_backend_array(imread(eicab_mask_path).data).astype(np.int32, copy=False)
     warped_path = out_dir / "_eicab_warped_tmp.nii.gz"
     if _grids_match(labels_native.shape, ref_shape):
-        labels_in_ref = labels_native
+        labels_in_bb = labels_native
         warped = False
     else:
         if transform_mat is None or not Path(transform_mat).is_file():
             raise FileNotFoundError(
-                "eICAB mask grid differs from TOF_resampled; stage1 matrix required."
+                "eICAB mask grid differs from vwi_bb; stage1 tof_to_vwi_bb.mat required."
             )
         flirt_apply_rigid(
             eicab_mask_path,
-            tof_ref_path,
+            vwi_bb_ref_path,
             transform_mat,
             warped_path,
             interp="nearestneighbour",
         )
-        labels_in_ref = np.rint(
+        labels_in_bb = np.rint(
             as_backend_array(imread(warped_path).data)
         ).astype(np.int32, copy=False)
         warped = True
 
-    bb_labels = relabel_eicab_to_bb(labels_in_ref)
+    bb_labels = relabel_eicab_to_bb(labels_in_bb)
     imsave(bb_path, bb_labels, metadata=dict(ref_img.metadata or {}))
 
     centerlines = compute_centerlines(
@@ -141,8 +142,9 @@ def build_centerlines_from_eicab(
         "eicab_mask_fallback_reason": (
             eicab_mask_info.fallback_reason if eicab_mask_info is not None else None
         ),
-        "tof_reference": str(tof_ref_path),
-        "warped_eicab": warped,
+        "segmentation_reference": str(vwi_bb_ref_path),
+        "segmentation_space": "vwi_bb",
+        "warped_eicab_to_vwi_bb": warped,
         "transform_matrix": str(transform_mat) if transform_mat else None,
         "labels": {
             str(lid): {

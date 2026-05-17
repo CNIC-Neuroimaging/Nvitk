@@ -11,9 +11,11 @@ from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import (
     resolve_eicab_mask,
 )
 
-# Legacy stage1 output names (pre vwi_bb rename).
+# Legacy stage1 outputs (older registration direction / filenames).
 _LEGACY_WARPED = "WVI_warped_to_tof.nii.gz"
 _LEGACY_MATRIX = "wvi_to_tof.mat"
+_LEGACY_BB_TO_TOF_WARPED = "vwi_bb_warped_to_tof.nii.gz"
+_LEGACY_BB_TO_TOF_MAT = "vwi_bb_to_tof.mat"
 
 
 def _stem_without_suffix(p: Path) -> str:
@@ -191,26 +193,32 @@ def registration_meta_path(output_root: Path, subject: str) -> Path:
     return stage1_dir(output_root, subject) / "registration_meta.json"
 
 
-def vwi_bb_warped_path(output_root: Path, subject: str) -> Path:
-    stage1 = stage1_dir(output_root, subject)
-    p = stage1 / "vwi_bb_warped_to_tof.nii.gz"
-    if p.is_file():
-        return p
-    legacy = stage1 / _LEGACY_WARPED
-    if legacy.is_file():
-        return legacy
-    return p
+def tof_warped_to_vwi_bb_path(output_root: Path, subject: str) -> Path:
+    """TOF_resampled warped into vwi_bb grid (QC / optional)."""
+    return stage1_dir(output_root, subject) / "tof_resampled_warped_to_vwi_bb.nii.gz"
 
 
 def registration_matrix_path(output_root: Path, subject: str) -> Path:
+    """FLIRT matrix mapping TOF_resampled (moving) → vwi_bb (fixed)."""
     stage1 = stage1_dir(output_root, subject)
-    p = stage1 / "vwi_bb_to_tof.mat"
+    p = stage1 / "tof_to_vwi_bb.mat"
     if p.is_file():
         return p
-    legacy = stage1 / _LEGACY_MATRIX
-    if legacy.is_file():
-        return legacy
+    for legacy in (_LEGACY_BB_TO_TOF_MAT, _LEGACY_MATRIX):
+        leg = stage1 / legacy
+        if leg.is_file():
+            return leg
     return p
+
+
+def vwi_bb_warped_path(output_root: Path, subject: str) -> Path:
+    """Deprecated: old pipeline warped vwi_bb to TOF; use :func:`vwi_bb_path` for segmentation."""
+    stage1 = stage1_dir(output_root, subject)
+    for name in (_LEGACY_BB_TO_TOF_WARPED, _LEGACY_WARPED):
+        p = stage1 / name
+        if p.is_file():
+            return p
+    return stage1 / _LEGACY_BB_TO_TOF_WARPED
 
 
 def wvi_warped_path(output_root: Path, subject: str) -> Path:
