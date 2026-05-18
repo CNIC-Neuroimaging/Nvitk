@@ -99,8 +99,32 @@ def keep_component_closest_to_center(
     return as_backend_array(lab == best_id)
 
 
+def keep_components_touching_seeds(
+    mask: Image | Any,
+    seed_mask: Image | Any,
+    *,
+    connectivity: int = 1,
+) -> Any:
+    """Keep only connected components of *mask* that overlap *seed_mask*."""
+    vessel = _coerce_to_current_backend(_as_array(mask).astype(bool, copy=False))
+    seeds = _coerce_to_current_backend(_as_array(seed_mask).astype(bool, copy=False))
+    if not np.any(vessel):
+        return _wrap_like(mask, np.zeros_like(vessel, dtype=bool))
+    labeled, n_cc = label_connected(vessel, connectivity=connectivity)
+    if n_cc <= 0:
+        return _wrap_like(mask, np.zeros_like(vessel, dtype=bool))
+    labeled_np = as_backend_array(labeled)
+    keep = np.zeros_like(vessel, dtype=bool)
+    for lab in range(1, int(n_cc) + 1):
+        cc = labeled_np == lab
+        if np.any(seeds & as_backend_array(cc).astype(bool, copy=False)):
+            keep |= as_backend_array(cc).astype(bool, copy=False)
+    return _wrap_like(mask, as_backend_array(keep.astype(bool, copy=False)))
+
+
 __all__ = [
-    "keep_component_closest_to_ºcenter",
+    "keep_component_closest_to_center",
+    "keep_components_touching_seeds",
     "label_connected",
     "remove_small_components",
     "remove_small_components_by_fraction",

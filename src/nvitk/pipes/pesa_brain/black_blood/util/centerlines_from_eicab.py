@@ -24,14 +24,9 @@ from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 log = Logger()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Output artifact names
-# ──────────────────────────────────────────────────────────────────────────────
-
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
 CENTERLINE_META_JSON = "centerline_meta.json"
 EICAB_BB_IN_VWI_BB_NIFTI = "eicab_bb_in_vwi_bb.nii.gz"
-# Legacy stage2 artifact (TOF-space pipeline).
 EICAB_BB_IN_TOF_NIFTI = "eicab_bb_in_tof.nii.gz"
 
 
@@ -43,11 +38,6 @@ class CenterlineArtifacts:
     centerlines_mask_path: Path
     centerline_meta_path: Path
     eicab_bb_path: Path
-
-
-# ---------------------------------------------------------------------------
-# Rasterize and grid checks
-# ---------------------------------------------------------------------------
 
 
 def rasterize_centerlines_mask(
@@ -72,11 +62,6 @@ def rasterize_centerlines_mask(
 def _grids_match(a_shape: tuple[int, ...], b_shape: tuple[int, ...]) -> bool:
     """True when the first three dimensions of two volumes match."""
     return tuple(int(x) for x in a_shape[:3]) == tuple(int(x) for x in b_shape[:3])
-
-
-# ---------------------------------------------------------------------------
-# Build centerlines in vwi_bb space
-# ---------------------------------------------------------------------------
 
 
 def build_centerlines_from_eicab(

@@ -14,7 +14,7 @@ Stages (``--stages``, comma-separated)
     Writes ``tof_to_vwi_bb.mat`` and warped TOF QC volume.
 
 ``stage2`` / ``seg`` / ``segmentation``
-    eICAB labels → centerlines in ``vwi_bb`` space → centerline-growth BB masks.
+    eICAB labels → centerlines + eICAB-guided hypointense lumen masks in ``vwi_bb`` space.
     Outputs under ``{output_root}/{subject}/pesa_brain/black_blood/stage2_bb_segmentation/``.
 
 Default stages (no download): ``stage0_c,stage1,stage2``.
@@ -25,8 +25,8 @@ Data layout
 - eICAB (qvtpy): ``{eicab_results_root}/{subject}/eicab/*_eICAB_{CW|WB}.nii.gz``
 - Results: ``{output_root}/{subject}/pesa_brain/black_blood/``
 
-Segmentation uses **centerline-growth** with hypointense (dark-lumen) region growing
-on native ``vwi_bb``; see ``util/bb_vessel_segmentation.py``.
+Segmentation is eICAB-guided hypointense lumen extraction on native ``vwi_bb``
+(see ``util/bb_vessel_segmentation.py``).
 """
 
 from __future__ import annotations
@@ -239,6 +239,69 @@ def _parse_subjects(
     help="FLIRT cost function (stage1).",
 )
 @click.option(
+    "--bbox-padding",
+    type=int,
+    default=15,
+    show_default=True,
+    help="Stage2: symmetric bbox padding around each vessel centerline.",
+)
+@click.option(
+    "--eicab-prior-dilate",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Stage2: dilate warped eICAB label to define vessel corridor prior.",
+)
+@click.option(
+    "--centerline-max-dist",
+    type=int,
+    default=10,
+    show_default=True,
+    help="Stage2: max voxel distance from centerline for lumen grow domain (non-ICA).",
+)
+@click.option(
+    "--ica-centerline-max-dist",
+    type=int,
+    default=14,
+    show_default=True,
+    help="Stage2: tighter centerline tube radius for LICA/RICA (reduces background leak).",
+)
+@click.option(
+    "--lumen-intensity-frac",
+    type=float,
+    default=1,
+    show_default=True,
+    help="Stage2: hypointense ceiling multiplier on seed intensity (non-ICA).",
+)
+@click.option(
+    "--lumen-percentile",
+    type=float,
+    default=99.0,
+    show_default=True,
+    help="Stage2: local (centerline tube) intensity percentile cap (non-ICA).",
+)
+@click.option(
+    "--ica-lumen-intensity-frac",
+    type=float,
+    default=1,
+    show_default=True,
+    help="Stage2: stricter ceiling multiplier for LICA/RICA.",
+)
+@click.option(
+    "--ica-lumen-percentile",
+    type=float,
+    default=99.0,
+    show_default=True,
+    help="Stage2: stricter local percentile cap for LICA/RICA.",
+)
+@click.option(
+    "--min-component-frac",
+    type=float,
+    default=0.005,
+    show_default=True,
+    help="Stage2: drop lumen islands smaller than this fraction of foreground.",
+)
+@click.option(
     "--cl-barrier-radius",
     type=int,
     default=3,
@@ -250,12 +313,9 @@ def _parse_subjects(
 @click.option(
     "--rg-intensity-frac",
     type=float,
-    default=.4,
+    default=1.75,
     show_default=True,
-    help=(
-        "Stage2: hypointense RG gate — admit neighbours with "
-        "I <= mean(seed) * rg_intensity_frac on native vwi_bb (lower = stricter)."
-    ),
+    help="Stage2: hypointense RG multiplier on mean(seed) after initial lumen mask.",
 )
 @click.option(
     "--rg-barrier-radius",
@@ -265,11 +325,41 @@ def _parse_subjects(
     help="Stage2: dilate other vessels' current segmentation to block merging.",
 )
 @click.option(
+    "--rg-constraint/--no-rg-constraint",
+    default=True,
+    show_default=True,
+    help=(
+        "Stage2: constrain RG to per-vessel bbox and eICAB∩centerline tube "
+        "(off = free full-volume RG)."
+    ),
+)
+@click.option(
     "--min-centerline-points",
     type=int,
     default=3,
     show_default=True,
     help="Minimum skeleton points per eICAB label to keep a centerline.",
+)
+@click.option(
+    "--vwi-preprocess",
+    type=click.Choice(["none", "median", "gaussian"]),
+    default="median",
+    show_default=True,
+    help="Light smoothing of vwi_bb before lumen segmentation.",
+)
+@click.option(
+    "--vwi-median-size",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Median filter kernel size (odd) when --vwi-preprocess=median.",
+)
+@click.option(
+    "--vwi-gaussian-sigma",
+    type=float,
+    default=0.8,
+    show_default=True,
+    help="Gaussian sigma (voxels) when --vwi-preprocess=gaussian.",
 )
 def main(
     subjects: str | None,
@@ -295,10 +385,23 @@ def main(
     report: bool,
     dof: int,
     cost: str,
+    bbox_padding: int,
+    eicab_prior_dilate: int,
+    centerline_max_dist: int,
+    ica_centerline_max_dist: int,
+    lumen_intensity_frac: float,
+    lumen_percentile: float,
+    ica_lumen_intensity_frac: float,
+    ica_lumen_percentile: float,
+    min_component_frac: float,
     cl_barrier_radius: int,
     rg_intensity_frac: float,
     rg_barrier_radius: int,
+    rg_constraint: bool,
     min_centerline_points: int,
+    vwi_preprocess: str,
+    vwi_median_size: int,
+    vwi_gaussian_sigma: float,
 ) -> None:
     """PESA-Brain black-blood: VWI_BB download, TOF→BB registration, centerline segmentation."""
     dicom = Path(dicom_root or cfg.DEFAULT_DICOM_ROOT)
@@ -405,10 +508,23 @@ def main(
                         vwi_bb_rel=rel,
                         eicab_subdir=eicab_subdir,
                         eicab_mask=mask_kind,
+                        bbox_padding=bbox_padding,
+                        eicab_prior_dilate=eicab_prior_dilate,
+                        centerline_max_dist=centerline_max_dist,
+                        ica_centerline_max_dist=ica_centerline_max_dist,
+                        lumen_intensity_frac=lumen_intensity_frac,
+                        lumen_percentile=lumen_percentile,
+                        ica_lumen_intensity_frac=ica_lumen_intensity_frac,
+                        ica_lumen_percentile=ica_lumen_percentile,
+                        min_component_frac=min_component_frac,
                         cl_barrier_radius=cl_barrier_radius,
                         rg_intensity_frac=rg_intensity_frac,
                         rg_barrier_radius=rg_barrier_radius,
+                        rg_constraint=rg_constraint,
                         min_centerline_points=min_centerline_points,
+                        vwi_preprocess=vwi_preprocess,  # type: ignore[arg-type]
+                        vwi_median_size=vwi_median_size,
+                        vwi_gaussian_sigma=vwi_gaussian_sigma,
                     ),
                 )
 

@@ -68,6 +68,9 @@ BB_ARTERIAL_LABEL_IDS: frozenset[int] = frozenset(
     lid for lid in BB_ARTERIAL_ID_TO_NAME if int(lid) > 0
 )
 
+# Proximal vessels with weak BB wall contrast (stricter lumen gating in stage2).
+BB_ICA_IDS: frozenset[int] = frozenset({BB_LICA, BB_RICA})
+
 # ---- eICAB → BB lookup (merge PCA segments; drop SCA / AChA) ----------------
 
 EICAB_TO_BB_LABEL: dict[int, int] = {

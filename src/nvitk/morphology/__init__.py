@@ -15,6 +15,7 @@ from .binary import close, dilate, erode, fill_holes, open
 from .centerline import compute_centerlines, skeletonize_binary
 from .components import (
     keep_component_closest_to_center,
+    keep_components_touching_seeds,
     label_connected,
     remove_small_components,
     remove_small_components_by_fraction,
@@ -27,6 +28,7 @@ __all__ = [
     "erode",
     "fill_holes",
     "keep_component_closest_to_center",
+    "keep_components_touching_seeds",
     "label_connected",
     "make_ball_footprint",
     "open",
