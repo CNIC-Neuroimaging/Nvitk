@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import as_backend_array
+from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.pesa_brain.black_blood.labels import (
@@ -21,6 +22,12 @@ from nvitk.pipes.pesa_brain.black_blood.labels import (
 from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskResolution
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
+log = Logger()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Output artifact names
+# ──────────────────────────────────────────────────────────────────────────────
+
 CENTERLINES_MASK_NIFTI = "centerlines_mask.nii.gz"
 CENTERLINE_META_JSON = "centerline_meta.json"
 EICAB_BB_IN_VWI_BB_NIFTI = "eicab_bb_in_vwi_bb.nii.gz"
@@ -30,10 +37,17 @@ EICAB_BB_IN_TOF_NIFTI = "eicab_bb_in_tof.nii.gz"
 
 @dataclass(frozen=True)
 class CenterlineArtifacts:
+    """Paths and in-memory centerlines produced by :func:`build_centerlines_from_eicab`."""
+
     centerlines: dict[int, np.ndarray]
     centerlines_mask_path: Path
     centerline_meta_path: Path
     eicab_bb_path: Path
+
+
+# ---------------------------------------------------------------------------
+# Rasterize and grid checks
+# ---------------------------------------------------------------------------
 
 
 def rasterize_centerlines_mask(
@@ -56,7 +70,13 @@ def rasterize_centerlines_mask(
 
 
 def _grids_match(a_shape: tuple[int, ...], b_shape: tuple[int, ...]) -> bool:
+    """True when the first three dimensions of two volumes match."""
     return tuple(int(x) for x in a_shape[:3]) == tuple(int(x) for x in b_shape[:3])
+
+
+# ---------------------------------------------------------------------------
+# Build centerlines in vwi_bb space
+# ---------------------------------------------------------------------------
 
 
 def build_centerlines_from_eicab(
@@ -77,6 +97,7 @@ def build_centerlines_from_eicab(
     bb_path = out_dir / EICAB_BB_IN_VWI_BB_NIFTI
 
     if skip_existing and mask_path.is_file() and meta_path.is_file():
+        log.step(f"skip existing centerlines -> {mask_path}")
         cl_img = imread(mask_path)
         clm = as_backend_array(cl_img.data).astype(np.int32, copy=False)
         centerlines = compute_centerlines(
@@ -94,17 +115,20 @@ def build_centerlines_from_eicab(
 
     ref_img = imread(vwi_bb_ref_path)
     ref_shape = tuple(int(x) for x in ref_img.data.shape[:3])
+    log.step(f"reference grid vwi_bb shape={ref_shape}")
 
     labels_native = as_backend_array(imread(eicab_mask_path).data).astype(np.int32, copy=False)
     warped_path = out_dir / "_eicab_warped_tmp.nii.gz"
     if _grids_match(labels_native.shape, ref_shape):
         labels_in_bb = labels_native
         warped = False
+        log.step("eICAB mask already on vwi_bb grid (no warp)")
     else:
         if transform_mat is None or not Path(transform_mat).is_file():
             raise FileNotFoundError(
                 "eICAB mask grid differs from vwi_bb; stage1 tof_to_vwi_bb.mat required."
             )
+        log.step(f"warping eICAB mask with {Path(transform_mat).name}")
         flirt_apply_rigid(
             eicab_mask_path,
             vwi_bb_ref_path,
@@ -119,14 +143,21 @@ def build_centerlines_from_eicab(
 
     bb_labels = relabel_eicab_to_bb(labels_in_bb)
     imsave(bb_path, bb_labels, metadata=dict(ref_img.metadata or {}))
+    log.step(f"relabelled eICAB → BB labels, wrote {bb_path.name}")
 
+    log.step("computing skeleton centerlines per arterial label")
     centerlines = compute_centerlines(
         bb_labels,
         labels=sorted(BB_ARTERIAL_LABEL_IDS),
         min_points=min_points,
     )
+    for lid in sorted(centerlines.keys()):
+        log.step(
+            f"{bb_vessel_name(lid)}: {int(centerlines[lid].shape[0])} centerline points"
+        )
     cl_mask = rasterize_centerlines_mask(ref_shape, centerlines)
     imsave(mask_path, cl_mask, metadata=dict(ref_img.metadata or {}))
+    log.step(f"rasterized centerlines -> {mask_path.name}")
 
     meta: dict[str, Any] = {
         "eicab_mask_source": str(eicab_mask_path),

@@ -1,4 +1,13 @@
-"""qvtpy stage 4: per-vessel local CD threshold + optional region growing → ``seg_4dflow``."""
+"""qvtpy stage 4: per-vessel local CD threshold + region growing → ``seg_4dflow``.
+
+**Inputs**
+
+- ``ComplexDifference_3D``, stage-3 ``centerlines_mask``, optional ``eicab_in_4dflow``.
+
+**Outputs**
+
+- ``seg_4dflow.nii.gz``, ``segmentation_meta.json``, stage-4 centerline exports.
+"""
 
 from __future__ import annotations
 
@@ -141,6 +150,7 @@ def run_subject(
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
 ) -> Path:
+    """Build multilabel 4D-flow segmentation locally; return stage-4 output directory."""
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
     if not cl_path.is_file():
@@ -168,6 +178,10 @@ def run_subject(
     cl_img = imread(cl_path)
     centerlines_mask = as_backend_array(cl_img.data).astype(np.int32, copy=False)
 
+    log.step(
+        f"per-vessel local CD seg (thr={thr_algorithm}, "
+        f"RG={region_growing}, rg_frac={rg_intensity_frac})"
+    )
     result = build_seg_4dflow_local(
         cd,
         centerlines_mask,
@@ -322,6 +336,7 @@ def submit_subject_sge(
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
 ) -> str:
+    """Emit or submit one stage-4 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage4_4dflow_segmentation.py"

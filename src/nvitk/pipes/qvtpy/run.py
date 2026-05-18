@@ -39,7 +39,7 @@ from nvitk.cluster.sge import (
     submit_stage,
     write_script_header,
 )
-from nvitk.core.logger import Logger
+from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.segmentation.eicab import config as eicab_cfg
 
 from . import config as cfg
@@ -121,6 +121,18 @@ _STAGES_ORDERED: tuple[str, ...] = (
 _ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
 DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB},{STAGE_REG},{STAGE_CENTERLINE},{STAGE_SEG},{STAGE_LOC},{STAGE_MEASURE}"
 
+_STAGE_LABELS: dict[str, str] = {
+    STAGE_DOWNLOAD: "XNAT download",
+    STAGE_CONVERT: "DICOM → NIfTI",
+    STAGE_EICAB: "eICAB (TOF)",
+    STAGE_REG: "FLIRT TOF → 4D flow",
+    STAGE_CENTERLINE: "centerlines + venous",
+    STAGE_SEG: "CD segmentation (4D)",
+    STAGE_SEG_T: "CD segmentation (4D+t)",
+    STAGE_LOC: "LOC generation",
+    STAGE_MEASURE: "flow measurement",
+}
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -128,6 +140,7 @@ DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB},{STAGE_REG},{STAGE_CENTERL
 
 
 def _parse_stages(spec: str) -> list[str]:
+    """Parse ``--stages`` comma list into canonical stage ids in pipeline order."""
     tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]
     if not tokens:
         raise click.ClickException("--stages cannot be empty.")
@@ -143,16 +156,19 @@ def _parse_stages(spec: str) -> list[str]:
 
 
 def _iter_subjects(root: Path) -> list[str]:
+    """Sorted subject folder names under *root* (one directory per subject)."""
     if not root.exists():
         return []
     return sorted([p.name for p in root.iterdir() if p.is_dir()])
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Host tree mounted at ``/nvitk/src/`` in SGE Singularity jobs."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _default_submit_script_path() -> Path:
+    """Timestamped bash script under :data:`~nvitk.pipes.qvtpy.config.SGE_SCRIPTS_DIR`."""
     cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return cfg.SGE_SCRIPTS_DIR / f"submit_qvtpy_{ts}.sh"
@@ -177,6 +193,7 @@ def _emit_stage0_convert(
     phase_bg_poly_order: int,
     phase_bg_static_percentile: float,
 ) -> str:
+    """Append one stage0_c :func:`~nvitk.cluster.sge.submit_stage` block; return job id."""
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage0_convert.py"
     cmd_parts: list[str] = [
@@ -486,169 +503,188 @@ def main(
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
 
-    if run_dl:
-        if submit == "sge":
-            log.info("stage0_d runs locally; SGE covers other selected stages.")
-        from nvitk.db.xnat import requested_sequence_set
-        from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
+    active_stages = (
+        stages if submit == "local" else [s for s in stages if s == STAGE_DOWNLOAD]
+    )
 
-        profile = load_xnat_profile(xnat_config_path)
-        conn = resolve_xnat_connection(profile)
-        seq_set = requested_sequence_set(sequences) or set(stage0_download.DEFAULT_SEQUENCES)
-        stage0_download.run_download(
-            subject_list,
-            dicom_root=dicom_root,
-            xnat_config=conn,
-            sequences=seq_set,
-            skip_existing=skip_existing,
-            report=report,
-        )
+    with PipelineRunTracker(
+        log,
+        "qvtpy",
+        subject_list,
+        active_stages,
+        stage_labels=_STAGE_LABELS,
+    ) as run:
+        if run_dl:
+            if submit == "sge":
+                log.info("stage0_d runs locally; SGE covers other selected stages.")
+            from nvitk.db.xnat import requested_sequence_set
+            from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
-    if submit == "local":
-        for subj in subject_list:
-            if run_conv:
-                stage0_convert.run_subject(
-                    subj,
-                    dicom_root=dicom_root,
-                    nifti_root=nifti_root,
-                    compute_phase_derived=compute_phase_derived,
-                    skip_existing=skip_existing,
-                    phase_background_correction=phase_background_correction,
-                    phase_bg_poly_order=phase_bg_poly_order,
-                    phase_bg_static_percentile=phase_bg_static_percentile,
-                )
-            if run_eicab:
-                try:
-                    stage1_eicab.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        resolution=eicab_resolution,
-                        device=eicab_device,
-                        eicab_container=eicab_container,
-                        vasculature_dir=vasculature_dir,
-                    )
-                except (FileNotFoundError, OSError) as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage1 eICAB skipped: {exc}")
-            if run_s2:
-                try:
-                    stage2_registration.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        reference=stage2_reference,  # type: ignore[arg-type]
-                        dof=stage2_dof,
-                        cost=stage2_cost,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage2 skipped: {exc}")
-            if run_s3:
-                try:
-                    stage3_centerline.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
-                        cd_up_thresh=cd_up_thresh,
-                        cd_shift_hm=cd_shift_hm,
-                        venous_min_component_frac=venous_min_component_frac,
-                        eicab_min_island_fraction=eicab_min_island_fraction,
-                        eicab_bridge_open_radius=eicab_bridge_open_radius,
-                        venous_min_branch_points=venous_min_branch_points,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage3 skipped: {exc}")
-            if run_s4:
-                try:
-                    stage4_4dflow_segmentation.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        crop_padding_bbox=crop_padding_bbox,
-                        thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
-                        region_growing=region_growing,
-                        rg_intensity_frac=rg_intensity_frac,
-                        rg_intensity_frac_explore=rg_intensity_frac_explore,
-                        cl_barrier_radius=cl_barrier_radius,
-                        rg_barrier_radius=rg_barrier_radius,
-                        aca_sequential_grow=aca_sequential_grow,
-                        aca_overlap_min_voxels=aca_overlap_min_voxels,
-                        acomm_junction_radius=acomm_junction_radius,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage4 skipped: {exc}")
-            if run_s4t:
-                try:
-                    stage4t_4dflow_t_segmentation.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        crop_padding_bbox=crop_padding_bbox,
-                        thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
-                        region_growing=region_growing,
-                        rg_intensity_frac=rg_intensity_frac,
-                        rg_intensity_frac_explore=rg_intensity_frac_explore,
-                        cl_barrier_radius=cl_barrier_radius,
-                        rg_barrier_radius=rg_barrier_radius,
-                        aca_sequential_grow=aca_sequential_grow,
-                        aca_overlap_min_voxels=aca_overlap_min_voxels,
-                        acomm_junction_radius=acomm_junction_radius,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage4t skipped: {exc}")
-            if run_s5:
-                try:
-                    stage5_loc_generation.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        loc_arterial_strategy=loc_arterial_strategy,
-                        cross_section_radius_vox=cross_section_radius_vox,
-                        venous_min_component_frac=venous_min_component_frac,
-                        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage5 skipped: {exc}")
-            if run_s6:
-                try:
-                    stage6_measure.run_subject(
-                        subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
-                        skip_existing=skip_existing,
-                        cross_section_radius_vox=cross_section_radius_vox,
-                        measure_resegment=measure_resegment,
-                        measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
-                        cross_section_res=cross_section_res,
-                        cross_section_plane_interp=cross_section_plane_interp,
-                    )
-                except Exception as exc:
-                    import traceback
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage6 skipped: {exc}")
-
-        if run_conv and report:
-            stage0_convert.print_nifti_qc_report(
-                nifti_root, subject_list, check_derived=report_derived
+            profile = load_xnat_profile(xnat_config_path)
+            conn = resolve_xnat_connection(profile)
+            seq_set = requested_sequence_set(sequences) or set(
+                stage0_download.DEFAULT_SEQUENCES
             )
+
+            def _download() -> None:
+                stage0_download.run_download(
+                    subject_list,
+                    dicom_root=dicom_root,
+                    xnat_config=conn,
+                    sequences=seq_set,
+                    skip_existing=skip_existing,
+                    report=report,
+                )
+
+            run.run_stage(
+                "(cohort)",
+                STAGE_DOWNLOAD,
+                _download,
+                detail=f"{len(subject_list)} subject(s)",
+            )
+
+        if submit == "local":
+            for subj in subject_list:
+                if run_conv:
+                    run.run_stage(
+                        subj,
+                        STAGE_CONVERT,
+                        lambda s=subj: stage0_convert.run_subject(
+                            s,
+                            dicom_root=dicom_root,
+                            nifti_root=nifti_root,
+                            compute_phase_derived=compute_phase_derived,
+                            skip_existing=skip_existing,
+                            phase_background_correction=phase_background_correction,
+                            phase_bg_poly_order=phase_bg_poly_order,
+                            phase_bg_static_percentile=phase_bg_static_percentile,
+                        ),
+                    )
+                if run_eicab:
+                    run.run_stage(
+                        subj,
+                        STAGE_EICAB,
+                        lambda s=subj: stage1_eicab.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            resolution=eicab_resolution,
+                            device=eicab_device,
+                            eicab_container=eicab_container,
+                            vasculature_dir=vasculature_dir,
+                        ),
+                    )
+                if run_s2:
+                    run.run_stage(
+                        subj,
+                        STAGE_REG,
+                        lambda s=subj: stage2_registration.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            reference=stage2_reference,  # type: ignore[arg-type]
+                            dof=stage2_dof,
+                            cost=stage2_cost,
+                        ),
+                    )
+                if run_s3:
+                    run.run_stage(
+                        subj,
+                        STAGE_CENTERLINE,
+                        lambda s=subj: stage3_centerline.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+                            cd_up_thresh=cd_up_thresh,
+                            cd_shift_hm=cd_shift_hm,
+                            venous_min_component_frac=venous_min_component_frac,
+                            eicab_min_island_fraction=eicab_min_island_fraction,
+                            eicab_bridge_open_radius=eicab_bridge_open_radius,
+                            venous_min_branch_points=venous_min_branch_points,
+                        ),
+                    )
+                if run_s4:
+                    run.run_stage(
+                        subj,
+                        STAGE_SEG,
+                        lambda s=subj: stage4_4dflow_segmentation.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            crop_padding_bbox=crop_padding_bbox,
+                            thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                            region_growing=region_growing,
+                            rg_intensity_frac=rg_intensity_frac,
+                            rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            cl_barrier_radius=cl_barrier_radius,
+                            rg_barrier_radius=rg_barrier_radius,
+                            aca_sequential_grow=aca_sequential_grow,
+                            aca_overlap_min_voxels=aca_overlap_min_voxels,
+                            acomm_junction_radius=acomm_junction_radius,
+                        ),
+                    )
+                if run_s4t:
+                    run.run_stage(
+                        subj,
+                        STAGE_SEG_T,
+                        lambda s=subj: stage4t_4dflow_t_segmentation.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            crop_padding_bbox=crop_padding_bbox,
+                            thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                            region_growing=region_growing,
+                            rg_intensity_frac=rg_intensity_frac,
+                            rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            cl_barrier_radius=cl_barrier_radius,
+                            rg_barrier_radius=rg_barrier_radius,
+                            aca_sequential_grow=aca_sequential_grow,
+                            aca_overlap_min_voxels=aca_overlap_min_voxels,
+                            acomm_junction_radius=acomm_junction_radius,
+                        ),
+                    )
+                if run_s5:
+                    run.run_stage(
+                        subj,
+                        STAGE_LOC,
+                        lambda s=subj: stage5_loc_generation.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            loc_arterial_strategy=loc_arterial_strategy,
+                            cross_section_radius_vox=cross_section_radius_vox,
+                            venous_min_component_frac=venous_min_component_frac,
+                            loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                        ),
+                    )
+                if run_s6:
+                    run.run_stage(
+                        subj,
+                        STAGE_MEASURE,
+                        lambda s=subj: stage6_measure.run_subject(
+                            s,
+                            nifti_root=nifti_root,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
+                            cross_section_radius_vox=cross_section_radius_vox,
+                            measure_resegment=measure_resegment,
+                            measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
+                            cross_section_res=cross_section_res,
+                            cross_section_plane_interp=cross_section_plane_interp,
+                        ),
+                    )
+
+    if submit == "local" and run_conv and report:
+        stage0_convert.print_nifti_qc_report(
+            nifti_root, subject_list, check_derived=report_derived
+        )
         return
 
     cluster_stages = (

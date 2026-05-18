@@ -1,4 +1,14 @@
-"""Shared 4D-flow contrast masks (complex-difference angiogram) for qvtpy stage 3."""
+"""Global complex-difference vessel masks for qvtpy stage 3.
+
+**Inputs**
+
+- 3D ``ComplexDifference`` volume (float), typically from stage-0 ``phase2volume``.
+
+**Outputs**
+
+- Boolean foreground mask after sliding threshold + area opening.
+- :func:`venous_search_region` — superior Y-slab mask restricting venous geometry heuristics.
+"""
 
 from __future__ import annotations
 

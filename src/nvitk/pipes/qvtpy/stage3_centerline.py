@@ -1,4 +1,14 @@
-"""qvtpy stage 3: centerlines (eICAB in 4Dflow space + venous branches from CD)."""
+"""qvtpy stage 3: centerlines (eICAB in 4D-flow space + venous branches from CD).
+
+**Inputs**
+
+- Stage-2 FLIRT transform, eICAB CW/WB mask, ``ComplexDifference_3D``.
+
+**Outputs**
+
+- ``eicab_in_4dflow.nii.gz``, ``centerlines_mask.nii.gz``, ``centerline_meta.json``,
+  ``cd_vessel_binary_qc.nii.gz`` under ``stage3_centerline/``.
+"""
 
 from __future__ import annotations
 
@@ -128,6 +138,7 @@ def run_subject(
     eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
 ) -> Path:
+    """Warp eICAB, extract arterial/venous centerlines; return stage-3 output directory."""
     # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
     meta = _load_stage2_meta(output_root, subject)
     mat = Path(meta["matrix"])
@@ -144,6 +155,7 @@ def run_subject(
         return out_dir
 
     # ---- Warp eICAB labels into 4D-flow space (nearest neighbour) ----------
+    log.step(f"warp eICAB ({eicab_res.used}) into 4D-flow space")
     warped_labels = out_dir / "eicab_in_4dflow.nii.gz"
     flirt_apply_rigid(
         eicab_res.path,
@@ -154,6 +166,7 @@ def run_subject(
     )
 
     # ---- Global CD vessel mask (sliding threshold + area opening) ------------
+    log.step("CD sliding-threshold vessel mask for venous search")
     lab_img = imread(warped_labels)
     labels_arr = as_backend_array(lab_img.data)
     shape3 = tuple(int(x) for x in labels_arr.shape[:3])
@@ -171,6 +184,7 @@ def run_subject(
     vessel_bin = as_backend_array(vessel_bin.astype(np.uint8, copy=False))
 
     # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
+    log.step("clean arterial eICAB labels + island filter")
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
     labels_np = relabel_eicab_mask_to_qvtpy(labels_np)
@@ -190,8 +204,10 @@ def run_subject(
     imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))
 
     arterial = compute_centerlines(arterial_vol, min_points=5)
+    log.step(f"arterial centerlines: {len(arterial)} label(s)")
 
     # ---- Venous: CD ∧ slab → clean → junction-split skeleton → name/label ----
+    log.step("venous branch detection from CD + slab region")
     venous_mask = vessel_bin.astype(bool) & venous_region
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
@@ -298,6 +314,7 @@ def submit_subject_sge(
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
 ) -> str:
+    """Emit or submit one stage-3 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage3_centerline.py"

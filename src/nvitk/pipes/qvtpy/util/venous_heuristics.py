@@ -1,4 +1,14 @@
-"""Geometry-based identification of venous sinuses (SSSV, STRV, LTSV, RTSV)."""
+"""Geometry-based identification of venous sinuses (SSSV, STRV, LTSV, RTSV).
+
+**Inputs**
+
+- Binary venous foreground in the superior Y-third of the 4D-flow grid (stage 3).
+
+**Outputs**
+
+- Named centerline polylines via :func:`assign_venous_branches` (junction-split skeleton chains).
+- Fixed label ids 31–34 through :func:`venous_name_to_label_id`.
+"""
 
 from __future__ import annotations
 

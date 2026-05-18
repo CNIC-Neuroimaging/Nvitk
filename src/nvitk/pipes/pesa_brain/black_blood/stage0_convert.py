@@ -1,4 +1,4 @@
-"""Black-blood stage 0 (convert): DICOM -> ``BlackBlood/vwi_bb.nii.gz``."""
+"""Black-blood stage 0 (convert): DICOM → canonical ``BlackBlood/vwi_bb.nii.gz``."""
 
 from __future__ import annotations
 
@@ -13,24 +13,36 @@ from . import config as cfg
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Output filenames
+# ──────────────────────────────────────────────────────────────────────────────
+
 VWI_BB_NIFTI = "vwi_bb.nii.gz"
 VWI_BB_JSON = "vwi_bb.json"
 BLACK_BLOOD_DIR = "BlackBlood"
 
 
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+
 def _iter_subjects(dicom_root: Path) -> list[str]:
+    """Sorted subject directory names under *dicom_root*."""
     if not dicom_root.is_dir():
         return []
     return sorted(p.name for p in dicom_root.iterdir() if p.is_dir())
 
 
 def _iter_nifti(folder: Path) -> list[Path]:
+    """Sorted ``.nii`` / ``.nii.gz`` files in *folder*."""
     if not folder.is_dir():
         return []
     return sorted([*folder.glob("*.nii"), *folder.glob("*.nii.gz")])
 
 
 def _nifti_stem(path: Path) -> str:
+    """Filename stem with ``.nii`` / ``.nii.gz`` suffix removed."""
     name = path.name
     if name.endswith(".nii.gz"):
         return name[: -len(".nii.gz")]
@@ -40,6 +52,7 @@ def _nifti_stem(path: Path) -> str:
 
 
 def _matching_json(nifti_path: Path, search_dir: Path) -> Path | None:
+    """Locate a JSON sidecar for *nifti_path* under *search_dir*, if present."""
     stem = _nifti_stem(nifti_path)
     for candidate in (search_dir / f"{stem}.json", search_dir / f"{nifti_path.name}.json"):
         if candidate.is_file():
@@ -49,11 +62,18 @@ def _matching_json(nifti_path: Path, search_dir: Path) -> Path | None:
 
 
 def vwi_bb_nifti_path(nifti_root: Path, subject: str) -> Path:
+    """Canonical black-blood NIfTI path for *subject*."""
     return nifti_root / subject / BLACK_BLOOD_DIR / VWI_BB_NIFTI
 
 
 def vwi_bb_json_path(nifti_root: Path, subject: str) -> Path:
+    """Canonical black-blood JSON sidecar path for *subject*."""
     return nifti_root / subject / BLACK_BLOOD_DIR / VWI_BB_JSON
+
+
+# ---------------------------------------------------------------------------
+# Per-subject convert and batch runner
+# ---------------------------------------------------------------------------
 
 
 def convert_subject(
@@ -125,6 +145,7 @@ def run_subject(
     nifti_root: Path,
     skip_existing: bool = False,
 ) -> Path:
+    """CLI entry: convert one subject (alias for :func:`convert_subject`)."""
     return convert_subject(
         subject,
         dicom_root=dicom_root,
@@ -134,6 +155,7 @@ def run_subject(
 
 
 def report_subjects(nifti_root: Path, subjects: Iterable[str]) -> dict[str, Any]:
+    """Print and return ``vwi_bb.nii.gz`` completeness for *subjects*."""
     root = Path(nifti_root)
     complete: list[str] = []
     incomplete: list[str] = []

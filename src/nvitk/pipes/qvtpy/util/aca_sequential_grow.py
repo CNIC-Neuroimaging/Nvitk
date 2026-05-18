@@ -1,4 +1,9 @@
-"""Sequential ACA region growing and AComm junction overlap correction (qvtpy)."""
+"""Sequential ACA region growing and AComm junction overlap correction (qvtpy).
+
+Called from :func:`~nvitk.pipes.qvtpy.util.vessel_cd_segmentation.build_seg_4dflow_local`
+when ``aca_sequential_grow`` is enabled: grow LACA then RACA without mutual barriers,
+then split overlap at the AComm junction plane when voxel overlap exceeds a threshold.
+"""
 
 from __future__ import annotations
 

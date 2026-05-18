@@ -1,11 +1,15 @@
-"""qvtpy stage 0: DICOM -> NIfTI conversion and reorganization.
+"""qvtpy stage 0 (convert): DICOM → NIfTI conversion and reorganization.
 
-- conversion (dicom2nifti) with specific flags
-- reorganization into a layout compatible with :mod:`nvitk.io.conversors.phase2volume`:
+**Inputs**
 
-  * ``4DFlow/AP``, ``4DFlow/RL``, ``4DFlow/FH`` — magnitude ``*_m.nii.gz`` and phase ``*_ph.nii.gz``
-    (from ``*_M_FFE`` / ``*_PHASE`` NIfTI), with matching ``*.json`` metadata beside them
-  * ``TOF/TOF.nii.gz`` plus any TOF-series ``*.json`` (original names)
+- Per-subject DICOM tree under ``<dicom_root>/<subject>/`` (from stage 0 download).
+
+**Outputs**
+
+- ``<nifti_root>/<subject>/4DFlow/{AP,RL,FH}/`` — ``*_m.nii.gz`` / ``*_ph.nii.gz`` + JSON sidecars.
+- ``<nifti_root>/<subject>/TOF/TOF.nii.gz``.
+- Optional derived volumes via :func:`nvitk.io.conversors.phase2volume.phase2volume`
+  (``Angiography_3D``, ``ComplexDifference_3D/4D``, …) when ``--compute-phase-derived``.
 """
 
 from __future__ import annotations
@@ -168,7 +172,7 @@ def convert_subject(
     *,
     skip_existing: bool = False,
 ) -> None:
-    """Run DICOM->NIfTI conversion using required flags."""
+    """Run DICOM→NIfTI conversion (dcm2nii) into a flat subject output folder."""
     subject_out_dir.mkdir(parents=True, exist_ok=True)
     if skip_existing and any(_iter_nifti(subject_out_dir)):
         log.info(f"[{subject_dicom_dir.name}] stage0: skipping existing conversion")
@@ -186,7 +190,7 @@ def convert_subject(
 
 
 def reorganize_subject(subject_out_dir: Path) -> None:
-    """Move flat dcm2nii outputs into ``4DFlow/{AP,RL,FH}/`` and ``TOF/`` with QVT naming."""
+    """Move flat dcm2nii outputs into ``4DFlow/{AP,RL,FH}/`` and ``TOF/`` (QVT naming)."""
     flow_root = subject_out_dir / "4DFlow"
     tof_dir = subject_out_dir / "TOF"
     for sub in ("AP", "RL", "FH"):

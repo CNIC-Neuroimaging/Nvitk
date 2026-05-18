@@ -1,4 +1,4 @@
-"""Path resolution for black-blood (no qvtpy / pesa_fat imports)."""
+"""Path resolution for black-blood inputs and stage outputs (no qvtpy / pesa_fat imports)."""
 
 from __future__ import annotations
 
@@ -11,14 +11,21 @@ from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import (
     resolve_eicab_mask,
 )
 
-# Legacy stage1 outputs (older registration direction / filenames).
+# ---- Legacy stage1 artifacts (older registration direction / filenames) --------
+
 _LEGACY_WARPED = "WVI_warped_to_tof.nii.gz"
 _LEGACY_MATRIX = "wvi_to_tof.mat"
 _LEGACY_BB_TO_TOF_WARPED = "vwi_bb_warped_to_tof.nii.gz"
 _LEGACY_BB_TO_TOF_MAT = "vwi_bb_to_tof.mat"
 
 
+# ---------------------------------------------------------------------------
+# eICAB volume discovery
+# ---------------------------------------------------------------------------
+
+
 def _stem_without_suffix(p: Path) -> str:
+    """NIfTI filename stem (strip ``.nii`` / ``.nii.gz``)."""
     if p.name.endswith(".nii.gz"):
         return p.name[: -len(".nii.gz")]
     if p.name.lower().endswith(".nii"):
@@ -44,6 +51,11 @@ def find_tof_resampled_volume(eicab_dir: Path) -> Path | None:
         if stem.endswith("_resampled") and "tof" in stem:
             hits.append(p)
     return hits[0] if hits else None
+
+
+# ---------------------------------------------------------------------------
+# eICAB CW / WB multilabel masks
+# ---------------------------------------------------------------------------
 
 
 def eicab_mask_resolution(
@@ -86,7 +98,13 @@ def eicab_cw_mask_path(
     )
 
 
+# ---------------------------------------------------------------------------
+# Required roots and vwi_bb / TOF paths
+# ---------------------------------------------------------------------------
+
+
 def require_path(value: Path | None, name: str) -> Path:
+    """Expand *value* and ensure the path exists; raise if unset or missing."""
     if value is None:
         raise ValueError(
             f"{name} is not set. Pass --{name.replace('_', '-')} on the CLI or set "
@@ -99,11 +117,13 @@ def require_path(value: Path | None, name: str) -> Path:
 
 
 def resolve_eicab_results_root(eicab_results_root: Path | None) -> Path:
+    """Default eICAB results root from config when *eicab_results_root* is None."""
     root = eicab_results_root or cfg.DEFAULT_EICAB_RESULTS_ROOT or cfg.DEFAULT_QVTPY_RESULTS_ROOT
     return require_path(root, "eicab_results_root")
 
 
 def require_vwi_bb_rel_path(vwi_bb_rel: str | None) -> str:
+    """Non-empty relative path to vwi_bb under each subject NIfTI tree."""
     rel = (vwi_bb_rel or cfg.VWI_BB_REL_PATH or "").strip()
     if not rel:
         raise ValueError(
@@ -119,6 +139,7 @@ def vwi_bb_path(
     *,
     vwi_bb_rel: str | None = None,
 ) -> Path:
+    """Native black-blood NIfTI for *subject* (fixed image for stage1 FLIRT)."""
     rel = require_vwi_bb_rel_path(vwi_bb_rel)
     p = nifti_root / subject / rel
     if not p.is_file():
@@ -158,6 +179,7 @@ def eicab_subject_dir(
     *,
     eicab_subdir: str | None = None,
 ) -> Path:
+    """Per-subject eICAB output directory under *eicab_results_root*."""
     sub = (eicab_subdir or cfg.QVTPY_EICAB_SUBDIR or cfg.EICAB_SUBDIR).strip() or "eicab"
     return eicab_results_root / subject / sub
 
@@ -168,6 +190,7 @@ def tof_resampled_path(
     *,
     eicab_subdir: str | None = None,
 ) -> Path:
+    """eICAB ``TOF_resampled`` NIfTI (moving image for stage1 FLIRT)."""
     eicab_dir = eicab_subject_dir(eicab_results_root, subject, eicab_subdir=eicab_subdir)
     p = find_tof_resampled_volume(eicab_dir)
     if p is None:
@@ -177,19 +200,28 @@ def tof_resampled_path(
     return p
 
 
+# ---------------------------------------------------------------------------
+# Pipeline output layout (stage1 / stage2)
+# ---------------------------------------------------------------------------
+
+
 def black_blood_root(output_root: Path, subject: str) -> Path:
+    """``{output_root}/{subject}/pesa_brain/black_blood``."""
     return output_root / subject / cfg.PIPELINE_SUBDIR / cfg.BLACK_BLOOD_SUBDIR
 
 
 def stage1_dir(output_root: Path, subject: str) -> Path:
+    """Stage1 registration directory for *subject*."""
     return black_blood_root(output_root, subject) / cfg.STAGE1_REG_DIR
 
 
 def stage2_dir(output_root: Path, subject: str) -> Path:
+    """Stage2 BB-space segmentation directory for *subject*."""
     return black_blood_root(output_root, subject) / cfg.STAGE2_SEG_DIR
 
 
 def registration_meta_path(output_root: Path, subject: str) -> Path:
+    """JSON sidecar written after stage1 FLIRT."""
     return stage1_dir(output_root, subject) / "registration_meta.json"
 
 

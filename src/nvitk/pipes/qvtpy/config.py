@@ -1,9 +1,17 @@
-"""qvtpy configuration (stage0: DICOM -> NIfTI + reorg; stage1: eICAB).
+"""qvtpy host configuration: data roots, stage paths, and SGE defaults.
 
-Single source of truth for host-side paths, stage directory names, SGE
-defaults, and the pipeline Singularity image. Optional overrides come from
-``.nvitk/sge.json`` (see :mod:`nvitk.cluster.sge_json`) under the ``qvtpy``
-pipeline key.
+**Inputs (environment / JSON)**
+
+- Default DICOM, NIfTI, and results roots on the analysis host.
+- Optional ``.nvitk/sge.json`` ``pipelines.qvtpy`` block (see :mod:`nvitk.cluster.sge_json`).
+
+**Outputs (constants consumed by stages)**
+
+- ``STAGE*_DIR`` — subdirectory names under ``<results>/<subject>/qvtpy/``.
+- ``SGE_*`` — project, queue, log/err dirs, and ``CONTAINER_PATH`` for cluster jobs.
+
+Stage 0 conversion and stage 1 eICAB use these paths; later stages read/write under
+``DEFAULT_RESULTS_ROOT`` / ``DEFAULT_NIFTI_ROOT`` unless overridden on the CLI.
 """
 
 from __future__ import annotations

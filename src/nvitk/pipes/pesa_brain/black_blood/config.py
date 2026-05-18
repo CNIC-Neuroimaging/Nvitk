@@ -1,21 +1,29 @@
-"""Black-blood pipeline defaults."""
+"""Default paths and layout constants for the black-blood (vwi_bb) pipeline."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# Host paths (aligned with qvtpy layout; no qvtpy import).
+# ──────────────────────────────────────────────────────────────────────────────
+# Host data roots (PESA-Brain layout; no qvtpy import)
+# ──────────────────────────────────────────────────────────────────────────────
+
 _PESA_BRAIN_DATA = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain")
 
 DEFAULT_DICOM_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "DICOM"
 DEFAULT_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
 DEFAULT_RESULTS_ROOT: Path | None = _PESA_BRAIN_DATA / "RESULTS" / "res_PESABrain"
 
-# qvtpy TOF / eICAB (notebooks/reports/qvtpy methods layout).
+# ──────────────────────────────────────────────────────────────────────────────
+# qvtpy TOF / eICAB (notebooks, reports, methods layout)
+# ──────────────────────────────────────────────────────────────────────────────
+
 DEFAULT_QVTPY_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
 DEFAULT_QVTPY_RESULTS_ROOT: Path = _PESA_BRAIN_DATA / "RESULTS" / "res_QVTPy"
 
 DEFAULT_EICAB_RESULTS_ROOT: Path | None = DEFAULT_QVTPY_RESULTS_ROOT
+
+# ---- Relative NIfTI paths and stage directories ------------------------------
 
 VWI_BB_REL_PATH: str | None = "BlackBlood/vwi_bb.nii.gz"
 
@@ -26,6 +34,10 @@ PIPELINE_SUBDIR: str = "pesa_brain"
 BLACK_BLOOD_SUBDIR: str = "black_blood"
 STAGE1_REG_DIR: str = "stage1_registration"
 STAGE2_SEG_DIR: str = "stage2_bb_segmentation"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Batch / container (optional overrides)
+# ──────────────────────────────────────────────────────────────────────────────
 
 SGE_LOG_DIR: Path | None = None
 SGE_ERR_DIR: Path | None = None

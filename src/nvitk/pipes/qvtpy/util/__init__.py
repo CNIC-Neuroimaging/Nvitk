@@ -1,6 +1,18 @@
-"""qvtpy shared utilities (masks, centerlines, cross-sections, LOCs, segmentation).
+"""Shared helpers for qvtpy stages 3–6 (no package-level re-exports).
 
-Import from submodules directly, e.g. ``from nvitk.pipes.qvtpy.util.cross_section import segment_at_point``.
+Submodules (import explicitly):
+
+- :mod:`eicab_masks` — resolve CW/WB eICAB NIfTI paths.
+- :mod:`flow_volume_masks` — global CD sliding-threshold vessel mask.
+- :mod:`mask_cleaning` — multilabel island removal and area opening.
+- :mod:`venous_heuristics` — geometry-based venous sinus centerlines.
+- :mod:`centerline_io` — load/write centerline masks and polylines.
+- :mod:`vessel_cd_segmentation` — per-vessel local ``seg_4dflow`` builder.
+- :mod:`aca_sequential_grow` — sequential ACA region growing.
+- :mod:`vertebral_split` — basilar → LVA/RVA split at VB junction.
+- :mod:`loc_selection` — QVTplus-style LOC placement.
+- :mod:`cross_section` — re-export of :mod:`nvitk.measure.cross_section`.
+- :mod:`measure_qc` — stage-6 cross-section QC PNGs.
 """
 
 from __future__ import annotations

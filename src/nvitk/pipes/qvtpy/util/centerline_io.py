@@ -1,4 +1,15 @@
-"""Load ordered vessel centerlines from stage-3 or stage-4 segmentation outputs."""
+"""Load and write ordered vessel centerlines from stage-3 / stage-4 outputs.
+
+**Inputs**
+
+- ``centerlines_mask.nii.gz`` + ``centerline_meta.json`` (stage 3).
+- Optional ``centerlines_mask_4dflow.nii.gz`` from stage-4 ``seg_4dflow`` skeletonization.
+
+**Outputs**
+
+- Polylines keyed by qvtpy arterial label id or venous name (SSSV, …).
+- Rasterized multilabel masks via :func:`rasterize_centerlines_mask`.
+"""
 
 from __future__ import annotations
 
@@ -32,16 +43,19 @@ CENTERLINE_SEG_META_JSON = "centerlines_seg_meta.json"
 
 
 def centerlines_mask_path(stage_dir: Path, *, from_segmentation: bool = False) -> Path:
+    """Path to the centerline multilabel NIfTI in *stage_dir*."""
     name = CENTERLINES_MASK_SEG_NIFTI if from_segmentation else CENTERLINES_MASK_NIFTI
     return Path(stage_dir) / name
 
 
 def centerline_meta_path(stage_dir: Path, *, from_segmentation: bool = False) -> Path:
+    """Path to the JSON sidecar listing arterial / venous label ids."""
     name = CENTERLINE_SEG_META_JSON if from_segmentation else CENTERLINE_META_JSON
     return Path(stage_dir) / name
 
 
 def load_centerline_meta(stage_dir: Path, *, from_segmentation: bool = False) -> dict[str, Any]:
+    """Parse centerline JSON metadata from *stage_dir*."""
     p = centerline_meta_path(stage_dir, from_segmentation=from_segmentation)
     if not p.is_file():
         raise FileNotFoundError(f"Missing {p}")

@@ -1,4 +1,13 @@
-"""qvtpy stage 2: rigid eICAB TOF (resampled) → 4D flow reference registration (FSL FLIRT via NiPype)."""
+"""qvtpy stage 2: rigid eICAB TOF (resampled) → 4D-flow reference (FSL FLIRT).
+
+**Inputs**
+
+- eICAB ``TOF_resampled`` (stage 1) and fixed 4D-flow ``Angiography_3D`` or ``ComplexDifference_3D``.
+
+**Outputs**
+
+- ``<output>/<subject>/qvtpy/stage2_registration/`` — FLIRT matrix, warped TOF, ``registration_meta.json``.
+"""
 
 from __future__ import annotations
 

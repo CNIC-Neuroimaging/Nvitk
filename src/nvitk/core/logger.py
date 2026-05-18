@@ -5,6 +5,8 @@ plain formatting on file handlers, and Rich :class:`~rich.progress.Progress` in 
 only (disabled in Jupyter). The :class:`Logger` is a process-wide singleton.
 """
 
+from __future__ import annotations
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
@@ -13,9 +15,12 @@ import logging
 import inspect
 import re
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, TypeVar, Union
+
+T = TypeVar("T")
 
 from rich.console import Console
 from rich.progress import Progress, TaskID
@@ -367,6 +372,24 @@ class Logger(metaclass=Singleton):
                     record.msg = f"{record.msg} | LOCALS={caller_locals}"
             return True
 
+    def ensure_progress(self) -> None:
+        """Start Rich :class:`~rich.progress.Progress` if not already running (terminal only)."""
+        if self._progress is not None or in_notebook():
+            return
+        self._progress = Progress(console=self._base_console, transient=False)
+        self._progress.start()
+
+    def stop_progress(self) -> None:
+        """Stop and clear the Rich progress display (no-op in notebooks)."""
+        if self._progress is None:
+            return
+        self._progress.stop()
+        self._progress = None
+
+    def step(self, msg: str, *args, **kwargs) -> None:
+        """Emit an indented INFO line for a sub-step within a pipeline stage."""
+        self.info(f"  ▸ {msg}", *args, **kwargs)
+
     def progress(self, description: str, total: float) -> Optional[TaskID]:
         """
         Add a Rich progress task (no-op in notebooks: logs a single INFO and returns None).
@@ -488,3 +511,123 @@ class Logger(metaclass=Singleton):
 
     def __str__(self) -> str:
         return self.__repr__()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pipeline run tracking (subjects × stages, log-only)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_COHORT_STAGES = frozenset({"stage0_d"})
+
+
+@dataclass
+class PipelineRunTracker:
+    """
+    Step logging for multi-subject pipeline runs (no Rich progress bar).
+
+    Counts one step per cohort stage (e.g. XNAT download) plus one per
+    (subject, per-subject stage). Use :meth:`run_stage` to log begin/complete/fail.
+
+    Examples
+    --------
+    >>> log = Logger()
+    >>> with PipelineRunTracker(log, "black_blood", subjects, stages) as run:
+    ...     run.run_stage("(cohort)", "stage0_d", lambda: download_all())
+    ...     for subj in subjects:
+    ...         run.run_stage(subj, "stage1", lambda: reg(subj))
+    """
+
+    logger: Logger
+    pipeline: str
+    subjects: list[str]
+    stages: list[str]
+    stage_labels: dict[str, str] = field(default_factory=dict)
+    _per_subject_stages: list[str] = field(init=False)
+    _cohort_stages: list[str] = field(init=False)
+    _total: int = field(init=False)
+    _done: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        self._cohort_stages = [s for s in self.stages if s in _COHORT_STAGES]
+        self._per_subject_stages = [s for s in self.stages if s not in _COHORT_STAGES]
+        self._total = len(self._cohort_stages) + len(self.subjects) * len(
+            self._per_subject_stages
+        )
+
+    def _label(self, stage: str) -> str:
+        return self.stage_labels.get(stage, stage)
+
+    def __enter__(self) -> PipelineRunTracker:
+        self.logger.info(
+            f"▶ {self.pipeline}: {len(self.subjects)} subject(s), "
+            f"stages=[{', '.join(self._label(s) for s in self.stages)}], "
+            f"{self._total} step(s)"
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        if exc_type is None:
+            self.logger.ok(
+                f"✓ {self.pipeline} finished ({self._done}/{self._total} steps)"
+            )
+        else:
+            self.logger.error(f"✗ {self.pipeline} aborted: {exc_val}")
+        return False
+
+    def _tick(self, caption: str, *, ok: bool = True) -> None:
+        self._done += 1
+        prefix = f"[{self._done}/{self._total}]"
+        if ok:
+            self.logger.ok(f"{prefix} {caption}")
+        else:
+            self.logger.warning(f"{prefix} {caption}")
+
+    def begin(self, subject: str, stage: str) -> None:
+        """Log start of a pipeline step."""
+        self.logger.info(f"▶ [{subject}] {self._label(stage)}")
+
+    def complete(self, subject: str, stage: str, detail: str = "") -> None:
+        """Mark a step complete and log ``[n/total]``."""
+        tail = f" — {detail}" if detail else ""
+        self._tick(f"[{subject}] {self._label(stage)}{tail}", ok=True)
+
+    def fail(self, subject: str, stage: str, exc: BaseException | str) -> None:
+        """Mark a step failed, log ``[n/total]``, and emit ERROR."""
+        msg = str(exc)
+        self.logger.error(f"[{subject}] {self._label(stage)} failed: {msg}")
+        self._tick(f"[{subject}] {self._label(stage)} FAILED", ok=False)
+
+    def run_stage(
+        self,
+        subject: str,
+        stage: str,
+        fn: Callable[[], T],
+        *,
+        detail: str | Callable[[T], str] | None = None,
+        reraise: bool = False,
+    ) -> T | None:
+        """
+        Run *fn* with begin/complete logging; on exception call :meth:`fail`.
+
+        Returns the result of *fn*, or None if an exception was caught and
+        *reraise* is False.
+        """
+        self.begin(subject, stage)
+        try:
+            result = fn()
+        except Exception as exc:
+            import traceback
+
+            self.logger.exception(traceback.format_exc())
+            self.fail(subject, stage, exc)
+            if reraise:
+                raise
+            return None
+        if callable(detail):
+            detail_str = detail(result)  # type: ignore[arg-type]
+        elif detail:
+            detail_str = str(detail)
+        else:
+            detail_str = ""
+        self.complete(subject, stage, detail_str)
+        return result

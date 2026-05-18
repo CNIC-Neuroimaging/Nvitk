@@ -1,4 +1,4 @@
-"""Black-blood stage 0 (download): XNAT -> DICOM for VWI_BB (BrainVIEW T1W).
+"""Black-blood stage 0 (download): XNAT → DICOM for VWI_BB (BrainVIEW T1W).
 
 Downloads one BrainVIEW variant per subject (strong > default > weak) into
 ``{dicom_root}/{subject}/vwi_bb/``.
@@ -32,6 +32,10 @@ from . import config as cfg
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Defaults
+# ──────────────────────────────────────────────────────────────────────────────
+
 DEFAULT_SEQUENCES: tuple[str, ...] = ("VWI_BB",)
 VWI_BB_SLOT = cfg.STAGE0_DICOM_SLOT
 
@@ -45,11 +49,18 @@ _SUBJECT_COLUMN_CANDIDATES: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Subject list helpers
+# ---------------------------------------------------------------------------
+
+
 def _normalize_header(value: str) -> str:
+    """Lowercase alphanumeric key for column-name matching."""
     return re.sub(r"[^0-9a-z]+", "", str(value).lower())
 
 
 def _detect_subject_column(columns: Iterable[str]) -> str | None:
+    """Pick the first column whose normalized name matches known subject headers."""
     norm = {_normalize_header(c): c for c in columns}
     for candidate in _SUBJECT_COLUMN_CANDIDATES:
         key = _normalize_header(candidate)
@@ -59,6 +70,7 @@ def _detect_subject_column(columns: Iterable[str]) -> str | None:
 
 
 def _read_subjects_dataframe(path: Path) -> list[str]:
+    """Load unique subject labels from a CSV or Excel file."""
     suffix = path.suffix.lower()
     if suffix == ".csv":
         df = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -96,6 +108,7 @@ def load_subjects(
     subjects: str | None,
     subjects_file: str | Path | None,
 ) -> list[str]:
+    """Resolve subject labels from ``--subjects`` or ``--subjects-file`` (mutually exclusive)."""
     if (subjects is None and subjects_file is None) or (
         subjects is not None and subjects_file is not None
     ):
@@ -116,7 +129,13 @@ def load_subjects(
     return resolve_subject_labels(subjects_file=path)
 
 
+# ---------------------------------------------------------------------------
+# XNAT scan resolution
+# ---------------------------------------------------------------------------
+
+
 def _coalesce_attr(obj: Any, *names: str) -> Any:
+    """Return the first non-None attribute (or zero-arg method result) on *obj*."""
     for name in names:
         if hasattr(obj, name):
             value = getattr(obj, name)
@@ -131,6 +150,7 @@ def _coalesce_attr(obj: Any, *names: str) -> Any:
 
 
 def _resolve_subject(project: Any, label: str) -> Any | None:
+    """Find an XNAT subject object by label within *project*."""
     subjects_map = getattr(project, "subjects", None) or {}
     if label in subjects_map:
         return subjects_map[label]
@@ -142,6 +162,7 @@ def _resolve_subject(project: Any, label: str) -> Any | None:
 
 
 def _dir_has_files(directory: Path) -> bool:
+    """True if *directory* contains at least one file (recursively)."""
     if not directory.is_dir():
         return False
     for child in directory.iterdir():
@@ -152,6 +173,11 @@ def _dir_has_files(directory: Path) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Per-subject download and batch runner
+# ---------------------------------------------------------------------------
+
+
 def download_subject(
     xnat_session: Any,
     project_id: str,
@@ -160,7 +186,7 @@ def download_subject(
     dicom_root: Path,
     skip_existing: bool = True,
 ) -> dict[str, list[Path]]:
-    """Download preferred VWI_BB DICOMs for one subject."""
+    """Download preferred VWI_BB DICOMs for one subject into ``{dicom_root}/{subject}/vwi_bb``."""
     project = xnat_session.projects[project_id]
     subject = _resolve_subject(project, subject_label)
     if subject is None:
@@ -230,6 +256,7 @@ def run_download(
     skip_existing: bool = True,
     report: bool = False,
 ) -> dict[str, dict[str, list[Path]]]:
+    """Download VWI_BB for all *subjects*; optionally print a DICOM completeness report."""
     root = Path(dicom_root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
 
@@ -266,6 +293,7 @@ def print_qc_report(
     subjects: Iterable[str],
     required_slots: list[str],
 ) -> dict[str, Any]:
+    """Print and return DICOM slot completeness for *subjects* under *dicom_root*."""
     root = Path(dicom_root)
     subj_list = list(subjects)
     complete: list[str] = []

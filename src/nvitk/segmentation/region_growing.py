@@ -3,11 +3,55 @@
 from __future__ import annotations
 
 from collections import deque
+from typing import Literal
 
 from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 
 setup(globals())
+
+IntensityPolarity = Literal["hyperintense", "hypointense"]
+
+_NEIGHBOURS = (
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+)
+
+
+def _grow_intensity_threshold(
+    seed_mean: float,
+    intensity_frac: float,
+    abs_floor: float | None,
+    *,
+    polarity: IntensityPolarity,
+) -> float:
+    """Intensity gate paired with :func:`_intensity_passes_gate`."""
+    frac = float(intensity_frac)
+    floor = float(abs_floor) if abs_floor is not None else 0.0
+    if polarity == "hypointense":
+        if frac <= 0.0:
+            return seed_mean
+        # Dual of hyperintense ``mean * frac``: admit voxels up to mean / frac.
+        ceiling = float(seed_mean) / frac
+        if abs_floor is not None:
+            ceiling = min(ceiling, floor)
+        return max(ceiling, float(seed_mean))
+    return max(float(seed_mean) * frac, floor)
+
+
+def _intensity_passes_gate(
+    value: float,
+    threshold: float,
+    *,
+    polarity: IntensityPolarity,
+) -> bool:
+    if polarity == "hypointense":
+        return value <= threshold
+    return value >= threshold
 
 
 def region_grow_binary_mask(
@@ -17,8 +61,14 @@ def region_grow_binary_mask(
     intensity_frac: float,
     abs_floor: float | None = None,
     forbidden: np.ndarray | None = None,
+    polarity: IntensityPolarity = "hyperintense",
 ) -> int:
-    """Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate."""
+    """Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate.
+
+    *polarity* ``hyperintense`` (default): grow into voxels with
+    ``I >= mean(seeds) * intensity_frac``. ``hypointense``: grow into darker voxels with
+    ``I <= mean(seeds) / intensity_frac`` (black-blood lumen).
+    """
     mask = np.asarray(vessel_mask, dtype=bool)
     int_np = as_backend_array(intensity).astype(np.float64)
     forb = None if forbidden is None else np.asarray(forbidden, dtype=bool)
@@ -27,8 +77,12 @@ def region_grow_binary_mask(
         return 0
 
     seed_vals = int_np[seeds[:, 0], seeds[:, 1], seeds[:, 2]]
-    floor = float(abs_floor) if abs_floor is not None else 0.0
-    grow_thresh = max(float(np.mean(seed_vals)) * float(intensity_frac), floor)
+    grow_thresh = _grow_intensity_threshold(
+        float(np.mean(seed_vals)),
+        intensity_frac,
+        abs_floor,
+        polarity=polarity,
+    )
 
     nx, ny, nz = mask.shape
     q: deque[tuple[int, int, int]] = deque(
@@ -39,14 +93,7 @@ def region_grow_binary_mask(
 
     while q:
         i, j, k = q.popleft()
-        for di, dj, dk in (
-            (1, 0, 0),
-            (-1, 0, 0),
-            (0, 1, 0),
-            (0, -1, 0),
-            (0, 0, 1),
-            (0, 0, -1),
-        ):
+        for di, dj, dk in _NEIGHBOURS:
             ni, nj, nk = i + di, j + dj, k + dk
             if ni < 0 or ni >= nx or nj < 0 or nj >= ny or nk < 0 or nk >= nz:
                 continue
@@ -55,7 +102,9 @@ def region_grow_binary_mask(
             seen.add((ni, nj, nk))
             if forb is not None and forb[ni, nj, nk]:
                 continue
-            if int_np[ni, nj, nk] < grow_thresh:
+            if not _intensity_passes_gate(
+                float(int_np[ni, nj, nk]), grow_thresh, polarity=polarity
+            ):
                 continue
             if not mask[ni, nj, nk]:
                 mask[ni, nj, nk] = True
@@ -73,8 +122,12 @@ def region_grow_into_label_volume(
     intensity_frac: float,
     abs_floor: float | None = None,
     forbidden: np.ndarray | None = None,
+    polarity: IntensityPolarity = "hyperintense",
 ) -> int:
-    """6-connected region growing into empty voxels (``labels == 0``) for *label_id*."""
+    """6-connected region growing into empty voxels (``labels == 0``) for *label_id*.
+
+    See :func:`region_grow_binary_mask` for *polarity* behaviour.
+    """
     seg_np = as_backend_array(labels)
     int_np = as_backend_array(intensity).astype(np.float64)
     forb = None if forbidden is None else as_backend_array(forbidden).astype(bool, copy=False)
@@ -83,9 +136,12 @@ def region_grow_into_label_volume(
         return 0
 
     seed_vals = int_np[seeds[:, 0], seeds[:, 1], seeds[:, 2]]
-    seed_mean = float(np.mean(seed_vals))
-    floor = float(abs_floor) if abs_floor is not None else 0.0
-    grow_thresh = max(seed_mean * float(intensity_frac), floor)
+    grow_thresh = _grow_intensity_threshold(
+        float(np.mean(seed_vals)),
+        intensity_frac,
+        abs_floor,
+        polarity=polarity,
+    )
 
     nx, ny, nz = seg_np.shape
     q: deque[tuple[int, int, int]] = deque(
@@ -96,14 +152,7 @@ def region_grow_into_label_volume(
 
     while q:
         i, j, k = q.popleft()
-        for di, dj, dk in (
-            (1, 0, 0),
-            (-1, 0, 0),
-            (0, 1, 0),
-            (0, -1, 0),
-            (0, 0, 1),
-            (0, 0, -1),
-        ):
+        for di, dj, dk in _NEIGHBOURS:
             ni, nj, nk = i + di, j + dj, k + dk
             if ni < 0 or ni >= nx or nj < 0 or nj >= ny or nk < 0 or nk >= nz:
                 continue
@@ -114,7 +163,9 @@ def region_grow_into_label_volume(
                 continue
             if forb is not None and forb[ni, nj, nk]:
                 continue
-            if int_np[ni, nj, nk] < grow_thresh:
+            if not _intensity_passes_gate(
+                float(int_np[ni, nj, nk]), grow_thresh, polarity=polarity
+            ):
                 continue
             seg_np[ni, nj, nk] = int(label_id)
             n_added += 1
@@ -124,6 +175,7 @@ def region_grow_into_label_volume(
 
 
 __all__ = [
+    "IntensityPolarity",
     "region_grow_binary_mask",
     "region_grow_into_label_volume",
 ]

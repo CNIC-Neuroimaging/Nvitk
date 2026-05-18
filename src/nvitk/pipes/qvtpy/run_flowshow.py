@@ -77,6 +77,7 @@ def _patient_dir(
     batch: str | None,
     patient_dir: Path | None,
 ) -> Path:
+    """Resolve subject NIfTI folder from ``--patient-dir`` or ``--nifti-root`` / ``--batch`` / ``--subject``."""
     if patient_dir is not None:
         p = patient_dir.expanduser().resolve()
         if not p.is_dir():
@@ -95,6 +96,7 @@ def _patient_dir(
 
 
 def _find_nifti_default_vessel_mask(patient: Path) -> Path | None:
+    """First existing file among :data:`_DEFAULT_VESSEL_REL_NAMES` under *patient*."""
     for name in _DEFAULT_VESSEL_REL_NAMES:
         cand = patient / name
         if cand.is_file():
@@ -103,6 +105,7 @@ def _find_nifti_default_vessel_mask(patient: Path) -> Path | None:
 
 
 def _resolve_vessel_mask(patient: Path, vessel_mask: Path | None) -> Path:
+    """Explicit or default multilabel mask path (raises if none found)."""
     if vessel_mask is None:
         hit = _find_nifti_default_vessel_mask(patient)
         if hit is not None:
@@ -122,10 +125,12 @@ def _resolve_vessel_mask(patient: Path, vessel_mask: Path | None) -> Path:
 
 
 def _qvtpy_subject_dir(results_root: Path, sub_key: str) -> Path:
+    """``<results_root>/<subject>/qvtpy/`` pipeline subtree."""
     return results_root / sub_key / cfg.QVT_SUBDIR
 
 
 def _seg_4dflow_path(qvt_dir: Path) -> Path:
+    """Stage-4 multilabel segmentation NIfTI."""
     return qvt_dir / cfg.STAGE4_SEG_DIR / "seg_4dflow.nii.gz"
 
 
@@ -180,6 +185,7 @@ def _resolve_vessel_mask_and_results_root(
 
 
 def _resolve_optional_mask(patient: Path, path: Path | None) -> Path | None:
+    """Optional NIfTI path relative to *patient*; ``None`` if *path* is ``None``."""
     if path is None:
         return None
     p = Path(path)
@@ -206,6 +212,7 @@ def _mask_to_xyz_3d(mask_img: Image, ref_spatial: tuple[int, int, int]) -> Image
 
 
 def _spatial_xyz_from_phase(ap: Image) -> tuple[int, int, int]:
+    """Spatial shape ``(nx, ny, nz)`` from the AP phase reference volume."""
     sh = tuple(int(x) for x in ap.data.shape[:3])
     return sh
 
@@ -220,6 +227,7 @@ def _parse_speed_clim(value: str | None) -> tuple[float, float] | None:
 
 
 def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
+    """``{stem}.nii.gz`` or ``{stem}.nii`` under *folder*, if present."""
     for name in (f"{stem}.nii.gz", f"{stem}.nii"):
         p = folder / name
         if p.is_file():

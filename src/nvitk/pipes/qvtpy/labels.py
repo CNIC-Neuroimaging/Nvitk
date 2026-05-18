@@ -1,13 +1,15 @@
 """Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
 
-**eICAB** integers match ``*_eICAB_CW.nii(.gz)`` (labels 0–18).
+**eICAB (input)** — integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0–18).
 
-**qvtpy** integers are used in stage 3 ``centerlines_mask``, stage 4
-``seg_4dflow``, and downstream LOC / flow tables. Arterial labels are derived
-from eICAB via :func:`relabel_eicab_mask_to_qvtpy` (PCA segments merged;
-SCA/AChA dropped). Venous sinuses use fixed ids 31–34.
+**qvtpy (pipeline)** — integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
+measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy`
+(merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31–34.
 
-See :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID` for the combined id→name table.
+**Outputs**
+
+- :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID` — combined arterial + venous id→name map.
+- Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_RG_SKIP_LABEL_IDS``, …) for stage-4 heuristics.
 """
 
 from __future__ import annotations
@@ -17,9 +19,9 @@ from nvitk.core.backend import setup
 
 setup(globals())
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # eICAB — input multilabel mask (0–18)
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 EICAB_BACKGROUND: int = 0
 
@@ -109,9 +111,9 @@ _EICAB_NAME_TO_ID_RAW: dict[str, int] = {
 
 EICAB_NAME_TO_ID: dict[str, int] = {k.upper(): v for k, v in _EICAB_NAME_TO_ID_RAW.items()}
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # qvtpy — arterial labels (centerline backbone + seg_4dflow)
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 QVTPY_BACKGROUND: int = 0
 
@@ -170,9 +172,9 @@ QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
 # Stage 4: gentler crop filtering (PCA/PComm/AComm) — see QVTPY_SMALL_ARTERIAL_IDS below.
 QVTPY_SMALL_ARTERIAL_IDS: frozenset[int] = QVTPY_PCA_IDS | QVTPY_COMM_IDS
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # qvtpy — venous labels (fixed 31–34)
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 NAME_SSSV: str = "SSSV"
 NAME_STRV: str = "STRV"
@@ -217,9 +219,9 @@ QVTPY_RG_INTENSITY_FRAC_VENOUS: dict[int, float] = {
     QVTPY_RTSV: 0.38,
 }
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # qvtpy — reserved / unused on backbone+seg
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 QVTPY_VENOUS_UNKNOWN_LABEL: int = 30
 QVTPY_VENOUS_REGION_BASE: int = 31
@@ -234,9 +236,9 @@ QVTPY_RESERVED_LABEL_BY_ID: dict[int, str] = {
     QVTPY_UNKNOWN_LABEL: "QVTPY_UNKNOWN",
 }
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # eICAB → qvtpy mapping (stage 3 relabel)
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 EICAB_LABEL_IDS_OMITTED: frozenset[int] = frozenset(
     {EICAB_LSCA, EICAB_RSCA, EICAB_LACHA, EICAB_RACHA}
@@ -279,9 +281,9 @@ QVTPY_TO_EICAB_LABELS: dict[int, tuple[int, ...]] = {
     QVTPY_ACOMM: (EICAB_ACOMM,),
 }
 
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 # Combined tables (centerline backbone + seg_4dflow)
-# =============================================================================
+# ──────────────────────────────────────────────────────────────────────────────
 
 QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID: dict[int, str] = {
     **QVTPY_ARTERIAL_ID_TO_NAME,
@@ -304,9 +306,9 @@ QVTPY_CENTERLINE_AND_SEG_LABEL_IDS: frozenset[int] = frozenset(
     QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID.keys()
 )
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Relabel + lookup helpers
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 def relabel_eicab_mask_to_qvtpy(volume: np.ndarray) -> np.ndarray:

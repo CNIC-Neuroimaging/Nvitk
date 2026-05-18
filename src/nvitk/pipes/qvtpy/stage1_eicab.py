@@ -1,17 +1,18 @@
-"""qvtpy stage 1: eICAB Circle-of-Willis / TOF segmentation on stage0 NIfTI layout.
+"""qvtpy stage 1: eICAB Circle-of-Willis / TOF segmentation on stage-0 NIfTI layout.
 
-Expects per-subject folders under ``--nifti-root`` as produced by
-:mod:`nvitk.pipes.qvtpy.stage0_convert`, in particular ``TOF/TOF.nii.gz`` (or
-``.nii``). Writes eICAB outputs under ``--output-root/<subject>/<eicab-subdir>/``
-(default subdir from :data:`nvitk.pipes.qvtpy.config.STAGE1_EICAB_DIR`).
+**Inputs**
 
-Two submission modes (mirroring stage0 + ``nvitk-eicab``):
+- ``<nifti_root>/<subject>/TOF/TOF.nii.gz`` from :mod:`nvitk.pipes.qvtpy.stage0_convert`.
 
-- ``--submit local`` (default): :func:`nvitk.segmentation.eicab.runner.run_eicab`
-  via ``singularity run`` on the current host.
-- ``--submit sge``: per-subject SGE job built with
-  :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job`
-  (canonical pipeline-container wrapper with all proper bind mounts).
+**Outputs**
+
+- eICAB NIfTIs under ``<output_root>/<subject>/<eicab-subdir>/`` (default
+  :data:`~nvitk.pipes.qvtpy.config.STAGE1_EICAB_DIR`), including ``TOF_resampled`` for stage 2.
+
+**Execution**
+
+- ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
+- ``--submit sge`` — :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job` per subject.
 """
 
 from __future__ import annotations
@@ -301,11 +302,6 @@ def submit_subject_sge(
         dry_run=dry_run,
         emit=emit,
     )
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

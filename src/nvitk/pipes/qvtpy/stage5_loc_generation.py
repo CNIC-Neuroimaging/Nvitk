@@ -1,4 +1,13 @@
-"""qvtpy stage 5: per-vessel LOC (voxel + tangent) from centerlines."""
+"""qvtpy stage 5: per-vessel LOC (voxel + tangent) from centerlines.
+
+**Inputs**
+
+- Stage-3/4 centerlines, contrast volumes (CD, angio, velocity magnitude).
+
+**Outputs**
+
+- ``locs.csv``, ``loc_meta.json`` under ``stage5_loc_generation/``.
+"""
 
 from __future__ import annotations
 
@@ -105,6 +114,7 @@ def run_subject(
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
 ) -> Path:
+    """Place arterial and venous LOCs; return stage-5 output directory."""
     del tangent_k_half  # tangents computed inside loc_selection
     # ---- Prerequisites: stage3 centerlines -----------------------------------
     s3 = _stage3_dir(output_root, subject)
@@ -228,6 +238,7 @@ def submit_subject_sge(
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
 ) -> str:
+    """Emit or submit one stage-5 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage5_loc_generation.py"

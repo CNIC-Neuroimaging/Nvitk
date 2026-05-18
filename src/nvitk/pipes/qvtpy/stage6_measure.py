@@ -1,4 +1,14 @@
-"""qvtpy stage 6: LOC-wise velocity / PI / RI from PC phase volumes."""
+"""qvtpy stage 6: LOC-wise velocity / PI / RI from PC phase volumes.
+
+**Inputs**
+
+- Stage-5 ``locs.csv``, AP/RL/FH phase NIfTIs (:func:`~nvitk.io.conversors.phase2volume.discover_phase_inputs`),
+  optional stage-4 ``seg_4dflow`` when not re-segmenting in-plane.
+
+**Outputs**
+
+- ``loc_measurements.csv``, optional cross-section QC PNGs under ``stage6_measure/``.
+"""
 
 from __future__ import annotations
 
@@ -135,6 +145,7 @@ def run_subject(
     cross_section_plane_interp: int = 1,
     write_cross_section_qc: bool = True,
 ) -> Path:
+    """Measure flow metrics at each LOC; return stage-6 output directory."""
     # ---- Prerequisites: stage5 locs.csv --------------------------------------
     loc_csv = _stage5_dir(output_root, subject) / "locs.csv"
     if not loc_csv.is_file():
@@ -332,6 +343,7 @@ def submit_subject_sge(
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
 ) -> str:
+    """Emit or submit one stage-6 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage6_measure.py"

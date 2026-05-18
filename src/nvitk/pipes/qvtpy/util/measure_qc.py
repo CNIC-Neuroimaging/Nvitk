@@ -1,4 +1,9 @@
-"""QC figures for stage-6 LOC cross-section measurements."""
+"""QC figures for stage-6 LOC cross-section measurements.
+
+Writes a five-panel PNG (centerline indices loc±2) with complex-difference background,
+in-plane mask contours, and the active LOC marked — for visual review of
+:func:`~nvitk.measure.cross_section.cross_section_at_loc` placement.
+"""
 
 from __future__ import annotations
 

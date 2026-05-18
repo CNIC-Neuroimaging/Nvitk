@@ -1,4 +1,12 @@
-"""PESA-Brain master CLI: dispatch black_blood or g_pet sub-pipelines."""
+"""
+PESA-Brain master CLI (``nvitk-pesa-brain``).
+
+Dispatches to sub-pipelines:
+- ``black_blood`` → :mod:`nvitk.pipes.pesa_brain.black_blood.run` (or use ``nvitk-pesa-brain-bb``).
+- ``g_pet`` → stub (``nvitk-pesa-brain-gpet``).
+
+For black-blood options and stage details, prefer ``nvitk-pesa-brain-bb --help``.
+"""
 
 from __future__ import annotations
 
@@ -16,20 +24,39 @@ log = Logger()
     "--pipeline",
     type=click.Choice(["black_blood", "g_pet"]),
     required=True,
-    help="Sub-pipeline to run (or use nvitk-pesa-brain-bb / nvitk-pesa-brain-gpet directly).",
+    help="Sub-pipeline: black_blood (VWI_BB + eICAB) or g_pet (not implemented).",
 )
-@click.option("--subjects", default=None)
-@click.option("--subjects-file", type=click.Path(path_type=Path), default=None)
+@click.option("--subjects", default=None, help="Comma-separated subject IDs.")
+@click.option(
+    "--subjects-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Subject list file for cohort / download.",
+)
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--output-root", type=click.Path(path_type=Path), default=None)
 @click.option("--eicab-results-root", type=click.Path(path_type=Path), default=None)
-@click.option("--qvtpy-results-root", type=click.Path(path_type=Path), default=None)
-@click.option("--vwi-bb-rel-path", default=None)
+@click.option(
+    "--qvtpy-results-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Alias for --eicab-results-root.",
+)
+@click.option("--vwi-bb-rel-path", default=None, help="Relative path to vwi_bb.nii.gz per subject.")
 @click.option("--wvi-rel-path", default=None, hidden=True)
 @click.option("--eicab-subdir", default=None)
-@click.option("--eicab-mask", type=click.Choice(["cw", "wb"]), default="cw")
-@click.option("--stages", default="stage0_c,stage1,stage2")
+@click.option(
+    "--eicab-mask",
+    type=click.Choice(["cw", "wb"]),
+    default="cw",
+    help="eICAB CW or WB multilabel (black_blood only).",
+)
+@click.option(
+    "--stages",
+    default="stage0_c,stage1,stage2",
+    help="Black-blood stages (see nvitk-pesa-brain-bb --help).",
+)
 @click.option("--with-download", is_flag=True, default=False)
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option("--xnat-config", type=click.Path(path_type=Path), default=None)
@@ -39,23 +66,32 @@ log = Logger()
 @click.option("--password", type=str, default=None)
 @click.option("--netrc-file", type=click.Path(path_type=Path), default=None)
 @click.option("--report", is_flag=True, default=False)
-@click.option("--dof", type=int, default=6)
-@click.option("--cost", default="normmi")
+@click.option("--dof", type=int, default=6, help="FLIRT DOF (stage1).")
+@click.option("--cost", default="normmi", help="FLIRT cost (stage1).")
 @click.option(
-    "--seg-strategy",
-    type=click.Choice(["crop-resegment", "centerline-growth"]),
-    default="crop-resegment",
+    "--cl-barrier-radius",
+    type=int,
+    default=2,
+    help="Centerline barrier radius (stage2 centerline-growth).",
 )
 @click.option(
-    "--thr-algorithm",
-    type=click.Choice(["otsu", "lsthr", "lthr"]),
-    default="otsu",
+    "--rg-intensity-frac",
+    type=float,
+    default=0.5,
+    help="Hypointense RG intensity fraction on native vwi_bb (stage2).",
 )
-@click.option("--crop-padding-bbox", type=int, default=3)
-@click.option("--cl-barrier-radius", type=int, default=2)
-@click.option("--min-component-frac", type=float, default=0.005)
-@click.option("--rg-intensity-frac", type=float, default=0.45)
-@click.option("--rg-barrier-radius", type=int, default=2)
+@click.option(
+    "--rg-barrier-radius",
+    type=int,
+    default=2,
+    help="Segmentation barrier radius (stage2).",
+)
+@click.option(
+    "--min-centerline-points",
+    type=int,
+    default=5,
+    help="Min skeleton points per vessel label (stage2).",
+)
 @click.pass_context
 def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
     """Run a PESA-Brain sub-pipeline."""
@@ -95,13 +131,10 @@ def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
         report=kwargs.get("report"),
         dof=kwargs.get("dof"),
         cost=kwargs.get("cost"),
-        seg_strategy=kwargs.get("seg_strategy"),
-        thr_algorithm=kwargs.get("thr_algorithm"),
-        crop_padding_bbox=kwargs.get("crop_padding_bbox"),
         cl_barrier_radius=kwargs.get("cl_barrier_radius"),
-        min_component_frac=kwargs.get("min_component_frac"),
         rg_intensity_frac=kwargs.get("rg_intensity_frac"),
         rg_barrier_radius=kwargs.get("rg_barrier_radius"),
+        min_centerline_points=kwargs.get("min_centerline_points"),
     )
 
 

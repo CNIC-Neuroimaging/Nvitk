@@ -1,4 +1,33 @@
-"""Black-blood pipeline runner (all stages via ``nvitk-pesa-brain-bb``)."""
+"""
+Black-blood pipeline runner (``nvitk-pesa-brain-bb``).
+
+Stages (``--stages``, comma-separated)
+--------------------------------------
+``stage0_d`` / ``download``
+    XNAT → DICOM (BrainVIEW VWI_BB, variant priority strong > default > weak).
+
+``stage0_c`` / ``convert`` / ``stage0``
+    DICOM → ``{nifti_root}/{subject}/BlackBlood/vwi_bb.nii.gz``.
+
+``stage1`` / ``reg`` / ``registration``
+    Rigid FLIRT: eICAB ``TOF_resampled`` (moving) → native ``vwi_bb`` (fixed).
+    Writes ``tof_to_vwi_bb.mat`` and warped TOF QC volume.
+
+``stage2`` / ``seg`` / ``segmentation``
+    eICAB labels → centerlines in ``vwi_bb`` space → centerline-growth BB masks.
+    Outputs under ``{output_root}/{subject}/pesa_brain/black_blood/stage2_bb_segmentation/``.
+
+Default stages (no download): ``stage0_c,stage1,stage2``.
+
+Data layout
+-----------
+- Native BB: ``{nifti_root}/{subject}/BlackBlood/vwi_bb.nii.gz``
+- eICAB (qvtpy): ``{eicab_results_root}/{subject}/eicab/*_eICAB_{CW|WB}.nii.gz``
+- Results: ``{output_root}/{subject}/pesa_brain/black_blood/``
+
+Segmentation uses **centerline-growth** with hypointense (dark-lumen) region growing
+on native ``vwi_bb``; see ``util/bb_vessel_segmentation.py``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +35,7 @@ from pathlib import Path
 
 import click
 
-from nvitk.core.logger import Logger
+from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.pipes.pesa_brain.black_blood import config as cfg
 from nvitk.pipes.pesa_brain.black_blood import (
     stage0_convert,
@@ -15,10 +44,13 @@ from nvitk.pipes.pesa_brain.black_blood import (
     stage2_bb_segmentation,
 )
 from nvitk.pipes.pesa_brain.black_blood.util import paths
-from nvitk.pipes.pesa_brain.black_blood.util.bb_vessel_segmentation import SegStrategy
 from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskKind
 
 log = Logger()
+
+# ---------------------------------------------------------------------------
+# Stage identifiers and aliases
+# ---------------------------------------------------------------------------
 
 STAGE_DOWNLOAD = "stage0_d"
 STAGE_CONVERT = "stage0_c"
@@ -46,6 +78,13 @@ _STAGE_ALIASES: dict[str, str] = {
 }
 
 _DEFAULT_STAGES = f"{STAGE_CONVERT},{STAGE_REG},{STAGE_SEG}"
+
+_STAGE_LABELS: dict[str, str] = {
+    STAGE_DOWNLOAD: "XNAT download (VWI_BB)",
+    STAGE_CONVERT: "DICOM → vwi_bb NIfTI",
+    STAGE_REG: "FLIRT TOF_resampled → vwi_bb",
+    STAGE_SEG: "centerlines + BB segmentation",
+}
 
 
 def _normalize_stages(stages: str) -> list[str]:
@@ -84,62 +123,154 @@ def _parse_subjects(
 
 
 @click.command("nvitk-pesa-brain-bb")
-@click.option("--subjects", default=None, help="Comma-separated subject ids.")
+@click.option(
+    "--subjects",
+    default=None,
+    help="Comma-separated subject IDs. If omitted, all folders under --nifti-root are used.",
+)
 @click.option(
     "--subjects-file",
     type=click.Path(path_type=Path),
     default=None,
-    help="Subject list file (.txt / .csv / .xlsx) for download stage.",
+    help="Subject list (.txt / .csv / .xlsx); used for download and explicit cohort runs.",
 )
-@click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
-@click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
-@click.option("--output-root", type=click.Path(path_type=Path), default=None)
-@click.option("--eicab-results-root", type=click.Path(path_type=Path), default=None)
-@click.option("--qvtpy-results-root", type=click.Path(path_type=Path), default=None)
-@click.option("--vwi-bb-rel-path", default=None)
+@click.option(
+    "--dicom-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=f"XNAT download root [{cfg.DEFAULT_DICOM_ROOT}].",
+)
+@click.option(
+    "--nifti-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=f"NIfTI tree with BlackBlood/vwi_bb per subject [{cfg.DEFAULT_NIFTI_ROOT}].",
+)
+@click.option(
+    "--output-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=f"Pipeline outputs (registration, segmentation) [{cfg.DEFAULT_RESULTS_ROOT}].",
+)
+@click.option(
+    "--eicab-results-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=f"qvtpy eICAB results root [{cfg.DEFAULT_EICAB_RESULTS_ROOT}].",
+)
+@click.option(
+    "--qvtpy-results-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Alias for --eicab-results-root (legacy name).",
+)
+@click.option(
+    "--vwi-bb-rel-path",
+    default=None,
+    help=f"Relative path to native BB volume under each subject [{cfg.VWI_BB_REL_PATH}].",
+)
 @click.option("--wvi-rel-path", default=None, hidden=True)
-@click.option("--eicab-subdir", default=None)
+@click.option(
+    "--eicab-subdir",
+    default=None,
+    help=f"eICAB folder name under subject results [{cfg.EICAB_SUBDIR}].",
+)
 @click.option(
     "--eicab-mask",
     type=click.Choice(["cw", "wb"]),
     default="cw",
     show_default=True,
-    help="eICAB multilabel mask for centerlines/segmentation (CW or WB).",
+    help=(
+        "eICAB multilabel for centerlines: Circle of Willis (cw) or whole-brain (wb). "
+        "Falls back to the other mask with a warning if the requested file is missing."
+    ),
 )
-@click.option("--stages", default=_DEFAULT_STAGES, show_default=True)
+@click.option(
+    "--stages",
+    default=_DEFAULT_STAGES,
+    show_default=True,
+    help="Comma-separated stages: stage0_d, stage0_c, stage1, stage2 (see module docstring).",
+)
 @click.option(
     "--with-download",
     is_flag=True,
     default=False,
     help="Prepend stage0_d (XNAT download) to --stages.",
 )
-@click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--xnat-config", type=click.Path(path_type=Path), default=None)
-@click.option("--server", type=str, default=None)
-@click.option("--project", type=str, default=None)
-@click.option("--user", type=str, default=None)
-@click.option("--password", type=str, default=None)
-@click.option("--netrc-file", type=click.Path(path_type=Path), default=None)
-@click.option("--report", is_flag=True, default=False, help="QC report after download/convert.")
-@click.option("--dof", type=int, default=6, show_default=True)
-@click.option("--cost", default="normmi", show_default=True)
 @click.option(
-    "--seg-strategy",
-    type=click.Choice(["crop-resegment", "centerline-growth"]),
-    default="crop-resegment",
-    show_default=True,
+    "--skip-existing",
+    is_flag=True,
+    default=False,
+    help="Skip steps when output artifacts already exist.",
 )
 @click.option(
-    "--thr-algorithm",
-    type=click.Choice(["otsu", "lsthr", "lthr"]),
-    default="otsu",
-    show_default=True,
+    "--xnat-config",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="XNAT profile YAML (server, project, credentials).",
 )
-@click.option("--crop-padding-bbox", type=int, default=3, show_default=True)
-@click.option("--cl-barrier-radius", type=int, default=2, show_default=True)
-@click.option("--min-component-frac", type=float, default=0.005, show_default=True)
-@click.option("--rg-intensity-frac", type=float, default=1.5, show_default=True)
-@click.option("--rg-barrier-radius", type=int, default=2, show_default=True)
+@click.option("--server", type=str, default=None, help="Override XNAT server URL.")
+@click.option("--project", type=str, default=None, help="Override XNAT project ID.")
+@click.option("--user", type=str, default=None, help="Override XNAT username.")
+@click.option("--password", type=str, default=None, help="Override XNAT password.")
+@click.option(
+    "--netrc-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional netrc for XNAT authentication.",
+)
+@click.option(
+    "--report",
+    is_flag=True,
+    default=False,
+    help="After convert: print subjects missing vwi_bb under --nifti-root.",
+)
+@click.option(
+    "--dof",
+    type=int,
+    default=6,
+    show_default=True,
+    help="FLIRT degrees of freedom (stage1: TOF_resampled → vwi_bb).",
+)
+@click.option(
+    "--cost",
+    default="normmi",
+    show_default=True,
+    help="FLIRT cost function (stage1).",
+)
+@click.option(
+    "--cl-barrier-radius",
+    type=int,
+    default=3,
+    show_default=True,
+    help=(
+        "Stage2: voxel radius to dilate other vessels' centerlines, blocking cross-label growth."
+    ),
+)
+@click.option(
+    "--rg-intensity-frac",
+    type=float,
+    default=0.9,
+    show_default=True,
+    help=(
+        "Stage2: hypointense RG gate — admit neighbours with "
+        "I <= mean(seed) / rg_intensity_frac on native vwi_bb."
+    ),
+)
+@click.option(
+    "--rg-barrier-radius",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Stage2: dilate other vessels' current segmentation to block merging.",
+)
+@click.option(
+    "--min-centerline-points",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Minimum skeleton points per eICAB label to keep a centerline.",
+)
 def main(
     subjects: str | None,
     subjects_file: Path | None,
@@ -164,15 +295,12 @@ def main(
     report: bool,
     dof: int,
     cost: str,
-    seg_strategy: str,
-    thr_algorithm: str,
-    crop_padding_bbox: int,
     cl_barrier_radius: int,
-    min_component_frac: float,
     rg_intensity_frac: float,
     rg_barrier_radius: int,
+    min_centerline_points: int,
 ) -> None:
-    """Run black-blood stages: download, convert, registration, segmentation."""
+    """PESA-Brain black-blood: VWI_BB download, TOF→BB registration, centerline segmentation."""
     dicom = Path(dicom_root or cfg.DEFAULT_DICOM_ROOT)
     nifti = paths.require_path(nifti_root or cfg.DEFAULT_NIFTI_ROOT, "nifti_root")
     out = paths.require_path(output_root or cfg.DEFAULT_RESULTS_ROOT, "output_root")
@@ -193,81 +321,96 @@ def main(
             f"No subjects resolved (use --subjects, --subjects-file, or populate {nifti})."
         )
 
-    strategy: SegStrategy = seg_strategy  # type: ignore[assignment]
+    with PipelineRunTracker(
+        log,
+        "pesa_brain/black_blood",
+        subj_list,
+        stages_sel,
+        stage_labels=_STAGE_LABELS,
+    ) as run:
+        if STAGE_DOWNLOAD in stages_sel:
+            from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
-    if STAGE_DOWNLOAD in stages_sel:
-        from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
+            dl_subjects = (
+                stage0_download.load_subjects(
+                    subjects=subjects, subjects_file=subjects_file
+                )
+                if subjects_file is not None or subjects
+                else subj_list
+            )
+            profile = load_xnat_profile(xnat_config)
+            conn = resolve_xnat_connection(
+                profile,
+                server=server,
+                project=project,
+                user=user,
+                password=password,
+                netrc_file=str(netrc_file) if netrc_file else None,
+            )
 
-        dl_subjects = (
-            stage0_download.load_subjects(subjects=subjects, subjects_file=subjects_file)
-            if subjects_file is not None or subjects
-            else subj_list
-        )
-        profile = load_xnat_profile(xnat_config)
-        conn = resolve_xnat_connection(
-            profile,
-            server=server,
-            project=project,
-            user=user,
-            password=password,
-            netrc_file=str(netrc_file) if netrc_file else None,
-        )
-        stage0_download.run_download(
-            dl_subjects,
-            dicom_root=dicom,
-            xnat_config=conn,
-            skip_existing=skip_existing,
-            report=report,
-        )
-
-    for subj in subj_list:
-        log.info(
-            f"=== black_blood | subject={subj} | stages={stages_sel} | "
-            f"eicab_mask={mask_kind} ==="
-        )
-        try:
-            if STAGE_CONVERT in stages_sel:
-                stage0_convert.run_subject(
-                    subj,
+            def _download() -> None:
+                stage0_download.run_download(
+                    dl_subjects,
                     dicom_root=dicom,
-                    nifti_root=nifti,
+                    xnat_config=conn,
                     skip_existing=skip_existing,
+                    report=report,
+                )
+
+            run.run_stage(
+                "(cohort)",
+                STAGE_DOWNLOAD,
+                _download,
+                detail=f"{len(dl_subjects)} subject(s)",
+            )
+
+        for subj in subj_list:
+            if STAGE_CONVERT in stages_sel:
+                run.run_stage(
+                    subj,
+                    STAGE_CONVERT,
+                    lambda s=subj: stage0_convert.run_subject(
+                        s,
+                        dicom_root=dicom,
+                        nifti_root=nifti,
+                        skip_existing=skip_existing,
+                    ),
                 )
             if STAGE_REG in stages_sel:
-                stage1_registration.run_subject(
+                run.run_stage(
                     subj,
-                    nifti_root=nifti,
-                    output_root=out,
-                    eicab_results_root=eicab_root,
-                    skip_existing=skip_existing,
-                    vwi_bb_rel=rel,
-                    eicab_subdir=eicab_subdir,
-                    dof=dof,
-                    cost=cost,
+                    STAGE_REG,
+                    lambda s=subj: stage1_registration.run_subject(
+                        s,
+                        nifti_root=nifti,
+                        output_root=out,
+                        eicab_results_root=eicab_root,
+                        skip_existing=skip_existing,
+                        vwi_bb_rel=rel,
+                        eicab_subdir=eicab_subdir,
+                        dof=dof,
+                        cost=cost,
+                    ),
                 )
             if STAGE_SEG in stages_sel:
-                stage2_bb_segmentation.run_subject(
+                run.run_stage(
                     subj,
-                    nifti_root=nifti,
-                    output_root=out,
-                    eicab_results_root=eicab_root,
-                    seg_strategy=strategy,
-                    skip_existing=skip_existing,
-                    vwi_bb_rel=rel,
-                    eicab_subdir=eicab_subdir,
-                    eicab_mask=mask_kind,
-                    thr_algorithm=thr_algorithm,  # type: ignore[arg-type]
-                    crop_padding_bbox=crop_padding_bbox,
-                    cl_barrier_radius=cl_barrier_radius,
-                    min_component_frac=min_component_frac,
-                    rg_intensity_frac=rg_intensity_frac,
-                    rg_barrier_radius=rg_barrier_radius,
+                    STAGE_SEG,
+                    lambda s=subj: stage2_bb_segmentation.run_subject(
+                        s,
+                        nifti_root=nifti,
+                        output_root=out,
+                        eicab_results_root=eicab_root,
+                        skip_existing=skip_existing,
+                        vwi_bb_rel=rel,
+                        eicab_subdir=eicab_subdir,
+                        eicab_mask=mask_kind,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_intensity_frac=rg_intensity_frac,
+                        rg_barrier_radius=rg_barrier_radius,
+                        min_centerline_points=min_centerline_points,
+                    ),
                 )
-        except Exception as exc:
-            import traceback
-
-            traceback.print_exc()
-            log.error(f"[{subj}] failed: {exc}")
 
     if report and STAGE_CONVERT in stages_sel:
         stage0_convert.report_subjects(nifti, subj_list)

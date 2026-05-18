@@ -16,8 +16,11 @@ Per-subject layout under ``--dicom-root`` (lowercase slot names, aligned with
     {subject}/4dflow_fh/
 
 When invoked from the qvtpy master runner (:mod:`nvitk.pipes.qvtpy.run`) this
-step is **opt-in** via ``--with-download``; ``stage0_convert`` continues to run
-by default.
+step is **opt-in** (``stage0_d``); ``stage0_convert`` runs by default.
+
+**Outputs**
+
+- ``{dicom_root}/{subject}/{tof|4dflow_ap|4dflow_rl|4dflow_fh}/`` DICOM file trees.
 """
 
 from __future__ import annotations

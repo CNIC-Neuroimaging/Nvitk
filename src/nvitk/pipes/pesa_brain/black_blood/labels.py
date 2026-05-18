@@ -1,4 +1,4 @@
-"""eICAB → black-blood arterial label table (local copy; no qvtpy import)."""
+"""eICAB Circle-of-Willis integers → black-blood arterial label table (local copy; no qvtpy import)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,10 @@ import numpy as np
 
 from nvitk.core.array import as_backend_array
 
-# eICAB integers (Circle-of-Willis multilabel).
+# ──────────────────────────────────────────────────────────────────────────────
+# eICAB multilabel ids (Circle-of-Willis)
+# ──────────────────────────────────────────────────────────────────────────────
+
 EICAB_BACKGROUND: int = 0
 EICAB_LICA: int = 1
 EICAB_RICA: int = 2
@@ -27,7 +30,10 @@ EICAB_RSCA: int = 16
 EICAB_LACHA: int = 17
 EICAB_RACHA: int = 18
 
-# Black-blood arterial ids (1–12).
+# ──────────────────────────────────────────────────────────────────────────────
+# Black-blood arterial ids (1–12; 0 = background)
+# ──────────────────────────────────────────────────────────────────────────────
+
 BB_BACKGROUND: int = 0
 BB_LICA: int = 1
 BB_RICA: int = 2
@@ -62,6 +68,8 @@ BB_ARTERIAL_LABEL_IDS: frozenset[int] = frozenset(
     lid for lid in BB_ARTERIAL_ID_TO_NAME if int(lid) > 0
 )
 
+# ---- eICAB → BB lookup (merge PCA segments; drop SCA / AChA) ----------------
+
 EICAB_TO_BB_LABEL: dict[int, int] = {
     EICAB_BACKGROUND: BB_BACKGROUND,
     EICAB_LICA: BB_LICA,
@@ -85,6 +93,11 @@ EICAB_TO_BB_LABEL: dict[int, int] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Relabel and naming
+# ---------------------------------------------------------------------------
+
+
 def relabel_eicab_to_bb(volume: np.ndarray) -> np.ndarray:
     """Map eICAB labels to black-blood arterial ids (merge PCA; drop SCA/AChA)."""
     vol = as_backend_array(volume)
@@ -97,7 +110,7 @@ def relabel_eicab_to_bb(volume: np.ndarray) -> np.ndarray:
 
 
 def bb_vessel_name(label_id: int) -> str:
-    """Name for a black-blood arterial label id."""
+    """Return the arterial name for a black-blood label id, or ``LABEL_<id>``."""
     lid = int(label_id)
     if lid in BB_ARTERIAL_ID_TO_NAME:
         return BB_ARTERIAL_ID_TO_NAME[lid]

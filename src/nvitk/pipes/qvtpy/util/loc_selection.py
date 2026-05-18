@@ -1,4 +1,13 @@
-"""LOC (location of interest) selection heuristics aligned with QVTplus."""
+"""LOC (location of interest) selection heuristics aligned with QVTplus.
+
+**Inputs**
+
+- Arterial / venous centerline polylines, optional venous slab mask, contrast volumes.
+
+**Outputs**
+
+- :class:`LocRecord` rows (voxel, tangent, cross-section metrics) for ``locs.csv`` (stage 5).
+"""
 
 from __future__ import annotations
 
@@ -41,6 +50,8 @@ QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset(
 
 @dataclass(frozen=True)
 class LocRecord:
+    """One LOC: vessel id, polyline station, voxel index, tangent, optional cross-section QC."""
+
     vessel_id: int
     vessel_name: str
     segment_id: int
@@ -209,6 +220,7 @@ def pick_masked_midpoint(
 
 
 def local_direction_alignment(points: np.ndarray, idx: int, *, window: int = 5) -> np.ndarray:
+    """Unit principal direction along the polyline near index *idx* (SVD over a local window)."""
     pts = to_numpy(points).astype(np.float64)
     n = pts.shape[0]
     i0 = max(0, idx - window)
@@ -304,6 +316,7 @@ def select_main_vessel_loc(
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     radius_vox: float = 10.0,
 ) -> LocRecord | None:
+    """Single midpoint LOC on a polyline (masked arc-length when *mask* is set)."""
     pts = to_numpy(points)
     if pts.shape[0] < 3:
         return None
@@ -376,6 +389,7 @@ def select_venous_locs(
     voxel_spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     radius_vox: float = 10.0,
 ) -> list[LocRecord]:
+    """One LOC per venous vessel (SSSV/STRV/LTSV/RTSV) with geometry validation."""
     from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
 
     if not venous_polylines:
@@ -573,6 +587,7 @@ def select_arterial_locs(
 
 
 def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:
+    """Serialize :class:`LocRecord` for ``locs.csv`` / JSON."""
     return {
         "vessel_id": rec.vessel_id,
         "vessel_name": rec.vessel_name,

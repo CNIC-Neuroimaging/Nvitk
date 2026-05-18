@@ -1,4 +1,13 @@
-"""qvtpy stage 4t: per-timepoint local CD segmentation → ``seg_4dflow_4d``."""
+"""qvtpy stage 4t: per-timepoint local CD segmentation → ``seg_4dflow_4d``.
+
+**Inputs**
+
+- ``ComplexDifference_4D`` (requires stage-0 ``--compute-phase-derived``), stage-3 centerlines.
+
+**Outputs**
+
+- ``seg_4dflow_4d.nii.gz``, per-timepoint ``segmentation_meta_t*.json``, ``temporal_seg_summary.json``.
+"""
 
 from __future__ import annotations
 
@@ -219,6 +228,7 @@ def _segmentation_meta_for_timepoint(
     aca_sequential_grow_info: dict[str, Any] | None,
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    """Per-timepoint ``segmentation_meta`` JSON payload (mirrors stage-4 fields)."""
     return {
         "subject": subject,
         "timepoint": int(timepoint),
@@ -269,6 +279,7 @@ def run_subject(
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
 ) -> Path:
+    """Segment each CD time frame; return stage-4t output directory."""
     s3 = _stage3_dir(output_root, subject)
     cl_path = centerlines_mask_path(s3)
     if not cl_path.is_file():
@@ -488,6 +499,7 @@ def submit_subject_sge(
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
 ) -> str:
+    """Emit or submit one stage-4t SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     script = f"{binds.src}nvitk/pipes/qvtpy/stage4t_4dflow_t_segmentation.py"

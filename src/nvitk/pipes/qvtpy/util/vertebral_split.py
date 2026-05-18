@@ -1,4 +1,9 @@
-"""Split LVA/RVA from basilar segmentation via vertebro-basilar skeleton bifurcation."""
+"""Split LVA/RVA from basilar segmentation via vertebro-basilar skeleton bifurcation.
+
+Post-processes the basilar label in stage-4 ``seg_4dflow``: when a Y-junction is found
+on the basilar skeleton, inferior branches are flood-filled into :data:`~nvitk.pipes.qvtpy.labels.QVTPY_LVA`
+and :data:`~nvitk.pipes.qvtpy.labels.QVTPY_RVA` by hemisphere.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Morphological cleaning for eICAB multilabel and CD binary masks."""
+"""Morphological cleaning for eICAB multilabel and CD binary masks.
+
+Used in stage 3 (eICAB island removal, venous slab opening) and stage 4
+(:func:`keep_largest_component_per_label` after local thresholding).
+"""
 
 from __future__ import annotations
 

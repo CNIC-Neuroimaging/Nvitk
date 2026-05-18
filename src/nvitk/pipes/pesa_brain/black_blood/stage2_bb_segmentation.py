@@ -1,4 +1,13 @@
-"""Black-blood stage 2: centerlines in vwi_bb space + BB artery segmentation."""
+"""
+Black-blood stage 2: eICAB centerlines in native ``vwi_bb`` space + BB segmentation.
+
+Workflow
+--------
+1. Warp eICAB CW/WB labels into ``vwi_bb`` grid (stage1 ``tof_to_vwi_bb.mat`` when needed).
+2. Rasterize centerlines → ``centerlines_mask.nii.gz``.
+3. Region-grow each vessel from its centerline into **hypointense** (dark) voxels on native BB.
+4. Write ``seg_bb.nii.gz`` with ``vwi_bb`` affine.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +17,7 @@ from pathlib import Path
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread
 from nvitk.pipes.pesa_brain.black_blood.util import paths
-from nvitk.pipes.pesa_brain.black_blood.util.bb_vessel_segmentation import (
-    SegStrategy,
-    ThrAlgorithm,
-    run_bb_segmentation,
-)
+from nvitk.pipes.pesa_brain.black_blood.util.bb_vessel_segmentation import run_bb_segmentation
 from nvitk.pipes.pesa_brain.black_blood.util.centerlines_from_eicab import (
     build_centerlines_from_eicab,
 )
@@ -36,20 +41,16 @@ def run_subject(
     nifti_root: Path,
     output_root: Path,
     eicab_results_root: Path,
-    seg_strategy: SegStrategy,
     skip_existing: bool = False,
     vwi_bb_rel: str | None = None,
     eicab_subdir: str | None = None,
     eicab_mask: EicabMaskKind = "cw",
-    thr_algorithm: ThrAlgorithm = "otsu",
-    crop_padding_bbox: int = 3,
     cl_barrier_radius: int = 2,
-    min_component_frac: float = 0.005,
     rg_intensity_frac: float = 0.45,
     rg_barrier_radius: int = 2,
     min_centerline_points: int = 5,
 ) -> Path:
-    """Build centerlines and segment in native vwi_bb space."""
+    """Build centerlines and centerline-growth BB segmentation in native ``vwi_bb`` space."""
     _load_stage1_meta(output_root, subject)
     vwi_bb_ref = paths.vwi_bb_path(nifti_root, subject, vwi_bb_rel=vwi_bb_rel)
     mat = paths.registration_matrix_path(output_root, subject)
@@ -64,10 +65,12 @@ def run_subject(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info(
-        f"pesa_brain stage2 | subject={subject} strategy={seg_strategy} "
-        f"space=vwi_bb eicab_mask={mask_res.used} (requested={mask_res.requested})"
+        f"pesa_brain stage2 | subject={subject} strategy=centerline-growth "
+        f"space=vwi_bb rg_polarity=hypointense "
+        f"eicab_mask={mask_res.used} (requested={mask_res.requested})"
     )
 
+    log.step("building centerlines from eICAB in vwi_bb space")
     build_centerlines_from_eicab(
         mask_res.path,
         vwi_bb_ref,
@@ -80,18 +83,21 @@ def run_subject(
 
     vwi_img = imread(vwi_bb_ref)
     cl_img = imread(out_dir / "centerlines_mask.nii.gz")
+    if tuple(vwi_img.data.shape[:3]) != tuple(cl_img.data.shape[:3]):
+        raise ValueError(
+            f"vwi_bb shape {vwi_img.data.shape[:3]} != centerlines_mask "
+            f"{cl_img.data.shape[:3]} for {subject}"
+        )
 
+    log.step("running hypointense centerline-growth BB segmentation")
     run_bb_segmentation(
         vwi_img.data,
         cl_img.data,
         out_dir,
-        strategy=seg_strategy,
-        thr_algorithm=thr_algorithm,
-        crop_padding_bbox=crop_padding_bbox,
         cl_barrier_radius=cl_barrier_radius,
-        min_component_frac=min_component_frac,
         rg_intensity_frac=rg_intensity_frac,
         rg_barrier_radius=rg_barrier_radius,
+        metadata=dict(vwi_img.metadata or {}),
         skip_existing=skip_existing,
     )
     return out_dir

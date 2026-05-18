@@ -1,13 +1,21 @@
 """Per-vessel local CD crop, threshold, and optional region growing for stage 4.
 
-Array indices ``(i, j, k)`` are treated as **(X, Y, Z)** for asymmetric bbox padding.
+**Inputs**
+
+- 3D complex-difference volume, stage-3 ``centerlines_mask``, optional warped eICAB labels.
+
+**Outputs**
+
+- Multilabel ``seg_4dflow`` via :func:`build_seg_4dflow_local` and per-vessel :class:`VesselSegStats`.
+
+Array indices ``(i, j, k)`` are **(X, Y, Z)** for asymmetric bbox padding.
 
 Region-growing intensity gate (per vessel ``L``)::
 
     grow_thresh = max(mean(CD on seg==L) * rg_intensity_frac(L), opt_thresh_local)
 
-A **lower** ``rg_intensity_frac`` admits dimmer neighbours (more growth). A **higher**
-value is stricter. MCA/ACA/PCA use a reduced default fraction to explore further.
+A **lower** ``rg_intensity_frac`` admits dimmer neighbours (more growth). MCA/ACA/PCA use
+a reduced explore fraction by default.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from typing import Any, Literal
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
+from nvitk.core.logger import Logger
 from nvitk.morphology import dilate
 from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected, remove_small_components_by_fraction
@@ -46,6 +55,12 @@ from nvitk.segmentation.region_growing import region_grow_into_label_volume
 
 setup(globals())
 
+log = Logger()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Types and defaults
+# ──────────────────────────────────────────────────────────────────────────────
+
 ThrAlgorithm = Literal["lsthr", "lthr", "otsu"]
 _CROP_MIN_COMPONENT_FRAC = 0.005
 _CROP_MIN_COMPONENT_FRAC_SMALL = 0.0
@@ -54,6 +69,8 @@ _DEFAULT_RG_INTENSITY_FRAC: float = 0.45
 _RG_INTENSITY_FRAC_EXPLORE: float = 0.35
 _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
 _ACA_OVERLAP_MIN_VOXELS_DEFAULT: int = 5
+
+
 @dataclass(frozen=True)
 class BboxFacePadding:
     """Per-face bbox expansion in voxels (toward lower / higher index on each axis)."""
@@ -440,6 +457,11 @@ def _segment_communicating_rg_only(
             st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
 
 
+# ---------------------------------------------------------------------------
+# Build seg_4dflow (per-label local threshold + region growing)
+# ---------------------------------------------------------------------------
+
+
 def build_seg_4dflow_local(
     cd: np.ndarray,
     centerlines_mask: np.ndarray,
@@ -471,6 +493,10 @@ def build_seg_4dflow_local(
     label_ids = sorted(int(v) for v in np.unique(clm) if int(v) > 0)
     phase1_ids = [lid for lid in label_ids if lid not in QVTPY_COMM_IDS]
     comm_ids = [lid for lid in label_ids if lid in QVTPY_COMM_IDS]
+    log.step(
+        f"local CD segmentation: {len(phase1_ids)} peripheral + {len(comm_ids)} "
+        f"communicating label(s), thr={thr_algorithm}, RG={region_growing}"
+    )
     stats: list[VesselSegStats] = []
     opt_thresh_by_label: dict[int, float | None] = {}
     cl_rad = max(0, int(cl_barrier_radius))
@@ -478,6 +504,7 @@ def build_seg_4dflow_local(
     venous_rg = resolve_venous_rg_intensity_fracs(venous_rg_intensity_fracs)
 
     for lid in phase1_ids:
+        log.step(f"label {lid}: crop + {thr_algorithm} threshold")
         roi = clm == lid
         bbox_out = _bbox_with_vessel_padding(roi, shape, lid, default_pad=crop_padding_bbox)
         if bbox_out is None:
@@ -643,7 +670,13 @@ def build_seg_4dflow_local(
     )
 
 
+# ---------------------------------------------------------------------------
+# Serialization
+# ---------------------------------------------------------------------------
+
+
 def vessel_stats_to_dict(st: VesselSegStats) -> dict[str, Any]:
+    """JSON-serializable dict from :class:`VesselSegStats`."""
     i0, i1, j0, j1, k0, k1 = st.bbox
     return {
         "label_id": st.label_id,

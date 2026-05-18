@@ -14,6 +14,11 @@ from nvitk.registration.fsl.flirt import flirt_register_rigid
 log = Logger()
 
 
+# ---------------------------------------------------------------------------
+# Per-subject registration
+# ---------------------------------------------------------------------------
+
+
 def run_subject(
     subject: str,
     *,
@@ -43,6 +48,7 @@ def run_subject(
     log.info(f"  moving (TOF_resampled): {moving}")
     log.info(f"  fixed (vwi_bb): {fixed}")
     log.info("  segmentation space: native vwi_bb")
+    log.step(f"FLIRT rigid registration dof={dof} cost={cost}")
 
     res = flirt_register_rigid(
         moving,
@@ -68,4 +74,7 @@ def run_subject(
         "created": datetime.now().isoformat(timespec="seconds"),
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    log.step(f"registration matrix -> {res.matrix_path.name}")
+    if res.warped_path is not None:
+        log.step(f"warped TOF QC -> {res.warped_path.name}")
     return out_dir

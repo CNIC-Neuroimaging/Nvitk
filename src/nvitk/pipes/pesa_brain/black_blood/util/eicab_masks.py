@@ -1,4 +1,4 @@
-"""Resolve eICAB CW or WB multilabel masks (local copy; no qvtpy import)."""
+"""Resolve eICAB Circle-of-Willis (CW) or whole-brain (WB) multilabel masks (local copy; no qvtpy import)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Types
+# ──────────────────────────────────────────────────────────────────────────────
+
 EicabMaskKind = Literal["cw", "wb"]
+
+# ---- Filename patterns -------------------------------------------------------
 
 _CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
 _WB_PATTERNS = ("*_eICAB_WB.nii.gz", "*_eICAB_WB.nii")
@@ -27,7 +33,13 @@ class EicabMaskResolution:
     fallback_reason: str | None
 
 
+# ---------------------------------------------------------------------------
+# Resolve CW / WB multilabel path
+# ---------------------------------------------------------------------------
+
+
 def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:
+    """First sorted glob hit under *eicab_dir* (direct, then recursive)."""
     for pat in patterns:
         hits = sorted(eicab_dir.glob(pat))
         if hits:
@@ -43,7 +55,11 @@ def resolve_eicab_mask(
     eicab_dir: Path,
     preference: EicabMaskKind = "cw",
 ) -> EicabMaskResolution:
-    """Return eICAB label NIfTI for *preference*, with warn-and-fallback to the other kind."""
+    """Return the eICAB label NIfTI path for *preference*, with warn-and-fallback.
+
+    If the requested mask is missing but the alternate exists, logs a warning and
+    uses the alternate. Raises :class:`FileNotFoundError` if neither exists.
+    """
     pref = preference.strip().lower()  # type: ignore[assignment]
     if pref not in ("cw", "wb"):
         raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
