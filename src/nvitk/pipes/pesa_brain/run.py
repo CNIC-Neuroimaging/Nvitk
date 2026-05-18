@@ -69,87 +69,33 @@ log = Logger()
 @click.option("--dof", type=int, default=6, help="FLIRT DOF (stage1).")
 @click.option("--cost", default="normmi", help="FLIRT cost (stage1).")
 @click.option(
-    "--bbox-padding",
+    "--eicab-dilate",
     type=int,
-    default=8,
-    help="Symmetric bbox padding around centerline (stage2).",
+    default=4,
+    help="Dilate warped eICAB label before ROI threshold (stage2).",
 )
 @click.option(
-    "--eicab-prior-dilate",
-    type=int,
-    default=3,
-    help="Dilate warped eICAB label for vessel corridor prior (stage2).",
-)
-@click.option("--centerline-max-dist", type=int, default=12, help="Centerline tube radius (stage2).")
-@click.option(
-    "--ica-centerline-max-dist",
-    type=int,
-    default=6,
-    help="Tighter centerline tube for LICA/RICA (stage2).",
-)
-@click.option(
-    "--lumen-intensity-frac",
-    type=float,
-    default=1.2,
-    help="Hypointense lumen ceiling multiplier (non-ICA, stage2).",
-)
-@click.option(
-    "--lumen-percentile",
-    type=float,
-    default=55.0,
-    help="Local tube percentile cap (non-ICA, stage2).",
-)
-@click.option(
-    "--ica-lumen-intensity-frac",
-    type=float,
-    default=1.05,
-    help="Stricter ceiling multiplier for LICA/RICA (stage2).",
-)
-@click.option(
-    "--ica-lumen-percentile",
-    type=float,
-    default=42.0,
-    help="Stricter tube percentile for LICA/RICA (stage2).",
+    "--thr-algorithm",
+    type=click.Choice(["lsthr", "lthr", "otsu"]),
+    default="lsthr",
+    help="Hypointense threshold algorithm inside dilated eICAB ROI (stage2).",
 )
 @click.option(
     "--min-component-frac",
     type=float,
     default=0.005,
-    help="Drop small lumen islands after threshold (stage2).",
-)
-@click.option(
-    "--cl-barrier-radius",
-    type=int,
-    default=2,
-    help="Centerline barrier radius (stage2).",
-)
-@click.option(
-    "--rg-intensity-frac",
-    type=float,
-    default=1.0,
-    help="Hypointense RG intensity fraction after initial mask (stage2).",
-)
-@click.option(
-    "--rg-barrier-radius",
-    type=int,
-    default=2,
-    help="Segmentation barrier radius (stage2).",
-)
-@click.option(
-    "--rg-constraint/--no-rg-constraint",
-    default=True,
-    help="Constrain RG to bbox and eICAB∩tube (stage2); --no-rg-constraint for free RG.",
+    help="Drop small islands after threshold (stage2).",
 )
 @click.option(
     "--min-centerline-points",
     type=int,
     default=5,
-    help="Min skeleton points per vessel label (stage2).",
+    help="Min skeleton points per vessel label (stage2 centerlines).",
 )
 @click.option(
     "--vwi-preprocess",
     type=click.Choice(["none", "median", "gaussian"]),
-    default="median",
+    default="none",
     help="vwi_bb smoothing before segmentation (stage2).",
 )
 @click.option("--vwi-median-size", type=int, default=3, help="Median kernel size (stage2).")
@@ -193,19 +139,9 @@ def main(ctx: click.Context, pipeline: str, **kwargs: object) -> None:
         report=kwargs.get("report"),
         dof=kwargs.get("dof"),
         cost=kwargs.get("cost"),
-        bbox_padding=kwargs.get("bbox_padding"),
-        eicab_prior_dilate=kwargs.get("eicab_prior_dilate"),
-        centerline_max_dist=kwargs.get("centerline_max_dist"),
-        ica_centerline_max_dist=kwargs.get("ica_centerline_max_dist"),
-        lumen_intensity_frac=kwargs.get("lumen_intensity_frac"),
-        lumen_percentile=kwargs.get("lumen_percentile"),
-        ica_lumen_intensity_frac=kwargs.get("ica_lumen_intensity_frac"),
-        ica_lumen_percentile=kwargs.get("ica_lumen_percentile"),
+        eicab_dilate=kwargs.get("eicab_dilate"),
+        thr_algorithm=kwargs.get("thr_algorithm"),
         min_component_frac=kwargs.get("min_component_frac"),
-        cl_barrier_radius=kwargs.get("cl_barrier_radius"),
-        rg_intensity_frac=kwargs.get("rg_intensity_frac"),
-        rg_barrier_radius=kwargs.get("rg_barrier_radius"),
-        rg_constraint=kwargs.get("rg_constraint"),
         min_centerline_points=kwargs.get("min_centerline_points"),
         vwi_preprocess=kwargs.get("vwi_preprocess"),
         vwi_median_size=kwargs.get("vwi_median_size"),
