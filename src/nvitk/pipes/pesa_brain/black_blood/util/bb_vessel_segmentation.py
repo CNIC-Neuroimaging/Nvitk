@@ -2,7 +2,8 @@
 Black-blood artery segmentation via centerline-guided region growing.
 
 Black-blood (VWI) lumen is **hypointense** (dark). Region growing uses
-``polarity='hypointense'`` on native ``vwi_bb`` intensities (no inversion).
+``polarity='hypointense'`` on native ``vwi_bb`` with gate ``I <= mean(seed) * frac``
+(lower *frac* → stricter / darker-only growth).
 
 Outputs (under stage2 dir)
 --------------------------

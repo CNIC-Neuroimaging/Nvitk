@@ -681,10 +681,11 @@ def main(
                         ),
                     )
 
-    if submit == "local" and run_conv and report:
-        stage0_convert.print_nifti_qc_report(
-            nifti_root, subject_list, check_derived=report_derived
-        )
+    if submit == "local":
+        if run_conv and report:
+            stage0_convert.print_nifti_qc_report(
+                nifti_root, subject_list, check_derived=report_derived
+            )
         return
 
     cluster_stages = (

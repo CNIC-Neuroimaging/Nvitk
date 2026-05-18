@@ -250,11 +250,11 @@ def _parse_subjects(
 @click.option(
     "--rg-intensity-frac",
     type=float,
-    default=0.9,
+    default=.4,
     show_default=True,
     help=(
         "Stage2: hypointense RG gate — admit neighbours with "
-        "I <= mean(seed) / rg_intensity_frac on native vwi_bb."
+        "I <= mean(seed) * rg_intensity_frac on native vwi_bb (lower = stricter)."
     ),
 )
 @click.option(
