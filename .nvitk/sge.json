@@ -57,7 +57,15 @@
         "sge_project": "MCC_GPU",
         "sge_account": "MCC_GPU",
         "sge_ngpu": 0,
-        "sge_h_vmem": "30G",
+        "sge_h_vmem": "30G"
+      },
+      "image_tools": {
+        "log_subdir": "image_tools",
+        "err_subdir": "image_tools",
+        "sge_job_prefix": "nvitk-tool",
+        "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif",
+        "sge_ngpu": 0,
+        "sge_h_vmem": "32G"
       }
     }
   }

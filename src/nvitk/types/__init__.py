@@ -3,5 +3,6 @@
 from __future__ import annotations
 
 from .image import Image
+from .mesh import Mesh
 
-__all__ = ["Image"]
+__all__ = ["Image", "Mesh"]

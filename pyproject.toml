@@ -132,6 +132,11 @@ test = [
 cluster = [
   "paramiko>=3.4.0",
 ]
+gui = [
+  "napari[all]>=0.5.0",
+  "magicgui>=0.8.0",
+  "superqt>=0.6.0",
+]
 # Standalone pipeline CLIs (same distribution; extras document install intent).
 "nvitk-bbtpy" = []
 "nvitk-gpetpy" = []
@@ -161,9 +166,19 @@ nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 nvitk-flirt = "nvitk.registration.cli:main"
 
 # -----------------------------------------------------------------------------
+# Image module CLIs (filters, morphology, restoration, measure, transform)
+# -----------------------------------------------------------------------------
+nvitk-morph = "nvitk.cli.morphology:main"
+nvitk-restore = "nvitk.cli.restoration:main"
+nvitk-filter = "nvitk.cli.filters:main"
+nvitk-measure = "nvitk.cli.measure:main"
+nvitk-transform = "nvitk.cli.transform:main"
+
+# -----------------------------------------------------------------------------
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
+nvitk-gui = "gui.main:main"
 
 # -----------------------------------------------------------------------------
 # Pipeline scripts
@@ -199,7 +214,7 @@ testpaths = ["tests", "test"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["nvitk", "nvitk.*"]  
+include = ["nvitk", "nvitk.*", "gui", "gui.*"]
 
 [tool.poetry]
 packages = [

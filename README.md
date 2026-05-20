@@ -15,7 +15,7 @@ Activate with `conda activate nvitk` or `conda activate gpu-nvitk`.
 
 > **Note:** The CPU profile does not install a CUDA-enabled PyTorch or CuPy. Use `./install.sh gpu` if you need GPU acceleration.
 
-For a catalog of installed CLI entry points, run **`pyhelp`** after activation.
+For a hierarchical catalog of CLI entry points, run **`pyhelp`** after activation (interactive tree on a TTY; use `pyhelp --no-interactive` for CI/pipes).
 
 ### GPU / CUDA (CUDA 13)
 
@@ -30,6 +30,9 @@ The GPU environment targets **CUDA 13** (PyTorch wheels from the `cu130` index a
 | [Computing backend](#computing-backend-numpy-and-cupy) | `using()`, env vars, `setup()` |
 | [The `Image` container](#the-image-container) | Voxels, metadata, axes |
 | [Command-line tools](#command-line-tools) | Scripts from `pyproject.toml` / `pyhelp` |
+| [Image module CLIs](#image-module-clis) | `nvitk-morph`, `nvitk-restore`, filters, measure, transform |
+| [nvitk-gui](#nvitk-gui) | Napari workbench for quick tool tests |
+| [Mesh reconstruction](#mesh-reconstruction) | `nvitk.types.Mesh`, `nvitk.meshlab` |
 | [Image I/O](#image-io-read-save-and-display) | `imread`, `imsave`, `imshow` |
 | [Measurements](#measurements-and-metrics) | Volumes, SUV, overlap, `Measurer` |
 | [Segmentation](#segmentation) | Labels, hemispheres, TotalSegmentator |
@@ -81,9 +84,62 @@ Same list as **`pyhelp`** and `src/nvitk/util/list_cli_commands.py` parse from `
 | `nvitk-pesa-fat-dixon` | PESA fat Dixon pipeline |
 
 ```bash
-pyhelp
+pyhelp                    # interactive colored tree; Enter on a command to select it
+pyhelp --no-interactive   # full static tree (colors)
+pyhelp --flat             # legacy flat listing
+# Bash: put the selected command on your current prompt line (recommended)
+source scripts/pyhelp-shell.bash && pyhelp-select
+# Or permanent wrapper:
+#   alias pyhelp='eval "$(pyhelp --shell 2>/dev/tty)"'
+# Capture only: cmd=$(pyhelp --pick 2>/dev/tty)
 nvitk-pesa-fat-ctpet --help
 ```
+
+**Image processing** commands are grouped under *Image Processing* in `pyhelp` (conversion, segmentation, registration, filters, morphology, restoration, measure, transform). **Pipelines** (PESA-fat, qvtpy, …) and **General** (`pyhelp`, `nvitk-gui`) are separate top-level sections.
+
+| Command | Role |
+|---------|------|
+| `nvitk-morph` | Morphology (dilate, centerline, siphon-correct, …) |
+| `nvitk-restore` | Restoration (bilateral) |
+| `nvitk-filter` | Filters (sliding-threshold) |
+| `nvitk-measure` | Metrics (volume, SUV, dice, surface) |
+| `nvitk-transform` | Resample, isotropy, oblique slice |
+| `nvitk-gui` | Napari GUI for prototyping (optional extra) |
+
+### Image module CLIs
+
+Module CLIs accept `-i` / `-o` paths and optional `--submit local|sge` (same SGE pattern as segmentation pipelines). Configure cluster defaults in `.nvitk/sge.json` under `pipelines.image_tools`.
+
+```bash
+nvitk-restore bilateral -i pet.nii.gz -o pet_denoised.nii.gz --backend gpu
+nvitk-morph dilate -i mask.nii.gz -o mask_dil.nii.gz --footprint 2
+nvitk-filter sliding-threshold -i cd.nii.gz -o mask.nii.gz --dim 3d
+nvitk-measure volume -i mask.nii.gz -o vol.txt
+nvitk-transform resample -i pet.nii.gz -r ct.nii.gz -o pet_on_ct.nii.gz
+```
+
+### nvitk-gui
+
+Install the GUI extra, then launch the Napari workbench:
+
+```bash
+pip install -e ".[gui]"
+nvitk-gui
+```
+
+Open images (drag-drop or Ctrl+O), pick tools from the catalog dock, toggle GPU for supported filters, reconstruct meshes from masks, and export a simple pipeline JSON from the *Pipeline* tab.
+
+### Mesh reconstruction
+
+```python
+from nvitk.io import imread
+from nvitk.meshlab import mesh_from_image
+
+img = imread("mask.nii.gz")
+mesh = mesh_from_image(img)  # binary; use multilabel=True for label maps
+```
+
+`nvitk.types.Mesh` stores vertices, faces, and metadata (affine, spacing, label id) for Napari surface layers.
 
 ### Image I/O: read, save, and display
 
