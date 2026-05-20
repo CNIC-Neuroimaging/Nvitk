@@ -101,7 +101,7 @@ def convert_subject(
         shutil.rmtree(tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info(f"black_blood stage0 convert | subject={subject}")
+    log.info(f"bbtpy stage0 convert | subject={subject}")
     dcm2nii(
         str(subj_dicom),
         str(tmp_dir),
@@ -166,7 +166,7 @@ def report_subjects(nifti_root: Path, subjects: Iterable[str]) -> dict[str, Any]
         else:
             incomplete.append(subj)
     print()
-    print("NIfTI completeness report (black_blood vwi_bb)")
+    print("NIfTI completeness report (bbtpy vwi_bb)")
     print(f"  root: {root}")
     print(f"  complete: {len(complete)} / {len(list(subjects))}")
     if incomplete:

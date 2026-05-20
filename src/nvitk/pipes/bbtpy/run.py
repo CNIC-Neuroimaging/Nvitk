@@ -1,5 +1,5 @@
 """
-Black-blood pipeline runner (``nvitk-pesa-brain-bb``).
+Black-blood pipeline runner (``nvitk-bbtpy``).
 
 Stages (``--stages``, comma-separated)
 --------------------------------------
@@ -23,7 +23,7 @@ Data layout
 -----------
 - Native BB: ``{nifti_root}/{subject}/BlackBlood/vwi_bb.nii.gz``
 - eICAB (qvtpy): ``{eicab_results_root}/{subject}/eicab/*_eICAB_{CW|WB}.nii.gz``
-- Results: ``{output_root}/{subject}/pesa_brain/black_blood/``
+- Results: ``{output_root}/{subject}/bbtpy/``
 
 Segmentation: dilated eICAB mask ROI + hypointense threshold (``util/bb_vessel_segmentation.py``).
 """
@@ -35,15 +35,15 @@ from pathlib import Path
 import click
 
 from nvitk.core.logger import Logger, PipelineRunTracker
-from nvitk.pipes.pesa_brain.black_blood import config as cfg
-from nvitk.pipes.pesa_brain.black_blood import (
+from nvitk.pipes.bbtpy import config as cfg
+from nvitk.pipes.bbtpy import (
     stage0_convert,
     stage0_download,
     stage1_registration,
     stage2_bb_segmentation,
 )
-from nvitk.pipes.pesa_brain.black_blood.util import paths
-from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskKind
+from nvitk.pipes.bbtpy.util import paths
+from nvitk.pipes.bbtpy.util.eicab_masks import EicabMaskKind
 
 log = Logger()
 
@@ -121,7 +121,7 @@ def _parse_subjects(
     )
 
 
-@click.command("nvitk-pesa-brain-bb")
+@click.command("nvitk-bbtpy")
 @click.option(
     "--subjects",
     default=None,
@@ -318,7 +318,7 @@ def main(
     vwi_median_size: int,
     vwi_gaussian_sigma: float,
 ) -> None:
-    """PESA-Brain black-blood: VWI_BB download, TOF→BB registration, centerline segmentation."""
+    """Black-blood (bbtpy): VWI_BB download, TOF→BB registration, centerline segmentation."""
     dicom = Path(dicom_root or cfg.DEFAULT_DICOM_ROOT)
     nifti = paths.require_path(nifti_root or cfg.DEFAULT_NIFTI_ROOT, "nifti_root")
     out = paths.require_path(output_root or cfg.DEFAULT_RESULTS_ROOT, "output_root")
@@ -341,7 +341,7 @@ def main(
 
     with PipelineRunTracker(
         log,
-        "pesa_brain/black_blood",
+        "bbtpy",
         subj_list,
         stages_sel,
         stage_labels=_STAGE_LABELS,

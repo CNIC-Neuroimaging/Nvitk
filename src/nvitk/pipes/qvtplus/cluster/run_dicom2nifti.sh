@@ -100,7 +100,6 @@ path_sge_err="/data3/BIOIT_IMAGE/BioImaging/env/errs/${bioimaging_project}"
 if [ ! -d "$path_sge_log" ]; then mkdir -p "$path_sge_log"; fi
 if [ ! -d "$path_sge_err" ]; then mkdir -p "$path_sge_err"; fi
 
-# Use the same container as other pesa_brain scripts, or a general Python container
 # Adjust this path to match your container setup
 path_container="/data3/BIOIT_IMAGE/Containers/pesa-brain_v2026.1.26.sif"
 path_src="/data3/BIOIT_IMAGE/BioImaging/src/"

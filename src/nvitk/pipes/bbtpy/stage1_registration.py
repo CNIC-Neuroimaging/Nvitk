@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nvitk.core.logger import Logger
-from nvitk.pipes.pesa_brain.black_blood.util import paths
+from nvitk.pipes.bbtpy.util import paths
 from nvitk.registration.fsl.flirt import flirt_register_rigid
 
 log = Logger()
@@ -44,7 +44,7 @@ def run_subject(
         log.info(f"[{subject}] stage1 registration: skip existing -> {out_dir}")
         return out_dir
 
-    log.info(f"pesa_brain stage1 FLIRT | subject={subject}")
+    log.info(f"bbtpy stage1 FLIRT | subject={subject}")
     log.info(f"  moving (TOF_resampled): {moving}")
     log.info(f"  fixed (vwi_bb): {fixed}")
     log.info("  segmentation space: native vwi_bb")

@@ -66,6 +66,7 @@ dependencies = [
 
   "nilearn>=0.11.0",
   "nipype>=1.11.0",
+  "gudhi>=3.12.0",
 
   # -----------------------------------------------------------------------------
   # Mesh processing dependencies
@@ -131,7 +132,10 @@ test = [
 cluster = [
   "paramiko>=3.4.0",
 ]
-full = ["nvitk[gpu,xnat,test,cluster,fsl]"]
+# Standalone pipeline CLIs (same distribution; extras document install intent).
+"nvitk-bbtpy" = []
+"nvitk-gpetpy" = []
+full = ["nvitk[gpu,xnat,test,cluster,fsl,nvitk-bbtpy,nvitk-gpetpy]"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Scripts
@@ -171,10 +175,9 @@ nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
 nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
 nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 
-# ────────────────────────────── PESA-Brain pipelines ──────────────────────────
-nvitk-pesa-brain = "nvitk.pipes.pesa_brain.run:main"
-nvitk-pesa-brain-bb = "nvitk.pipes.pesa_brain.black_blood.run:main"
-nvitk-pesa-brain-gpet = "nvitk.pipes.pesa_brain.g_pet.run:main"
+# ────────────────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─
+nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
+nvitk-gpetpy = "nvitk.pipes.gpetpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 

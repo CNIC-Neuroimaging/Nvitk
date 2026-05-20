@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nvitk.pipes.pesa_brain.black_blood import config as cfg
-from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import (
+from nvitk.pipes.bbtpy import config as cfg
+from nvitk.pipes.bbtpy.util.eicab_masks import (
     EicabMaskKind,
     EicabMaskResolution,
     resolve_eicab_mask,
@@ -108,7 +108,7 @@ def require_path(value: Path | None, name: str) -> Path:
     if value is None:
         raise ValueError(
             f"{name} is not set. Pass --{name.replace('_', '-')} on the CLI or set "
-            f"nvitk.pipes.pesa_brain.black_blood.config."
+            f"nvitk.pipes.bbtpy.config."
         )
     p = Path(value)
     if not p.exists():
@@ -128,7 +128,7 @@ def require_vwi_bb_rel_path(vwi_bb_rel: str | None) -> str:
     if not rel:
         raise ValueError(
             "VWI_BB relative path is not set. Pass --vwi-bb-rel-path or set "
-            "nvitk.pipes.pesa_brain.black_blood.config.VWI_BB_REL_PATH."
+            "nvitk.pipes.bbtpy.config.VWI_BB_REL_PATH."
         )
     return rel
 
@@ -205,19 +205,19 @@ def tof_resampled_path(
 # ---------------------------------------------------------------------------
 
 
-def black_blood_root(output_root: Path, subject: str) -> Path:
-    """``{output_root}/{subject}/pesa_brain/black_blood``."""
-    return output_root / subject / cfg.PIPELINE_SUBDIR / cfg.BLACK_BLOOD_SUBDIR
+def bbtpy_root(output_root: Path, subject: str) -> Path:
+    """``{output_root}/{subject}/bbtpy`` (pipeline outputs root)."""
+    return output_root / subject / cfg.PIPELINE_SUBDIR
 
 
 def stage1_dir(output_root: Path, subject: str) -> Path:
     """Stage1 registration directory for *subject*."""
-    return black_blood_root(output_root, subject) / cfg.STAGE1_REG_DIR
+    return bbtpy_root(output_root, subject) / cfg.STAGE1_REG_DIR
 
 
 def stage2_dir(output_root: Path, subject: str) -> Path:
     """Stage2 BB-space segmentation directory for *subject*."""
-    return black_blood_root(output_root, subject) / cfg.STAGE2_SEG_DIR
+    return bbtpy_root(output_root, subject) / cfg.STAGE2_SEG_DIR
 
 
 def registration_meta_path(output_root: Path, subject: str) -> Path:

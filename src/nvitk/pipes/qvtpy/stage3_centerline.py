@@ -166,7 +166,7 @@ def run_subject(
     )
 
     # ---- Global CD vessel mask (sliding threshold + area opening) ------------
-    log.step("CD sliding-threshold vessel mask for venous search")
+    log.step("CD slding-threshold vessel mask for venous search")
     lab_img = imread(warped_labels)
     labels_arr = as_backend_array(lab_img.data)
     shape3 = tuple(int(x) for x in labels_arr.shape[:3])

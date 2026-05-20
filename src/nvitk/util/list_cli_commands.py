@@ -38,8 +38,8 @@ def categorize_command(cmd, module):
     if cmd.startswith('nvitk-pesa-fat') or any(pesa in cmd for pesa in []):
         return "PESA-Fat Analysis"
     
-    # PESA Brain commands
-    if cmd.startswith('nvitk-qvtpy') or cmd.startswith('nvitk-pesa-brain') or any(qvt in cmd for qvt in []):
+    # PESA-Brain commands
+    if cmd.startswith('nvitk-qvtpy') or cmd.startswith('nvitk-bbtpy') or cmd.startswith('nvitk-gpetpy'):
         return "PESA-Brain Analysis"
     
     # Default category

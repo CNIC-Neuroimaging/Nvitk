@@ -15,17 +15,17 @@ from pathlib import Path
 
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread
-from nvitk.pipes.pesa_brain.black_blood.util import paths
-from nvitk.pipes.pesa_brain.black_blood.util.bb_vessel_segmentation import (
+from nvitk.pipes.bbtpy.util import paths
+from nvitk.pipes.bbtpy.util.bb_vessel_segmentation import (
     ThrAlgorithm,
     run_bb_segmentation,
 )
-from nvitk.pipes.pesa_brain.black_blood.util.centerlines_from_eicab import (
+from nvitk.pipes.bbtpy.util.centerlines_from_eicab import (
     EICAB_BB_IN_VWI_BB_NIFTI,
     build_centerlines_from_eicab,
 )
-from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskKind
-from nvitk.pipes.pesa_brain.black_blood.util.vwi_preprocess import VwiPreprocess, preprocess_vwi_bb
+from nvitk.pipes.bbtpy.util.eicab_masks import EicabMaskKind
+from nvitk.pipes.bbtpy.util.vwi_preprocess import VwiPreprocess, preprocess_vwi_bb
 
 log = Logger()
 
@@ -72,7 +72,7 @@ def run_subject(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     log.info(
-        f"pesa_brain stage2 | subject={subject} strategy=eicab_mask_hypointense_threshold "
+        f"bbtpy stage2 | subject={subject} strategy=eicab_mask_hypointense_threshold "
         f"thr={thr_algorithm} eicab_mask={mask_res.used} (requested={mask_res.requested})"
     )
 

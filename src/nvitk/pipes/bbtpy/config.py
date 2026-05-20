@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Host data roots (PESA-Brain layout; no qvtpy import)
+# Host data roots (bbtpy defaults; no qvtpy import)
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PESA_BRAIN_DATA = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain")
@@ -30,8 +30,7 @@ VWI_BB_REL_PATH: str | None = "BlackBlood/vwi_bb.nii.gz"
 STAGE0_DICOM_SLOT: str = "vwi_bb"
 EICAB_SUBDIR: str = "eicab"
 QVTPY_EICAB_SUBDIR: str = EICAB_SUBDIR
-PIPELINE_SUBDIR: str = "pesa_brain"
-BLACK_BLOOD_SUBDIR: str = "black_blood"
+PIPELINE_SUBDIR: str = "bbtpy"
 STAGE1_REG_DIR: str = "stage1_registration"
 STAGE2_SEG_DIR: str = "stage2_bb_segmentation"
 

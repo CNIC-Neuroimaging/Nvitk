@@ -20,7 +20,7 @@ from nvitk.core.logger import Logger
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
 from nvitk.morphology.binary import dilate
 from nvitk.morphology.components import remove_small_components_by_fraction
-from nvitk.pipes.pesa_brain.black_blood.labels import bb_vessel_name
+from nvitk.pipes.bbtpy.labels import bb_vessel_name
 
 setup(globals())
 

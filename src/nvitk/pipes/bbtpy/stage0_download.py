@@ -260,7 +260,7 @@ def run_download(
     root = Path(dicom_root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
 
-    log.info(f"black_blood stage0_download | subjects={len(subjects)}")
+    log.info(f"bbtpy stage0_download | subjects={len(subjects)}")
     log.info(f"  dicom_root : {root}")
     log.info(f"  xnat       : {xnat_config.server} / {xnat_config.project}")
 
@@ -307,7 +307,7 @@ def print_qc_report(
             incomplete.append(subj)
 
     print()
-    print("DICOM completeness report (black_blood VWI_BB)")
+    print("DICOM completeness report (bbtpy VWI_BB)")
     print(f"  root: {root}")
     print(f"  required slots: {required_slots}")
     print(f"  complete: {len(complete)} / {len(subj_list)}")

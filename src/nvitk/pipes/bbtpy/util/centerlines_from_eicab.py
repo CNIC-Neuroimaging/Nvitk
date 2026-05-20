@@ -14,12 +14,12 @@ from nvitk.core.array import as_backend_array
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
-from nvitk.pipes.pesa_brain.black_blood.labels import (
+from nvitk.pipes.bbtpy.labels import (
     BB_ARTERIAL_LABEL_IDS,
     bb_vessel_name,
     relabel_eicab_to_bb,
 )
-from nvitk.pipes.pesa_brain.black_blood.util.eicab_masks import EicabMaskResolution
+from nvitk.pipes.bbtpy.util.eicab_masks import EicabMaskResolution
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 log = Logger()
