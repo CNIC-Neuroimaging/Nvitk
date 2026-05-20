@@ -39,6 +39,9 @@ Outputs
   rest).
 - ``removed_bridges.nii.gz`` — per-label bridge-voxel mask (same label IDs as
   ``correction_ids``).
+- ``vessel_mask_corrected.nii.gz`` — full multilabel mask with ICAs replaced by
+  the Otsu+erode (+ optional donut-cut) lumen mask (same label IDs).
+- ``seg_ica_repaired.nii.gz`` — ICA-only multilabel volume (corrected labels only).
 - ``siphon_correction.json`` — per-label metadata (cycles, arc lengths,
   endpoints, warnings).
 - ``qc_siphon_correction.png`` — 3D matplotlib QC figure (when
@@ -999,7 +1002,9 @@ def correct_siphon_centerlines(
 
     Labels outside *correction_ids* keep the default
     :func:`~nvitk.morphology.centerline.compute_centerlines` on *vessel_mask*.
-    The input segmentation is not modified; only centerline outputs are written.
+    When *out_dir* is set, a merged ``vessel_mask_corrected.nii.gz`` replaces
+    each corrected ICA with its final Otsu lumen mask (eroded, or donut-cut
+    when needed); non-ICA labels are copied unchanged from *vessel_mask*.
 
     Parameters
     ----------
@@ -1011,8 +1016,8 @@ def correct_siphon_centerlines(
     correction_ids
         Label IDs to siphon-correct (default ``(1, 2)`` = RICA/LICA).
     out_dir
-        If set, writes ``corrected_centerlines.nii.gz``, ``removed_bridges.nii.gz``, 
-        ``siphon_correction.json`` and optionally QC figures.
+        If set, writes centerlines, bridges, corrected vessel/ICA masks,
+        ``siphon_correction.json``, and optionally QC figures.
     save_qc
         Save 3D QC and ICA overview figures; always prints the summary table.
     min_points
@@ -1169,6 +1174,9 @@ def correct_siphon_centerlines(
 
         cl_mask = _rasterize_centerlines_mask(shape, centerlines)
         bridges_mask = _rasterize_bridges_mask(shape, bridges_by_label)
+        vessel_mask_corrected = _merge_ica_into_vessel_mask(
+            mask_data, repaired_masks, correction_ids
+        )
 
         out_paths: dict[str, str] = {}
         # I/O: Only if output directory given.
@@ -1178,11 +1186,30 @@ def correct_siphon_centerlines(
             out_path.mkdir(parents=True, exist_ok=True)
             cl_path = out_path / "corrected_centerlines.nii.gz"
             br_path = out_path / "removed_bridges.nii.gz"
-            io.imsave(cl_path, cl_mask, metadata=tof.metadata, axes='XYZ')
-            io.imsave(br_path, bridges_mask, metadata=tof.metadata, axes='XYZ')
+            vm_path = out_path / "vessel_mask_corrected.nii.gz"
+            ica_path = out_path / "seg_ica_repaired.nii.gz"
+            io.imsave(cl_path, cl_mask, metadata=tof.metadata, axes="XYZ")
+            io.imsave(br_path, bridges_mask, metadata=tof.metadata, axes="XYZ")
+            io.imsave(
+                vm_path,
+                vessel_mask_corrected,
+                metadata=tof.metadata,
+                axes="XYZ",
+            )
+            io.imsave(
+                ica_path,
+                seg_ica_repaired,
+                metadata=tof.metadata,
+                axes="XYZ",
+            )
             out_paths["centerlines"] = str(cl_path)
             out_paths["bridges"] = str(br_path)
-            log.ok(f"wrote {cl_path.name} + {br_path.name} (TOF spatial metadata)")
+            out_paths["vessel_mask"] = str(vm_path)
+            out_paths["seg_ica_repaired"] = str(ica_path)
+            log.ok(
+                f"wrote {cl_path.name} + {br_path.name} + "
+                f"{vm_path.name} + {ica_path.name} (TOF spatial metadata)"
+            )
 
             meta_path = out_path / "siphon_correction.json"
             meta_path.write_text(
@@ -1244,6 +1271,8 @@ def correct_siphon_centerlines(
             "details": details,
             "corrected_centerlines_mask": as_backend_array(cl_mask),
             "removed_bridges_mask": as_backend_array(bridges_mask),
+            "vessel_mask_corrected": as_backend_array(vessel_mask_corrected),
+            "seg_ica_repaired": as_backend_array(seg_ica_repaired),
             "output_paths": out_paths,
         }
 
@@ -1310,6 +1339,29 @@ def _to_image(obj: Any, *, name: str) -> Image:
             )
         return loaded
     return Image(data=obj, metadata={})
+
+
+def _merge_ica_into_vessel_mask(
+    vessel_mask: Any,
+    repaired_masks: dict[int, Any],
+    correction_ids: Sequence[int],
+) -> np.ndarray:
+    """Replace ICA labels in *vessel_mask* with per-ICA Otsu lumen masks.
+
+    Skips labels with an empty repaired mask (Otsu failure) and leaves the
+    original *vessel_mask* voxels for that ICA unchanged.
+    """
+    merged = to_numpy(vessel_mask).astype(np.int32, copy=True)
+    for lid in correction_ids:
+        rep = repaired_masks.get(int(lid))
+        if rep is None:
+            continue
+        rep_np = to_numpy(rep).astype(bool, copy=False)
+        if not rep_np.any():
+            continue
+        merged[merged == int(lid)] = 0
+        merged[rep_np] = int(lid)
+    return merged
 
 
 def _rasterize_centerlines_mask(
