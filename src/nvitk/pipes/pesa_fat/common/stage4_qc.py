@@ -86,7 +86,13 @@ def run_qc_subject(
             html_txt = Path(p).read_text(encoding="utf-8", errors="ignore")
             ctpet_masks.append(iframe_srcdoc(html_txt, height_px=420, title="ctpet_overview"))
         ctpet_axial_parts.append(
-            build_ctpet_slice_viewer_html(lay, subject, margin_vox=margin_vox)
+            build_ctpet_slice_viewer_html(
+                lay,
+                subject,
+                margin_vox=margin_vox,
+                assets_dir=assets / "slices" / "ctpet",
+                assets_rel=f"{rel_assets}/slices/ctpet",
+            )
         )
 
     if "dixon-v5" in pipelines:
@@ -97,7 +103,13 @@ def run_qc_subject(
             html_txt = Path(p).read_text(encoding="utf-8", errors="ignore")
             dixon_masks.append(iframe_srcdoc(html_txt, height_px=420, title="dixon_overview"))
         dixon_axial_parts.append(
-            build_dixon_slice_viewer_html(lay, subject, margin_vox=margin_vox)
+            build_dixon_slice_viewer_html(
+                lay,
+                subject,
+                margin_vox=margin_vox,
+                assets_dir=assets / "slices" / "dixon",
+                assets_rel=f"{rel_assets}/slices/dixon",
+            )
         )
 
     if "ct-pet-v5" in pipelines:

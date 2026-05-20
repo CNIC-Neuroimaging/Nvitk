@@ -37,6 +37,7 @@ dist/
 *.egg-info/
 .eggs/
 *.mat
+notebooks/exploration/pesabrain-anatomy/checkpoints/*
 
 # Virtual environments
 # .env

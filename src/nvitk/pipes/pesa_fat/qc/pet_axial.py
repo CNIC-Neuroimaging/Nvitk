@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import base64
+import json
 from pathlib import Path
 
 import matplotlib
@@ -15,13 +16,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.io import imread
 from nvitk.measure.suv import suv_image
-from nvitk.pipes.pesa_fat.common.paths import BatchLayout, resolve_nii
+from nvitk.pipes.pesa_fat.common.paths import BatchLayout, resolve_nii, resolve_nii_optional
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
+from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
+    BODY_LABELS,
+    FAT_BATCH_LABELS,
+    FAT_LABELS,
+    MO_LABELS,
+    MUSCLES_LABELS,
+    ORGANS_LABELS,
+    OUTPUT_LABEL_TO_TS,
+)
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
+from nvitk.pipes.pesa_fat.dixon_v5.labels import HEAD_LABELS, LEGS_LABELS, THORAX_LABELS
 from nvitk.segmentation.labels import get_label
+from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.transform.resampling import resample_mask_to_pet
 from nvitk.types import Image
 
@@ -69,31 +81,176 @@ def _safe_stem(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
 
 
-def _render_axial_png(
-    vol_2d: np.ndarray,
-    mask_2d: np.ndarray,
+_CT_MASK_TO_LABELS: dict[str, dict[str, int]] = {
+    "MO.nii": MO_LABELS,
+    "FAT.nii": FAT_LABELS,
+    "FAT_BATCH.nii": FAT_BATCH_LABELS,
+    "BODY.nii": BODY_LABELS,
+    "ORGANS.nii": ORGANS_LABELS,
+    "MUSCLES.nii": MUSCLES_LABELS,
+}
+
+_DIXON_MASK_TO_LABELS: dict[str, dict[str, int]] = {
+    "HEAD.nii": HEAD_LABELS,
+    "THORAX.nii": THORAX_LABELS,
+    "LEGS.nii": LEGS_LABELS,
+}
+
+_DIXON_OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
+    "H_PVM_L": [("total_mr", "autochthon_left")],
+    "H_PVM_R": [("total_mr", "autochthon_right")],
+    "LIVER": [("total_mr", "liver")],
+    "PANCREAS": [("total_mr", "pancreas")],
+    "KIDNEY_L": [("total_mr", "kidney_left")],
+    "KIDNEY_R": [("total_mr", "kidney_right")],
+    "T_PVM_L": [("total_mr", "autochthon_left")],
+    "T_PVM_R": [("total_mr", "autochthon_right")],
+    "BN_L3": [("vertebrae_mr", "vertebrae_L3")],
+    "BN_L4": [("vertebrae_mr", "vertebrae_L4")],
+    "L_QM_L": [("thigh_shoulder_muscles_mr", "quadriceps_femoris_left")],
+    "L_QM_R": [("thigh_shoulder_muscles_mr", "quadriceps_femoris_right")],
+}
+
+
+def _pp_label_names(mask_file: str, label_ids: tuple[int, ...], *, pipeline: str) -> list[str]:
+    labels_dict = (
+        _CT_MASK_TO_LABELS if pipeline == "ctpet" else _DIXON_MASK_TO_LABELS
+    ).get(mask_file, {})
+    inv = {v: k for k, v in labels_dict.items()}
+    names: list[str] = []
+    for lid in label_ids:
+        name = inv.get(lid)
+        if not name:
+            continue
+        if name in ("DELTOIDES_L", "DELTOIDES_R"):
+            if "DELTOIDES" not in names:
+                names.append("DELTOIDES")
+        else:
+            names.append(name)
+    return names
+
+
+def _load_raw_ts_mask_ctpet(
+    lay: BatchLayout,
+    subject: str,
+    output_label_names: list[str],
     *,
-    title: str,
-) -> bytes:
-    """*vol_2d* shape (nx, ny) axial slice; *mask_2d* same shape binary."""
-    fig, ax = plt.subplots(figsize=(4, 4))
-    v = np.asarray(vol_2d, dtype=np.float64)
-    m = mask_2d > 0
-    if np.any(np.isfinite(v)) and v.size:
-        lo, hi = np.nanpercentile(v[m] if np.any(m) else v, (5, 95))
-        if hi <= lo:
-            lo, hi = float(np.nanmin(v)), float(np.nanmax(v))
-        im = ax.imshow(v.T, cmap="gray", origin="lower", vmin=lo, vmax=hi, interpolation="none")
-    else:
-        ax.imshow(np.zeros_like(v).T, cmap="gray", origin="lower", interpolation="none")
-    if np.any(m):
-        ax.contour(m.T.astype(float), levels=[0.5], colors=["red"], linewidths=1.0, origin="lower")
-    ax.set_title(title, fontsize=8)
-    ax.axis("off")
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", pad_inches=0.05)
-    plt.close(fig)
-    return buf.getvalue()
+    target: Image,
+) -> np.ndarray | None:
+    stage1_dir = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
+    combined: np.ndarray | None = None
+    ref_img: Image | None = None
+    for name in output_label_names:
+        ts_entries = list(OUTPUT_LABEL_TO_TS.get(name, []))
+        if name == "BODY" and not ts_entries:
+            ts_entries = (
+                list(OUTPUT_LABEL_TO_TS.get("BODY_TRUNC", []))
+                + list(OUTPUT_LABEL_TO_TS.get("BODY_EXT", []))
+            )
+        for task, ts_label in ts_entries:
+            seg_path = resolve_nii_optional(stage1_dir, task)
+            if seg_path is None:
+                continue
+            try:
+                cid = get_class_id(ts_label, task)
+                seg = imread(str(seg_path), axes="XYZ")
+            except Exception:
+                continue
+            if ref_img is None:
+                ref_img = seg
+            bin_np = (to_numpy(seg.data) == int(cid))
+            if combined is None:
+                combined = bin_np.copy()
+            else:
+                combined |= bin_np
+    if combined is None or ref_img is None:
+        return None
+    target_shape = tuple(int(v) for v in to_numpy(target.data).shape)
+    if combined.shape != target_shape:
+        try:
+            raw_img = ref_img.with_data(as_backend_array(combined.astype(np.uint8)))
+            combined = to_numpy(resample_mask_to_pet(raw_img, target).data) > 0
+        except Exception:
+            return None
+    return combined
+
+
+def _load_raw_ts_mask_dixon(
+    lay: BatchLayout,
+    subject: str,
+    region: str,
+    output_label_names: list[str],
+    *,
+    target: Image,
+) -> np.ndarray | None:
+    stage1_dir = lay.results_dir / dx_cfg.STAGE1_DIR / subject / f"{dx_cfg.INPUT_PREFIX}_{region}"
+    combined: np.ndarray | None = None
+    ref_img: Image | None = None
+    for name in output_label_names:
+        for task, ts_label in _DIXON_OUTPUT_LABEL_TO_TS.get(name, []):
+            seg_path = resolve_nii_optional(stage1_dir, task)
+            if seg_path is None:
+                continue
+            try:
+                cid = get_class_id(ts_label, task)
+                seg = imread(str(seg_path), axes="XYZ")
+            except Exception:
+                continue
+            if ref_img is None:
+                ref_img = seg
+            bin_np = (to_numpy(seg.data) == int(cid))
+            if combined is None:
+                combined = bin_np.copy()
+            else:
+                combined |= bin_np
+    if combined is None or ref_img is None:
+        return None
+    target_shape = tuple(int(v) for v in to_numpy(target.data).shape)
+    if combined.shape != target_shape:
+        try:
+            raw_img = ref_img.with_data(as_backend_array(combined.astype(np.uint8)))
+            combined = to_numpy(resample_mask_to_pet(raw_img, target).data) > 0
+        except Exception:
+            return None
+    return combined
+
+
+def _full_volume_display_range(vol: np.ndarray) -> tuple[float, float]:
+    v = np.asarray(vol, dtype=np.float64)
+    finite = v[np.isfinite(v)]
+    if finite.size == 0:
+        return 0.0, 1.0
+    lo, hi = np.nanpercentile(finite, (2, 98))
+    if hi <= lo:
+        lo, hi = float(np.nanmin(finite)), float(np.nanmax(finite))
+    return float(lo), float(hi)
+
+
+def _figsize_for_slice(vol_2d: np.ndarray, *, rotate90: bool = False, width_in: float = 5.2) -> tuple[float, float]:
+    """Keep the displayed horizontal (X) extent fixed across axial/coronal views."""
+    v = np.asarray(vol_2d)
+    if rotate90:
+        v = np.rot90(v, k=1)
+    disp_rows, disp_cols = v.T.shape
+    if disp_cols <= 0:
+        return (width_in, width_in)
+    return (width_in, max(width_in * (disp_rows / disp_cols), 1.0))
+
+
+def _figsize_sagittal_match_y(
+    vol_2d: np.ndarray,
+    *,
+    y_height_in: float,
+    rotate90: bool = True,
+) -> tuple[float, float]:
+    """Sagittal panel height matches axial Y extent; width follows slice aspect."""
+    v = np.asarray(vol_2d)
+    if rotate90:
+        v = np.rot90(v, k=1)
+    disp_rows, disp_cols = v.T.shape
+    if disp_rows <= 0:
+        return (y_height_in, y_height_in)
+    return (max(y_height_in * (disp_cols / disp_rows), 1.0), y_height_in)
 
 
 def _png_data_uri(png_bytes: bytes) -> str:
@@ -101,29 +258,68 @@ def _png_data_uri(png_bytes: bytes) -> str:
     return f"data:image/png;base64,{b64}"
 
 
+class _SliceImageStore:
+    """Write slice PNGs to disk (preferred) or fall back to inline data URIs."""
+
+    def __init__(
+        self,
+        *,
+        assets_dir: Path | None,
+        assets_rel: str | None,
+        prefix: str,
+    ) -> None:
+        self.assets_dir = assets_dir
+        self.assets_rel = assets_rel.rstrip("/") if assets_rel else None
+        self.prefix = _safe_stem(prefix)
+
+    def add(self, png_bytes: bytes, *, view: str, roi: str, tag: str) -> str:
+        if self.assets_dir is None or self.assets_rel is None:
+            return _png_data_uri(png_bytes)
+        self.assets_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{self.prefix}_{_safe_stem(roi)}_{view}_{tag}.png"
+        (self.assets_dir / fname).write_bytes(png_bytes)
+        return f"{self.assets_rel}/{fname}"
+
+
 def _render_slice_png(
     vol_2d: np.ndarray,
-    mask_2d: np.ndarray,
+    mask_pp_2d: np.ndarray,
     *,
+    mask_raw_2d: np.ndarray | None = None,
     title: str,
+    vmin: float,
+    vmax: float,
     rotate90: bool = False,
+    figsize: tuple[float, float] | None = None,
 ) -> bytes:
-    # same as axial helper but shared for sagittal
-    fig, ax = plt.subplots(figsize=(5.2, 5.2))
+    if figsize is None:
+        figsize = _figsize_for_slice(vol_2d, rotate90=rotate90)
+    fig, ax = plt.subplots(figsize=figsize)
     v = np.asarray(vol_2d, dtype=np.float64)
-    m = mask_2d > 0
+    m_pp = np.asarray(mask_pp_2d) > 0
+    m_raw = np.asarray(mask_raw_2d) > 0 if mask_raw_2d is not None else None
     if rotate90:
         v = np.rot90(v, k=1)
-        m = np.rot90(m, k=1)
-    if np.any(np.isfinite(v)) and v.size:
-        lo, hi = np.nanpercentile(v[m] if np.any(m) else v, (2, 98))
-        if hi <= lo:
-            lo, hi = float(np.nanmin(v)), float(np.nanmax(v))
-        ax.imshow(v.T, cmap="gray", origin="lower", vmin=lo, vmax=hi, interpolation="none")
-    else:
-        ax.imshow(np.zeros_like(v).T, cmap="gray", origin="lower", interpolation="none")
-    if np.any(m):
-        ax.contour(m.T.astype(float), levels=[0.5], colors=["red"], linewidths=1.0, origin="lower")
+        m_pp = np.rot90(m_pp, k=1)
+        if m_raw is not None:
+            m_raw = np.rot90(m_raw, k=1)
+    ax.imshow(v.T, cmap="gray", origin="lower", vmin=vmin, vmax=vmax, interpolation="none")
+    if m_raw is not None and np.any(m_raw):
+        ax.contour(
+            m_raw.T.astype(float),
+            levels=[0.5],
+            colors=["blue"],
+            linewidths=1.0,
+            origin="lower",
+        )
+    if np.any(m_pp):
+        ax.contour(
+            m_pp.T.astype(float),
+            levels=[0.5],
+            colors=["red"],
+            linewidths=1.0,
+            origin="lower",
+        )
     ax.set_title(title, fontsize=8)
     ax.axis("off")
     buf = io.BytesIO()
@@ -144,16 +340,12 @@ def _viewer_html(
     roi_to_sag_mid: dict[str, int],
     default_roi: str | None = None,
 ) -> str:
-    # Build JS object literal safely via repr (strings are data URIs).
     def js_map(d: dict[str, list[str]]) -> str:
-        items = ",\n".join(f"{k!r}: {v!r}" for k, v in d.items())
-        return "{\n" + items + "\n}"
+        return json.dumps(d)
 
     roi_opts = "".join(f"<option value='{_safe_stem(r)}'>{r}</option>" for r in roi_names)
-    # Use stem as key to avoid quotes in value; keep separate label map.
-    key_map = { _safe_stem(r): r for r in roi_names }
-    key_items = ",\n".join(f"{k!r}: {v!r}" for k, v in key_map.items())
-    key_js = "{\n" + key_items + "\n}"
+    key_map = {_safe_stem(r): r for r in roi_names}
+    key_js = json.dumps(key_map)
 
     return f"""
 <div class="slice-viewer" id="{dom_id}">
@@ -245,6 +437,8 @@ def build_ctpet_slice_viewer_html(
     subject: str,
     *,
     margin_vox: int = 3,
+    assets_dir: Path | None = None,
+    assets_rel: str | None = None,
 ) -> str:
     """Compact axial+sagittal viewer on CT (with mask contours)."""
     nifti_dir = lay.subject_nifti_dir(subject)
@@ -254,6 +448,13 @@ def build_ctpet_slice_viewer_html(
 
     ct = imread(str(resolve_nii(nifti_dir, ct_cfg.INPUT_STEM)), axes="XYZ")
     ct_arr = to_numpy(ct.data)
+    vmin, vmax = _full_volume_display_range(ct_arr)
+    sagittal_y_height = _figsize_for_slice(ct_arr[:, :, min(ct_arr.shape[2] // 2, ct_arr.shape[2] - 1)])[1]
+    img_store = _SliceImageStore(
+        assets_dir=assets_dir,
+        assets_rel=assets_rel,
+        prefix=f"ct_{_safe_stem(subject)}",
+    )
 
     cache: dict[str, Image] = {}
     roi_names: list[str] = []
@@ -265,6 +466,7 @@ def build_ctpet_slice_viewer_html(
     roi_sg_mid: dict[str, int] = {}
 
     for disp, mask_file, label_ids in _ctpet_roi_specs():
+        raw_m: np.ndarray | None = None
         try:
             if mask_file not in cache:
                 cache[mask_file] = _load_mask(stage2, mask_file)
@@ -276,9 +478,13 @@ def build_ctpet_slice_viewer_html(
             m = to_numpy(bin_mask.data) > 0
         except Exception:
             continue
+        try:
+            pp_names = _pp_label_names(mask_file, label_ids, pipeline="ctpet")
+            raw_m = _load_raw_ts_mask_ctpet(lay, subject, pp_names, target=ct)
+        except Exception:
+            raw_m = None
         if not np.any(m):
             continue
-        roi_names.append(disp)
 
         coords = np.argwhere(m)
         z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
@@ -294,7 +500,22 @@ def build_ctpet_slice_viewer_html(
         for z in z_indices:
             sl = ct_arr[:, :, z]
             sl_m = m[:, :, z]
-            ax_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} axial z={z}")))
+            sl_raw = raw_m[:, :, z] if raw_m is not None else None
+            ax_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} axial z={z}",
+                        vmin=vmin,
+                        vmax=vmax,
+                    ),
+                    view="ax",
+                    roi=disp,
+                    tag=f"z{z:04d}",
+                )
+            )
         roi_to_ax[disp] = ax_uris
         roi_ax_mid[disp] = len(ax_uris) // 2
 
@@ -306,7 +527,22 @@ def build_ctpet_slice_viewer_html(
         for y in y_indices:
             sl = ct_arr[:, y, z0 : z1 + 1]
             sl_m = m[:, y, z0 : z1 + 1]
-            co_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} coronal y={y}")))
+            sl_raw = raw_m[:, y, z0 : z1 + 1] if raw_m is not None else None
+            co_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} coronal y={y}",
+                        vmin=vmin,
+                        vmax=vmax,
+                    ),
+                    view="co",
+                    roi=disp,
+                    tag=f"y{y:04d}",
+                )
+            )
         roi_to_co[disp] = co_uris
         roi_co_mid[disp] = len(co_uris) // 2
 
@@ -316,16 +552,34 @@ def build_ctpet_slice_viewer_html(
         for x in x_indices:
             sl = ct_arr[x, :, z0 : z1 + 1]
             sl_m = m[x, :, z0 : z1 + 1]
-            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}", rotate90=True)))
+            sl_raw = raw_m[x, :, z0 : z1 + 1] if raw_m is not None else None
+            sg_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} sagittal x={x}",
+                        vmin=vmin,
+                        vmax=vmax,
+                        rotate90=True,
+                        figsize=_figsize_sagittal_match_y(sl, y_height_in=sagittal_y_height),
+                    ),
+                    view="sg",
+                    roi=disp,
+                    tag=f"x{x:04d}",
+                )
+            )
         roi_to_sg[disp] = sg_uris
         roi_sg_mid[disp] = len(sg_uris) // 2
+        roi_names.append(disp)
 
     if not roi_names:
         return f"<p><em>{_safe_stem(subject)}: no CT-PET slice ROIs.</em></p>"
 
     return _viewer_html(
         dom_id=f"ct_sv_{_safe_stem(subject)}",
-        title="CT-PET slices (CT underlay)",
+        title="CT-PET slices (CT underlay; red=post-processed, blue=raw TotalSegmentator)",
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
         roi_to_cor=roi_to_co,
@@ -361,6 +615,8 @@ def build_dixon_slice_viewer_html(
     subject: str,
     *,
     margin_vox: int = 3,
+    assets_dir: Path | None = None,
+    assets_rel: str | None = None,
 ) -> str:
     """Compact axial+sagittal viewer on Dixon WATER (fallback FF)."""
     nifti_dir = lay.subject_nifti_dir(subject)
@@ -368,8 +624,16 @@ def build_dixon_slice_viewer_html(
     if not stage2.exists():
         return f"<p><em>{_safe_stem(subject)}: no Dixon stage-2 directory.</em></p>"
 
+    img_store = _SliceImageStore(
+        assets_dir=assets_dir,
+        assets_rel=assets_rel,
+        prefix=f"dx_{_safe_stem(subject)}",
+    )
+
     cache_mask: dict[str, Image] = {}
-    cache_water: dict[str, np.ndarray] = {}
+    cache_water: dict[str, Image] = {}
+    cache_vrange: dict[str, tuple[float, float]] = {}
+    cache_sag_y_height: dict[str, float] = {}
     roi_names: list[str] = []
     roi_to_ax: dict[str, list[str]] = {}
     roi_to_co: dict[str, list[str]] = {}
@@ -379,23 +643,36 @@ def build_dixon_slice_viewer_html(
     roi_sg_mid: dict[str, int] = {}
 
     for disp, region, mask_file, label_ids in _dixon_roi_specs():
+        raw_m: np.ndarray | None = None
         try:
             if mask_file not in cache_mask:
                 cache_mask[mask_file] = _load_mask(stage2, mask_file)
             if region not in cache_water:
                 stem = f"{dx_cfg.INPUT_PREFIX}_{region}_WATER"
-                cache_water[region] = to_numpy(imread(str(resolve_nii(nifti_dir, stem)), axes="XYZ").data)
+                cache_water[region] = imread(str(resolve_nii(nifti_dir, stem)), axes="XYZ")
+                vol0 = to_numpy(cache_water[region].data)
+                cache_vrange[region] = _full_volume_display_range(vol0)
+                zmid = min(vol0.shape[2] // 2, vol0.shape[2] - 1)
+                cache_sag_y_height[region] = _figsize_for_slice(vol0[:, :, zmid])[1]
             label_img = cache_mask[mask_file]
-            vol = cache_water[region]
+            water_img = cache_water[region]
+            vol = to_numpy(water_img.data)
+            vmin, vmax = cache_vrange[region]
             bin_mask = _build_binary_mask(label_img, label_ids)
             m = to_numpy(bin_mask.data) > 0
             if vol.shape != m.shape:
                 continue
         except Exception:
             continue
+        try:
+            pp_names = _pp_label_names(mask_file, label_ids, pipeline="dixon")
+            raw_m = _load_raw_ts_mask_dixon(
+                lay, subject, region, pp_names, target=water_img
+            )
+        except Exception:
+            raw_m = None
         if not np.any(m):
             continue
-        roi_names.append(disp)
 
         coords = np.argwhere(m)
         z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
@@ -411,7 +688,22 @@ def build_dixon_slice_viewer_html(
         for z in z_indices:
             sl = vol[:, :, z]
             sl_m = m[:, :, z]
-            ax_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} axial z={z}")))
+            sl_raw = raw_m[:, :, z] if raw_m is not None else None
+            ax_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} axial z={z}",
+                        vmin=vmin,
+                        vmax=vmax,
+                    ),
+                    view="ax",
+                    roi=disp,
+                    tag=f"z{z:04d}",
+                )
+            )
         roi_to_ax[disp] = ax_uris
         roi_ax_mid[disp] = len(ax_uris) // 2
 
@@ -423,7 +715,22 @@ def build_dixon_slice_viewer_html(
         for y in y_indices:
             sl = vol[:, y, z0 : z1 + 1]
             sl_m = m[:, y, z0 : z1 + 1]
-            co_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} coronal y={y}")))
+            sl_raw = raw_m[:, y, z0 : z1 + 1] if raw_m is not None else None
+            co_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} coronal y={y}",
+                        vmin=vmin,
+                        vmax=vmax,
+                    ),
+                    view="co",
+                    roi=disp,
+                    tag=f"y{y:04d}",
+                )
+            )
         roi_to_co[disp] = co_uris
         roi_co_mid[disp] = len(co_uris) // 2
 
@@ -432,16 +739,36 @@ def build_dixon_slice_viewer_html(
         for x in x_indices:
             sl = vol[x, :, z0 : z1 + 1]
             sl_m = m[x, :, z0 : z1 + 1]
-            sg_uris.append(_png_data_uri(_render_slice_png(sl, sl_m, title=f"{disp} sagittal x={x}", rotate90=True)))
+            sl_raw = raw_m[x, :, z0 : z1 + 1] if raw_m is not None else None
+            sg_uris.append(
+                img_store.add(
+                    _render_slice_png(
+                        sl,
+                        sl_m,
+                        mask_raw_2d=sl_raw,
+                        title=f"{disp} sagittal x={x}",
+                        vmin=vmin,
+                        vmax=vmax,
+                        rotate90=True,
+                        figsize=_figsize_sagittal_match_y(
+                            sl, y_height_in=cache_sag_y_height[region]
+                        ),
+                    ),
+                    view="sg",
+                    roi=disp,
+                    tag=f"x{x:04d}",
+                )
+            )
         roi_to_sg[disp] = sg_uris
         roi_sg_mid[disp] = len(sg_uris) // 2
+        roi_names.append(disp)
 
     if not roi_names:
         return f"<p><em>{_safe_stem(subject)}: no Dixon slice ROIs.</em></p>"
 
     return _viewer_html(
         dom_id=f"dx_sv_{_safe_stem(subject)}",
-        title="Dixon slices (WATER underlay)",
+        title="Dixon slices (WATER underlay; red=post-processed, blue=raw TotalSegmentator)",
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
         roi_to_cor=roi_to_co,

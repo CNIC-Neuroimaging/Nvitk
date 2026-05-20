@@ -13,6 +13,14 @@ from __future__ import annotations
 from ._common import make_ball_footprint
 from .binary import close, dilate, erode, fill_holes, open
 from .centerline import compute_centerlines, skeletonize_binary
+from .centerline_siphon import (
+    GenusReport,
+    SiphonCorrectionResult,
+    compute_corrected_centerline,
+    compute_mask_genus,
+    correct_siphon_centerlines,
+    prune_skeleton_shortest_arc,
+)
 from .components import (
     keep_component_closest_to_center,
     keep_components_touching_seeds,
@@ -22,8 +30,13 @@ from .components import (
 )
 
 __all__ = [
+    "GenusReport",
+    "SiphonCorrectionResult",
     "close",
     "compute_centerlines",
+    "compute_corrected_centerline",
+    "compute_mask_genus",
+    "correct_siphon_centerlines",
     "dilate",
     "erode",
     "fill_holes",
@@ -32,6 +45,7 @@ __all__ = [
     "label_connected",
     "make_ball_footprint",
     "open",
+    "prune_skeleton_shortest_arc",
     "remove_small_components",
     "remove_small_components_by_fraction",
     "skeletonize_binary",

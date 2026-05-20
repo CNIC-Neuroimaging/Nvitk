@@ -52,6 +52,34 @@ HotspotMode = Literal["top_percent", "top_k", "threshold"]
 log = logging.getLogger(__name__)
 
 
+def _add_orientation_axes(pl: Any) -> None:
+    """Viewport-corner RGB orientation widget (X=red, Y=green, Z=blue)."""
+    try:
+        pl.add_axes(
+            interactive=False,
+            line_width=2,
+            x_color="red",
+            y_color="green",
+            z_color="blue",
+            xlabel="X",
+            ylabel="Y",
+            zlabel="Z",
+        )
+    except TypeError:
+        try:
+            pl.add_axes(
+                interactive=False,
+                line_width=2,
+                x_color="red",
+                y_color="green",
+                z_color="blue",
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _require_pyvista() -> Any:
     try:
         import pyvista as pv  
@@ -144,6 +172,7 @@ def show_hotspots(
     allow_empty_hotspot: bool = False,
     scalar_bar_title: str = "SUV",
     show_min_max_text: bool = True,
+    show_orientation_axes: bool = True,
 ) -> Any:
     """
     Render SUV hotspots inside a segmentation mask.
@@ -251,6 +280,8 @@ def show_hotspots(
         pl.add_text(f"{head}\n(no hotspot voxels)".strip(), position="upper_left", font_size=12)
         pl.add_mesh(surf, color="white", opacity=float(mask_opacity), show_scalar_bar=False)
         pl.view_isometric()
+        if show_orientation_axes:
+            _add_orientation_axes(pl)
         if show:
             pl.show()
         return pl
@@ -314,6 +345,8 @@ def show_hotspots(
         scalar_bar_args={"title": str(scalar_bar_title)},
     )
     pl.view_isometric()
+    if show_orientation_axes:
+        _add_orientation_axes(pl)
 
     if show:
         pl.show()
