@@ -254,7 +254,7 @@ def run_subject(
     *,
     dicom_root: Path,
     nifti_root: Path,
-    compute_phase_derived: bool = False,
+    compute_phase_derived: bool = True,
     skip_existing: bool = False,
     phase_background_correction: bool = True,
     phase_bg_poly_order: int = 2,

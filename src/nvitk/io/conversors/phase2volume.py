@@ -18,7 +18,7 @@ except Exception:
     click = None
 
 from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, get_current_backend, using
 from nvitk.core.exceptions import BackendUnavailableError
 from nvitk.core.logger import Logger
 from .._common import default_nifti_axes
@@ -252,7 +252,7 @@ def resolve_venc_mm_s(
     ctx = f" ({log_context})" if log_context else ""
     log.warning(
         "VENC not found in JSON, NIfTI metadata, or DICOM under search paths%s; "
-        "using default %.1f mm/s (MATLAB QVTplus-style fallback).",
+        "using default %.1f mm/s (fallback VENC).",
         ctx,
         float(default_mm_s),
     )
@@ -342,7 +342,7 @@ def compute_phase_derivatives(
         cd = _calc_angio(angio_tr, v_mag_capped, venc)
         v_mag_mean = np.mean(v_mag, axis=-1)
         cd_mean = _calc_angio(angio_mean, np.clip(v_mag_mean, 0, venc), venc)
-        v_mean_stack = np.stack([np.mean(v, axis=-1), np.mean(vy, axis=-1), np.mean(vz, axis=-1)], axis=-1)
+        v_mean_stack = np.stack([np.mean(vx, axis=-1), np.mean(vy, axis=-1), np.mean(vz, axis=-1)], axis=-1)
     else:
         v_mag = np.sqrt(vx * vx + vy * vy + vz * vz)
         v_mag_capped = np.clip(v_mag, 0, venc)
@@ -398,45 +398,48 @@ def process_patient(
     bg_poly_order: int = 2,
     bg_static_percentile: float = 25.0,
     dicom_search_dir: Path | None = None,
+    backend: str = None,
 ) -> list[Path]:
-    inputs = discover_phase_inputs(patient_dir)
-    ctx = subject_uid or inputs.patient_dir.name
-    if dry_run:
-        return [
-            inputs.angio_path,
-            inputs.ap_phase_path,
-            inputs.rl_phase_path,
-            inputs.fh_phase_path,
-        ]
+    backend = backend or get_current_backend()
+    with using(backend):
+        inputs = discover_phase_inputs(patient_dir)
+        ctx = subject_uid or inputs.patient_dir.name
+        if dry_run:
+            return [
+                inputs.angio_path,
+                inputs.ap_phase_path,
+                inputs.rl_phase_path,
+                inputs.fh_phase_path,
+            ]
 
-    angio_image = imread(inputs.angio_path)
-    ap_image = imread(inputs.ap_phase_path)
-    rl_image = imread(inputs.rl_phase_path)
-    fh_image = imread(inputs.fh_phase_path)
+        angio_image = imread(inputs.angio_path)
+        ap_image = imread(inputs.ap_phase_path)
+        rl_image = imread(inputs.rl_phase_path)
+        fh_image = imread(inputs.fh_phase_path)
 
-    actual_venc, venc_src = resolve_venc_mm_s(
-        ap_dir=inputs.ap_dir,
-        default_mm_s=venc,
-        ap_phase_metadata=dict(ap_image.metadata or {}),
-        magnitude_metadata=dict(angio_image.metadata or {}),
-        dicom_search_dir=dicom_search_dir,
-        log_context=ctx,
-    )
-    if venc_src != "default":
-        log.info("VENC=%.1f mm/s from %s (subject=%s)", actual_venc, venc_src, ctx)
+        actual_venc, venc_src = resolve_venc_mm_s(
+            ap_dir=inputs.ap_dir,
+            default_mm_s=venc,
+            ap_phase_metadata=dict(ap_image.metadata or {}),
+            magnitude_metadata=dict(angio_image.metadata or {}),
+            dicom_search_dir=dicom_search_dir,
+            log_context=ctx,
+        )
+        if venc_src != "default":
+            log.info("VENC=%.1f mm/s from %s (subject=%s)", actual_venc, venc_src, ctx)
 
-    outputs = compute_phase_derivatives(
-        angio_image.data,
-        ap_image.data,
-        rl_image.data,
-        fh_image.data,
-        venc=actual_venc,
-        background_phase_correction=background_phase_correction,
-        bg_poly_order=bg_poly_order,
-        bg_static_percentile=bg_static_percentile,
-    )
-    written = _write_outputs(inputs.flow_dir, outputs, dict(angio_image.metadata or {}))
-    return written
+        outputs = compute_phase_derivatives(
+            angio_image.data,
+            ap_image.data,
+            rl_image.data,
+            fh_image.data,
+            venc=actual_venc,
+            background_phase_correction=background_phase_correction,
+            bg_poly_order=bg_poly_order,
+            bg_static_percentile=bg_static_percentile,
+        )
+        written = _write_outputs(inputs.flow_dir, outputs, dict(angio_image.metadata or {}))
+        return written
 
 
 def phase2volume(
@@ -450,6 +453,7 @@ def phase2volume(
     bg_poly_order: int = 2,
     bg_static_percentile: float = 25.0,
     dicom_search_dir: Path | None = None,
+    backend: str = 'gpu',
 ) -> list[Path]:
     try:
         source = Path(input_path)
@@ -467,6 +471,7 @@ def phase2volume(
                         bg_poly_order=bg_poly_order,
                         bg_static_percentile=bg_static_percentile,
                         dicom_search_dir=dicom_search_dir,
+                        backend=backend,
                     )
                 )
             return written
@@ -481,6 +486,7 @@ def phase2volume(
             bg_poly_order=bg_poly_order,
             bg_static_percentile=bg_static_percentile,
             dicom_search_dir=dicom_search_dir,
+            backend=backend,
         )
     except Exception as exc:
         log.exception(exc)
@@ -530,6 +536,14 @@ def phase2volume(
     hidden=True,
     help="Deprecated; use --pipeline-id.",
 )
+@_click_option(
+    '--backend',
+    'backend',
+    type=click.Choice(['cpu', 'gpu']),
+    default='gpu',
+    show_default=True,
+    help='Backend to use for processing.',
+)
 def main(
     input_path: Path,
     multifile: bool,
@@ -541,6 +555,7 @@ def main(
     dry_run: bool,
     pipeline_id_opt: str | None,
     pipeline_version_legacy: str | None,
+    backend: str,
 ) -> None:
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
@@ -556,6 +571,7 @@ def main(
         bg_poly_order=bg_poly_order,
         bg_static_percentile=bg_static_percentile,
         dicom_search_dir=dicom_search_dir,
+        backend=backend,
     )
     for output in outputs:
         click.echo(str(output))

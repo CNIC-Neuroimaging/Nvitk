@@ -40,8 +40,9 @@ Outputs
 - ``removed_bridges.nii.gz`` — per-label bridge-voxel mask (same label IDs as
   ``correction_ids``).
 - ``vessel_mask_corrected.nii.gz`` — full multilabel mask with ICAs replaced by
-  the Otsu+erode (+ optional donut-cut) lumen mask (same label IDs).
-- ``seg_ica_repaired.nii.gz`` — ICA-only multilabel volume (corrected labels only).
+  post-clean Otsu lumen masks (same label IDs).
+- ``seg_ica_repaired.nii.gz`` — ICA-only multilabel volume (post-clean labels).
+- ``cleared_bridge_region.nii.gz`` — voxels removed by post-CL mask cleaning.
 - ``siphon_correction.json`` — per-label metadata (cycles, arc lengths,
   endpoints, warnings).
 - ``qc_siphon_correction.png`` — 3D matplotlib QC figure (when
@@ -98,6 +99,14 @@ CL_BARRIER_RADIUS = 5
 EROSION_ITERS = 2
 MAX_REPAIR_ITERS = 3
 CUT_RADII = (1, 2)
+BRIDGE_DILATE_R = 2
+THICKNESS_MAX_EXTRA_ITERS = EROSION_ITERS + 2
+THICKNESS_SHELL_FRACTION = 0.5
+THICKNESS_MICRO_STEPS_MAX = (EROSION_ITERS + 2) * 4
+MIN_SIPHON_CYCLE_LEN = 20
+GEODESIC_CL_MARGIN = 1
+LUMEN_GAP_CLOSE_ITERS = 1
+SMALL_HOLE_AREA = 64
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -122,6 +131,9 @@ class GenusReport:
     beta1: int
     skeleton_cycles: int
     skeleton_voxels: int
+    beta1_raw: int = 0
+    max_cycle_len: int = 0
+    noise_filtered: bool = False
 
     @property
     def suspect(self) -> bool:
@@ -170,26 +182,43 @@ class SiphonCorrectionResult:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def _skeleton_cycle_lengths(mask: np.ndarray) -> list[int]:
+    """Lengths of cycles in the 26-connected skeleton graph."""
+    import networkx as nx
+
+    sk = to_numpy(skeletonize_binary(mask)).astype(bool, copy=False)
+    if int(sk.sum()) < 3:
+        return []
+    G = _skeleton_to_graph(sk)
+    if G.number_of_edges() == 0:
+        return []
+    try:
+        cycles = list(nx.minimum_cycle_basis(G))
+    except Exception:
+        cycles = []
+    if not cycles:
+        try:
+            cycles = list(nx.cycle_basis(G))
+        except Exception:
+            cycles = []
+    return [int(len(c)) for c in cycles]
+
+
 def compute_mask_genus(
     mask: Any,
     *,
     label_name: str = "vessel",
     connectivity: int = 1,
+    min_cycle_len: int = MIN_SIPHON_CYCLE_LEN,
+    filter_small_handles: bool = True,
 ) -> GenusReport:
     """Return :class:`GenusReport` for *mask* (3D bool / int, NumPy or CuPy).
 
+    When ``filter_small_handles`` is True, β₁ is zeroed if the largest skeleton
+    cycle is shorter than ``min_cycle_len`` (noise handle vs cavernous siphon).
+
     The mask is moved to NumPy internally (``skimage`` / ``networkx`` are CPU
     only). The returned report is JSON-serialisable via ``report.to_dict()``.
-
-    Parameters
-    ----------
-    mask
-        3D mask; non-zero voxels are foreground.
-    label_name
-        Free-form name recorded in the report (e.g. ``"LICA"``).
-    connectivity
-        ``ndi``-style voxel connectivity for the CC count
-        (1 = 6-conn, 2 = 18-conn, 3 = 26-conn).
     """
     from skimage.measure import euler_number
 
@@ -205,7 +234,9 @@ def compute_mask_genus(
     for cid in range(1, int(n_cc) + 1):
         chi_sum += float(euler_number(labeled_np == cid, connectivity=connectivity))
     beta0 = int(n_cc)
-    beta1 = max(0, int(beta0 - int(round(chi_sum))))
+    beta1_raw = max(0, int(beta0 - int(round(chi_sum))))
+    cycle_lengths = _skeleton_cycle_lengths(m) if filter_small_handles else []
+    max_cycle = int(max(cycle_lengths)) if cycle_lengths else 0
     sk = to_numpy(skeletonize_binary(m)).astype(bool, copy=False)
     sk_vox = int(sk.sum())
     if sk_vox < 3:
@@ -220,15 +251,27 @@ def compute_mask_genus(
                 + nx.number_connected_components(G)
             ),
         )
+    beta1 = int(beta1_raw)
+    noise_filtered = False
+    if filter_small_handles and beta1 > 0:
+        if max_cycle > 0 and max_cycle < int(min_cycle_len):
+            beta1 = 0
+            cyc = 0
+            noise_filtered = True
+        elif not cycle_lengths and beta1_raw > 0:
+            noise_filtered = False
     return GenusReport(
         label_name=label_name,
         n_voxels=n_vox,
         n_components=beta0,
         euler_chi=float(chi_sum),
         beta0=beta0,
-        beta1=int(beta1),
+        beta1=beta1,
         skeleton_cycles=int(cyc),
         skeleton_voxels=int(sk_vox),
+        beta1_raw=int(beta1_raw),
+        max_cycle_len=int(max_cycle),
+        noise_filtered=bool(noise_filtered),
     )
 
 
@@ -430,14 +473,50 @@ def _smallest_cycle(G: Any) -> list[tuple[int, int, int]] | None:
     return [tuple(int(v) for v in node) for node in cycles[0]]
 
 
+def _bridge_cut_anchor(
+    mask: np.ndarray,
+    bridge_voxels: Sequence[tuple[int, int, int]],
+    *,
+    dilate_r: int = BRIDGE_DILATE_R,
+) -> tuple[int, int, int] | None:
+    """Pick a donut-cut anchor at the thinnest point near removed bridge voxels."""
+    from scipy import ndimage as ndi_cpu
+
+    if not bridge_voxels:
+        return None
+    m = mask.astype(bool, copy=False)
+    seed = np.zeros(m.shape, dtype=bool)
+    for v in bridge_voxels:
+        i, j, k = int(v[0]), int(v[1]), int(v[2])
+        if 0 <= i < m.shape[0] and 0 <= j < m.shape[1] and 0 <= k < m.shape[2]:
+            seed[i, j, k] = True
+    if int(dilate_r) > 0:
+        seed = ndi_cpu.binary_dilation(seed, iterations=int(dilate_r))
+    band = seed & m
+    if not band.any():
+        band = seed
+    if not band.any():
+        return tuple(int(v) for v in bridge_voxels[0])
+    dt = ndi_cpu.distance_transform_edt(m)
+    coords = np.argwhere(band)
+    idx = int(np.argmin(dt[coords[:, 0], coords[:, 1], coords[:, 2]]))
+    return tuple(int(v) for v in coords[idx])
+
+
 def repair_ica_donut_3d(
     mask_bool: Any,
     seed_bool: Any,
     *,
     label_name: str,
     ckpt_dir: Path | None = None,
+    anchor: tuple[int, int, int] | None = None,
+    max_iters: int | None = None,
+    action_prefix: str = "",
 ) -> tuple[Any, RepairLog]:
     """Optional 3D donut cut on an eroded ICA mask.
+
+    When ``anchor`` is set, the cut is centred on that voxel (e.g. bridge region)
+    instead of the max-Y cycle band. ``max_iters`` defaults to ``MAX_REPAIR_ITERS``.
 
     When ``ckpt_dir`` is ``None`` no checkpoint files are written.
     """
@@ -446,6 +525,8 @@ def repair_ica_donut_3d(
     seed = to_numpy(seed_bool).astype(bool, copy=False)
     rlog.n_voxels_before = int(mask.sum())
     rlog.before = compute_mask_genus(mask, label_name=label_name)
+    n_iters = int(max_iters) if max_iters is not None else MAX_REPAIR_ITERS
+    fixed_anchor = anchor is not None
 
     if not rlog.before.suspect:
         rlog.action = "skipped"
@@ -454,38 +535,48 @@ def repair_ica_donut_3d(
         log.step(f"[{label_name}] genus 0 → skipping repair")
         return as_backend_array(mask), rlog
 
-    for it in range(MAX_REPAIR_ITERS):
-        sk = to_numpy(skeletonize_binary(mask)).astype(bool)
-        G = _skeleton_to_graph(sk)
-        cycle = _smallest_cycle(G)
-        if cycle is None:
-            log.step(f"[{label_name}] iter {it}: no skeleton cycle → stop")
-            rlog.notes.append(f"iter {it}: no cycle")
-            break
-
-        cycle_arr = np.array(cycle, dtype=np.int32)
-        log.step(
-            f"[{label_name}] iter {it}: cycle len={len(cycle)} "
-            f"x[{cycle_arr[:, 0].min()},{cycle_arr[:, 0].max()}] "
-            f"y[{cycle_arr[:, 1].min()},{cycle_arr[:, 1].max()}] "
-            f"z[{cycle_arr[:, 2].min()},{cycle_arr[:, 2].max()}]"
-        )
-
-        top_y = int(cycle_arr[:, 1].max())
-        top_band = cycle_arr[cycle_arr[:, 1] == top_y]
+    for it in range(n_iters):
         from scipy import ndimage as ndi_cpu
 
-        dt = ndi_cpu.distance_transform_edt(mask)
-        if top_band.shape[0] > 1:
-            dt_top = dt[top_band[:, 0], top_band[:, 1], top_band[:, 2]]
-            anchor = tuple(int(v) for v in top_band[int(np.argmin(dt_top))])
-            anchor_dt = float(dt_top.min())
+        if fixed_anchor:
+            cut_anchor = tuple(int(v) for v in anchor)  # type: ignore[arg-type]
+            anchor_dt = float(ndi_cpu.distance_transform_edt(mask)[cut_anchor])
+            top_y = int(cut_anchor[1])
+            log.step(
+                f"[{label_name}] iter {it}: fixed anchor={cut_anchor} "
+                f"dt={anchor_dt:.2f}"
+            )
         else:
-            anchor = tuple(int(v) for v in top_band[0])
-            anchor_dt = float(dt[anchor])
-        log.step(
-            f"[{label_name}] iter {it}: anchor={anchor} top_y={top_y} dt={anchor_dt:.2f}"
-        )
+            sk = to_numpy(skeletonize_binary(mask)).astype(bool)
+            G = _skeleton_to_graph(sk)
+            cycle = _smallest_cycle(G)
+            if cycle is None:
+                log.step(f"[{label_name}] iter {it}: no skeleton cycle → stop")
+                rlog.notes.append(f"iter {it}: no cycle")
+                break
+
+            cycle_arr = np.array(cycle, dtype=np.int32)
+            log.step(
+                f"[{label_name}] iter {it}: cycle len={len(cycle)} "
+                f"x[{cycle_arr[:, 0].min()},{cycle_arr[:, 0].max()}] "
+                f"y[{cycle_arr[:, 1].min()},{cycle_arr[:, 1].max()}] "
+                f"z[{cycle_arr[:, 2].min()},{cycle_arr[:, 2].max()}]"
+            )
+
+            top_y = int(cycle_arr[:, 1].max())
+            top_band = cycle_arr[cycle_arr[:, 1] == top_y]
+            dt = ndi_cpu.distance_transform_edt(mask)
+            if top_band.shape[0] > 1:
+                dt_top = dt[top_band[:, 0], top_band[:, 1], top_band[:, 2]]
+                cut_anchor = tuple(int(v) for v in top_band[int(np.argmin(dt_top))])
+                anchor_dt = float(dt_top.min())
+            else:
+                cut_anchor = tuple(int(v) for v in top_band[0])
+                anchor_dt = float(dt[cut_anchor])
+            log.step(
+                f"[{label_name}] iter {it}: anchor={cut_anchor} top_y={top_y} "
+                f"dt={anchor_dt:.2f}"
+            )
 
         beta1_pre = (
             int(rlog.before.beta1)
@@ -497,7 +588,7 @@ def repair_ica_donut_3d(
         best_score: tuple[int, int] | None = None
         chosen_radius = int(CUT_RADII[0])
         for r in CUT_RADII:
-            offs = _ball_offsets(int(r)) + np.array(anchor, dtype=np.int32)
+            offs = _ball_offsets(int(r)) + np.array(cut_anchor, dtype=np.int32)
             valid = (
                 (offs[:, 0] >= 0)
                 & (offs[:, 0] < mask.shape[0])
@@ -543,7 +634,7 @@ def repair_ica_donut_3d(
             rlog.iters.append(
                 {
                     "iter": int(it),
-                    "anchor": list(anchor),
+                    "anchor": list(cut_anchor),
                     "radius": int(chosen_radius),
                     "accepted": False,
                     "rejected_reason": "no β₁ reduction",
@@ -552,26 +643,31 @@ def repair_ica_donut_3d(
             break
 
         mask = mask_try
-        rlog.iters.append(
-            {
-                "iter": int(it),
-                "anchor": list(anchor),
-                "top_y": int(top_y),
-                "cycle_len": int(len(cycle)),
-                "anchor_dt": float(anchor_dt),
-                "radius": int(chosen_radius),
-                "voxels_after": int(mask.sum()),
-                "beta1_after": int(rep_try.beta1),
-                "accepted": bool(rep_try.beta1 == 0),
-            }
-        )
+        iter_rec: dict[str, Any] = {
+            "iter": int(it),
+            "anchor": list(cut_anchor),
+            "top_y": int(top_y),
+            "anchor_dt": float(anchor_dt),
+            "radius": int(chosen_radius),
+            "voxels_after": int(mask.sum()),
+            "beta1_after": int(rep_try.beta1),
+            "accepted": bool(rep_try.beta1 == 0),
+            "fixed_anchor": bool(fixed_anchor),
+        }
+        if not fixed_anchor:
+            iter_rec["cycle_len"] = int(len(cycle))  # type: ignore[possibly-undefined]
+        rlog.iters.append(iter_rec)
         if rep_try.beta1 == 0:
             log.ok(f"[{label_name}] iter {it}: genus cleared with r={chosen_radius}")
             break
 
     rlog.after = compute_mask_genus(mask, label_name=label_name)
     rlog.n_voxels_after = int(mask.sum())
-    rlog.action = "repaired" if not rlog.after.suspect else "partial"
+    base_action = "repaired" if not rlog.after.suspect else "partial"
+    if action_prefix:
+        rlog.action = f"{action_prefix}_{base_action}"
+    else:
+        rlog.action = base_action
     log.step(f"[{label_name}] repair done: action={rlog.action}")
     return as_backend_array(mask), rlog
 
@@ -975,6 +1071,500 @@ def compute_corrected_centerline(
     return as_backend_array(path_arr), as_backend_array(sk_np), info
 
 
+def _bfs_distances_inside_roi(
+    roi: np.ndarray,
+    seeds: np.ndarray,
+) -> np.ndarray:
+    """26-connected geodesic distance from *seeds* (bool) to every ``roi`` voxel."""
+    from collections import deque
+
+    shape = roi.shape
+    dist = np.full(shape, -1, dtype=np.int32)
+    q: deque[tuple[int, int, int]] = deque()
+    seed_coords = np.argwhere(seeds & roi)
+    for i, j, k in seed_coords:
+        ii, jj, kk = int(i), int(j), int(k)
+        dist[ii, jj, kk] = 0
+        q.append((ii, jj, kk))
+    while q:
+        i, j, k = q.popleft()
+        d = int(dist[i, j, k]) + 1
+        for di, dj, dk in _NEI26:
+            ni, nj, nk = i + int(di), j + int(dj), k + int(dk)
+            if (
+                0 <= ni < shape[0]
+                and 0 <= nj < shape[1]
+                and 0 <= nk < shape[2]
+                and roi[ni, nj, nk]
+                and dist[ni, nj, nk] < 0
+            ):
+                dist[ni, nj, nk] = d
+                q.append((ni, nj, nk))
+    return dist
+
+
+def _rasterize_path_seeds(
+    shape: tuple[int, int, int],
+    path: Any,
+) -> np.ndarray:
+    """Bool volume with True at rounded centerline path voxels."""
+    seeds = np.zeros(shape, dtype=bool)
+    p = to_numpy(path)
+    if p.size == 0:
+        return seeds
+    ii = np.rint(p[:, 0]).astype(np.int32)
+    jj = np.rint(p[:, 1]).astype(np.int32)
+    kk = np.rint(p[:, 2]).astype(np.int32)
+    keep = (
+        (ii >= 0) & (ii < shape[0])
+        & (jj >= 0) & (jj < shape[1])
+        & (kk >= 0) & (kk < shape[2])
+    )
+    seeds[ii[keep], jj[keep], kk[keep]] = True
+    return seeds
+
+
+def clean_mask_geodesic_cl(
+    roi: Any,
+    centerline_path: Any,
+    bridge_voxels: Sequence[tuple[int, int, int]],
+    *,
+    label_name: str = "vessel",
+    bridge_dilate_r: int = BRIDGE_DILATE_R,
+) -> tuple[Any, dict]:
+    """Remove mask voxels on the bridge side of a geodesic CL vs bridge partition."""
+    from scipy import ndimage as ndi_cpu
+
+    m = to_numpy(roi).astype(bool, copy=False)
+    if not m.any():
+        return as_backend_array(m), {"cleared_voxels": 0, "skipped": "empty roi"}
+
+    before = compute_mask_genus(m, label_name=label_name)
+    cl_seeds = _rasterize_path_seeds(m.shape, centerline_path)
+    if not cl_seeds.any():
+        return as_backend_array(m), {"cleared_voxels": 0, "skipped": "empty centerline"}
+
+    bridge_seed = np.zeros(m.shape, dtype=bool)
+    for v in bridge_voxels:
+        i, j, k = int(v[0]), int(v[1]), int(v[2])
+        if 0 <= i < m.shape[0] and 0 <= j < m.shape[1] and 0 <= k < m.shape[2]:
+            bridge_seed[i, j, k] = True
+    if int(bridge_dilate_r) > 0 and bridge_seed.any():
+        bridge_seed = ndi_cpu.binary_dilation(
+            bridge_seed, iterations=int(bridge_dilate_r)
+        )
+    bridge_seed &= m
+
+    dist_cl = _bfs_distances_inside_roi(m, cl_seeds)
+    dist_br = _bfs_distances_inside_roi(m, bridge_seed) if bridge_seed.any() else dist_cl
+
+    unreachable_cl = dist_cl < 0
+    margin = int(GEODESIC_CL_MARGIN)
+    remove = (
+        m
+        & (~unreachable_cl)
+        & (dist_br >= 0)
+        & (dist_br + margin < dist_cl)
+    )
+    cleaned = m & ~remove
+    if cleaned.any():
+        cleaned = to_numpy(
+            keep_components_touching_seeds(cleaned, cl_seeds, connectivity=1)
+        ).astype(bool)
+    if MIN_COMPONENT_FRAC > 0 and cleaned.any():
+        cleaned = to_numpy(
+            remove_small_components_by_fraction(
+                cleaned, min_fraction=MIN_COMPONENT_FRAC, connectivity=1
+            )
+        ).astype(bool)
+
+    cleaned = to_numpy(
+        refine_mask_lumen_gaps(
+            cleaned,
+            m,
+            centerline_path,
+            label_name=label_name,
+        )
+    ).astype(bool)
+
+    after = compute_mask_genus(cleaned, label_name=label_name)
+    n_cleared = int(remove.sum())
+    log.step(
+        f"[{label_name}] geodesic clean: cleared {n_cleared} voxels "
+        f"β₁ {before.beta1}→{after.beta1}"
+    )
+    info = {
+        "cleared_voxels": n_cleared,
+        "beta1_before": int(before.beta1),
+        "beta1_after": int(after.beta1),
+        "before": before.to_dict(),
+        "after": after.to_dict(),
+    }
+    return as_backend_array(cleaned), info
+
+
+def _dilate_fractional_shell(
+    mask: np.ndarray,
+    ceiling: np.ndarray,
+    *,
+    shell_fraction: float = THICKNESS_SHELL_FRACTION,
+    cl_seeds: np.ndarray | None = None,
+) -> tuple[np.ndarray, int]:
+    """Add a fraction of the next one-voxel shell inside *ceiling* (sub-step growth)."""
+    from scipy import ndimage as ndi_cpu
+
+    if not mask.any() or not np.any(ceiling & ~mask):
+        return mask, 0
+    d = ndi_cpu.distance_transform_edt(~mask)
+    candidates = np.argwhere((~mask) & ceiling & (d > 0) & (d <= 1.0 + 1e-6))
+    if candidates.shape[0] == 0:
+        return mask, 0
+    if float(shell_fraction) < 1.0 and candidates.shape[0] > 1:
+        if cl_seeds is not None and bool(np.asarray(cl_seeds).any()):
+            cl_d = ndi_cpu.distance_transform_edt(~np.asarray(cl_seeds, dtype=bool))
+            priority = cl_d[
+                candidates[:, 0], candidates[:, 1], candidates[:, 2]
+            ]
+            order = np.argsort(priority)
+        else:
+            order = np.arange(candidates.shape[0])
+        n_add = max(1, int(round(float(shell_fraction) * candidates.shape[0])))
+        pick = candidates[order[:n_add]]
+    else:
+        pick = candidates
+    out = mask.copy()
+    out[pick[:, 0], pick[:, 1], pick[:, 2]] = True
+    return out, int(pick.shape[0])
+
+
+def _count_safe_thickness_micro_steps(
+    mask: np.ndarray,
+    ceiling: np.ndarray,
+    *,
+    label_name: str,
+    cl_seeds: np.ndarray | None = None,
+    max_micro_steps: int | None = None,
+) -> int:
+    """How many fractional shell steps keep β₁ clear (for paired ICA symmetry)."""
+    n_max = (
+        int(max_micro_steps)
+        if max_micro_steps is not None
+        else THICKNESS_MICRO_STEPS_MAX
+    )
+    current = mask.astype(bool, copy=False).copy()
+    safe = 0
+    for _ in range(n_max):
+        if not np.any(ceiling & ~current):
+            break
+        nxt, added = _dilate_fractional_shell(
+            current, ceiling, cl_seeds=cl_seeds
+        )
+        if added == 0 or int(nxt.sum()) <= int(current.sum()):
+            break
+        rep = compute_mask_genus(nxt, label_name=label_name)
+        if rep.suspect:
+            break
+        current = nxt
+        safe += 1
+    return int(safe)
+
+
+def _apply_thickness_micro_steps(
+    mask: np.ndarray,
+    ceiling: np.ndarray,
+    n_steps: int,
+    *,
+    cl_seeds: np.ndarray | None = None,
+) -> np.ndarray:
+    """Apply exactly *n_steps* fractional shell dilations within *ceiling*."""
+    current = mask.astype(bool, copy=False).copy()
+    for _ in range(int(n_steps)):
+        if not np.any(ceiling & ~current):
+            break
+        nxt, added = _dilate_fractional_shell(
+            current, ceiling, cl_seeds=cl_seeds
+        )
+        if added == 0 or int(nxt.sum()) <= int(current.sum()):
+            break
+        current = nxt
+    return current
+
+
+def recover_lumen_thickness(
+    mask: Any,
+    ceiling_mask: Any,
+    *,
+    label_name: str = "vessel",
+    max_extra_iters: int | None = None,
+    cl_seeds: np.ndarray | None = None,
+    n_micro_steps: int | None = None,
+) -> tuple[Any, dict]:
+    """Dilate *mask* toward *ceiling* with fractional shells; stop before β₁ > 0."""
+    current = to_numpy(mask).astype(bool, copy=False)
+    ceiling = to_numpy(ceiling_mask).astype(bool, copy=False)
+    if not current.any():
+        rep = compute_mask_genus(current, label_name=label_name)
+        return as_backend_array(current), {
+            "n_micro_steps": 0,
+            "voxels_before": 0,
+            "voxels_after": 0,
+            "beta1_final": int(rep.beta1),
+            "skipped": "empty mask",
+        }
+
+    vox_before = int(current.sum())
+    if n_micro_steps is not None:
+        best = _apply_thickness_micro_steps(
+            current, ceiling, int(n_micro_steps), cl_seeds=cl_seeds
+        )
+        n_steps = int(n_micro_steps)
+    else:
+        n_steps = _count_safe_thickness_micro_steps(
+            current,
+            ceiling,
+            label_name=label_name,
+            cl_seeds=cl_seeds,
+            max_micro_steps=(
+                int(max_extra_iters) * 2
+                if max_extra_iters is not None
+                else THICKNESS_MICRO_STEPS_MAX
+            ),
+        )
+        best = _apply_thickness_micro_steps(
+            current, ceiling, n_steps, cl_seeds=cl_seeds
+        )
+
+    rep_f = compute_mask_genus(best, label_name=label_name)
+    vox_after = int(best.sum())
+    log.step(
+        f"[{label_name}] thickness recovery: {vox_before}→{vox_after} voxels "
+        f"in {n_steps} micro-step(s) β₁={rep_f.beta1}"
+    )
+    return as_backend_array(best), {
+        "n_micro_steps": int(n_steps),
+        "n_iters": int(n_steps),
+        "voxels_before": vox_before,
+        "voxels_after": vox_after,
+        "beta1_final": int(rep_f.beta1),
+        "shell_fraction": float(THICKNESS_SHELL_FRACTION),
+        "after": rep_f.to_dict(),
+    }
+
+
+def recover_lumen_thickness_symmetric(
+    items: Sequence[dict[str, Any]],
+) -> tuple[dict[int, Any], dict[str, Any]]:
+    """Apply the same number of thickness micro-steps to all ICA masks in *items*.
+
+    Each entry: ``lid``, ``mask``, ``ceiling``, ``label_name``, optional ``cl_seeds``.
+    Uses the minimum safe step count across ICAs so hemispheres stay matched.
+    """
+    per_lid_steps: dict[int, int] = {}
+    per_lid_meta: dict[int, dict] = {}
+    for it in items:
+        lid = int(it["lid"])
+        m = to_numpy(it["mask"]).astype(bool, copy=False)
+        ceil = to_numpy(it["ceiling"]).astype(bool, copy=False)
+        name = str(it.get("label_name", bb_vessel_name(lid)))
+        cl = it.get("cl_seeds")
+        if cl is not None:
+            cl = np.asarray(cl, dtype=bool)
+        if not m.any():
+            per_lid_steps[lid] = 0
+            continue
+        per_lid_steps[lid] = _count_safe_thickness_micro_steps(
+            m, ceil, label_name=name, cl_seeds=cl
+        )
+    common = min(per_lid_steps.values()) if per_lid_steps else 0
+    log.step(
+        f"paired thickness recovery: per-ICA steps={per_lid_steps} "
+        f"→ common={common} (fraction={THICKNESS_SHELL_FRACTION})"
+    )
+    out_masks: dict[int, Any] = {}
+    for it in items:
+        lid = int(it["lid"])
+        m = to_numpy(it["mask"]).astype(bool, copy=False)
+        ceil = to_numpy(it["ceiling"]).astype(bool, copy=False)
+        name = str(it.get("label_name", bb_vessel_name(lid)))
+        cl = it.get("cl_seeds")
+        if cl is not None:
+            cl = np.asarray(cl, dtype=bool)
+        if not m.any():
+            out_masks[lid] = as_backend_array(m)
+            per_lid_meta[lid] = {"n_micro_steps": 0, "skipped": "empty"}
+            continue
+        best = _apply_thickness_micro_steps(m, ceil, common, cl_seeds=cl)
+        rep = compute_mask_genus(best, label_name=name)
+        out_masks[lid] = as_backend_array(best)
+        per_lid_meta[lid] = {
+            "n_micro_steps": int(common),
+            "n_micro_steps_available": int(per_lid_steps.get(lid, 0)),
+            "voxels_before": int(m.sum()),
+            "voxels_after": int(best.sum()),
+            "beta1_final": int(rep.beta1),
+            "after": rep.to_dict(),
+        }
+        log.step(
+            f"[{name}] paired thickness: {m.sum()}→{best.sum()} voxels "
+            f"({common} common micro-steps) β₁={rep.beta1}"
+        )
+    return out_masks, {
+        "common_micro_steps": int(common),
+        "per_ica_steps": {str(k): v for k, v in per_lid_steps.items()},
+        "per_ica": per_lid_meta,
+    }
+
+
+def refine_mask_lumen_gaps(
+    mask: Any,
+    ceiling: Any,
+    centerline_path: Any,
+    *,
+    label_name: str = "vessel",
+    close_iters: int = LUMEN_GAP_CLOSE_ITERS,
+) -> Any:
+    """Reconnect lumen along the corrected CL and fill small internal gaps."""
+    from scipy import ndimage as ndi_cpu
+
+    m = to_numpy(mask).astype(bool, copy=False)
+    ceil = to_numpy(ceiling).astype(bool, copy=False)
+    if not m.any():
+        return as_backend_array(m)
+
+    cl_seeds = _rasterize_path_seeds(m.shape, centerline_path)
+    if not cl_seeds.any():
+        return as_backend_array(m)
+
+    tube = ndi_cpu.binary_dilation(cl_seeds, iterations=2) & ceil
+    refined = m | (tube & ndi_cpu.binary_dilation(m, iterations=1))
+    if int(close_iters) > 0:
+        refined = ndi_cpu.binary_closing(refined, iterations=int(close_iters)) & ceil
+    refined = to_numpy(
+        keep_components_touching_seeds(refined, cl_seeds, connectivity=1)
+    ).astype(bool)
+    try:
+        from skimage.morphology import remove_small_holes
+
+        refined = remove_small_holes(
+            refined, area_threshold=int(SMALL_HOLE_AREA), connectivity=1
+        )
+    except ImportError:
+        pass
+    refined &= ceil
+    if MIN_COMPONENT_FRAC > 0 and refined.any():
+        refined = to_numpy(
+            remove_small_components_by_fraction(
+                refined, min_fraction=MIN_COMPONENT_FRAC, connectivity=1
+            )
+        ).astype(bool)
+    n_added = int(refined.sum()) - int(m.sum())
+    if n_added > 0:
+        log.step(
+            f"[{label_name}] lumen gap refine: +{n_added} voxels along CL "
+            f"(close_iters={close_iters})"
+        )
+    return as_backend_array(refined)
+
+
+def clean_ica_mask_after_centerline(
+    repaired_mask: Any,
+    prep_info: dict,
+    centerline_path: Any,
+    bridge_voxels: Sequence[tuple[int, int, int]],
+    seed_bool: Any,
+    *,
+    label_name: str,
+    clean_mask: bool = True,
+    recover_lumen_thickness_flag: bool = True,
+) -> tuple[Any, dict]:
+    """Post-centerline ICA mask cleaning: bridge cut, geodesic, thickness recovery."""
+    mask = to_numpy(repaired_mask).astype(bool, copy=False)
+    seed = to_numpy(seed_bool).astype(bool, copy=False)
+    otsu_ceiling = prep_info.get("otsu_mask")
+    if otsu_ceiling is not None:
+        ceiling = np.asarray(otsu_ceiling, dtype=bool)
+    else:
+        ceiling = mask.copy()
+
+    genus_before = compute_mask_genus(mask, label_name=label_name)
+    meta: dict[str, Any] = {
+        "topo_clean_attempted": False,
+        "bridge_repair": None,
+        "geodesic": None,
+        "thickness_recovery": None,
+        "genus_before": genus_before.to_dict(),
+        "genus_after": None,
+        "clean_method": "none",
+    }
+    if not mask.any() or not clean_mask:
+        meta["genus_after"] = genus_before.to_dict()
+        return as_backend_array(mask), meta
+
+    repair_info = prep_info.get("repair") or {}
+    prep_action = str(repair_info.get("action", ""))
+    n_bridge = len(bridge_voxels)
+    needs_topo = prep_action == "partial" or (
+        genus_before.suspect and n_bridge > 0
+    )
+
+    working = mask
+    method_parts: list[str] = []
+
+    if needs_topo and n_bridge > 0:
+        meta["topo_clean_attempted"] = True
+        br_anchor = _bridge_cut_anchor(working, bridge_voxels)
+        if br_anchor is not None:
+            log.step(f"[{label_name}] post-CL bridge-anchored donut cut")
+            cut_mask, br_log = repair_ica_donut_3d(
+                working,
+                seed,
+                label_name=label_name,
+                anchor=br_anchor,
+                max_iters=1,
+                action_prefix="bridge_anchor",
+            )
+            meta["bridge_repair"] = br_log.to_dict()
+            working = to_numpy(cut_mask).astype(bool, copy=False)
+            method_parts.append(str(br_log.action))
+
+        genus_mid = compute_mask_genus(working, label_name=label_name)
+        if genus_mid.suspect and centerline_path is not None:
+            path_np = to_numpy(centerline_path)
+            if path_np.size > 0:
+                log.step(f"[{label_name}] post-CL geodesic CL vs bridge")
+                working, geo_info = clean_mask_geodesic_cl(
+                    working,
+                    centerline_path,
+                    bridge_voxels,
+                    label_name=label_name,
+                )
+                meta["geodesic"] = geo_info
+                if int(geo_info.get("cleared_voxels", 0)) > 0:
+                    method_parts.append("geodesic")
+
+    if recover_lumen_thickness_flag and ceiling.any():
+        cl_for_thick = _rasterize_path_seeds(working.shape, centerline_path)
+        working, thick_info = recover_lumen_thickness(
+            working,
+            ceiling,
+            label_name=label_name,
+            cl_seeds=cl_for_thick if cl_for_thick.any() else None,
+        )
+        meta["thickness_recovery"] = thick_info
+        if int(thick_info.get("n_micro_steps", thick_info.get("n_iters", 0))) > 0:
+            method_parts.append("thickness")
+
+    genus_after = compute_mask_genus(working, label_name=label_name)
+    meta["genus_after"] = genus_after.to_dict()
+    meta["clean_method"] = "+".join(method_parts) if method_parts else "none"
+
+    log.step(
+        f"[{label_name}] mask clean done: β₁ {genus_before.beta1}→{genus_after.beta1} "
+        f"method={meta['clean_method']}"
+    )
+    return as_backend_array(working), meta
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Public top-level functions
 # ──────────────────────────────────────────────────────────────────────────────
@@ -988,6 +1578,8 @@ def correct_siphon_centerlines(
     out_dir: str | Path | None = None,
     save_qc: bool = False,
     min_points: int = 3,
+    clean_mask: bool = True,
+    recover_lumen_thickness: bool = True,
 ) -> dict[str, Any]:
     """
     End-to-end siphon centerline correction (matches ``eicab_reseg.ipynb``).
@@ -1022,6 +1614,10 @@ def correct_siphon_centerlines(
         Save 3D QC and ICA overview figures; always prints the summary table.
     min_points
         Minimum centerline length (voxels) for inclusion.
+    clean_mask
+        Run post-centerline mask cleaning (bridge-anchored cut, geodesic, thickness).
+    recover_lumen_thickness
+        Dilate cleaned mask toward Otsu ceiling with a β₁ watchdog (default on).
 
     Returns
     -------
@@ -1085,10 +1681,12 @@ def correct_siphon_centerlines(
         bridges_by_label: dict[int, list[tuple[int, int, int]]] = {}
         pruned_skeletons: dict[int, Any] = {}
         repaired_masks: dict[int, Any] = {}
+        cleared_by_label: dict[int, np.ndarray] = {}
         uncorrected_cls: dict[int, Any] = {}
         seg_ica_otsu = np.zeros(shape, dtype=np.int32)
         seg_ica_eroded = np.zeros(shape, dtype=np.int32)
         seg_ica_repaired = np.zeros(shape, dtype=np.int32)
+        thickness_queue: list[dict[str, Any]] = []
 
         out_path = Path(out_dir) if out_dir is not None else None
         ckpt_root = out_path if save_qc else None
@@ -1116,8 +1714,6 @@ def correct_siphon_centerlines(
             if eroded_m is not None and bool(np.asarray(eroded_m).any()):
                 seg_ica_eroded[np.asarray(eroded_m, dtype=bool)] = int(lid)
             rep_np = to_numpy(repaired_mask).astype(bool, copy=False)
-            if rep_np.any():
-                seg_ica_repaired[rep_np] = int(lid)
 
             # Optionally compute unpruned centerline on repaired mask for QC
             if save_qc:
@@ -1170,7 +1766,79 @@ def correct_siphon_centerlines(
                 f"({len(bridge_vox)} bridge voxel(s) removed); "
                 f"endpoints base={res.base} tip={res.tip} (leaves={cl_info.get('n_leaves')})"
             )
-            details[int(lid)] = {**res.to_dict(), "prep": prep_info}
+
+            mask_before_clean = rep_np.copy()
+            seed_ica = _rasterize_path_seeds(shape, path)
+            if not seed_ica.any():
+                seed_ica = to_numpy(cl_seed_mask) == int(lid)
+            cleaned_mask, mask_clean_info = clean_ica_mask_after_centerline(
+                repaired_mask,
+                prep_info,
+                path,
+                bridge_vox,
+                seed_ica,
+                label_name=name,
+                clean_mask=bool(clean_mask),
+                recover_lumen_thickness_flag=False,
+            )
+            cleaned_np = to_numpy(cleaned_mask).astype(bool, copy=False)
+            repaired_masks[int(lid)] = cleaned_mask
+            if mask_before_clean.any() or cleaned_np.any():
+                cleared_by_label[int(lid)] = mask_before_clean & ~cleaned_np
+            seg_ica_repaired[seg_ica_repaired == int(lid)] = 0
+            if cleaned_np.any():
+                seg_ica_repaired[cleaned_np] = int(lid)
+
+            details[int(lid)] = {
+                **res.to_dict(),
+                "prep": prep_info,
+                "mask_clean": mask_clean_info,
+            }
+
+            if bool(recover_lumen_thickness) and bool(clean_mask):
+                otsu_ceil = prep_info.get("otsu_mask")
+                if otsu_ceil is not None and cleaned_np.any():
+                    thickness_queue.append(
+                        {
+                            "lid": int(lid),
+                            "mask": cleaned_mask,
+                            "ceiling": otsu_ceil,
+                            "label_name": name,
+                            "cl_seeds": seed_ica,
+                        }
+                    )
+
+        if bool(recover_lumen_thickness) and thickness_queue:
+            log.step("=== Paired ICA thickness recovery (symmetric micro-steps) ===")
+            sym_masks, sym_meta = recover_lumen_thickness_symmetric(
+                thickness_queue
+            )
+            for item in thickness_queue:
+                lid = int(item["lid"])
+                sym_mask = sym_masks[lid]
+                sym_np = to_numpy(sym_mask).astype(bool, copy=False)
+                repaired_masks[lid] = sym_mask
+                seg_ica_repaired[seg_ica_repaired == lid] = 0
+                if sym_np.any():
+                    seg_ica_repaired[sym_np] = lid
+                mc = details[lid].get("mask_clean") or {}
+                per_ica_th = sym_meta.get("per_ica", {})
+                mc["thickness_recovery"] = per_ica_th.get(
+                    lid, per_ica_th.get(str(lid))
+                )
+                mc["thickness_symmetric"] = sym_meta
+                if mc.get("thickness_recovery"):
+                    ga = mc["thickness_recovery"].get("after")
+                    if ga:
+                        mc["genus_after"] = ga
+                prev = mc.get("clean_method", "none")
+                if int(sym_meta.get("common_micro_steps", 0)) > 0:
+                    mc["clean_method"] = (
+                        f"{prev}+thickness_sym"
+                        if prev and prev != "none"
+                        else "thickness_sym"
+                    )
+                details[lid]["mask_clean"] = mc
 
         cl_mask = _rasterize_centerlines_mask(shape, centerlines)
         bridges_mask = _rasterize_bridges_mask(shape, bridges_by_label)
@@ -1188,6 +1856,8 @@ def correct_siphon_centerlines(
             br_path = out_path / "removed_bridges.nii.gz"
             vm_path = out_path / "vessel_mask_corrected.nii.gz"
             ica_path = out_path / "seg_ica_repaired.nii.gz"
+            cleared_path = out_path / "cleared_bridge_region.nii.gz"
+            cleared_mask = _rasterize_cleared_masks(shape, cleared_by_label)
             io.imsave(cl_path, cl_mask, metadata=tof.metadata, axes="XYZ")
             io.imsave(br_path, bridges_mask, metadata=tof.metadata, axes="XYZ")
             io.imsave(
@@ -1202,13 +1872,21 @@ def correct_siphon_centerlines(
                 metadata=tof.metadata,
                 axes="XYZ",
             )
+            io.imsave(
+                cleared_path,
+                cleared_mask,
+                metadata=tof.metadata,
+                axes="XYZ",
+            )
             out_paths["centerlines"] = str(cl_path)
             out_paths["bridges"] = str(br_path)
             out_paths["vessel_mask"] = str(vm_path)
             out_paths["seg_ica_repaired"] = str(ica_path)
+            out_paths["cleared_bridge_region"] = str(cleared_path)
             log.ok(
                 f"wrote {cl_path.name} + {br_path.name} + "
-                f"{vm_path.name} + {ica_path.name} (TOF spatial metadata)"
+                f"{vm_path.name} + {ica_path.name} + {cleared_path.name} "
+                f"(TOF spatial metadata)"
             )
 
             meta_path = out_path / "siphon_correction.json"
@@ -1273,6 +1951,9 @@ def correct_siphon_centerlines(
             "removed_bridges_mask": as_backend_array(bridges_mask),
             "vessel_mask_corrected": as_backend_array(vessel_mask_corrected),
             "seg_ica_repaired": as_backend_array(seg_ica_repaired),
+            "cleared_bridge_region_mask": as_backend_array(
+                _rasterize_cleared_masks(shape, cleared_by_label)
+            ),
             "output_paths": out_paths,
         }
 
@@ -1399,21 +2080,33 @@ def _rasterize_bridges_mask(
     return as_backend_array(mask)
 
 
+def _rasterize_cleared_masks(
+    shape: tuple[int, int, int],
+    cleared_by_label: dict[int, np.ndarray],
+) -> np.ndarray:
+    """Per-label mask of voxels removed by post-CL cleaning."""
+    mask = np.zeros(shape, dtype=np.int32)
+    for vid, cleared in cleared_by_label.items():
+        c = np.asarray(cleared, dtype=bool)
+        mask[c] = int(vid)
+    return mask
+
+
 def _print_ica_summary_table(
     correction_ids: Sequence[int],
     details: dict[int, dict],
     centerlines: dict[int, Any],
 ) -> str:
-    """Print notebook Cell 9 summary (voxels, genus, cycles, CL length, action)."""
+    """Print notebook Cell 9 summary (+ final voxels/genus after mask clean)."""
+    width = 128
     lines: list[str] = [
         "",
-        "=" * 110,
+        "=" * width,
         (
-            f"{'ICA':6s} {'vox_o':>7s} {'vox_e':>7s} {'vox_r':>7s} "
-            f"{'β₁ o→e→r':>10s} {'cyc o→e→r':>12s} "
-            f"{'CL_pts':>7s} {'action':>32s}"
+            f"{'ICA':6s} {'vox_o':>7s} {'vox_e':>7s} {'vox_r':>7s} {'vox_f':>7s} "
+            f"{'β₁ o→e→r→f':>14s} {'CL_pts':>7s} {'repair':>28s} {'clean':>18s}"
         ),
-        "-" * 110,
+        "-" * width,
     ]
     for lid in correction_ids:
         name = bb_vessel_name(int(lid))
@@ -1429,21 +2122,32 @@ def _print_ica_summary_table(
         o = prep["otsu_report"]
         e = prep["eroded_report"]
         a = prep["repaired_report"]
+        mc = info.get("mask_clean") or {}
+        ga = mc.get("genus_after") or a
         n_o = int(otsu_info.get("n_voxels_pre_erode", o["n_voxels"]))
         n_e = int(otsu_info["n_voxels"])
         n_r = int(a["n_voxels"])
+        n_f = int(ga.get("n_voxels", n_r))
         cl = centerlines.get(int(lid))
         n_cl = int(to_numpy(cl).shape[0]) if cl is not None else 0
-        action = prep["repair"]["action"]
-        b1_str = f"{o['beta1']}→{e['beta1']}→{a['beta1']}"
-        cyc_str = (
-            f"{o['skeleton_cycles']}→{e['skeleton_cycles']}→{a['skeleton_cycles']}"
+        repair_action = prep["repair"]["action"]
+        b1_f = int(ga.get("beta1", a["beta1"]))
+        b1_raw_e = int(e.get("beta1_raw", e["beta1"]))
+        noise_e = "n" if e.get("noise_filtered") else ""
+        b1_str = f"{o['beta1']}→{b1_raw_e}→{a['beta1']}→{b1_f}"
+        if noise_e:
+            b1_str += noise_e
+        clean_m = str(mc.get("clean_method", "none"))[:18]
+        sym_steps = (mc.get("thickness_symmetric") or {}).get(
+            "common_micro_steps"
         )
+        if sym_steps is not None:
+            clean_m = f"{clean_m[:12]}s{sym_steps}"[:18]
         lines.append(
-            f"{name:6s} {n_o:7d} {n_e:7d} {n_r:7d} "
-            f"{b1_str:>10s} {cyc_str:>12s} {n_cl:7d} {action:>32s}"
+            f"{name:6s} {n_o:7d} {n_e:7d} {n_r:7d} {n_f:7d} "
+            f"{b1_str:>14s} {n_cl:7d} {repair_action:>28s} {clean_m:>18s}"
         )
-    lines.append("=" * 110)
+    lines.append("=" * width)
     text = "\n".join(lines)
     print(text)
     return text
@@ -1637,10 +2341,15 @@ __all__ = [
     "GenusReport",
     "RepairLog",
     "SiphonCorrectionResult",
+    "clean_ica_mask_after_centerline",
+    "clean_mask_geodesic_cl",
     "compute_corrected_centerline",
     "compute_mask_genus",
     "correct_siphon_centerlines",
     "ica_otsu_mask",
     "prune_skeleton_shortest_arc",
+    "recover_lumen_thickness",
+    "recover_lumen_thickness_symmetric",
+    "refine_mask_lumen_gaps",
     "repair_ica_donut_3d",
 ]

@@ -17,6 +17,13 @@ tests/
 .config/
 .config/*
 .nvitk/xnat.json
+notebooks/exploration/pesabrain-anatomy/checkpoints/
+notebooks/exploration/pesabrain-anatomy/checkpoints/*
+notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/
+notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/*
+notebooks/exploration/pesabrain-anatomy/checkpoints_partial/
+notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
+
 
 # Site-local SGE overrides
 # .nvitk/sge.json

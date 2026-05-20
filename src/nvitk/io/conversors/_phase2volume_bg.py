@@ -11,7 +11,8 @@ backend (see :mod:`nvitk.core.backend`).
 
 from __future__ import annotations
 
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, using
+from nvitk.core.array import as_backend_array, to_numpy
 
 setup(globals())
 
@@ -50,7 +51,6 @@ def fit_polynomial_background_3vector(
     spatial_order: int = 2,
     static_percentile: float = 25.0,
     max_voxels: int = 12000,
-    rng=None,
 ):
     """Return (bg_x, bg_y, bg_z) same shape as inputs, fitted on low-speed voxels."""
     if spatial_order not in (2, 3):
@@ -66,9 +66,11 @@ def fit_polynomial_background_3vector(
     if idx.size < (spatial_order + 1) ** 3 + 10:
         idx = np.flatnonzero(speed.ravel() <= np.percentile(speed, 50.0))
 
-    rng = rng or np.random.default_rng(0)
     if idx.size > max_voxels:
-        idx = rng.choice(idx, size=max_voxels, replace=False)
+        with using('cpu'):
+            perm = np.random.default_rng(0).permutation(idx.size)[:max_voxels]
+            idx = idx[perm]
+        idx = as_backend_array(idx)
 
     ix = np.arange(nx, dtype=np.float64) / max(nx - 1, 1) * 2.0 - 1.0
     iy = np.arange(ny, dtype=np.float64) / max(ny - 1, 1) * 2.0 - 1.0

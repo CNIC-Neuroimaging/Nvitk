@@ -109,7 +109,7 @@ then traces the `min-Z leaf → max-Z leaf` shortest path on the pruned
 skeleton. Returns `(path, sk_pruned, info)` with `path` shape `(N, 3)`
 float32 in voxel coords, ordered base → tip.
 
-### `correct_siphon_centerlines(tof, vessel_mask, *, correction_ids=(0, 1), out_dir=None, save_qc=False, min_points=3)`
+### `correct_siphon_centerlines(tof, vessel_mask, *, correction_ids=(1, 2), out_dir=None, save_qc=False, min_points=3, clean_mask=True, recover_lumen_thickness=True)`
 
 The top-level driver — **same order as `eicab_reseg.ipynb` Cells 4–8**:
 
@@ -118,21 +118,40 @@ The top-level driver — **same order as `eicab_reseg.ipynb` Cells 4–8**:
    2-iter erosion, optional `repair_ica_donut_3d` when β₁ > 0.
 3. `compute_corrected_centerline` on the **repaired Otsu mask** (not the raw
    eICAB label).
-4. Default `compute_centerlines` for all other labels.
+4. **Post-CL mask cleaning** (`clean_ica_mask_after_centerline`, default on):
+   - If prep repair is `partial` or β₁ > 0 with bridge voxels removed: one
+     bridge-anchored `repair_ica_donut_3d` pass, then geodesic CL-vs-bridge
+     partition if still suspect.
+   - **Thickness recovery** (default on for all ICAs): **paired symmetric**
+     fractional shell growth toward the Otsu ceiling (half a voxel layer per
+     micro-step, CL-prioritized), using the **minimum** safe step count across
+     LICA/RICA so hemispheres stay matched.
+   - **Lumen gap refine** after geodesic partition: closing + CL-tube union +
+     small hole fill to avoid internal gaps/disconnection on `partial` cases.
+   - **Genus noise filter**: β₁ is ignored when the largest skeleton cycle is
+     shorter than `MIN_SIPHON_CYCLE_LEN` (default 20) — small noise handles vs
+     the cavernous siphon loop.
+5. Default `compute_centerlines` for all other labels; merge cleaned ICA masks
+   into `vessel_mask_corrected.nii.gz`.
 
-The input segmentation volume is not written back; only centerline / bridge
-outputs are saved. NIfTI writes use `_imsave_like_reference(..., tof)` so
-affine, zooms, and axes match the TOF `Image` metadata (same as notebook
-`save_mask_nii(..., ref=tof)`).
+NIfTI writes use the TOF image metadata (affine, zooms, axes).
 
 Outputs (when `out_dir` is provided):
 
 | file | content |
 | ---- | ------- |
-| `corrected_centerlines.nii.gz` | per-label centerline mask (corrected for `correction_ids`, default for the rest) — saved with the TOF affine/header. |
-| `removed_bridges.nii.gz`       | per-label bridge-voxel mask (same label IDs as `correction_ids`) — saved with the TOF affine/header. |
-| `siphon_correction.json`       | per-label metadata (cycle/anchor info, base/tip, warnings). |
+| `corrected_centerlines.nii.gz` | per-label centerline mask (corrected for `correction_ids`, default for the rest). |
+| `removed_bridges.nii.gz`       | skeleton bridge voxels removed during CL correction. |
+| `vessel_mask_corrected.nii.gz` | full multilabel mask with cleaned ICA lumens. |
+| `seg_ica_repaired.nii.gz`      | ICA-only cleaned lumen masks. |
+| `cleared_bridge_region.nii.gz` | mask voxels removed by post-CL cleaning. |
+| `siphon_correction.json`       | per-label metadata (`prep`, `mask_clean`, cycles, endpoints). |
 | `qc_siphon_correction.png`     | 3D matplotlib QC overlay (only when `save_qc=True`). |
+| `qc_ica_overview.png`          | axial Otsu → erode → cleaned ICA + CL (when `save_qc=True`). |
+
+**Repair `action` values (prep stage):** `skipped (erosion alone cleared)` |
+`repaired` | `partial` | `skipped`. **`mask_clean.clean_method`:** e.g.
+`bridge_anchor_partial+geodesic+thickness` or `thickness` only.
 
 Returns:
 
