@@ -48,6 +48,7 @@ log = Logger()
 # ---------------------------------------------------------------------------
 
 _BN_ERODE = 3  # legacy dixon used 3 (ct-pet used 5)
+_KIDNEY_ERODE = 1
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,15 @@ def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Im
         out_labels.data[out_labels.data == lid] = 0
         out_labels.data[cc.data > 0] = lid
     return out_labels
+
+
+def _kidney_erode(kidney: Image, iterations: int = _KIDNEY_ERODE) -> Image:
+    binary = (kidney.data > 0).astype(np.uint8)
+    eroded = erode(kidney.with_data(binary), iterations=iterations)
+    if not bool(eroded.data.any()):
+        return kidney.with_data(np.zeros_like(kidney.data, dtype=np.uint8))
+    log.warning(f"Kidney not eroded, using original mask [Empty mask post-erode]")
+    return kidney
 
 
 # ---------------------------------------------------------------------------
