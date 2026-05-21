@@ -19,7 +19,7 @@ def main() -> None:
         )
         raise SystemExit(1) from exc
 
-    from gui.app import run_app
+    from nvitk.gui.app import run_app
 
     run_app()
 

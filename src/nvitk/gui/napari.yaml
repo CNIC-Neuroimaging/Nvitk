@@ -1,0 +1,26 @@
+name: nvitk
+display_name: nvitk I/O
+schema_version: 0.2.0
+contributions:
+  commands:
+    - id: nvitk.read_paths
+      title: Read with nvitk.io
+      python_name: nvitk.gui.io_napari:read_paths
+  readers:
+    - command: nvitk.read_paths
+      filename_patterns:
+        - "*.nii"
+        - "*.nii.gz"
+        - "*.mha"
+        - "*.mhd"
+        - "*.tif"
+        - "*.tiff"
+        - "*.nd2"
+        - "*.png"
+        - "*.jpg"
+        - "*.jpeg"
+        - "*.bmp"
+        - "*.gif"
+        - "*.dcm"
+      accepts_directories: true
+      priority: 100

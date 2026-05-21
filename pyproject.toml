@@ -178,7 +178,7 @@ nvitk-transform = "nvitk.cli.transform:main"
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
-nvitk-gui = "gui.main:main"
+nvitk-gui = "nvitk.gui.main:main"
 
 # -----------------------------------------------------------------------------
 # Pipeline scripts
@@ -199,6 +199,9 @@ nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 # -----------------------------------------------------------------------------
 # GUI scripts
 # -----------------------------------------------------------------------------
+[project.entry-points."napari.manifest"]
+nvitk = "nvitk.gui:napari.yaml"
+
 [project.gui-scripts]
 # nvitk-gui = "gui.main:main"
 
@@ -214,7 +217,10 @@ testpaths = ["tests", "test"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["nvitk", "nvitk.*", "gui", "gui.*"]
+include = ["nvitk", "nvitk.*"]
+
+[tool.setuptools.package-data]
+"nvitk.gui" = ["napari.yaml"]
 
 [tool.poetry]
 packages = [

@@ -127,7 +127,9 @@ pip install -e ".[gui]"
 nvitk-gui
 ```
 
-Open images (drag-drop or Ctrl+O), pick tools from the catalog dock, toggle GPU for supported filters, reconstruct meshes from masks, and export a simple pipeline JSON from the *Pipeline* tab.
+Open images (drag-drop or Ctrl+O) via **nvitk.io** (NIfTI, DICOM folders, TIFF, MHA, ND2, …) — not Napari’s default imageio reader. Pick tools from the catalog dock, toggle GPU for supported filters, reconstruct meshes from masks, and export a simple pipeline JSON from the *Pipeline* tab.
+
+After `pip install -e .`, Napari also registers the **nvitk-io** reader plugin (higher priority than builtins for `.nii.gz`).
 
 ### Mesh reconstruction
 

@@ -116,22 +116,22 @@ def list_cli_commands_flat() -> None:
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
-    "--no-interactive",
+    "--no-interactive", "-n",
     is_flag=True,
     help="Print static expanded tree (for pipes/CI).",
 )
 @click.option(
-    "--flat",
+    "--flat", "-f",
     is_flag=True,
     help="Legacy flat category listing via Logger.",
 )
 @click.option(
-    "--shell",
+    "--shell", "-s",
     is_flag=True,
     help="Force bash readline assignments on stdout (for: eval \"$(pyhelp --shell 2>/dev/tty)\").",
 )
 @click.option(
-    "--pick",
+    "--pick", "-p",
     is_flag=True,
     help="Print only the selected command to stdout (alias for capture mode).",
 )

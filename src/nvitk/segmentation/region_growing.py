@@ -65,7 +65,7 @@ def _bfs_intensity_grow(
     shape: tuple[int, int, int],
     intensity: np.ndarray,
     grow_thresh: float,
-    *,
+    *, 
     polarity: IntensityPolarity,
     seed_coords: np.ndarray,
     forbidden: np.ndarray | None,
