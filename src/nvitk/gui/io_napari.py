@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
 from nvitk.core.array import to_numpy
+from nvitk.gui.orientation import (
+    configure_viewer_for_layer,
+    prepare_for_napari,
+    suppress_nonorthogonal_slice_warning,
+)
+from nvitk.gui.warnings import install_napari_display_warnings
+
+install_napari_display_warnings()
 from nvitk.io import imread
 from nvitk.io._common import guess_read_type
 from nvitk.types import Image
@@ -16,6 +24,9 @@ _NVITK_OPEN_SUFFIXES = frozenset({
     ".nii", ".nii.gz", ".mha", ".mhd", ".tif", ".tiff", ".nd2",
     ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".dcm",
 })
+
+LayerData = tuple[Any, dict[str, Any], str]
+ReaderFunc = Callable[[str], list[LayerData] | None]
 
 
 def _normalize_paths(path: str | Path | Sequence[str | Path]) -> list[Path]:
@@ -53,7 +64,7 @@ def _napari_scale(img: Image, ndim: int) -> tuple[float, ...] | None:
 
 
 def _napari_affine(img: Image) -> np.ndarray | None:
-    """4x4 voxel-to-world matrix for Napari (fixes L/R and oblique orientation)."""
+    """Raw 4x4 voxel-to-world matrix from the file (before display reorientation)."""
     aff = img.affine
     if aff is None:
         return None
@@ -63,30 +74,95 @@ def _napari_affine(img: Image) -> np.ndarray | None:
     return aff
 
 
-def _layer_meta(img: Image, path: Path) -> dict[str, Any]:
-    meta: dict[str, Any] = {
-        "name": img.name or path.stem,
-        "source": str(path),
-    }
-    if img.metadata:
-        meta["nvitk_metadata"] = dict(img.metadata)
+def _nvitk_layer_metadata(
+    img: Image,
+    path: Path,
+    *,
+    affine_source: np.ndarray | None,
+) -> dict[str, Any]:
+    """Napari ``metadata`` dict (nested nvitk fields only — no invalid layer kwargs)."""
+    nvitk_md = dict(img.metadata) if img.metadata else {}
+    nvitk_md["source"] = str(path)
+    if affine_source is not None:
+        nvitk_md["affine_source"] = np.asarray(affine_source, dtype=float)
+    out: dict[str, Any] = {"nvitk_metadata": nvitk_md}
     if img.axes:
-        meta["axes"] = img.axes
-    return meta
+        out["axes"] = img.axes
+    return out
+
+
+def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
+    data = to_numpy(img.data)
+    raw_affine = _napari_affine(img)
+    data, affine, scale = prepare_for_napari(data, raw_affine)
+    layer_meta: dict[str, Any] = {
+        "name": img.name or path.stem,
+        "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
+    }
+    if affine is not None:
+        layer_meta["affine"] = affine
+    elif scale is not None:
+        nd = min(len(scale), data.ndim)
+        layer_meta["scale"] = tuple(scale[:nd])
+    else:
+        sc = _napari_scale(img, data.ndim)
+        if sc is not None:
+            layer_meta["scale"] = sc
+    return (data, layer_meta, "image")
+
+
+def _read_layer_data(path: str) -> list[LayerData] | None:
+    """Read one path into Napari layer tuples."""
+    pth = Path(path)
+    if not _nvitk_can_open(pth):
+        return None
+    try:
+        result = imread(pth, backend="numpy")
+    except Exception:
+        return None
+    images = result if isinstance(result, list) else [result]
+    out: list[LayerData] = []
+    for i, img in enumerate(images):
+        if not img.name:
+            img.name = f"{pth.stem}_{i}" if len(images) > 1 else pth.stem
+        out.append(_prepare_layer_tuple(img, pth))
+    return out or None
+
+
+def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
+    """
+    Napari npe2 reader command.
+
+    When called with a single path string (npe2 command exec), returns a reader
+    function. When that function is invoked, returns layer data tuples.
+    """
+    if isinstance(path, list):
+        layer_data: list[LayerData] = []
+        for p in path:
+            chunk = _read_layer_data(p)
+            if chunk:
+                layer_data.extend(chunk)
+        return layer_data or None
+
+    if not _nvitk_can_open(Path(path)):
+        return None
+    return _read_layer_data
 
 
 def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
-    data = to_numpy(img.data)
-    meta = _layer_meta(img, path)
-    affine = _napari_affine(img)
-    kwargs: dict[str, Any] = {"name": meta["name"], "metadata": meta}
-    if affine is not None:
-        kwargs["affine"] = affine
-    else:
-        scale = _napari_scale(img, data.ndim)
-        if scale is not None:
-            kwargs["scale"] = scale
-    return viewer.add_image(data, **kwargs)
+    data, layer_meta, _ = _prepare_layer_tuple(img, path)
+    kwargs: dict[str, Any] = {
+        "name": layer_meta["name"],
+        "metadata": layer_meta["metadata"],
+    }
+    if "affine" in layer_meta:
+        kwargs["affine"] = layer_meta["affine"]
+    elif "scale" in layer_meta:
+        kwargs["scale"] = layer_meta["scale"]
+    with suppress_nonorthogonal_slice_warning():
+        layer = viewer.add_image(data, **kwargs)
+    configure_viewer_for_layer(viewer, layer)
+    return layer
 
 
 def open_paths_with_nvitk(
@@ -117,35 +193,6 @@ def open_paths_with_nvitk(
             layers.append(_add_image_to_viewer(viewer, img, path))
 
     return layers
-
-
-def read_paths(path: str | list[str]) -> list[tuple] | None:
-    """Napari npe2 reader — LayerData tuples for drag-and-drop / File › Open."""
-    paths = [path] if isinstance(path, str) else list(path)
-    layer_data: list[tuple] = []
-
-    for p in paths:
-        pth = Path(p)
-        if not _nvitk_can_open(pth):
-            continue
-        try:
-            result = imread(pth, backend="numpy")
-        except Exception:
-            continue
-        images = result if isinstance(result, list) else [result]
-        for img in images:
-            data = to_numpy(img.data)
-            meta = _layer_meta(img, pth)
-            affine = _napari_affine(img)
-            if affine is not None:
-                meta["affine"] = affine
-            else:
-                scale = _napari_scale(img, data.ndim)
-                if scale is not None:
-                    meta["scale"] = scale
-            layer_data.append((data, meta, "image"))
-
-    return layer_data or None
 
 
 def _notify_error(message: str) -> None:
@@ -221,42 +268,3 @@ def install_nvitk_io(viewer: Any) -> None:
 
     qt._qt_open = _qt_open
     qt._nvitk_io_patched = True
-
-
-def napari_manifest() -> dict[str, Any]:
-    """Entry point for ``[project.entry-points.\"napari.manifest\"]``."""
-    return {
-        "name": "nvitk-io",
-        "display_name": "nvitk I/O",
-        "version": "0.1.0",
-        "contributions": {
-            "commands": [
-                {
-                    "id": "nvitk-read-paths",
-                    "title": "Read with nvitk.io",
-                    "python_name": "nvitk.gui.io_napari:read_paths",
-                }
-            ],
-            "readers": [
-                {
-                    "command": "nvitk-read-paths",
-                    "accepts": [
-                        "*.nii",
-                        "*.nii.gz",
-                        "*.mha",
-                        "*.mhd",
-                        "*.tif",
-                        "*.tiff",
-                        "*.nd2",
-                        "*.png",
-                        "*.jpg",
-                        "*.jpeg",
-                        "*.bmp",
-                        "*.gif",
-                        "*.dcm",
-                    ],
-                    "priority": 100,
-                }
-            ],
-        },
-    }

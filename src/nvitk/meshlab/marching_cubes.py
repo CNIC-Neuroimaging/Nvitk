@@ -67,6 +67,7 @@ def marching_cubes_binary(
     *,
     level: float = 0.5,
     step_size: int = 1,
+    world_space: bool = True,
 ) -> Mesh | None:
     """Extract a single surface from a binary mask."""
     if isinstance(mask, Image):
@@ -95,13 +96,16 @@ def marching_cubes_binary(
     except (ValueError, RuntimeError):
         return None
 
-    verts_w = _world_vertices(
-        verts,
-        affine=to_numpy(affine) if affine is not None else None,
-        spacing=spacing,
-        origin=origin,
-    )
-    return Mesh(vertices=verts_w, faces=faces.astype(np.int32), metadata=meta)
+    if world_space:
+        verts_out = _world_vertices(
+            verts,
+            affine=to_numpy(affine) if affine is not None else None,
+            spacing=spacing,
+            origin=origin,
+        )
+    else:
+        verts_out = verts
+    return Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta)
 
 
 def marching_cubes_multilabel(
@@ -110,6 +114,7 @@ def marching_cubes_multilabel(
     label_ids: Iterable[int] | None = None,
     level: float = 0.5,
     step_size: int = 1,
+    world_space: bool = True,
 ) -> list[Mesh]:
     """One mesh per nonzero label id."""
     if isinstance(labels, Image):
@@ -144,13 +149,16 @@ def marching_cubes_multilabel(
         if isinstance(labels, Image):
             meta.update(_metadata_from_image(labels, label_id=lid, name=meta["name"]))
         origin = meta.get("origin")
-        verts_w = _world_vertices(
-            verts,
-            affine=to_numpy(affine) if affine is not None else None,
-            spacing=spacing,
-            origin=origin,
-        )
-        meshes.append(Mesh(vertices=verts_w, faces=faces.astype(np.int32), metadata=meta))
+        if world_space:
+            verts_out = _world_vertices(
+                verts,
+                affine=to_numpy(affine) if affine is not None else None,
+                spacing=spacing,
+                origin=origin,
+            )
+        else:
+            verts_out = verts
+        meshes.append(Mesh(vertices=verts_out, faces=faces.astype(np.int32), metadata=meta))
     return meshes
 
 
@@ -159,6 +167,7 @@ def mesh_from_image(
     *,
     multilabel: bool | None = None,
     label_ids: Iterable[int] | None = None,
+    world_space: bool = True,
 ) -> Mesh | list[Mesh] | None:
     """Convenience: binary (nonzero) or multilabel reconstruction."""
     if isinstance(image, Image):
@@ -170,5 +179,5 @@ def mesh_from_image(
     is_multi = multilabel if multilabel is not None else len(unique) > 2 or (len(unique) == 2 and 0 not in unique)
 
     if is_multi:
-        return marching_cubes_multilabel(image, label_ids=label_ids)
-    return marching_cubes_binary(image)
+        return marching_cubes_multilabel(image, label_ids=label_ids, world_space=world_space)
+    return marching_cubes_binary(image, world_space=world_space)

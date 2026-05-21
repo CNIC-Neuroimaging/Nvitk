@@ -23,4 +23,3 @@ contributions:
         - "*.gif"
         - "*.dcm"
       accepts_directories: true
-      priority: 100
