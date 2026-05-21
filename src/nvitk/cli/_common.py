@@ -10,6 +10,7 @@ from typing import Any
 import click
 
 from nvitk.core.backend import using
+from nvitk.core.click_backend import apply_cli_backend
 from nvitk.core.logger import Logger
 from nvitk.io import imread, imsave
 
@@ -17,16 +18,28 @@ log = Logger()
 
 
 def backend_option(supports_gpu: bool = True):
+    """Add ``--backend cpu|gpu`` (default gpu) and apply it before the command runs."""
+
+    _ = supports_gpu  # legacy arg; backend is always exposed on tool CLIs
+
     def decorator(f):
-        if not supports_gpu:
-            return f
-        return click.option(
+        f = click.option(
             "--backend",
             type=click.Choice(["cpu", "gpu"], case_sensitive=False),
-            default="cpu",
+            default="gpu",
             show_default=True,
-            help="Array backend: cpu (numpy) or gpu (cupy).",
+            help="Array backend: cpu (NumPy) or gpu (CuPy).",
         )(f)
+
+        from functools import wraps
+
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            apply_cli_backend(kwargs.get("backend", "gpu"))
+            return f(*args, **kwargs)
+
+        return wrapper
+
     return decorator
 
 
@@ -175,7 +188,7 @@ def dispatch_tool(
     input_path: Path,
     output_path: Path,
     submit: str,
-    backend: str,
+    backend: str = "gpu",
     mask_path: Path | None,
     emit_script: Path | None,
     direct_submit: bool,
@@ -184,6 +197,7 @@ def dispatch_tool(
     runner: Callable[..., Any],
     runner_kwargs: dict[str, Any] | None = None,
 ) -> None:
+    apply_cli_backend(backend)
     if submit.lower() == "local":
         run_local(
             input_path,

@@ -36,6 +36,7 @@ import click
 import numpy as np
 
 from nvitk.core.backend import using
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import ValidationError
 from nvitk.core.logger import Logger
@@ -241,6 +242,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 
 
 @click.command("nvitk-qvtpy-flowshow")
+@backend_click_option()
 @click.option(
     "--pipeline-output-root",
     type=click.Path(path_type=Path),

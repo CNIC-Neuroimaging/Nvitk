@@ -14,6 +14,7 @@ from pathlib import Path
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.sge import SgeResources, write_script_header
@@ -35,6 +36,7 @@ def _default_emit_script(task: str) -> Path:
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@backend_click_option()
 @click.option(
     "--input",
     "input_path",

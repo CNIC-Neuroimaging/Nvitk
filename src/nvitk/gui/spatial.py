@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from nvitk.core.array import to_numpy
 
 from nvitk.types import Image
 
@@ -26,7 +27,7 @@ def layer_affine(layer: Any) -> np.ndarray | None:
     """4x4 transform used by the Napari layer (voxel index → world)."""
     aff = getattr(layer, "affine", None)
     if aff is not None:
-        aff = np.asarray(aff, dtype=float)
+        aff = to_numpy(aff).astype(float)
         if aff.shape == (4, 4):
             return aff
     meta = nvitk_metadata_from_layer(layer)
@@ -34,7 +35,7 @@ def layer_affine(layer: Any) -> np.ndarray | None:
     if src is None:
         src = meta.get("affine")
     if src is not None:
-        aff = np.asarray(src, dtype=float)
+        aff = to_numpy(src).astype(float)
         if aff.shape == (4, 4):
             return aff
     return None
@@ -63,7 +64,7 @@ def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     aff = getattr(layer, "affine", None)
     if aff is not None:
-        kwargs["affine"] = np.asarray(aff, dtype=float)
+        kwargs["affine"] = to_numpy(aff).astype(float)
     elif getattr(layer, "scale", None) is not None:
         kwargs["scale"] = tuple(float(x) for x in layer.scale)
     return kwargs
@@ -86,7 +87,7 @@ def find_spatial_reference_layer(viewer: Any, layer: Any) -> Any:
 
 def layer_to_image(layer: Any, data: np.ndarray | None = None) -> Image:
     """Build :class:`~nvitk.types.Image` using file metadata and layer geometry."""
-    arr = np.asarray(data if data is not None else layer.data)
+    arr = to_numpy(data if data is not None else layer.data)
     meta = nvitk_metadata_from_layer(layer)
     aff = layer_affine(layer)
     if aff is not None:

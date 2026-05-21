@@ -34,6 +34,7 @@ from pathlib import Path
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.pipes.bbtpy import config as cfg
 from nvitk.pipes.bbtpy import (
@@ -122,6 +123,7 @@ def _parse_subjects(
 
 
 @click.command("nvitk-bbtpy")
+@backend_click_option()
 @click.option(
     "--subjects",
     default=None,

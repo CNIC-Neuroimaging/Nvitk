@@ -13,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from nvitk.core.click_backend import apply_cli_backend
 from nvitk.core.logger import Logger
 
 from .runner import run_eicab
@@ -36,7 +37,14 @@ def main(argv: list[str] | None = None) -> int:
         default=True,
         help="Otsu ICA resegment + region growing after eICAB.",
     )
+    p.add_argument(
+        "--backend",
+        choices=("cpu", "gpu"),
+        default="gpu",
+        help="Array backend: cpu (NumPy) or gpu (CuPy).",
+    )
     args = p.parse_args(argv)
+    apply_cli_backend(args.backend)
 
     try:
         run_eicab(

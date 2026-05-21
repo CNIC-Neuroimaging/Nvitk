@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+from nvitk.core.array import to_numpy
 from nvitk.meshlab import mesh_from_image, marching_cubes_multilabel
 from nvitk.types import Image, Mesh
 
@@ -85,6 +86,11 @@ def run_app() -> None:
         on_layers_changed=_on_layers_changed,
         record_step=lambda step: _record_step(app_state, step),
     )
+
+    from nvitk.gui.gpu_toggle import backend_label
+    from nvitk.gui.log_panel import gui_log
+
+    gui_log(f"Compute backend: {backend_label()}")
 
     @magicgui(call_button="Reconstruct mesh")
     def mesh_panel(multilabel: bool = False) -> None:
@@ -164,11 +170,11 @@ def run_app() -> None:
             notify("No layer selected.", error=True)
             return
         layer = viewer.layers.selection.active or viewer.layers[-1]
-        data = np.asarray(layer.data)
+        data = to_numpy(layer.data)
         if data.ndim not in (2, 3):
             notify("Labels overlay needs a 2D or 3D layer.", error=True)
             return
-        labels = np.asarray(data, dtype=np.int32)
+        labels = to_numpy(data).astype(np.int32)
         spatial_src = find_spatial_reference_layer(viewer, layer)
         kwargs = _layer_display_kwargs(spatial_src, name=f"{layer.name}_labels")
         meta = kwargs.pop("metadata", None)

@@ -1,4 +1,8 @@
-"""GUI-specific backend helpers: layer arrays and Napari-safe outputs."""
+"""GUI helpers aligned with the global nvitk backend (:mod:`nvitk.core.backend`).
+
+The active backend is set by ``nvitk-gui --backend cpu|gpu``, the dock GPU toggle
+(:mod:`nvitk.gui.gpu_toggle`), or :func:`~nvitk.core.backend.set_default_backend`.
+"""
 
 from __future__ import annotations
 
@@ -7,19 +11,17 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy
-from nvitk.core.backend import is_cupy_array, set_global_backend, using
+from nvitk.core.backend import get_global_backend, is_cupy_array, using
 
 
-def setup_tool_backend(use_gpu: bool) -> str:
-    """Set process default backend for a tool run. Returns resolved name (``numpy`` or ``cupy``)."""
-    if use_gpu:
-        return set_global_backend("cupy", allow_fallback=True)
-    return set_global_backend("cpu", allow_fallback=False)
+def gpu_enabled() -> bool:
+    """True when the global backend is CuPy."""
+    return get_global_backend() == "cupy"
 
 
-def layer_data_for_tool(data: Any, *, use_gpu: bool) -> Any:
-    """Coerce layer data for tool input: NumPy on CPU, backend array on GPU."""
-    if use_gpu:
+def layer_data_for_tool(data: Any) -> Any:
+    """Coerce layer data for tool input using the global backend."""
+    if gpu_enabled():
         from nvitk.core.array import as_backend_array
 
         return as_backend_array(data)
@@ -28,7 +30,6 @@ def layer_data_for_tool(data: Any, *, use_gpu: bool) -> Any:
 
 def napari_array(out: Any) -> np.ndarray:
     """Always return a NumPy array suitable for Napari (no implicit CuPy conversion)."""
-    # Only unwrap nvitk Image wrappers — CuPy/NumPy arrays also have a ``.data`` memptr.
     from nvitk.types import Image
 
     if isinstance(out, Image):
@@ -38,15 +39,12 @@ def napari_array(out: Any) -> np.ndarray:
     if is_cupy_array(out):
         return to_numpy(out)
     try:
-        arr = np.asarray(out)
+        arr = to_numpy(out)
     except TypeError:
         return to_numpy(out)
-    if arr.dtype == object:
-        return to_numpy(out)
-    return arr
+    return arr.astype(np.float64)
 
 
-def run_with_backend(use_gpu: bool):
-    """Context manager: ``using('cupy')`` or ``using('numpy')`` for tool body."""
-    name = "cupy" if use_gpu else "numpy"
-    return using(name, allow_fallback=use_gpu)
+def run_with_backend():
+    """Context manager scoped to the current global backend."""
+    return using(get_global_backend(), allow_fallback=True)

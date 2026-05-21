@@ -40,6 +40,7 @@ from nvitk.cluster.sge import (
     submit_stage,
     write_script_header,
 )
+from nvitk.core.click_backend import backend_click_option, sge_backend_env
 from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.segmentation.eicab import config as eicab_cfg
 
@@ -193,11 +194,14 @@ def _emit_stage0_convert(
     phase_background_correction: bool,
     phase_bg_poly_order: int,
     phase_bg_static_percentile: float,
+    backend: str = "gpu",
 ) -> str:
     """Append one stage0_c :func:`~nvitk.cluster.sge.submit_stage` block; return job id."""
     binds = SingularityBinds()
     cmd_parts: list[str] = [
         *python_module_argv("nvitk.pipes.qvtpy.stage0_convert"),
+        "--backend",
+        shlex.quote(backend),
         "--subject",
         shlex.quote(subject),
         "--dicom-root",
@@ -238,7 +242,7 @@ def _emit_stage0_convert(
         ),
         binds=binds,
         use_nv=False,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env=sge_backend_env(binds.src, backend),
     )
     return submit_stage(spec, paths, emit=fh)
 
@@ -249,6 +253,7 @@ def _emit_stage0_convert(
 
 
 @click.command("nvitk-qvtpy")
+@backend_click_option()
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_DICOM_ROOT)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_NIFTI_ROOT)
 @click.option(
@@ -474,6 +479,7 @@ def main(
     measure_thr_algorithm: str,
     cross_section_res: int,
     cross_section_plane_interp: int,
+    backend: str,
 ) -> None:
     Logger()
 
@@ -729,6 +735,7 @@ def main(
                         phase_background_correction=phase_background_correction,
                         phase_bg_poly_order=phase_bg_poly_order,
                         phase_bg_static_percentile=phase_bg_static_percentile,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback
@@ -750,6 +757,7 @@ def main(
                         vasculature_dir=vasculature_dir,
                         post_process_eicab=post_process_eicab,
                         hold_jid=prev_jid,
+                        backend=backend,
                         dry_run=False,
                         emit=fh,
                     )
@@ -772,6 +780,7 @@ def main(
                         dof=stage2_dof,
                         cost=stage2_cost,
                         hold_jid=prev_jid,
+                        backend=backend,
                         emit=fh,
                     )
                 except Exception as exc:
@@ -797,6 +806,7 @@ def main(
                         eicab_min_island_fraction=eicab_min_island_fraction,
                         eicab_bridge_open_radius=eicab_bridge_open_radius,
                         venous_min_branch_points=venous_min_branch_points,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback
@@ -824,6 +834,7 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback
@@ -851,6 +862,7 @@ def main(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback
@@ -872,6 +884,7 @@ def main(
                         cross_section_radius_vox=cross_section_radius_vox,
                         venous_min_component_frac=venous_min_component_frac,
                         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback
@@ -894,6 +907,7 @@ def main(
                         measure_thr_algorithm=measure_thr_algorithm,
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
+                        backend=backend,
                     )
                 except Exception as exc:
                     import traceback

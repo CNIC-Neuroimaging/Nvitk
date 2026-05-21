@@ -30,6 +30,8 @@ from nvitk.cluster.sge import (
     python_module_argv,
     submit_stage,
 )
+from nvitk.core.click_backend import backend_click_option
+from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
@@ -314,12 +316,14 @@ def submit_subject_sge(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
+    backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-3 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts: list[str] = [
         *python_module_argv("nvitk.pipes.qvtpy.stage3_centerline"),
+        *sge_backend_cli_args(backend),
         "--subject",
         shlex.quote(subject),
         "--nifti-root",
@@ -365,12 +369,13 @@ def submit_subject_sge(
         ),
         binds=binds,
         use_nv=False,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env=sge_stage_extra_env(binds.src, backend),
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
 @click.command("qvtpy-stage3-centerline")
+@backend_click_option()
 @_stage3_cli_options
 def main(
     subject: str,

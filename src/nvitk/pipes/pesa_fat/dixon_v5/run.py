@@ -15,6 +15,7 @@ from typing import Any, Callable, TextIO
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.paths import (
     DEFAULT_DICOM_ROOT,
@@ -304,6 +305,7 @@ def _run_sge(
 
 
 @click.command("nvitk-pesa-fat-dixon")
+@backend_click_option()
 @click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
 @click.option(
     "--subjects",
@@ -336,12 +338,6 @@ def _run_sge(
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
-@click.option(
-    "--backend",
-    type=click.Choice(["cupy", "numpy"], case_sensitive=False),
-    default="cupy",
-    show_default=True,
-)
 @click.option(
     "--device",
     type=click.Choice(["gpu", "cpu"]),

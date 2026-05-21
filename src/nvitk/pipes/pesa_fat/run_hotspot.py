@@ -33,6 +33,7 @@ import click
 import numpy as np
 
 from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.core.exceptions import ValidationError
 from nvitk.io import imread
@@ -327,6 +328,7 @@ def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) 
 
 
 @click.command("nvitk-pesa-fat-hotspot")
+@backend_click_option()
 @click.option("--subject", required=False, help="Subject id (e.g. PESA123).")
 @click.option("--measure", required=False, help="Measure id (use --list-measures).")
 @click.option("--batch", default=None, help="Batch name (optional; auto-detect if omitted).")

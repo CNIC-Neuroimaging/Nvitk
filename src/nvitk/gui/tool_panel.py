@@ -103,7 +103,6 @@ def build_tool_panel(
             "choices": operations_for_category(default_category()),
             "label": "Operation",
         },
-        use_gpu={"label": "GPU backend"},
         target_mode={
             "choices": ["raw", "binary_mask", "label", "all_labels"],
             "label": "Process target",
@@ -153,7 +152,6 @@ def build_tool_panel(
     def tool_panel(
         category: str,
         operation: str,
-        use_gpu: bool,
         target_mode: str,
         label_ids: str,
         overlay_mode: str,
@@ -235,7 +233,6 @@ def build_tool_panel(
                 tool_id,
                 layer,
                 viewer,
-                use_gpu=use_gpu,
                 target_mode=target_mode,
                 label_ids=ids or None,
                 params=params,

@@ -28,6 +28,8 @@ from nvitk.cluster.sge import (
     python_module_argv,
     submit_stage,
 )
+from nvitk.core.click_backend import backend_click_option
+from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage1_eicab import find_tof_resampled_volume
@@ -159,6 +161,7 @@ def submit_subject_sge(
     cost: str = "normmi",
     eicab_subdir: str | None = None,
     hold_jid: str | None = None,
+    backend: str = "gpu",
     emit: TextIO | None = None,
 ) -> str:
     """Emit or submit one stage2 SGE block (FLIRT inside Singularity)."""
@@ -166,6 +169,7 @@ def submit_subject_sge(
     binds = SingularityBinds()
     parts: list[str] = [
         *python_module_argv("nvitk.pipes.qvtpy.stage2_registration"),
+        *sge_backend_cli_args(backend),
         "--subject",
         shlex.quote(subject),
         "--nifti-root",
@@ -206,12 +210,13 @@ def submit_subject_sge(
         ),
         binds=binds,
         use_nv=False,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env=sge_stage_extra_env(binds.src, backend),
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
 @click.command("qvtpy-stage2-registration")
+@backend_click_option()
 @click.option("--subject", required=True)
 @click.option("--nifti-root", type=click.Path(path_type=Path), required=True)
 @click.option("--output-root", type=click.Path(path_type=Path), required=True)

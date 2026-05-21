@@ -31,6 +31,8 @@ from nvitk.cluster.sge import (
     python_module_argv,
     submit_stage,
 )
+from nvitk.core.click_backend import backend_click_option
+from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread
 from nvitk.pipes.qvtpy import config as cfg
@@ -238,12 +240,14 @@ def submit_subject_sge(
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
+    backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-5 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
         *python_module_argv("nvitk.pipes.qvtpy.stage5_loc_generation"),
+        *sge_backend_cli_args(backend),
         "--subject",
         shlex.quote(subject),
         "--nifti-root",
@@ -283,12 +287,13 @@ def submit_subject_sge(
         ),
         binds=binds,
         use_nv=False,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env=sge_stage_extra_env(binds.src, backend),
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
 @click.command("qvtpy-stage5-loc")
+@backend_click_option()
 @click.option("--subject", required=True)
 @click.option("--nifti-root", type=click.Path(path_type=Path), required=True)
 @click.option("--output-root", type=click.Path(path_type=Path), required=True)

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 import numpy as np
+from nvitk.core.array import to_numpy
 
 
 @contextmanager
@@ -30,7 +31,7 @@ def superior_voxel_axis(affine: np.ndarray | None, ndim: int = 3) -> int:
     except Exception:
         return min(2, ndim - 1)
 
-    aff = np.asarray(affine, dtype=float)
+    aff = to_numpy(affine).astype(float)
     try:
         codes = nib.orientations.aff2axcodes(aff[:3, :3])
     except Exception:
@@ -61,12 +62,12 @@ def prepare_for_napari(
     """Pass through array and file affine (no voxel reorientation)."""
     _ = radiological
     if affine is not None:
-        aff = np.asarray(affine, dtype=float)
+        aff = to_numpy(affine).astype(float)
         if aff.shape != (4, 4):
             affine = None
         else:
             affine = aff
-    return np.asarray(data), affine, None
+    return to_numpy(data), affine, None
 
 
 def _lr_voxel_axis_for_radiological(affine: np.ndarray | None, ndim: int) -> int | None:
@@ -78,7 +79,7 @@ def _lr_voxel_axis_for_radiological(affine: np.ndarray | None, ndim: int) -> int
     except Exception:
         return None
     try:
-        codes = nib.orientations.aff2axcodes(np.asarray(affine, dtype=float)[:3, :3])
+        codes = nib.orientations.aff2axcodes(to_numpy(affine).astype(float)[:3, :3])
     except Exception:
         return None
     for i, code in enumerate(codes[:ndim]):
@@ -95,7 +96,7 @@ def _apply_voxel_axis_flip(layer: Any, axis: int) -> None:
     aff = getattr(layer, "affine", None)
     if aff is None:
         return
-    aff = np.asarray(aff, dtype=float).copy()
+    aff = to_numpy(aff).astype(float).copy()
     if aff.shape != (4, 4):
         return
     shape = getattr(layer, "data", None)
@@ -121,7 +122,7 @@ def configure_viewer_for_layer(
         return
     try:
         aff = getattr(layer, "affine", None)
-        aff_arr = np.asarray(aff, dtype=float) if aff is not None else None
+        aff_arr = to_numpy(aff).astype(float) if aff is not None else None
         ndim = int(layer.data.ndim)
         order = axial_dim_order(aff_arr, ndim)
         sup = order[0]

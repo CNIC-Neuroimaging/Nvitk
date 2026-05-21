@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from qtpy.QtWidgets import QVBoxLayout, QWidget
 
+from nvitk.gui.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.label_selector import LabelSelectorWidget
 from nvitk.gui.pipeline_form import PipelineCliForm
 from nvitk.gui.tool_panel import build_tool_panel
@@ -61,9 +62,9 @@ def build_tools_dock(
                 return picked
         if layer is not None:
             from nvitk.gui.label_selector import unique_layer_labels
-            import numpy as np
+            from nvitk.core.array import to_numpy
 
-            return unique_layer_labels(np.asarray(layer.data))
+            return unique_layer_labels(to_numpy(layer.data))
         return []
 
     def _get_totalseg_roi() -> list[str] | None:
@@ -111,6 +112,7 @@ def build_tools_dock(
         if hasattr(tool_panel, "correction_ids"):
             tool_panel.correction_ids.visible = (tid == "siphon_correct") and (not show_labels)
 
+    layout.addWidget(build_gpu_toggle_button())
     layout.addWidget(tool_panel.native)
     layout.addWidget(label_selector)
     layout.addWidget(totalseg_roi)

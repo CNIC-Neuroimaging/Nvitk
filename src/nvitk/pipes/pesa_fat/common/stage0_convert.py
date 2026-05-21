@@ -33,6 +33,7 @@ from typing import Iterable
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.io.conversors.dcm2nii import dcm2nii
 from nvitk.pipes.pesa_fat.common.paths import (
@@ -233,6 +234,7 @@ def run_batch(
 
 
 @click.command("stage0-convert")
+@backend_click_option()
 @click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
 @click.option(
     "--subject",

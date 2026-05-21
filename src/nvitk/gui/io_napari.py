@@ -68,7 +68,7 @@ def _napari_affine(img: Image) -> np.ndarray | None:
     aff = img.affine
     if aff is None:
         return None
-    aff = np.asarray(aff, dtype=float)
+    aff = to_numpy(aff).astype(float)
     if aff.shape != (4, 4):
         return None
     return aff
@@ -84,7 +84,7 @@ def _nvitk_layer_metadata(
     nvitk_md = dict(img.metadata) if img.metadata else {}
     nvitk_md["source"] = str(path)
     if affine_source is not None:
-        nvitk_md["affine_source"] = np.asarray(affine_source, dtype=float)
+        nvitk_md["affine_source"] = to_numpy(affine_source).astype(float)
     out: dict[str, Any] = {"nvitk_metadata": nvitk_md}
     if img.axes:
         out["axes"] = img.axes

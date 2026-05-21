@@ -30,9 +30,9 @@ from typing import Any
 import click
 
 from nvitk.core import as_backend_array
+from nvitk.core.click_backend import backend_click_option, set_default_backend
 from nvitk.core.backend import (
     get_current_backend,
-    set_global_backend,
     setup,
     to_cupy,
     to_numpy,
@@ -475,7 +475,7 @@ def run_subject(
 ) -> Path:
     """Build the five stage-2 outputs for a single subject."""
     try:
-        set_global_backend(backend, allow_fallback=True)
+        set_default_backend(backend, allow_fallback=True)
     except Exception as exc:
         log.warning(f"Backend '{backend}' unavailable, falling back: {exc}")
 
@@ -498,17 +498,12 @@ def run_subject(
 
 
 @click.command("ctpet-v5-stage2")
+@backend_click_option()
 @click.option("--batch", required=True)
 @click.option("--subject", required=True)
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
-@click.option(
-    "--backend",
-    type=click.Choice(["cupy", "numpy"], case_sensitive=False),
-    default="cupy",
-    show_default=True,
-)
 @click.option("--log-level", default="INFO")
 @click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
 def main(

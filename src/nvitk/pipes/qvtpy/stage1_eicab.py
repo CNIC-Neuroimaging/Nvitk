@@ -29,6 +29,7 @@ import click
 import nvitk
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.sge import SgeResources, write_script_header
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
 from nvitk.segmentation.eicab.cluster import submit_eicab_job
@@ -201,6 +202,7 @@ def submit_subject_sge(
     post_process_eicab: bool = True,
     resources: SgeResources | None = None,
     hold_jid: str | None = None,
+    backend: str = "gpu",
     dry_run: bool = False,
     emit: TextIO | None = None,
     job_name: str | None = None,
@@ -275,6 +277,7 @@ def submit_subject_sge(
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
+        backend=backend,
         resources=res,
         hold_jid=hold_jid,
         dry_run=dry_run,
@@ -288,6 +291,7 @@ def submit_subject_sge(
 
 
 @click.command("qvtpy-stage1-eicab")
+@backend_click_option()
 @click.option(
     "--nifti-root",
     type=click.Path(path_type=Path),

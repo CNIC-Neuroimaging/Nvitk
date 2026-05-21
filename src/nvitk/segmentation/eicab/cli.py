@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 import nvitk
 
@@ -38,6 +39,7 @@ def _default_emit_script(input_path: Path) -> Path:
 
 
 @click.command("nvitk-eicab", context_settings={"help_option_names": ["-h", "--help"]})
+@backend_click_option()
 @click.option(
     "--input",
     "input_path",

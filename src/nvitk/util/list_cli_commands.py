@@ -13,6 +13,7 @@ _src_dir = _project_root / "src"
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
+from nvitk.core.click_backend import backend_click_option  # noqa: E402
 from nvitk.cli.catalog import (  # noqa: E402
     build_catalog_tree,
     find_pyproject_toml,
@@ -115,6 +116,7 @@ def list_cli_commands_flat() -> None:
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@backend_click_option()
 @click.option(
     "--no-interactive", "-n",
     is_flag=True,

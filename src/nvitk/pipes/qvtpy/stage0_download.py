@@ -32,6 +32,7 @@ from typing import Any, Iterable
 import click
 import pandas as pd
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.db.xnat import (
     classify_scan,
@@ -418,6 +419,7 @@ def print_qc_report(
 
 
 @click.command("qvtpy-stage0-download")
+@backend_click_option()
 @click.option(
     "--dicom-root",
     type=click.Path(path_type=Path),

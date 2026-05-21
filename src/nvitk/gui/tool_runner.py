@@ -10,21 +10,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-from nvitk.core.array import to_numpy as array_to_numpy
-from nvitk.core.backend import using
-from nvitk.gui.gui_backend import (
-    layer_data_for_tool,
-    napari_array,
-    run_with_backend,
-    setup_tool_backend,
-)
+from nvitk.core.array import as_backend_array, to_numpy as array_to_numpy
+from nvitk.core.backend import get_global_backend, using, setup
+from nvitk.gui.gui_backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
 from nvitk.gui.log_panel import gui_log, run_subprocess_logged
 from nvitk.gui.spatial import nvitk_metadata_from_layer
 from nvitk.gui.spatial import layer_to_image
 from nvitk.gui.tools_registry import tool_by_id
 from nvitk.types import Image
+
+setup(globals())
 
 _MEASURE_NOTIFY = frozenset({
     "volume_mm3",
@@ -52,11 +47,6 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
 def _format_metrics(metrics: dict[str, Any]) -> str:
     lines = [f"{k}: {v}" for k, v in metrics.items()]
     return "\n".join(lines)
-
-
-def _setup_gui_backend(use_gpu: bool) -> str:
-    """Set process default backend: CuPy (with fallback) or CPU/NumPy."""
-    return setup_tool_backend(use_gpu)
 
 
 def _layer_source_path(layer: Any) -> Path | None:
@@ -110,7 +100,7 @@ def _run_pipeline_cli(spec: Any, params: dict[str, Any]) -> None:
 
 
 def _unique_labels(data: np.ndarray) -> list[int]:
-    flat = np.asarray(data).ravel()
+    flat = as_backend_array(data).ravel()
     if flat.size == 0:
         return []
     labels = np.unique(flat)
@@ -124,7 +114,7 @@ def prepare_layer_data(
     label_ids: list[int] | None,
 ) -> tuple[np.ndarray, str]:
     mode = target_mode.strip().lower()
-    arr = np.asarray(data)
+    arr = as_backend_array(data)
 
     if mode == "raw":
         return arr, "raw"
@@ -156,7 +146,7 @@ def coerce_tool_output(out: Any) -> np.ndarray:
     return napari_array(out)
 
 
-def _morph_common(img: Image, op: str, params: dict[str, Any], *, use_gpu: bool) -> np.ndarray:
+def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
     from nvitk.morphology.binary import close, dilate, erode, fill_holes, open as morph_open
 
     fn = {
@@ -174,7 +164,7 @@ def _morph_common(img: Image, op: str, params: dict[str, Any], *, use_gpu: bool)
     }
     if op == "fill_holes":
         kw = {"connectivity": kw["connectivity"]}
-    with run_with_backend(use_gpu):
+    with run_with_backend():
         return coerce_tool_output(fn(img, **kw))
 
 
@@ -183,7 +173,6 @@ def run_gui_tool(
     layer: Any,
     viewer: Any,
     *,
-    use_gpu: bool,
     target_mode: str,
     label_ids: list[int] | None,
     params: dict[str, Any] | None = None,
@@ -198,10 +187,10 @@ def run_gui_tool(
         _run_pipeline_cli(spec, params)
         return None
 
-    bk = _setup_gui_backend(use_gpu)
-    data = layer_data_for_tool(layer.data, use_gpu=use_gpu)
-    if bk == "numpy":
-        data = np.asarray(array_to_numpy(data))
+    bk = get_global_backend()
+    data = layer_data_for_tool(layer.data)
+    if not gpu_enabled():
+        data = as_backend_array(array_to_numpy(data))
 
     if tool_id in _MEASURE_NOTIFY:
         per_label_ids: list[int] | None = label_ids
@@ -210,18 +199,18 @@ def run_gui_tool(
             if not per_label_ids:
                 raise ValueError("No non-zero labels in the active layer.")
             _run_measure_per_label(
-                tool_id, layer, viewer, data, per_label_ids, params=params, use_gpu=use_gpu
+                tool_id, layer, viewer, data, per_label_ids, params=params
             )
             return None
         if target_mode == "label" and label_ids and len(label_ids) > 1:
             _run_measure_per_label(
-                tool_id, layer, viewer, data, label_ids, params=params, use_gpu=use_gpu
+                tool_id, layer, viewer, data, label_ids, params=params
             )
             return None
 
     proc_data, _tag = prepare_layer_data(data, target_mode=target_mode, label_ids=label_ids)
-    if bk == "numpy":
-        proc_data = np.asarray(array_to_numpy(proc_data))
+    if not gpu_enabled():
+        proc_data = as_backend_array(array_to_numpy(proc_data))
     img = layer_to_image(layer, proc_data)
 
     if spec.needs_3d and img.ndim != 3:
@@ -250,11 +239,11 @@ def run_gui_tool(
             binary_mask_sliding_threshold_3d,
         )
 
-        arr = layer_data_for_tool(img.data, use_gpu=use_gpu)
+        arr = layer_data_for_tool(img.data)
         step = float(params.get("step") or 0.001)
         up = float(params.get("up_thresh") or 0.8)
         smf = int(params.get("smf") or 10)
-        with run_with_backend(use_gpu):
+        with run_with_backend():
             if arr.ndim == 2:
                 out = binary_mask_sliding_threshold_2d(
                     arr, step=step, up_thresh=up, smf=smf
@@ -268,7 +257,7 @@ def run_gui_tool(
             return coerce_tool_output(out)
 
     if tool_id in ("dilate", "erode", "open", "close", "fill_holes"):
-        return _morph_common(img, tool_id, params, use_gpu=use_gpu)
+        return _morph_common(img, tool_id, params)
 
     if tool_id == "label_cc":
         from nvitk.morphology.components import label_connected
@@ -294,14 +283,14 @@ def run_gui_tool(
     if tool_id == "skeletonize":
         from nvitk.morphology.centerline import compute_centerlines, skeletonize_binary
 
-        arr = np.asarray(img.data)
+        arr = as_backend_array(img.data)
         labels = _unique_labels(arr)
         with using(bk):
             if len(labels) > 1:
                 paths = compute_centerlines(arr, labels=labels, min_points=5)
                 out = np.zeros(arr.shape, dtype=np.uint8)
                 for lid, pts in paths.items():
-                    pts_i = np.round(np.asarray(pts)).astype(int)
+                    pts_i = np.round(as_backend_array(pts)).astype(int)
                     for x, y, z in pts_i:
                         if (
                             0 <= x < out.shape[0]
@@ -313,7 +302,7 @@ def run_gui_tool(
                     raise ValueError("No centerline points found.")
                 return out
             sk = skeletonize_binary(arr > 0)
-            return np.asarray(sk, dtype=np.uint8)
+            return as_backend_array(sk).astype(np.uint8)
 
     if tool_id == "isotropy":
         from nvitk.transform.isotropy import isotropy
@@ -342,7 +331,7 @@ def run_gui_tool(
     if tool_id == "oblique_slice":
         from nvitk.transform.oblique import oblique_slice
 
-        arr = np.asarray(img.data, dtype=np.float64)
+        arr = as_backend_array(img.data).astype(np.float64)
         cx, cy, cz = [s / 2.0 for s in arr.shape]
         center = (cx, cy, cz)
         u = (0.0, 1.0, 0.0)
@@ -517,8 +506,8 @@ def run_gui_tool(
         from nvitk.segmentation.region_growing import region_grow_binary_mask
 
         ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        mask = np.asarray(proc_data, dtype=bool).copy()
-        intensity = np.asarray(ref.data, dtype=np.float64)
+        mask = as_backend_array(proc_data).astype(bool).copy()
+        intensity = as_backend_array(ref.data).astype(np.float64)
         if mask.shape != intensity.shape:
             raise ValueError("Mask and intensity layers must have the same shape.")
         sz = int(params.get("seed_z") or 0)
@@ -663,13 +652,10 @@ def _run_measure_per_label(
     label_ids: list[int],
     *,
     params: dict[str, Any],
-    use_gpu: bool,
 ) -> None:
     """Run a measure tool once per label id and log each result."""
-    _ = use_gpu
-    bk = _setup_gui_backend(use_gpu)
-    if bk == "numpy":
-        data = np.asarray(array_to_numpy(data))
+    if not gpu_enabled():
+        data = as_backend_array(array_to_numpy(data))
     lines: list[str] = []
     for lid in label_ids:
         proc, _ = prepare_layer_data(data, target_mode="label", label_ids=[lid])

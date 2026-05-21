@@ -30,6 +30,8 @@ from nvitk.cluster.sge import (
     python_module_argv,
     submit_stage,
 )
+from nvitk.core.click_backend import backend_click_option
+from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
@@ -499,12 +501,14 @@ def submit_subject_sge(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-4t SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
         *python_module_argv("nvitk.pipes.qvtpy.stage4t_4dflow_t_segmentation"),
+        *sge_backend_cli_args(backend),
         "--subject",
         shlex.quote(subject),
         "--nifti-root",
@@ -560,12 +564,13 @@ def submit_subject_sge(
         ),
         binds=binds,
         use_nv=False,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env=sge_stage_extra_env(binds.src, backend),
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
 @click.command("qvtpy-stage4t-seg")
+@backend_click_option()
 @_stage4t_cli_options
 def main(
     subject: str,

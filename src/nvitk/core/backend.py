@@ -163,6 +163,11 @@ def get_global_backend() -> BackendName:
     return _global_backend
 
 
+def set_default_backend(name: str, allow_fallback: bool = True) -> BackendName:
+    """Alias for :func:`set_global_backend` (default ``allow_fallback=True`` for CLI use)."""
+    return set_global_backend(name, allow_fallback=allow_fallback)
+
+
 def set_global_backend(name: str, allow_fallback: bool = False) -> BackendName:
     """
     Set the default backend for new code and refresh registered module proxies.

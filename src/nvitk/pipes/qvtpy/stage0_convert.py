@@ -20,6 +20,7 @@ from typing import Any, Iterable
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.io.conversors.dcm2nii import dcm2nii
 from nvitk.io.conversors.phase2volume import phase2volume
@@ -424,6 +425,7 @@ def print_nifti_qc_report(
 
 
 @click.command("qvtpy-stage0")
+@backend_click_option()
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_DICOM_ROOT)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_NIFTI_ROOT)
 @click.option(

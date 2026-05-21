@@ -17,9 +17,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.core.array import to_numpy
+
 
 def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
-    flat = np.asarray(data).ravel()
+    flat = to_numpy(data).ravel()
     if flat.size == 0:
         return []
     if np.issubdtype(flat.dtype, np.floating):
@@ -80,7 +82,7 @@ class LabelSelectorWidget(QGroupBox):
         if layer is None:
             self._hint.setText("No layer selected.")
             return
-        labels = unique_layer_labels(np.asarray(layer.data))
+        labels = unique_layer_labels(to_numpy(layer.data))
         if not labels:
             self._hint.setText(f"No non-zero labels in “{layer.name}”.")
             return

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 
+from nvitk.core.click_backend import apply_cli_backend
 from nvitk.core.logger import Logger
 from nvitk.registration.fsl.flirt import flirt_apply_rigid, flirt_register_rigid
 
@@ -17,8 +18,19 @@ log = Logger()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-def main() -> None:
+@click.option(
+    "--backend",
+    type=click.Choice(["cpu", "gpu"], case_sensitive=False),
+    default="gpu",
+    show_default=True,
+    help="Array backend: cpu (NumPy) or gpu (CuPy).",
+)
+@click.pass_context
+def main(ctx: click.Context, backend: str) -> None:
     """Medical image registration helpers (currently FSL FLIRT only)."""
+    apply_cli_backend(backend)
+    ctx.ensure_object(dict)
+    ctx.obj["backend"] = backend
 
 
 @main.command("register-rigid")

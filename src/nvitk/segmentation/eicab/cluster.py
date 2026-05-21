@@ -76,6 +76,7 @@ def build_run_job_python_cmd(
     attention: bool,
     keep_aux_outputs: bool,
     post_process_eicab: bool,
+    backend: str,
     binds: SingularityBinds,
 ) -> str:
     module = "nvitk.segmentation.eicab.run_job"
@@ -104,6 +105,7 @@ def build_run_job_python_cmd(
         parts.append("--post-process-eicab")
     else:
         parts.append("--no-post-process-eicab")
+    parts.extend(["--backend", shlex.quote(str(backend).strip().lower())])
     return " ".join(parts)
 
 
@@ -148,6 +150,7 @@ def submit_eicab_job(
     attention: bool,
     keep_aux_outputs: bool,
     post_process_eicab: bool = True,
+    backend: str = "gpu",
     resources: SgeResources,
     hold_jid: str | None = None,
     dry_run: bool = False,
@@ -206,6 +209,7 @@ def submit_eicab_job(
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
+        backend=backend,
         binds=binds,
     )
 
@@ -224,7 +228,10 @@ def submit_eicab_job(
         resources=resources,
         binds=binds,
         use_nv=use_nv,
-        extra_env={"PYTHONPATH": str(binds.src)},
+        extra_env={
+            "PYTHONPATH": str(binds.src),
+            "NVITK_BACKEND": str(backend).strip().lower(),
+        },
         extra_host_binds=extra_host_binds,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, dry_run=dry_run, emit=emit)

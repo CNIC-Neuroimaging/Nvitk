@@ -6,12 +6,15 @@ import sys
 
 import click
 
+from nvitk.core.click_backend import apply_cli_backend, backend_click_option
+
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-def main() -> None:
+@backend_click_option()
+def main(backend: str) -> None:
     """Launch the Napari workbench for nvitk image tools."""
     try:
-        import napari  # noqa: F401
+        import napari  
     except ImportError as exc:
         print(
             "nvitk-gui requires napari. Install with: pip install 'nvitk[gui]'",
@@ -23,6 +26,7 @@ def main() -> None:
     from nvitk.gui.warnings import install_napari_display_warnings
 
     install_napari_display_warnings()
+    apply_cli_backend(backend)
     run_app()
 
 

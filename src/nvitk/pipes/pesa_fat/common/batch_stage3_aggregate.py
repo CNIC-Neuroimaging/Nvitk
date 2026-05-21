@@ -11,6 +11,7 @@ from pathlib import Path
 
 import click
 
+from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.paths import layout, parse_subjects
 from nvitk.pipes.pesa_fat.common.stage3_batch_summary import aggregate_stage3_summary
@@ -19,6 +20,7 @@ log = Logger()
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@backend_click_option()
 @click.option("--batch", required=True, help="Batch name (e.g. 202602_Week4).")
 @click.option(
     "--subjects",
