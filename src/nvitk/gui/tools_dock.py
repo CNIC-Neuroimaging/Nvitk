@@ -7,6 +7,7 @@ from typing import Any, Callable
 from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 from nvitk.gui.gpu_toggle import build_gpu_toggle_button
+from nvitk.gui.label_catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
 from nvitk.gui.label_selector import LabelSelectorWidget
 from nvitk.gui.pipeline_form import PipelineCliForm
 from nvitk.gui.tool_panel import build_tool_panel
@@ -91,22 +92,31 @@ def build_tools_dock(
         spec = tool_by_id(tid)
         tm = tool_panel.target_mode.value
 
+        is_ts = tid == "seg_totalsegmentator"
         show_labels = _show_label_picker(cat, tid, tm)
         label_selector.setVisible(show_labels)
         if show_labels:
-            label_selector.refresh_from_layer(_active_layer())
+            layer = _active_layer()
+            if is_ts:
+                task = getattr(tool_panel, "task", None)
+                task_val = str(task.value if task is not None else "total")
+                label_selector.set_schema_key(schema_for_totalsegmentator_task(task_val))
+            else:
+                guessed = guess_schema_from_layer(layer)
+                if guessed:
+                    label_selector.set_schema_key(guessed)
+            label_selector.refresh_from_layer(layer)
 
         is_pipeline = spec is not None and spec.run_mode == "pipeline"
         pipeline_form.setVisible(is_pipeline)
         if is_pipeline and spec:
             pipeline_form.set_script(spec.cli_command)
 
-        is_ts = tid == "seg_totalsegmentator"
         totalseg_roi.setVisible(is_ts)
         if is_ts:
             task = getattr(tool_panel, "task", None)
-            task_val = task.value if task is not None else "total"
-            totalseg_roi.set_task(str(task_val))
+            task_val = str(task.value if task is not None else "total")
+            totalseg_roi.set_task(task_val)
 
         tool_panel.label_ids.visible = (not show_labels) and tm == "label"
         if hasattr(tool_panel, "correction_ids"):
@@ -133,8 +143,14 @@ def build_tools_dock(
         if label_selector.isVisible():
             label_selector.refresh_from_layer(_active_layer())
 
-    label_selector._btn_refresh.clicked.connect(
-        lambda: label_selector.refresh_from_layer(_active_layer())
-    )
+    def _refresh_label_selector() -> None:
+        layer = _active_layer()
+        if label_selector.schema_key() == "generic":
+            guessed = guess_schema_from_layer(layer)
+            if guessed:
+                label_selector.set_schema_key(guessed)
+        label_selector.refresh_from_layer(layer)
+
+    label_selector._btn_refresh.clicked.connect(_refresh_label_selector)
     _sync_aux_panels()
     return container, tool_panel
