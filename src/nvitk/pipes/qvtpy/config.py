@@ -89,6 +89,8 @@ if (v := _pipe.get("sge_h_vmem")) is not None:
     SGE_H_VMEM = str(v)
 if "sge_queue" in _pipe:
     SGE_QUEUE = _pipe["sge_queue"]
+if (v := _pipe.get("nvitk_src_dir")) is not None:
+    NVITK_SRC_DIR = Path(str(v))
 
 _lg_qvt, _er_qvt = _sj.resolve_log_err_dirs(
     paths=_paths,

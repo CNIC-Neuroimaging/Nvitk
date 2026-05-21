@@ -164,7 +164,7 @@ def _iter_subjects(root: Path) -> list[str]:
 
 def _default_nvitk_src_dir() -> Path:
     """Host tree mounted at ``/nvitk/src/`` in SGE Singularity jobs."""
-    return Path(nvitk.__file__).resolve().parent.parent
+    return cfg.NVITK_SRC_DIR
 
 
 def _default_submit_script_path() -> Path:
