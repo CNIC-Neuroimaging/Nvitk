@@ -38,6 +38,36 @@ class EicabMaskResolution:
 # ---------------------------------------------------------------------------
 
 
+def _stem_without_suffix(p: Path) -> str:
+    if p.name.lower().endswith(".nii.gz"):
+        return p.name[: -len(".nii.gz")]
+    if p.name.lower().endswith(".nii"):
+        return p.name[: -len(".nii")]
+    return p.stem
+
+
+def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
+    """Return path to eICAB ``TOF_resampled`` NIfTI under *eicab_output_dir*, or None."""
+    if not eicab_output_dir.is_dir():
+        return None
+    for name in ("TOF_resampled.nii.gz", "TOF_resampled.nii"):
+        p = eicab_output_dir / name
+        if p.is_file():
+            return p
+    hits: list[Path] = []
+    for p in sorted(eicab_output_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if not (p.suffix == ".nii" or p.name.endswith(".nii.gz")):
+            continue
+        stem = _stem_without_suffix(p).lower()
+        if not stem.endswith("_resampled"):
+            continue
+        if "tof" in stem:
+            hits.append(p)
+    return hits[0] if hits else None
+
+
 def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:
     for pat in patterns:
         hits = sorted(eicab_dir.glob(pat))
@@ -113,5 +143,6 @@ def resolve_eicab_mask(
 __all__ = [
     "EicabMaskKind",
     "EicabMaskResolution",
+    "find_tof_resampled_volume",
     "resolve_eicab_mask",
 ]

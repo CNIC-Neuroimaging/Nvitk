@@ -13,6 +13,7 @@
 
 - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
 - ``--submit sge`` — :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job` per subject.
+- ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA region growing in the same stage.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ from nvitk.segmentation.eicab.cluster import submit_eicab_job
 from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
+from .util.eicab_masks import find_tof_resampled_volume
+from .util.eicab_postprocess import postprocess_eicab_directory
 
 log = Logger()
 
@@ -85,41 +88,6 @@ def find_tof_volume(subject_nifti_dir: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _stem_without_suffix(p: Path) -> str:
-    if p.name.lower().endswith(".nii.gz"):
-        return p.name[: -len(".nii.gz")]
-    if p.name.lower().endswith(".nii"):
-        return p.name[: -len(".nii")]
-    return p.stem
-
-
-def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
-    """Return path to eICAB ``TOF_resampled`` NIfTI under *eicab_output_dir*, or None.
-
-    Used as the moving image for stage-2 FLIRT (same grid and contrast as multilabel outputs).
-    Prefers ``TOF_resampled.nii.gz`` / ``TOF_resampled.nii``, then any ``*TOF*`` stem ending
-    in ``_resampled`` (case-insensitive), shallow then recursive under *eicab_output_dir*.
-    """
-    if not eicab_output_dir.is_dir():
-        return None
-    for name in ("TOF_resampled.nii.gz", "TOF_resampled.nii"):
-        p = eicab_output_dir / name
-        if p.is_file():
-            return p
-    hits: list[Path] = []
-    for p in sorted(eicab_output_dir.rglob("*")):
-        if not p.is_file():
-            continue
-        if not (p.suffix == ".nii" or p.name.endswith(".nii.gz")):
-            continue
-        stem = _stem_without_suffix(p).lower()
-        if not stem.endswith("_resampled"):
-            continue
-        if "tof" in stem:
-            hits.append(p)
-    return hits[0] if hits else None
-
-
 def _output_has_segmentation(out_dir: Path) -> bool:
     if not out_dir.is_dir():
         return False
@@ -151,6 +119,7 @@ def run_subject(
     tmp_dir: Path | None = None,
     vasculature_dir: Path | None = None,
     keep_aux_outputs: bool = False,
+    post_process_eicab: bool = True,
 ) -> Path:
     """Run eICAB locally for one subject. Returns the eICAB output directory."""
     subj_nifti = nifti_root / subject
@@ -195,6 +164,13 @@ def run_subject(
         vasculature_host_path=vas_host,
         capture_output=False,
     )
+    if post_process_eicab:
+        log.step(f"[{subject}] eICAB ICA post-process (Otsu + region growing)")
+        tof_resampled = find_tof_resampled_volume(out_dir)
+        postprocess_eicab_directory(
+            out_dir,
+            tof_path=tof_resampled,
+        )
     return out_dir
 
 
@@ -222,6 +198,7 @@ def submit_subject_sge(
     log_dir: Path | None = None,
     err_dir: Path | None = None,
     keep_aux_outputs: bool = False,
+    post_process_eicab: bool = True,
     resources: SgeResources | None = None,
     hold_jid: str | None = None,
     dry_run: bool = False,
@@ -297,6 +274,7 @@ def submit_subject_sge(
         simple_segmentation=simple_segmentation,
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
+        post_process_eicab=post_process_eicab,
         resources=res,
         hold_jid=hold_jid,
         dry_run=dry_run,
@@ -392,6 +370,12 @@ def submit_subject_sge(
     help="Keep auxiliary eICAB intermediates (default: prune to CoW/WB NIfTIs).",
 )
 @click.option(
+    "--post-process-eicab/--no-post-process-eicab",
+    default=True,
+    show_default=True,
+    help="After eICAB: Otsu ICA resegment (centerline_siphon) + ICA region growing.",
+)
+@click.option(
     "--emit-script",
     type=click.Path(path_type=Path),
     default=None,
@@ -424,6 +408,7 @@ def main(
     log_dir: Path | None,
     err_dir: Path | None,
     keep_aux_outputs: bool,
+    post_process_eicab: bool,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
@@ -457,6 +442,7 @@ def main(
                     tmp_dir=tmp_dir,
                     vasculature_dir=vasculature_dir,
                     keep_aux_outputs=keep_aux_outputs,
+                    post_process_eicab=post_process_eicab,
                 )
             except (FileNotFoundError, OSError) as exc:
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
@@ -494,6 +480,7 @@ def main(
                     log_dir=log_dir,
                     err_dir=err_dir,
                     keep_aux_outputs=keep_aux_outputs,
+                    post_process_eicab=post_process_eicab,
                     dry_run=False,
                     emit=fh,
                 )

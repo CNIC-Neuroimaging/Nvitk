@@ -322,6 +322,12 @@ def _emit_stage0_convert(
     show_default=True,
 )
 @click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
+@click.option(
+    "--post-process-eicab/--no-post-process-eicab",
+    default=True,
+    show_default=True,
+    help="Stage1: Otsu ICA resegment + ICA region growing after eICAB.",
+)
 # --- stage 2 ---
 @click.option(
     "--stage2-reference",
@@ -441,6 +447,7 @@ def main(
     vasculature_dir: Path | None,
     eicab_device: str,
     eicab_resolution: float,
+    post_process_eicab: bool,
     stage2_reference: str,
     stage2_dof: int,
     stage2_cost: str,
@@ -573,6 +580,7 @@ def main(
                             device=eicab_device,
                             eicab_container=eicab_container,
                             vasculature_dir=vasculature_dir,
+                            post_process_eicab=post_process_eicab,
                         ),
                     )
                 if run_s2:
@@ -741,6 +749,7 @@ def main(
                         pipeline_container=None,
                         src_dir=src_p,
                         vasculature_dir=vasculature_dir,
+                        post_process_eicab=post_process_eicab,
                         hold_jid=prev_jid,
                         dry_run=False,
                         emit=fh,

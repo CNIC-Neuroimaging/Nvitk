@@ -74,6 +74,7 @@ def build_run_job_python_cmd(
     simple_segmentation: bool,
     attention: bool,
     keep_aux_outputs: bool,
+    post_process_eicab: bool,
     binds: SingularityBinds,
 ) -> str:
     module = "nvitk.segmentation.eicab.run_job"
@@ -100,6 +101,10 @@ def build_run_job_python_cmd(
         parts.append("--attention")
     if keep_aux_outputs:
         parts.append("--keep-aux-outputs")
+    if post_process_eicab:
+        parts.append("--post-process-eicab")
+    else:
+        parts.append("--no-post-process-eicab")
     return " ".join(parts)
 
 
@@ -143,6 +148,7 @@ def submit_eicab_job(
     simple_segmentation: bool,
     attention: bool,
     keep_aux_outputs: bool,
+    post_process_eicab: bool = True,
     resources: SgeResources,
     hold_jid: str | None = None,
     dry_run: bool = False,
@@ -200,6 +206,7 @@ def submit_eicab_job(
         simple_segmentation=simple_segmentation,
         attention=attention,
         keep_aux_outputs=keep_aux_outputs,
+        post_process_eicab=post_process_eicab,
         binds=binds,
     )
 

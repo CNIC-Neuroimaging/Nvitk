@@ -31,6 +31,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--simple-segmentation", action="store_true")
     p.add_argument("--attention", action="store_true")
     p.add_argument("--keep-aux-outputs", action="store_true")
+    p.add_argument(
+        "--post-process-eicab/--no-post-process-eicab",
+        default=True,
+        help="Otsu ICA resegment + region growing after eICAB.",
+    )
     args = p.parse_args(argv)
 
     try:
@@ -45,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
             tmp_dir=args.tmp,
             keep_aux_outputs=args.keep_aux_outputs,
         )
+        if args.post_process_eicab:
+            from nvitk.pipes.qvtpy.util.eicab_postprocess import postprocess_eicab_directory
+
+            postprocess_eicab_directory(args.output)
     except Exception as exc:
         log.error("run_job failed: %s", exc)
         raise
