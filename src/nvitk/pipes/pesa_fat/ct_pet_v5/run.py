@@ -45,6 +45,7 @@ from nvitk.cluster.sge import (
     SgeResources,
     SingularityBinds,
     StageSpec,
+    python_module_argv,
     submit_chain,
     write_script_header,
 )
@@ -170,15 +171,13 @@ def _build_python_cmd(
       it to ``binds.data`` so :class:`BatchLayout` stays consistent.
     """
     module = STAGE_MODULES[stage]
-    script = f"{binds.src}{module.replace('.', '/')}.py"
     c_dicom = binds.data
     c_nifti = binds.data
     c_out = binds.output
     c_model = binds.models
 
     parts: list[str] = [
-        "python",
-        shlex.quote(script),
+        *python_module_argv(module),
         "--batch",
         shlex.quote(lay.batch),
         "--subject",

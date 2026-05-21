@@ -36,6 +36,7 @@ from nvitk.cluster.sge import (
     SgeResources,
     SingularityBinds,
     StageSpec,
+    python_module_argv,
     submit_stage,
     write_script_header,
 )
@@ -195,10 +196,8 @@ def _emit_stage0_convert(
 ) -> str:
     """Append one stage0_c :func:`~nvitk.cluster.sge.submit_stage` block; return job id."""
     binds = SingularityBinds()
-    script = f"{binds.src}nvitk/pipes/qvtpy/stage0_convert.py"
     cmd_parts: list[str] = [
-        "python",
-        shlex.quote(script),
+        *python_module_argv("nvitk.pipes.qvtpy.stage0_convert"),
         "--subject",
         shlex.quote(subject),
         "--dicom-root",
@@ -938,3 +937,7 @@ __all__ = [
     "STAGE_LOC",
     "STAGE_MEASURE",
 ]
+
+
+if __name__ == "__main__":
+    main()

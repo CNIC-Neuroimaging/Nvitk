@@ -13,8 +13,15 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy as array_to_numpy
-from nvitk.core.backend import set_global_backend, using
+from nvitk.core.backend import using
+from nvitk.gui.gui_backend import (
+    layer_data_for_tool,
+    napari_array,
+    run_with_backend,
+    setup_tool_backend,
+)
 from nvitk.gui.log_panel import gui_log, run_subprocess_logged
+from nvitk.gui.spatial import nvitk_metadata_from_layer
 from nvitk.gui.spatial import layer_to_image
 from nvitk.gui.tools_registry import tool_by_id
 from nvitk.types import Image
@@ -49,9 +56,31 @@ def _format_metrics(metrics: dict[str, Any]) -> str:
 
 def _setup_gui_backend(use_gpu: bool) -> str:
     """Set process default backend: CuPy (with fallback) or CPU/NumPy."""
-    if use_gpu:
-        return set_global_backend("cupy", allow_fallback=True)
-    return set_global_backend("cpu", allow_fallback=False)
+    return setup_tool_backend(use_gpu)
+
+
+def _layer_source_path(layer: Any) -> Path | None:
+    meta = nvitk_metadata_from_layer(layer)
+    src = meta.get("source")
+    if not src:
+        return None
+    path = Path(str(src))
+    return path if path.is_file() else None
+
+
+def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
+    """Return on-disk NIfTI for *layer*, exporting a temp file when needed."""
+    src = _layer_source_path(layer)
+    if src is not None:
+        name = src.name.lower()
+        if name.endswith(".nii") or name.endswith(".nii.gz"):
+            return src
+    from nvitk.io import imsave
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
+    path = tmp_dir / "volume.nii.gz"
+    imsave(path, layer_to_image(layer))
+    return path
 
 
 def _run_pipeline_cli(spec: Any, params: dict[str, Any]) -> None:
@@ -123,16 +152,8 @@ def prepare_layer_data(
 
 
 def coerce_tool_output(out: Any) -> np.ndarray:
-    if isinstance(out, Image):
-        return np.asarray(out.data)
-    if isinstance(out, tuple):
-        if len(out) == 0:
-            raise ValueError("Tool returned an empty tuple.")
-        out = out[0]
-    arr = np.asarray(out)
-    if arr.dtype == object:
-        raise ValueError("Tool returned an inhomogeneous object array.")
-    return arr
+    """Napari-safe NumPy output (never implicit CuPy → NumPy conversion)."""
+    return napari_array(out)
 
 
 def _morph_common(img: Image, op: str, params: dict[str, Any], *, use_gpu: bool) -> np.ndarray:
@@ -153,8 +174,7 @@ def _morph_common(img: Image, op: str, params: dict[str, Any], *, use_gpu: bool)
     }
     if op == "fill_holes":
         kw = {"connectivity": kw["connectivity"]}
-    bk = "cupy" if use_gpu else "numpy"
-    with using(bk):
+    with run_with_backend(use_gpu):
         return coerce_tool_output(fn(img, **kw))
 
 
@@ -179,7 +199,7 @@ def run_gui_tool(
         return None
 
     bk = _setup_gui_backend(use_gpu)
-    data = np.asarray(layer.data)
+    data = layer_data_for_tool(layer.data, use_gpu=use_gpu)
     if bk == "numpy":
         data = np.asarray(array_to_numpy(data))
 
@@ -230,21 +250,22 @@ def run_gui_tool(
             binary_mask_sliding_threshold_3d,
         )
 
-        arr = np.asarray(img.data, dtype=np.float64)
+        arr = layer_data_for_tool(img.data, use_gpu=use_gpu)
         step = float(params.get("step") or 0.001)
         up = float(params.get("up_thresh") or 0.8)
         smf = int(params.get("smf") or 10)
-        with using(bk):
+        with run_with_backend(use_gpu):
             if arr.ndim == 2:
-                return binary_mask_sliding_threshold_2d(
+                out = binary_mask_sliding_threshold_2d(
                     arr, step=step, up_thresh=up, smf=smf
                 )
-            if arr.ndim == 3:
-                mask, _ = binary_mask_sliding_threshold_3d(
+            elif arr.ndim == 3:
+                out, _ = binary_mask_sliding_threshold_3d(
                     arr, step=step, up_thresh=up, smf=smf
                 )
-                return mask
-        raise ValueError(f"Sliding threshold expects 2D or 3D data, got {arr.ndim}D")
+            else:
+                raise ValueError(f"Sliding threshold expects 2D or 3D data, got {arr.ndim}D")
+            return coerce_tool_output(out)
 
     if tool_id in ("dilate", "erode", "open", "close", "fill_holes"):
         return _morph_common(img, tool_id, params, use_gpu=use_gpu)
@@ -557,6 +578,72 @@ def run_gui_tool(
             "eICAB is cluster-oriented. Use: nvitk-eicab --help "
             "or run the QVTpy / PESA-FAT pipeline stages with eICAB enabled."
         )
+        return None
+
+    if tool_id == "reg_flirt_rigid":
+        from nvitk.registration.fsl.flirt import flirt_register_rigid
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        moving_path = _ensure_nifti_path(layer, prefix="flirt_moving")
+        fixed_path = _ensure_nifti_path(ref_layer, prefix="flirt_fixed")
+        out_dir = Path(
+            str(params.get("output_dir") or "").strip()
+            or tempfile.mkdtemp(prefix="nvitk_flirt_reg_")
+        )
+        dof = int(params.get("dof") or 6)
+        cost = str(params.get("cost") or "corratio").strip() or "corratio"
+        searchr = float(params.get("searchr_x") or 0)
+        searchr_x = searchr if searchr > 0 else None
+        warped_name = str(params.get("warped_name") or "moving_warped.nii.gz").strip()
+        matrix_name = str(params.get("matrix_name") or "affine.mat").strip()
+        notify(f"FLIRT rigid: moving→fixed, output {out_dir}")
+        res = flirt_register_rigid(
+            moving_path,
+            fixed_path,
+            out_dir,
+            dof=dof,
+            cost=cost,
+            warped_name=warped_name,
+            matrix_name=matrix_name,
+            searchr_x=searchr_x,
+        )
+        notify(f"FLIRT matrix: {res.matrix_path}")
+        if res.warped_path is not None:
+            notify(f"FLIRT warped: {res.warped_path}")
+            from nvitk.io import imread
+
+            warped = imread(res.warped_path)
+            viewer.add_image(
+                coerce_tool_output(warped),
+                **_layer_kwargs_from(ref_layer, "flirt_warped"),
+            )
+        return None
+
+    if tool_id == "reg_flirt_apply":
+        from nvitk.registration.fsl.flirt import flirt_apply_rigid
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        mat_path = Path(str(params.get("mat_path") or "").strip())
+        if not mat_path.is_file():
+            raise ValueError("Set a valid FLIRT matrix path (.mat).")
+        out_s = str(params.get("out_path") or "").strip()
+        if out_s:
+            out_path = Path(out_s)
+        else:
+            out_path = Path(tempfile.mkdtemp(prefix="nvitk_flirt_apply_")) / "resampled.nii.gz"
+        in_path = _ensure_nifti_path(layer, prefix="flirt_in")
+        ref_path = _ensure_nifti_path(ref_layer, prefix="flirt_ref")
+        interp = str(params.get("interp") or "trilinear").strip() or "trilinear"
+        notify(f"FLIRT apply: {in_path.name} → {out_path}")
+        flirt_apply_rigid(in_path, ref_path, mat_path, out_path, interp=interp)
+        from nvitk.io import imread
+
+        out_img = imread(out_path)
+        viewer.add_image(
+            coerce_tool_output(out_img),
+            **_layer_kwargs_from(ref_layer, "flirt_applied"),
+        )
+        notify(f"FLIRT output layer from {out_path}")
         return None
 
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")

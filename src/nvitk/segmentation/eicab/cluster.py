@@ -11,6 +11,7 @@ from nvitk.cluster.sge import (
     SingularityBinds,
     SgeResources,
     StageSpec,
+    python_module_argv,
     submit_stage,
 )
 
@@ -78,10 +79,8 @@ def build_run_job_python_cmd(
     binds: SingularityBinds,
 ) -> str:
     module = "nvitk.segmentation.eicab.run_job"
-    script = f"{binds.src}{module.replace('.', '/')}.py"
     parts: list[str] = [
-        "python",
-        shlex.quote(script),
+        *python_module_argv(module),
         "--input",
         shlex.quote(input_container_path),
         "--output",

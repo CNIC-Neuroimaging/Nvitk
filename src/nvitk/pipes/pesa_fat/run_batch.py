@@ -67,6 +67,7 @@ from nvitk.cluster.sge import (
     SgeResources,
     SingularityBinds,
     StageSpec,
+    python_module_argv,
     submit_stage,
     write_script_header,
 )
@@ -97,22 +98,12 @@ _AGGREGATE_MODULE = "nvitk.pipes.pesa_fat.common.batch_stage3_aggregate"
 _STAGE4_QC_MODULE = "nvitk.pipes.pesa_fat.common.stage4_qc"
 
 
-def _module_to_script(binds_src: str, module: str) -> str:
-    """Convert ``nvitk.pipes.foo.bar`` to the container-side script path
-    ``<binds_src>nvitk/pipes/foo/bar.py`` so workers can invoke the file
-    directly (``python <path>.py ...``) instead of ``python -m <module>``.
-    """
-    return f"{binds_src}{module.replace('.', '/')}.py"
-
-
 def _stage0_python_cmd(subject: str, lay: BatchLayout, log_level: str) -> str:
     """Stage 0 inside the container reads from the mounted DICOM root and
     writes to the mounted NIfTI root; use container paths here."""
-    script = _module_to_script(SingularityBinds().src, _STAGE0_MODULE)
     return " ".join(
         [
-            "python",
-            shlex.quote(script),
+            *python_module_argv(_STAGE0_MODULE),
             "--batch",
             shlex.quote(lay.batch),
             "--subject",
@@ -159,11 +150,9 @@ def _stage4_qc_python_cmd(
     log_level: str,
 ) -> str:
     binds = SingularityBinds()
-    script = _module_to_script(binds.src, _STAGE4_QC_MODULE)
     return " ".join(
         [
-            "python",
-            shlex.quote(script),
+            *python_module_argv(_STAGE4_QC_MODULE),
             "--batch",
             shlex.quote(lay.batch),
             "--subjects",
@@ -187,11 +176,9 @@ def _aggregate_python_cmd(
     log_level: str,
 ) -> str:
     binds = SingularityBinds()
-    script = _module_to_script(binds.src, _AGGREGATE_MODULE)
     return " ".join(
         [
-            "python",
-            shlex.quote(script),
+            *python_module_argv(_AGGREGATE_MODULE),
             "--batch",
             shlex.quote(lay.batch),
             "--subjects",

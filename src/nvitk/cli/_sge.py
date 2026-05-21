@@ -11,6 +11,7 @@ from nvitk.cluster.sge import (
     SgeResources,
     SingularityBinds,
     StageSpec,
+    python_module_argv,
     submit_stage,
     write_script_header,
 )
@@ -62,11 +63,10 @@ def build_worker_command(
     extra_args: list[str],
 ) -> str:
     """Build python command run inside Singularity (container paths)."""
-    src = "/nvitk/src"
-    script = f"{src}/nvitk/cli/{module_path}"
+    stem = module_path.removesuffix(".py")
+    module = f"nvitk.cli.{stem}"
     parts = [
-        "python",
-        shlex.quote(script),
+        *python_module_argv(module),
         shlex.quote(subcommand),
         "-i",
         shlex.quote(container_input),

@@ -75,6 +75,16 @@ class StageSpec:
     extra_host_binds: tuple[tuple[Path, str], ...] = field(default_factory=tuple)
 
 
+def python_module_argv(module: str, *, python: str = "python") -> list[str]:
+    """Argv prefix for in-container workers: ``python -m <module>``.
+
+    Use with relative-import package modules (e.g. ``nvitk.pipes.qvtpy.stage0_convert``).
+    Requires ``PYTHONPATH`` to include the tree that contains the ``nvitk`` package
+    (typically ``/nvitk/src/`` via :class:`SingularityBinds`).
+    """
+    return [python, "-m", module]
+
+
 def build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str:
     """Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds."""
     env_exports = " ".join(
@@ -439,6 +449,7 @@ __all__ = [
     "StageSpec",
     "build_qsub_command",
     "build_singularity_command",
+    "python_module_argv",
     "emit_sge_submission_summary_to_terminal",
     "format_sge_submission_summary",
     "submit_chain",

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from click.core import UNSET as CLICK_UNSET
 from qtpy.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -106,12 +107,13 @@ class PipelineCliForm(QGroupBox):
             label = f"{name}{' *' if param.required else ''}"
             if isinstance(param, click.Option) and param.is_flag:
                 w = QCheckBox(param.help or name)
-                w.setChecked(bool(param.default))
+                default = param.default
+                w.setChecked(bool(default) if default is not CLICK_UNSET else False)
                 self._form.addRow(label, w)
                 self._fields.append(_Field(param, w))
                 continue
             edit = QLineEdit()
-            if param.default is not None and param.default is not click.UNSET:
+            if param.default is not None and param.default is not CLICK_UNSET:
                 edit.setPlaceholderText(str(param.default))
             if param.help:
                 edit.setToolTip(param.help)

@@ -28,6 +28,7 @@ from nvitk.cluster.sge import (
     SgeResources,
     SingularityBinds,
     StageSpec,
+    python_module_argv,
     submit_stage,
 )
 from nvitk.core.logger import Logger
@@ -241,10 +242,8 @@ def submit_subject_sge(
     """Emit or submit one stage-5 SGE job. Returns qsub job id."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
-    script = f"{binds.src}nvitk/pipes/qvtpy/stage5_loc_generation.py"
     parts = [
-        "python",
-        shlex.quote(script),
+        *python_module_argv("nvitk.pipes.qvtpy.stage5_loc_generation"),
         "--subject",
         shlex.quote(subject),
         "--nifti-root",
@@ -330,3 +329,7 @@ def main(
 
 
 __all__ = ["main", "run_subject", "submit_subject_sge"]
+
+
+if __name__ == "__main__":
+    main()

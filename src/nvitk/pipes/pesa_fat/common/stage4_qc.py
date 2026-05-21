@@ -284,3 +284,7 @@ def main(
 
 
 __all__ = ["main", "run_qc", "RES_QC_DIR"]
+
+
+if __name__ == "__main__":
+    main()

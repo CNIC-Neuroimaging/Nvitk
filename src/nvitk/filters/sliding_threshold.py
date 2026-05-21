@@ -124,7 +124,8 @@ def binary_mask_sliding_threshold_2d(
         opt_frac = float(x[idx])
 
     thresh = max_val * opt_frac
-    return (img > thresh).astype(bool, copy=False)
+    segment = img > thresh
+    return as_backend_array(to_numpy(segment).astype(bool, copy=False))
 
 
 __all__ = [
