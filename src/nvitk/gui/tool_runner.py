@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +109,11 @@ def _unique_labels(data: np.ndarray) -> list[int]:
     return [int(x) for x in labels if int(x) != 0]
 
 
+def _label_ids_array(label_ids: list[int]) -> np.ndarray:
+    """Backend array of label ids for :func:`np.isin` (CuPy rejects plain lists)."""
+    return array_to_numpy(label_ids)
+
+
 def prepare_layer_data(
     data: np.ndarray,
     *,
@@ -127,7 +134,7 @@ def prepare_layer_data(
     if mode == "label":
         if not label_ids:
             raise ValueError("Label mode requires one or more label ids.")
-        mask = np.isin(arr, label_ids)
+        mask = np.isin(arr, _label_ids_array(label_ids))
         if not mask.any():
             raise ValueError(f"No voxels found for label id(s): {label_ids}")
         return mask.astype(np.uint8), f"label_{'_'.join(str(i) for i in label_ids)}"
@@ -185,6 +192,18 @@ def run_gui_tool(
 
     if spec.run_mode == "pipeline":
         _run_pipeline_cli(spec, params)
+        return None
+
+    if tool_id == "viz_flowshow":
+        _run_flowshow_tool(params)
+        return None
+
+    if tool_id == "qvtpy_locs":
+        _run_qvtpy_locs(viewer, layer, params)
+        return None
+
+    if tool_id == "measure_loc_hemodynamics":
+        _run_measure_loc_hemodynamics(viewer, layer, params)
         return None
 
     bk = get_global_backend()
@@ -426,6 +445,18 @@ def run_gui_tool(
         notify(_format_metrics({k: round(float(v), 6) for k, v in metrics.items()}))
         return None
 
+    if tool_id == "measure_mask_hemodynamics":
+        mask_vol = data if target_mode in ("label", "all_labels", "raw") else proc_data
+        lids = params.get("selected_label_ids") or label_ids
+        if target_mode == "all_labels" and not lids:
+            lids = _unique_labels(mask_vol)
+        _run_measure_mask_hemodynamics(viewer, layer, mask_vol, params, label_ids=lids)
+        return None
+
+    if tool_id == "viz_pet_hotspots":
+        _run_viz_pet_hotspots(viewer, layer, proc_data, params, label_ids=label_ids)
+        return None
+
     if tool_id == "siphon_correct":
         from nvitk.morphology.centerline_siphon import correct_siphon_centerlines
 
@@ -503,23 +534,62 @@ def run_gui_tool(
         return None
 
     if tool_id == "seg_region_grow":
-        from nvitk.segmentation.region_growing import region_grow_binary_mask
+        from nvitk.segmentation.region_growing import (
+            forbidden_from_label_mask,
+            forbidden_other_labels,
+            merge_forbidden,
+            region_grow_binary_mask,
+        )
 
         ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
         mask = as_backend_array(proc_data).astype(bool).copy()
         intensity = as_backend_array(ref.data).astype(np.float64)
         if mask.shape != intensity.shape:
             raise ValueError("Mask and intensity layers must have the same shape.")
-        sz = int(params.get("seed_z") or 0)
-        sy = int(params.get("seed_y") or 0)
-        sx = int(params.get("seed_x") or 0)
+        seed_ids = list(params.get("selected_label_ids") or label_ids or [])
+        if bool(params.get("seed_from_label")) and seed_ids:
+            from nvitk.gui.tool_presets import label_centroid_voxel
+
+            sz, sy, sx = label_centroid_voxel(mask, int(seed_ids[0]))
+        else:
+            sz = int(params.get("seed_z") or 0)
+            sy = int(params.get("seed_y") or 0)
+            sx = int(params.get("seed_x") or 0)
         mask[sz, sy, sx] = True
         thresh = float(params.get("threshold") or 0.0)
+        bar_rad = int(params.get("barrier_radius_vox") or 0)
+        forbidden = None
+        bar_name = str(params.get("barrier_layer") or "").strip()
+        if bar_name:
+            bar_layer = _resolve_layer(viewer, bar_name)
+            bar_vol = as_backend_array(layer_data_for_tool(bar_layer.data))
+            if bar_vol.shape != mask.shape:
+                raise ValueError("Barrier layer must match the active mask shape.")
+            forbidden = forbidden_from_label_mask(bar_vol, radius_vox=bar_rad)
+        if bool(params.get("barrier_other_labels")):
+            label_vol = as_backend_array(data)
+            if label_vol.shape != mask.shape:
+                raise ValueError("Active layer shape mismatch for label barriers.")
+            exclude = [int(x) for x in seed_ids]
+            if not exclude:
+                growing = np.asarray(mask, dtype=bool)
+                for lid in np.unique(to_numpy(label_vol)):
+                    lid = int(lid)
+                    if lid != 0 and np.any(label_vol[growing] == lid):
+                        exclude.append(lid)
+            if not exclude:
+                raise ValueError(
+                    "Barrier other labels: select label id(s) or seed a labeled region."
+                )
+            other_forb = forbidden_other_labels(label_vol, exclude, radius_vox=bar_rad)
+            forbidden = merge_forbidden(forbidden, other_forb)
         region_grow_binary_mask(
             mask,
             intensity,
             intensity_frac=thresh,
             abs_floor=None,
+            forbidden=forbidden,
+            polarity="hyperintense",
         )
         return mask.astype(np.uint8)
 
@@ -636,6 +706,288 @@ def run_gui_tool(
         return None
 
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
+
+
+def _layer_spacing(layer: Any) -> tuple[float, float, float]:
+    from nvitk.gui.spatial import layer_spacing
+
+    sp = layer_spacing(layer)
+    if sp is not None and len(sp) >= 3:
+        return (float(sp[0]), float(sp[1]), float(sp[2]))
+    return (1.0, 1.0, 1.0)
+
+
+def _phase_arrays_from_layers_or_disk(
+    viewer: Any,
+    params: dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[float, float, float]]:
+    ap_name = str(params.get("ap_layer") or "").strip()
+    rl_name = str(params.get("rl_layer") or "").strip()
+    fh_name = str(params.get("fh_layer") or "").strip()
+    if ap_name and rl_name and fh_name:
+        ap = as_backend_array(_resolve_layer(viewer, ap_name).data).astype(np.float64)
+        rl = as_backend_array(_resolve_layer(viewer, rl_name).data).astype(np.float64)
+        fh = as_backend_array(_resolve_layer(viewer, fh_name).data).astype(np.float64)
+        return ap, rl, fh, _layer_spacing(_resolve_layer(viewer, ap_name))
+
+    subject = str(params.get("subject") or "").strip()
+    nifti_root = str(params.get("nifti_root") or "").strip()
+    if not subject or not nifti_root:
+        raise ValueError("Provide AP/RL/FH layers or subject + nifti_root.")
+    from nvitk.io.conversors.phase2volume import discover_phase_inputs
+    from nvitk.io.imageio import imread
+
+    root = Path(nifti_root)
+    inputs = discover_phase_inputs(root / subject)
+    ap_img = imread(inputs.ap_phase_path)
+    rl_img = imread(inputs.rl_phase_path)
+    fh_img = imread(inputs.fh_phase_path)
+    ap = as_backend_array(ap_img.data).astype(np.float64)
+    rl = as_backend_array(rl_img.data).astype(np.float64)
+    fh = as_backend_array(fh_img.data).astype(np.float64)
+    sp = ap_img.spacing
+    if sp is not None and len(sp) >= 3:
+        voxel_spacing = (float(sp[0]), float(sp[1]), float(sp[2]))
+    else:
+        voxel_spacing = (1.0, 1.0, 1.0)
+    return ap, rl, fh, voxel_spacing
+
+
+def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    from nvitk.io.imageio import imread
+
+    sub = nifti_root / subject / "4DFlow"
+    cd_p = sub / "ComplexDifference_3D.nii.gz"
+    if not cd_p.is_file():
+        cd_p = sub / "ComplexDifference_3D.nii"
+    cd = as_backend_array(imread(cd_p).data).astype(np.float64)
+    mag = cd
+    angio = sub / "Angiography_3D.nii.gz"
+    if angio.is_file():
+        mag = as_backend_array(imread(angio).data).astype(np.float64)
+    vel = np.abs(cd)
+    vmag = sub / "VelocityMagnitude_3D.nii.gz"
+    if vmag.is_file():
+        vel = as_backend_array(imread(vmag).data).astype(np.float64)
+    return mag, cd, vel
+
+
+def _run_flowshow_tool(params: dict[str, Any]) -> None:
+    argv = ["nvitk-qvtpy-flowshow"]
+    subject = str(params.get("subject") or "").strip()
+    if subject:
+        argv.extend(["--subject", subject])
+    nifti_root = str(params.get("nifti_root") or "").strip()
+    if nifti_root:
+        argv.extend(["--nifti-root", nifti_root])
+    batch = str(params.get("batch") or "").strip()
+    if batch:
+        argv.extend(["--batch", batch])
+    out_root = str(params.get("pipeline_output_root") or "").strip()
+    if out_root:
+        argv.extend(["--pipeline-output-root", out_root])
+    vm = str(params.get("vessel_mask") or "").strip()
+    if vm:
+        argv.extend(["--vessel-mask", vm])
+    if bool(params.get("notebook")):
+        argv.append("--notebook")
+    notify(f"Launching FlowShow: {' '.join(argv)}")
+    code = run_subprocess_logged(argv)
+    if code == 0:
+        notify("FlowShow finished.")
+    else:
+        notify(f"FlowShow exited with code {code}", error=True)
+
+
+def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    from nvitk.gui.loc_points import add_locs_layer, load_locs_csv
+    from nvitk.pipes.qvtpy import config as qcfg
+
+    mode = str(params.get("loc_mode") or "load_csv").strip()
+    if mode == "generate":
+        subject = str(params.get("subject") or "").strip()
+        nifti_root = str(params.get("nifti_root") or "").strip()
+        output_root = str(params.get("output_root") or "").strip()
+        if not subject or not nifti_root or not output_root:
+            raise ValueError("Generate mode requires subject, nifti_root, and output_root.")
+        argv = [
+            "qvtpy-stage5-loc",
+            "--subject",
+            subject,
+            "--nifti-root",
+            nifti_root,
+            "--output-root",
+            output_root,
+            "--loc-arterial-strategy",
+            str(params.get("loc_arterial_strategy") or "qvtpy"),
+            "--cross-section-radius-vox",
+            str(float(params.get("cross_section_radius_vox") or 10.0)),
+        ]
+        notify(f"Running stage5 LOC generation: {' '.join(argv)}")
+        code = run_subprocess_logged(argv)
+        if code != 0:
+            notify(f"Stage5 failed (code {code})", error=True)
+            return
+        csv_path = (
+            Path(output_root) / subject / qcfg.QVT_SUBDIR / qcfg.STAGE5_LOC_DIR / "locs.csv"
+        )
+    else:
+        csv_path = Path(str(params.get("locs_csv") or "").strip())
+    rows = load_locs_csv(csv_path)
+    ref = layer
+    add_locs_layer(viewer, rows, reference_layer=ref)
+    notify(f"Loaded {len(rows)} LOCs from {csv_path}")
+
+
+def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    from nvitk.gui.loc_points import load_locs_csv
+    from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
+    from nvitk.pipes.qvtpy import config as qcfg
+    from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
+
+    csv_s = str(params.get("locs_csv") or "").strip()
+    subject = str(params.get("subject") or "").strip()
+    output_root = str(params.get("output_root") or "").strip()
+    if not csv_s and subject and output_root:
+        csv_path = (
+            Path(output_root) / subject / qcfg.QVT_SUBDIR / qcfg.STAGE5_LOC_DIR / "locs.csv"
+        )
+    else:
+        csv_path = Path(csv_s)
+    loc_rows = load_locs_csv(csv_path)
+
+    ap, rl, fh, voxel_spacing = _phase_arrays_from_layers_or_disk(viewer, params)
+    vx, vy, vz = velocity_mm_s_from_phases(ap, rl, fh)
+
+    nifti_root = str(params.get("nifti_root") or "").strip()
+    volume_seg = None
+    measure_resegment = bool(params.get("measure_resegment", True))
+    if not measure_resegment and subject and nifti_root:
+        seg_p = (
+            Path(output_root or ".")
+            / subject
+            / qcfg.QVT_SUBDIR
+            / qcfg.STAGE4_SEG_DIR
+            / "seg_4dflow.nii.gz"
+        )
+        if seg_p.is_file():
+            from nvitk.io.imageio import imread
+
+            volume_seg = as_backend_array(imread(seg_p).data).astype(np.int32)
+
+    if subject and nifti_root:
+        mag, cd, vel_mag = _load_contrast_volumes(Path(nifti_root), subject)
+    else:
+        ref_name = str(params.get("reference_layer") or "").strip()
+        if ref_name:
+            ref_data = as_backend_array(_resolve_layer(viewer, ref_name).data).astype(np.float64)
+            mag = cd = vel_mag = ref_data
+        else:
+            vel_mag = np.sqrt(vx[..., 0] ** 2 + vy[..., 0] ** 2 + vz[..., 0] ** 2)
+            mag = cd = vel_mag
+
+    rows_out = run_loc_measurements(
+        loc_rows,
+        mag=mag,
+        cd=cd,
+        vel_mag=vel_mag,
+        vx=vx,
+        vy=vy,
+        vz=vz,
+        voxel_spacing=voxel_spacing,
+        cross_section_radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
+        measure_resegment=measure_resegment,
+        volume_seg=volume_seg,
+    )
+    out_csv = csv_path.parent / "loc_measurements.csv"
+    if rows_out:
+        with out_csv.open("w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows_out[0].keys()))
+            w.writeheader()
+            w.writerows(rows_out)
+    lines = [
+        f"{r['vessel_name']}: PI={r['loc_pi']:.3f} RI={r['loc_ri']:.3f} flow={r['loc_mean_flow_ml_s']:.2f} ml/s"
+        for r in rows_out[:12]
+    ]
+    if len(rows_out) > 12:
+        lines.append(f"... ({len(rows_out)} vessels total)")
+    notify(f"Wrote {out_csv}\n" + "\n".join(lines))
+
+
+def _run_measure_mask_hemodynamics(
+    viewer: Any,
+    layer: Any,
+    mask_data: np.ndarray,
+    params: dict[str, Any],
+    *,
+    label_ids: list[int] | None,
+) -> None:
+    from nvitk.measure.mask_hemodynamics import measure_mask_hemodynamics
+
+    lids = list(label_ids or []) or [int(params.get("label_id") or 1)]
+    ap, rl, fh, voxel_spacing = _phase_arrays_from_layers_or_disk(viewer, params)
+    ref_name = str(params.get("reference_layer") or "").strip()
+    mag = cd = vel_mag = None
+    if ref_name:
+        ref_data = as_backend_array(_resolve_layer(viewer, ref_name).data).astype(np.float64)
+        mag = cd = vel_mag = ref_data
+    method = str(params.get("hemo_method") or "both")
+    lines: list[str] = []
+    for lid in lids:
+        results = measure_mask_hemodynamics(
+            mask_data,
+            ap,
+            rl,
+            fh,
+            mag=mag,
+            cd=cd,
+            vel_mag=vel_mag,
+            label_id=int(lid),
+            method=method,  # type: ignore[arg-type]
+            voxel_spacing=voxel_spacing,
+            radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
+            measure_resegment=bool(params.get("measure_resegment", True)),
+            volume_seg=mask_data if not bool(params.get("measure_resegment", True)) else None,
+        )
+        for res in results:
+            extra = ""
+            if res.mean_flow_ml_s is not None:
+                extra = f" flow={res.mean_flow_ml_s:.2f} ml/s"
+            lines.append(
+                f"Label {lid} [{res.method}]: PI={res.pi:.3f} RI={res.ri:.3f}{extra} — {res.note}"
+            )
+    notify("\n".join(lines))
+
+
+def _run_viz_pet_hotspots(
+    viewer: Any,
+    layer: Any,
+    mask_data: np.ndarray,
+    params: dict[str, Any],
+    *,
+    label_ids: list[int] | None,
+) -> None:
+    ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
+    suv = as_backend_array(ref.data)
+    mask = mask_data
+    lids = label_ids
+
+    def _show() -> None:
+        from nvitk.viz.pet_hotspots import show_hotspots
+
+        show_hotspots(
+            suv,
+            mask,
+            label_ids=lids,
+            hotspot=str(params.get("hotspot") or "top_percent"),
+            top_percent=float(params.get("top_percent") or 0.1),
+            max_points=int(params.get("max_points") or 20000),
+            cmap=str(params.get("cmap") or "turbo"),
+            show=True,
+        )
+
+    threading.Thread(target=_show, daemon=True).start()
+    notify("Opened PyVista hotspots window (background thread).")
 
 
 def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:

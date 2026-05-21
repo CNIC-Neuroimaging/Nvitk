@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from qtpy.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from nvitk.gui.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.label_catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
 from nvitk.gui.label_selector import LabelSelectorWidget
 from nvitk.gui.pipeline_form import PipelineCliForm
+from nvitk.gui.tool_presets import cursor_voxel_indices
 from nvitk.gui.tool_panel import build_tool_panel
 from nvitk.gui.tools_registry import (
     TOOL_IDS_USING_LABEL_PICKER,
@@ -121,9 +122,40 @@ def build_tools_dock(
         tool_panel.label_ids.visible = (not show_labels) and tm == "label"
         if hasattr(tool_panel, "correction_ids"):
             tool_panel.correction_ids.visible = (tid == "siphon_correct") and (not show_labels)
+        if hasattr(tool_panel, "pipeline_preset"):
+            tool_panel.pipeline_preset.visible = tid == "seg_region_grow"
+        if hasattr(tool_panel, "seed_from_label"):
+            tool_panel.seed_from_label.visible = tid == "seg_region_grow"
+        cursor_row.setVisible(tid == "seg_region_grow")
+
+    cursor_row = QWidget()
+    cursor_layout = QHBoxLayout()
+    cursor_layout.setContentsMargins(0, 0, 0, 0)
+    btn_cursor_seed = QPushButton("Use cursor as seed")
+    cursor_layout.addWidget(btn_cursor_seed)
+    cursor_row.setLayout(cursor_layout)
+
+    def _apply_cursor_seed() -> None:
+        layer = _active_layer()
+        if layer is None:
+            return
+        try:
+            z, y, x = cursor_voxel_indices(viewer, layer)
+        except Exception as exc:
+            from nvitk.gui.tool_runner import notify
+
+            notify(str(exc), error=True)
+            return
+        for name, val in (("seed_z", z), ("seed_y", y), ("seed_x", x)):
+            w = getattr(tool_panel, name, None)
+            if w is not None:
+                w.value = val
+
+    btn_cursor_seed.clicked.connect(_apply_cursor_seed)
 
     layout.addWidget(build_gpu_toggle_button())
     layout.addWidget(tool_panel.native)
+    layout.addWidget(cursor_row)
     layout.addWidget(label_selector)
     layout.addWidget(totalseg_roi)
     layout.addWidget(pipeline_form)

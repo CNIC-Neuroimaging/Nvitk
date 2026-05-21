@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from magicgui import magicgui
 
+from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
 from nvitk.gui.tools_registry import (
     categories,
@@ -49,6 +50,9 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "smf",
         "min_size",
         "reference_layer",
+        "barrier_layer",
+        "barrier_other_labels",
+        "barrier_radius_vox",
         "factor",
         "order",
         "radius_vox",
@@ -65,6 +69,28 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "seed_y",
         "seed_x",
         "threshold",
+        "pipeline_preset",
+        "seed_from_label",
+        "loc_mode",
+        "locs_csv",
+        "subject",
+        "nifti_root",
+        "output_root",
+        "batch",
+        "pipeline_output_root",
+        "vessel_mask",
+        "notebook",
+        "hotspot",
+        "top_percent",
+        "max_points",
+        "cmap",
+        "ap_layer",
+        "rl_layer",
+        "fh_layer",
+        "loc_arterial_strategy",
+        "cross_section_radius_vox",
+        "measure_resegment",
+        "hemo_method",
     )
     for name in all_names:
         sub = getattr(widget, name, None)
@@ -73,13 +99,18 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
 
 
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
-    ref = getattr(widget, "reference_layer", None)
-    if ref is None:
-        return
     names = [lyr.name for lyr in viewer.layers]
-    ref.choices = names
-    if names and ref.value not in names:
-        ref.value = names[0]
+    for attr in ("reference_layer", "barrier_layer", "ap_layer", "rl_layer", "fh_layer"):
+        ref = getattr(widget, attr, None)
+        if ref is None:
+            continue
+        ref.choices = names
+        if names and ref.value not in names:
+            ref.value = names[0] if attr == "reference_layer" else ""
+
+
+def _update_phase_layers(widget: Any, viewer: Any) -> None:
+    _update_reference_layers(widget, viewer)
 
 
 def build_tool_panel(
@@ -128,6 +159,14 @@ def build_tool_panel(
             "choices": [""],
             "value": "",
         },
+        barrier_layer={
+            "label": "Barrier mask layer (optional)",
+            "widget_type": "ComboBox",
+            "choices": [""],
+            "value": "",
+        },
+        barrier_other_labels={"label": "Barrier: other labels on active layer", "value": False},
+        barrier_radius_vox={"label": "Barrier dilation (vox)", "min": 0, "max": 32, "value": 3},
         factor={"label": "Isotropy factor (0=auto)", "value": 0.0, "min": 0.0},
         order={"label": "Interpolation order", "min": 0, "max": 5, "value": 1},
         radius_vox={"label": "Oblique half-size", "value": 40.0, "min": 1.0},
@@ -146,7 +185,50 @@ def build_tool_panel(
         seed_z={"label": "Seed Z", "min": 0, "value": 0},
         seed_y={"label": "Seed Y", "min": 0, "value": 0},
         seed_x={"label": "Seed X", "min": 0, "value": 0},
-        threshold={"label": "Intensity threshold", "value": 0.0},
+        threshold={"label": "Intensity fraction", "value": 0.0, "min": 0.0, "max": 1.0},
+        pipeline_preset={
+            "choices": [
+                "Custom",
+                "QVTpy default (frac=0.45)",
+                "QVTpy explore (frac=0.35)",
+                "QVTpy ICA test (frac=0.45)",
+            ],
+            "label": "Pipeline preset",
+            "value": "Custom",
+        },
+        seed_from_label={"label": "Seed from label centroid", "value": False},
+        loc_mode={"choices": ["load_csv", "generate"], "label": "LOC mode", "value": "load_csv"},
+        locs_csv={"label": "LOCs CSV path", "value": ""},
+        subject={"label": "Subject id", "value": ""},
+        nifti_root={"label": "NIfTI root", "value": ""},
+        output_root={"label": "Output root", "value": ""},
+        batch={"label": "Batch folder", "value": ""},
+        pipeline_output_root={"label": "Pipeline output root", "value": ""},
+        vessel_mask={"label": "Vessel mask path", "value": ""},
+        notebook={"label": "FlowShow notebook mode", "value": False},
+        hotspot={
+            "choices": ["top_percent", "top_k", "threshold"],
+            "label": "Hotspot mode",
+            "value": "top_percent",
+        },
+        top_percent={"label": "Top percent", "value": 0.1, "min": 0.01, "max": 100.0},
+        max_points={"label": "Max hotspot points", "min": 100, "max": 500000, "value": 20000},
+        cmap={"label": "Colormap", "value": "turbo"},
+        ap_layer={"label": "AP phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
+        rl_layer={"label": "RL phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
+        fh_layer={"label": "FH phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
+        loc_arterial_strategy={
+            "choices": ["qvtpy", "midpoint"],
+            "label": "Arterial LOC strategy",
+            "value": "qvtpy",
+        },
+        cross_section_radius_vox={"label": "Cross-section radius (vox)", "value": 10.0, "min": 1.0},
+        measure_resegment={"label": "Resegment in-plane", "value": True},
+        hemo_method={
+            "choices": ["pseudo_loc", "voxel_avg", "both"],
+            "label": "Mask hemo method",
+            "value": "both",
+        },
         call_button="Run tool",
     )
     def tool_panel(
@@ -168,6 +250,9 @@ def build_tool_panel(
         smf: int,
         min_size: int,
         reference_layer: str,
+        barrier_layer: str,
+        barrier_other_labels: bool,
+        barrier_radius_vox: int,
         factor: float,
         order: int,
         radius_vox: float,
@@ -183,6 +268,28 @@ def build_tool_panel(
         seed_y: int,
         seed_x: int,
         threshold: float,
+        pipeline_preset: str,
+        seed_from_label: bool,
+        loc_mode: str,
+        locs_csv: str,
+        subject: str,
+        nifti_root: str,
+        output_root: str,
+        batch: str,
+        pipeline_output_root: str,
+        vessel_mask: str,
+        notebook: bool,
+        hotspot: str,
+        top_percent: float,
+        max_points: int,
+        cmap: str,
+        ap_layer: str,
+        rl_layer: str,
+        fh_layer: str,
+        loc_arterial_strategy: str,
+        cross_section_radius_vox: float,
+        measure_resegment: bool,
+        hemo_method: str,
     ) -> None:
         if not viewer.layers:
             notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)
@@ -208,6 +315,10 @@ def build_tool_panel(
             return
 
         _update_reference_layers(tool_panel, viewer)
+        _update_phase_layers(tool_panel, viewer)
+        if tool_id == "seg_region_grow":
+            key = preset_key_from_title(tool_id, pipeline_preset)
+            apply_preset_to_panel(tool_panel, tool_id, key)
         params = _collect_params(tool_panel, tool_id)
         if correction_ids and tool_id == "siphon_correct":
             params["correction_ids"] = correction_ids
@@ -305,6 +416,16 @@ def build_tool_panel(
     tid0 = tool_id_from_label(default_category(), default_operation(default_category()))
     if tid0:
         _set_param_visibility(tool_panel, tid0)
-    _update_reference_layers(tool_panel, viewer)
+        _update_reference_layers(tool_panel, viewer)
+        _update_phase_layers(tool_panel, viewer)
+
+    @tool_panel.pipeline_preset.changed.connect
+    def _on_preset_changed(event) -> None:
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value)
+        if tid != "seg_region_grow":
+            return
+        title = _signal_value(event)
+        key = preset_key_from_title(tid, title)
+        apply_preset_to_panel(tool_panel, tid, key)
 
     return tool_panel

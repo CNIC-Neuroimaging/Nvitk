@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Callable, Literal
+from typing import Callable, Literal, Sequence
 
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 
 setup(globals())
@@ -199,8 +199,66 @@ def region_grow_into_label_volume(
     )
 
 
+def dilate_bool_barrier(mask: np.ndarray, *, radius_vox: int = 0) -> np.ndarray:
+    """Morphologically dilate a boolean forbidden mask."""
+    from nvitk.morphology.binary import dilate
+
+    m = np.asarray(to_numpy(mask), dtype=bool)
+    rad = int(radius_vox)
+    if rad <= 0 or not np.any(m):
+        return m
+    return np.asarray(
+        as_backend_array(dilate(m.astype(np.uint8), footprint=rad, connectivity=1)),
+        dtype=bool,
+    )
+
+
+def forbidden_other_labels(
+    label_volume: np.ndarray,
+    exclude_label_ids: Sequence[int],
+    *,
+    radius_vox: int = 0,
+) -> np.ndarray:
+    """Forbidden mask: voxels labeled as any id except 0 and *exclude_label_ids*."""
+    seg = to_numpy(label_volume)
+    exclude = {int(x) for x in exclude_label_ids}
+    other = np.zeros(seg.shape, dtype=bool)
+    for oid in np.unique(seg):
+        lid = int(oid)
+        if lid == 0 or lid in exclude:
+            continue
+        other |= seg == lid
+    return dilate_bool_barrier(other, radius_vox=radius_vox)
+
+
+def forbidden_from_label_mask(
+    mask: np.ndarray,
+    *,
+    radius_vox: int = 0,
+) -> np.ndarray:
+    """Forbidden mask: any nonzero voxel in *mask* (binary or multilabel)."""
+    arr = to_numpy(mask)
+    forb = arr != 0 if arr.dtype != bool else np.asarray(arr, dtype=bool)
+    return dilate_bool_barrier(forb, radius_vox=radius_vox)
+
+
+def merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None:
+    """OR-combine optional forbidden masks; ``None`` if all inputs are ``None``."""
+    merged: np.ndarray | None = None
+    for m in masks:
+        if m is None:
+            continue
+        b = np.asarray(m, dtype=bool)
+        merged = b if merged is None else (merged | b)
+    return merged
+
+
 __all__ = [
     "IntensityPolarity",
+    "dilate_bool_barrier",
+    "forbidden_from_label_mask",
+    "forbidden_other_labels",
+    "merge_forbidden",
     "region_grow_binary_mask",
     "region_grow_into_label_volume",
 ]

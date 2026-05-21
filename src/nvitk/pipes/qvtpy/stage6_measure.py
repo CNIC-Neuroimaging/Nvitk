@@ -37,20 +37,11 @@ from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_e
 from nvitk.core.logger import Logger
 from nvitk.io.conversors.phase2volume import discover_phase_inputs
 from nvitk.io.imageio import imread
-from nvitk.measure.hemodynamics import (
-    mean_velocity_mm_s,
-    pulsatility_index,
-    resistivity_index,
-    velocity_mm_s_from_phases,
-)
+from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.measure.cross_section import (
-    ThrAlgorithm,
-    cross_section_at_loc,
-    flow_series_ml_s,
-    masked_plane_velocity_series,
-)
+from nvitk.measure.cross_section import ThrAlgorithm
 from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines
+from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
 from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
 from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
@@ -205,98 +196,62 @@ def run_subject(
             log.warning(f"[{subject}] stage6 QC: missing stage3 centerlines, skipping PNGs")
 
     # ---- Per-LOC: resegment, masked-plane flow, PI / RI ----------------------
-    rows_out: list[dict[str, float | int | str]] = []
-    qc_paths: list[str] = []
+    loc_rows: list[dict[str, str]] = []
     with loc_csv.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            vid = int(row["vessel_id"])
-            vname = (row.get("vessel_name") or "").strip() or qvtpy_vessel_name(vid)
-            center = np.array(
-                [
-                    float(row["centerline_x"]),
-                    float(row["centerline_y"]),
-                    float(row["centerline_z"]),
-                ],
-                dtype=np.float64,
-            )
-            tang = np.array(
-                [float(row["tangent_x"]), float(row["tangent_y"]), float(row["tangent_z"])],
-                dtype=np.float64,
-            )
-            xs = cross_section_at_loc(
-                center,
-                tang,
-                mag=mag,
-                cd=cd,
-                vel_mag=vel_mag,
-                voxel_spacing=voxel_spacing,
-                radius_vox=cross_section_radius_vox,
-                cross_section_res=cross_section_res,
-                plane_interp_order=int(cross_section_plane_interp),
-                measure_resegment=measure_resegment,
-                thr_algorithm=measure_thr_algorithm,
-                volume_seg=volume_seg,
-                volume_label_id=vid,
-            )
-            area_mm2 = float(xs.area_mm2)
+        loc_rows = list(csv.DictReader(fh))
 
-            vel_ts = masked_plane_velocity_series(
-                vx,
-                vy,
-                vz,
-                xs,
-                plane_interp_order=int(cross_section_plane_interp),
-            )
-            flow_ts = flow_series_ml_s(vel_ts, area_mm2)
-            flow_2d = flow_ts.reshape(1, -1)
+    rows_out = run_loc_measurements(
+        loc_rows,
+        mag=mag,
+        cd=cd,
+        vel_mag=vel_mag,
+        vx=vx,
+        vy=vy,
+        vz=vz,
+        voxel_spacing=voxel_spacing,
+        cross_section_radius_vox=cross_section_radius_vox,
+        measure_resegment=measure_resegment,
+        thr_algorithm=measure_thr_algorithm,
+        cross_section_res=cross_section_res,
+        cross_section_plane_interp=cross_section_plane_interp,
+        volume_seg=volume_seg,
+    )
+    qc_paths: list[str] = []
+    for row, _rec in zip(loc_rows, rows_out):
+        vid = int(row["vessel_id"])
+        vname = (row.get("vessel_name") or "").strip() or qvtpy_vessel_name(vid)
 
-            rec: dict[str, float | int | str] = {
-                "vessel_id": vid,
-                "vessel_name": vname,
-                "loc_cross_section_radius_vox": float(cross_section_radius_vox),
-                "loc_cross_section_area_mm2": float(area_mm2),
-                "loc_mean_velocity_mm_s": float(abs(mean_velocity_mm_s(vel_ts))),
-                "loc_mean_flow_ml_s": float(abs(np.mean(flow_ts))),
-                "loc_pi": float(pulsatility_index(flow_2d)[0]),
-                "loc_ri": float(resistivity_index(flow_2d)[0]),
-            }
-            for t in range(nt):
-                rec[f"loc_velocity_mm_s_t{t}"] = float(abs(vel_ts[t]))
-                rec[f"loc_flow_ml_s_t{t}"] = float(abs(flow_ts[t]))
-            rows_out.append(rec)
-
-            if arterial_cls is not None and vid in arterial_cls:
-                seg_id = int(row.get("segment_id") or 0)
-                loc_role = str(row.get("loc_role") or "mid")
-                cl_idx = int(row.get("centerline_index") or 0)
-                qc_name = f"{vname}_seg{seg_id}.png"
-                qc_path = qc_dir / qc_name
-                try:
-                    save_loc_cross_section_qc_png(
-                        qc_path,
-                        cd=cd,
-                        mag=mag,
-                        vel_mag=vel_mag,
-                        centerline_pts=arterial_cls[vid],
-                        loc_index=cl_idx,
-                        vessel_name=vname,
-                        segment_id=seg_id,
-                        loc_role=loc_role,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=cross_section_radius_vox,
-                        cross_section_res=cross_section_res,
-                        plane_interp_order=int(cross_section_plane_interp),
-                        measure_resegment=measure_resegment,
-                        thr_algorithm=measure_thr_algorithm,
-                        volume_seg=volume_seg,
-                        volume_label_id=vid,
-                    )
-                    qc_paths.append(str(qc_path.relative_to(out_dir)))
-                except Exception as exc:
-                    import traceback
-                    traceback.print_exc()
-                    log.warning(f"[{subject}] QC PNG failed for {vname}: {exc}")
+        if arterial_cls is not None and vid in arterial_cls:
+            seg_id = int(row.get("segment_id") or 0)
+            loc_role = str(row.get("loc_role") or "mid")
+            cl_idx = int(row.get("centerline_index") or 0)
+            qc_name = f"{vname}_seg{seg_id}.png"
+            qc_path = qc_dir / qc_name
+            try:
+                save_loc_cross_section_qc_png(
+                    qc_path,
+                    cd=cd,
+                    mag=mag,
+                    vel_mag=vel_mag,
+                    centerline_pts=arterial_cls[vid],
+                    loc_index=cl_idx,
+                    vessel_name=vname,
+                    segment_id=seg_id,
+                    loc_role=loc_role,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=cross_section_radius_vox,
+                    cross_section_res=cross_section_res,
+                    plane_interp_order=int(cross_section_plane_interp),
+                    measure_resegment=measure_resegment,
+                    thr_algorithm=measure_thr_algorithm,
+                    volume_seg=volume_seg,
+                    volume_label_id=vid,
+                )
+                qc_paths.append(str(qc_path.relative_to(out_dir)))
+            except Exception as exc:
+                import traceback
+                traceback.print_exc()
+                log.warning(f"[{subject}] QC PNG failed for {vname}: {exc}")
 
     # ---- Write loc_measurements.csv + measure_meta.json ----------------------
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
