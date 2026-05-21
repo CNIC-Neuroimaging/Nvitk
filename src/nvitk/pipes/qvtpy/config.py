@@ -73,12 +73,13 @@ SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/QVTPY")
 
 # Default location for emitted submission scripts (parallels eicab.config).
 SGE_SCRIPTS_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/")
-
 CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
-
+NVITK_SRC_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk/src")
 
 _pipe = _sj.merged_pipeline_flat("qvtpy")
 _paths = _sj.paths_section()
+if (v := _paths.get("nvitk_src_dir")) is not None:
+    NVITK_SRC_DIR = Path(str(v))
 if (v := _pipe.get("sge_project")) is not None:
     SGE_PROJECT = str(v)
 if (v := _pipe.get("sge_account")) is not None:
@@ -89,8 +90,6 @@ if (v := _pipe.get("sge_h_vmem")) is not None:
     SGE_H_VMEM = str(v)
 if "sge_queue" in _pipe:
     SGE_QUEUE = _pipe["sge_queue"]
-if (v := _pipe.get("nvitk_src_dir")) is not None:
-    NVITK_SRC_DIR = Path(str(v))
 
 _lg_qvt, _er_qvt = _sj.resolve_log_err_dirs(
     paths=_paths,
