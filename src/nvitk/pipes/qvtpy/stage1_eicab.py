@@ -14,12 +14,14 @@
 - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
 - ``--submit sge`` — :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job` per subject.
 - ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA region growing in the same stage.
+- ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
 """
 
 from __future__ import annotations
 
 import getpass
 import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -28,7 +30,15 @@ import click
 
 import nvitk
 from nvitk.cluster.remote_submit import run_sge_script_ssh
-from nvitk.cluster.sge import SgeResources, write_script_header
+from nvitk.cluster.sge import (
+    ClusterPaths,
+    SgeResources,
+    SingularityBinds,
+    StageSpec,
+    python_module_argv,
+    submit_stage,
+    write_script_header,
+)
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
@@ -36,8 +46,9 @@ from nvitk.segmentation.eicab.cluster import submit_eicab_job
 from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
-from .util.eicab_masks import find_tof_resampled_volume
+from .util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
 from .util.eicab_postprocess import postprocess_eicab_directory
+from .util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
 
 log = Logger()
 
@@ -100,6 +111,45 @@ def _output_has_segmentation(out_dir: Path) -> bool:
     return False
 
 
+def _eicab_out_dir(
+    output_root: Path,
+    subject: str,
+    eicab_subdir: str | None,
+) -> Path:
+    subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
+    return output_root / subject / subdir
+
+
+def _require_eicab_for_postprocess(out_dir: Path) -> None:
+    """Raise if *out_dir* lacks eICAB multilabel + TOF_resampled for post-process."""
+    if not _output_has_segmentation(out_dir):
+        raise FileNotFoundError(
+            f"No eICAB segmentation NIfTI under {out_dir}. "
+            "Run stage1 without --only-pp first."
+        )
+    if find_tof_resampled_volume(out_dir) is None:
+        raise FileNotFoundError(
+            f"No TOF_resampled under {out_dir} (required for ICA post-process)."
+        )
+    resolve_eicab_mask(out_dir, preference="cw")
+
+
+def run_postprocess_only(
+    subject: str,
+    *,
+    output_root: Path,
+    eicab_subdir: str | None = None,
+) -> Path:
+    """ICA Otsu resegment + region growing on existing eICAB outputs."""
+    out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
+    _require_eicab_for_postprocess(out_dir)
+    log.info(f"qvtpy stage1 eICAB post-process only | subject={subject}")
+    log.info(f"  output: {out_dir}")
+    tof_resampled = find_tof_resampled_volume(out_dir)
+    postprocess_eicab_directory(out_dir, tof_path=tof_resampled)
+    return out_dir
+
+
 # ---------------------------------------------------------------------------
 # Local execution
 # ---------------------------------------------------------------------------
@@ -121,8 +171,18 @@ def run_subject(
     vasculature_dir: Path | None = None,
     keep_aux_outputs: bool = False,
     post_process_eicab: bool = True,
+    only_pp: bool = False,
 ) -> Path:
     """Run eICAB locally for one subject. Returns the eICAB output directory."""
+    out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
+
+    if only_pp:
+        return run_postprocess_only(
+            subject,
+            output_root=output_root,
+            eicab_subdir=eicab_subdir,
+        )
+
     subj_nifti = nifti_root / subject
     if not subj_nifti.is_dir():
         raise FileNotFoundError(f"NIfTI subject dir not found: {subj_nifti}")
@@ -133,8 +193,6 @@ def run_subject(
             f"No TOF NIfTI under {subj_nifti / 'TOF'} (expected TOF/TOF.nii.gz from stage0)."
         )
 
-    subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
-    out_dir = output_root / subject / subdir
     tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
     container = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
     vas_host = (
@@ -200,6 +258,7 @@ def submit_subject_sge(
     err_dir: Path | None = None,
     keep_aux_outputs: bool = False,
     post_process_eicab: bool = True,
+    only_pp: bool = False,
     resources: SgeResources | None = None,
     hold_jid: str | None = None,
     backend: str = "gpu",
@@ -223,9 +282,23 @@ def submit_subject_sge(
             f"emitting predicted path {tof} (produced by stage0_c at run time)."
         )
 
-    subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
-    out_dir = output_root / subject / subdir
+    out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if only_pp:
+        return _submit_postprocess_only_sge(
+            subject,
+            nifti_root=nifti_root,
+            output_root=output_root,
+            eicab_subdir=eicab_subdir,
+            pipeline_container=pipeline_container,
+            src_dir=src_dir,
+            hold_jid=hold_jid,
+            backend=backend,
+            dry_run=dry_run,
+            emit=emit,
+            job_name=job_name,
+        )
 
     if skip_existing and _output_has_segmentation(out_dir):
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
@@ -283,6 +356,74 @@ def submit_subject_sge(
         dry_run=dry_run,
         emit=emit,
     )
+
+
+def _submit_postprocess_only_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    eicab_subdir: str | None,
+    pipeline_container: Path | None,
+    src_dir: Path | None,
+    hold_jid: str | None,
+    backend: str,
+    dry_run: bool,
+    emit: TextIO | None,
+    job_name: str | None,
+) -> str:
+    """SGE job: ``python -m nvitk.pipes.qvtpy.stage1_eicab --only-pp`` inside pipeline container."""
+    src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
+    pipeline_c = (
+        Path(pipeline_container)
+        if pipeline_container is not None
+        else eicab_cfg.PIPELINE_CONTAINER_PATH
+    )
+    binds = SingularityBinds()
+    parts: list[str] = [
+        *python_module_argv("nvitk.pipes.qvtpy.stage1_eicab"),
+        *sge_backend_cli_args(backend),
+        "--only-pp",
+        "--submit",
+        "local",
+        "--subject",
+        shlex.quote(subject),
+        "--nifti-root",
+        shlex.quote(binds.data),
+        "--output-root",
+        shlex.quote(binds.output),
+    ]
+    if eicab_subdir:
+        parts.extend(["--eicab-subdir", shlex.quote(eicab_subdir.strip())])
+    python_cmd = " ".join(parts)
+
+    paths = ClusterPaths(
+        src=src_p,
+        container=pipeline_c,
+        models=None,
+        data_root=nifti_root,
+        output_root=output_root,
+        log_dir=eicab_cfg.SGE_LOG_DIR,
+        err_dir=eicab_cfg.SGE_ERR_DIR,
+    )
+    jn = job_name or f"{cfg.SGE_JOB_PREFIX}_stage1_eicab_pp_{_SAFE.sub('_', subject)[:36]}"
+    spec = StageSpec(
+        job_name=jn,
+        python_cmd=python_cmd,
+        resources=SgeResources(
+            project=cfg.SGE_PROJECT,
+            account=cfg.SGE_ACCOUNT,
+            ngpu=0,
+            h_vmem=cfg.SGE_H_VMEM,
+            queue=cfg.SGE_QUEUE,
+        ),
+        binds=binds,
+        use_nv=False,
+        extra_env=sge_stage_extra_env(binds.src, backend),
+    )
+    log.info(f"qvtpy stage1 eICAB post-process only (sge) | subject={subject}")
+    log.info(f"  output: {_eicab_out_dir(output_root, subject, eicab_subdir)}")
+    return submit_stage(spec, paths, hold_jid=hold_jid, dry_run=dry_run, emit=emit)
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +521,12 @@ def submit_subject_sge(
     help="After eICAB: Otsu ICA resegment (centerline_siphon) + ICA region growing.",
 )
 @click.option(
+    "--only-pp",
+    is_flag=True,
+    default=False,
+    help="Skip eICAB inference; run ICA post-process on existing outputs in output-root/<subject>/eicab/.",
+)
+@click.option(
     "--emit-script",
     type=click.Path(path_type=Path),
     default=None,
@@ -413,6 +560,7 @@ def main(
     err_dir: Path | None,
     keep_aux_outputs: bool,
     post_process_eicab: bool,
+    only_pp: bool,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
@@ -447,6 +595,7 @@ def main(
                     vasculature_dir=vasculature_dir,
                     keep_aux_outputs=keep_aux_outputs,
                     post_process_eicab=post_process_eicab,
+                    only_pp=only_pp,
                 )
             except (FileNotFoundError, OSError) as exc:
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
@@ -485,6 +634,8 @@ def main(
                     err_dir=err_dir,
                     keep_aux_outputs=keep_aux_outputs,
                     post_process_eicab=post_process_eicab,
+                    only_pp=only_pp,
+                    backend=backend,
                     dry_run=False,
                     emit=fh,
                 )
@@ -516,7 +667,14 @@ def main(
         )
 
 
-__all__ = ["find_tof_resampled_volume", "find_tof_volume", "run_subject", "submit_subject_sge", "main"]
+__all__ = [
+    "find_tof_resampled_volume",
+    "find_tof_volume",
+    "run_postprocess_only",
+    "run_subject",
+    "submit_subject_sge",
+    "main",
+]
 
 
 if __name__ == "__main__":

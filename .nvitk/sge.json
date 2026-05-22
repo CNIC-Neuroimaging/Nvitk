@@ -20,7 +20,7 @@
     },
     "pipelines": {
       "eicab": {
-        "sge_project": "MCC",
+        "sge_project": "Prod",
         "sge_ngpu":    0,
         "sge_h_vmem":  "25G",
         "log_subdir":  "eICAB",

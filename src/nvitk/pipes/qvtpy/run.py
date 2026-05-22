@@ -332,6 +332,12 @@ def _emit_stage0_convert(
     show_default=True,
     help="Stage1: Otsu ICA resegment + ICA region growing after eICAB.",
 )
+@click.option(
+    '--only-pp/--no-only-pp',
+    default=False,
+    show_default=True,
+    help="Stage1: Only run ICA post-process on existing eICAB outputs.",
+)
 # --- stage 2 ---
 @click.option(
     "--stage2-reference",
@@ -452,6 +458,7 @@ def main(
     eicab_device: str,
     eicab_resolution: float,
     post_process_eicab: bool,
+    only_pp: bool,
     stage2_reference: str,
     stage2_dof: int,
     stage2_cost: str,
@@ -586,6 +593,7 @@ def main(
                             eicab_container=eicab_container,
                             vasculature_dir=vasculature_dir,
                             post_process_eicab=post_process_eicab,
+                            only_pp=only_pp,
                         ),
                     )
                 if run_s2:
@@ -760,6 +768,7 @@ def main(
                         backend=backend,
                         dry_run=False,
                         emit=fh,
+                        only_pp=only_pp,
                     )
                     prev_jid = jid or prev_jid
                 except (FileNotFoundError, OSError) as exc:

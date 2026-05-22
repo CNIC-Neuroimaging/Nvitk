@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
-import numpy as np
-
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
@@ -42,7 +40,7 @@ def _merge_ica_masks_into_labels(
         rep = ica_masks.get(int(lid))
         if rep is None:
             continue
-        rep_np = np.asarray(rep, dtype=bool)
+        rep_np = as_backend_array(rep).astype(bool)
         if not rep_np.any():
             continue
         labels[labels == int(lid)] = 0
@@ -73,13 +71,13 @@ def resegment_icas_otsu(
 ) -> dict[int, np.ndarray]:
     """Otsu-resegment each ICA; erode only when the raw eICAB ICA mask is suspect."""
     wvi = as_backend_array(intensity)
-    seg_np = np.asarray(labels, dtype=np.int32, copy=True)
+    seg_np = as_backend_array(labels).astype(np.int32)
     clm = cl_mask if cl_mask is not None else _seed_centerline_mask(seg_np, ica_ids)
 
     out: dict[int, np.ndarray] = {}
     for lid in ica_ids:
         name = f"ICA_{int(lid)}"
-        raw = np.asarray(seg_np == int(lid), dtype=bool)
+        raw = as_backend_array(seg_np == int(lid)).astype(bool)
         if not raw.any():
             log.warning(f"[{name}] empty eICAB mask — skipping Otsu")
             continue
@@ -95,7 +93,7 @@ def resegment_icas_otsu(
         if info.get("warning"):
             log.warning(f"[{name}] Otsu: {info['warning']}")
             continue
-        out[int(lid)] = to_numpy(eroded).astype(bool, copy=False)
+        out[int(lid)] = to_numpy(eroded).astype(bool)
     return out
 
 
@@ -109,7 +107,7 @@ def region_grow_icas(
 ) -> dict[int, int]:
     """Grow ICA labels into empty voxels; barriers are other labels dilated by *rg_barrier_radius*."""
     int_np = as_backend_array(intensity).astype(np.float64)
-    seg_np = np.asarray(labels, dtype=np.int32, copy=False)
+    seg_np = as_backend_array(labels).astype(np.int32)
     added: dict[int, int] = {}
     for lid in ica_ids:
         if not np.any(seg_np == int(lid)):
@@ -139,7 +137,7 @@ def postprocess_eicab_labels(
     rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
 ) -> dict[str, Any]:
     """Otsu ICA masks (conditional erosion) then hyperintense region growing."""
-    seg_np = np.asarray(labels, dtype=np.int32, copy=True)
+    seg_np = as_backend_array(labels).astype(np.int32)
     ica_masks = resegment_icas_otsu(intensity, seg_np, ica_ids=ica_ids)
     _merge_ica_masks_into_labels(seg_np, ica_masks, ica_ids)
     rg_added = region_grow_icas(
@@ -149,7 +147,7 @@ def postprocess_eicab_labels(
         rg_barrier_radius=rg_barrier_radius,
         intensity_frac=rg_intensity_frac,
     )
-    labels[:] = seg_np
+    labels[:] = to_numpy(seg_np)
     return {
         "ica_otsu_voxels": {str(k): int(v.sum()) for k, v in ica_masks.items()},
         "region_grow_added": {str(k): v for k, v in rg_added.items()},
@@ -177,7 +175,7 @@ def postprocess_eicab_directory(
 
     seg_img = imread(res.path)
     tof_img = imread(intensity_p)
-    labels = to_numpy(seg_img.data).astype(np.int32, copy=True)
+    labels = to_numpy(seg_img.data).astype(np.int32)
     wvi = to_numpy(tof_img.data)
     if labels.shape[:3] != wvi.shape[:3]:
         raise ValueError(

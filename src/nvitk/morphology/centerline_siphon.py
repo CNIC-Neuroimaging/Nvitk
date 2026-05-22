@@ -313,7 +313,8 @@ def _bbox_with_padding(
 ) -> tuple[int, int, int, int, int, int] | None:
     """Tight bbox of *roi* voxels padded by *pad*."""
     roi_np = to_numpy(roi)
-    xs, ys, zs = np.nonzero(roi_np)
+    with using('cpu'):
+        xs, ys, zs = np.nonzero(roi_np)
     if xs.size == 0:
         return None
     nx_, ny_, nz_ = full_shape
@@ -336,12 +337,11 @@ def _other_cl_barrier(
 ) -> Any:
     """Voxels in the crop too close to other labels' seed centerlines."""
     i0, i1, j0, j1, k0, k1 = bbox
-    cl_np = to_numpy(cl_mask)
+    cl_np = as_backend_array(cl_mask)
     other = (cl_np != 0) & (cl_np != int(lid))
     if int(radius) > 0 and np.any(other):
-        from scipy import ndimage as ndi_cpu
-
-        other = ndi_cpu.binary_dilation(other, iterations=int(radius))
+        from nvitk.morphology.binary import dilate
+        other = dilate(other, iterations=int(radius))
     return other[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
 
 
@@ -395,18 +395,18 @@ def ica_otsu_mask(
     t = float(threshold_otsu(pos))
     mask_crop = crop > t
     if min_cc_frac > 0 and mask_crop.any():
-        mask_crop = to_numpy(
+        mask_crop = as_backend_array(
             remove_small_components_by_fraction(
                 mask_crop, min_fraction=float(min_cc_frac), connectivity=1
             )
         ).astype(bool)
 
-    forbidden = to_numpy(_other_cl_barrier(cl_mask, bbox, int(lid), barrier_r))
+    forbidden = as_backend_array(_other_cl_barrier(cl_mask, bbox, int(lid), barrier_r))
     mask_crop = mask_crop & (~forbidden)
 
     seed_crop = seed[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
     if mask_crop.any() and seed_crop.any():
-        mask_crop = to_numpy(
+        mask_crop = as_backend_array(
             keep_components_touching_seeds(mask_crop, seed_crop, connectivity=1)
         ).astype(bool)
 
@@ -414,15 +414,14 @@ def ica_otsu_mask(
     full_pre[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1] = mask_pre_erode
 
     if int(erode_iters) > 0 and mask_crop.any():
-        from scipy import ndimage as ndi_cpu
-
-        mask_crop = ndi_cpu.binary_erosion(mask_crop, iterations=int(erode_iters))
+        from nvitk.morphology.binary import erode
+        mask_crop = erode(mask_crop, iterations=int(erode_iters))
         if mask_crop.any() and seed_crop.any():
-            mask_crop = to_numpy(
+            mask_crop = as_backend_array(
                 keep_components_touching_seeds(mask_crop, seed_crop, connectivity=1)
             ).astype(bool)
         if min_cc_frac > 0 and mask_crop.any():
-            mask_crop = to_numpy(
+            mask_crop = as_backend_array(
                 remove_small_components_by_fraction(
                     mask_crop, min_fraction=float(min_cc_frac), connectivity=1
                 )
@@ -756,7 +755,7 @@ def _prepare_ica_mask_for_centerline(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-_NEI26 = np.array(
+_NEI26 = to_numpy(
     [
         (dx, dy, dz)
         for dx in (-1, 0, 1)
@@ -764,7 +763,6 @@ _NEI26 = np.array(
         for dz in (-1, 0, 1)
         if (dx, dy, dz) != (0, 0, 0)
     ],
-    dtype=np.int32,
 )
 
 
@@ -779,7 +777,8 @@ def _skeleton_to_graph(sk: Any) -> Any:
 
     sk_np = to_numpy(sk).astype(bool, copy=False)
     G = nx.Graph()
-    coords = np.argwhere(sk_np)
+    with using('cpu'):
+        coords = np.argwhere(sk_np)
     nodes = [tuple(int(v) for v in row) for row in coords]
     node_set = set(nodes)
     for n in nodes:
