@@ -53,6 +53,49 @@ def axial_dim_order(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, ...]
     return (sup, *rest)
 
 
+def _axes_string_from_layer(layer: Any) -> str | None:
+    labels = getattr(layer, "axis_labels", None)
+    if labels is not None and len(labels) == int(getattr(layer.data, "ndim", 0)):
+        return "".join(str(l) for l in labels)
+    meta = getattr(layer, "metadata", None) or {}
+    nv = meta.get("nvitk_metadata") if isinstance(meta, dict) else None
+    if isinstance(nv, dict) and nv.get("axes"):
+        return str(nv["axes"])
+    if isinstance(meta, dict) and meta.get("axes"):
+        return str(meta["axes"])
+    return None
+
+
+def napari_dim_order(
+    axes: str | None,
+    affine: np.ndarray | None,
+    ndim: int,
+) -> tuple[int, ...]:
+    """
+    Napari ``dims.order``: non-displayed axes first (time), then spatial axes to render.
+
+    For ``XYZT`` data this yields ``(T, X, Y, Z)`` so the time slider drives axis ``T`` and
+    the 3D view uses array ``X``, ``Y``, ``Z`` (no superior-first shuffle on 4D+).
+    """
+    if ndim <= 3:
+        return axial_dim_order(affine, ndim)
+
+    from nvitk.io._common import default_nifti_axes
+
+    ax = (axes or default_nifti_axes(ndim)).upper()
+    if len(ax) != ndim:
+        return axial_dim_order(affine, ndim)
+
+    time_axes = [i for i, ch in enumerate(ax) if ch in ("T", "C")]
+    spatial_axes = [i for i, ch in enumerate(ax) if ch in "XYZ"]
+    if not time_axes:
+        return axial_dim_order(affine, ndim)
+    if len(spatial_axes) < 3:
+        return tuple(time_axes) + axial_dim_order(affine, len(spatial_axes) or ndim)
+
+    return tuple(time_axes + spatial_axes)
+
+
 def prepare_for_napari(
     data: np.ndarray,
     affine: np.ndarray | None,
@@ -124,11 +167,12 @@ def configure_viewer_for_layer(
         aff = getattr(layer, "affine", None)
         aff_arr = to_numpy(aff).astype(float) if aff is not None else None
         ndim = int(layer.data.ndim)
-        order = axial_dim_order(aff_arr, ndim)
-        sup = order[0]
+        axes_str = _axes_string_from_layer(layer)
+        order = napari_dim_order(axes_str, aff_arr, ndim)
         shape = layer.data.shape
 
         if ndim == 3:
+            sup = order[0]
             viewer.dims.ndisplay = 2
             viewer.dims.order = order
             mid = int(shape[sup] // 2) if sup < len(shape) else 0
@@ -142,13 +186,15 @@ def configure_viewer_for_layer(
                 if lr is not None and lr != sup:
                     _apply_voxel_axis_flip(layer, lr)
         else:
-            viewer.dims.ndisplay = min(3, ndim)
+            viewer.dims.ndisplay = 3
             viewer.dims.order = order
-            point = [int(round(float(x))) for x in viewer.dims.point]
-            if len(point) < ndim:
-                point = list(point) + [0] * (ndim - len(point))
-            if sup < len(shape):
-                point[0] = int(shape[sup] // 2)
+            if axes_str and len(axes_str) == ndim:
+                viewer.dims.axis_labels = tuple(axes_str)
+            point = [0] * ndim
+            if axes_str and len(axes_str) == ndim:
+                for i, ch in enumerate(axes_str.upper()):
+                    if ch == "Z" and i < len(shape):
+                        point[i] = int(shape[i] // 2)
             viewer.dims.point = tuple(point[:ndim])
         try:
             viewer.camera.angles = (0, 0, 0)

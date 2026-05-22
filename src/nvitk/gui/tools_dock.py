@@ -23,10 +23,12 @@ from nvitk.gui.totalseg_selector import TotalSegRoiWidget
 def _show_label_picker(category: str, tool_id: str, target_mode: str) -> bool:
     if target_mode in ("label", "all_labels") and category in (
         "Morphology",
+        "Centerline",
         "Measure",
         "Filters",
         "Restoration",
         "Transform",
+        "Visualization",
     ):
         return True
     return tool_id in TOOL_IDS_USING_LABEL_PICKER

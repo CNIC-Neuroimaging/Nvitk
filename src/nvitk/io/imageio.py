@@ -19,8 +19,6 @@ from ._common import guess_read_type, guess_write_type, reorder_axes
 from .readers import read_dicom, read_mha, read_nd2, read_nifti, read_pil, read_tiff
 from .writers import write_mha, write_nifti, write_pil, write_tiff
 
-from nvitk.viz.brainshow import brainshow
-
 _READERS = {
     "nifti": read_nifti,
     "dicom": read_dicom,

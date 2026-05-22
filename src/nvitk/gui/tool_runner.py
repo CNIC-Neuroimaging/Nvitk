@@ -8,7 +8,6 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +70,15 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
 def _format_metrics(metrics: dict[str, Any]) -> str:
     lines = [f"{k}: {v}" for k, v in metrics.items()]
     return "\n".join(lines)
+
+
+def _suv_stats_kwargs(params: dict[str, Any]) -> dict[str, Any]:
+    """Shared SUV conversion options for stats and volume tools."""
+    return {
+        "kinds": (str(params.get("suv_kind") or "bw"),),
+        "philips": bool(params.get("philips_factor", True)),
+        "revert_scaling": bool(params.get("revert_scaling", False)),
+    }
 
 
 def _layer_source_path(layer: Any) -> Path | None:
@@ -216,9 +224,31 @@ def run_gui_tool(
         _run_pipeline_cli(spec, params)
         return None
 
-    if tool_id == "viz_flowshow":
-        _run_flowshow_tool(params)
+    if tool_id == "centerline_detect_junctions":
+        _run_centerline_detect_junctions(viewer, layer, label_ids, params)
         return None
+
+    if tool_id == "viz_flowshow":
+        _run_viz_flowshow_napari(viewer, layer, params, label_ids=label_ids)
+        return None
+
+    if tool_id == "measure_generate_suv":
+        from nvitk.measure.suv import suv_image
+
+        pet = layer_to_image(layer)
+        if pet.ndim != 3:
+            raise ValueError("Generate SUV requires a 3D PET image layer.")
+        suv_out = suv_image(
+            pet,
+            kind=str(params.get("suv_kind") or "bw"),
+            philips=bool(params.get("philips_factor", True)),
+            revert_scaling=bool(params.get("revert_scaling", False)),
+        )
+        notify(
+            f"SUV ({params.get('suv_kind') or 'bw'}) volume ready "
+            f"(shape {tuple(suv_out.data.shape)})."
+        )
+        return array_to_numpy(suv_out.data)
 
     if tool_id == "qvtpy_locs":
         _run_qvtpy_locs(viewer, layer, params)
@@ -284,14 +314,23 @@ def run_gui_tool(
         step = float(params.get("step") or 0.001)
         up = float(params.get("up_thresh") or 0.8)
         smf = int(params.get("smf") or 10)
+        shift_hm = bool(params.get("shift_hm", True))
         with run_with_backend():
             if arr.ndim == 2:
                 out = binary_mask_sliding_threshold_2d(
-                    arr, step=step, up_thresh=up, smf=smf
+                    arr,
+                    step=step,
+                    up_thresh=up,
+                    smf=smf,
+                    shift_hm_flag=shift_hm,
                 )
             elif arr.ndim == 3:
                 out, _ = binary_mask_sliding_threshold_3d(
-                    arr, step=step, up_thresh=up, smf=smf
+                    arr,
+                    step=step,
+                    up_thresh=up,
+                    smf=smf,
+                    shift_hm_flag=shift_hm,
                 )
             else:
                 raise ValueError(f"Sliding threshold expects 2D or 3D data, got {arr.ndim}D")
@@ -434,7 +473,7 @@ def run_gui_tool(
         else:
             pet = img
             mask_img = img
-        stats = suv_stats(pet, mask_img)
+        stats = suv_stats(pet, mask_img, **_suv_stats_kwargs(params))
         notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
         return None
 
@@ -485,6 +524,9 @@ def run_gui_tool(
     if tool_id == "viz_pet_hotspots":
         _run_viz_pet_hotspots(viewer, layer, proc_data, params, label_ids=label_ids)
         return None
+
+    if tool_id == "centerline_cut_junctions":
+        return _run_centerline_cut_junctions(viewer, layer, label_ids, params)
 
     if tool_id == "siphon_correct":
         from nvitk.morphology.centerline_siphon import correct_siphon_centerlines
@@ -538,10 +580,78 @@ def run_gui_tool(
         ids = parse_label_ids(str(params.get("label_ids") or ""))
         return coerce_tool_output(remove_labels(img, ids))
 
+    if tool_id == "seg_pet_ureter":
+        return _run_seg_pet_ureter(viewer, layer, params)
+
+    if tool_id == "seg_convex_hull_slice":
+        from nvitk.segmentation.hull_edt import convex_hull_slicewise
+
+        out = convex_hull_slicewise(img, axis=int(params.get("hull_axis") or 2))
+        return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id == "seg_convex_hull_3d":
+        from nvitk.segmentation.hull_edt import convex_hull_3d
+
+        out = convex_hull_3d(img)
+        return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id == "seg_distance_transform":
+        from nvitk.gui.spatial import layer_spacing
+        from nvitk.segmentation.hull_edt import distance_transform
+
+        sp = layer_spacing(layer) if bool(params.get("edt_use_spacing", True)) else None
+        spacing = None
+        if sp is not None and len(sp) >= 3:
+            spacing = (float(sp[0]), float(sp[1]), float(sp[2]))
+        rad = float(params.get("radius_mm") or 0.0)
+        out = distance_transform(
+            img,
+            spacing=spacing,
+            radius_mm=rad if rad > 0 else None,
+        )
+        return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id == "seg_mask_union":
+        return _run_mask_binary_op(viewer, layer, proc_data, params, "mask_union")
+
+    if tool_id == "seg_mask_intersection":
+        return _run_mask_binary_op(viewer, layer, proc_data, params, "mask_intersection")
+
+    if tool_id == "seg_mask_subtract":
+        return _run_mask_binary_op(viewer, layer, proc_data, params, "mask_subtract")
+
+    if tool_id == "seg_mask_xor":
+        return _run_mask_binary_op(viewer, layer, proc_data, params, "mask_xor")
+
+    if tool_id == "seg_mask_complement":
+        from nvitk.segmentation.mask_ops import mask_complement
+
+        a_img = layer_to_image(layer, proc_data)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        if ref_name:
+            ref_layer = _resolve_layer(viewer, ref_name)
+            _, within_img, _ = align_mask_to_reference_layer(
+                ref_layer, layer, proc_data, order=0
+            )
+            out = mask_complement(a_img, within_img)
+        else:
+            out = mask_complement(a_img)
+        return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
     if tool_id == "seg_biggest_cc":
         from nvitk.segmentation.labels import biggest_cc
 
         return coerce_tool_output(biggest_cc(img))
+
+    if tool_id == "morph_biggest_cc":
+        from scipy.ndimage import generate_binary_structure
+
+        from nvitk.segmentation.labels import biggest_cc
+
+        conn = int(params.get("connectivity") or 1)
+        rank = min(3, int(proc_data.ndim))
+        structure = generate_binary_structure(rank, conn)
+        return coerce_tool_output(biggest_cc(img, structure=structure))
 
     if tool_id == "seg_split_lr_cc":
         from nvitk.segmentation.hemisphere import split_lr_by_cc
@@ -809,31 +919,173 @@ def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[np.ndarray, 
     return mag, cd, vel
 
 
-def _run_flowshow_tool(params: dict[str, Any]) -> None:
-    argv = ["nvitk-qvtpy-flowshow"]
-    subject = str(params.get("subject") or "").strip()
-    if subject:
-        argv.extend(["--subject", subject])
-    nifti_root = str(params.get("nifti_root") or "").strip()
-    if nifti_root:
-        argv.extend(["--nifti-root", nifti_root])
-    batch = str(params.get("batch") or "").strip()
-    if batch:
-        argv.extend(["--batch", batch])
-    out_root = str(params.get("pipeline_output_root") or "").strip()
-    if out_root:
-        argv.extend(["--pipeline-output-root", out_root])
-    vm = str(params.get("vessel_mask") or "").strip()
-    if vm:
-        argv.extend(["--vessel-mask", vm])
-    if bool(params.get("notebook")):
-        argv.append("--notebook")
-    notify(f"Launching FlowShow: {' '.join(argv)}")
-    code = run_subprocess_logged(argv)
-    if code == 0:
-        notify("FlowShow finished.")
-    else:
-        notify(f"FlowShow exited with code {code}", error=True)
+def _run_mask_binary_op(
+    viewer: Any,
+    layer: Any,
+    mask_data: Any,
+    params: dict[str, Any],
+    op_name: str,
+) -> np.ndarray:
+    from nvitk.segmentation import mask_ops
+
+    ref_name = str(params.get("reference_layer") or "").strip()
+    if not ref_name:
+        raise ValueError("Select the second mask layer (reference).")
+    ref_layer = _resolve_layer(viewer, ref_name)
+    a_img = layer_to_image(layer, mask_data)
+    _, b_img, resampled = align_mask_to_reference_layer(
+        ref_layer, layer, mask_data, order=0
+    )
+    if resampled:
+        gui_log(f"Resampled '{ref_layer.name}' onto active layer grid.")
+    fn = getattr(mask_ops, op_name)
+    out = fn(a_img, b_img)
+    data = out.data if hasattr(out, "data") else out
+    return coerce_tool_output(data)
+
+
+def _run_seg_pet_ureter(viewer: Any, layer: Any, params: dict[str, Any]) -> np.ndarray:
+    from nvitk.measure.suv import suv_image
+    from nvitk.segmentation.labels import get_label
+    from nvitk.segmentation.pet.ureter_segmentation import segment_ureter
+
+    pet_name = str(params.get("reference_layer") or "").strip()
+    if not pet_name:
+        raise ValueError("Select PET image layer.")
+    pet_layer = _resolve_layer(viewer, pet_name)
+    pet_img = layer_to_image(pet_layer)
+
+    organ_name = str(params.get("organ_layer") or "").strip()
+    organ_layer = _resolve_layer(viewer, organ_name) if organ_name else layer
+
+    body_name = str(params.get("body_layer") or "").strip()
+    if not body_name:
+        raise ValueError("Select body mask layer.")
+    body_layer = _resolve_layer(viewer, body_name)
+
+    _, organ_img, _ = align_mask_to_reference_layer(organ_layer, pet_layer, order=0)
+    _, body_img, _ = align_mask_to_reference_layer(body_layer, pet_layer, order=0)
+
+    kr_id = int(params.get("kidney_r_id") or 2)
+    kl_id = int(params.get("kidney_l_id") or 3)
+    bl_id = int(params.get("bladder_id") or 21)
+
+    kidney_r = get_label(organ_img, kr_id, missing="empty")
+    kidney_l = get_label(organ_img, kl_id, missing="empty")
+    bladder = get_label(organ_img, bl_id, missing="empty")
+
+    suv = suv_image(
+        pet_img,
+        kind=str(params.get("suv_kind") or "bw"),
+        philips=bool(params.get("philips_factor", True)),
+        revert_scaling=bool(params.get("revert_scaling", False)),
+    )
+    notify("Running PET ureter segmentation (MCP paths)…")
+    mask_ureter, _paths, _paths_sp = segment_ureter(
+        suv,
+        kidney_r,
+        kidney_l,
+        bladder,
+        body_img,
+        radius_mm=float(params.get("radius_mm") or 6.0),
+        w_pet=float(params.get("w_pet") or 5.0),
+    )
+    notify("Ureter segmentation finished.")
+    return coerce_tool_output(mask_ureter.data)
+
+
+def _run_centerline_detect_junctions(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    from nvitk.gui.centerline_flexion import (
+        JUNCTION_POINTS_LAYER,
+        add_junction_points_layer,
+        detect_junctions_from_layer,
+    )
+
+    lid = label_ids[0] if label_ids else None
+    junctions = detect_junctions_from_layer(
+        layer,
+        label_id=lid,
+        min_degree=int(params.get("min_junction_degree") or 3),
+        reskeletonize=bool(params.get("reskeletonize", False)),
+    )
+    add_junction_points_layer(
+        viewer,
+        junctions,
+        reference_layer=layer,
+        source_layer_name=str(getattr(layer, "name", "")),
+        min_degree=int(params.get("min_junction_degree") or 3),
+    )
+    if junctions.shape[0] == 0:
+        notify("No skeleton junctions found (try lowering min degree).", error=True)
+        return
+    notify(f"Marked {junctions.shape[0]} junction(s) on '{JUNCTION_POINTS_LAYER}'.")
+
+
+def _resolve_centerline_mask_layer(viewer: Any) -> Any:
+    """3D centerline mask recorded when junctions were detected."""
+    from nvitk.gui.centerline_flexion import JUNCTION_META_KEY, JUNCTION_POINTS_LAYER
+
+    for lyr in viewer.layers:
+        if lyr.name != JUNCTION_POINTS_LAYER:
+            continue
+        meta = getattr(lyr, "metadata", None) or {}
+        jmeta = meta.get(JUNCTION_META_KEY) if isinstance(meta, dict) else None
+        if isinstance(jmeta, dict):
+            src_name = str(jmeta.get("source_layer") or "").strip()
+            if src_name:
+                for ref in viewer.layers:
+                    if ref.name == src_name:
+                        return ref
+    raise ValueError(
+        f"No '{JUNCTION_POINTS_LAYER}' layer with source metadata. "
+        "Run Detect skeleton junctions on the centerline mask first."
+    )
+
+
+def _run_centerline_cut_junctions(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> np.ndarray:
+    from nvitk.gui.centerline_flexion import (
+        centerline_polyline_for_label,
+        read_junction_coords,
+        split_label_at_junctions,
+    )
+
+    arr = array_to_numpy(layer.data)
+    if arr.ndim != 3:
+        raise ValueError("Junction cut requires a 3D labels/image layer.")
+
+    if not label_ids:
+        raise ValueError("Select one label id to split at junctions.")
+    src_lid = int(label_ids[0])
+    junctions = read_junction_coords(viewer)
+    centerline_layer = _resolve_centerline_mask_layer(viewer)
+    poly = centerline_polyline_for_label(
+        centerline_layer,
+        src_lid,
+        reskeletonize=bool(params.get("reskeletonize", False)),
+    )
+    start_raw = int(params.get("new_label_start") or 0)
+    new_start = None if start_raw <= 0 else start_raw
+    vol, new_ids = split_label_at_junctions(
+        arr,
+        src_lid,
+        poly,
+        junctions,
+        new_label_start=new_start,
+    )
+    notify(
+        f"Split label {src_lid} at {junctions.shape[0]} junction(s) → new labels {new_ids}."
+    )
+    return vol
 
 
 def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
@@ -1020,28 +1272,77 @@ def _run_viz_pet_hotspots(
     *,
     label_ids: list[int] | None,
 ) -> None:
+    from nvitk.gui.napari_viz import add_hotspot_points_layer, hotspot_points_from_volumes
+    from nvitk.viz.pet_hotspots import HotspotMode
+
     ref_name = str(params.get("reference_layer") or "").strip()
+    ref_layer = _resolve_layer(viewer, ref_name)
     ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, mask_data)
-    suv = as_backend_array(ref_img.data)
-    mask = mask_img.data
-    lids = label_ids
+    mode = str(params.get("hotspot") or "top_percent")
+    coords, _vals, features = hotspot_points_from_volumes(
+        array_to_numpy(ref_img.data),
+        array_to_numpy(mask_img.data),
+        label_ids=label_ids,
+        hotspot=mode,  # type: ignore[arg-type]
+        top_percent=float(params.get("top_percent") or 0.1),
+        max_points=int(params.get("max_points") or 20000),
+    )
+    if coords.shape[0] == 0:
+        notify("No hotspots found in the selected ROI.", error=True)
+        return
+    add_hotspot_points_layer(viewer, coords, features, reference_layer=ref_layer)
+    notify(f"Added {coords.shape[0]} SUV hotspot point(s) in Napari.")
 
-    def _show() -> None:
-        from nvitk.viz.pet_hotspots import show_hotspots
 
-        show_hotspots(
-            suv,
-            mask,
-            label_ids=lids,
-            hotspot=str(params.get("hotspot") or "top_percent"),
-            top_percent=float(params.get("top_percent") or 0.1),
-            max_points=int(params.get("max_points") or 20000),
-            cmap=str(params.get("cmap") or "turbo"),
-            show=True,
+def _run_viz_flowshow_napari(
+    viewer: Any,
+    mask_layer: Any,
+    params: dict[str, Any],
+    *,
+    label_ids: list[int] | None,
+) -> None:
+    from nvitk.gui.napari_viz import add_flow_vectors_layer, flow_vectors_at_time
+
+    ap_name = str(params.get("ap_layer") or "").strip()
+    rl_name = str(params.get("rl_layer") or "").strip()
+    fh_name = str(params.get("fh_layer") or "").strip()
+    if not ap_name or not rl_name or not fh_name:
+        raise ValueError("Select AP, RL, and FH phase layers.")
+
+    ap_layer = _resolve_layer(viewer, ap_name)
+    rl_layer = _resolve_layer(viewer, rl_name)
+    fh_layer = _resolve_layer(viewer, fh_name)
+    ref_name = str(params.get("reference_layer") or "").strip()
+    if ref_name:
+        ref_layer = _resolve_layer(viewer, ref_name)
+        _, mask_on_ref, _ = align_mask_to_reference_layer(
+            mask_layer, ref_layer, array_to_numpy(mask_layer.data), order=0
         )
+        mask_arr = array_to_numpy(mask_on_ref.data)
+        spatial_ref = ref_layer
+    else:
+        mask_arr = array_to_numpy(mask_layer.data)
+        spatial_ref = ap_layer
 
-    threading.Thread(target=_show, daemon=True).start()
-    notify("Opened PyVista hotspots window (background thread).")
+    positions, vectors = flow_vectors_at_time(
+        ap_layer.data,
+        rl_layer.data,
+        fh_layer.data,
+        mask_arr,
+        int(params.get("time_index") or 0),
+        label_ids=label_ids,
+        max_points=int(params.get("max_points") or 4000),
+    )
+    if positions.shape[0] == 0:
+        notify("No voxels in mask for flow vectors.", error=True)
+        return
+    add_flow_vectors_layer(
+        viewer, positions, vectors, reference_layer=spatial_ref
+    )
+    t = int(params.get("time_index") or 0)
+    notify(
+        f"Added {positions.shape[0]} flow vector glyph(s) at cardiac phase {t} (Napari)."
+    )
 
 
 def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
@@ -1108,11 +1409,12 @@ def _measure_line(
         from nvitk.measure.suv import suv_stats
 
         ref_name = str(params.get("reference_layer") or "").strip()
+        kw = _suv_stats_kwargs(params)
         if ref_name:
             pet, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
-            stats = suv_stats(pet, mask_img)
+            stats = suv_stats(pet, mask_img, **kw)
         else:
-            stats = suv_stats(img, img)
+            stats = suv_stats(img, img, **kw)
         return _format_metrics({k: round(float(v), 6) for k, v in stats.items()})
     if tool_id == "dice":
         from nvitk.measure.voxel import dice

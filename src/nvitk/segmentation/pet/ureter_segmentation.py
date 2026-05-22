@@ -52,17 +52,11 @@ log = Logger()
 
 def _convex_hull_slicewise_z(vol_uint8: np.ndarray) -> np.ndarray:
     """Hull each axial (IS) slice along the last axis — same as stage2."""
-    try:
-        from skimage.morphology import convex_hull_image
-    except Exception:
-        return vol_uint8.copy()
-    vol_uint8 = to_numpy(vol_uint8)
-    out = vol_uint8.astype(np.uint8, copy=True)
-    for i in range(out.shape[-1]):
-        sl = out[..., i]
-        if sl.any():
-            out[..., i] = convex_hull_image(sl)
-    return as_backend_array(out)
+    from nvitk.segmentation.hull_edt import convex_hull_slicewise
+
+    out = convex_hull_slicewise(vol_uint8, axis=-1)
+    data = out.data if hasattr(out, "data") else out
+    return as_backend_array(data)
 
 
 # ---------------------------------------------------------------------------

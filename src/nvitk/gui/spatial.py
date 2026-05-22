@@ -98,7 +98,9 @@ def layer_to_image(layer: Any, data: np.ndarray | None = None) -> Image:
         meta["x_res"], meta["y_res"], meta["z_res"] = sp[0], sp[1], sp[2]
     axes = meta.get("axes")
     if axes is None:
-        axes = "XYZ" if arr.ndim == 3 else "YX"
+        from nvitk.io._common import default_nifti_axes
+
+        axes = default_nifti_axes(arr.ndim)
     return Image(
         data=arr,
         metadata=meta,

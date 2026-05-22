@@ -17,7 +17,7 @@ from nvitk.gui.warnings import install_napari_display_warnings
 
 install_napari_display_warnings()
 from nvitk.io import imread
-from nvitk.io._common import guess_read_type
+from nvitk.io._common import default_nifti_axes, guess_read_type
 from nvitk.types import Image
 
 _NVITK_OPEN_SUFFIXES = frozenset({
@@ -51,16 +51,39 @@ def _nvitk_can_open(path: Path) -> bool:
         return False
 
 
-def _napari_scale(img: Image, ndim: int) -> tuple[float, ...] | None:
-    sp = img.spacing
-    if sp is None:
-        sp = img.metadata.get("spacing") if img.metadata else None
-    if sp is None:
+def _resolution_for_axis(md: dict[str, Any], axis_char: str) -> float | None:
+    key = {
+        "X": "x_res",
+        "Y": "y_res",
+        "Z": "z_res",
+        "T": "t_res",
+        "C": "t_res",
+    }.get(axis_char.upper())
+    if key is None:
         return None
-    vals = [float(x) for x in sp[:ndim]]
+    val = md.get(key)
+    if val is None and axis_char.upper() in ("T", "C"):
+        val = md.get("temporal_resolution")
+    if val is None:
+        return None
+    return float(val)
+
+
+def _napari_scale(img: Image, ndim: int) -> tuple[float, ...] | None:
+    """Per-array-axis scale aligned with ``img.axes`` (e.g. XYZT → x,y,z,t)."""
+    axes = (img.axes or default_nifti_axes(ndim)).upper()
+    if len(axes) != ndim:
+        axes = default_nifti_axes(ndim)
+    md = img.metadata or {}
+    vals: list[float] = []
+    for ch in axes:
+        r = _resolution_for_axis(md, ch)
+        if r is None:
+            return None
+        vals.append(r)
     if len(vals) < ndim:
         vals.extend([1.0] * (ndim - len(vals)))
-    return tuple(vals)
+    return tuple(vals[:ndim])
 
 
 def _napari_affine(img: Image) -> np.ndarray | None:
@@ -91,6 +114,13 @@ def _nvitk_layer_metadata(
     return out
 
 
+def _axis_labels_for_image(img: Image, ndim: int) -> tuple[str, ...]:
+    axes = img.axes or default_nifti_axes(ndim)
+    if len(axes) == ndim:
+        return tuple(axes)
+    return tuple(default_nifti_axes(ndim))
+
+
 def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     data = to_numpy(img.data)
     raw_affine = _napari_affine(img)
@@ -98,6 +128,7 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     layer_meta: dict[str, Any] = {
         "name": img.name or path.stem,
         "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
+        "axis_labels": _axis_labels_for_image(img, data.ndim),
     }
     if affine is not None:
         layer_meta["affine"] = affine
@@ -159,6 +190,8 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
         kwargs["affine"] = layer_meta["affine"]
     elif "scale" in layer_meta:
         kwargs["scale"] = layer_meta["scale"]
+    if "axis_labels" in layer_meta:
+        kwargs["axis_labels"] = layer_meta["axis_labels"]
     with suppress_nonorthogonal_slice_warning():
         layer = viewer.add_image(data, **kwargs)
     configure_viewer_for_layer(viewer, layer)

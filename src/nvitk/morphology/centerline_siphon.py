@@ -754,7 +754,6 @@ def _prepare_ica_mask_for_centerline(
 # Skeleton-graph + cycle utilities (CPU only)
 # ──────────────────────────────────────────────────────────────────────────────
 
-
 _NEI26 = to_numpy(
     [
         (dx, dy, dz)
@@ -763,7 +762,7 @@ _NEI26 = to_numpy(
         for dz in (-1, 0, 1)
         if (dx, dy, dz) != (0, 0, 0)
     ],
-)
+).astype(np.int32)
 
 
 def _skeleton_to_graph(sk: Any) -> Any:
