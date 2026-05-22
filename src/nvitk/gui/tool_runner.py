@@ -16,8 +16,11 @@ from nvitk.core.array import as_backend_array, to_numpy as array_to_numpy
 from nvitk.core.backend import get_global_backend, using, setup
 from nvitk.gui.gui_backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
 from nvitk.gui.log_panel import gui_log, run_subprocess_logged
-from nvitk.gui.spatial import nvitk_metadata_from_layer
-from nvitk.gui.spatial import layer_to_image
+from nvitk.gui.spatial import (
+    align_mask_to_reference_layer,
+    layer_to_image,
+    nvitk_metadata_from_layer,
+)
 from nvitk.gui.tools_registry import tool_by_id
 from nvitk.types import Image
 
@@ -34,6 +37,25 @@ _MEASURE_NOTIFY = frozenset({
     "voxel_metrics",
     "surface_metrics",
 })
+
+
+def _reference_and_mask_images(
+    viewer: Any,
+    mask_layer: Any,
+    reference_layer_name: str,
+    mask_data: np.ndarray | None = None,
+) -> tuple[Image, Image]:
+    """Reference grid + mask (affine-resampled when Napari shows them aligned)."""
+    ref_layer = _resolve_layer(viewer, reference_layer_name)
+    ref_img, mask_img, resampled = align_mask_to_reference_layer(
+        mask_layer, ref_layer, mask_data, order=0
+    )
+    if resampled:
+        gui_log(
+            f"Resampled mask '{getattr(mask_layer, 'name', 'layer')}' onto reference "
+            f"'{ref_layer.name}' grid {tuple(ref_img.data.shape)}."
+        )
+    return ref_img, mask_img
 
 
 def _resolve_layer(viewer: Any, name: str) -> Any:
@@ -384,18 +406,22 @@ def run_gui_tool(
     if tool_id == "masked_stats":
         from nvitk.measure.intensity import masked_stats
 
-        ref = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
-        intensity = layer_to_image(ref)
-        stats = masked_stats(intensity, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        intensity, mask_img = _reference_and_mask_images(
+            viewer, layer, ref_name, proc_data
+        )
+        stats = masked_stats(intensity, mask_img)
         notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
         return None
 
     if tool_id == "integrated_intensity":
         from nvitk.measure.radiomics import integrated_intensity
 
-        ref = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
-        intensity = layer_to_image(ref)
-        val = integrated_intensity(intensity, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        intensity, mask_img = _reference_and_mask_images(
+            viewer, layer, ref_name, proc_data
+        )
+        val = integrated_intensity(intensity, mask_img)
         notify(f"Integrated intensity: {val:.6g}")
         return None
 
@@ -404,44 +430,47 @@ def run_gui_tool(
 
         ref_name = str(params.get("reference_layer") or "").strip()
         if ref_name:
-            pet = layer_to_image(_resolve_layer(viewer, ref_name))
-            mask = img
+            pet, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
         else:
             pet = img
-            mask = img
-        stats = suv_stats(pet, mask)
+            mask_img = img
+        stats = suv_stats(pet, mask_img)
         notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
         return None
 
     if tool_id == "dice":
         from nvitk.measure.voxel import dice
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        val = dice(ref, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
+        val = dice(ref_img, mask_img)
         notify(f"Dice: {val:.6f}")
         return None
 
     if tool_id == "jaccard":
         from nvitk.measure.voxel import jaccard
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        val = jaccard(ref, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
+        val = jaccard(ref_img, mask_img)
         notify(f"Jaccard: {val:.6f}")
         return None
 
     if tool_id == "voxel_metrics":
         from nvitk.measure.voxel import voxel_metrics
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        metrics = voxel_metrics(ref, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
+        metrics = voxel_metrics(ref_img, mask_img)
         notify(_format_metrics({k: round(float(v), 6) for k, v in metrics.items()}))
         return None
 
     if tool_id == "surface_metrics":
         from nvitk.measure.surface import surface_metrics
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        metrics = surface_metrics(ref, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
+        metrics = surface_metrics(ref_img, mask_img)
         notify(_format_metrics({k: round(float(v), 6) for k, v in metrics.items()}))
         return None
 
@@ -541,11 +570,18 @@ def run_gui_tool(
             region_grow_binary_mask,
         )
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        mask = as_backend_array(proc_data).astype(bool).copy()
+        intensity_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        ref = layer_to_image(intensity_layer)
+        _, mask_img, mask_resampled = align_mask_to_reference_layer(
+            layer, intensity_layer, proc_data, order=0
+        )
+        if mask_resampled:
+            gui_log(
+                f"Resampled mask '{layer.name}' onto intensity '{intensity_layer.name}' "
+                f"grid {tuple(ref.data.shape)}."
+            )
+        mask = as_backend_array(mask_img.data).astype(bool).copy()
         intensity = as_backend_array(ref.data).astype(np.float64)
-        if mask.shape != intensity.shape:
-            raise ValueError("Mask and intensity layers must have the same shape.")
         seed_ids = list(params.get("selected_label_ids") or label_ids or [])
         if bool(params.get("seed_from_label")) and seed_ids:
             from nvitk.gui.tool_presets import label_centroid_voxel
@@ -562,14 +598,15 @@ def run_gui_tool(
         bar_name = str(params.get("barrier_layer") or "").strip()
         if bar_name:
             bar_layer = _resolve_layer(viewer, bar_name)
-            bar_vol = as_backend_array(layer_data_for_tool(bar_layer.data))
-            if bar_vol.shape != mask.shape:
-                raise ValueError("Barrier layer must match the active mask shape.")
-            forbidden = forbidden_from_label_mask(bar_vol, radius_vox=bar_rad)
+            _, bar_img, _ = align_mask_to_reference_layer(
+                bar_layer, intensity_layer, order=0
+            )
+            forbidden = forbidden_from_label_mask(bar_img.data, radius_vox=bar_rad)
         if bool(params.get("barrier_other_labels")):
-            label_vol = as_backend_array(data)
-            if label_vol.shape != mask.shape:
-                raise ValueError("Active layer shape mismatch for label barriers.")
+            _, label_img, _ = align_mask_to_reference_layer(
+                layer, intensity_layer, data, order=0
+            )
+            label_vol = as_backend_array(label_img.data)
             exclude = [int(x) for x in seed_ids]
             if not exclude:
                 growing = np.asarray(mask, dtype=bool)
@@ -925,12 +962,28 @@ def _run_measure_mask_hemodynamics(
     from nvitk.measure.mask_hemodynamics import measure_mask_hemodynamics
 
     lids = list(label_ids or []) or [int(params.get("label_id") or 1)]
+    ap_name = str(params.get("ap_layer") or "").strip()
+    if ap_name:
+        ap_layer = _resolve_layer(viewer, ap_name)
+        _, mask_img, resampled = align_mask_to_reference_layer(
+            layer, ap_layer, mask_data, order=0
+        )
+        if resampled:
+            gui_log(
+                f"Resampled mask '{layer.name}' onto phase grid '{ap_layer.name}' "
+                f"{tuple(mask_img.data.shape)}."
+            )
+        mask_data = mask_img.data
     ap, rl, fh, voxel_spacing = _phase_arrays_from_layers_or_disk(viewer, params)
     ref_name = str(params.get("reference_layer") or "").strip()
     mag = cd = vel_mag = None
     if ref_name:
-        ref_data = as_backend_array(_resolve_layer(viewer, ref_name).data).astype(np.float64)
-        mag = cd = vel_mag = ref_data
+        ref_layer = _resolve_layer(viewer, ref_name)
+        if ap_name:
+            _, ref_on_ap, _ = align_mask_to_reference_layer(ref_layer, ap_layer, order=1)
+            mag = cd = vel_mag = as_backend_array(ref_on_ap.data).astype(np.float64)
+        else:
+            mag = cd = vel_mag = as_backend_array(ref_layer.data).astype(np.float64)
     method = str(params.get("hemo_method") or "both")
     lines: list[str] = []
     for lid in lids:
@@ -967,9 +1020,10 @@ def _run_viz_pet_hotspots(
     *,
     label_ids: list[int] | None,
 ) -> None:
-    ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-    suv = as_backend_array(ref.data)
-    mask = mask_data
+    ref_name = str(params.get("reference_layer") or "").strip()
+    ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, mask_data)
+    suv = as_backend_array(ref_img.data)
+    mask = mask_img.data
     lids = label_ids
 
     def _show() -> None:
@@ -1036,45 +1090,57 @@ def _measure_line(
     if tool_id == "masked_stats":
         from nvitk.measure.intensity import masked_stats
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        stats = masked_stats(ref, img)
+        ref_name = str(params.get("reference_layer") or "").strip()
+        intensity, mask_img = _reference_and_mask_images(
+            viewer, layer, ref_name, img.data
+        )
+        stats = masked_stats(intensity, mask_img)
         return _format_metrics({k: round(float(v), 6) for k, v in stats.items()})
     if tool_id == "integrated_intensity":
         from nvitk.measure.radiomics import integrated_intensity
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        return f"integrated = {integrated_intensity(ref, img):.6g}"
+        ref_name = str(params.get("reference_layer") or "").strip()
+        intensity, mask_img = _reference_and_mask_images(
+            viewer, layer, ref_name, img.data
+        )
+        return f"integrated = {integrated_intensity(intensity, mask_img):.6g}"
     if tool_id == "suv_stats":
         from nvitk.measure.suv import suv_stats
 
         ref_name = str(params.get("reference_layer") or "").strip()
         if ref_name:
-            pet = layer_to_image(_resolve_layer(viewer, ref_name))
-            stats = suv_stats(pet, img)
+            pet, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
+            stats = suv_stats(pet, mask_img)
         else:
             stats = suv_stats(img, img)
         return _format_metrics({k: round(float(v), 6) for k, v in stats.items()})
     if tool_id == "dice":
         from nvitk.measure.voxel import dice
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        return f"dice = {dice(ref, img):.6f}"
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
+        return f"dice = {dice(ref_img, mask_img):.6f}"
     if tool_id == "jaccard":
         from nvitk.measure.voxel import jaccard
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        return f"jaccard = {jaccard(ref, img):.6f}"
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
+        return f"jaccard = {jaccard(ref_img, mask_img):.6f}"
     if tool_id == "voxel_metrics":
         from nvitk.measure.voxel import voxel_metrics
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
-        return _format_metrics({k: round(float(v), 6) for k, v in voxel_metrics(ref, img).items()})
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
+        return _format_metrics(
+            {k: round(float(v), 6) for k, v in voxel_metrics(ref_img, mask_img).items()}
+        )
     if tool_id == "surface_metrics":
         from nvitk.measure.surface import surface_metrics
 
-        ref = layer_to_image(_resolve_layer(viewer, str(params.get("reference_layer") or "")))
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
         return _format_metrics(
-            {k: round(float(v), 6) for k, v in surface_metrics(ref, img).items()}
+            {k: round(float(v), 6) for k, v in surface_metrics(ref_img, mask_img).items()}
         )
     raise ValueError(f"Per-label measure not supported for {tool_id}")
 

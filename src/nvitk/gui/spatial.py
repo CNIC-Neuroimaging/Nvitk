@@ -107,6 +107,55 @@ def layer_to_image(layer: Any, data: np.ndarray | None = None) -> Image:
     )
 
 
+def layers_need_resample(
+    mask_layer: Any,
+    reference_layer: Any,
+    mask_img: Image,
+    reference_img: Image,
+) -> bool:
+    """True when mask and reference are not on the same voxel grid."""
+    if tuple(mask_img.data.shape) != tuple(reference_img.data.shape):
+        return True
+    aff_m = layer_affine(mask_layer)
+    aff_r = layer_affine(reference_layer)
+    if aff_m is None or aff_r is None:
+        return tuple(mask_img.data.shape) != tuple(reference_img.data.shape)
+    return not np.allclose(aff_m, aff_r, rtol=0, atol=1e-3)
+
+
+def align_mask_to_reference_layer(
+    mask_layer: Any,
+    reference_layer: Any,
+    mask_data: np.ndarray | None = None,
+    *,
+    order: int = 0,
+) -> tuple[Image, Image, bool]:
+    """
+    Return ``(reference_image, mask_on_reference_grid, was_resampled)``.
+
+    When shapes or affines differ, resamples the mask onto the reference grid
+    (same convention as :meth:`~nvitk.measure.Measurer.align` ``mask_to_raw``).
+    """
+    ref_img = layer_to_image(reference_layer)
+    mask_img = layer_to_image(mask_layer, mask_data)
+    if not layers_need_resample(mask_layer, reference_layer, mask_img, ref_img):
+        return ref_img, mask_img, False
+
+    if layer_affine(mask_layer) is None or layer_affine(reference_layer) is None:
+        raise ValueError(
+            f"Shape mismatch ({mask_img.data.shape} vs {ref_img.data.shape}) but affine "
+            f"metadata is missing on "
+            f"'{getattr(mask_layer, 'name', 'mask')}' or "
+            f"'{getattr(reference_layer, 'name', 'reference')}'; "
+            "cannot resample for measurement."
+        )
+
+    from nvitk.measure.measurer import Measurer
+
+    aligned = Measurer(ref_img, mask_img).align("mask_to_raw", order=order)
+    return aligned.image, aligned.mask, True
+
+
 def _axis_direction_label(code: str) -> str:
     c = str(code).upper()
     pairs = {
