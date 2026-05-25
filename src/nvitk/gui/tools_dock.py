@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from qtpy.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from nvitk.gui.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.label_catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
@@ -18,6 +19,24 @@ from nvitk.gui.tools_registry import (
     tool_id_from_label,
 )
 from nvitk.gui.totalseg_selector import TotalSegRoiWidget
+
+
+def _compact_magicgui_panel(native: QWidget) -> None:
+    """Group magicgui controls at the top (no vertical stretch between fields)."""
+    lay = native.layout()
+    if lay is None:
+        return
+    lay.setAlignment(Qt.AlignTop)
+    lay.setSpacing(6)
+    fixed = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    for i in range(lay.count()):
+        item = lay.itemAt(i)
+        if item is None:
+            continue
+        w = item.widget()
+        if w is not None:
+            w.setSizePolicy(fixed)
+    lay.addStretch(1)
 
 
 def _show_label_picker(category: str, tool_id: str, target_mode: str) -> bool:
@@ -46,6 +65,8 @@ def build_tools_dock(
     container = QWidget()
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
+    layout.setAlignment(Qt.AlignTop)
+    layout.setSpacing(6)
 
     label_selector = LabelSelectorWidget()
     pipeline_form = PipelineCliForm()
@@ -161,7 +182,10 @@ def build_tools_dock(
     layout.addWidget(label_selector)
     layout.addWidget(totalseg_roi)
     layout.addWidget(pipeline_form)
+    layout.addStretch(1)
     container.setLayout(layout)
+
+    _compact_magicgui_panel(tool_panel.native)
 
     def _signal_value(event: Any) -> Any:
         return event.value if hasattr(event, "value") else event

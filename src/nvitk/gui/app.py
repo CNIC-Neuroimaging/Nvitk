@@ -14,7 +14,11 @@ from nvitk.meshlab import mesh_from_image, marching_cubes_multilabel
 from nvitk.types import Image, Mesh
 
 from nvitk.gui.export_napari import export_selected_layer
-from nvitk.gui.io_napari import install_nvitk_io, open_paths_with_nvitk
+from nvitk.gui.io_napari import (
+    install_nvitk_io,
+    install_nvitk_layer_hooks,
+    open_paths_with_nvitk,
+)
 from nvitk.gui.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
 from nvitk.gui.log_panel import build_log_dock_widget
 from nvitk.gui.tool_runner import notify
@@ -65,6 +69,7 @@ def run_app() -> None:
     viewer = napari.Viewer(title="nvitk")
     _ = viewer.window
     install_nvitk_io(viewer)
+    install_nvitk_layer_hooks(viewer)
 
     app_state: dict[str, Any] = {
         "record_enabled": True,
@@ -305,15 +310,21 @@ def run_app() -> None:
     attach_orientation_status(viewer, orientation_label)
 
     layers_tab = QWidget()
+    from qtpy.QtCore import Qt
+
     layers_layout = QVBoxLayout()
+    layers_layout.setAlignment(Qt.AlignTop)
+    layers_layout.setSpacing(6)
     layers_layout.addWidget(orientation_label)
     layers_layout.addWidget(layer_list)
     layers_layout.addWidget(layers_panel.native)
     layers_layout.addWidget(layers_refresh_panel.native)
+    layers_layout.addStretch(1)
     layers_tab.setLayout(layers_layout)
 
     dock = QWidget()
     layout = QVBoxLayout()
+    layout.setAlignment(Qt.AlignTop)
     tabs = QTabWidget()
     tabs.addTab(tools_widget, "Tools")
     tabs.addTab(mesh_panel.native, "Mesh")
@@ -323,6 +334,7 @@ def run_app() -> None:
     tabs.addTab(export_panel.native, "Pipeline")
     tabs.addTab(pipeline_panel.native, "Pipeline log")
     layout.addWidget(tabs)
+    layout.addStretch(1)
     dock.setLayout(layout)
     viewer.window.add_dock_widget(dock, area="right", name="nvitk")
     log_dock = build_log_dock_widget()

@@ -96,21 +96,122 @@ def napari_dim_order(
     return tuple(time_axes + spatial_axes)
 
 
+def _resolution_from_metadata(metadata: dict[str, Any] | None, axis_char: str) -> float | None:
+    md = metadata or {}
+    key = {
+        "X": "x_res",
+        "Y": "y_res",
+        "Z": "z_res",
+        "T": "t_res",
+        "C": "t_res",
+    }.get(axis_char.upper())
+    if key is None:
+        return None
+    val = md.get(key)
+    if val is None and axis_char.upper() in ("T", "C"):
+        val = md.get("temporal_resolution")
+    if val is None:
+        return None
+    return float(val)
+
+
+def napari_scale_for_display(
+    shape: tuple[int, ...],
+    axes: str | None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[float, ...]:
+    """Diagonal voxel spacing per array axis (used for 4D+ instead of affine)."""
+    from nvitk.io._common import default_nifti_axes
+
+    ndim = len(shape)
+    axes_u = (axes or default_nifti_axes(ndim)).upper()
+    if len(axes_u) != ndim:
+        axes_u = default_nifti_axes(ndim)
+    return tuple(_resolution_from_metadata(metadata, ch) or 1.0 for ch in axes_u)
+
+
+def napari_affine_for_display(
+    affine: np.ndarray | None,
+    shape: tuple[int, ...],
+    axes: str | None,
+    metadata: dict[str, Any] | None = None,
+) -> np.ndarray | None:
+    """
+    Affine for Napari display.
+
+    For 4D+ volumes, decouple the temporal axis from spatial world coordinates so the
+    time slider spans voxel indices (e.g. 15 phases), not a distorted world extent.
+    """
+    from nvitk.io._common import default_nifti_axes
+
+    ndim = len(shape)
+    if ndim <= 3:
+        if affine is None:
+            return None
+        aff = to_numpy(affine).astype(float)
+        return aff if aff.shape == (4, 4) else None
+
+    axes_u = (axes or default_nifti_axes(ndim)).upper()
+    if len(axes_u) != ndim:
+        axes_u = default_nifti_axes(ndim)
+
+    time_axes = [i for i, ch in enumerate(axes_u) if ch in ("T", "C")]
+    if not time_axes:
+        if affine is None:
+            return None
+        aff = to_numpy(affine).astype(float)
+        return aff if aff.shape == (4, 4) else None
+
+    t_ix = time_axes[0]
+    md = metadata or {}
+    t_scale = _resolution_from_metadata(md, axes_u[t_ix]) or 1.0
+
+    if affine is not None:
+        aff = to_numpy(affine).astype(float).copy()
+        if aff.shape != (4, 4):
+            aff = np.eye(4, dtype=float)
+    else:
+        aff = np.eye(4, dtype=float)
+        for i, ch in enumerate(axes_u):
+            if ch in "XYZ":
+                s = _resolution_from_metadata(md, ch)
+                if s is not None:
+                    aff[i, i] = float(s)
+
+    # Drop spatial↔temporal cross-terms (common 4DFlow bug: X extent mapped onto T slider).
+    aff[0:3, t_ix] = 0.0
+    aff[t_ix, 0:3] = 0.0
+    aff[t_ix, t_ix] = float(t_scale)
+    if t_ix == 3:
+        aff[3, 0:3] = 0.0
+        aff[3, 3] = float(t_scale)
+    else:
+        aff[3, t_ix] = 0.0
+    return aff
+
+
 def prepare_for_napari(
     data: np.ndarray,
     affine: np.ndarray | None,
     *,
+    axes: str | None = None,
+    metadata: dict[str, Any] | None = None,
     radiological: bool = True,
-) -> tuple[np.ndarray, np.ndarray | None, tuple[float, float, float] | None]:
-    """Pass through array and file affine (no voxel reorientation)."""
+) -> tuple[np.ndarray, np.ndarray | None, tuple[float, ...] | None]:
+    """
+    Prepare layer display transforms.
+
+    4D+ uses ``scale`` only (no affine). Oblique 4DFlow affines couple spatial axes into
+    the temporal world axis and Napari then reports ~60 bogus time steps instead of 15.
+    The file affine is preserved in metadata as ``affine_source`` for export.
+    """
     _ = radiological
-    if affine is not None:
-        aff = to_numpy(affine).astype(float)
-        if aff.shape != (4, 4):
-            affine = None
-        else:
-            affine = aff
-    return to_numpy(data), affine, None
+    data = to_numpy(data)
+    shape = tuple(int(x) for x in data.shape)
+    if data.ndim > 3:
+        return data, None, napari_scale_for_display(shape, axes, metadata)
+    display_affine = napari_affine_for_display(affine, shape, axes, metadata)
+    return data, display_affine, None
 
 
 def _lr_voxel_axis_for_radiological(affine: np.ndarray | None, ndim: int) -> int | None:
@@ -154,6 +255,43 @@ def _apply_voxel_axis_flip(layer: Any, axis: int) -> None:
     layer.affine = aff @ flip
 
 
+def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
+    scale = getattr(layer, "scale", None)
+    if scale is not None and len(scale) >= ndim:
+        return tuple(float(scale[i]) for i in range(ndim))
+    return (1.0,) * ndim
+
+
+def _synchronize_4d_dims(
+    viewer: Any,
+    layer: Any,
+    *,
+    axes_str: str | None,
+    shape: tuple[int, ...],
+) -> None:
+    """Force Napari dims range/point from array shape (15 phases, not ~62)."""
+    try:
+        from napari.utils.misc import RangeTuple
+    except Exception:
+        RangeTuple = tuple  # type: ignore[misc, assignment]
+
+    ndim = len(shape)
+    sc = _layer_display_scale(layer, ndim)
+    ranges = []
+    point: list[float] = []
+    for i, n in enumerate(shape):
+        step = sc[i]
+        stop = float(max(0, n - 1)) * step
+        ranges.append(RangeTuple(0.0, stop, step))
+        point.append(0.0)
+    if axes_str and len(axes_str) == ndim:
+        for i, ch in enumerate(axes_str.upper()):
+            if ch == "Z":
+                point[i] = float(max(0, shape[i] - 1)) / 2.0 * sc[i]
+    viewer.dims.range = tuple(ranges)
+    viewer.dims.point = tuple(point)
+
+
 def configure_viewer_for_layer(
     viewer: Any,
     layer: Any,
@@ -190,12 +328,7 @@ def configure_viewer_for_layer(
             viewer.dims.order = order
             if axes_str and len(axes_str) == ndim:
                 viewer.dims.axis_labels = tuple(axes_str)
-            point = [0] * ndim
-            if axes_str and len(axes_str) == ndim:
-                for i, ch in enumerate(axes_str.upper()):
-                    if ch == "Z" and i < len(shape):
-                        point[i] = int(shape[i] // 2)
-            viewer.dims.point = tuple(point[:ndim])
+            _synchronize_4d_dims(viewer, layer, axes_str=axes_str, shape=shape)
         try:
             viewer.camera.angles = (0, 0, 0)
         except Exception:

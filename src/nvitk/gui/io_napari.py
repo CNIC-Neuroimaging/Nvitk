@@ -124,13 +124,24 @@ def _axis_labels_for_image(img: Image, ndim: int) -> tuple[str, ...]:
 def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     data = to_numpy(img.data)
     raw_affine = _napari_affine(img)
-    data, affine, scale = prepare_for_napari(data, raw_affine)
+    axis_labels = _axis_labels_for_image(img, data.ndim)
+    axes_str = "".join(axis_labels)
+    data, affine, scale = prepare_for_napari(
+        data,
+        raw_affine,
+        axes=axes_str,
+        metadata=img.metadata,
+    )
     layer_meta: dict[str, Any] = {
         "name": img.name or path.stem,
         "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
         "axis_labels": _axis_labels_for_image(img, data.ndim),
     }
-    if affine is not None:
+    if data.ndim > 3:
+        sc = scale or _napari_scale(img, data.ndim)
+        if sc is not None:
+            layer_meta["scale"] = tuple(sc[: data.ndim])
+    elif affine is not None:
         layer_meta["affine"] = affine
     elif scale is not None:
         nd = min(len(scale), data.ndim)
@@ -186,10 +197,10 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
         "name": layer_meta["name"],
         "metadata": layer_meta["metadata"],
     }
-    if "affine" in layer_meta:
-        kwargs["affine"] = layer_meta["affine"]
-    elif "scale" in layer_meta:
+    if "scale" in layer_meta:
         kwargs["scale"] = layer_meta["scale"]
+    elif "affine" in layer_meta:
+        kwargs["affine"] = layer_meta["affine"]
     if "axis_labels" in layer_meta:
         kwargs["axis_labels"] = layer_meta["axis_labels"]
     with suppress_nonorthogonal_slice_warning():
@@ -234,6 +245,75 @@ def _notify_error(message: str) -> None:
         show_error(message)
     except Exception:
         print(message, flush=True)
+
+
+def _is_nvitk_layer(layer: Any) -> bool:
+    meta = getattr(layer, "metadata", None) or {}
+    if isinstance(meta, dict) and "nvitk_metadata" in meta:
+        return True
+    nv = meta.get("nvitk_metadata") if isinstance(meta, dict) else None
+    return isinstance(nv, dict)
+
+
+def _layer_from_list_event(event: Any) -> Any | None:
+    """Layer instance from Napari ``inserted`` / legacy ``added`` events."""
+    value = getattr(event, "value", None)
+    if value is not None and hasattr(value, "data"):
+        return value
+    source = getattr(event, "source", None)
+    if isinstance(source, (list, tuple)):
+        for item in reversed(source):
+            if hasattr(item, "data"):
+                return item
+    return None
+
+
+def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
+    layer = _layer_from_list_event(event)
+    if layer is None:
+        return
+    data = getattr(layer, "data", None)
+    ndim = int(getattr(data, "ndim", 0) or 0)
+    if not _is_nvitk_layer(layer) and ndim != 4:
+        return
+    if ndim > 3 and getattr(layer, "affine", None) is not None:
+        # Use scale-only for 4D+ (see prepare_for_napari).
+        meta = getattr(layer, "metadata", None) or {}
+        nv = meta.get("nvitk_metadata") if isinstance(meta, dict) else {}
+        axes = None
+        if isinstance(nv, dict) and nv.get("axes"):
+            axes = str(nv["axes"])
+        elif isinstance(meta, dict) and meta.get("axes"):
+            axes = str(meta["axes"])
+        from nvitk.gui.orientation import napari_scale_for_display
+
+        layer.affine = np.eye(4, dtype=float)
+        layer.scale = napari_scale_for_display(
+            tuple(int(x) for x in data.shape),
+            axes,
+            nv if isinstance(nv, dict) else meta,
+        )
+    configure_viewer_for_layer(viewer, layer)
+
+
+def install_nvitk_layer_hooks(viewer: Any) -> None:
+    """Configure dims when layers are added by the nvitk-io reader (not only Qt open)."""
+    if getattr(viewer, "_nvitk_layer_hooks", False):
+        return
+
+    events = viewer.layers.events
+
+    def _callback(event: Any) -> None:
+        _on_nvitk_layer_inserted(viewer, event)
+
+    if hasattr(events, "inserted"):
+        events.inserted.connect(_callback)
+    elif hasattr(events, "added"):
+        events.added.connect(_callback)
+    else:
+        return
+
+    viewer._nvitk_layer_hooks = True  # type: ignore[attr-defined]
 
 
 def install_nvitk_io(viewer: Any) -> None:
@@ -301,3 +381,4 @@ def install_nvitk_io(viewer: Any) -> None:
 
     qt._qt_open = _qt_open
     qt._nvitk_io_patched = True
+    install_nvitk_layer_hooks(viewer)

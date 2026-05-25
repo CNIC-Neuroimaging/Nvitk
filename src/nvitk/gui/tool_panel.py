@@ -12,6 +12,7 @@ from nvitk.gui.tools_registry import (
     categories,
     default_category,
     default_operation,
+    operation_help_text,
     operations_for_category,
     params_for_tool,
     tool_by_id,
@@ -166,6 +167,14 @@ def build_tool_panel(
             "choices": operations_for_category(default_category()),
             "label": "Operation",
         },
+        operation_help={
+            "label": "",
+            "widget_type": "TextEdit",
+            "value": operation_help_text(
+                tool_id_from_label(default_category(), default_operation(default_category()))
+            ),
+            "enabled": False,
+        },
         target_mode={
             "choices": ["raw", "binary_mask", "label", "all_labels"],
             "label": "Process target",
@@ -300,6 +309,7 @@ def build_tool_panel(
     def tool_panel(
         category: str,
         operation: str,
+        operation_help: str,
         target_mode: str,
         label_ids: str,
         overlay_mode: str,
@@ -485,6 +495,12 @@ def build_tool_panel(
     def _signal_value(event: Any) -> Any:
         return event.value if hasattr(event, "value") else event
 
+    def _sync_operation_help() -> None:
+        cat = tool_panel.category.value
+        op = tool_panel.operation.value
+        tid = tool_id_from_label(cat, op)
+        tool_panel.operation_help.value = operation_help_text(tid)
+
     @tool_panel.category.changed.connect
     def _on_category_changed(event) -> None:
         cat = _signal_value(event)
@@ -495,6 +511,7 @@ def build_tool_panel(
         tid = tool_id_from_label(cat, tool_panel.operation.value)
         if tid:
             _set_param_visibility(tool_panel, tid)
+        _sync_operation_help()
 
     @tool_panel.operation.changed.connect
     def _on_operation_changed(event) -> None:
@@ -502,12 +519,14 @@ def build_tool_panel(
         if tid:
             _set_param_visibility(tool_panel, tid)
         _update_reference_layers(tool_panel, viewer)
+        _sync_operation_help()
 
     tid0 = tool_id_from_label(default_category(), default_operation(default_category()))
     if tid0:
         _set_param_visibility(tool_panel, tid0)
         _update_reference_layers(tool_panel, viewer)
         _update_phase_layers(tool_panel, viewer)
+    _sync_operation_help()
 
     @tool_panel.pipeline_preset.changed.connect
     def _on_preset_changed(event) -> None:

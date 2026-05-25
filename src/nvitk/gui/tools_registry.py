@@ -41,6 +41,7 @@ class GuiToolSpec:
     needs_3d: bool = False
     run_mode: RunMode = "layer"
     cli_command: str = ""
+    description: str = ""
 
 
 TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
@@ -171,6 +172,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Mark skeleton branch points (degree ≥ N) on a 3D centerline mask."
+        ),
     ),
     GuiToolSpec(
         "centerline_cut_junctions",
@@ -182,6 +186,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
         needs_3d=True,
         run_mode="layer",
+        description=(
+            "Split a label at junction markers from Detect skeleton junctions."
+        ),
     ),
     GuiToolSpec(
         "siphon_correct",
@@ -614,6 +621,7 @@ _PIPELINE_GUI: tuple[GuiToolSpec, ...] = tuple(
         (_WORKING_DIR,),
         run_mode="pipeline",
         cli_command=p.cli_command,
+        description=p.description,
     )
     for p in PIPELINE_TOOLS
 )
@@ -659,3 +667,16 @@ def default_operation(category: str) -> str:
 def params_for_tool(tool_id: str) -> tuple[ParamSpec, ...]:
     t = tool_by_id(tool_id)
     return t.params if t else ()
+
+
+def operation_help_text(tool_id: str | None) -> str:
+    """Brief description for the selected tool (Tools panel)."""
+    from nvitk.gui.tool_descriptions import tool_description_text
+
+    if not tool_id:
+        return tool_description_text("", fallback_label="Select a category and operation.")
+    spec = tool_by_id(tool_id)
+    fallback = spec.label if spec else ""
+    if spec and spec.description.strip():
+        return spec.description.strip()
+    return tool_description_text(tool_id, fallback_label=fallback)
