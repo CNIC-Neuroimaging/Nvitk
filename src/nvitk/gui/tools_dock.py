@@ -119,6 +119,7 @@ def build_tools_dock(
         is_ts = tid == "seg_totalsegmentator"
         show_labels = _show_label_picker(cat, tid, tm)
         label_selector.setVisible(show_labels)
+        _update_label_dock_layout(show_labels)
         if show_labels:
             layer = _active_layer()
             if is_ts:
@@ -176,14 +177,36 @@ def build_tools_dock(
 
     btn_cursor_seed.clicked.connect(_apply_cursor_seed)
 
-    layout.addWidget(build_gpu_toggle_button())
-    layout.addWidget(tool_panel.native)
-    layout.addWidget(cursor_row)
-    layout.addWidget(label_selector)
-    layout.addWidget(totalseg_roi)
-    layout.addWidget(pipeline_form)
-    layout.addStretch(1)
+    layout.addWidget(build_gpu_toggle_button(), 0)
+    layout.addWidget(tool_panel.native, 0)
+    layout.addWidget(cursor_row, 0)
+    layout.addWidget(label_selector, 0)
+    layout.addWidget(totalseg_roi, 0)
+    layout.addWidget(pipeline_form, 0)
+    bottom_spacer = QWidget()
+    bottom_spacer.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+    layout.addWidget(bottom_spacer, 1)
     container.setLayout(layout)
+
+    _label_row = layout.indexOf(label_selector)
+    _spacer_row = layout.indexOf(bottom_spacer)
+
+    def _update_label_dock_layout(show_labels: bool) -> None:
+        label_selector.set_expanded(show_labels)
+        if show_labels:
+            bottom_spacer.setVisible(False)
+            layout.setStretch(_spacer_row, 0)
+            layout.setStretch(_label_row, 1)
+            for i in range(layout.count()):
+                if i not in (_label_row, _spacer_row):
+                    layout.setStretch(i, 0)
+        else:
+            bottom_spacer.setVisible(True)
+            layout.setStretch(_label_row, 0)
+            layout.setStretch(_spacer_row, 1)
+            for i in range(layout.count()):
+                if i != _spacer_row:
+                    layout.setStretch(i, 0)
 
     _compact_magicgui_panel(tool_panel.native)
 

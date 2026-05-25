@@ -106,6 +106,12 @@ def _nvitk_layer_metadata(
     """Napari ``metadata`` dict (nested nvitk fields only — no invalid layer kwargs)."""
     nvitk_md = dict(img.metadata) if img.metadata else {}
     nvitk_md["source"] = str(path)
+    try:
+        src_type = guess_read_type(path)
+        if src_type:
+            nvitk_md["source_type"] = src_type
+    except Exception:
+        pass
     if affine_source is not None:
         nvitk_md["affine_source"] = to_numpy(affine_source).astype(float)
     out: dict[str, Any] = {"nvitk_metadata": nvitk_md}

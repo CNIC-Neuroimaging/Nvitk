@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -81,7 +82,7 @@ class LabelSelectorWidget(QGroupBox):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setMaximumHeight(180)
+        self._scroll.setMinimumHeight(80)
         self._inner = QWidget()
         self._inner_layout = QVBoxLayout()
         self._inner_layout.setAlignment(Qt.AlignTop)
@@ -136,6 +137,19 @@ class LabelSelectorWidget(QGroupBox):
 
     def schema_key(self) -> str:
         return self._schema_key
+
+    def set_expanded(self, expanded: bool) -> None:
+        """When True, grow to fill remaining dock height (label picker visible)."""
+        if expanded:
+            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            self.setSizePolicy(policy)
+            self._scroll.setSizePolicy(policy)
+            self._scroll.setMaximumHeight(16777215)
+        else:
+            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.setSizePolicy(policy)
+            self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self._scroll.setMaximumHeight(180)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         self._layer_ref = layer

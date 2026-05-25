@@ -22,6 +22,7 @@ from nvitk.gui.io_napari import (
 from nvitk.gui.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
 from nvitk.gui.log_panel import build_log_dock_widget
 from nvitk.gui.tool_runner import notify
+from nvitk.gui.dicom_tags_panel import DicomTagsPanel, layer_has_dicom_tags
 from nvitk.gui.tools_dock import build_tools_dock
 from nvitk.gui.warnings import install_napari_display_warnings
 
@@ -91,6 +92,7 @@ def run_app() -> None:
         on_layers_changed=_on_layers_changed,
         record_step=lambda step: _record_step(app_state, step),
     )
+    dicom_tags_panel = DicomTagsPanel()
 
     from nvitk.gui.gpu_toggle import backend_label
     from nvitk.gui.log_panel import gui_log
@@ -327,6 +329,7 @@ def run_app() -> None:
     layout.setAlignment(Qt.AlignTop)
     tabs = QTabWidget()
     tabs.addTab(tools_widget, "Tools")
+    dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
     tabs.addTab(mesh_panel.native, "Mesh")
     tabs.addTab(batch_panel.native, "Batch")
     tabs.addTab(layers_tab, "Layers")
@@ -341,6 +344,31 @@ def run_app() -> None:
     viewer.window.add_dock_widget(log_dock, area="bottom", name="nvitk log")
 
     _refresh_layer_list(layer_list, viewer, app_state)
+
+    def _refresh_dicom_tags_tab() -> None:
+        layer = (
+            viewer.layers.selection.active
+            if viewer.layers
+            else None
+        )
+        dicom_tags_panel.refresh_from_layer(layer)
+        has_tags = layer_has_dicom_tags(layer)
+        tabs.setTabEnabled(dicom_tab_index, has_tags)
+        if has_tags:
+            tabs.setTabToolTip(
+                dicom_tab_index,
+                "DICOM metadata for the active layer",
+            )
+
+    @viewer.layers.selection.events.active.connect
+    def _on_active_layer_changed(_event: Any) -> None:
+        _refresh_dicom_tags_tab()
+
+    @viewer.layers.events.inserted.connect
+    def _on_layer_inserted_dicom(_event: Any) -> None:
+        _refresh_dicom_tags_tab()
+
+    _refresh_dicom_tags_tab()
 
     @viewer.bind_key("Control-T")
     def _transpose_axes(_viewer) -> None:
