@@ -204,11 +204,19 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
     text = "  |  ".join(parts)
     if viewer is not None and getattr(layer, "data", None) is not None:
         try:
-            from nvitk.gui.orientation import axial_dim_order, superior_voxel_axis
+            from nvitk.gui.orientation import (
+                axial_dim_order,
+                napari_dim_order_3d,
+                superior_voxel_axis,
+            )
 
             ndim = int(layer.data.ndim)
             sup = superior_voxel_axis(aff, ndim)
-            order = axial_dim_order(aff, ndim)
+            order = (
+                napari_dim_order_3d(aff, 3)
+                if ndim == 3
+                else axial_dim_order(aff, ndim)
+            )
             in_plane = [order[1], order[2]] if len(order) >= 3 else []
             plane = ", ".join(
                 f"dim {d} ({codes[d] if d < len(codes) else '?'})" for d in in_plane

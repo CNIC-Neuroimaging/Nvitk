@@ -211,7 +211,7 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
         kwargs["axis_labels"] = layer_meta["axis_labels"]
     with suppress_nonorthogonal_slice_warning():
         layer = viewer.add_image(data, **kwargs)
-    configure_viewer_for_layer(viewer, layer)
+    configure_viewer_for_layer(viewer, layer, radiological=False)
     return layer
 
 
@@ -275,31 +275,34 @@ def _layer_from_list_event(event: Any) -> Any | None:
 
 
 def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
+    from nvitk.gui.orientation import configure_viewer_for_layer, ensure_4d_scale_only_layer
+
     layer = _layer_from_list_event(event)
     if layer is None:
         return
     data = getattr(layer, "data", None)
     ndim = int(getattr(data, "ndim", 0) or 0)
-    if not _is_nvitk_layer(layer) and ndim != 4:
+    if ndim > 3:
+        ensure_4d_scale_only_layer(layer)
+        configure_viewer_for_layer(viewer, layer, radiological=False)
         return
-    if ndim > 3 and getattr(layer, "affine", None) is not None:
-        # Use scale-only for 4D+ (see prepare_for_napari).
-        meta = getattr(layer, "metadata", None) or {}
-        nv = meta.get("nvitk_metadata") if isinstance(meta, dict) else {}
-        axes = None
-        if isinstance(nv, dict) and nv.get("axes"):
-            axes = str(nv["axes"])
-        elif isinstance(meta, dict) and meta.get("axes"):
-            axes = str(meta["axes"])
-        from nvitk.gui.orientation import napari_scale_for_display
+    if not _is_nvitk_layer(layer):
+        return
+    configure_viewer_for_layer(viewer, layer, radiological=False)
 
-        layer.affine = np.eye(4, dtype=float)
-        layer.scale = napari_scale_for_display(
-            tuple(int(x) for x in data.shape),
-            axes,
-            nv if isinstance(nv, dict) else meta,
-        )
-    configure_viewer_for_layer(viewer, layer)
+
+def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:
+    """Re-apply 4D dims when selecting a 4D layer (3D oblique affines can pollute viewer.dims)."""
+    from nvitk.gui.orientation import _axes_string_from_layer, _synchronize_4d_dims, ensure_4d_scale_only_layer
+
+    if not viewer.layers:
+        return
+    layer = viewer.layers.selection.active
+    if layer is None or getattr(layer.data, "ndim", 0) <= 3:
+        return
+    ensure_4d_scale_only_layer(layer)
+    axes_str = _axes_string_from_layer(layer)
+    _synchronize_4d_dims(viewer, layer, axes_str=axes_str, shape=tuple(layer.data.shape))
 
 
 def install_nvitk_layer_hooks(viewer: Any) -> None:
@@ -318,6 +321,10 @@ def install_nvitk_layer_hooks(viewer: Any) -> None:
         events.added.connect(_callback)
     else:
         return
+
+    @viewer.layers.selection.events.active.connect
+    def _active_layer_callback(event: Any) -> None:
+        _on_active_layer_sync_dims(viewer, event)
 
     viewer._nvitk_layer_hooks = True  # type: ignore[attr-defined]
 

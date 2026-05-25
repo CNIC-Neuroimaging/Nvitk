@@ -53,6 +53,21 @@ def axial_dim_order(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, ...]
     return (sup, *rest)
 
 
+def napari_dim_order_3d(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, ...]:
+    """
+    Dims order for 3D axial viewing in Napari (matches in-plane layout after Ctrl+T).
+
+    ``axial_dim_order`` alone yields ``(S, A, R)``; Napari's default display matches
+    ``(S, R, A)`` for typical RAS NIfTI — the same result as ``dims.transpose()`` once,
+    without calling transpose on load.
+    """
+    sup = superior_voxel_axis(affine, ndim)
+    rest = [i for i in range(ndim) if i != sup]
+    if len(rest) >= 2:
+        return (sup, rest[1], rest[0])
+    return (sup, *rest)
+
+
 def _axes_string_from_layer(layer: Any) -> str | None:
     labels = getattr(layer, "axis_labels", None)
     if labels is not None and len(labels) == int(getattr(layer.data, "ndim", 0)):
@@ -262,6 +277,32 @@ def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
     return (1.0,) * ndim
 
 
+def _metadata_for_layer(layer: Any) -> dict[str, Any]:
+    meta = getattr(layer, "metadata", None) or {}
+    if not isinstance(meta, dict):
+        return {}
+    nv = meta.get("nvitk_metadata")
+    return nv if isinstance(nv, dict) else meta
+
+
+def ensure_4d_scale_only_layer(layer: Any) -> None:
+    """
+    Force 4D+ layers to diagonal scale (no oblique file affine).
+
+    Oblique 4DFlow affines break the time slider and cause out-of-bounds indices.
+    """
+    data = getattr(layer, "data", None)
+    if data is None:
+        return
+    ndim = int(data.ndim)
+    if ndim <= 3:
+        return
+    axes_str = _axes_string_from_layer(layer)
+    sc = napari_scale_for_display(tuple(int(x) for x in data.shape), axes_str, _metadata_for_layer(layer))
+    layer.scale = sc
+    layer.affine = np.eye(4, dtype=float)
+
+
 def _synchronize_4d_dims(
     viewer: Any,
     layer: Any,
@@ -270,10 +311,7 @@ def _synchronize_4d_dims(
     shape: tuple[int, ...],
 ) -> None:
     """Force Napari dims range/point from array shape (15 phases, not ~62)."""
-    try:
-        from napari.utils.misc import RangeTuple
-    except Exception:
-        RangeTuple = tuple  # type: ignore[misc, assignment]
+    from napari.components.dims import RangeTuple
 
     ndim = len(shape)
     sc = _layer_display_scale(layer, ndim)
@@ -296,9 +334,13 @@ def configure_viewer_for_layer(
     viewer: Any,
     layer: Any,
     *,
-    radiological: bool = True,
+    radiological: bool = False,
 ) -> None:
-    """Axial-friendly dims for 3D; preserve 4D+ volumes (time/other axes untouched)."""
+    """Axial-friendly dims for 3D; preserve 4D+ volumes (time/other axes untouched).
+
+    Radiological L/R affine flips are off by default so raw images align with label
+    masks opened from the same NIfTI grid (file affine, no extra X mirror).
+    """
     if getattr(layer, "data", None) is None or layer.data.ndim < 3:
         return
     try:
@@ -306,10 +348,10 @@ def configure_viewer_for_layer(
         aff_arr = to_numpy(aff).astype(float) if aff is not None else None
         ndim = int(layer.data.ndim)
         axes_str = _axes_string_from_layer(layer)
-        order = napari_dim_order(axes_str, aff_arr, ndim)
         shape = layer.data.shape
 
         if ndim == 3:
+            order = napari_dim_order_3d(aff_arr, ndim)
             sup = order[0]
             viewer.dims.ndisplay = 2
             viewer.dims.order = order
@@ -317,13 +359,15 @@ def configure_viewer_for_layer(
             point = [int(round(float(x))) for x in viewer.dims.point]
             if len(point) < ndim:
                 point = list(point) + [0] * (ndim - len(point))
-            point[0] = mid
+            point[sup] = mid
             viewer.dims.point = tuple(point[:ndim])
             if radiological and aff_arr is not None:
                 lr = _lr_voxel_axis_for_radiological(aff_arr, ndim)
                 if lr is not None and lr != sup:
                     _apply_voxel_axis_flip(layer, lr)
         else:
+            ensure_4d_scale_only_layer(layer)
+            order = napari_dim_order(axes_str, aff_arr, ndim)
             viewer.dims.ndisplay = 3
             viewer.dims.order = order
             if axes_str and len(axes_str) == ndim:
