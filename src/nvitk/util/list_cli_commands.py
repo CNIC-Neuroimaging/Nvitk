@@ -116,7 +116,6 @@ def list_cli_commands_flat() -> None:
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@backend_click_option()
 @click.option(
     "--no-interactive", "-n",
     is_flag=True,

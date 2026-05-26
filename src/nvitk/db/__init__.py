@@ -34,9 +34,17 @@ from .local_nifti_assets import register_nifti_tree, upsert_nifti_assets
 from .xnat import (
     classify_scan,
     connect_xnat,
+    list_scans_for_subject,
+    list_subjects_for_project,
     resolve_xnat_scan_from_scan_row,
     sync_xnat_project,
     xnat_sequence_to_asset_slot,
+)
+from .xnat_projects import (
+    classify_scan_for_project,
+    classify_scan_ia_pet_v5,
+    get_xnat_project,
+    list_xnat_project_ids,
 )
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 
@@ -60,7 +68,13 @@ __all__ = [
     "SQLiteIndex",
     "XnatConnectionConfig",
     "classify_scan",
+    "classify_scan_for_project",
+    "classify_scan_ia_pet_v5",
     "connect_xnat",
+    "get_xnat_project",
+    "list_xnat_project_ids",
+    "list_scans_for_subject",
+    "list_subjects_for_project",
     "import_measurements_from_source",
     "import_pesabrain_curated_tables",
     "import_pesabrain_source",

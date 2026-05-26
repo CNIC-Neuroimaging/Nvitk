@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 import termios
 import tty
@@ -180,7 +182,7 @@ def _footer_text(*, interactive: bool = True) -> str:
         "[bold bright_white]→/+[/] expand  "
         "[bold bright_white]←/-[/] collapse  "
         "[bold bright_white]Enter[/] "
-        + ("select cmd · toggle branch  " if interactive else "toggle branch  ")
+        + ("select cmd (shows --help) · toggle branch  " if interactive else "toggle branch  ")
         + "[bold bright_white]a/z[/] all/none  "
         "[bold bright_white]q[/] quit"
     )
@@ -298,6 +300,27 @@ def _default_shell_mode() -> bool:
     """Use bash readline injection when running under bash interactively."""
     shell = os.environ.get("SHELL", "")
     return "bash" in shell and sys.stdin.isatty()
+
+
+def run_command_help(command: str, *, console: Console | None = None) -> int:
+    """Run ``command --help`` after interactive selection. Returns process exit code."""
+    cmd = command.strip()
+    if not cmd:
+        return 1
+    out = console or _ui_console()
+    exe = shutil.which(cmd) or cmd
+    try:
+        result = subprocess.run(
+            [exe, "--help"],
+            stdin=subprocess.DEVNULL,
+        )
+        return int(result.returncode or 0)
+    except FileNotFoundError:
+        out.print(f"[bold red]Command not found:[/] [cyan]{cmd}[/]")
+        return 127
+    except OSError as exc:
+        out.print(f"[bold red]Could not run --help for[/] [cyan]{cmd}[/]: {exc}")
+        return 1
 
 
 def _emit_selected_command(command: str, *, shell_mode: bool) -> None:
@@ -425,6 +448,8 @@ def run_interactive_pyhelp(
                 f"[dim green]Selected:[/] [bold cyan]{selected}[/] "
                 "[dim](printed to stdout)[/]",
             )
+        ui_console.print()
+        run_command_help(selected, console=ui_console)
     return selected
 
 

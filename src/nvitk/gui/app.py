@@ -86,6 +86,7 @@ def run_app() -> None:
         "inputs": [],
         "outputs": [],
         "meshes": [],
+        "xnat_temp_dirs": [],
     }
 
     layer_list = QListWidget()
@@ -101,6 +102,25 @@ def run_app() -> None:
         record_step=lambda step: _record_step(app_state, step),
     )
     dicom_tags_panel = DicomTagsPanel()
+
+    def _on_xnat_inputs_opened(paths: list[str]) -> None:
+        for p in paths:
+            app_state["inputs"].append({"path": p, "name": Path(p).name})
+        _on_layers_changed()
+
+    try:
+        from nvitk.gui.data_browser_panel import DataBrowserPanel
+
+        xnat_panel: Any = DataBrowserPanel(
+            viewer,
+            app_state,
+            on_inputs_opened=_on_xnat_inputs_opened,
+        )
+        data_tab_label = "Data"
+    except Exception as exc:
+        xnat_panel = QLabel(f"Data browser unavailable: {exc}")
+        xnat_panel.setWordWrap(True)
+        data_tab_label = "Data"
 
     from nvitk.gui.gpu_toggle import backend_label
     from nvitk.gui.log_panel import gui_log
@@ -338,6 +358,7 @@ def run_app() -> None:
     tabs = QTabWidget()
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     tabs.addTab(tools_widget, "Tools")
+    tabs.addTab(xnat_panel, data_tab_label)
     dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
     tabs.addTab(mesh_panel.native, "Mesh")
     tabs.addTab(batch_panel.native, "Batch")
@@ -378,6 +399,20 @@ def run_app() -> None:
         _refresh_dicom_tags_tab()
 
     _refresh_dicom_tags_tab()
+
+    try:
+        qt_viewer = viewer.window._qt_viewer
+        _orig_close = qt_viewer.closeEvent
+
+        def _close_with_xnat_cleanup(event: Any) -> None:
+            if hasattr(xnat_panel, "cleanup_temp_dirs"):
+                xnat_panel.cleanup_temp_dirs()
+            if _orig_close is not None:
+                _orig_close(event)
+
+        qt_viewer.closeEvent = _close_with_xnat_cleanup
+    except Exception:
+        pass
 
     @viewer.bind_key("Control-T")
     def _transpose_axes(_viewer) -> None:

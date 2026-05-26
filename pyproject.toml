@@ -179,6 +179,7 @@ nvitk-transform = "nvitk.cli.transform:main"
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-gui = "nvitk.gui.main:main"
+nvitk-xnat-sync = "nvitk.db.xnat:main"
 
 # -----------------------------------------------------------------------------
 # Pipeline scripts

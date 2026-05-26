@@ -377,10 +377,47 @@ def xnat_sequence_to_asset_slot(sequence_label: str) -> str:
         "CAROTID_QF": "carotid_qf",
         "RESTING_STATE_MB": "resting_state_mb",
         "VWI_BB": "vwi_bb",
+        "DIXON_HEAD": "dixon_head",
+        "DIXON_THORAX": "dixon_thorax",
+        "DIXON_LEGS": "dixon_legs",
+        "CT": "ct",
+        "PET": "pet",
     }
     if key in mapping:
         return mapping[key]
     return re.sub(r"[^0-9a-z]+", "_", key.lower()).strip("_") or "unknown"
+
+
+_ASSET_SLOT_LABELS: dict[str, str] = {
+    "tof": "TOF",
+    "4dflow_ap": "4DFLOW AP",
+    "4dflow_fh": "4DFLOW FH",
+    "4dflow_rl": "4DFLOW RL",
+    "4dflow": "4DFLOW",
+    "t1_3d": "3D T1",
+    "t2_hr_3d": "3D T2 HR",
+    "flair_3d": "3D FLAIR",
+    "swi": "SWI/QSM",
+    "qsm": "QSM",
+    "carotid_qf": "Carotid QF",
+    "resting_state_mb": "Resting state MB",
+    "vwi_bb": "VWI BB",
+    "dixon_head": "DIXON HEAD",
+    "dixon_thorax": "DIXON THORAX",
+    "dixon_legs": "DIXON LEGS",
+    "ct": "CT",
+    "pet": "PET",
+}
+
+
+def asset_slot_display_label(asset_slot: str) -> str:
+    """Human-readable label for catalog ``asset_slot`` keys."""
+    key = str(asset_slot).strip().lower()
+    if not key:
+        return "?"
+    if key in _ASSET_SLOT_LABELS:
+        return _ASSET_SLOT_LABELS[key]
+    return key.replace("_", " ").upper()
 
 
 def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
@@ -726,6 +763,130 @@ def download_scan_dicoms(
     return extracted
 
 
+def list_subjects_for_project(repo: Any, project_id: str) -> list[str]:
+    """Distinct ``subject_uid`` values with sessions in *project_id*."""
+    if not repo.catalog.table_exists("sessions"):
+        return []
+    df = repo._load_table_frame("sessions", filters={"project_id": str(project_id)}, use_sqlite=True)
+    if df.empty or "subject_uid" not in df.columns:
+        return []
+    subjects = sorted({str(x).strip() for x in df["subject_uid"].dropna().unique() if str(x).strip()})
+    return subjects
+
+
+def list_scans_for_subject(repo: Any, project_id: str, subject_uid: str) -> pd.DataFrame:
+    """Scans for *subject_uid* in *project_id* (joined with sessions)."""
+    if not repo.catalog.table_exists("scans") or not repo.catalog.table_exists("sessions"):
+        return pd.DataFrame()
+
+    scans = repo._load_table_frame(
+        "scans",
+        filters={"subject_uid": str(subject_uid)},
+        use_sqlite=True,
+    )
+    if scans.empty:
+        return scans
+
+    sessions = repo._load_table_frame(
+        "sessions",
+        filters={"project_id": str(project_id), "subject_uid": str(subject_uid)},
+        use_sqlite=True,
+    )
+    if sessions.empty:
+        return pd.DataFrame()
+
+    merged = scans.merge(
+        sessions[["session_uid", "project_id", "experiment_label"]],
+        on="session_uid",
+        how="inner",
+    )
+    cols = [
+        "scan_uid",
+        "scan_id",
+        "series_description",
+        "experiment_label",
+        "modality",
+        "asset_slot",
+        "local_cache_path",
+        "session_uid",
+        "subject_uid",
+        "quality",
+    ]
+    present = [c for c in cols if c in merged.columns]
+    return merged[present].sort_values(["experiment_label", "scan_id"], na_position="last").reset_index(drop=True)
+
+
+def project_subject_asset_slots(repo: Any, project_id: str) -> dict[str, set[str]]:
+    """Map each ``subject_uid`` in *project_id* to indexed ``asset_slot`` values."""
+    if not repo.catalog.table_exists("scans") or not repo.catalog.table_exists("sessions"):
+        return {}
+
+    sessions = repo._load_table_frame(
+        "sessions",
+        filters={"project_id": str(project_id)},
+        use_sqlite=True,
+    )
+    if sessions.empty:
+        return {}
+
+    session_uids = {str(x) for x in sessions["session_uid"].dropna().unique()}
+    scans = repo._load_table_frame("scans", use_sqlite=True)
+    if scans.empty or "session_uid" not in scans.columns:
+        return {}
+
+    scans = scans[scans["session_uid"].astype(str).isin(session_uids)]
+    if scans.empty:
+        return {}
+
+    if "subject_uid" not in scans.columns:
+        scans = scans.merge(
+            sessions[["session_uid", "subject_uid"]],
+            on="session_uid",
+            how="inner",
+        )
+
+    out: dict[str, set[str]] = {}
+    for subject_uid, group in scans.groupby("subject_uid", sort=False):
+        subj = str(subject_uid).strip()
+        if not subj:
+            continue
+        slots = {
+            str(s).strip()
+            for s in group.get("asset_slot", pd.Series(dtype=str)).dropna().unique()
+            if str(s).strip() and str(s).strip().lower() != "nan"
+        }
+        if slots:
+            out[subj] = slots
+    return out
+
+
+def list_asset_slots_for_project(repo: Any, project_id: str) -> list[str]:
+    """Sorted distinct ``asset_slot`` values indexed for *project_id*."""
+    slots: set[str] = set()
+    for subject_slots in project_subject_asset_slots(repo, project_id).values():
+        slots.update(subject_slots)
+    return sorted(slots)
+
+
+def filter_subjects_by_asset_slots(
+    subject_slots: dict[str, set[str]],
+    required_slots: set[str],
+    *,
+    match_all: bool = True,
+) -> list[str]:
+    """Return subject UIDs whose indexed scans satisfy the slot filter."""
+    if not required_slots:
+        return sorted(subject_slots.keys())
+    matched: list[str] = []
+    for subject_uid, slots in subject_slots.items():
+        if match_all:
+            if required_slots.issubset(slots):
+                matched.append(subject_uid)
+        elif required_slots & slots:
+            matched.append(subject_uid)
+    return sorted(matched)
+
+
 def sync_xnat_project(
     repo: DataRepo,
     config: XnatConnectionConfig,
@@ -749,6 +910,12 @@ def sync_xnat_project(
         if base is None:
             raise ValueError("download_niftis requires download_root or nifti_download_root to be set.")
 
+    from .xnat_projects import (
+        classify_scan_for_project,
+        default_sequences_for_project,
+        session_modality_from_classifications,
+    )
+
     subject_labels = resolve_subject_labels(
         catalog_path=catalog_path,
         subjects=subjects,
@@ -756,6 +923,13 @@ def sync_xnat_project(
         id_type=id_type,
     )
     allowed_sequences = requested_sequence_set(requested_sequences)
+    if not allowed_sequences:
+        try:
+            allowed_sequences = requested_sequence_set(
+                ",".join(default_sequences_for_project(config.project))
+            )
+        except KeyError:
+            pass
     source_batch_id = f"xnat_{utc_now_iso().replace(':', '').replace('-', '')}"
 
     subject_rows: list[dict[str, Any]] = []
@@ -802,26 +976,22 @@ def sync_xnat_project(
             for experiment in experiments:
                 experiment_label = str(_coalesce_attr(experiment, "label", "id") or "")
                 session_uid = f"{config.project}:{subject_uid}:{experiment_label}"
-                session_rows.append(
-                    {
-                        "session_uid": session_uid,
-                        "subject_uid": subject_uid,
-                        "project_id": config.project,
-                        "experiment_label": experiment_label,
-                        "modality": "mr",
-                        "visit_label": pd.NA,
-                        "acquired_at": pd.to_datetime(_coalesce_attr(experiment, "date"), errors="coerce"),
-                        "source_batch_id": source_batch_id,
-                        "updated_at": utc_now_iso(),
-                    }
-                )
 
                 scans = list(getattr(experiment, "scans", {}).values())
+                classified_scans: list[tuple[Any, str, str, str, dict[str, Any]]] = []
                 for scan in scans:
                     scan_id = str(_coalesce_attr(scan, "id", "label", "name") or "")
-                    series_description = str(_coalesce_attr(scan, "series_description", "type", "label") or "")
+                    series_description = str(
+                        _coalesce_attr(scan, "series_description", "type", "label") or ""
+                    )
                     quality = str(_coalesce_attr(scan, "quality") or "")
-                    classification = classify_scan(series_description, quality)
+                    classification = classify_scan_for_project(
+                        config.project,
+                        series_description,
+                        quality,
+                        scan_id=scan_id,
+                        experiment_label=experiment_label,
+                    )
                     if classification is None:
                         continue
                     if allowed_sequences and classification["sequence"] not in allowed_sequences:
@@ -830,7 +1000,30 @@ def sync_xnat_project(
                             and allowed_sequences.intersection({"4DFLOW_AP", "4DFLOW_RL", "4DFLOW_FH"})
                         ):
                             continue
+                    classified_scans.append(
+                        (scan, scan_id, series_description, quality, classification)
+                    )
 
+                if not classified_scans:
+                    continue
+
+                session_rows.append(
+                    {
+                        "session_uid": session_uid,
+                        "subject_uid": subject_uid,
+                        "project_id": config.project,
+                        "experiment_label": experiment_label,
+                        "modality": session_modality_from_classifications(
+                            [item[4] for item in classified_scans]
+                        ),
+                        "visit_label": pd.NA,
+                        "acquired_at": pd.to_datetime(_coalesce_attr(experiment, "date"), errors="coerce"),
+                        "source_batch_id": source_batch_id,
+                        "updated_at": utc_now_iso(),
+                    }
+                )
+
+                for scan, scan_id, series_description, quality, classification in classified_scans:
                     scan_uid = f"{session_uid}:{scan_id}"
                     local_cache_path = pd.NA
                     sequence_label = classification["sequence"]
@@ -964,7 +1157,13 @@ def sync_xnat_project(
     "If omitted, uses NVITK_XNAT_CONFIG or ~/.config/nvitk/xnat.{yaml,yml,json}.",
 )
 @_click_option("--server", type=str, default=None, help="XNAT server URL (overrides config / XNAT_SERVER).")
-@_click_option("--project", type=str, default=None, help="XNAT project identifier (overrides config / XNAT_PROJECT).")
+@_click_option(
+    "--project",
+    type=str,
+    default=None,
+    help="XNAT project identifier (overrides config / XNAT_PROJECT). "
+    "Registered: PESA_Brain, IA_PET_V5.",
+)
 @_click_option("--user", type=str, default=None, help="XNAT username.")
 @_click_option("--password", type=str, default=None, help="XNAT password (prefer env, keyring, or netrc).")
 @_click_option("--netrc-file", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Optional netrc file to use for authentication.")

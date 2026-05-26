@@ -84,7 +84,7 @@ Same list as **`pyhelp`** and `src/nvitk/util/list_cli_commands.py` parse from `
 | `nvitk-pesa-fat-dixon` | PESA fat Dixon pipeline |
 
 ```bash
-pyhelp                    # interactive colored tree; Enter on a command to select it
+pyhelp                    # interactive tree; Enter on a command selects it and prints its --help
 pyhelp --no-interactive   # full static tree (colors)
 pyhelp --flat             # legacy flat listing
 # Bash: put the selected command on your current prompt line (recommended)
