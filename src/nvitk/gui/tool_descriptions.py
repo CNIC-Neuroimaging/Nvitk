@@ -48,7 +48,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_totalsegmentator": "Run TotalSegmentator on the active image.",
     "seg_eicab": "Run EICAB segmentation (cluster or local).",
     "viz_pet_hotspots": "Highlight high-SUV voxels as Napari points.",
-    "viz_flowshow": "Overlay 4D flow magnitude / vectors in Napari.",
+    "viz_flowshow": (
+        "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
+        "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."
+    ),
     "reg_flirt_rigid": "Rigid FLIRT registration to a reference volume.",
     "reg_flirt_apply": "Apply a saved FLIRT transform to a volume.",
     "isotropy": "Resample to near-isotropic voxel spacing.",

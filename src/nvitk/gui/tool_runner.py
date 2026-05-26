@@ -1431,7 +1431,7 @@ def _run_viz_flowshow_napari(
     *,
     label_ids: list[int] | None,
 ) -> None:
-    from nvitk.gui.napari_viz import add_flow_vectors_layer, flow_vectors_at_time
+    from nvitk.gui.napari_viz import add_animated_flow_vectors_layer, flow_vectors_all_times
 
     ap_name = str(params.get("ap_layer") or "").strip()
     rl_name = str(params.get("rl_layer") or "").strip()
@@ -1445,33 +1445,57 @@ def _run_viz_flowshow_napari(
     ref_name = str(params.get("reference_layer") or "").strip()
     if ref_name:
         ref_layer = _resolve_layer(viewer, ref_name)
+        # Align 3D mask to spatial grid of reference (supports 4D phase volumes).
         _, mask_on_ref, _ = align_mask_to_reference_layer(
             mask_layer, ref_layer, to_numpy(mask_layer.data), order=0
         )
         mask_arr = to_numpy(mask_on_ref.data)
-        spatial_ref = ref_layer
+        spatial_ref = ref_layer if int(getattr(ref_layer.data, "ndim", 0)) <= 3 else ap_layer
     else:
-        mask_arr = to_numpy(mask_layer.data)
+        ref_layer = ap_layer
+        _, mask_on_ref, _ = align_mask_to_reference_layer(
+            mask_layer, ap_layer, to_numpy(mask_layer.data), order=0
+        )
+        mask_arr = to_numpy(mask_on_ref.data)
         spatial_ref = ap_layer
 
-    positions, vectors = flow_vectors_at_time(
+    max_arrow_voxels = float(params.get("length_scale") or 5.0)
+    cache = flow_vectors_all_times(
         ap_layer.data,
         rl_layer.data,
         fh_layer.data,
         mask_arr,
-        int(params.get("time_index") or 0),
+        phase_layer=ap_layer,
         label_ids=label_ids,
         max_points=int(params.get("max_points") or 4000),
+        max_arrow_voxels=max_arrow_voxels,
     )
-    if positions.shape[0] == 0:
+    if cache.positions.shape[0] == 0:
         notify("No voxels in mask for flow vectors.", error=True)
         return
-    add_flow_vectors_layer(
-        viewer, positions, vectors, reference_layer=spatial_ref
+
+    t0 = int(params.get("time_index") or 0)
+    sync_dims = bool(params.get("sync_dims", True))
+    animate = bool(params.get("animate", False))
+    fps = float(params.get("fps") or 8.0)
+    colormap = str(params.get("cmap") or params.get("colormap") or "turbo")
+
+    add_animated_flow_vectors_layer(
+        viewer,
+        cache,
+        phase_layer=ap_layer,
+        spatial_reference_layer=spatial_ref,
+        initial_time=t0,
+        sync_dims=sync_dims,
+        animate=animate,
+        fps=fps,
+        colormap=colormap,
     )
-    t = int(params.get("time_index") or 0)
+    lo, hi = float(np.min(cache.magnitudes)), float(np.max(cache.magnitudes))
     notify(
-        f"Added {positions.shape[0]} flow vector glyph(s) at cardiac phase {t} (Napari)."
+        f"Added {cache.positions.shape[0]} flow vector(s) × {cache.n_time} phases "
+        f"(speed {lo:.2f}–{hi:.2f} mm/s; arrow length capped, color=speed). "
+        + ("Auto-play on." if animate else "Scrub cardiac phase with the dims slider.")
     )
 
 

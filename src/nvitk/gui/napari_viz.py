@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from dataclasses import dataclass
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.gui.spatial import layer_affine, layer_spacing, layer_to_image
+from nvitk.gui.spatial import layer_affine, layer_spacing
 from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
-from nvitk.types import Image
 from nvitk.viz.pet_hotspots import HotspotMode, _roi_mask, _select_hotspots
 
 HOTSPOTS_LAYER = "SUV hotspots"
 FLOW_VECTORS_LAYER = "Flow velocity"
+
+
+@dataclass
+class FlowVectorCache:
+    """Precomputed subsampled flow glyphs for all cardiac phases."""
+
+    positions: np.ndarray
+    velocities: np.ndarray
+    magnitudes: np.ndarray
+    n_time: int
+    max_arrow_voxels: float
+    speed_percentile: float
 
 
 def hotspot_points_from_volumes(
@@ -48,7 +60,7 @@ def hotspot_points_from_volumes(
         return np.zeros((0, 3), dtype=np.float64), np.zeros(0, dtype=np.float64), {}
 
     vals = suv_arr[hot].astype(np.float64)
-    if coords.shape[0] > int(max_points):
+    if coords.shape[0] > max_points:
         order = np.argsort(vals)[::-1][: int(max_points)]
         coords = coords[order]
         vals = vals[order]
@@ -98,6 +110,143 @@ def _subsample_mask_indices(mask: np.ndarray, max_points: int, label_ids: list[i
     return idx[::step][: int(max_points)]
 
 
+def _time_axis_index_from_layer(layer: Any) -> int:
+    """Array axis index for cardiac phase (``T`` / ``C``) on a 4D phase layer."""
+    from nvitk.gui.orientation import _axes_string_from_layer
+
+    axes = (_axes_string_from_layer(layer) or "").upper()
+    nd = int(getattr(getattr(layer, "data", None), "ndim", 0) or 0)
+    if len(axes) == nd:
+        if "T" in axes:
+            return int(axes.index("T"))
+        if "C" in axes:
+            return int(axes.index("C"))
+    return max(0, nd - 1)
+
+
+def _move_time_axis_last(*arrays: np.ndarray, time_axis: int) -> tuple[np.ndarray, ...]:
+    """Ensure the cardiac-phase axis is last (required by velocity_mm_s_from_phases)."""
+    out: list[np.ndarray] = []
+    for arr in arrays:
+        a = to_numpy(arr)
+        if int(time_axis) != a.ndim - 1 and a.ndim >= 4:
+            a = np.moveaxis(a, int(time_axis), -1)
+        out.append(a)
+    return tuple(out)
+
+
+def _displacement_from_velocity(
+    velocities_mm_s: np.ndarray,
+    *,
+    max_arrow_voxels: float,
+    speed_percentile: float = 95.0,
+) -> np.ndarray:
+    """Unit direction × capped length; color still uses true speed in features."""
+    vel = to_numpy(velocities_mm_s).astype(np.float64)
+    if vel.size == 0:
+        return vel
+    mag = np.linalg.norm(vel, axis=1, keepdims=True)
+    mag_safe = np.maximum(mag, 1e-9)
+    direction = vel / mag_safe
+    ref = float(np.percentile(mag.ravel(), float(speed_percentile)))
+    ref = max(ref, 1e-6)
+    rel = np.clip(mag / ref, 0.0, 1.0)
+    return (direction * rel * float(max_arrow_voxels)).astype(np.float64)
+
+
+def flow_vector_frame(
+    cache: FlowVectorCache,
+    time_index: int,
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Build Napari vectors data (N, 2, 3) and features for one cardiac phase."""
+    t = int(np.clip(time_index, 0, cache.n_time - 1))
+    pos = cache.positions.astype(np.float64, copy=False)
+    vel = cache.velocities[t].astype(np.float64, copy=False)
+    mag = cache.magnitudes[t].astype(np.float64, copy=False)
+    disp = _displacement_from_velocity(
+        vel,
+        max_arrow_voxels=cache.max_arrow_voxels,
+        speed_percentile=cache.speed_percentile,
+    )
+    # Napari Vectors: row 0 = tail, row 1 = projection (not endpoint); end = tail + length * proj.
+    data = np.stack([pos, disp], axis=1)
+    features = {
+        "speed": mag,
+        "vx_mm_s": vel[:, 0],
+        "vy_mm_s": vel[:, 1],
+        "vz_mm_s": vel[:, 2],
+        "phase": np.full(mag.shape[0], t, dtype=np.int32),
+    }
+    return data, features
+
+
+def flow_vectors_all_times(
+    ap: np.ndarray,
+    rl: np.ndarray,
+    fh: np.ndarray,
+    mask: np.ndarray,
+    *,
+    phase_layer: Any | None = None,
+    label_ids: list[int] | None = None,
+    max_points: int = 4000,
+    max_arrow_voxels: float = 5.0,
+    speed_percentile: float = 95.0,
+) -> FlowVectorCache:
+    """Precompute subsampled velocity glyphs for every cardiac phase."""
+    time_axis = _time_axis_index_from_layer(phase_layer) if phase_layer is not None else -1
+    ap_np, rl_np, fh_np = _move_time_axis_last(ap, rl, fh, time_axis=time_axis)
+    ap_a = as_backend_array(ap_np).astype(np.float64)
+    rl_a = as_backend_array(rl_np).astype(np.float64)
+    fh_a = as_backend_array(fh_np).astype(np.float64)
+    mask_np = to_numpy(mask)
+    if mask_np.ndim > 3:
+        raise ValueError("Mask must be a 3D spatial volume for flow vectors.")
+    spatial_shape = tuple(int(x) for x in ap_a.shape[:3])
+    if tuple(mask_np.shape) != spatial_shape:
+        raise ValueError(
+            f"Mask shape {tuple(mask_np.shape)} does not match AP spatial shape {spatial_shape}; "
+            "align the mask to the phase grid first."
+        )
+    vx, vy, vz = velocity_mm_s_from_phases(ap_a, rl_a, fh_a)
+    n_time = int(vx.shape[3])
+    idx = _subsample_mask_indices(mask, max_points, label_ids)
+    if idx.size == 0:
+        return FlowVectorCache(
+            positions=np.zeros((0, 3), dtype=np.float64),
+            velocities=np.zeros((n_time, 0, 3), dtype=np.float64),
+            magnitudes=np.zeros((n_time, 0), dtype=np.float64),
+            n_time=n_time,
+            max_arrow_voxels=float(max_arrow_voxels),
+            speed_percentile=float(speed_percentile),
+        )
+
+    pos = idx.astype(np.float64)
+    n_pts = int(pos.shape[0])
+    velocities = np.zeros((n_time, n_pts, 3), dtype=np.float64)
+    magnitudes = np.zeros((n_time, n_pts), dtype=np.float64)
+    ii, jj, kk = idx[:, 0], idx[:, 1], idx[:, 2]
+    for t in range(n_time):
+        vec = np.stack(
+            [
+                to_numpy(vx[ii, jj, kk, t]),
+                to_numpy(vy[ii, jj, kk, t]),
+                to_numpy(vz[ii, jj, kk, t]),
+            ],
+            axis=1,
+        ).astype(np.float64)
+        velocities[t] = vec
+        magnitudes[t] = np.linalg.norm(vec, axis=1)
+
+    return FlowVectorCache(
+        positions=pos,
+        velocities=velocities,
+        magnitudes=magnitudes,
+        n_time=n_time,
+        max_arrow_voxels=float(max_arrow_voxels),
+        speed_percentile=float(speed_percentile),
+    )
+
+
 def flow_vectors_at_time(
     ap: np.ndarray,
     rl: np.ndarray,
@@ -105,31 +254,38 @@ def flow_vectors_at_time(
     mask: np.ndarray,
     time_index: int,
     *,
+    phase_layer: Any | None = None,
     label_ids: list[int] | None = None,
     max_points: int = 4000,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return (positions Nx3, vectors Nx3) in mm/s for one cardiac phase."""
-    ap_a = as_backend_array(ap).astype(np.float64)
-    rl_a = as_backend_array(rl).astype(np.float64)
-    fh_a = as_backend_array(fh).astype(np.float64)
-    vx, vy, vz = velocity_mm_s_from_phases(ap_a, rl_a, fh_a)
-    t = int(np.clip(time_index, 0, int(vx.shape[3]) - 1))
-    idx = _subsample_mask_indices(mask, max_points, label_ids)
-    if idx.size == 0:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
-    pos = idx.astype(np.float64)
-    vec = np.stack(
-        [
-            vx[idx[:, 0], idx[:, 1], idx[:, 2], t],
-            vy[idx[:, 0], idx[:, 1], idx[:, 2], t],
-            vz[idx[:, 0], idx[:, 1], idx[:, 2], t],
-        ],
-        axis=1,
+    max_arrow_voxels: float = 5.0,
+    speed_percentile: float = 95.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (positions Nx3, displacement Nx3, speed N) for one cardiac phase."""
+    cache = flow_vectors_all_times(
+        ap,
+        rl,
+        fh,
+        mask,
+        phase_layer=phase_layer,
+        label_ids=label_ids,
+        max_points=max_points,
+        max_arrow_voxels=max_arrow_voxels,
+        speed_percentile=speed_percentile,
     )
-    vec = to_numpy(vec).astype(np.float64)
-    mag = np.linalg.norm(vec, axis=1, keepdims=True)
-    vec = np.where(mag > 1e-6, vec / np.maximum(mag, 1e-6), vec)
-    return pos, vec * 2.0
+    t = int(np.clip(time_index, 0, max(0, cache.n_time - 1)))
+    if cache.positions.shape[0] == 0:
+        return (
+            np.zeros((0, 3), dtype=np.float64),
+            np.zeros((0, 3), dtype=np.float64),
+            np.zeros(0, dtype=np.float64),
+        )
+    vel = cache.velocities[t]
+    disp = _displacement_from_velocity(
+        vel,
+        max_arrow_voxels=cache.max_arrow_voxels,
+        speed_percentile=cache.speed_percentile,
+    )
+    return cache.positions, disp, cache.magnitudes[t]
 
 
 def add_flow_vectors_layer(
@@ -139,6 +295,9 @@ def add_flow_vectors_layer(
     *,
     reference_layer: Any,
     name: str = FLOW_VECTORS_LAYER,
+    features: dict[str, np.ndarray] | None = None,
+    speed_limits: tuple[float, float] | None = None,
+    colormap: str = "turbo",
 ) -> Any:
     for lyr in list(viewer.layers):
         if lyr.name == name:
@@ -149,11 +308,254 @@ def add_flow_vectors_layer(
         "edge_width": 0,
         "length": 1.0,
     }
+    if features and "speed" in features:
+        kwargs["features"] = features
+        kwargs["edge_color"] = "speed"
+        kwargs["edge_colormap"] = colormap
+        speeds = to_numpy(features["speed"]).astype(np.float64)
+        if speed_limits is not None:
+            kwargs["edge_contrast_limits"] = speed_limits
+        elif speeds.size:
+            lo = float(np.percentile(speeds, 2.0))
+            hi = float(np.percentile(speeds, 98.0))
+            kwargs["edge_contrast_limits"] = (lo, hi if hi > lo else lo + 1.0)
     aff = layer_affine(reference_layer)
     if aff is not None:
         kwargs["affine"] = aff
     data = np.stack([positions, vectors], axis=1)
     return viewer.add_vectors(data, **kwargs)
+
+
+def _time_index_from_viewer(viewer: Any, phase_layer: Any, n_time: int) -> int:
+    """Read cardiac phase from the 4D phase layer dims (not the vectors layer)."""
+    t_ax = _time_axis_index_from_layer(phase_layer)
+    steps = tuple(int(x) for x in viewer.dims.current_step)
+    if t_ax < len(steps):
+        return int(np.clip(steps[t_ax], 0, max(0, n_time - 1)))
+    return 0
+
+
+def _set_viewer_time_index(viewer: Any, phase_layer: Any, time_index: int, n_time: int) -> None:
+    """Set cardiac phase on the 4D phase volume dims."""
+    t_ax = _time_axis_index_from_layer(phase_layer)
+    steps = list(int(x) for x in viewer.dims.current_step)
+    if len(steps) < int(phase_layer.data.ndim):
+        steps = steps + [0] * (int(phase_layer.data.ndim) - len(steps))
+    if t_ax < len(steps):
+        steps[t_ax] = int(np.clip(time_index, 0, max(0, n_time - 1)))
+        viewer.dims.current_step = tuple(steps)
+
+
+def _phase_dim_steps(viewer: Any, phase_layer: Any) -> list[int]:
+    """Current integer slice indices for every axis of *phase_layer*."""
+    ndim = int(phase_layer.data.ndim)
+    shape = tuple(int(x) for x in phase_layer.data.shape)
+    steps = list(int(round(float(x))) for x in viewer.dims.current_step)
+    if len(steps) < ndim:
+        steps.extend([0] * (ndim - len(steps)))
+    return [int(np.clip(steps[i], 0, max(0, shape[i] - 1))) for i in range(ndim)]
+
+
+def _install_phase_dims(viewer: Any, phase_layer: Any) -> None:
+    """One-time 4D dims setup after adding vectors: ranges/labels, keep camera + scrubber."""
+    from napari.components.dims import RangeTuple
+    from nvitk.gui.orientation import (
+        _axes_string_from_layer,
+        _layer_display_scale,
+        ensure_4d_scale_only_layer,
+        napari_dim_order,
+    )
+
+    if getattr(phase_layer, "data", None) is None or int(phase_layer.data.ndim) <= 3:
+        return
+
+    ensure_4d_scale_only_layer(phase_layer)
+    ndim = int(phase_layer.data.ndim)
+    shape = tuple(int(x) for x in phase_layer.data.shape)
+    axes_str = _axes_string_from_layer(phase_layer)
+    steps = _phase_dim_steps(viewer, phase_layer)
+    sc = _layer_display_scale(phase_layer, ndim)
+    ranges = tuple(
+        RangeTuple(0.0, float(max(0, n - 1)) * sc[i], sc[i]) for i, n in enumerate(shape)
+    )
+
+    viewer.dims.ndim = max(int(viewer.dims.ndim), ndim)
+    full_range = list(viewer.dims.range)
+    if len(full_range) < ndim:
+        full_range.extend([RangeTuple(0.0, 0.0, 1.0)] * (ndim - len(full_range)))
+    for i in range(ndim):
+        full_range[i] = ranges[i]
+    viewer.dims.range = tuple(full_range[: viewer.dims.ndim])
+
+    viewer.dims.order = napari_dim_order(axes_str, layer_affine(phase_layer), ndim)
+    if axes_str and len(axes_str) == ndim:
+        viewer.dims.axis_labels = tuple(axes_str)
+    viewer.dims.current_step = tuple(steps[: viewer.dims.ndim])
+
+
+def _repair_time_dim_range(viewer: Any, phase_layer: Any) -> None:
+    """Fix cardiac-phase slider extent if vector layer updates polluted dims.range."""
+    from napari.components.dims import RangeTuple
+    from nvitk.gui.orientation import _layer_display_scale, ensure_4d_scale_only_layer
+
+    if getattr(phase_layer, "data", None) is None or int(phase_layer.data.ndim) <= 3:
+        return
+    t_ax = _time_axis_index_from_layer(phase_layer)
+    n_time = int(phase_layer.data.shape[t_ax])
+    if t_ax >= len(viewer.dims.range):
+        return
+    ensure_4d_scale_only_layer(phase_layer)
+    sc = _layer_display_scale(phase_layer, int(phase_layer.data.ndim))
+    step = float(sc[t_ax])
+    expected_stop = float(max(0, n_time - 1)) * step
+    rng = viewer.dims.range[t_ax]
+    if abs(float(rng.stop) - expected_stop) <= max(step, 1e-6):
+        return
+    full = list(viewer.dims.range)
+    full[t_ax] = RangeTuple(0.0, expected_stop, step)
+    viewer.dims.range = tuple(full)
+
+
+def _global_speed_limits(cache: FlowVectorCache) -> tuple[float, float]:
+    if cache.magnitudes.size == 0:
+        return (0.0, 1.0)
+    lo = float(np.percentile(cache.magnitudes, 2.0))
+    hi = float(np.percentile(cache.magnitudes, 98.0))
+    return (lo, hi if hi > lo else lo + 1.0)
+
+
+@dataclass
+class FlowVectorPlayback:
+    """Dims-synced flow vector layer with optional auto-play."""
+
+    cache: FlowVectorCache
+    phase_layer: Any
+    layer: Any
+    dims_callback: Callable[[Any], None]
+    timer: Any | None = None
+
+
+def stop_flow_vector_playback(viewer: Any) -> None:
+    """Stop timers and dims hooks from a prior flow-vector overlay."""
+    state = getattr(viewer, "_nvitk_flow_vector_state", None)
+    if state is None:
+        return
+    if state.timer is not None:
+        try:
+            state.timer.stop()
+        except Exception:
+            pass
+    try:
+        viewer.dims.events.current_step.disconnect(state.dims_callback)
+    except Exception:
+        pass
+    setattr(viewer, "_nvitk_flow_vector_state", None)
+
+
+def _update_flow_vector_layer(
+    layer: Any,
+    cache: FlowVectorCache,
+    time_index: int,
+    *,
+    viewer: Any | None = None,
+    phase_layer: Any | None = None,
+) -> None:
+    data, features = flow_vector_frame(cache, time_index)
+    layer.data = data
+    layer.features = features
+    limits = _global_speed_limits(cache)
+    layer.edge_color = "speed"
+    layer.edge_colormap = "turbo"
+    layer.edge_contrast_limits = limits
+    layer.length = 1.0
+    if viewer is not None and phase_layer is not None:
+        _repair_time_dim_range(viewer, phase_layer)
+
+
+def add_animated_flow_vectors_layer(
+    viewer: Any,
+    cache: FlowVectorCache,
+    *,
+    phase_layer: Any,
+    spatial_reference_layer: Any | None = None,
+    name: str = FLOW_VECTORS_LAYER,
+    initial_time: int = 0,
+    sync_dims: bool = True,
+    animate: bool = False,
+    fps: float = 8.0,
+    colormap: str = "turbo",
+) -> FlowVectorPlayback:
+    """Add flow vectors colored and sized by speed; optionally animate over phases."""
+    stop_flow_vector_playback(viewer)
+
+    spatial_ref = spatial_reference_layer or phase_layer
+    t0 = int(np.clip(initial_time, 0, max(0, cache.n_time - 1)))
+    data, features = flow_vector_frame(cache, t0)
+    limits = _global_speed_limits(cache)
+
+    for lyr in list(viewer.layers):
+        if lyr.name == name:
+            viewer.layers.remove(lyr)
+
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "vector_style": "arrow",
+        "edge_width": 0,
+        "length": 1.0,
+        "features": features,
+        "edge_color": "speed",
+        "edge_colormap": colormap,
+        "edge_contrast_limits": limits,
+    }
+    aff = layer_affine(spatial_ref)
+    if aff is not None:
+        kwargs["affine"] = aff
+    layer = viewer.add_vectors(data, **kwargs)
+
+    _install_phase_dims(viewer, phase_layer)
+    try:
+        viewer.layers.selection.active = phase_layer
+    except Exception:
+        pass
+
+    def _on_dims(_event: Any = None) -> None:
+        if not getattr(layer, "visible", True):
+            return
+        _repair_time_dim_range(viewer, phase_layer)
+        t = _time_index_from_viewer(viewer, phase_layer, cache.n_time)
+        _update_flow_vector_layer(layer, cache, t, viewer=viewer, phase_layer=phase_layer)
+
+    timer = None
+    if sync_dims:
+        viewer.dims.events.current_step.connect(_on_dims)
+
+    if animate and cache.n_time > 1:
+        from qtpy.QtCore import QTimer
+
+        phase = {"t": t0}
+
+        def _tick() -> None:
+            phase["t"] = (int(phase["t"]) + 1) % int(cache.n_time)
+            _set_viewer_time_index(viewer, phase_layer, phase["t"], cache.n_time)
+            if not sync_dims:
+                _update_flow_vector_layer(
+                    layer, cache, phase["t"], viewer=viewer, phase_layer=phase_layer
+                )
+
+        timer = QTimer()
+        interval = max(20, int(round(1000.0 / max(float(fps), 0.1))))
+        timer.timeout.connect(_tick)
+        timer.start(interval)
+
+    playback = FlowVectorPlayback(
+        cache=cache,
+        phase_layer=phase_layer,
+        layer=layer,
+        dims_callback=_on_dims,
+        timer=timer,
+    )
+    setattr(viewer, "_nvitk_flow_vector_state", playback)
+    return playback
 
 
 def voxel_spacing_from_layer(layer: Any) -> tuple[float, float, float]:

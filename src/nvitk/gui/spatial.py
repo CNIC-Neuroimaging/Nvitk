@@ -109,6 +109,65 @@ def layer_to_image(layer: Any, data: np.ndarray | None = None) -> Image:
     )
 
 
+def _time_axis_index(layer: Any) -> int:
+    """Array axis index for cardiac phase (``T`` / ``C``) on a 4D+ layer."""
+    from nvitk.gui.orientation import _axes_string_from_layer
+
+    axes = (_axes_string_from_layer(layer) or "").upper()
+    nd = int(getattr(getattr(layer, "data", None), "ndim", 0) or 0)
+    if len(axes) == nd:
+        if "T" in axes:
+            return int(axes.index("T"))
+        if "C" in axes:
+            return int(axes.index("C"))
+    return max(0, nd - 1)
+
+
+def spatial_volume_image(layer: Any, data: np.ndarray | None = None) -> Image:
+    """3D spatial volume from a 3D or 4D+ layer (cardiac phase index 0)."""
+    img = layer_to_image(layer, data)
+    arr = to_numpy(img.data)
+    if arr.ndim <= 3:
+        return img
+
+    t_ax = _time_axis_index(layer)
+    sl: list[slice] = [slice(None)] * arr.ndim
+    sl[t_ax] = 0
+    data3 = np.ascontiguousarray(arr[tuple(sl)])
+    meta = dict(img.metadata or {})
+    meta["shape"] = tuple(int(x) for x in data3.shape)
+    spatial_axes = [i for i in range(arr.ndim) if i != t_ax]
+    axes_str = str(meta.get("axes") or "").upper()
+    if len(axes_str) == arr.ndim:
+        meta["axes"] = "".join(axes_str[i] for i in spatial_axes)
+    else:
+        from nvitk.io._common import default_nifti_axes
+
+        meta["axes"] = default_nifti_axes(data3.ndim)
+
+    scale = getattr(layer, "scale", None)
+    if scale is not None and len(scale) >= arr.ndim:
+        sc = tuple(float(x) for x in scale)
+        sp3 = tuple(sc[i] for i in spatial_axes[:3])
+        meta["spacing"] = sp3
+        meta["x_res"], meta["y_res"], meta["z_res"] = sp3[0], sp3[1], sp3[2]
+
+    aff = meta.get("affine")
+    if aff is not None:
+        aff_np = to_numpy(aff).astype(float)
+        if aff_np.shape == (4, 4) and arr.ndim > 3:
+            meta["affine"] = np.eye(4, dtype=float)
+        else:
+            meta["affine"] = aff_np
+
+    return Image(
+        data=data3,
+        metadata=meta,
+        axes=meta.get("axes"),
+        name=getattr(layer, "name", "layer"),
+    )
+
+
 def layers_need_resample(
     mask_layer: Any,
     reference_layer: Any,
@@ -116,12 +175,18 @@ def layers_need_resample(
     reference_img: Image,
 ) -> bool:
     """True when mask and reference are not on the same voxel grid."""
-    if tuple(mask_img.data.shape) != tuple(reference_img.data.shape):
+    mask_sp = spatial_volume_image(mask_layer, to_numpy(mask_img.data)) if mask_img.ndim > 3 else mask_img
+    ref_sp = (
+        spatial_volume_image(reference_layer)
+        if reference_img.ndim > 3
+        else reference_img
+    )
+    if tuple(mask_sp.data.shape) != tuple(ref_sp.data.shape):
         return True
     aff_m = layer_affine(mask_layer)
     aff_r = layer_affine(reference_layer)
     if aff_m is None or aff_r is None:
-        return tuple(mask_img.data.shape) != tuple(reference_img.data.shape)
+        return tuple(mask_sp.data.shape) != tuple(ref_sp.data.shape)
     return not np.allclose(aff_m, aff_r, rtol=0, atol=1e-3)
 
 
@@ -140,12 +205,20 @@ def align_mask_to_reference_layer(
     """
     ref_img = layer_to_image(reference_layer)
     mask_img = layer_to_image(mask_layer, mask_data)
+    ref_sp = spatial_volume_image(reference_layer) if ref_img.ndim > 3 else ref_img
+    mask_sp = (
+        spatial_volume_image(mask_layer, mask_data)
+        if mask_img.ndim > 3
+        else mask_img
+    )
     if not layers_need_resample(mask_layer, reference_layer, mask_img, ref_img):
-        return ref_img, mask_img, False
+        return ref_sp, mask_sp, False
 
     if layer_affine(mask_layer) is None or layer_affine(reference_layer) is None:
+        if tuple(mask_sp.data.shape) == tuple(ref_sp.data.shape):
+            return ref_sp, mask_sp, False
         raise ValueError(
-            f"Shape mismatch ({mask_img.data.shape} vs {ref_img.data.shape}) but affine "
+            f"Shape mismatch ({mask_sp.data.shape} vs {ref_sp.data.shape}) but affine "
             f"metadata is missing on "
             f"'{getattr(mask_layer, 'name', 'mask')}' or "
             f"'{getattr(reference_layer, 'name', 'reference')}'; "
@@ -154,8 +227,8 @@ def align_mask_to_reference_layer(
 
     from nvitk.measure.measurer import Measurer
 
-    aligned = Measurer(ref_img, mask_img).align("mask_to_raw", order=order)
-    return aligned.image, aligned.mask, True
+    aligned = Measurer(ref_sp, mask_sp).align("mask_to_raw", order=order)
+    return ref_sp, aligned.mask, True
 
 
 def _axis_direction_label(code: str) -> str:

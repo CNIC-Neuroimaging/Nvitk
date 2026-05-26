@@ -285,6 +285,8 @@ def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
     layer = _layer_from_list_event(event)
     if layer is None:
         return
+    if type(layer).__name__ in ("Vectors", "Points", "Shapes", "Surface"):
+        return
     data = getattr(layer, "data", None)
     ndim = int(getattr(data, "ndim", 0) or 0)
     configure_dims = len(viewer.layers) <= 1
@@ -308,6 +310,9 @@ def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:
         return
     layer = viewer.layers.selection.active
     if layer is None or getattr(layer.data, "ndim", 0) <= 3:
+        return
+    layer_type = type(layer).__name__
+    if layer_type in ("Vectors", "Points", "Shapes", "Surface"):
         return
     ensure_4d_scale_only_layer(layer)
     axes_str = _axes_string_from_layer(layer)
