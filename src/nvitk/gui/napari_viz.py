@@ -79,7 +79,7 @@ def add_hotspot_points_layer(
     else:
         kwargs["face_color"] = "suv"
         kwargs["face_colormap"] = "viridis"
-        vals = np.asarray(features["suv"], dtype=np.float64)
+        vals = to_numpy(features["suv"]).astype(np.float64)
         lo = float(np.min(vals))
         hi = float(np.max(vals))
         kwargs["face_contrast_limits"] = (lo, hi if hi > lo else lo + 1.0)
@@ -152,7 +152,8 @@ def add_flow_vectors_layer(
     aff = layer_affine(reference_layer)
     if aff is not None:
         kwargs["affine"] = aff
-    return viewer.add_vectors(positions, vectors, **kwargs)
+    data = np.stack([positions, vectors], axis=1)
+    return viewer.add_vectors(data, **kwargs)
 
 
 def voxel_spacing_from_layer(layer: Any) -> tuple[float, float, float]:

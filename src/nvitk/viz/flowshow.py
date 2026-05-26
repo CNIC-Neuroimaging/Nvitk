@@ -473,11 +473,11 @@ def _centerline_longest_path(coords_zyx: np.ndarray) -> np.ndarray:
         path.append(cur)
         cur = parent.get(cur, None)
     path.reverse()
-    return np.asarray(path, dtype=np.float32)
+    return to_numpy(path, dtype=np.float32)
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
-    v = np.asarray(v, dtype=np.float32)
+    v = to_numpy(v, dtype=np.float32)
     n = float(np.linalg.norm(v))
     if n <= 1e-6:
         return np.zeros_like(v)
@@ -530,7 +530,7 @@ def _oblique_slice(
         res=res,
         order=order,
     )
-    return np.asarray(to_numpy(sl), dtype=np.float32)
+    return to_numpy(to_numpy(sl), dtype=np.float32)
 
 def _coord_blocks_for_speed_clim(
     mask: np.ndarray,
@@ -902,7 +902,7 @@ def _flowshow_notebook(
         if isinstance(centerline_mask, Image):
             cl_np = to_numpy(centerline_mask.data)
         else:
-            cl_np = np.asarray(centerline_mask)
+            cl_np = to_numpy(centerline_mask)
     centerlines = compute_centerlines(mask, centerline_mask=cl_np, labels=labels)
 
     cache_all = (
@@ -1049,7 +1049,7 @@ def _flowshow_desktop(
         if isinstance(centerline_mask, Image):
             cl_np = to_numpy(centerline_mask.data)
         else:
-            cl_np = np.asarray(centerline_mask)
+            cl_np = to_numpy(centerline_mask)
     centerlines = compute_centerlines(mask, centerline_mask=cl_np, labels=labels)
 
     loc_pts = np.zeros((0, 3), dtype=np.float32)
@@ -1064,9 +1064,9 @@ def _flowshow_desktop(
             lt.append([float(r["tangent_x"]), float(r["tangent_y"]), float(r["tangent_z"])])
             lv.append(int(r["vessel_id"]))
         if lp:
-            loc_pts = np.asarray(lp, dtype=np.float32)
-            loc_tang = np.asarray(lt, dtype=np.float64)
-            loc_vlbl = np.asarray(lv, dtype=np.int32)
+            loc_pts = to_numpy(lp, dtype=np.float32)
+            loc_tang = to_numpy(lt, dtype=np.float64)
+            loc_vlbl = to_numpy(lv, dtype=np.int32)
 
     min_voxel_sp = (
         min(float(voxel_spacing_mm[0]), float(voxel_spacing_mm[1]), float(voxel_spacing_mm[2]))
@@ -1252,7 +1252,7 @@ def _flowshow_desktop(
         pts = centerlines.get(int(lbl))
         if pts is None:
             continue
-        pts_arr = np.asarray(pts, dtype=np.float32)
+        pts_arr = to_numpy(pts, dtype=np.float32)
         # Normalize centerlines to a stable ndarray shape so later picking/rendering
         # never accidentally hits a plain Python list.
         centerlines[int(lbl)] = pts_arr
@@ -1407,7 +1407,7 @@ def _flowshow_desktop(
         cx = int(np.clip(int(selection["voxel_ijk"][0]), 0, vel.shape[0] - 1))
         cy = int(np.clip(int(selection["voxel_ijk"][1]), 0, vel.shape[1] - 1))
         cz = int(np.clip(int(selection["voxel_ijk"][2]), 0, vel.shape[2] - 1))
-        te = np.asarray(selection["tangent_eff"], dtype=np.float64).reshape(3)
+        te = to_numpy(selection["tangent_eff"], dtype=np.float64).reshape(3)
         nt = int(vel.shape[3])
         t_axis = np.arange(nt, dtype=np.float64)
         mk = str(state.get("ts_metric", ts_metric_labels[0]))
@@ -1481,8 +1481,8 @@ def _flowshow_desktop(
             return
         lbl = int(selection["label"])
         if use_loc_t:
-            center = np.asarray(selection["point"], dtype=np.float32).reshape(3)
-            tvec = np.asarray(selection["loc_tangent"], dtype=np.float64).reshape(3)
+            center = to_numpy(selection["point"], dtype=np.float32).reshape(3)
+            tvec = to_numpy(selection["loc_tangent"], dtype=np.float64).reshape(3)
             tvec = tvec / (float(np.linalg.norm(tvec)) + 1e-12)
         else:
             idx = int(selection["index"])
@@ -1492,7 +1492,7 @@ def _flowshow_desktop(
                 selection["voxel_ijk"] = None
                 _set_right_panel_text(f"Cross-section unavailable:\nno centerline for label={lbl}")
                 return
-            pts_arr = np.asarray(pts, dtype=np.float32)
+            pts_arr = to_numpy(pts, dtype=np.float32)
             if pts_arr.ndim != 2 or pts_arr.shape[1] != 3 or pts_arr.shape[0] < 2:
                 selection["tangent_eff"] = None
                 selection["voxel_ijk"] = None
@@ -1514,7 +1514,7 @@ def _flowshow_desktop(
         vloc = vel[cx, cy, cz, tt_now, :].astype(np.float32, copy=False)
         if float(np.dot(vloc, tvec)) < 0:
             tvec = -tvec
-        selection["tangent_eff"] = np.asarray(tvec, dtype=np.float64).copy()
+        selection["tangent_eff"] = to_numpy(tvec, dtype=np.float64).copy()
         selection["voxel_ijk"] = (int(cx), int(cy), int(cz))
         u, v = _frame_from_tangent(tvec)
         # Sampling resolution: ~one step per voxel across the measurement disk (see transform.oblique_slice).
@@ -1606,7 +1606,7 @@ def _flowshow_desktop(
             from vtk.util import numpy_support  # type: ignore
 
             def _vtk_image_from_2d(img2d: np.ndarray) -> Any:
-                arr = np.asarray(img2d, dtype=np.float32)
+                arr = to_numpy(img2d, dtype=np.float32)
                 # VTK expects x-fastest; keep a consistent orientation for display.
                 flat = arr.T.reshape(-1, order="C").astype(np.float32, copy=False)
                 img = vtk.vtkImageData()
@@ -1759,7 +1759,7 @@ def _flowshow_desktop(
         pick_marker = None
         if pt is None:
             return
-        pta = np.asarray(pt, dtype=np.float32).reshape(3)
+        pta = to_numpy(pt, dtype=np.float32).reshape(3)
         try:
             sph = pv.Sphere(radius=0.85, center=tuple(float(x) for x in pta))
             pick_marker = plotter.add_mesh(sph, color="red", opacity=0.9)
@@ -1803,7 +1803,7 @@ def _flowshow_desktop(
         plotter.render()
 
     def _select_nearest_centerline(picked_xyz: Any) -> None:
-        arr = np.asarray(picked_xyz, dtype=np.float32)
+        arr = to_numpy(picked_xyz, dtype=np.float32)
         if arr.ndim == 2 and arr.shape[1] == 3 and arr.shape[0] >= 1:
             arr = arr[0]
         p = arr.reshape(1, 3)
@@ -1815,7 +1815,7 @@ def _flowshow_desktop(
         for lbl, pts in centerlines.items():
             if pts is None:
                 continue
-            pts_arr = np.asarray(pts, dtype=np.float32)
+            pts_arr = to_numpy(pts, dtype=np.float32)
             if pts_arr.ndim != 2 or pts_arr.shape[0] == 0 or pts_arr.shape[1] != 3:
                 continue
             d2 = np.sum((pts_arr - p) ** 2, axis=1)
@@ -1833,7 +1833,7 @@ def _flowshow_desktop(
             selection["loc_tangent"] = loc_tang[ii].copy()
         else:
             lbl, j = int(payload[0]), int(payload[1])
-            pt = np.asarray(centerlines[lbl], dtype=np.float32)[j]
+            pt = to_numpy(centerlines[lbl], dtype=np.float32)[j]
             selection["label"] = lbl
             selection["index"] = j
             selection["point"] = pt.copy()
@@ -1954,7 +1954,7 @@ def _flowshow_desktop(
                     try:
                         pt = picker.GetPickPosition()
                         if pt is not None:
-                            _select_nearest_centerline(np.asarray(pt, dtype=np.float32))
+                            _select_nearest_centerline(to_numpy(pt, dtype=np.float32))
                     except Exception as e:
                         import traceback
                         log.error(traceback.format_exc())
@@ -2312,7 +2312,7 @@ def _flowshow_desktop(
                 )
                 continue
 
-            pts = np.asarray(surf.points, dtype=np.float32)
+            pts = to_numpy(surf.points, dtype=np.float32)
             ijk = np.round(pts).astype(int)
             ijk[:, 0] = np.clip(ijk[:, 0], 0, speed.shape[0] - 1)
             ijk[:, 1] = np.clip(ijk[:, 1], 0, speed.shape[1] - 1)
@@ -2686,14 +2686,14 @@ def _flowshow_desktop(
         c0 = c00 * (1 - fy) + c10 * fy
         c1 = c01 * (1 - fy) + c11 * fy
         c = c0 * (1 - fz) + c1 * fz
-        return np.asarray(c, dtype=np.float32)
+        return to_numpy(c, dtype=np.float32)
 
     def _build_pathlines(tt_start: int, *, dt: float) -> Any | None:
         """Integrate pathlines forward through time-varying vel field."""
         seed_cloud = _get_stream_seed_cloud(nseed=int(vec.streamline_n_seeds), seed=stream_seed)
         if seed_cloud is None:
             return None
-        seeds = np.asarray(seed_cloud.points, dtype=np.float32)
+        seeds = to_numpy(seed_cloud.points, dtype=np.float32)
         if seeds.ndim != 2 or seeds.shape[0] == 0:
             return None
         _, _, _, nt, _ = vel.shape
@@ -2737,7 +2737,7 @@ def _flowshow_desktop(
             return None
         try:
             poly = pv.PolyData(points)
-            poly.lines = np.asarray(lines, dtype=np.int64)
+            poly.lines = to_numpy(lines, dtype=np.int64)
             tube = poly.tube(radius=vec.streamline_radius)
             return tube
         except Exception:
@@ -3062,10 +3062,10 @@ def flowshow(
     vec_eff = vector or FlowshowVectorOptions()
     anim_eff = animation or FlowshowAnimationOptions()
 
-    ap = to_numpy(ap_phase.data) if isinstance(ap_phase, Image) else np.asarray(ap_phase)
-    rl = to_numpy(rl_phase.data) if isinstance(rl_phase, Image) else np.asarray(rl_phase)
-    fh = to_numpy(fh_phase.data) if isinstance(fh_phase, Image) else np.asarray(fh_phase)
-    mask = to_numpy(vessel_mask.data) if isinstance(vessel_mask, Image) else np.asarray(vessel_mask)
+    ap = to_numpy(ap_phase.data) if isinstance(ap_phase, Image) else to_numpy(ap_phase)
+    rl = to_numpy(rl_phase.data) if isinstance(rl_phase, Image) else to_numpy(rl_phase)
+    fh = to_numpy(fh_phase.data) if isinstance(fh_phase, Image) else to_numpy(fh_phase)
+    mask = to_numpy(vessel_mask.data) if isinstance(vessel_mask, Image) else to_numpy(vessel_mask)
     mask = mask.astype(np.int32, copy=False)
 
     vel = _velocity_from_phases(ap, rl, fh)
@@ -3088,7 +3088,7 @@ def flowshow(
             if isinstance(v, Image):
                 cs_np[k] = to_numpy(v.data)
             else:
-                cs_np[k] = np.asarray(v)
+                cs_np[k] = to_numpy(v)
         # best-effort sanity check: must match spatial dims
         for k, arr in cs_np.items():
             if tuple(arr.shape[:3]) != (x, y, z):
@@ -3104,7 +3104,7 @@ def flowshow(
         else:
             aff = ap_phase.affine
             if aff is not None:
-                a = np.asarray(aff, dtype=np.float64)
+                a = to_numpy(aff, dtype=np.float64)
                 voxel_sp_eff = (
                     float(np.linalg.norm(a[:3, 0])),
                     float(np.linalg.norm(a[:3, 1])),

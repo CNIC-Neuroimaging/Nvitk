@@ -17,11 +17,13 @@ from nvitk.morphology.centerline_siphon import (
 )
 from nvitk.pipes.qvtpy.labels import EICAB_LICA, EICAB_RICA
 from nvitk.pipes.qvtpy.util.centerline_io import rasterize_centerlines_mask
-from nvitk.pipes.qvtpy.util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
-from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
-    _DEFAULT_RG_INTENSITY_FRAC,
-    _dilated_other_segmentation_barrier,
+from nvitk.pipes.qvtpy.util.eicab_masks import (
+    CENTERLINES_MASK_PP_NIFTI,
+    eicab_pp_path,
+    find_tof_resampled_volume,
+    resolve_eicab_mask,
 )
+from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _dilated_other_segmentation_barrier
 from nvitk.segmentation.region_growing import region_grow_into_label_volume
 
 setup(globals())
@@ -29,6 +31,9 @@ setup(globals())
 log = Logger()
 
 _DEFAULT_ICA_IDS: tuple[int, ...] = (EICAB_LICA, EICAB_RICA)
+_ICA_RG_INTENSITY_FRAC: float = 0.75
+_ICA_RG_BARRIER_RADIUS: int = 3
+_OTSU_MAX_VOLUME_RATIO: float = 3.0
 
 
 def _merge_ica_masks_into_labels(
@@ -60,6 +65,35 @@ def _seed_centerline_mask(
         min_points=int(min_points),
     )
     return rasterize_centerlines_mask(shape, seed_cls)
+
+
+def _filter_otsu_by_volume(
+    ica_masks: dict[int, np.ndarray],
+    labels: np.ndarray,
+    ica_ids: Sequence[int],
+    *,
+    max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
+) -> tuple[dict[int, np.ndarray], dict[str, str]]:
+    """Drop Otsu masks larger than *max_volume_ratio* × original ICA mask."""
+    seg_np = as_backend_array(labels).astype(np.int32, copy=False)
+    kept: dict[int, np.ndarray] = {}
+    rejected: dict[str, str] = {}
+    ratio = float(max_volume_ratio)
+    for lid in ica_ids:
+        otsu = ica_masks.get(int(lid))
+        if otsu is None:
+            continue
+        raw_n = int(np.count_nonzero(to_numpy(seg_np == int(lid))))
+        otsu_n = int(np.count_nonzero(to_numpy(otsu)))
+        if raw_n > 0 and otsu_n > ratio * raw_n:
+            msg = (
+                f"Otsu voxels ({otsu_n}) > {ratio:.0f}× raw ICA ({raw_n}) — keeping original"
+            )
+            log.warning(f"[ICA id={lid}] {msg}")
+            rejected[str(int(lid))] = msg
+            continue
+        kept[int(lid)] = otsu
+    return kept, rejected
 
 
 def resegment_icas_otsu(
@@ -102,8 +136,8 @@ def region_grow_icas(
     labels: np.ndarray,
     *,
     ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = 1,
-    intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
+    intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
 ) -> dict[int, int]:
     """Grow ICA labels into empty voxels; barriers are other labels dilated by *rg_barrier_radius*."""
     int_np = as_backend_array(intensity).astype(np.float64)
@@ -128,18 +162,44 @@ def region_grow_icas(
     return added
 
 
+def _compute_pp_centerlines(labels: np.ndarray, *, min_points: int = 5) -> np.ndarray:
+    """Rasterize centerlines for all foreground labels in the post-processed eICAB mask."""
+    shape = tuple(int(s) for s in labels.shape[:3])
+    seg_np = as_backend_array(labels).astype(np.int32, copy=False)
+    present = [
+        int(lid)
+        for lid in np.unique(to_numpy(seg_np))
+        if int(lid) > 0
+    ]
+    if not present:
+        return rasterize_centerlines_mask(shape, {})
+    seed_cls = compute_centerlines(seg_np, labels=present, min_points=int(min_points))
+    return rasterize_centerlines_mask(shape, seed_cls)
+
+
 def postprocess_eicab_labels(
     intensity: Any,
     labels: np.ndarray,
     *,
     ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = 1,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
+    rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
+    otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
 ) -> dict[str, Any]:
-    """Otsu ICA masks (conditional erosion) then hyperintense region growing."""
-    seg_np = as_backend_array(labels).astype(np.int32)
-    ica_masks = resegment_icas_otsu(intensity, seg_np, ica_ids=ica_ids)
-    _merge_ica_masks_into_labels(seg_np, ica_masks, ica_ids)
+    """Otsu ICA masks (volume guard) then hyperintense ICA region growing."""
+    seg_np = as_backend_array(labels).astype(np.int32, copy=True)
+    ica_masks_raw = resegment_icas_otsu(intensity, seg_np, ica_ids=ica_ids)
+    ica_masks, rejected = _filter_otsu_by_volume(
+        ica_masks_raw,
+        seg_np,
+        ica_ids,
+        max_volume_ratio=otsu_max_volume_ratio,
+    )
+    pp_applied = bool(ica_masks)
+    if not pp_applied:
+        log.warning("eICAB post-process: no ICA Otsu accepted — output equals original mask")
+    else:
+        _merge_ica_masks_into_labels(seg_np, ica_masks, ica_ids)
     rg_added = region_grow_icas(
         intensity,
         seg_np,
@@ -149,8 +209,12 @@ def postprocess_eicab_labels(
     )
     labels[:] = to_numpy(seg_np)
     return {
+        "pp_applied": pp_applied,
+        "ica_otsu_rejected": rejected,
         "ica_otsu_voxels": {str(k): int(v.sum()) for k, v in ica_masks.items()},
         "region_grow_added": {str(k): v for k, v in rg_added.items()},
+        "rg_intensity_frac": float(rg_intensity_frac),
+        "rg_barrier_radius": int(rg_barrier_radius),
     }
 
 
@@ -160,12 +224,17 @@ def postprocess_eicab_directory(
     tof_path: Path | None = None,
     preference: str = "cw",
     ica_ids: Sequence[int] = _DEFAULT_ICA_IDS,
-    rg_barrier_radius: int = 1,
-    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS,
+    rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC,
+    otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO,
 ) -> dict[str, Any]:
-    """Load eICAB mask + TOF, post-process in place, return summary metadata."""
+    """Load eICAB mask + TOF, write ``*_pp`` mask and ``centerlines_mask_pp.nii.gz``."""
     eicab_dir = Path(eicab_dir)
-    res = resolve_eicab_mask(eicab_dir, preference=preference)  # type: ignore[arg-type]
+    res = resolve_eicab_mask(
+        eicab_dir,
+        preference=preference,  # type: ignore[arg-type]
+        prefer_postprocessed=False,
+    )
     intensity_p = Path(tof_path) if tof_path is not None else find_tof_resampled_volume(eicab_dir)
     if intensity_p is None or not intensity_p.is_file():
         raise FileNotFoundError(
@@ -175,7 +244,7 @@ def postprocess_eicab_directory(
 
     seg_img = imread(res.path)
     tof_img = imread(intensity_p)
-    labels = to_numpy(seg_img.data).astype(np.int32)
+    labels = to_numpy(seg_img.data).astype(np.int32, copy=True)
     wvi = to_numpy(tof_img.data)
     if labels.shape[:3] != wvi.shape[:3]:
         raise ValueError(
@@ -190,11 +259,20 @@ def postprocess_eicab_directory(
         ica_ids=ica_ids,
         rg_barrier_radius=rg_barrier_radius,
         rg_intensity_frac=rg_intensity_frac,
+        otsu_max_volume_ratio=otsu_max_volume_ratio,
     )
+    pp_path = eicab_pp_path(res.path)
+    cl_pp_path = eicab_dir / CENTERLINES_MASK_PP_NIFTI
+    cl_pp = _compute_pp_centerlines(labels)
+
     summary["mask_path"] = str(res.path)
+    summary["mask_pp_path"] = str(pp_path)
+    summary["centerlines_mask_pp_path"] = str(cl_pp_path)
     summary["intensity_path"] = str(intensity_p)
-    imsave(res.path, labels, metadata=dict(seg_img.metadata or {}))
-    log.ok(f"eICAB post-process written: {res.path}")
+
+    imsave(pp_path, labels, metadata=dict(seg_img.metadata or {}))
+    imsave(cl_pp_path, cl_pp, metadata=dict(seg_img.metadata or {}))
+    log.ok(f"eICAB post-process written: {pp_path} + {cl_pp_path.name}")
     return summary
 
 

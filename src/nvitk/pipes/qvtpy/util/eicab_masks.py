@@ -16,10 +16,14 @@ log = Logger()
 
 EicabMaskKind = Literal["cw", "wb"]
 
+CENTERLINES_MASK_PP_NIFTI = "centerlines_mask_pp.nii.gz"
+
 # ---- Filename patterns -------------------------------------------------------
 
 _CW_PATTERNS = ("*_eICAB_CW.nii.gz", "*_eICAB_CW.nii")
 _WB_PATTERNS = ("*_eICAB_WB.nii.gz", "*_eICAB_WB.nii")
+_CW_PP_PATTERNS = ("*_eICAB_CW_pp.nii.gz", "*_eICAB_CW_pp.nii")
+_WB_PP_PATTERNS = ("*_eICAB_WB_pp.nii.gz", "*_eICAB_WB_pp.nii")
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,8 @@ class EicabMaskResolution:
     used: EicabMaskKind
     fallback: bool
     fallback_reason: str | None
+    postprocessed: bool = False
+    original_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +50,19 @@ def _stem_without_suffix(p: Path) -> str:
     if p.name.lower().endswith(".nii"):
         return p.name[: -len(".nii")]
     return p.stem
+
+
+def eicab_pp_path(original: Path) -> Path:
+    """Post-processed mask path: ``foo_eICAB_CW.nii.gz`` → ``foo_eICAB_CW_pp.nii.gz``."""
+    p = Path(original)
+    stem = _stem_without_suffix(p)
+    if stem.endswith("_pp"):
+        return p
+    if p.name.lower().endswith(".nii.gz"):
+        return p.with_name(f"{stem}_pp.nii.gz")
+    if p.suffix.lower() == ".nii":
+        return p.with_name(f"{stem}_pp.nii")
+    return p.parent / f"{stem}_pp{p.suffix}"
 
 
 def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
@@ -76,19 +95,12 @@ def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:
     return None
 
 
-def resolve_eicab_mask(
+def _resolve_base_mask(
     eicab_dir: Path,
-    preference: EicabMaskKind = "cw",
+    preference: EicabMaskKind,
 ) -> EicabMaskResolution:
-    """Return the eICAB label NIfTI path for *preference*, with warn-and-fallback.
-
-    If the requested mask is missing but the alternate exists, logs a warning and
-    uses the alternate. Raises :class:`FileNotFoundError` if neither exists.
-    """
-    pref = preference.strip().lower()  # type: ignore[assignment]
-    if pref not in ("cw", "wb"):
-        raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
-
+    """Resolve raw (non-pp) CW/WB mask with warn-and-fallback."""
+    pref = preference
     cw = _glob_first(eicab_dir, _CW_PATTERNS)
     wb = _glob_first(eicab_dir, _WB_PATTERNS)
 
@@ -140,9 +152,84 @@ def resolve_eicab_mask(
     raise FileNotFoundError(f"No eICAB CW/WB NIfTI under {eicab_dir}")
 
 
+def resolve_eicab_mask(
+    eicab_dir: Path,
+    preference: EicabMaskKind = "cw",
+    *,
+    prefer_postprocessed: bool = True,
+) -> EicabMaskResolution:
+    """Return the eICAB label NIfTI path for *preference*, with warn-and-fallback.
+
+    When *prefer_postprocessed* is True and a ``*_pp`` sibling of the base mask exists,
+    that post-processed file is returned (``postprocessed=True``).
+    """
+    pref = preference.strip().lower()  # type: ignore[assignment]
+    if pref not in ("cw", "wb"):
+        raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
+
+    if prefer_postprocessed:
+        pp_cw = _glob_first(eicab_dir, _CW_PP_PATTERNS)
+        pp_wb = _glob_first(eicab_dir, _WB_PP_PATTERNS)
+        if pref == "cw" and pp_cw is not None:
+            return EicabMaskResolution(
+                path=pp_cw,
+                requested="cw",
+                used="cw",
+                fallback=False,
+                fallback_reason=None,
+                postprocessed=True,
+                original_path=_glob_first(eicab_dir, _CW_PATTERNS),
+            )
+        if pref == "wb" and pp_wb is not None:
+            return EicabMaskResolution(
+                path=pp_wb,
+                requested="wb",
+                used="wb",
+                fallback=False,
+                fallback_reason=None,
+                postprocessed=True,
+                original_path=_glob_first(eicab_dir, _WB_PATTERNS),
+            )
+        if pref == "cw" and pp_wb is not None and _glob_first(eicab_dir, _CW_PATTERNS) is None:
+            msg = (
+                f"Requested eICAB CW pp mask but none found; "
+                f"continuing with WB pp mask {pp_wb.name}"
+            )
+            log.warning(msg)
+            return EicabMaskResolution(
+                path=pp_wb,
+                requested="cw",
+                used="wb",
+                fallback=True,
+                fallback_reason=msg,
+                postprocessed=True,
+                original_path=_glob_first(eicab_dir, _WB_PATTERNS),
+            )
+        if pref == "wb" and pp_cw is not None and _glob_first(eicab_dir, _WB_PATTERNS) is None:
+            msg = (
+                f"Requested eICAB WB pp mask but none found; "
+                f"continuing with CW pp mask {pp_cw.name}"
+            )
+            log.warning(msg)
+            return EicabMaskResolution(
+                path=pp_cw,
+                requested="wb",
+                used="cw",
+                fallback=True,
+                fallback_reason=msg,
+                postprocessed=True,
+                original_path=_glob_first(eicab_dir, _CW_PATTERNS),
+            )
+
+    base = _resolve_base_mask(eicab_dir, pref)  # type: ignore[arg-type]
+    return base
+
+
 __all__ = [
+    "CENTERLINES_MASK_PP_NIFTI",
     "EicabMaskKind",
     "EicabMaskResolution",
+    "eicab_pp_path",
     "find_tof_resampled_volume",
     "resolve_eicab_mask",
 ]

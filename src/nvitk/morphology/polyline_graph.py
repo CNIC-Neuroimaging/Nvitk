@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections import deque
 from typing import Literal
 
-import numpy as np
-
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import setup
 from nvitk.morphology.centerline import _centerline_longest_path, skeletonize_binary
 from nvitk.morphology.components import label_connected
+
+setup(globals())
 
 ExtractionMode = Literal["junction_split", "longest_path"]
 
@@ -123,7 +124,7 @@ def branch_polylines_from_skeleton(
             seen_chains.add(key)
 
             if len(path) >= int(min_points):
-                polylines.append(np.asarray(path, dtype=np.float32))
+                polylines.append(to_numpy(path).astype(np.float32))
 
     return polylines
 
@@ -140,7 +141,7 @@ def junction_nodes_from_skeleton(
     pts = collapse_junction_clusters(_nodes, deg, min_degree=int(min_degree))
     if not pts:
         return np.zeros((0, 3), dtype=np.float32)
-    return np.asarray(pts, dtype=np.float32)
+    return to_numpy(pts).astype(np.float32)
 
 
 def _coords_from_centerline_volume(

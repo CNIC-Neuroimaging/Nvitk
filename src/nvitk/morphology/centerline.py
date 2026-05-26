@@ -25,7 +25,7 @@ def skeletonize_binary(mask) -> Any:
     if m.ndim not in (2, 3):
         raise ValidationError("skeletonize_binary expects a 2D or 3D mask.")
     sk = skeletonize(m.astype(np.uint8, copy=False))
-    return as_backend_array(np.asarray(sk, dtype=bool))
+    return as_backend_array(sk).astype(bool)
 
 
 def _require_skeletonize():
@@ -107,7 +107,7 @@ def _centerline_longest_path(coords_xyz: np.ndarray) -> np.ndarray:
         path.append(cur)
         cur = parent.get(cur, None)
     path.reverse()
-    return np.asarray(path, dtype=np.float32)
+    return to_numpy(path).astype(np.float32)
 
 
 def compute_centerlines(

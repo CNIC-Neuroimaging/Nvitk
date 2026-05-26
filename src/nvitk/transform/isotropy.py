@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nvitk.core.array import to_numpy
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
@@ -89,7 +90,7 @@ def isotropy(
 
     affine = image.affine
     if affine is not None:
-        new_affine = np.asarray(affine, dtype=float).copy()
+        new_affine = to_numpy(affine).astype(float).copy()
         new_affine[:3, axis] = new_affine[:3, axis] / float(factor)
         out.metadata["affine"] = new_affine
 

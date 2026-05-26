@@ -131,7 +131,7 @@ def cluster_junction_coords(
                     q.append(j)
         block = pts[cluster_idx]
         reps.append(block[len(block) // 2])
-    return np.asarray(reps, dtype=np.int32)
+    return to_numpy(reps).astype(np.int32)
 
 
 def _nearest_polyline_indices(

@@ -117,9 +117,9 @@ def region_grow_binary_mask(
     polarity: IntensityPolarity = "hyperintense",
 ) -> int:
     """Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate."""
-    mask = np.asarray(vessel_mask, dtype=bool)
+    mask = as_backend_array(vessel_mask).astype(bool)
     int_np = as_backend_array(intensity).astype(np.float64)
-    forb = None if forbidden is None else np.asarray(forbidden, dtype=bool)
+    forb = None if forbidden is None else as_backend_array(forbidden).astype(bool)
     seeds = np.argwhere(mask)
     if seeds.size == 0:
         return 0
@@ -203,11 +203,11 @@ def dilate_bool_barrier(mask: np.ndarray, *, radius_vox: int = 0) -> np.ndarray:
     """Morphologically dilate a boolean forbidden mask."""
     from nvitk.morphology.binary import dilate
 
-    m = np.asarray(to_numpy(mask), dtype=bool)
+    m = as_backend_array(mask).astype(bool)
     rad = int(radius_vox)
     if rad <= 0 or not np.any(m):
         return m
-    return np.asarray(
+    return as_backend_array(
         as_backend_array(dilate(m.astype(np.uint8), footprint=rad, connectivity=1)),
         dtype=bool,
     )
@@ -249,7 +249,7 @@ def forbidden_from_label_mask(
                     continue
                 forb |= arr == lid
         else:
-            forb = arr != 0 if arr.dtype != bool else np.asarray(arr, dtype=bool)
+            forb = arr != 0 if arr.dtype != bool else as_backend_array(arr).astype(bool)
     else:
         forb = arr != 0
     return dilate_bool_barrier(forb, radius_vox=radius_vox)
@@ -261,7 +261,7 @@ def merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None:
     for m in masks:
         if m is None:
             continue
-        b = np.asarray(m, dtype=bool)
+        b = as_backend_array(m).astype(bool)
         merged = b if merged is None else (merged | b)
     return merged
 

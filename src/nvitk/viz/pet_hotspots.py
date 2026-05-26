@@ -92,7 +92,7 @@ def _require_pyvista() -> Any:
 
 
 def _as_numpy_3d(x: Image | np.ndarray, *, name: str) -> np.ndarray:
-    arr = to_numpy(x.data) if isinstance(x, Image) else np.asarray(x)
+    arr = to_numpy(x.data) if isinstance(x, Image) else to_numpy(x)
     if arr.ndim != 3:
         raise ValidationError(f"{name} must be a 3D array; got shape {arr.shape}.")
     return arr
@@ -103,7 +103,7 @@ def _roi_mask(mask_arr: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarr
         return mask_arr > 0
     if len(label_ids) == 0:
         raise ValidationError("label_ids cannot be empty (pass None for all nonzero labels).")
-    return np.isin(mask_arr, np.asarray(label_ids, dtype=np.int64))
+    return np.isin(mask_arr, to_numpy(label_ids).astype(np.int64))
 
 
 def _select_hotspots(

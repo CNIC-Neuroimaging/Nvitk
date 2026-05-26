@@ -12,7 +12,7 @@ from nvitk.types import Image
 
 def _as_bool_mask(mask: Image | Any) -> np.ndarray:
     arr = to_numpy(mask.data if isinstance(mask, Image) else mask)
-    return np.asarray(arr > 0, dtype=bool)
+    return as_backend_array(arr > 0).astype(bool)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:
@@ -101,7 +101,7 @@ def distance_transform(
     if radius_mm is not None and float(radius_mm) > 0:
         out = (dist <= float(radius_mm)).astype(np.uint8)
     else:
-        out = np.asarray(dist, dtype=np.float32)
+        out = as_backend_array(dist).astype(np.float32)
     return _wrap_like(mask, out)
 
 

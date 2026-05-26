@@ -13,7 +13,7 @@
 
 - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
 - ``--submit sge`` — :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job` per subject.
-- ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA region growing in the same stage.
+- ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA RG; writes ``*_pp`` mask and ``centerlines_mask_pp.nii.gz`` (originals unchanged).
 - ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
 """
 
@@ -224,7 +224,7 @@ def run_subject(
         capture_output=False,
     )
     if post_process_eicab:
-        log.step(f"[{subject}] eICAB ICA post-process (Otsu + region growing)")
+        log.step(f"[{subject}] eICAB ICA post-process (Otsu + RG → *_pp + centerlines_mask_pp)")
         tof_resampled = find_tof_resampled_volume(out_dir)
         postprocess_eicab_directory(
             out_dir,
@@ -518,7 +518,7 @@ def _submit_postprocess_only_sge(
     "--post-process-eicab/--no-post-process-eicab",
     default=True,
     show_default=True,
-    help="After eICAB: Otsu ICA resegment (centerline_siphon) + ICA region growing.",
+    help="After eICAB: Otsu ICA resegment + ICA RG; writes *_pp mask and centerlines_mask_pp.nii.gz.",
 )
 @click.option(
     "--only-pp",

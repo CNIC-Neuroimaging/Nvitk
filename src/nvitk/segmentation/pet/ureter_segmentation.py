@@ -262,7 +262,7 @@ def build_cost_volume(
 
     # ---- gap-filled SUV ---------------------------------------------------
     # 1) Body mask
-    body_mask = np.asarray(body.data) > 0
+    body_mask = as_backend_array(body.data) > 0
 
     # 2) Clip + smooth as you already do
     suv_c = np.clip(suv, suv_clip_l, suv_clip_h)

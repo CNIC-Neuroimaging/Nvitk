@@ -106,8 +106,8 @@ def _outputs_complete(out_dir: Path, n_timepoints: int) -> bool:
 
 def dice_binary(mask_a: np.ndarray, mask_b: np.ndarray) -> float | None:
     """Dice coefficient for two boolean masks; ``None`` if both empty."""
-    a = np.asarray(mask_a, dtype=bool)
-    b = np.asarray(mask_b, dtype=bool)
+    a = as_backend_array(mask_a).astype(bool)
+    b = as_backend_array(mask_b).astype(bool)
     inter = int(np.count_nonzero(a & b))
     sa = int(np.count_nonzero(a))
     sb = int(np.count_nonzero(b))

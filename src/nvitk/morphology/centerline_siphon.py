@@ -364,8 +364,8 @@ def ica_otsu_mask(
     name = bb_vessel_name(int(lid))
     wvi_np = to_numpy(wvi)
     shape = tuple(int(s) for s in wvi_np.shape[:3])
-    full_post = np.zeros(shape, dtype=bool)
-    full_pre = np.zeros(shape, dtype=bool)
+    full_post = np.zeros(shape).astype(bool)
+    full_pre = np.zeros(shape).astype(bool)
 
     cl_np = to_numpy(cl_mask)
     seed = cl_np == int(lid)
@@ -445,8 +445,8 @@ def ica_otsu_mask(
 def _ball_offsets(radius: int) -> np.ndarray:
     r = int(radius)
     if r <= 0:
-        return np.zeros((1, 3), dtype=np.int32)
-    rr = np.arange(-r, r + 1, dtype=np.int32)
+        return np.zeros((1, 3)).astype(np.int32)
+    rr = np.arange(-r, r + 1).astype(np.int32)
     gx, gy, gz = np.meshgrid(rr, rr, rr, indexing="ij")
     sel = (gx * gx + gy * gy + gz * gz) <= (r * r)
     return np.stack([gx[sel], gy[sel], gz[sel]], axis=1).astype(np.int32)
@@ -484,7 +484,7 @@ def _bridge_cut_anchor(
     if not bridge_voxels:
         return None
     m = mask.astype(bool, copy=False)
-    seed = np.zeros(m.shape, dtype=bool)
+    seed = np.zeros(m.shape).astype(bool)
     for v in bridge_voxels:
         i, j, k = int(v[0]), int(v[1]), int(v[2])
         if 0 <= i < m.shape[0] and 0 <= j < m.shape[1] and 0 <= k < m.shape[2]:
@@ -554,7 +554,7 @@ def repair_ica_donut_3d(
                 rlog.notes.append(f"iter {it}: no cycle")
                 break
 
-            cycle_arr = np.array(cycle, dtype=np.int32)
+            cycle_arr = np.array(cycle).astype(np.int32)
             log.step(
                 f"[{label_name}] iter {it}: cycle len={len(cycle)} "
                 f"x[{cycle_arr[:, 0].min()},{cycle_arr[:, 0].max()}] "
@@ -587,7 +587,7 @@ def repair_ica_donut_3d(
         best_score: tuple[int, int] | None = None
         chosen_radius = int(CUT_RADII[0])
         for r in CUT_RADII:
-            offs = _ball_offsets(int(r)) + np.array(cut_anchor, dtype=np.int32)
+            offs = _ball_offsets(int(r)) + np.array(cut_anchor).astype(np.int32)
             valid = (
                 (offs[:, 0] >= 0)
                 & (offs[:, 0] < mask.shape[0])
@@ -693,7 +693,7 @@ def _prepare_ica_mask_for_centerline(
     )
     if otsu_info.get("warning"):
         log.warning(f"[{name}] Otsu skipped: {otsu_info['warning']}")
-        empty = np.zeros(to_numpy(wvi).shape[:3], dtype=bool)
+        empty = np.zeros(to_numpy(wvi).shape[:3]).astype(bool)
         return as_backend_array(empty), {
             "otsu_info": otsu_info,
             "otsu_mask": empty,
@@ -854,11 +854,11 @@ def _split_cycle_into_arcs(
     bridge is the **shorter** arc; the curl is the longer one.
     """
     ordered = _walk_cycle(G, cycle)
-    cyc_arr = np.array(ordered, dtype=np.int32)
+    cyc_arr = np.array(ordered).astype(np.int32)
     junctions = [n for n in ordered if G.degree(n) > 2]
     if len(junctions) >= 2:
         if len(junctions) > 2:
-            j_arr = np.array(junctions, dtype=np.int32)
+            j_arr = np.array(junctions).astype(np.int32)
             anchors = [
                 junctions[int(np.argmin(j_arr[:, 2]))],
                 junctions[int(np.argmax(j_arr[:, 2]))],
@@ -870,7 +870,7 @@ def _split_cycle_into_arcs(
         others = [n for n in ordered if n != j]
         if not others:
             return [], list(ordered), [j]
-        oa = np.array(others, dtype=np.int32)
+        oa = np.array(others).astype(np.int32)
         virtual = others[int(np.argmax(oa[:, 2]))]
         anchors = [j, virtual]
     else:
@@ -947,10 +947,10 @@ def prune_skeleton_shortest_arc(
     bridge_voxels: list[tuple[int, int, int]] = []
     for ci, cycle in enumerate(cycles):
         bridge, curl, anchors = _split_cycle_into_arcs(G, cycle)
-        cyc_arr = np.array(cycle, dtype=np.int32)
+        cyc_arr = np.array(cycle).astype(np.int32)
         br_y = br_z = None
         if bridge:
-            br_arr = np.array(bridge, dtype=np.int32)
+            br_arr = np.array(bridge).astype(np.int32)
             br_y = [int(br_arr[:, 1].min()), int(br_arr[:, 1].max())]
             br_z = [int(br_arr[:, 2].min()), int(br_arr[:, 2].max())]
         for v in bridge:
@@ -1034,7 +1034,7 @@ def compute_corrected_centerline(
         empty = np.empty((0, 3), dtype=np.float32)
         return as_backend_array(empty), as_backend_array(sk_np), info
 
-    cand_arr = np.array(candidates, dtype=np.int32)
+    cand_arr = np.array(candidates).astype(np.int32)
     base = candidates[int(np.argmin(cand_arr[:, 2]))]
     tip = candidates[int(np.argmax(cand_arr[:, 2]))]
     info["base"] = list(base)
@@ -1052,7 +1052,7 @@ def compute_corrected_centerline(
         ccs = sorted(nx.connected_components(G), key=len, reverse=True)
         sub = G.subgraph(ccs[0]).copy()
         sub_nodes = list(sub.nodes())
-        sub_arr = np.array(sub_nodes, dtype=np.int32)
+        sub_arr = np.array(sub_nodes).astype(np.int32)
         base = sub_nodes[int(np.argmin(sub_arr[:, 2]))]
         tip = sub_nodes[int(np.argmax(sub_arr[:, 2]))]
         info["base"] = list(base)
@@ -1077,7 +1077,7 @@ def _bfs_distances_inside_roi(
     from collections import deque
 
     shape = roi.shape
-    dist = np.full(shape, -1, dtype=np.int32)
+    dist = np.full(shape, -1).astype(np.int32)
     q: deque[tuple[int, int, int]] = deque()
     seed_coords = np.argwhere(seeds & roi)
     for i, j, k in seed_coords:
@@ -1106,7 +1106,7 @@ def _rasterize_path_seeds(
     path: Any,
 ) -> np.ndarray:
     """Bool volume with True at rounded centerline path voxels."""
-    seeds = np.zeros(shape, dtype=bool)
+    seeds = np.zeros(shape).astype(bool)
     p = to_numpy(path)
     if p.size == 0:
         return seeds
@@ -1142,7 +1142,7 @@ def clean_mask_geodesic_cl(
     if not cl_seeds.any():
         return as_backend_array(m), {"cleared_voxels": 0, "skipped": "empty centerline"}
 
-    bridge_seed = np.zeros(m.shape, dtype=bool)
+    bridge_seed = np.zeros(m.shape).astype(bool)
     for v in bridge_voxels:
         i, j, k = int(v[0]), int(v[1]), int(v[2])
         if 0 <= i < m.shape[0] and 0 <= j < m.shape[1] and 0 <= k < m.shape[2]:
@@ -1218,8 +1218,8 @@ def _dilate_fractional_shell(
     if candidates.shape[0] == 0:
         return mask, 0
     if float(shell_fraction) < 1.0 and candidates.shape[0] > 1:
-        if cl_seeds is not None and bool(np.asarray(cl_seeds).any()):
-            cl_d = ndi_cpu.distance_transform_edt(~np.asarray(cl_seeds, dtype=bool))
+        if cl_seeds is not None and bool(as_backend_array(cl_seeds).any()):
+            cl_d = ndi_cpu.distance_transform_edt(~as_backend_array(cl_seeds).astype(bool))
             priority = cl_d[
                 candidates[:, 0], candidates[:, 1], candidates[:, 2]
             ]
@@ -1366,7 +1366,7 @@ def recover_lumen_thickness_symmetric(
         name = str(it.get("label_name", bb_vessel_name(lid)))
         cl = it.get("cl_seeds")
         if cl is not None:
-            cl = np.asarray(cl, dtype=bool)
+            cl = as_backend_array(cl).astype(bool)
         if not m.any():
             per_lid_steps[lid] = 0
             continue
@@ -1386,7 +1386,7 @@ def recover_lumen_thickness_symmetric(
         name = str(it.get("label_name", bb_vessel_name(lid)))
         cl = it.get("cl_seeds")
         if cl is not None:
-            cl = np.asarray(cl, dtype=bool)
+            cl = as_backend_array(cl).astype(bool)
         if not m.any():
             out_masks[lid] = as_backend_array(m)
             per_lid_meta[lid] = {"n_micro_steps": 0, "skipped": "empty"}
@@ -1480,7 +1480,7 @@ def clean_ica_mask_after_centerline(
     seed = to_numpy(seed_bool).astype(bool, copy=False)
     otsu_ceiling = prep_info.get("otsu_mask")
     if otsu_ceiling is not None:
-        ceiling = np.asarray(otsu_ceiling, dtype=bool)
+        ceiling = as_backend_array(otsu_ceiling).astype(bool)
     else:
         ceiling = mask.copy()
 
@@ -1681,9 +1681,9 @@ def correct_siphon_centerlines(
         repaired_masks: dict[int, Any] = {}
         cleared_by_label: dict[int, np.ndarray] = {}
         uncorrected_cls: dict[int, Any] = {}
-        seg_ica_otsu = np.zeros(shape, dtype=np.int32)
-        seg_ica_eroded = np.zeros(shape, dtype=np.int32)
-        seg_ica_repaired = np.zeros(shape, dtype=np.int32)
+        seg_ica_otsu = np.zeros(shape).astype(np.int32)
+        seg_ica_eroded = np.zeros(shape).astype(np.int32)
+        seg_ica_repaired = np.zeros(shape).astype(np.int32)
         thickness_queue: list[dict[str, Any]] = []
 
         out_path = Path(out_dir) if out_dir is not None else None
@@ -1707,10 +1707,10 @@ def correct_siphon_centerlines(
             repaired_masks[int(lid)] = repaired_mask
             otsu_m = prep_info.get("otsu_mask")
             eroded_m = prep_info.get("eroded_mask")
-            if otsu_m is not None and bool(np.asarray(otsu_m).any()):
-                seg_ica_otsu[np.asarray(otsu_m, dtype=bool)] = int(lid)
-            if eroded_m is not None and bool(np.asarray(eroded_m).any()):
-                seg_ica_eroded[np.asarray(eroded_m, dtype=bool)] = int(lid)
+            if otsu_m is not None and bool(as_backend_array(otsu_m).any()):
+                seg_ica_otsu[as_backend_array(otsu_m).astype(bool)] = int(lid)
+            if eroded_m is not None and bool(as_backend_array(eroded_m).any()):
+                seg_ica_eroded[as_backend_array(eroded_m).astype(bool)] = int(lid)
             rep_np = to_numpy(repaired_mask).astype(bool, copy=False)
 
             # Optionally compute unpruned centerline on repaired mask for QC
@@ -2047,7 +2047,7 @@ def _rasterize_centerlines_mask(
     shape: tuple[int, int, int], centerlines: dict[int, Any]
 ) -> Any:
     """Per-label voxel mask with vessel id on each centerline point (CPU NumPy)."""
-    mask = np.zeros(shape, dtype=np.int32)
+    mask = np.zeros(shape).astype(np.int32)
     for vid, pts in sorted(centerlines.items()):
         p = to_numpy(pts)
         if p.size == 0:
@@ -2069,7 +2069,7 @@ def _rasterize_bridges_mask(
     bridges_by_label: dict[int, list[tuple[int, int, int]]],
 ) -> Any:
     """Per-label voxel mask of removed-bridge voxels (CPU NumPy)."""
-    mask = np.zeros(shape, dtype=np.int32)
+    mask = np.zeros(shape).astype(np.int32)
     for vid, voxels in bridges_by_label.items():
         for v in voxels:
             i, j, k = int(v[0]), int(v[1]), int(v[2])
@@ -2083,9 +2083,9 @@ def _rasterize_cleared_masks(
     cleared_by_label: dict[int, np.ndarray],
 ) -> np.ndarray:
     """Per-label mask of voxels removed by post-CL cleaning."""
-    mask = np.zeros(shape, dtype=np.int32)
+    mask = np.zeros(shape).astype(np.int32)
     for vid, cleared in cleared_by_label.items():
-        c = np.asarray(cleared, dtype=bool)
+        c = as_backend_array(cleared).astype(bool)
         mask[c] = int(vid)
     return mask
 
@@ -2306,7 +2306,7 @@ def _save_qc_figure(
         # 4) Removed bridge voxels
         bv = bridges_by_label.get(int(lid)) or []
         if bv:
-            bv_arr = np.asarray(bv, dtype=np.int32)
+            bv_arr = as_backend_array(bv).astype(np.int32)
             ax.scatter(
                 bv_arr[:, 0], bv_arr[:, 1], bv_arr[:, 2],
                 s=80, c="magenta", marker="x",

@@ -249,7 +249,7 @@ def cross_section_at_loc(
             res=res,
             order=0,
         )
-        mask = np.asarray(np.round(seg_sl) == int(volume_label_id), dtype=bool)
+        mask = as_backend_array(np.round(seg_sl) == int(volume_label_id)).astype(bool)
         circ = _circularity_proxy(mask)
 
     area_mm2 = _cross_section_area_mm2(

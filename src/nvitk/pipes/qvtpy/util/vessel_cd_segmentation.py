@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
 from nvitk.morphology import dilate
 from nvitk.morphology.centerline import skeletonize_binary
@@ -227,7 +227,7 @@ def eicab_dropped_label_barrier(
     ids = EICAB_RG_BARRIER_LABEL_IDS if label_ids is None else label_ids
     barrier = np.zeros(vol.shape, dtype=bool)
     for eid in ids:
-        barrier |= np.asarray(vol == int(eid), dtype=bool)
+        barrier |= as_backend_array(vol == int(eid)).astype(bool)
     return _dilate_bool_mask(barrier, radius=int(radius_vox))
 
 
@@ -292,10 +292,10 @@ def _bbox_with_padding(
 
 
 def _dilate_bool_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
-    m = np.asarray(mask, dtype=bool)
+    m = as_backend_array(mask).astype(bool)
     if radius <= 0 or not np.any(m):
         return m
-    return np.asarray(
+    return as_backend_array(
         as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)),
         dtype=bool,
     )
@@ -311,7 +311,7 @@ def _dilated_other_centerlines_barrier(
     """Forbidden slab (bool) inside *bbox*: dilated other-vessel centerlines."""
     i0, i1, j0, j1, k0, k1 = bbox
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
-    other = np.asarray((clm != 0) & (clm != int(label_id)), dtype=bool)
+    other = as_backend_array((clm != 0) & (clm != int(label_id))).astype(bool)
     other = _dilate_bool_mask(other, radius=radius)
     return other[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
 
@@ -401,7 +401,7 @@ def _dilated_other_segmentation_barrier_excluding(
         oid = int(other_id)
         if oid == 0 or oid == int(label_id) or oid in exclude_label_ids:
             continue
-        other |= np.asarray(seg_np == oid, dtype=bool)
+        other |= as_backend_array(seg_np == oid).astype(bool)
     if not np.any(other):
         return other
     return _dilate_bool_mask(other, radius=radius)
@@ -414,7 +414,7 @@ def _merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None:
     for m in masks:
         if m is None:
             continue
-        b = np.asarray(m, dtype=bool)
+        b = as_backend_array(m).astype(bool)
         merged = b if merged is None else (merged | b)
     return merged
 
@@ -438,7 +438,8 @@ def _threshold_crop(
         except ImportError as exc:
             raise ImportError("otsu requires scikit-image") from exc
         try:
-            t = float(threshold_otsu(pos))
+            with using("cpu"):
+                t = float(threshold_otsu(to_numpy(pos)))
         except ValueError as exc:
             return np.zeros(cd_crop.shape, dtype=bool), None, f"otsu failed: {exc}"
         mask = (cd_crop > t).astype(bool, copy=False)

@@ -761,7 +761,7 @@ def run_gui_tool(
             )
             label_vol = as_backend_array(label_img.data)
             if not exclude:
-                growing = np.asarray(mask, dtype=bool)
+                growing = as_backend_array(mask).astype(bool)
                 for lid in np.unique(to_numpy(label_vol)):
                     lid = int(lid)
                     if lid != 0 and np.any(label_vol[growing] == lid):

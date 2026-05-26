@@ -140,6 +140,7 @@ def run_subject(
     eicab_min_island_fraction: float = 0.05,
     eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
+    eicab_prefer_pp: bool = True,
 ) -> Path:
     """Warp eICAB, extract arterial/venous centerlines; return stage-3 output directory."""
     # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
@@ -148,7 +149,11 @@ def run_subject(
     fixed = Path(meta["fixed"])
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
     eicab_dir = output_root / subject / subdir
-    eicab_res = resolve_eicab_mask(eicab_dir, preference=eicab_mask)
+    eicab_res = resolve_eicab_mask(
+        eicab_dir,
+        preference=eicab_mask,
+        prefer_postprocessed=bool(eicab_prefer_pp),
+    )
 
     out_dir = _stage3_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +163,8 @@ def run_subject(
         return out_dir
 
     # ---- Warp eICAB labels into 4D-flow space (nearest neighbour) ----------
-    log.step(f"warp eICAB ({eicab_res.used}) into 4D-flow space")
+    pp_tag = " pp" if eicab_res.postprocessed else ""
+    log.step(f"warp eICAB ({eicab_res.used}{pp_tag}) into 4D-flow space")
     warped_labels = out_dir / "eicab_in_4dflow.nii.gz"
     flirt_apply_rigid(
         eicab_res.path,
@@ -248,6 +254,10 @@ def run_subject(
         "eicab_mask_used": eicab_res.used,
         "eicab_mask_fallback": eicab_res.fallback,
         "eicab_mask_fallback_reason": eicab_res.fallback_reason,
+        "eicab_mask_postprocessed": bool(eicab_res.postprocessed),
+        "eicab_mask_original": (
+            str(eicab_res.original_path) if eicab_res.original_path is not None else None
+        ),
         "eicab_labels_source": str(eicab_res.path),
         "arterial_label_scheme": "qvtpy",
         "arterial_labels": [int(k) for k in sorted(arterial.keys())],
@@ -299,6 +309,12 @@ def _stage3_cli_options(func):  # type: ignore[no-untyped-def]
     func = click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)(func)
     func = click.option("--eicab-bridge-open-radius", type=int, default=1, show_default=True)(func)
     func = click.option("--venous-min-branch-points", type=int, default=12, show_default=True)(func)
+    func = click.option(
+        "--eicab-prefer-pp/--no-eicab-prefer-pp",
+        default=True,
+        show_default=True,
+        help="Prefer stage1 *_pp eICAB mask when present.",
+    )(func)
     return func
 
 
@@ -319,6 +335,7 @@ def submit_subject_sge(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
+    eicab_prefer_pp: bool = True,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-3 SGE job. Returns qsub job id."""
@@ -346,6 +363,8 @@ def submit_subject_sge(
     ]
     if skip_existing:
         parts.append("--skip-existing")
+    if not eicab_prefer_pp:
+        parts.append("--no-eicab-prefer-pp")
     if cd_up_thresh is not None:
         parts.extend(["--cd-up-thresh", str(float(cd_up_thresh))])
     if cd_shift_hm is not None:
@@ -392,6 +411,7 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    eicab_prefer_pp: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -406,6 +426,7 @@ def main(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        eicab_prefer_pp=eicab_prefer_pp,
     )
 
 

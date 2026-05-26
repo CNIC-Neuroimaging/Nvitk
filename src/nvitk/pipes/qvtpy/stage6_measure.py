@@ -95,7 +95,7 @@ def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
         return (float(sp[0]), float(sp[1]), float(sp[2]))
     aff = ap_img.affine
     if aff is not None:
-        a = np.asarray(aff, dtype=np.float64)
+        a = to_numpy(aff).astype(np.float64)
         return (
             float(np.linalg.norm(a[:3, 0])),
             float(np.linalg.norm(a[:3, 1])),
@@ -189,7 +189,7 @@ def run_subject(
         s3 = _stage3_dir(output_root, subject)
         try:
             arterial_cls = {
-                int(k): np.asarray(v)
+                int(k): to_numpy(v)
                 for k, v in load_arterial_centerlines(s3, min_points=3).items()
             }
         except FileNotFoundError:

@@ -165,7 +165,7 @@ def split_vertebral_from_basilar(
     bifurcation stays basilar and the two VA masks do not bridge.
     """
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
-    basilar = np.asarray(seg_np == int(QVTPY_BASILAR), dtype=bool)
+    basilar = as_backend_array(seg_np == int(QVTPY_BASILAR)).astype(bool)
     n_basilar = int(np.count_nonzero(basilar))
     if n_basilar == 0:
         return seg_np, VertebralSplitResult(
@@ -179,7 +179,7 @@ def split_vertebral_from_basilar(
             message="empty basilar mask",
         )
 
-    skel = np.asarray(to_numpy(skeletonize_binary(basilar)), dtype=bool)
+    skel = as_backend_array(skeletonize_binary(basilar)).astype(bool)
     branch_nodes = _skeleton_branch_nodes(skel)
     if not branch_nodes:
         return seg_np, VertebralSplitResult(

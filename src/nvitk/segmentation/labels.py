@@ -178,7 +178,7 @@ def biggest_cc(mask: Image | Any, *, structure: Any = None) -> Image | Any:
     if int(sizes.sum()) == 0:
         out = np.zeros_like(arr, dtype=np.uint8)
     else:
-        winner = int(np.asarray(sizes).argmax())
+        winner = int(as_backend_array(sizes).argmax())
         out = (labeled == winner).astype(np.uint8)
     return _wrap_like(mask, out)
 

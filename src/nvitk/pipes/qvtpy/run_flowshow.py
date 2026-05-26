@@ -470,7 +470,7 @@ def main(
     if sp is not None and len(sp) >= 3:
         voxel_sp_tuple = (float(sp[0]), float(sp[1]), float(sp[2]))
     elif ap.affine is not None:
-        a = np.asarray(ap.affine, dtype=np.float64)
+        a = to_numpy(ap.affine).astype(np.float64)
         voxel_sp_tuple = (
             float(np.linalg.norm(a[:3, 0])),
             float(np.linalg.norm(a[:3, 1])),

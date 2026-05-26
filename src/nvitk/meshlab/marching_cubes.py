@@ -29,17 +29,17 @@ def _world_vertices(
     origin: Sequence[float] | None,
 ) -> np.ndarray:
     """Map voxel-index vertices to physical/world coordinates."""
-    v = np.asarray(verts_voxel, dtype=np.float64)
+    v = to_numpy(verts_voxel).astype(np.float64)
     if affine is not None:
-        aff = np.asarray(affine, dtype=np.float64)
+        aff = to_numpy(affine).astype(np.float64)
         if aff.shape == (4, 4):
             hom = np.column_stack([v, np.ones(len(v))])
             return (aff @ hom.T).T[:, :3]
     if spacing is not None:
-        sp = np.asarray(spacing[:3], dtype=np.float64)
+        sp = to_numpy(spacing[:3]).astype(np.float64)
         off = np.zeros(3, dtype=np.float64)
         if origin is not None:
-            off = np.asarray(origin[:3], dtype=np.float64)
+            off = to_numpy(origin[:3]).astype(np.float64)
         return v * sp + off
     return v
 

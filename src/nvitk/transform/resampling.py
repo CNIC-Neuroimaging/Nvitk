@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
@@ -15,7 +15,7 @@ def _require_affine(image: Image, name: str) -> np.ndarray:
     affine = image.affine
     if affine is None:
         raise ValueError(f"Image '{name}' has no affine in its metadata.")
-    affine = np.asarray(to_numpy(affine), dtype=float)
+    affine = to_numpy(affine).astype(float)
     if affine.shape != (4, 4):
         raise ValueError(f"Affine for '{name}' must be (4, 4); got {affine.shape}.")
     return affine
@@ -73,8 +73,8 @@ def resample_to(
 
     resampled = ndi.affine_transform(
         source.data,
-        matrix=np.asarray(inv_linear),
-        offset=np.asarray(inv_offset),
+        matrix=as_backend_array(inv_linear),
+        offset=as_backend_array(inv_offset),
         output_shape=target.shape,
         order=int(order),
         mode=mode,
@@ -84,7 +84,7 @@ def resample_to(
 
     md = dict(source.metadata or {})
     target_md = target.metadata or {}
-    md["affine"] = np.asarray(aff_target, dtype=float)
+    md["affine"] = to_numpy(aff_target).astype(float)
     for key in ("spacing", "x_res", "y_res", "z_res", "orientation"):
         if key in target_md:
             md[key] = target_md[key]

@@ -356,6 +356,12 @@ def _emit_stage0_convert(
     show_default=True,
     help="Stage3: prefer Circle-of-Willis or whole-brain eICAB mask.",
 )
+@click.option(
+    "--eicab-prefer-pp/--no-eicab-prefer-pp",
+    default=True,
+    show_default=True,
+    help="Stage3: use stage1 *_pp eICAB mask when available.",
+)
 @click.option("--cd-up-thresh", type=float, default=None, help="Stage3: CD sliding-threshold upper fraction.")
 @click.option(
     "--cd-shift-hm/--no-cd-shift-hm",
@@ -464,6 +470,7 @@ def main(
     stage2_dof: int,
     stage2_cost: str,
     eicab_mask: str,
+    eicab_prefer_pp: bool,
     cd_up_thresh: float | None,
     cd_shift_hm: bool | None,
     venous_min_component_frac: float,
@@ -622,6 +629,7 @@ def main(
                             output_root=output_root,
                             skip_existing=skip_existing,
                             eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+                            eicab_prefer_pp=eicab_prefer_pp,
                             cd_up_thresh=cd_up_thresh,
                             cd_shift_hm=cd_shift_hm,
                             venous_min_component_frac=venous_min_component_frac,
@@ -813,6 +821,7 @@ def main(
                         hold_jid=prev_jid,
                         emit=fh,
                         eicab_mask=eicab_mask,
+                        eicab_prefer_pp=eicab_prefer_pp,
                         cd_up_thresh=cd_up_thresh,
                         cd_shift_hm=cd_shift_hm,
                         venous_min_component_frac=venous_min_component_frac,

@@ -6,13 +6,13 @@ from typing import Any
 
 import numpy as np
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.types import Image
 
 
 def _as_bool(mask: Image | Any) -> np.ndarray:
     arr = to_numpy(mask.data if isinstance(mask, Image) else mask)
-    return np.asarray(arr > 0, dtype=bool)
+    return as_backend_array(arr > 0).astype(bool)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:

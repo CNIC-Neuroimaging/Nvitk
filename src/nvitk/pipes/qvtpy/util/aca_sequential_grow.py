@@ -41,18 +41,18 @@ def _aca_seed_mask(
     """Thin ACA seeds: stage-3 centerline primary, skeletonized eICAB fallback."""
     lid = int(label_id)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
-    seeds = np.asarray(clm == lid, dtype=bool)
+    seeds = as_backend_array(clm == lid).astype(bool)
     if np.any(seeds):
         return seeds, "centerline"
     if eicab_qvtpy is None:
         return seeds, "none"
     eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
-    raw = np.asarray(eq == lid, dtype=bool)
+    raw = as_backend_array(eq == lid).astype(bool)
     if not np.any(raw):
         return seeds, "none"
     try:
         skel = skeletonize_binary(raw)
-        skel_np = np.asarray(as_backend_array(skel), dtype=bool)
+        skel_np = as_backend_array(skel).astype(bool)
         if np.any(skel_np):
             return skel_np, "eicab_skeleton"
     except Exception:
@@ -66,7 +66,7 @@ def _acomm_junction_voxel(eicab_qvtpy: np.ndarray) -> tuple[int, int, int] | Non
     coords = np.argwhere(eq == int(QVTPY_ACOMM))
     if coords.size == 0:
         return None
-    coords_np = np.asarray(to_numpy(coords), dtype=np.float64)
+    coords_np = as_backend_array(to_numpy(coords)).astype(np.float64)
     com = coords_np.mean(axis=0)
     d2 = np.sum((coords_np - com) ** 2, axis=1)
     best = coords_np[int(np.argmin(d2))]
@@ -83,8 +83,8 @@ def _infer_aca_junction(
         j = _acomm_junction_voxel(eicab_qvtpy)
         if j is not None:
             return j, "eicab_acomm"
-    lc = np.asarray(to_numpy(np.argwhere(laca_seeds)), dtype=np.float64)
-    rc = np.asarray(to_numpy(np.argwhere(raca_seeds)), dtype=np.float64)
+    lc = as_backend_array(to_numpy(np.argwhere(laca_seeds))).astype(np.float64)
+    rc = as_backend_array(to_numpy(np.argwhere(raca_seeds))).astype(np.float64)
     if lc.size == 0 or rc.size == 0:
         return None, None
     d2 = np.sum((lc[:, None, :] - rc[None, :, :]) ** 2, axis=2)
@@ -108,8 +108,8 @@ def _infer_aca_split_plane(
     junction: tuple[int, int, int],
 ) -> tuple[int, int, bool]:
     """Dominant in-plane axis and whether LACA lies on the low-index side of *junction*."""
-    lc = np.asarray(np.argwhere(laca_seeds), dtype=np.float64)
-    rc = np.asarray(np.argwhere(raca_seeds), dtype=np.float64)
+    lc = as_backend_array(np.argwhere(laca_seeds)).astype(np.float64)
+    rc = as_backend_array(np.argwhere(raca_seeds)).astype(np.float64)
     ji = int(junction[0])
     jj = int(junction[1])
     if lc.size == 0 or rc.size == 0:
@@ -130,12 +130,12 @@ def _infer_aca_split_plane(
 
 def _aca_axis_unit_vector(seeds: np.ndarray) -> np.ndarray | None:
     """Principal axis of ACA seeds (robust when centerline stops short of junction)."""
-    coords = np.asarray(np.argwhere(seeds), dtype=np.float64)
+    coords = as_backend_array(np.argwhere(seeds)).astype(np.float64)
     if coords.shape[0] < 2:
         return None
     c = coords - coords.mean(axis=0, keepdims=True)
     _, _, vh = np.linalg.svd(c, full_matrices=False)
-    axis = np.asarray(vh[0], dtype=np.float64)
+    axis = as_backend_array(vh[0]).astype(np.float64)
     n = float(np.linalg.norm(axis))
     if n < 1e-6:
         return None
@@ -147,13 +147,13 @@ def _aca_arm_from_junction(
     junction: tuple[int, int, int],
 ) -> tuple[np.ndarray, tuple[int, int, int] | None]:
     """Unit vector along ACA centerline axis; endpoint is farthest seed from junction."""
-    coords = np.asarray(np.argwhere(seeds), dtype=np.float64)
+    coords = as_backend_array(np.argwhere(seeds)).astype(np.float64)
     if coords.size == 0:
-        return np.zeros(3, dtype=np.float64), None
+        return np.zeros(3).astype(np.float64), None
     axis = _aca_axis_unit_vector(seeds)
     if axis is None:
-        return np.zeros(3, dtype=np.float64), None
-    j = np.asarray(junction, dtype=np.float64)
+        return np.zeros(3).astype(np.float64), None
+    j = as_backend_array(junction).astype(np.float64)
     d2 = np.sum((coords - j) ** 2, axis=1)
     idx = int(np.argmax(d2))
     endpoint = coords[idx]
@@ -167,9 +167,9 @@ def _distance_from_junction_voxels(
 ) -> np.ndarray:
     """EDT distance (vox) from the AComm junction seed voxel."""
     ji, jj, jk = (int(junction[0]), int(junction[1]), int(junction[2]))
-    junc = np.zeros(shape, dtype=bool)
+    junc = np.zeros(shape).astype(bool)
     junc[ji, jj, jk] = True
-    return np.asarray(to_numpy(ndi.distance_transform_edt(~junc)), dtype=np.float32)
+    return as_backend_array(to_numpy(ndi.distance_transform_edt(~junc)), dtype=np.float32)
 
 
 @dataclass(frozen=True)
@@ -190,17 +190,17 @@ def _aca_seed_connected_keep_mask(
     seed_mask: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (voxels in seed-touching CCs, stray CC voxels with no seed on that label)."""
-    vessel = np.asarray(vessel_mask, dtype=bool)
-    seeds = np.asarray(seed_mask, dtype=bool)
+    vessel = as_backend_array(vessel_mask).astype(bool)
+    seeds = as_backend_array(seed_mask).astype(bool)
     if not np.any(vessel):
-        return vessel.copy(), np.zeros_like(vessel, dtype=bool)
+        return vessel.copy(), np.zeros_like(vessel).astype(bool)
 
     labeled, n_cc = label_connected(vessel, connectivity=1)
     if n_cc <= 0:
-        return vessel.copy(), np.zeros_like(vessel, dtype=bool)
+        return vessel.copy(), np.zeros_like(vessel).astype(bool)
 
-    labeled_np = np.asarray(labeled, dtype=np.int32)
-    keep = np.zeros_like(vessel, dtype=bool)
+    labeled_np = as_backend_array(labeled).astype(np.int32)
+    keep = np.zeros_like(vessel).astype(bool)
     for lab in range(1, int(n_cc) + 1):
         cc = labeled_np == lab
         if np.any(seeds & cc):
@@ -220,16 +220,16 @@ def _prune_aca_stray_islands(
     r_keep, r_stray = _aca_seed_connected_keep_mask(raca_mask, raca_seeds)
     n_reassigned = int(np.count_nonzero(l_stray) + np.count_nonzero(r_stray))
 
-    laca_out = np.asarray(l_keep | r_stray, dtype=bool)
-    raca_out = np.asarray(r_keep | l_stray, dtype=bool)
+    laca_out = as_backend_array(l_keep | r_stray).astype(bool)
+    raca_out = as_backend_array(r_keep | l_stray).astype(bool)
     overlap = laca_out & raca_out
     if np.any(overlap):
-        d_laca = np.asarray(
-            to_numpy(ndi.distance_transform_edt(~np.asarray(laca_seeds, dtype=bool))),
+        d_laca = as_backend_array(
+            to_numpy(ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))),
             dtype=np.float32,
         )
-        d_raca = np.asarray(
-            to_numpy(ndi.distance_transform_edt(~np.asarray(raca_seeds, dtype=bool))),
+        d_raca = as_backend_array(
+            to_numpy(ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))),
             dtype=np.float32,
         )
         coords = np.argwhere(overlap)
@@ -253,8 +253,8 @@ def _split_aca_merged_by_junction_plane(
     acomm_junction_radius: int,
 ) -> _AcaPlaneSplitResult:
     """Plane-split the merged ACA blob near AComm, then drop seedless CC islands."""
-    laca_in = np.asarray(laca_mask, dtype=bool)
-    raca_in = np.asarray(raca_mask, dtype=bool)
+    laca_in = as_backend_array(laca_mask).astype(bool)
+    raca_in = as_backend_array(raca_mask).astype(bool)
     overlap = laca_in & raca_in
     aca_union = laca_in | raca_in
     if not np.any(overlap):
@@ -274,8 +274,8 @@ def _split_aca_merged_by_junction_plane(
     raca_seeds, _ = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_RACA)
     junction, junction_source = _infer_aca_junction(laca_seeds, raca_seeds, eicab_qvtpy)
     if junction is None:
-        raca_out = np.asarray(raca_in & ~overlap, dtype=bool)
-        laca_out = np.asarray(laca_in.copy(), dtype=bool)
+        raca_out = as_backend_array(raca_in & ~overlap).astype(bool)
+        laca_out = as_backend_array(laca_in.copy()).astype(bool)
         return _AcaPlaneSplitResult(
             laca_out,
             raca_out,
@@ -299,16 +299,16 @@ def _split_aca_merged_by_junction_plane(
     else:
         split_zone = aca_union
 
-    laca_out = np.asarray(laca_in & ~split_zone, dtype=bool)
-    raca_out = np.asarray(raca_in & ~split_zone, dtype=bool)
+    laca_out = as_backend_array(laca_in & ~split_zone).astype(bool)
+    raca_out = as_backend_array(raca_in & ~split_zone).astype(bool)
     n_split = 0
 
-    d_laca = np.asarray(
-        to_numpy(ndi.distance_transform_edt(~np.asarray(laca_seeds, dtype=bool))),
+    d_laca = as_backend_array(
+        to_numpy(ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))),
         dtype=np.float32,
     )
-    d_raca = np.asarray(
-        to_numpy(ndi.distance_transform_edt(~np.asarray(raca_seeds, dtype=bool))),
+    d_raca = as_backend_array(
+        to_numpy(ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))),
         dtype=np.float32,
     )
 
@@ -398,8 +398,8 @@ def _write_aca_masks_to_seg(
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     seg_np[seg_np == int(QVTPY_LACA)] = 0
     seg_np[seg_np == int(QVTPY_RACA)] = 0
-    lm = np.asarray(laca_mask, dtype=bool)
-    rm = np.asarray(raca_mask, dtype=bool)
+    lm = as_backend_array(laca_mask).astype(bool)
+    rm = as_backend_array(raca_mask).astype(bool)
     seg_np[lm] = int(QVTPY_LACA)
     seg_np[rm] = int(QVTPY_RACA)
 
@@ -425,8 +425,8 @@ def _region_grow_acas_sequential(
     exclude_raca = frozenset({int(QVTPY_RACA)})
     exclude_laca = frozenset({int(QVTPY_LACA)})
 
-    laca_mask = np.asarray(seg == int(QVTPY_LACA), dtype=bool)
-    raca_mask = np.asarray(seg == int(QVTPY_RACA), dtype=bool)
+    laca_mask = as_backend_array(seg == int(QVTPY_LACA)).astype(bool)
+    raca_mask = as_backend_array(seg == int(QVTPY_RACA)).astype(bool)
 
     frac_l = rg_intensity_frac_for_label(
         QVTPY_LACA,
@@ -460,7 +460,7 @@ def _region_grow_acas_sequential(
         QVTPY_RACA,
         exclude_label_ids=exclude_laca,
     )
-    forb_raca = np.asarray(forb_raca, dtype=bool) & ~laca_mask
+    forb_raca = as_backend_array(forb_raca).astype(bool) & ~laca_mask
     region_grow_binary_mask(
         raca_mask,
         cd,
@@ -487,7 +487,7 @@ def _region_grow_acas_sequential(
             raca_mask = split_info.raca_mask
             corrected = True
         else:
-            raca_mask = np.asarray(raca_mask & ~overlap, dtype=bool)
+            raca_mask = as_backend_array(raca_mask & ~overlap).astype(bool)
 
     _write_aca_masks_to_seg(seg, laca_mask, raca_mask)
 
