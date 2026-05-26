@@ -210,6 +210,11 @@ QVTPY_VENOUS_LABEL_IDS: frozenset[int] = frozenset(VENOUS_NAME_BY_LABEL.keys())
 
 # Stage 4 region growing: more exploration on ACA/MCA/PCA; all venous skip RG.
 QVTPY_RG_EXPLORE_MORE_IDS: frozenset[int] = QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
+# MCA/PCA use explore RG fraction; ACA uses a separate (typically stricter) ACA fraction.
+QVTPY_RG_MCA_PCA_EXPLORE_IDS: frozenset[int] = QVTPY_MCA_IDS | QVTPY_PCA_IDS
+# PCA + basilar: RG barriers include native eICAB labels dropped at relabel (SCA).
+QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS: frozenset[int] = QVTPY_PCA_IDS | frozenset({QVTPY_BASILAR})
+EICAB_RG_BARRIER_LABEL_IDS: frozenset[int] = frozenset({EICAB_LSCA, EICAB_RSCA})
 QVTPY_RG_SKIP_LABEL_IDS: frozenset[int] = QVTPY_VENOUS_LABEL_IDS
 
 # Per-sinus RG intensity fractions (lower → more growth). STRV omitted (RG disabled).
@@ -403,7 +408,10 @@ __all__ = [
     "QVTPY_VERTEBRAL_IDS",
     "QVTPY_MCA_IDS",
     "QVTPY_PCA_IDS",
+    "EICAB_RG_BARRIER_LABEL_IDS",
     "QVTPY_RG_EXPLORE_MORE_IDS",
+    "QVTPY_RG_MCA_PCA_EXPLORE_IDS",
+    "QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS",
     "QVTPY_RG_INTENSITY_FRAC_VENOUS",
     "QVTPY_RG_SKIP_LABEL_IDS",
     "QVTPY_SMALL_ARTERIAL_IDS",

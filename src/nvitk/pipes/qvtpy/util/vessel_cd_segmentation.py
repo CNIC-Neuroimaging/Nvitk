@@ -31,6 +31,7 @@ from nvitk.morphology import dilate
 from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected, remove_small_components_by_fraction
 from nvitk.pipes.qvtpy.labels import (
+    EICAB_RG_BARRIER_LABEL_IDS,
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
     QVTPY_BASILAR,
@@ -43,6 +44,8 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_RACA,
     QVTPY_RG_EXPLORE_MORE_IDS,
     QVTPY_RG_INTENSITY_FRAC_VENOUS,
+    QVTPY_RG_MCA_PCA_EXPLORE_IDS,
+    QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS,
     QVTPY_RG_SKIP_LABEL_IDS,
     QVTPY_RMCA,
     QVTPY_SMALL_ARTERIAL_IDS,
@@ -51,7 +54,7 @@ from nvitk.pipes.qvtpy.labels import (
 from nvitk.pipes.qvtpy.util.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
 from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
-from nvitk.segmentation.region_growing import region_grow_into_label_volume
+from nvitk.segmentation.region_growing import merge_forbidden, region_grow_into_label_volume
 
 setup(globals())
 
@@ -66,7 +69,11 @@ _CROP_MIN_COMPONENT_FRAC = 0.005
 _CROP_MIN_COMPONENT_FRAC_SMALL = 0.0
 VESSEL_EXTRA_PADDING: int = 10
 _DEFAULT_RG_INTENSITY_FRAC: float = 0.45
-_RG_INTENSITY_FRAC_EXPLORE: float = 0.35
+_RG_INTENSITY_FRAC_EXPLORE: float = 0.25
+_RG_INTENSITY_FRAC_ACA: float = 0.35
+_RG_EXPLORE_SEG_BARRIER_RADIUS: int = 1
+_RG_EXPLORE_CL_BARRIER_RADIUS: int = 3
+_EICAB_RG_BARRIER_RADIUS: int = 1
 _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
 _ACA_OVERLAP_MIN_VOXELS_DEFAULT: int = 5
 
@@ -177,11 +184,24 @@ def resolve_venous_rg_intensity_fracs(
     return out
 
 
+def rg_abs_floor_for_label(
+    label_id: int,
+    opt_thresh: float | None,
+) -> float | None:
+    """Intensity floor for RG; MCA/PCA use fraction-only gate (no local threshold floor)."""
+    if int(label_id) in QVTPY_RG_MCA_PCA_EXPLORE_IDS:
+        return None
+    if int(label_id) in QVTPY_ACA_IDS:
+        return None
+    return opt_thresh
+
+
 def rg_intensity_frac_for_label(
     label_id: int,
     *,
     default_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
     explore_frac: float = _RG_INTENSITY_FRAC_EXPLORE,
+    aca_frac: float = _RG_INTENSITY_FRAC_ACA,
     venous_fracs: dict[int, float] | None = None,
 ) -> float:
     """Per-vessel RG intensity factor (lower → more growth)."""
@@ -189,9 +209,26 @@ def rg_intensity_frac_for_label(
     venous = venous_fracs if venous_fracs is not None else QVTPY_RG_INTENSITY_FRAC_VENOUS
     if lid in venous:
         return float(venous[lid])
-    if lid in QVTPY_RG_EXPLORE_MORE_IDS:
+    if lid in QVTPY_ACA_IDS:
+        return float(aca_frac)
+    if lid in QVTPY_RG_MCA_PCA_EXPLORE_IDS:
         return float(explore_frac)
     return float(default_frac)
+
+
+def eicab_dropped_label_barrier(
+    eicab_native: np.ndarray,
+    *,
+    label_ids: frozenset[int] | None = None,
+    radius_vox: int = _EICAB_RG_BARRIER_RADIUS,
+) -> np.ndarray:
+    """Forbidden mask from native eICAB ids omitted at qvtpy relabel (default LSCA/RSCA = 15/16)."""
+    vol = as_backend_array(eicab_native).astype(np.int32, copy=False)
+    ids = EICAB_RG_BARRIER_LABEL_IDS if label_ids is None else label_ids
+    barrier = np.zeros(vol.shape, dtype=bool)
+    for eid in ids:
+        barrier |= np.asarray(vol == int(eid), dtype=bool)
+    return _dilate_bool_mask(barrier, radius=int(radius_vox))
 
 
 def region_growing_enabled_for_label(label_id: int) -> bool:
@@ -277,6 +314,65 @@ def _dilated_other_centerlines_barrier(
     other = np.asarray((clm != 0) & (clm != int(label_id)), dtype=bool)
     other = _dilate_bool_mask(other, radius=radius)
     return other[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
+
+
+def _dilated_other_centerlines_barrier_full(
+    centerlines_mask: np.ndarray,
+    label_id: int,
+    *,
+    radius: int,
+    exclude_label_ids: frozenset[int] | None = None,
+) -> np.ndarray:
+    """Full-volume forbidden mask: dilated centerlines of other vessels."""
+    clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    lid = int(label_id)
+    extra = exclude_label_ids or frozenset()
+    other = np.zeros(clm.shape, dtype=bool)
+    for oid in np.unique(clm):
+        oid_int = int(oid)
+        if oid_int == 0 or oid_int == lid or oid_int in extra:
+            continue
+        other |= clm == oid_int
+    return _dilate_bool_mask(other, radius=int(radius))
+
+
+def explore_region_grow_forbidden(
+    seg: np.ndarray,
+    centerlines_mask: np.ndarray,
+    label_id: int,
+    *,
+    seg_barrier_radius: int = _RG_EXPLORE_SEG_BARRIER_RADIUS,
+    cl_barrier_radius: int = _RG_EXPLORE_CL_BARRIER_RADIUS,
+    exclude_label_ids: frozenset[int] | None = None,
+    eicab_native: np.ndarray | None = None,
+    eicab_barrier_radius: int = _EICAB_RG_BARRIER_RADIUS,
+) -> np.ndarray:
+    """Combined explore-group RG barriers: other seg @ *seg_barrier_radius*, other CL @ *cl_barrier_radius*."""
+    lid = int(label_id)
+    exclude = exclude_label_ids or frozenset()
+    seg_forb = _dilated_other_segmentation_barrier_excluding(
+        seg,
+        lid,
+        exclude_label_ids=exclude,
+        radius=int(seg_barrier_radius),
+    )
+    cl_forb = _dilated_other_centerlines_barrier_full(
+        centerlines_mask,
+        lid,
+        radius=int(cl_barrier_radius),
+        exclude_label_ids=exclude,
+    )
+    merged = merge_forbidden(seg_forb, cl_forb)
+    if eicab_native is not None and lid in QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS:
+        merged = merge_forbidden(
+            merged,
+            eicab_dropped_label_barrier(
+                eicab_native,
+                radius_vox=int(eicab_barrier_radius),
+            ),
+        )
+    assert merged is not None
+    return merged
 
 
 def _dilated_other_segmentation_barrier(
@@ -467,11 +563,13 @@ def build_seg_4dflow_local(
     centerlines_mask: np.ndarray,
     *,
     eicab_qvtpy: np.ndarray | None = None,
+    eicab_native: np.ndarray | None = None,
     crop_padding_bbox: int = 3,
     thr_algorithm: ThrAlgorithm = "lsthr",
     region_growing: bool = True,
     rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
     rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA,
     venous_rg_intensity_fracs: dict[int, float] | None = None,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
@@ -486,6 +584,11 @@ def build_seg_4dflow_local(
         None
         if eicab_qvtpy is None
         else as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+    )
+    eicab_ids = (
+        None
+        if eicab_native is None
+        else as_backend_array(eicab_native).astype(np.int32, copy=False)
     )
     shape = tuple(int(s) for s in clm.shape[:3])
     seg = np.zeros(shape, dtype=np.int32)
@@ -535,8 +638,13 @@ def build_seg_4dflow_local(
             min_component_frac=crop_min_fraction_for_label(lid),
         )
         opt_thresh_by_label[lid] = opt_t
+        paste_cl_rad = (
+            _RG_EXPLORE_CL_BARRIER_RADIUS
+            if lid in QVTPY_RG_EXPLORE_MORE_IDS
+            else cl_rad
+        )
         cl_barrier = _dilated_other_centerlines_barrier(
-            clm, lid, bbox, radius=cl_rad
+            clm, lid, bbox, radius=paste_cl_rad
         )
         n_thr = _paste_crop_mask(seg, crop_mask, lid, bbox, forbidden=cl_barrier)
 
@@ -580,7 +688,7 @@ def build_seg_4dflow_local(
                 eicab,
                 opt_thresh_by_label=opt_thresh_by_label,
                 rg_intensity_frac=rg_intensity_frac,
-                rg_intensity_frac_explore=rg_intensity_frac_explore,
+                rg_intensity_frac_aca=rg_intensity_frac_aca,
                 venous_fracs=venous_rg,
                 rg_barrier_radius=rg_rad,
                 aca_overlap_min_voxels=aca_overlap_min_voxels,
@@ -609,10 +717,23 @@ def build_seg_4dflow_local(
                 lid,
                 default_frac=rg_intensity_frac,
                 explore_frac=rg_intensity_frac_explore,
+                aca_frac=rg_intensity_frac_aca,
                 venous_fracs=venous_rg,
             )
-            floor = opt_thresh_by_label.get(lid)
-            rg_forbidden = _dilated_other_segmentation_barrier(seg, lid, radius=rg_rad)
+            floor = rg_abs_floor_for_label(lid, opt_thresh_by_label.get(lid))
+            if lid in QVTPY_RG_MCA_PCA_EXPLORE_IDS or lid == int(QVTPY_BASILAR):
+                rg_forbidden = explore_region_grow_forbidden(
+                    seg,
+                    clm,
+                    lid,
+                    eicab_native=eicab_ids,
+                )
+            elif lid in QVTPY_ACA_IDS:
+                continue
+            elif lid in QVTPY_RG_EXPLORE_MORE_IDS:
+                rg_forbidden = explore_region_grow_forbidden(seg, clm, lid)
+            else:
+                rg_forbidden = _dilated_other_segmentation_barrier(seg, lid, radius=rg_rad)
 
             _region_grow_vessel(
                 seg,
@@ -712,11 +833,15 @@ __all__ = [
     "_ACA_OVERLAP_MIN_VOXELS_DEFAULT",
     "_DEFAULT_RG_INTENSITY_FRAC",
     "_RG_INTENSITY_FRAC_EXPLORE",
+    "_RG_EXPLORE_SEG_BARRIER_RADIUS",
+    "_RG_EXPLORE_CL_BARRIER_RADIUS",
+    "explore_region_grow_forbidden",
     "bbox_padding_for_label",
     "build_seg_4dflow_local",
     "crop_min_fraction_for_label",
     "region_growing_enabled_for_label",
     "resolve_venous_rg_intensity_fracs",
+    "rg_abs_floor_for_label",
     "rg_intensity_frac_for_label",
     "vessel_stats_to_dict",
     "_bbox_with_padding",

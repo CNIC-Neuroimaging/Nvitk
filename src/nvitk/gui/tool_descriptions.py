@@ -37,7 +37,13 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_biggest_cc": "Keep largest connected component per label.",
     "seg_split_lr_cc": "Split mask into left/right by connected components.",
     "seg_split_lr_midline": "Split mask at a sagittal midline plane.",
-    "seg_region_grow": "Grow a region from seed voxels with optional barriers.",
+    "seg_region_grow": (
+        "Grow from seed voxels. Barriers block other label ids only; "
+        "mask and centerline layers use separate dilation radii."
+    ),
+    "measure_centerline_arc_length": (
+        "Report centerline polyline arc length in voxels and mm (debug)."
+    ),
     "seg_adjust_masks": "Morphological adjust label masks (open/close per label).",
     "seg_totalsegmentator": "Run TotalSegmentator on the active image.",
     "seg_eicab": "Run EICAB segmentation (cluster or local).",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Literal
 
 import numpy as np
@@ -50,6 +51,37 @@ def skeleton_graph(
     return nodes, adj, deg
 
 
+def collapse_junction_clusters(
+    nodes: list[tuple[int, int, int]],
+    deg: dict[tuple[int, int, int], int],
+    *,
+    min_degree: int = 3,
+) -> list[tuple[int, int, int]]:
+    """One representative voxel per 26-connected cluster of skeleton junctions (deg >= *min_degree*)."""
+    md = int(min_degree)
+    junction = [n for n in nodes if deg[n] >= md]
+    if not junction:
+        return []
+    jset = set(junction)
+    visited: set[tuple[int, int, int]] = set()
+    reps: list[tuple[int, int, int]] = []
+    for start in junction:
+        if start in visited:
+            continue
+        cluster: list[tuple[int, int, int]] = []
+        q: deque[tuple[int, int, int]] = deque([start])
+        visited.add(start)
+        while q:
+            n = q.popleft()
+            cluster.append(n)
+            for m in _neighbors26(n):
+                if m in jset and m not in visited:
+                    visited.add(m)
+                    q.append(m)
+        reps.append(max(cluster, key=lambda n: (deg[n], n)))
+    return reps
+
+
 def branch_polylines_from_skeleton(
     coords_xyz: np.ndarray,
     *,
@@ -63,7 +95,9 @@ def branch_polylines_from_skeleton(
         return [poly] if poly.shape[0] >= int(min_points) else []
 
     _nodes, adj, deg = skeleton_graph(coords_xyz)
-    special = [n for n in _nodes if deg[n] != 2]
+    special = [n for n in _nodes if deg[n] == 1]
+    special.extend(collapse_junction_clusters(_nodes, deg, min_degree=3))
+    special = list(dict.fromkeys(special))
     if not special:
         poly = _centerline_longest_path(coords_xyz.astype(np.float32))
         return [poly] if poly.shape[0] >= int(min_points) else []
@@ -103,8 +137,7 @@ def junction_nodes_from_skeleton(
     if coords_xyz.shape[0] == 0:
         return np.zeros((0, 3), dtype=np.float32)
     _nodes, _adj, deg = skeleton_graph(coords_xyz)
-    md = int(min_degree)
-    pts = [n for n in _nodes if deg[n] >= md]
+    pts = collapse_junction_clusters(_nodes, deg, min_degree=int(min_degree))
     if not pts:
         return np.zeros((0, 3), dtype=np.float32)
     return np.asarray(pts, dtype=np.float32)
@@ -206,6 +239,7 @@ def detect_junctions_from_centerline(
 
 
 __all__ = [
+    "collapse_junction_clusters",
     "ExtractionMode",
     "branch_polylines_from_skeleton",
     "detect_junctions_from_centerline",

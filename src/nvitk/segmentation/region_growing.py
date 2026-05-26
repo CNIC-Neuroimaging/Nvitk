@@ -235,10 +235,23 @@ def forbidden_from_label_mask(
     mask: np.ndarray,
     *,
     radius_vox: int = 0,
+    exclude_label_ids: Sequence[int] = (),
 ) -> np.ndarray:
-    """Forbidden mask: any nonzero voxel in *mask* (binary or multilabel)."""
+    """Forbidden mask from *mask* (binary or multilabel), optionally excluding label ids."""
     arr = to_numpy(mask)
-    forb = arr != 0 if arr.dtype != bool else np.asarray(arr, dtype=bool)
+    exclude = {int(x) for x in exclude_label_ids}
+    if arr.dtype == bool or exclude:
+        if exclude and arr.dtype != bool:
+            forb = np.zeros(arr.shape, dtype=bool)
+            for oid in np.unique(arr):
+                lid = int(oid)
+                if lid == 0 or lid in exclude:
+                    continue
+                forb |= arr == lid
+        else:
+            forb = arr != 0 if arr.dtype != bool else np.asarray(arr, dtype=bool)
+    else:
+        forb = arr != 0
     return dilate_bool_barrier(forb, radius_vox=radius_vox)
 
 

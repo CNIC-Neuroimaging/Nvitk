@@ -53,7 +53,10 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "min_size",
         "reference_layer",
         "barrier_layer",
+        "centerline_barrier_layer",
         "barrier_other_labels",
+        "mask_barrier_dilation_vox",
+        "centerline_barrier_dilation_vox",
         "barrier_radius_vox",
         "factor",
         "order",
@@ -116,18 +119,62 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "w_pet",
         "hull_axis",
         "edt_use_spacing",
+        "dicom_root",
+        "skip_existing",
+        "compute_phase_derived",
+        "phase_background_correction",
+        "no_cd_4d_background_correction",
+        "eicab_mask",
     )
     for name in all_names:
         sub = getattr(widget, name, None)
         if sub is not None:
             sub.visible = name in visible
 
+    if tool_id.startswith("qvtpy_stage"):
+        for name in all_names:
+            sub = getattr(widget, name, None)
+            if sub is not None:
+                sub.visible = False
+        for name in ("subject", "skip_existing"):
+            sub = getattr(widget, name, None)
+            if sub is not None:
+                sub.visible = True
+        if tool_id == "qvtpy_stage0_download":
+            for name in ("dicom_root",):
+                sub = getattr(widget, name, None)
+                if sub is not None:
+                    sub.visible = True
+        else:
+            for name in ("nifti_root", "output_root", "dicom_root"):
+                sub = getattr(widget, name, None)
+                if sub is not None:
+                    sub.visible = True
+        if tool_id == "qvtpy_stage0_convert":
+            for name in (
+                "compute_phase_derived",
+                "phase_background_correction",
+                "no_cd_4d_background_correction",
+            ):
+                sub = getattr(widget, name, None)
+                if sub is not None:
+                    sub.visible = True
+        if tool_id == "qvtpy_stage3_centerline":
+            sub = getattr(widget, "eicab_mask", None)
+            if sub is not None:
+                sub.visible = True
+
+
+_LAYER_NONE = "(none)"
+
 
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
     names = [lyr.name for lyr in viewer.layers]
+    optional_choices = [_LAYER_NONE, *names]
     for attr in (
         "reference_layer",
         "barrier_layer",
+        "centerline_barrier_layer",
         "ap_layer",
         "rl_layer",
         "fh_layer",
@@ -137,9 +184,14 @@ def _update_reference_layers(widget: Any, viewer: Any) -> None:
         ref = getattr(widget, attr, None)
         if ref is None:
             continue
-        ref.choices = names
-        if names and ref.value not in names:
-            ref.value = names[0] if attr == "reference_layer" else ""
+        if attr in ("barrier_layer", "centerline_barrier_layer"):
+            ref.choices = optional_choices
+            if ref.value not in optional_choices:
+                ref.value = _LAYER_NONE
+        else:
+            ref.choices = names
+            if names and ref.value not in names:
+                ref.value = names[0] if attr == "reference_layer" else ""
 
 
 def _update_phase_layers(widget: Any, viewer: Any) -> None:
@@ -208,12 +260,30 @@ def build_tool_panel(
             "value": "",
         },
         barrier_layer={
-            "label": "Barrier mask layer (optional)",
+            "label": "Barrier mask layer",
             "widget_type": "ComboBox",
-            "choices": [""],
-            "value": "",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
         },
-        barrier_other_labels={"label": "Barrier: other labels on active layer", "value": False},
+        centerline_barrier_layer={
+            "label": "Barrier centerline layer",
+            "widget_type": "ComboBox",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
+        },
+        barrier_other_labels={"label": "Barrier: other labels on active mask", "value": False},
+        mask_barrier_dilation_vox={
+            "label": "Mask barrier dilation (vox)",
+            "min": 0,
+            "max": 32,
+            "value": 1,
+        },
+        centerline_barrier_dilation_vox={
+            "label": "Centerline barrier dilation (vox)",
+            "min": 0,
+            "max": 32,
+            "value": 3,
+        },
         barrier_radius_vox={"label": "Barrier dilation (vox)", "min": 0, "max": 32, "value": 3},
         factor={"label": "Isotropy factor (0=auto)", "value": 0.0, "min": 0.0},
         order={"label": "Interpolation order", "min": 0, "max": 5, "value": 1},
@@ -238,7 +308,7 @@ def build_tool_panel(
             "choices": [
                 "Custom",
                 "QVTpy default (frac=0.45)",
-                "QVTpy explore (frac=0.35)",
+                "QVTpy explore (frac=0.25)",
                 "QVTpy ICA test (frac=0.45)",
             ],
             "label": "Pipeline preset",
@@ -304,6 +374,18 @@ def build_tool_panel(
         w_pet={"label": "PET cost weight", "value": 5.0, "min": 0.1, "max": 50.0},
         hull_axis={"label": "Hull slice axis", "min": 0, "max": 2, "value": 2},
         edt_use_spacing={"label": "EDT distance in mm", "value": True},
+        dicom_root={"label": "DICOM root", "value": ""},
+        skip_existing={"label": "Skip existing outputs", "value": False},
+        compute_phase_derived={"label": "Compute phase derivatives (stage 0)", "value": True},
+        phase_background_correction={
+            "label": "Phase background correction (stage 0)",
+            "value": True,
+        },
+        no_cd_4d_background_correction={
+            "label": "Disable CD 4D background correction",
+            "value": False,
+        },
+        eicab_mask={"choices": ["cw", "wb"], "label": "eICAB mask (stage 3)", "value": "cw"},
         call_button="Run tool",
     )
     def tool_panel(
@@ -328,7 +410,10 @@ def build_tool_panel(
         min_size: int,
         reference_layer: str,
         barrier_layer: str,
+        centerline_barrier_layer: str,
         barrier_other_labels: bool,
+        mask_barrier_dilation_vox: int,
+        centerline_barrier_dilation_vox: int,
         barrier_radius_vox: int,
         factor: float,
         order: int,
@@ -390,6 +475,12 @@ def build_tool_panel(
         w_pet: float,
         hull_axis: int,
         edt_use_spacing: bool,
+        dicom_root: str,
+        skip_existing: bool,
+        compute_phase_derived: bool,
+        phase_background_correction: bool,
+        no_cd_4d_background_correction: bool,
+        eicab_mask: str,
     ) -> None:
         if not viewer.layers:
             notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)

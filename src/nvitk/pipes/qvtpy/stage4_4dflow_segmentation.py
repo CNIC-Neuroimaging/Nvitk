@@ -46,6 +46,7 @@ from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     _ACOMM_JUNCTION_RADIUS_DEFAULT,
     _DEFAULT_RG_INTENSITY_FRAC,
+    _RG_INTENSITY_FRAC_ACA,
     _RG_INTENSITY_FRAC_EXPLORE,
     build_seg_4dflow_local,
     vessel_stats_to_dict,
@@ -56,6 +57,7 @@ setup(globals())
 log = Logger()
 
 EICAB_IN_4DFLOW_NIFTI = "eicab_in_4dflow.nii.gz"
+EICAB_IN_4DFLOW_EICAB_IDS_NIFTI = "eicab_in_4dflow_eicab_ids.nii.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -91,11 +93,13 @@ def _segmentation_meta(
     nifti_root: Path,
     cl_path: Path,
     eicab_in_4dflow: str | None,
+    eicab_in_4dflow_eicab_ids: str | None,
     crop_padding_bbox: int,
     thr_algorithm: str,
     region_growing: bool,
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
+    rg_intensity_frac_aca: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
     aca_sequential_grow: bool,
@@ -109,13 +113,18 @@ def _segmentation_meta(
         "complex_difference": str(_cd_path(nifti_root, subject)),
         "centerlines_mask": str(cl_path),
         "eicab_in_4dflow": eicab_in_4dflow,
+        "eicab_in_4dflow_eicab_ids": eicab_in_4dflow_eicab_ids,
         "crop_padding_bbox": int(crop_padding_bbox),
         "vessel_extra_padding": int(VESSEL_EXTRA_PADDING),
         "thr_algorithm": thr_algorithm,
         "region_growing": bool(region_growing),
         "rg_intensity_frac": float(rg_intensity_frac),
         "rg_intensity_frac_explore": float(rg_intensity_frac_explore),
-        "rg_intensity_frac_explore_labels": "ACA,MCA,PCA (ids 4-9)",
+        "rg_intensity_frac_aca": float(rg_intensity_frac_aca),
+        "rg_intensity_frac_explore_labels": "MCA,PCA (ids 7-9)",
+        "rg_intensity_frac_aca_labels": "ACA (ids 4-5)",
+        "eicab_rg_barrier_label_ids": [15, 16],
+        "eicab_rg_barrier_vessels": "PCA,basilar",
         "rg_skip_labels": "all venous (ids 31-34)",
         "venous_region_growing": False,
         "comm_segmentation_strategy": "centerline_rg_only",
@@ -147,6 +156,7 @@ def run_subject(
     region_growing: bool = True,
     rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
     rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
     aca_sequential_grow: bool = True,
@@ -165,6 +175,16 @@ def run_subject(
         eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
     else:
         log.warning(f"[{subject}] stage4: missing {eicab_path}; ACA Voronoi uses centerlines only")
+
+    native_eicab_path = s3 / EICAB_IN_4DFLOW_EICAB_IDS_NIFTI
+    eicab_native = None
+    if native_eicab_path.is_file():
+        eicab_native = as_backend_array(imread(native_eicab_path).data).astype(np.int32, copy=False)
+    else:
+        log.warning(
+            f"[{subject}] stage4: missing {native_eicab_path}; "
+            "PCA/basilar RG will omit native eICAB SCA barriers (re-run stage3)"
+        )
 
     out_dir = _stage4_out(output_root, subject)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -189,11 +209,13 @@ def run_subject(
         cd,
         centerlines_mask,
         eicab_qvtpy=eicab_qvtpy,
+        eicab_native=eicab_native,
         crop_padding_bbox=int(crop_padding_bbox),
         thr_algorithm=thr_algorithm,
         region_growing=bool(region_growing),
         rg_intensity_frac=float(rg_intensity_frac),
         rg_intensity_frac_explore=float(rg_intensity_frac_explore),
+        rg_intensity_frac_aca=float(rg_intensity_frac_aca),
         cl_barrier_radius=int(cl_barrier_radius),
         rg_barrier_radius=int(rg_barrier_radius),
         aca_sequential_grow=bool(aca_sequential_grow),
@@ -231,11 +253,15 @@ def run_subject(
                 nifti_root=nifti_root,
                 cl_path=cl_path,
                 eicab_in_4dflow=str(eicab_path) if eicab_path.is_file() else None,
+                eicab_in_4dflow_eicab_ids=(
+                    str(native_eicab_path) if native_eicab_path.is_file() else None
+                ),
                 crop_padding_bbox=crop_padding_bbox,
                 thr_algorithm=thr_algorithm,
                 region_growing=region_growing,
                 rg_intensity_frac=rg_intensity_frac,
                 rg_intensity_frac_explore=rg_intensity_frac_explore,
+                rg_intensity_frac_aca=rg_intensity_frac_aca,
                 cl_barrier_radius=cl_barrier_radius,
                 rg_barrier_radius=rg_barrier_radius,
                 aca_sequential_grow=aca_sequential_grow,
@@ -291,7 +317,14 @@ def _stage4_cli_options(func):  # type: ignore[no-untyped-def]
         type=float,
         default=_RG_INTENSITY_FRAC_EXPLORE,
         show_default=True,
-        help="RG frac for ACA/MCA/PCA (lower = explore more).",
+        help="RG frac for MCA/PCA (lower = explore more).",
+    )(func)
+    func = click.option(
+        "--rg-intensity-frac-aca",
+        type=float,
+        default=_RG_INTENSITY_FRAC_ACA,
+        show_default=True,
+        help="RG frac for ACA sequential grow (lower = explore more).",
     )(func)
     func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
     func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)
@@ -333,6 +366,7 @@ def submit_subject_sge(
     region_growing: bool = True,
     rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
     rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA,
     cl_barrier_radius: int = 2,
     rg_barrier_radius: int = 3,
     aca_sequential_grow: bool = True,
@@ -360,6 +394,8 @@ def submit_subject_sge(
         str(float(rg_intensity_frac)),
         "--rg-intensity-frac-explore",
         str(float(rg_intensity_frac_explore)),
+        "--rg-intensity-frac-aca",
+        str(float(rg_intensity_frac_aca)),
         "--cl-barrier-radius",
         str(int(cl_barrier_radius)),
         "--rg-barrier-radius",
@@ -419,6 +455,7 @@ def main(
     region_growing: bool,
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
+    rg_intensity_frac_aca: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
     aca_sequential_grow: bool,
@@ -436,6 +473,7 @@ def main(
         region_growing=region_growing,
         rg_intensity_frac=rg_intensity_frac,
         rg_intensity_frac_explore=rg_intensity_frac_explore,
+        rg_intensity_frac_aca=rg_intensity_frac_aca,
         cl_barrier_radius=cl_barrier_radius,
         rg_barrier_radius=rg_barrier_radius,
         aca_sequential_grow=aca_sequential_grow,
@@ -444,7 +482,13 @@ def main(
     )
 
 
-__all__ = ["EICAB_IN_4DFLOW_NIFTI", "main", "run_subject", "submit_subject_sge"]
+__all__ = [
+    "EICAB_IN_4DFLOW_EICAB_IDS_NIFTI",
+    "EICAB_IN_4DFLOW_NIFTI",
+    "main",
+    "run_subject",
+    "submit_subject_sge",
+]
 
 
 if __name__ == "__main__":

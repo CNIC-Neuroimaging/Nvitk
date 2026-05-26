@@ -29,6 +29,7 @@ setup(globals())
 from ._phase2volume_bg import (
     fit_polynomial_background_3vector,
     subtract_mean_background_from_temporal,
+    subtract_polynomial_background_4d_scalar,
 )
 
 log = Logger()
@@ -275,6 +276,7 @@ def compute_phase_derivatives(
     background_phase_correction: bool = True,
     bg_poly_order: int = 2,
     bg_static_percentile: float = 25.0,
+    cd_4d_background_correction: bool | None = None,
 ) -> dict[str, Any]:
     """Compute angiography, complex-difference, and velocity magnitude derivatives (QVTplus-aligned).
 
@@ -340,6 +342,17 @@ def compute_phase_derivatives(
             v_mag_capped = v_mag_capped[..., :min_t]
             v_mag = v_mag[..., :min_t]
         cd = _calc_angio(angio_tr, v_mag_capped, venc)
+        apply_cd4_bpc = (
+            bool(cd_4d_background_correction)
+            if cd_4d_background_correction is not None
+            else bool(background_phase_correction)
+        )
+        if apply_cd4_bpc:
+            cd = subtract_polynomial_background_4d_scalar(
+                cd,
+                spatial_order=int(bg_poly_order),
+                static_percentile=float(bg_static_percentile),
+            )
         v_mag_mean = np.mean(v_mag, axis=-1)
         cd_mean = _calc_angio(angio_mean, np.clip(v_mag_mean, 0, venc), venc)
         v_mean_stack = np.stack([np.mean(vx, axis=-1), np.mean(vy, axis=-1), np.mean(vz, axis=-1)], axis=-1)
@@ -397,6 +410,7 @@ def process_patient(
     background_phase_correction: bool = True,
     bg_poly_order: int = 2,
     bg_static_percentile: float = 25.0,
+    cd_4d_background_correction: bool | None = None,
     dicom_search_dir: Path | None = None,
     backend: str = None,
 ) -> list[Path]:
@@ -437,6 +451,7 @@ def process_patient(
             background_phase_correction=background_phase_correction,
             bg_poly_order=bg_poly_order,
             bg_static_percentile=bg_static_percentile,
+            cd_4d_background_correction=cd_4d_background_correction,
         )
         written = _write_outputs(inputs.flow_dir, outputs, dict(angio_image.metadata or {}))
         return written
@@ -452,6 +467,7 @@ def phase2volume(
     background_phase_correction: bool = True,
     bg_poly_order: int = 2,
     bg_static_percentile: float = 25.0,
+    cd_4d_background_correction: bool | None = None,
     dicom_search_dir: Path | None = None,
     backend: str = 'gpu',
 ) -> list[Path]:
@@ -470,6 +486,7 @@ def phase2volume(
                         background_phase_correction=background_phase_correction,
                         bg_poly_order=bg_poly_order,
                         bg_static_percentile=bg_static_percentile,
+                        cd_4d_background_correction=cd_4d_background_correction,
                         dicom_search_dir=dicom_search_dir,
                         backend=backend,
                     )
@@ -485,6 +502,7 @@ def phase2volume(
             background_phase_correction=background_phase_correction,
             bg_poly_order=bg_poly_order,
             bg_static_percentile=bg_static_percentile,
+            cd_4d_background_correction=cd_4d_background_correction,
             dicom_search_dir=dicom_search_dir,
             backend=backend,
         )

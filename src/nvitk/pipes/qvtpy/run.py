@@ -365,7 +365,7 @@ def _emit_stage0_convert(
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
 @click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
-@click.option("--venous-min-branch-points", type=int, default=5, show_default=True)
+@click.option("--venous-min-branch-points", type=int, default=25, show_default=True)
 # --- stage 4 ---
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
@@ -383,9 +383,10 @@ def _emit_stage0_convert(
     help="Stage4: grow labels into unassigned high-CD voxels.",
 )
 @click.option("--rg-intensity-frac", type=float, default=0.45, show_default=True, help="Stage4: RG intensity factor (default vessels).")
-@click.option("--rg-intensity-frac-explore", type=float, default=0.05, show_default=True, help="Stage4: RG frac for ACA/MCA/PCA.")
-@click.option("--cl-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other centerlines (vox).")
-@click.option("--rg-barrier-radius", type=int, default=1, show_default=True, help="Stage4: dilate other seg during RG (vox).")
+@click.option("--rg-intensity-frac-explore", type=float, default=0.25, show_default=True, help="Stage4: RG frac for MCA/PCA.")
+@click.option("--rg-intensity-frac-aca", type=float, default=0.35, show_default=True, help="Stage4: RG frac for ACA.")
+@click.option("--cl-barrier-radius", type=int, default=5, show_default=True, help="Stage4: dilate other centerlines (vox).")
+@click.option("--rg-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other seg during RG (vox).")
 @click.option(
     "--aca-sequential-grow/--no-aca-sequential-grow",
     default=True,
@@ -474,6 +475,7 @@ def main(
     region_growing: bool,
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
+    rg_intensity_frac_aca: float,
     cl_barrier_radius: int,
     rg_barrier_radius: int,
     aca_sequential_grow: bool,
@@ -642,6 +644,7 @@ def main(
                             region_growing=region_growing,
                             rg_intensity_frac=rg_intensity_frac,
                             rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            rg_intensity_frac_aca=rg_intensity_frac_aca,
                             cl_barrier_radius=cl_barrier_radius,
                             rg_barrier_radius=rg_barrier_radius,
                             aca_sequential_grow=aca_sequential_grow,
@@ -663,6 +666,7 @@ def main(
                             region_growing=region_growing,
                             rg_intensity_frac=rg_intensity_frac,
                             rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            rg_intensity_frac_aca=rg_intensity_frac_aca,
                             cl_barrier_radius=cl_barrier_radius,
                             rg_barrier_radius=rg_barrier_radius,
                             aca_sequential_grow=aca_sequential_grow,
@@ -838,6 +842,7 @@ def main(
                         region_growing=region_growing,
                         rg_intensity_frac=rg_intensity_frac,
                         rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        rg_intensity_frac_aca=rg_intensity_frac_aca,
                         cl_barrier_radius=cl_barrier_radius,
                         rg_barrier_radius=rg_barrier_radius,
                         aca_sequential_grow=aca_sequential_grow,
@@ -866,6 +871,7 @@ def main(
                         region_growing=region_growing,
                         rg_intensity_frac=rg_intensity_frac,
                         rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        rg_intensity_frac_aca=rg_intensity_frac_aca,
                         cl_barrier_radius=cl_barrier_radius,
                         rg_barrier_radius=rg_barrier_radius,
                         aca_sequential_grow=aca_sequential_grow,

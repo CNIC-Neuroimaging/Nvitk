@@ -260,6 +260,7 @@ def run_subject(
     phase_background_correction: bool = True,
     phase_bg_poly_order: int = 2,
     phase_bg_static_percentile: float = 25.0,
+    cd_4d_background_correction: bool | None = None,
 ) -> Path:
     """Convert + reorganize for one subject. Returns the subject NIfTI folder."""
     subj_dicom = dicom_root / subject
@@ -283,6 +284,7 @@ def run_subject(
                 background_phase_correction=phase_background_correction,
                 bg_poly_order=phase_bg_poly_order,
                 bg_static_percentile=phase_bg_static_percentile,
+                cd_4d_background_correction=cd_4d_background_correction,
             )
         except Exception as exc:
             log.exception(f"[{subject}] phase2volume failed: {exc}")
@@ -446,6 +448,13 @@ def print_nifti_qc_report(
 @click.option("--phase-bg-poly-order", type=int, default=2, show_default=True)
 @click.option("--phase-bg-static-percentile", type=float, default=25.0, show_default=True)
 @click.option(
+    "--no-cd-4d-background-correction",
+    "no_cd_4d_background_correction",
+    is_flag=True,
+    default=False,
+    help="Disable per-frame polynomial background on ComplexDifference_4D (on by default when phase BPC is on).",
+)
+@click.option(
     "--report",
     is_flag=True,
     default=False,
@@ -466,10 +475,12 @@ def main(
     phase_background_correction: bool,
     phase_bg_poly_order: int,
     phase_bg_static_percentile: float,
+    no_cd_4d_background_correction: bool,
     report: bool,
     report_derived: bool,
 ) -> None:
     Logger()
+    cd_4d_bpc = False if no_cd_4d_background_correction else None
     if subject:
         run_subject(
             subject,
@@ -480,6 +491,7 @@ def main(
             phase_background_correction=phase_background_correction,
             phase_bg_poly_order=phase_bg_poly_order,
             phase_bg_static_percentile=phase_bg_static_percentile,
+            cd_4d_background_correction=cd_4d_bpc,
         )
         report_subjects = [subject]
     else:
@@ -508,6 +520,7 @@ def main(
                     phase_background_correction=phase_background_correction,
                     phase_bg_poly_order=phase_bg_poly_order,
                     phase_bg_static_percentile=phase_bg_static_percentile,
+                    cd_4d_background_correction=cd_4d_bpc,
                 )
             report_subjects = subjects
 

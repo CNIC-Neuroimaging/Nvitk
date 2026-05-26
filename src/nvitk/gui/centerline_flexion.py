@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -100,16 +101,62 @@ def read_junction_coords(viewer: Any) -> np.ndarray:
     )
 
 
-def _nearest_polyline_indices(polyline: np.ndarray, junctions: np.ndarray) -> list[int]:
-    """Map each junction voxel to the closest index on an ordered centerline polyline."""
+def cluster_junction_coords(
+    junctions: np.ndarray,
+    *,
+    cluster_radius_vox: int = 1,
+) -> np.ndarray:
+    """Collapse nearby junction markers to one representative voxel per cluster."""
+    pts = to_numpy(junctions).astype(np.int32)
+    if pts.ndim != 2 or pts.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.int32)
+    rad = max(0, int(cluster_radius_vox))
+    visited = np.zeros(pts.shape[0], dtype=bool)
+    reps: list[np.ndarray] = []
+    for i in range(pts.shape[0]):
+        if visited[i]:
+            continue
+        cluster_idx = [i]
+        visited[i] = True
+        q: deque[int] = deque([i])
+        while q:
+            cur = q.popleft()
+            for j in range(pts.shape[0]):
+                if visited[j]:
+                    continue
+                d = np.abs(pts[j] - pts[cur])
+                if int(d.max()) <= rad:
+                    visited[j] = True
+                    cluster_idx.append(j)
+                    q.append(j)
+        block = pts[cluster_idx]
+        reps.append(block[len(block) // 2])
+    return np.asarray(reps, dtype=np.int32)
+
+
+def _nearest_polyline_indices(
+    polyline: np.ndarray,
+    junctions: np.ndarray,
+    *,
+    min_separation_points: int = 2,
+) -> list[int]:
+    """Map each junction cluster to one cut index on an ordered centerline polyline."""
     if junctions.size == 0 or polyline.shape[0] == 0:
         return []
     p = to_numpy(polyline).astype(np.float64)
+    reps = cluster_junction_coords(junctions, cluster_radius_vox=1)
     cuts: list[int] = []
-    for j in to_numpy(junctions).astype(np.float64):
+    for j in reps.astype(np.float64):
         d2 = np.sum((p - j.reshape(1, 3)) ** 2, axis=1)
         cuts.append(int(np.argmin(d2)))
-    return sorted({int(c) for c in cuts if 0 < int(c) < int(p.shape[0])})
+    sep = max(1, int(min_separation_points))
+    ordered = sorted({int(c) for c in cuts if 0 < int(c) < int(p.shape[0])})
+    merged: list[int] = []
+    for c in ordered:
+        if merged and abs(c - merged[-1]) < sep:
+            continue
+        merged.append(c)
+    return merged
 
 
 def split_label_at_junctions(
@@ -130,11 +177,11 @@ def split_label_at_junctions(
     cut_idx = _nearest_polyline_indices(centerline_polyline, junction_coords)
 
     if not cut_idx:
-        # Fallback: break connectivity at junction voxels directly
+        # Fallback: remove one voxel per junction cluster
         mask = vol == int(source_label_id)
         work = mask.copy()
-        for row in to_numpy(junction_coords):
-            i, j, k = (int(round(row[0])), int(round(row[1])), int(round(row[2])))
+        for row in cluster_junction_coords(junction_coords, cluster_radius_vox=1):
+            i, j, k = int(row[0]), int(row[1]), int(row[2])
             if 0 <= i < work.shape[0] and 0 <= j < work.shape[1] and 0 <= k < work.shape[2]:
                 work[i, j, k] = False
         from scipy import ndimage as ndi

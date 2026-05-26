@@ -22,7 +22,8 @@ from nvitk.pipes.qvtpy.labels import (
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     AcaSequentialGrowInfo,
     VesselSegStats,
-    _dilated_other_segmentation_barrier_excluding,
+    explore_region_grow_forbidden,
+    rg_abs_floor_for_label,
     rg_intensity_frac_for_label,
 )
 from nvitk.segmentation.region_growing import region_grow_binary_mask
@@ -411,7 +412,7 @@ def _region_grow_acas_sequential(
     *,
     opt_thresh_by_label: dict[int, float | None],
     rg_intensity_frac: float,
-    rg_intensity_frac_explore: float,
+    rg_intensity_frac_aca: float,
     venous_fracs: dict[int, float],
     rg_barrier_radius: int,
     aca_overlap_min_voxels: int,
@@ -419,7 +420,6 @@ def _region_grow_acas_sequential(
     stats_by_id: dict[int, VesselSegStats],
 ) -> AcaSequentialGrowInfo:
     """Grow LACA then RACA without blocking on the other ACA; fix close-approach overlap."""
-    rg_rad = max(0, int(rg_barrier_radius))
     min_ov = max(0, int(aca_overlap_min_voxels))
     junc_rad = max(0, int(acomm_junction_radius))
     exclude_raca = frozenset({int(QVTPY_RACA)})
@@ -431,35 +431,41 @@ def _region_grow_acas_sequential(
     frac_l = rg_intensity_frac_for_label(
         QVTPY_LACA,
         default_frac=rg_intensity_frac,
-        explore_frac=rg_intensity_frac_explore,
+        aca_frac=rg_intensity_frac_aca,
         venous_fracs=venous_fracs,
     )
     frac_r = rg_intensity_frac_for_label(
         QVTPY_RACA,
         default_frac=rg_intensity_frac,
-        explore_frac=rg_intensity_frac_explore,
+        aca_frac=rg_intensity_frac_aca,
         venous_fracs=venous_fracs,
     )
 
-    forb_laca = _dilated_other_segmentation_barrier_excluding(
-        seg, QVTPY_LACA, exclude_label_ids=exclude_raca, radius=rg_rad
+    forb_laca = explore_region_grow_forbidden(
+        seg,
+        centerlines_mask,
+        QVTPY_LACA,
+        exclude_label_ids=exclude_raca,
     )
     region_grow_binary_mask(
         laca_mask,
         cd,
         intensity_frac=frac_l,
-        abs_floor=opt_thresh_by_label.get(QVTPY_LACA),
+        abs_floor=rg_abs_floor_for_label(QVTPY_LACA, opt_thresh_by_label.get(QVTPY_LACA)),
         forbidden=forb_laca,
     )
-    forb_raca = _dilated_other_segmentation_barrier_excluding(
-        seg, QVTPY_RACA, exclude_label_ids=exclude_laca, radius=rg_rad
+    forb_raca = explore_region_grow_forbidden(
+        seg,
+        centerlines_mask,
+        QVTPY_RACA,
+        exclude_label_ids=exclude_laca,
     )
     forb_raca = np.asarray(forb_raca, dtype=bool) & ~laca_mask
     region_grow_binary_mask(
         raca_mask,
         cd,
         intensity_frac=frac_r,
-        abs_floor=opt_thresh_by_label.get(QVTPY_RACA),
+        abs_floor=rg_abs_floor_for_label(QVTPY_RACA, opt_thresh_by_label.get(QVTPY_RACA)),
         forbidden=forb_raca,
     )
 

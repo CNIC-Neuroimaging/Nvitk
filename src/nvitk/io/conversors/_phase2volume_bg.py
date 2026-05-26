@@ -94,6 +94,65 @@ def fit_polynomial_background_3vector(
     return bg_x, bg_y, bg_z
 
 
+def fit_polynomial_background_scalar(
+    volume,
+    *,
+    spatial_order: int = 2,
+    static_percentile: float = 25.0,
+    max_voxels: int = 12000,
+):
+    """Return a 3D polynomial background field fitted on low-intensity voxels of *volume*."""
+    if spatial_order not in (2, 3):
+        raise ValueError("spatial_order must be 2 or 3")
+    vol = as_backend_array(volume).astype(np.float64)
+    nx, ny, nz = vol.shape
+    flat = vol.ravel()
+    thr = np.percentile(flat, float(static_percentile))
+    mask = flat < thr
+    idx = np.flatnonzero(mask)
+    if idx.size < (spatial_order + 1) ** 3 + 10:
+        idx = np.flatnonzero(flat <= np.percentile(flat, 50.0))
+
+    if idx.size > max_voxels:
+        with using("cpu"):
+            perm = np.random.default_rng(0).permutation(idx.size)[:max_voxels]
+            idx = idx[perm]
+        idx = as_backend_array(idx)
+
+    ix = np.arange(nx, dtype=np.float64) / max(nx - 1, 1) * 2.0 - 1.0
+    iy = np.arange(ny, dtype=np.float64) / max(ny - 1, 1) * 2.0 - 1.0
+    iz = np.arange(nz, dtype=np.float64) / max(nz - 1, 1) * 2.0 - 1.0
+    zz, yy, xx = np.meshgrid(iz, iy, ix, indexing="ij")
+    coords = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=1)
+    A_full = _poly_design_matrix(coords, spatial_order)
+    A = A_full[idx]
+    b = flat[idx]
+    coef, *_ = np.linalg.lstsq(A, b, rcond=None)
+    bg = (A_full @ coef).reshape(nx, ny, nz)
+    return bg
+
+
+def subtract_polynomial_background_4d_scalar(
+    volume_4d,
+    *,
+    spatial_order: int = 2,
+    static_percentile: float = 25.0,
+):
+    """Per-frame spatial polynomial background subtraction on a 4D scalar stack."""
+    vol = as_backend_array(volume_4d).astype(np.float64)
+    if vol.ndim != 4:
+        raise ValueError("expected (nx, ny, nz, nt) volume")
+    out = vol.copy()
+    for t in range(int(vol.shape[3])):
+        bg = fit_polynomial_background_scalar(
+            vol[..., t],
+            spatial_order=int(spatial_order),
+            static_percentile=float(static_percentile),
+        )
+        out[..., t] = np.maximum(vol[..., t] - bg, 0.0)
+    return out
+
+
 def subtract_mean_background_from_temporal(
     vx,
     vy,

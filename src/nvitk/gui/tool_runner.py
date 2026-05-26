@@ -7,11 +7,12 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from nvitk.core.array import as_backend_array, to_numpy as array_to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import get_global_backend, using, setup
 from nvitk.gui.gui_backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
 from nvitk.gui.log_panel import gui_log, run_subprocess_logged
@@ -141,7 +142,7 @@ def _unique_labels(data: np.ndarray) -> list[int]:
 
 def _label_ids_array(label_ids: list[int]) -> np.ndarray:
     """Backend array of label ids for :func:`np.isin` (CuPy rejects plain lists)."""
-    return array_to_numpy(label_ids)
+    return to_numpy(label_ids)
 
 
 def prepare_layer_data(
@@ -248,10 +249,18 @@ def run_gui_tool(
             f"SUV ({params.get('suv_kind') or 'bw'}) volume ready "
             f"(shape {tuple(suv_out.data.shape)})."
         )
-        return array_to_numpy(suv_out.data)
+        return to_numpy(suv_out.data)
 
     if tool_id == "qvtpy_locs":
         _run_qvtpy_locs(viewer, layer, params)
+        return None
+
+    if tool_id.startswith("qvtpy_stage"):
+        _run_qvtpy_stage(tool_id, params)
+        return None
+
+    if tool_id == "measure_centerline_arc_length":
+        _run_measure_centerline_arc_length(viewer, layer, label_ids, params)
         return None
 
     if tool_id == "measure_loc_hemodynamics":
@@ -261,7 +270,7 @@ def run_gui_tool(
     bk = get_global_backend()
     data = layer_data_for_tool(layer.data)
     if not gpu_enabled():
-        data = as_backend_array(array_to_numpy(data))
+        data = as_backend_array(to_numpy(data))
 
     if tool_id in _MEASURE_NOTIFY:
         per_label_ids: list[int] | None = label_ids
@@ -281,7 +290,7 @@ def run_gui_tool(
 
     proc_data, _tag = prepare_layer_data(data, target_mode=target_mode, label_ids=label_ids)
     if not gpu_enabled():
-        proc_data = as_backend_array(array_to_numpy(proc_data))
+        proc_data = as_backend_array(to_numpy(proc_data))
     img = layer_to_image(layer, proc_data)
 
     if spec.needs_3d and img.ndim != 3:
@@ -703,21 +712,54 @@ def run_gui_tool(
             sx = int(params.get("seed_x") or 0)
         mask[sz, sy, sx] = True
         thresh = float(params.get("threshold") or 0.0)
-        bar_rad = int(params.get("barrier_radius_vox") or 0)
+        mask_rad = int(
+            params.get("mask_barrier_dilation_vox")
+            or params.get("barrier_radius_vox")
+            or 0
+        )
+        cl_rad = int(params.get("centerline_barrier_dilation_vox") or 0)
         forbidden = None
-        bar_name = str(params.get("barrier_layer") or "").strip()
+        exclude = [int(x) for x in seed_ids]
+
+        def _layer_name(raw: str) -> str:
+            name = str(raw or "").strip()
+            return "" if name in ("", "(none)") else name
+
+        bar_name = _layer_name(params.get("barrier_layer"))
         if bar_name:
             bar_layer = _resolve_layer(viewer, bar_name)
             _, bar_img, _ = align_mask_to_reference_layer(
                 bar_layer, intensity_layer, order=0
             )
-            forbidden = forbidden_from_label_mask(bar_img.data, radius_vox=bar_rad)
+            bar_vol = as_backend_array(bar_img.data)
+            if len(np.unique(to_numpy(bar_vol))) > 2:
+                forb = forbidden_other_labels(bar_vol, exclude, radius_vox=mask_rad)
+            else:
+                forb = forbidden_from_label_mask(
+                    bar_vol, radius_vox=mask_rad, exclude_label_ids=exclude
+                )
+            forbidden = merge_forbidden(forbidden, forb)
+
+        cl_bar_name = _layer_name(params.get("centerline_barrier_layer"))
+        if cl_bar_name:
+            cl_layer = _resolve_layer(viewer, cl_bar_name)
+            _, cl_img, _ = align_mask_to_reference_layer(
+                cl_layer, intensity_layer, order=0
+            )
+            cl_vol = as_backend_array(cl_img.data)
+            if len(np.unique(to_numpy(cl_vol))) > 2:
+                cl_forb = forbidden_other_labels(cl_vol, exclude, radius_vox=cl_rad)
+            else:
+                cl_forb = forbidden_from_label_mask(
+                    cl_vol, radius_vox=cl_rad, exclude_label_ids=exclude
+                )
+            forbidden = merge_forbidden(forbidden, cl_forb)
+
         if bool(params.get("barrier_other_labels")):
             _, label_img, _ = align_mask_to_reference_layer(
                 layer, intensity_layer, data, order=0
             )
             label_vol = as_backend_array(label_img.data)
-            exclude = [int(x) for x in seed_ids]
             if not exclude:
                 growing = np.asarray(mask, dtype=bool)
                 for lid in np.unique(to_numpy(label_vol)):
@@ -728,7 +770,7 @@ def run_gui_tool(
                 raise ValueError(
                     "Barrier other labels: select label id(s) or seed a labeled region."
                 )
-            other_forb = forbidden_other_labels(label_vol, exclude, radius_vox=bar_rad)
+            other_forb = forbidden_other_labels(label_vol, exclude, radius_vox=mask_rad)
             forbidden = merge_forbidden(forbidden, other_forb)
         region_grow_binary_mask(
             mask,
@@ -1059,7 +1101,7 @@ def _run_centerline_cut_junctions(
         split_label_at_junctions,
     )
 
-    arr = array_to_numpy(layer.data)
+    arr = to_numpy(layer.data)
     if arr.ndim != 3:
         raise ValueError("Junction cut requires a 3D labels/image layer.")
 
@@ -1100,7 +1142,9 @@ def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
         if not subject or not nifti_root or not output_root:
             raise ValueError("Generate mode requires subject, nifti_root, and output_root.")
         argv = [
-            "qvtpy-stage5-loc",
+            sys.executable,
+            "-m",
+            "nvitk.pipes.qvtpy.stage5_loc_generation",
             "--subject",
             subject,
             "--nifti-root",
@@ -1126,6 +1170,92 @@ def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     ref = layer
     add_locs_layer(viewer, rows, reference_layer=ref)
     notify(f"Loaded {len(rows)} LOCs from {csv_path}")
+
+
+def _run_qvtpy_stage(tool_id: str, params: dict[str, Any]) -> None:
+    from nvitk.gui.qvtpy_stages import build_qvtpy_stage_argv
+
+    argv = build_qvtpy_stage_argv(tool_id, params)
+    notify(f"Running: {' '.join(argv)}")
+    code = run_subprocess_logged(argv)
+    if code == 0:
+        notify(f"Stage finished: {tool_id}")
+    else:
+        notify(f"Stage failed (exit {code}): {tool_id}", error=True)
+
+
+def _run_measure_centerline_arc_length(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    from nvitk.gui.centerline_flexion import centerline_polyline_for_label
+    from nvitk.morphology.polyline_graph import extract_polylines_from_centerline
+    from nvitk.pipes.qvtpy.util.loc_selection import polyline_cumulative_arc_length
+
+    arr = to_numpy(layer.data)
+    if arr.ndim != 3:
+        raise ValueError("Centerline arc length requires a 3D layer.")
+
+    scale = getattr(layer, "scale", None)
+    if scale is not None and len(scale) >= 3:
+        sx, sy, sz = float(scale[2]), float(scale[1]), float(scale[0])
+    else:
+        sx = sy = sz = 1.0
+
+    reskel = bool(params.get("reskeletonize", False))
+    lid_raw = int(params.get("label_id") or 0)
+    targets = [int(x) for x in (label_ids or [])]
+    if lid_raw > 0:
+        targets = [lid_raw]
+    elif not targets:
+        targets = [0]
+
+    lines: list[str] = []
+    if targets == [0]:
+        polys = extract_polylines_from_centerline(
+            arr,
+            mode="junction_split",
+            reskeletonize=reskel,
+            per_connected_component=True,
+        )
+        for i, poly in enumerate(polys):
+            cum = polyline_cumulative_arc_length(poly)
+            vox_len = float(cum[-1]) if cum.size else 0.0
+            seg = np.diff(poly.astype(np.float64), axis=0)
+            mm_len = float(
+                np.sum(np.linalg.norm(seg * np.array([sx, sy, sz], dtype=np.float64), axis=1))
+            ) if seg.shape[0] else 0.0
+            lines.append(f"branch[{i}]: {vox_len:.2f} vox, {mm_len:.2f} mm, {poly.shape[0]} points")
+    else:
+        for lid in targets:
+            try:
+                poly = centerline_polyline_for_label(
+                    layer, lid, reskeletonize=reskel
+                )
+            except ValueError:
+                polys = extract_polylines_from_centerline(
+                    arr,
+                    label_id=lid,
+                    mode="junction_split",
+                    reskeletonize=reskel,
+                )
+                if not polys:
+                    lines.append(f"label {lid}: no polyline")
+                    continue
+                poly = max(polys, key=lambda p: p.shape[0])
+            cum = polyline_cumulative_arc_length(poly)
+            vox_len = float(cum[-1]) if cum.size else 0.0
+            seg = np.diff(poly.astype(np.float64), axis=0)
+            mm_len = float(
+                np.sum(np.linalg.norm(seg * np.array([sx, sy, sz], dtype=np.float64), axis=1))
+            ) if seg.shape[0] else 0.0
+            lines.append(
+                f"label {lid}: {vox_len:.2f} vox, {mm_len:.2f} mm, {poly.shape[0]} points"
+            )
+
+    notify("Centerline arc length:\n" + "\n".join(lines))
 
 
 def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
@@ -1280,8 +1410,8 @@ def _run_viz_pet_hotspots(
     ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, mask_data)
     mode = str(params.get("hotspot") or "top_percent")
     coords, _vals, features = hotspot_points_from_volumes(
-        array_to_numpy(ref_img.data),
-        array_to_numpy(mask_img.data),
+        to_numpy(ref_img.data),
+        to_numpy(mask_img.data),
         label_ids=label_ids,
         hotspot=mode,  # type: ignore[arg-type]
         top_percent=float(params.get("top_percent") or 0.1),
@@ -1316,12 +1446,12 @@ def _run_viz_flowshow_napari(
     if ref_name:
         ref_layer = _resolve_layer(viewer, ref_name)
         _, mask_on_ref, _ = align_mask_to_reference_layer(
-            mask_layer, ref_layer, array_to_numpy(mask_layer.data), order=0
+            mask_layer, ref_layer, to_numpy(mask_layer.data), order=0
         )
-        mask_arr = array_to_numpy(mask_on_ref.data)
+        mask_arr = to_numpy(mask_on_ref.data)
         spatial_ref = ref_layer
     else:
-        mask_arr = array_to_numpy(mask_layer.data)
+        mask_arr = to_numpy(mask_layer.data)
         spatial_ref = ap_layer
 
     positions, vectors = flow_vectors_at_time(
@@ -1362,7 +1492,7 @@ def _run_measure_per_label(
 ) -> None:
     """Run a measure tool once per label id and log each result."""
     if not gpu_enabled():
-        data = as_backend_array(array_to_numpy(data))
+        data = as_backend_array(to_numpy(data))
     lines: list[str] = []
     for lid in label_ids:
         proc, _ = prepare_layer_data(data, target_mode="label", label_ids=[lid])

@@ -22,7 +22,7 @@ from nvitk.gui.totalseg_selector import TotalSegRoiWidget
 
 
 def _compact_magicgui_panel(native: QWidget) -> None:
-    """Group magicgui controls at the top (no vertical stretch between fields)."""
+    """Keep tool controls at minimum height so aux panels can use dock space below."""
     lay = native.layout()
     if lay is None:
         return
@@ -36,7 +36,7 @@ def _compact_magicgui_panel(native: QWidget) -> None:
         w = item.widget()
         if w is not None:
             w.setSizePolicy(fixed)
-    lay.addStretch(1)
+    native.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
 
 def _show_label_picker(category: str, tool_id: str, target_mode: str) -> bool:
@@ -63,9 +63,9 @@ def build_tools_dock(
 ) -> tuple[QWidget, Any]:
     """Return (dock widget, magicgui tool_panel)."""
     container = QWidget()
+    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setAlignment(Qt.AlignTop)
     layout.setSpacing(6)
 
     label_selector = LabelSelectorWidget()
@@ -119,7 +119,6 @@ def build_tools_dock(
         is_ts = tid == "seg_totalsegmentator"
         show_labels = _show_label_picker(cat, tid, tm)
         label_selector.setVisible(show_labels)
-        _update_label_dock_layout(show_labels)
         if show_labels:
             layer = _active_layer()
             if is_ts:
@@ -136,6 +135,8 @@ def build_tools_dock(
         pipeline_form.setVisible(is_pipeline)
         if is_pipeline and spec:
             pipeline_form.set_script(spec.cli_command)
+
+        _update_aux_panel_layout(show_labels)
 
         totalseg_roi.setVisible(is_ts)
         if is_ts:
@@ -183,30 +184,25 @@ def build_tools_dock(
     layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)
-    bottom_spacer = QWidget()
-    bottom_spacer.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-    layout.addWidget(bottom_spacer, 1)
     container.setLayout(layout)
 
     _label_row = layout.indexOf(label_selector)
-    _spacer_row = layout.indexOf(bottom_spacer)
+    _pipeline_row = layout.indexOf(pipeline_form)
 
-    def _update_label_dock_layout(show_labels: bool) -> None:
+    def _reset_dock_stretches(*, expand_row: int | None) -> None:
+        for i in range(layout.count()):
+            layout.setStretch(i, 1 if i == expand_row else 0)
+
+    def _update_aux_panel_layout(show_labels: bool) -> None:
+        is_pipeline = pipeline_form.isVisible()
         label_selector.set_expanded(show_labels)
+        pipeline_form.set_expanded(is_pipeline)
+        expand_row: int | None = None
         if show_labels:
-            bottom_spacer.setVisible(False)
-            layout.setStretch(_spacer_row, 0)
-            layout.setStretch(_label_row, 1)
-            for i in range(layout.count()):
-                if i not in (_label_row, _spacer_row):
-                    layout.setStretch(i, 0)
-        else:
-            bottom_spacer.setVisible(True)
-            layout.setStretch(_label_row, 0)
-            layout.setStretch(_spacer_row, 1)
-            for i in range(layout.count()):
-                if i != _spacer_row:
-                    layout.setStretch(i, 0)
+            expand_row = _label_row
+        elif is_pipeline:
+            expand_row = _pipeline_row
+        _reset_dock_stretches(expand_row=expand_row)
 
     _compact_magicgui_panel(tool_panel.native)
 

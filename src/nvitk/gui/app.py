@@ -65,7 +65,15 @@ def run_app() -> None:
     install_napari_display_warnings()
     import napari
     from magicgui import magicgui
-    from qtpy.QtWidgets import QFileDialog, QLabel, QListWidget, QTabWidget, QVBoxLayout, QWidget
+    from qtpy.QtWidgets import (
+        QFileDialog,
+        QLabel,
+        QListWidget,
+        QSizePolicy,
+        QTabWidget,
+        QVBoxLayout,
+        QWidget,
+    )
 
     viewer = napari.Viewer(title="nvitk")
     _ = viewer.window
@@ -326,8 +334,9 @@ def run_app() -> None:
 
     dock = QWidget()
     layout = QVBoxLayout()
-    layout.setAlignment(Qt.AlignTop)
+    layout.setContentsMargins(4, 4, 4, 4)
     tabs = QTabWidget()
+    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     tabs.addTab(tools_widget, "Tools")
     dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
     tabs.addTab(mesh_panel.native, "Mesh")
@@ -336,9 +345,9 @@ def run_app() -> None:
     tabs.addTab(save_panel.native, "Export")
     tabs.addTab(export_panel.native, "Pipeline")
     tabs.addTab(pipeline_panel.native, "Pipeline log")
-    layout.addWidget(tabs)
-    layout.addStretch(1)
+    layout.addWidget(tabs, stretch=1)
     dock.setLayout(layout)
+    dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     viewer.window.add_dock_widget(dock, area="right", name="nvitk")
     log_dock = build_log_dock_widget()
     viewer.window.add_dock_widget(log_dock, area="bottom", name="nvitk log")

@@ -94,7 +94,7 @@ class LabelSelectorWidget(QGroupBox):
         root.addLayout(schema_row)
         root.addWidget(self._show_full)
         root.addLayout(btn_row)
-        root.addWidget(self._scroll)
+        root.addWidget(self._scroll, stretch=1)
         self.setLayout(root)
 
         self._btn_all.clicked.connect(self.select_all)
@@ -149,7 +149,8 @@ class LabelSelectorWidget(QGroupBox):
             policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
             self.setSizePolicy(policy)
             self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-            self._scroll.setMaximumHeight(180)
+            self._scroll.setMinimumHeight(80)
+            self._scroll.setMaximumHeight(200)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         self._layer_ref = layer

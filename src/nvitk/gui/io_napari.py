@@ -211,7 +211,12 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
         kwargs["axis_labels"] = layer_meta["axis_labels"]
     with suppress_nonorthogonal_slice_warning():
         layer = viewer.add_image(data, **kwargs)
-    configure_viewer_for_layer(viewer, layer, radiological=False)
+    configure_viewer_for_layer(
+        viewer,
+        layer,
+        radiological=False,
+        configure_dims=len(viewer.layers) <= 1,
+    )
     return layer
 
 
@@ -282,13 +287,17 @@ def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
         return
     data = getattr(layer, "data", None)
     ndim = int(getattr(data, "ndim", 0) or 0)
+    configure_dims = len(viewer.layers) <= 1
     if ndim > 3:
-        ensure_4d_scale_only_layer(layer)
-        configure_viewer_for_layer(viewer, layer, radiological=False)
+        configure_viewer_for_layer(
+            viewer, layer, radiological=False, configure_dims=configure_dims
+        )
         return
     if not _is_nvitk_layer(layer):
         return
-    configure_viewer_for_layer(viewer, layer, radiological=False)
+    configure_viewer_for_layer(
+        viewer, layer, radiological=False, configure_dims=configure_dims
+    )
 
 
 def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:

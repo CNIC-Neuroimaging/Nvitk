@@ -19,9 +19,21 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+
+def _cli_long_option(param: click.Parameter) -> str:
+    """Primary ``--long-option`` for argv (uses Click opts, not Python ``param.name``)."""
+    if isinstance(param, click.Option):
+        long_opts = [
+            o for o in param.opts if o.startswith("--") and not o.startswith("---")
+        ]
+        if long_opts:
+            return max(long_opts, key=len)
+    return f"--{param.name.replace('_', '-')}"
 
 
 def _load_click_command(script_name: str) -> click.Command | None:
@@ -77,15 +89,32 @@ class PipelineCliForm(QGroupBox):
         self._hint.setWordWrap(True)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setMaximumHeight(220)
+        self._scroll.setMinimumHeight(160)
+        self._scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._form_host = QWidget()
         self._form = QFormLayout()
         self._form_host.setLayout(self._form)
         self._scroll.setWidget(self._form_host)
         root = QVBoxLayout()
         root.addWidget(self._hint)
-        root.addWidget(self._scroll)
+        root.addWidget(self._scroll, stretch=1)
         self.setLayout(root)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+
+    def set_expanded(self, expanded: bool) -> None:
+        """When True, grow to fill remaining Tools tab height."""
+        if expanded:
+            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            self.setSizePolicy(policy)
+            self._scroll.setSizePolicy(policy)
+            self._scroll.setMinimumHeight(200)
+            self._scroll.setMaximumHeight(16777215)
+        else:
+            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.setSizePolicy(policy)
+            self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self._scroll.setMinimumHeight(80)
+            self._scroll.setMaximumHeight(200)
 
     def set_script(self, script_name: str) -> None:
         if script_name == self._script:
@@ -103,8 +132,8 @@ class PipelineCliForm(QGroupBox):
         for param in cmd.params:
             if getattr(param, "hidden", False):
                 continue
-            name = param.name
-            label = f"{name}{' *' if param.required else ''}"
+            flag = _cli_long_option(param)
+            label = f"{flag.lstrip('-')}{' *' if param.required else ''}"
             if isinstance(param, click.Option) and param.is_flag:
                 w = QCheckBox(param.help or name)
                 default = param.default
@@ -153,13 +182,10 @@ class PipelineCliForm(QGroupBox):
             val = field.value()
             if val is None:
                 continue
-            name = field.param.name
+            flag = _cli_long_option(field.param)
             if isinstance(field.widget, QCheckBox):
                 if val:
-                    argv.append(f"--{name}")
+                    argv.append(flag)
                 continue
-            if isinstance(field.param.type, click.Path):
-                argv.extend([f"--{name}", str(val)])
-            else:
-                argv.extend([f"--{name}", str(val)])
+            argv.extend([flag, str(val)])
         return argv

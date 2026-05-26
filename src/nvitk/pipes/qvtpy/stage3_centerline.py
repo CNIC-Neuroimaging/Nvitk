@@ -190,6 +190,8 @@ def run_subject(
     log.step("clean arterial eICAB labels + island filter")
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
+    native_eicab_path = out_dir / "eicab_in_4dflow_eicab_ids.nii.gz"
+    imsave(native_eicab_path, labels_np, metadata=dict(lab_img.metadata or {}))
     labels_np = relabel_eicab_mask_to_qvtpy(labels_np)
     labels_np = clean_multilabel_islands(
         labels_np,
@@ -241,6 +243,7 @@ def run_subject(
     meta_out = {
         "subject": subject,
         "eicab_in_4dflow": str(warped_labels),
+        "eicab_in_4dflow_eicab_ids": str(native_eicab_path),
         "eicab_mask_requested": eicab_res.requested,
         "eicab_mask_used": eicab_res.used,
         "eicab_mask_fallback": eicab_res.fallback,

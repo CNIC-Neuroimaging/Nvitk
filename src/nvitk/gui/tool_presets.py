@@ -29,9 +29,13 @@ _PRESETS: dict[str, dict[str, ToolPreset]] = {
         ),
         "qvtpy_explore": ToolPreset(
             "qvtpy_explore",
-            "QVTpy explore (frac=0.35)",
-            {"threshold": 0.35},
-            "ACA / MCA / PCA explore fraction in QVTpy.",
+            "QVTpy explore (frac=0.25)",
+            {
+                "threshold": 0.25,
+                "mask_barrier_dilation_vox": 1,
+                "centerline_barrier_dilation_vox": 3,
+            },
+            "ACA / MCA / PCA explore RG in QVTpy (mask barrier @1, CL @3).",
         ),
         "qvtpy_ica": ToolPreset(
             "qvtpy_ica",

@@ -335,20 +335,31 @@ def configure_viewer_for_layer(
     layer: Any,
     *,
     radiological: bool = False,
+    configure_dims: bool | None = None,
 ) -> None:
     """Axial-friendly dims for 3D; preserve 4D+ volumes (time/other axes untouched).
 
     Radiological L/R affine flips are off by default so raw images align with label
     masks opened from the same NIfTI grid (file affine, no extra X mirror).
+
+    Set ``configure_dims=False`` when adding further layers (e.g. tool outputs) so the
+    user's ndisplay, axis order, transpose, and camera are left unchanged.
     """
     if getattr(layer, "data", None) is None or layer.data.ndim < 3:
         return
+    if configure_dims is None:
+        configure_dims = len(viewer.layers) <= 1
     try:
         aff = getattr(layer, "affine", None)
         aff_arr = to_numpy(aff).astype(float) if aff is not None else None
         ndim = int(layer.data.ndim)
         axes_str = _axes_string_from_layer(layer)
         shape = layer.data.shape
+
+        if ndim > 3:
+            ensure_4d_scale_only_layer(layer)
+        if not configure_dims:
+            return
 
         if ndim == 3:
             order = napari_dim_order_3d(aff_arr, ndim)
@@ -366,7 +377,6 @@ def configure_viewer_for_layer(
                 if lr is not None and lr != sup:
                     _apply_voxel_axis_flip(layer, lr)
         else:
-            ensure_4d_scale_only_layer(layer)
             order = napari_dim_order(axes_str, aff_arr, ndim)
             viewer.dims.ndisplay = 3
             viewer.dims.order = order
