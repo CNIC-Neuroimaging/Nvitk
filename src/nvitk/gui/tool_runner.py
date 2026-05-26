@@ -1476,8 +1476,6 @@ def _run_viz_flowshow_napari(
 
     t0 = int(params.get("time_index") or 0)
     sync_dims = bool(params.get("sync_dims", True))
-    animate = bool(params.get("animate", False))
-    fps = float(params.get("fps") or 8.0)
     colormap = str(params.get("cmap") or params.get("colormap") or "turbo")
 
     add_animated_flow_vectors_layer(
@@ -1487,15 +1485,13 @@ def _run_viz_flowshow_napari(
         spatial_reference_layer=spatial_ref,
         initial_time=t0,
         sync_dims=sync_dims,
-        animate=animate,
-        fps=fps,
         colormap=colormap,
     )
     lo, hi = float(np.min(cache.magnitudes)), float(np.max(cache.magnitudes))
     notify(
         f"Added {cache.positions.shape[0]} flow vector(s) × {cache.n_time} phases "
-        f"(speed {lo:.2f}–{hi:.2f} mm/s; arrow length capped, color=speed). "
-        + ("Auto-play on." if animate else "Scrub cardiac phase with the dims slider.")
+        f"(speed {lo:.2f}–{hi:.2f} mm/s; arrow length capped). "
+        "Scrub or play cardiac phase with Napari's dims slider."
     )
 
 

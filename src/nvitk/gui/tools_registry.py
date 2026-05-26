@@ -470,8 +470,6 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 "bool",
                 True,
             ),
-            ParamSpec("animate", "Auto-play cardiac phases", "bool", False),
-            ParamSpec("fps", "Animation FPS", "float", 8.0, min=0.5, max=60.0),
         ),
         needs_reference_layer=True,
         needs_3d=True,

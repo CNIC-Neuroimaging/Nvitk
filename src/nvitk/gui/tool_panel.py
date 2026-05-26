@@ -127,8 +127,6 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "eicab_mask",
         "length_scale",
         "sync_dims",
-        "animate",
-        "fps",
     )
     for name in all_names:
         sub = getattr(widget, name, None)
@@ -376,8 +374,6 @@ def build_tool_panel(
             "max": 50.0,
         },
         sync_dims={"label": "Sync vectors to dims slider", "value": True},
-        animate={"label": "Auto-play cardiac phases", "value": False},
-        fps={"label": "Animation FPS", "value": 8.0, "min": 0.5, "max": 60.0},
         organ_layer={"label": "Organ labels layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
         body_layer={"label": "Body mask layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
         kidney_r_id={"label": "Kidney right label id", "min": 0, "max": 9999, "value": 2},
@@ -481,8 +477,6 @@ def build_tool_panel(
         time_index: int,
         length_scale: float,
         sync_dims: bool,
-        animate: bool,
-        fps: float,
         organ_layer: str,
         body_layer: str,
         kidney_r_id: int,

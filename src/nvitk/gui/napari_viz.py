@@ -14,6 +14,7 @@ from nvitk.viz.pet_hotspots import HotspotMode, _roi_mask, _select_hotspots
 
 HOTSPOTS_LAYER = "SUV hotspots"
 FLOW_VECTORS_LAYER = "Flow velocity"
+DEFAULT_FLOW_EDGE_WIDTH = 0.3
 
 
 @dataclass
@@ -305,7 +306,7 @@ def add_flow_vectors_layer(
     kwargs: dict[str, Any] = {
         "name": name,
         "vector_style": "arrow",
-        "edge_width": 0,
+        "edge_width": DEFAULT_FLOW_EDGE_WIDTH,
         "length": 1.0,
     }
     if features and "speed" in features:
@@ -333,17 +334,6 @@ def _time_index_from_viewer(viewer: Any, phase_layer: Any, n_time: int) -> int:
     if t_ax < len(steps):
         return int(np.clip(steps[t_ax], 0, max(0, n_time - 1)))
     return 0
-
-
-def _set_viewer_time_index(viewer: Any, phase_layer: Any, time_index: int, n_time: int) -> None:
-    """Set cardiac phase on the 4D phase volume dims."""
-    t_ax = _time_axis_index_from_layer(phase_layer)
-    steps = list(int(x) for x in viewer.dims.current_step)
-    if len(steps) < int(phase_layer.data.ndim):
-        steps = steps + [0] * (int(phase_layer.data.ndim) - len(steps))
-    if t_ax < len(steps):
-        steps[t_ax] = int(np.clip(time_index, 0, max(0, n_time - 1)))
-        viewer.dims.current_step = tuple(steps)
 
 
 def _phase_dim_steps(viewer: Any, phase_layer: Any) -> list[int]:
@@ -426,25 +416,19 @@ def _global_speed_limits(cache: FlowVectorCache) -> tuple[float, float]:
 
 @dataclass
 class FlowVectorPlayback:
-    """Dims-synced flow vector layer with optional auto-play."""
+    """Dims-synced flow vector layer (updates with Napari time slider / play bar)."""
 
     cache: FlowVectorCache
     phase_layer: Any
     layer: Any
     dims_callback: Callable[[Any], None]
-    timer: Any | None = None
 
 
 def stop_flow_vector_playback(viewer: Any) -> None:
-    """Stop timers and dims hooks from a prior flow-vector overlay."""
+    """Disconnect dims hooks from a prior flow-vector overlay."""
     state = getattr(viewer, "_nvitk_flow_vector_state", None)
     if state is None:
         return
-    if state.timer is not None:
-        try:
-            state.timer.stop()
-        except Exception:
-            pass
     try:
         viewer.dims.events.current_step.disconnect(state.dims_callback)
     except Exception:
@@ -463,11 +447,6 @@ def _update_flow_vector_layer(
     data, features = flow_vector_frame(cache, time_index)
     layer.data = data
     layer.features = features
-    limits = _global_speed_limits(cache)
-    layer.edge_color = "speed"
-    layer.edge_colormap = "turbo"
-    layer.edge_contrast_limits = limits
-    layer.length = 1.0
     if viewer is not None and phase_layer is not None:
         _repair_time_dim_range(viewer, phase_layer)
 
@@ -481,11 +460,9 @@ def add_animated_flow_vectors_layer(
     name: str = FLOW_VECTORS_LAYER,
     initial_time: int = 0,
     sync_dims: bool = True,
-    animate: bool = False,
-    fps: float = 8.0,
     colormap: str = "turbo",
 ) -> FlowVectorPlayback:
-    """Add flow vectors colored and sized by speed; optionally animate over phases."""
+    """Add flow vectors; sync glyph data to the Napari dims slider / play bar."""
     stop_flow_vector_playback(viewer)
 
     spatial_ref = spatial_reference_layer or phase_layer
@@ -500,7 +477,7 @@ def add_animated_flow_vectors_layer(
     kwargs: dict[str, Any] = {
         "name": name,
         "vector_style": "arrow",
-        "edge_width": 0,
+        "edge_width": DEFAULT_FLOW_EDGE_WIDTH,
         "length": 1.0,
         "features": features,
         "edge_color": "speed",
@@ -525,34 +502,14 @@ def add_animated_flow_vectors_layer(
         t = _time_index_from_viewer(viewer, phase_layer, cache.n_time)
         _update_flow_vector_layer(layer, cache, t, viewer=viewer, phase_layer=phase_layer)
 
-    timer = None
     if sync_dims:
         viewer.dims.events.current_step.connect(_on_dims)
-
-    if animate and cache.n_time > 1:
-        from qtpy.QtCore import QTimer
-
-        phase = {"t": t0}
-
-        def _tick() -> None:
-            phase["t"] = (int(phase["t"]) + 1) % int(cache.n_time)
-            _set_viewer_time_index(viewer, phase_layer, phase["t"], cache.n_time)
-            if not sync_dims:
-                _update_flow_vector_layer(
-                    layer, cache, phase["t"], viewer=viewer, phase_layer=phase_layer
-                )
-
-        timer = QTimer()
-        interval = max(20, int(round(1000.0 / max(float(fps), 0.1))))
-        timer.timeout.connect(_tick)
-        timer.start(interval)
 
     playback = FlowVectorPlayback(
         cache=cache,
         phase_layer=phase_layer,
         layer=layer,
         dims_callback=_on_dims,
-        timer=timer,
     )
     setattr(viewer, "_nvitk_flow_vector_state", playback)
     return playback
