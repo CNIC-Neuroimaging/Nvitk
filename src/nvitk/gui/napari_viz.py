@@ -15,6 +15,8 @@ from nvitk.viz.pet_hotspots import HotspotMode, _roi_mask, _select_hotspots
 HOTSPOTS_LAYER = "SUV hotspots"
 FLOW_VECTORS_LAYER = "Flow velocity"
 DEFAULT_FLOW_EDGE_WIDTH = 0.3
+DEFAULT_HOTSPOT_POINT_SIZE = 6.0
+DEFAULT_HOTSPOT_COLORMAP = "viridis"
 
 
 @dataclass
@@ -75,6 +77,62 @@ def hotspot_points_from_volumes(
     return coords.astype(np.float64), vals, features
 
 
+@dataclass
+class HotspotPointsState:
+    """Tracks SUV hotspot layer and Napari 0.7 style-sync callbacks."""
+
+    layer: Any
+    disconnect_style_sync: Callable[[], None] | None = None
+
+
+def stop_hotspot_points_sync(viewer: Any) -> None:
+    """Disconnect style-sync hooks from a prior SUV hotspot layer."""
+    state = getattr(viewer, "_nvitk_hotspot_points_state", None)
+    if state is None:
+        return
+    if state.disconnect_style_sync is not None:
+        try:
+            state.disconnect_style_sync()
+        except Exception:
+            pass
+    setattr(viewer, "_nvitk_hotspot_points_state", None)
+
+
+def install_points_style_sync(layer: Any) -> Callable[[], None]:
+    """Napari 0.7+: broadcast ``current_size`` / ``current_symbol`` to all points."""
+    def _sync_size(_event: Any = None) -> None:
+        if len(layer.data) == 0:
+            return
+        layer.size = float(layer.current_size)
+
+    def _sync_symbol(_event: Any = None) -> None:
+        if len(layer.data) == 0:
+            return
+        layer.symbol = layer.current_symbol
+
+    def _sync_border(_event: Any = None) -> None:
+        if len(layer.data) == 0:
+            return
+        layer.border_width = float(layer.current_border_width)
+
+    layer.events.current_size.connect(_sync_size)
+    layer.events.current_symbol.connect(_sync_symbol)
+    layer.events.current_border_width.connect(_sync_border)
+
+    def disconnect() -> None:
+        for evt, cb in (
+            (layer.events.current_size, _sync_size),
+            (layer.events.current_symbol, _sync_symbol),
+            (layer.events.current_border_width, _sync_border),
+        ):
+            try:
+                evt.disconnect(cb)
+            except Exception:
+                pass
+
+    return disconnect
+
+
 def add_hotspot_points_layer(
     viewer: Any,
     coords: np.ndarray,
@@ -82,16 +140,20 @@ def add_hotspot_points_layer(
     *,
     reference_layer: Any,
     name: str = HOTSPOTS_LAYER,
+    point_size: float = DEFAULT_HOTSPOT_POINT_SIZE,
+    colormap: str = DEFAULT_HOTSPOT_COLORMAP,
 ) -> Any:
+    stop_hotspot_points_sync(viewer)
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)
-    kwargs: dict[str, Any] = {"size": 6, "symbol": "o"}
+    size = float(point_size)
+    kwargs: dict[str, Any] = {"size": size, "symbol": "o", "border_width_is_relative": False}
     if coords.shape[0] == 0:
         kwargs["face_color"] = "red"
     else:
         kwargs["face_color"] = "suv"
-        kwargs["face_colormap"] = "viridis"
+        kwargs["face_colormap"] = str(colormap or DEFAULT_HOTSPOT_COLORMAP)
         vals = to_numpy(features["suv"]).astype(np.float64)
         lo = float(np.min(vals))
         hi = float(np.max(vals))
@@ -99,7 +161,16 @@ def add_hotspot_points_layer(
     aff = layer_affine(reference_layer)
     if aff is not None:
         kwargs["affine"] = aff
-    return viewer.add_points(coords, name=name, features=features, **kwargs)
+    layer = viewer.add_points(coords, name=name, features=features, **kwargs)
+    layer.current_size = size
+    layer.size = size
+    disconnect = install_points_style_sync(layer)
+    setattr(
+        viewer,
+        "_nvitk_hotspot_points_state",
+        HotspotPointsState(layer=layer, disconnect_style_sync=disconnect),
+    )
+    return layer
 
 
 def _subsample_mask_indices(mask: np.ndarray, max_points: int, label_ids: list[int] | None) -> np.ndarray:

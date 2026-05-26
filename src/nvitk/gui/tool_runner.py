@@ -1420,8 +1420,18 @@ def _run_viz_pet_hotspots(
     if coords.shape[0] == 0:
         notify("No hotspots found in the selected ROI.", error=True)
         return
-    add_hotspot_points_layer(viewer, coords, features, reference_layer=ref_layer)
-    notify(f"Added {coords.shape[0]} SUV hotspot point(s) in Napari.")
+    add_hotspot_points_layer(
+        viewer,
+        coords,
+        features,
+        reference_layer=ref_layer,
+        point_size=float(params.get("point_size") or 6.0),
+        colormap=str(params.get("cmap") or params.get("colormap") or "viridis"),
+    )
+    notify(
+        f"Added {coords.shape[0]} SUV hotspot point(s) in Napari "
+        f"(colormap={params.get('cmap') or 'viridis'}; adjust size/symbol in the layer panel)."
+    )
 
 
 def _run_viz_flowshow_napari(
