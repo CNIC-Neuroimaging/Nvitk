@@ -17,6 +17,7 @@ from nvitk.cluster.sge import (
 )
 from nvitk.cluster import sge_json
 from nvitk.cli import config as cfg
+from nvitk.core.click_backend import sge_backend_env
 
 
 def cluster_paths(
@@ -91,13 +92,14 @@ def submit_tool_job(
 ) -> str | None:
     paths = cluster_paths(data_root=data_root, output_root=output_root)
     paths.ensure_dirs()
+    binds = SingularityBinds()
     spec = StageSpec(
         job_name=job_name,
         python_cmd=python_cmd,
         resources=default_resources(gpu=gpu),
-        binds=SingularityBinds(),
+        binds=binds,
         use_nv=gpu,
-        extra_env={"NVITK_BACKEND": "cupy" if gpu else "numpy"},
+        extra_env=sge_backend_env(binds.src, "cupy" if gpu else "numpy"),
     )
     return submit_stage(spec, paths, emit=emit)
 

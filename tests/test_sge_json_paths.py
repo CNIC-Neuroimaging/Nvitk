@@ -52,4 +52,4 @@ def test_emit_submit_script_uses_cluster_src(tmp_path: Path, monkeypatch):
     )
     text = script.read_text(encoding="utf-8")
     assert "/data3/BIOIT_IMAGE/nvitk/src" in text
-    assert "/home/" not in text or "/data3/BIOIT_IMAGE/nvitk/src" in text
+    assert "PYTHONPATH=/nvitk/src" in text.replace(" ", "") or 'PYTHONPATH="/nvitk/src' in text
