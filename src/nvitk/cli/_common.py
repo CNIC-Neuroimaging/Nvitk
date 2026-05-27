@@ -168,7 +168,25 @@ def run_sge(
         )
         log.info(f"Wrote SGE script: {script}")
         if not direct_submit and not no_remote:
-            run_sge_script_ssh(script)
+            import os
+
+            from nvitk.cluster.remote_transfer import resolve_cluster_host
+
+            host = os.environ.get("NVITK_SGE_SSH_HOST", "").strip()
+            user = os.environ.get("NVITK_SGE_SSH_USER", "").strip()
+            password = os.environ.get("NVITK_SGE_SSH_PASSWORD", "")
+            if host and user and password:
+                run_sge_script_ssh(
+                    resolve_cluster_host(host),
+                    user,
+                    password,
+                    script,
+                )
+            else:
+                log.warning(
+                    "Skipping remote SSH (set NVITK_SGE_SSH_HOST, NVITK_SGE_SSH_USER, "
+                    "NVITK_SGE_SSH_PASSWORD to auto-run on cluster)."
+                )
         return
 
     submit_tool_job(

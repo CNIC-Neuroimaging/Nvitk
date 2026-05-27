@@ -136,6 +136,8 @@ def build_tools_dock(
             task_val = str(task.value if task is not None else "total")
             totalseg_roi.set_task(task_val)
 
+        _sync_sge_button()
+
         tool_panel.label_ids.visible = (not show_labels) and tm == "label"
         if hasattr(tool_panel, "correction_ids"):
             tool_panel.correction_ids.visible = (tid == "siphon_correct") and (not show_labels)
@@ -180,6 +182,34 @@ def build_tools_dock(
     tool_scroll.setMinimumHeight(140)
 
     layout.addWidget(build_gpu_toggle_button(), 0)
+
+    from nvitk.gui.tools_registry import is_sge_capable, sge_block_reason
+    from nvitk.gui.sge_submit import submit_gui_sge
+
+    btn_run_sge = QPushButton("Run SGE")
+    btn_run_sge.setEnabled(False)
+
+    def _sync_sge_button() -> None:
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
+        capable = is_sge_capable(tid)
+        btn_run_sge.setEnabled(capable)
+        reason = sge_block_reason(tid)
+        btn_run_sge.setToolTip(
+            reason
+            or "Export layer, upload via SFTP, and submit Singularity job on the cluster."
+        )
+
+    def _on_run_sge() -> None:
+        submit_gui_sge(
+            viewer,
+            tool_panel,
+            get_label_ids=_get_label_ids,
+            get_totalseg_roi=_get_totalseg_roi,
+            parent=container,
+        )
+
+    btn_run_sge.clicked.connect(_on_run_sge)
+    layout.addWidget(btn_run_sge, 0)
     layout.addWidget(tool_scroll, 0)
     layout.addWidget(cursor_row, 0)
     layout.addWidget(label_selector, 0)

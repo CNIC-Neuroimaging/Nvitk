@@ -761,3 +761,68 @@ def operation_help_text(tool_id: str | None) -> str:
     if spec and spec.description.strip():
         return spec.description.strip()
     return tool_description_text(tool_id, fallback_label=fallback)
+
+
+# GUI SGE capability gate (layer-output tools only; v1 blocklist).
+SGE_BLOCKLIST: frozenset[str] = frozenset({
+    "centerline_detect_junctions",
+    "centerline_cut_junctions",
+    "measure_generate_suv",
+    "measure_centerline_arc_length",
+    "measure_loc_hemodynamics",
+    "volume_mm3",
+    "volume_cc",
+    "mean_intensity",
+    "integrated_intensity",
+    "label_stats",
+    "dice",
+    "jaccard",
+    "voxel_metrics",
+    "surface_metrics",
+    "qvtpy_locs",
+    "viz_flowshow",
+    "viz_pet_hotspots",
+    "seg_totalsegmentator",
+    "seg_eicab",
+    "seg_split_lr_cc",
+    "seg_split_lr_midline",
+    "seg_adjust_masks",
+    "reg_flirt_rigid",
+    "reg_flirt_apply",
+    "siphon_correct",
+    "pet_ureter_seg",
+})
+
+SGE_BLOCKLIST_PREFIXES: tuple[str, ...] = ("qvtpy_stage",)
+
+
+def is_sge_capable(tool_id: str | None) -> bool:
+    """Return True when *tool_id* can run through :func:`run_gui_tool_headless`."""
+    if not tool_id:
+        return False
+    tid = str(tool_id).strip()
+    if tid in SGE_BLOCKLIST:
+        return False
+    if any(tid.startswith(p) for p in SGE_BLOCKLIST_PREFIXES):
+        return False
+    spec = tool_by_id(tid)
+    if spec is None:
+        return False
+    if spec.run_mode != "layer":
+        return False
+    return True
+
+
+def sge_block_reason(tool_id: str | None) -> str:
+    if is_sge_capable(tool_id):
+        return ""
+    if not tool_id:
+        return "No tool selected."
+    spec = tool_by_id(str(tool_id))
+    if spec is None:
+        return f"Unknown tool {tool_id!r}."
+    if spec.run_mode != "layer":
+        return f"{spec.label} uses run mode {spec.run_mode!r} (not supported on SGE yet)."
+    if str(tool_id) in SGE_BLOCKLIST:
+        return f"{spec.label} requires Napari or a dedicated cluster CLI."
+    return f"{spec.label} is not supported for remote SGE in this version."

@@ -111,7 +111,12 @@ def emit_submit_script(
     paths = cluster_paths(data_root=data_root, output_root=output_root)
     paths.ensure_dirs()
     with open(script_path, "w", encoding="utf-8") as fh:
-        write_script_header(fh)
+        write_script_header(
+            fh,
+            log_dir=paths.log_dir,
+            err_dir=paths.err_dir,
+            title="nvitk image_tools CLI",
+        )
         for job_name, python_cmd in stages:
             submit_tool_job(
                 job_name=job_name,

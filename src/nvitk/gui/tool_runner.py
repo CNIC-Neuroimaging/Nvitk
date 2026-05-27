@@ -897,6 +897,71 @@ def run_gui_tool(
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
 
 
+def _image_to_mock_layer(img: Image, name: str) -> Any:
+    """Minimal Napari-like layer for headless :func:`run_gui_tool`."""
+    from types import SimpleNamespace
+
+    data = to_numpy(img.data)
+    meta = dict(img.metadata or {})
+    scale = meta.get("spacing")
+    if scale is not None:
+        scale = tuple(float(x) for x in scale[: max(3, data.ndim)])
+    else:
+        scale = tuple(1.0 for _ in range(min(3, data.ndim)))
+    aff = meta.get("affine")
+    return SimpleNamespace(
+        name=name,
+        data=data,
+        metadata=meta,
+        scale=scale,
+        affine=aff,
+    )
+
+
+def _build_headless_viewer(primary_layer: Any, aux_layers: list[Any]) -> Any:
+    from types import SimpleNamespace
+
+    layers_list = [primary_layer, *aux_layers]
+
+    class _Layers:
+        def __init__(self, items: list[Any]) -> None:
+            self._items = items
+            self.selection = SimpleNamespace(active=items[0] if items else None)
+
+        def __iter__(self):
+            return iter(self._items)
+
+    return SimpleNamespace(layers=_Layers(layers_list))
+
+
+def run_gui_tool_headless(
+    tool_id: str,
+    *,
+    primary: Image,
+    aux: dict[str, Image],
+    target_mode: str,
+    label_ids: list[int] | None,
+    params: dict[str, Any] | None = None,
+) -> np.ndarray | None:
+    """Run a layer tool without Napari (cluster worker entry point)."""
+    primary_name = str(getattr(primary, "name", None) or "input")
+    primary_layer = _image_to_mock_layer(primary, primary_name)
+    aux_layers = [_image_to_mock_layer(img, name) for name, img in (aux or {}).items()]
+    viewer = _build_headless_viewer(primary_layer, aux_layers)
+    with using("numpy"):
+        result = run_gui_tool(
+            tool_id,
+            primary_layer,
+            viewer,
+            target_mode=target_mode,
+            label_ids=label_ids,
+            params=dict(params or {}),
+        )
+    if result is None:
+        return None
+    return to_numpy(result)
+
+
 def _layer_spacing(layer: Any) -> tuple[float, float, float]:
     from nvitk.gui.spatial import layer_spacing
 
