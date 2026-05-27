@@ -11,7 +11,7 @@ from pathlib import Path
 
 from nvitk.cluster import sge_json as _sj
 
-CONTAINER_PATH = Path("/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif")
+CONTAINER_PATH = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
 MODELS_DIR = Path("/references/AI_models/totalsegmentator")
 
 SGE_PROJECT = "MCC_GPU"
@@ -51,8 +51,7 @@ lg, er = _sj.resolve_log_err_dirs(
 SGE_LOG_DIR, SGE_ERR_DIR = lg, er
 if (v := _pipe.get("default_sge_scripts_dir")):
     DEFAULT_SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
-if (v := _pipe.get("default_sge_container_root") or _pipe.get("container_path")):
-    CONTAINER_PATH = Path(os.path.expanduser(str(v)))
+CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe, fallback=CONTAINER_PATH)
 if (v := _pipe.get("default_sge_model_root") or _pipe.get("models_dir")):
     MODELS_DIR = Path(os.path.expanduser(str(v)))
 CLUSTER_HOST_ALIASES = _sj.merge_cluster_host_aliases(

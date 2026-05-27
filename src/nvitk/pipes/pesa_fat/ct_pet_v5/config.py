@@ -202,7 +202,7 @@ SGE_CPU_NGPU: int = 0
 SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/PESAFatV5")
 SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/PESAFatV5")
 
-CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
+CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
 MODELS_PATH: Path = DEFAULT_MODEL_ROOT
 
 _pipe_ct = _sj.merged_pipeline_flat("pesa_fat_ct_pet")
@@ -228,8 +228,7 @@ _lg_ct, _er_ct = _sj.resolve_log_err_dirs(
     fallback_err=SGE_ERR_DIR,
 )
 SGE_LOG_DIR, SGE_ERR_DIR = _lg_ct, _er_ct
-if (v := _pipe_ct.get("default_sge_container_root") or _pipe_ct.get("container_path")):
-    CONTAINER_PATH = Path(os.path.expanduser(str(v)))
+CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe_ct, fallback=CONTAINER_PATH)
 if (v := _pipe_ct.get("default_sge_model_root") or _pipe_ct.get("models_path")):
     MODELS_PATH = Path(os.path.expanduser(str(v)))
 

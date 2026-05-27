@@ -11,6 +11,7 @@
   },
   "paths": {
     "nvitk_src_dir": "/data3/BIOIT_IMAGE/nvitk/src",
+    "nvitk_container": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif",
     "gui_sge_job_root": "/data3/BIOIT_IMAGE/nvitk-sge/gui/",
     "sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
     "sge_log_root": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/",
@@ -36,24 +37,24 @@
       "log_subdir": "totalseg",
       "err_subdir": "totalseg",
       "default_sge_model_root": "/references/AI_models/totalsegmentator",
-      "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif"
     },
     "pesa_fat_ct_pet": {
       "log_subdir": "PESAFatV5-CT-PET",
       "err_subdir": "PESAFatV5-CT-PET",
       "default_sge_model_root": "/references/AI_models/totalsegmentator",
-      "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif"
     },
     "pesa_fat_dixon": {
       "log_subdir": "PESAFatV5-DIXON",
       "err_subdir": "PESAFatV5-DIXON",
       "default_sge_model_root": "/references/AI_models/totalsegmentator",
-      "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif"
+      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif"
     },
     "qvtpy": {
       "log_subdir": "QVTPY",
       "err_subdir": "QVTPY",
-      "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif",
+      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif",
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
       "sge_project": "MCC_GPU",
       "sge_account": "MCC_GPU",
@@ -64,7 +65,7 @@
       "log_subdir": "image_tools",
       "err_subdir": "image_tools",
       "sge_job_prefix": "nvitk-tool",
-      "default_sge_container_root": "/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif",
+      "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif",
       "sge_ngpu": 0,
       "sge_h_vmem": "32G"
     }

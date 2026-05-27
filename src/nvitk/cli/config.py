@@ -9,7 +9,7 @@ from nvitk.cluster import sge_json as _sj
 PIPELINE_ID = "image_tools"
 
 # Host paths (override via sge.json paths / pipelines.image_tools)
-DEFAULT_CONTAINER = Path("/images/BIOIT_IMAGE/nvitk_v2026.04.21.sif")
+DEFAULT_CONTAINER = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
 DEFAULT_MODELS = Path("/references/AI_models")
 
 SGE_PROJECT = "GPU"
@@ -30,8 +30,7 @@ _pipe = _sj.merged_pipeline_flat(PIPELINE_ID)
 
 if v := _paths.get("nvitk_src_dir"):
     NVITK_SRC_DIR = Path(str(v))
-if v := _pipe.get("default_sge_container_root") or _pipe.get("sge_container_root"):
-    DEFAULT_CONTAINER = Path(str(v))
+DEFAULT_CONTAINER = _sj.resolve_nvitk_container(pipe=_pipe, fallback=DEFAULT_CONTAINER)
 if v := _pipe.get("default_sge_model_root") or _pipe.get("sge_model_root"):
     DEFAULT_MODELS = Path(str(v))
 if v := _pipe.get("sge_project"):

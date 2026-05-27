@@ -73,7 +73,7 @@ SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/QVTPY")
 
 # Default location for emitted submission scripts (parallels eicab.config).
 SGE_SCRIPTS_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/")
-CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.04.21.sif")
+CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
 NVITK_SRC_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk/src")
 
 _pipe = _sj.merged_pipeline_flat("qvtpy")
@@ -101,8 +101,7 @@ SGE_LOG_DIR, SGE_ERR_DIR = _lg_qvt, _er_qvt
 
 if (v := _pipe.get("default_sge_scripts_dir")):
     SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
-if (v := _pipe.get("container_path")):
-    CONTAINER_PATH = Path(os.path.expanduser(str(v)))
+CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe, fallback=CONTAINER_PATH)
 
 
 __all__ = [
