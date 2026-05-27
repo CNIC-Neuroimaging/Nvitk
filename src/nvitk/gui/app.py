@@ -87,6 +87,8 @@ def run_app() -> None:
         "outputs": [],
         "meshes": [],
         "xnat_temp_dirs": [],
+        "sge_pending_jobs": [],
+        "sge_last_connection": {},
     }
 
     layer_list = QListWidget()

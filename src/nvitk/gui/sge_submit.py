@@ -12,6 +12,8 @@ from nvitk.cluster.remote_transfer import resolve_cluster_host, upload_staged_jo
 from nvitk.gui.gui_backend import gpu_enabled
 from nvitk.gui.sge_dialog import SgeSubmitDialog
 from nvitk.gui.sge_job import emit_gui_sge_script, stage_job_locally
+from nvitk.gui.sge_models import SgeConnection, SgePendingJob
+from nvitk.gui.sge_poll import register_sge_monitor, store_pending_job
 from nvitk.gui.tool_panel import _collect_params, _update_reference_layers
 from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids
@@ -36,9 +38,44 @@ def _require_paramiko() -> None:
         ) from exc
 
 
+def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
+    if app_state.get("_sge_monitor_registered"):
+        return
+
+    def _on_finished(job_id: str, done: Any) -> None:
+        from nvitk.gui.sge_poll import update_pending_job_status
+
+        payload = done.to_dict() if hasattr(done, "to_dict") else done
+        update_pending_job_status(app_state, job_id, status="done", done_payload=payload)
+        notify(f"SGE job finished: {job_id}. Downloading results …")
+        importer = app_state.get("import_sge_job")
+        if callable(importer):
+            importer(job_id)
+        else:
+            notify(
+                "Use Import SGE results to load outputs into Napari.",
+            )
+
+    def _on_failed(job_id: str, done: Any) -> None:
+        from nvitk.gui.sge_poll import update_pending_job_status
+
+        payload = done.to_dict() if hasattr(done, "to_dict") else done
+        update_pending_job_status(app_state, job_id, status="failed", done_payload=payload)
+        err = getattr(done, "error", None) or "unknown error"
+        notify(
+            f"SGE job failed: {job_id}\n{err}\n"
+            f"Remote data remains on the cluster.",
+            error=True,
+        )
+
+    register_sge_monitor(app_state, on_finished=_on_finished, on_failed=_on_failed)
+    app_state["_sge_monitor_registered"] = True
+
+
 def submit_gui_sge(
     viewer: Any,
     tool_panel: Any,
+    app_state: dict[str, Any],
     *,
     get_label_ids: Callable[[], list[int]] | None = None,
     get_totalseg_roi: Callable[[], list[str] | None] | None = None,
@@ -133,17 +170,34 @@ def submit_gui_sge(
             script_path=remote_script,
         )
         if ok:
+            pending = SgePendingJob(
+                job_id=job.job_id,
+                tool_id=tool_id,
+                remote_job_root=remote_job_root,
+                connection=SgeConnection(
+                    host=conn.host,
+                    user=conn.user,
+                    password=conn.password,
+                ),
+                output_name=job.output_name,
+            )
+            store_pending_job(app_state, pending)
+            _ensure_sge_monitor(app_state)
+            monitor = app_state.get("_sge_monitor")
+            if monitor is not None:
+                monitor.track(pending)
             notify(
                 f"SGE job submitted.\n"
                 f"  job_id: {job.job_id}\n"
                 f"  remote: {remote_job_root}\n"
                 f"  tool: {tool_id}\n"
-                f"Results remain on the cluster (v1)."
+                f"Results will auto-import when output/.done appears (~15s poll)."
             )
         else:
             notify(
                 f"Remote submission may have failed. Check SSH output and run manually:\n"
-                f"  bash {remote_script}",
+                f"  bash {remote_script}\n"
+                f"If the job was uploaded, data remains at: {remote_job_root}",
                 error=True,
             )
         return ok

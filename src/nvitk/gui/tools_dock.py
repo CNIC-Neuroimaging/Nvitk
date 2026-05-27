@@ -184,10 +184,27 @@ def build_tools_dock(
     layout.addWidget(build_gpu_toggle_button(), 0)
 
     from nvitk.gui.tools_registry import is_sge_capable, sge_block_reason
+    from nvitk.gui.sge_retrieve import import_sge_job
     from nvitk.gui.sge_submit import submit_gui_sge
 
     btn_run_sge = QPushButton("Run SGE")
+    btn_import_sge = QPushButton("Import SGE results")
     btn_run_sge.setEnabled(False)
+    btn_import_sge.setToolTip(
+        "Re-import the latest finished job using session credentials "
+        "(or retry if auto-import was skipped)."
+    )
+
+    def _import_sge(job_id: str | None = None) -> bool:
+        return import_sge_job(
+            viewer,
+            app_state,
+            job_id=job_id,
+            parent=container,
+            on_layers_changed=on_layers_changed,
+        )
+
+    app_state["import_sge_job"] = _import_sge
 
     def _sync_sge_button() -> None:
         tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
@@ -203,13 +220,25 @@ def build_tools_dock(
         submit_gui_sge(
             viewer,
             tool_panel,
+            app_state,
             get_label_ids=_get_label_ids,
             get_totalseg_roi=_get_totalseg_roi,
             parent=container,
         )
 
+    def _on_import_sge() -> None:
+        _import_sge()
+
     btn_run_sge.clicked.connect(_on_run_sge)
-    layout.addWidget(btn_run_sge, 0)
+    btn_import_sge.clicked.connect(_on_import_sge)
+
+    sge_row = QWidget()
+    sge_layout = QHBoxLayout()
+    sge_layout.setContentsMargins(0, 0, 0, 0)
+    sge_layout.addWidget(btn_run_sge)
+    sge_layout.addWidget(btn_import_sge)
+    sge_row.setLayout(sge_layout)
+    layout.addWidget(sge_row, 0)
     layout.addWidget(tool_scroll, 0)
     layout.addWidget(cursor_row, 0)
     layout.addWidget(label_selector, 0)
