@@ -18,11 +18,30 @@ def _find_repo_root() -> Path | None:
 
 
 def sge_json_path() -> Path | None:
+    """Locate ``.nvitk/sge.json`` (repo, cwd, ``NVITK_HOME``, or ``NVITK_SGE_JSON``)."""
+    candidates: list[Path] = []
     root = _find_repo_root()
-    if root is None:
-        return None
-    p = root / ".nvitk" / "sge.json"
-    return p if p.is_file() else None
+    if root is not None:
+        candidates.append(root / ".nvitk" / "sge.json")
+    candidates.append(Path.cwd() / ".nvitk" / "sge.json")
+    env_home = os.environ.get("NVITK_HOME", "").strip()
+    if env_home:
+        candidates.append(Path(env_home).expanduser() / ".nvitk" / "sge.json")
+    env_json = os.environ.get("NVITK_SGE_JSON", "").strip()
+    if env_json:
+        candidates.append(Path(env_json).expanduser())
+    seen: set[Path] = set()
+    for p in candidates:
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.is_file():
+            return p
+    return None
 
 
 def load_sge_document() -> dict[str, Any]:
@@ -34,12 +53,34 @@ def load_sge_document() -> dict[str, Any]:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        import warnings
+
+        warnings.warn(f"Could not load {path}: {exc}", stacklevel=2)
         return {}
 
 
 def paths_section() -> dict[str, Any]:
     return dict(load_sge_document().get("paths", {}))
+
+
+def resolve_nvitk_src_dir(*, fallback: Path | None = None) -> Path:
+    """Cluster/host nvitk source tree from ``paths.nvitk_src_dir`` in ``sge.json``."""
+    paths = paths_section()
+    raw = paths.get("nvitk_src_dir")
+    if raw is not None and str(raw).strip():
+        return Path(os.path.expanduser(str(raw).strip()))
+    if fallback is not None:
+        return fallback
+    return Path(__file__).resolve().parents[1]
+
+
+def gui_sge_job_root() -> str:
+    """Default remote staging root for GUI SGE jobs (``paths.gui_sge_job_root``)."""
+    raw = paths_section().get("gui_sge_job_root")
+    if raw is None or not str(raw).strip():
+        return ""
+    return str(raw).strip().rstrip("/")
 
 
 def defaults_section() -> dict[str, Any]:

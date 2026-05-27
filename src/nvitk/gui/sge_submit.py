@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
+from nvitk.cluster import sge_json
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.remote_transfer import resolve_cluster_host, upload_staged_job
 from nvitk.gui.gui_backend import gpu_enabled
@@ -15,6 +16,15 @@ from nvitk.gui.tool_panel import _collect_params, _update_reference_layers
 from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids
 from nvitk.gui.tools_registry import is_sge_capable, sge_block_reason, tool_by_id, tool_id_from_label
+
+
+def _resolve_remote_job_root(user_root: str, job_id: str) -> str:
+    """Use ``{gui_sge_job_root}/{job_id}`` when the dialog still has the configured base."""
+    root = str(user_root or "").strip().rstrip("/")
+    base = sge_json.gui_sge_job_root()
+    if base and root == base.rstrip("/"):
+        return f"{base.rstrip('/')}/{job_id}"
+    return root
 
 
 def _require_paramiko() -> None:
@@ -99,21 +109,22 @@ def submit_gui_sge(
             label_ids=ids or None,
             gpu=gpu_enabled(),
         )
+        remote_job_root = _resolve_remote_job_root(conn.remote_job_root, job.job_id)
         emit_gui_sge_script(
             job,
             local_staging=staging,
-            remote_job_root=conn.remote_job_root,
+            remote_job_root=remote_job_root,
         )
         host = resolve_cluster_host(conn.host)
-        notify(f"Uploading job {job.job_id} to {host}:{conn.remote_job_root} …")
+        notify(f"Uploading job {job.job_id} to {host}:{remote_job_root} …")
         upload_staged_job(
             host=conn.host,
             user=conn.user,
             password=conn.password,
             local_staging=staging,
-            remote_job_root=conn.remote_job_root,
+            remote_job_root=remote_job_root,
         )
-        remote_script = Path(f"{conn.remote_job_root.rstrip('/')}/submit.sh")
+        remote_script = Path(f"{remote_job_root.rstrip('/')}/submit.sh")
         notify(f"Submitting {remote_script} on {host} …")
         ok = run_sge_script_ssh(
             host,
@@ -125,7 +136,7 @@ def submit_gui_sge(
             notify(
                 f"SGE job submitted.\n"
                 f"  job_id: {job.job_id}\n"
-                f"  remote: {conn.remote_job_root}\n"
+                f"  remote: {remote_job_root}\n"
                 f"  tool: {tool_id}\n"
                 f"Results remain on the cluster (v1)."
             )

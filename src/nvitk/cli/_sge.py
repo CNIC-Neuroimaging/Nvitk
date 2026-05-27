@@ -15,6 +15,7 @@ from nvitk.cluster.sge import (
     submit_stage,
     write_script_header,
 )
+from nvitk.cluster import sge_json
 from nvitk.cli import config as cfg
 
 
@@ -24,9 +25,11 @@ def cluster_paths(
     output_root: Path,
     container: Path | None = None,
     models: Path | None = None,
+    nvitk_src: Path | None = None,
 ) -> ClusterPaths:
+    src = nvitk_src or sge_json.resolve_nvitk_src_dir(fallback=cfg.NVITK_SRC_DIR)
     return ClusterPaths(
-        src=cfg.NVITK_SRC_DIR,
+        src=src,
         container=container or cfg.DEFAULT_CONTAINER,
         models=models or cfg.DEFAULT_MODELS,
         data_root=data_root,

@@ -33,6 +33,10 @@ def _default_host() -> str:
     return "samwise"
 
 
+def _default_remote_job_root() -> str:
+    return sge_json.gui_sge_job_root()
+
+
 class SgeSubmitDialog(QDialog):
     """Collect SSH host, credentials, and remote job root."""
 
@@ -51,8 +55,11 @@ class SgeSubmitDialog(QDialog):
         self.user = QLineEdit("")
         self.password = QLineEdit("")
         self.password.setEchoMode(QLineEdit.Password)
-        self.remote_job_root = QLineEdit("")
-        self.remote_job_root.setPlaceholderText("/home/user/nvitk_jobs/my_run")
+        default_root = _default_remote_job_root()
+        self.remote_job_root = QLineEdit(default_root)
+        self.remote_job_root.setPlaceholderText(
+            default_root or "/data3/BIOIT_IMAGE/nvitk-sge/gui/<job_id>"
+        )
 
         form = QFormLayout()
         form.addRow("SSH host", self.host)
@@ -87,8 +94,12 @@ class SgeSubmitDialog(QDialog):
             self.user.setFocus()
             return
         if not s.remote_job_root:
-            self.remote_job_root.setFocus()
-            return
+            fallback = _default_remote_job_root()
+            if fallback:
+                self.remote_job_root.setText(fallback)
+            else:
+                self.remote_job_root.setFocus()
+                return
         super().accept()
 
 
