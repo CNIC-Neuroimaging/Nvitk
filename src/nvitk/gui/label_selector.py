@@ -27,6 +27,9 @@ from nvitk.gui.label_catalog import (
     schema_keys,
 )
 
+# Cap scroll height so the Tools dock does not resize the main window when shown.
+LABEL_SELECTOR_SCROLL_MAX = 260
+
 
 def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
     flat = to_numpy(data).ravel()
@@ -139,18 +142,13 @@ class LabelSelectorWidget(QGroupBox):
         return self._schema_key
 
     def set_expanded(self, expanded: bool) -> None:
-        """When True, grow to fill remaining dock height (label picker visible)."""
-        if expanded:
-            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-            self.setSizePolicy(policy)
-            self._scroll.setSizePolicy(policy)
-            self._scroll.setMaximumHeight(16777215)
-        else:
-            policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-            self.setSizePolicy(policy)
-            self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-            self._scroll.setMinimumHeight(80)
-            self._scroll.setMaximumHeight(200)
+        """Show the label list in a bounded scroll area (never resize the main window)."""
+        cap = LABEL_SELECTOR_SCROLL_MAX if expanded else 200
+        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.setSizePolicy(policy)
+        self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self._scroll.setMinimumHeight(80 if expanded else 0)
+        self._scroll.setMaximumHeight(cap)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         self._layer_ref = layer

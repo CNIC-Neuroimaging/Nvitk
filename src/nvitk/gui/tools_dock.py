@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from nvitk.gui.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.label_catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
@@ -22,20 +22,12 @@ from nvitk.gui.totalseg_selector import TotalSegRoiWidget
 
 
 def _compact_magicgui_panel(native: QWidget) -> None:
-    """Keep tool controls at minimum height so aux panels can use dock space below."""
+    """Keep tool controls compact; the parent scroll area caps total height."""
     lay = native.layout()
     if lay is None:
         return
     lay.setAlignment(Qt.AlignTop)
     lay.setSpacing(6)
-    fixed = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-    for i in range(lay.count()):
-        item = lay.itemAt(i)
-        if item is None:
-            continue
-        w = item.widget()
-        if w is not None:
-            w.setSizePolicy(fixed)
     native.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
 
@@ -63,7 +55,7 @@ def build_tools_dock(
 ) -> tuple[QWidget, Any]:
     """Return (dock widget, magicgui tool_panel)."""
     container = QWidget()
-    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(6)
@@ -178,33 +170,28 @@ def build_tools_dock(
 
     btn_cursor_seed.clicked.connect(_apply_cursor_seed)
 
+    _compact_magicgui_panel(tool_panel.native)
+    tool_scroll = QScrollArea()
+    tool_scroll.setWidgetResizable(True)
+    tool_scroll.setWidget(tool_panel.native)
+    tool_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    tool_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+    tool_scroll.setMaximumHeight(440)
+    tool_scroll.setMinimumHeight(140)
+
     layout.addWidget(build_gpu_toggle_button(), 0)
-    layout.addWidget(tool_panel.native, 0)
+    layout.addWidget(tool_scroll, 0)
     layout.addWidget(cursor_row, 0)
     layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)
+    layout.addStretch(1)
     container.setLayout(layout)
-
-    _label_row = layout.indexOf(label_selector)
-    _pipeline_row = layout.indexOf(pipeline_form)
-
-    def _reset_dock_stretches(*, expand_row: int | None) -> None:
-        for i in range(layout.count()):
-            layout.setStretch(i, 1 if i == expand_row else 0)
 
     def _update_aux_panel_layout(show_labels: bool) -> None:
         is_pipeline = pipeline_form.isVisible()
         label_selector.set_expanded(show_labels)
         pipeline_form.set_expanded(is_pipeline)
-        expand_row: int | None = None
-        if show_labels:
-            expand_row = _label_row
-        elif is_pipeline:
-            expand_row = _pipeline_row
-        _reset_dock_stretches(expand_row=expand_row)
-
-    _compact_magicgui_panel(tool_panel.native)
 
     def _signal_value(event: Any) -> Any:
         return event.value if hasattr(event, "value") else event
