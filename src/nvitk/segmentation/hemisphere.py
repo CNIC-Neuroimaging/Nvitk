@@ -19,21 +19,20 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as _host_np
-
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
 setup(globals())
 
 
-def _centroid_world_x(coords_voxel: _host_np.ndarray, affine: _host_np.ndarray) -> float:
+def _centroid_world_x(coords_voxel: np.ndarray, affine: np.ndarray) -> float:
     """Project a voxel-space centroid onto the world x axis using *affine*."""
-    homog = _host_np.asarray(
-        [coords_voxel[0], coords_voxel[1], coords_voxel[2], 1.0], dtype=float
-    )
-    return float((_host_np.asarray(affine, dtype=float) @ homog)[0])
+    homog = as_backend_array(
+        [coords_voxel[0], coords_voxel[1], coords_voxel[2], 1.0]
+    ).astype(float)
+    
+    return float((as_backend_array(affine).astype(float) @ homog)[0])
 
 
 def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[Image, Image]:
@@ -79,8 +78,8 @@ def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[I
     sizes[0] = 0
 
     # Tiny array (N+1 ints); host hop is cheap and makes Python sort easy.
-    sizes_h = to_numpy(sizes)
-    top_ids = _host_np.argsort(sizes_h)[-n:][::-1]
+    sizes_h = as_backend_array(sizes)
+    top_ids = np.argsort(sizes_h)[-n:][::-1]
     top_ids = [int(i) for i in top_ids if int(sizes_h[int(i)]) > 0]
 
     if len(top_ids) == 0:
@@ -88,11 +87,11 @@ def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[I
         return mask.with_data(empty.copy()), mask.with_data(empty.copy())
 
     # Small (<=n) list of 3-tuples; ok to keep host-side.
-    affine_np = _host_np.asarray(to_numpy(affine), dtype=float)
+    affine_np = as_backend_array(affine).astype(float)
     world_x: list[float | None] = []
     for cc_id in top_ids:
         coords = ndi.center_of_mass(np.ones_like(labeled), labeled, cc_id)
-        coords_np = _host_np.asarray(to_numpy(np.asarray(coords)))
+        coords_np = as_backend_array(coords).astype(np.float64)
         world_x.append(_centroid_world_x(coords_np, affine_np))
 
     if len(top_ids) == 1:
@@ -143,7 +142,7 @@ def split_lr_by_midline(mask: Image, *, plane_x: int | None = None) -> tuple[Ima
         if affine is None:
             plane_x = nx // 2
         else:
-            affine_np = _host_np.asarray(to_numpy(affine), dtype=float)
+            affine_np = as_backend_array(affine).astype(float)
             origin = affine_np[:3, 3]
             step = affine_np[:3, 0]
             if float(step[0]) == 0.0:
@@ -157,7 +156,7 @@ def split_lr_by_midline(mask: Image, *, plane_x: int | None = None) -> tuple[Ima
 
     affine = mask.affine
     flip = False
-    if affine is not None and float(to_numpy(affine)[0, 0]) < 0:
+    if affine is not None and float(as_backend_array(affine).astype(float)[0, 0]) < 0:
         flip = True
 
     lower_half = np.zeros_like(data, dtype=np.uint8)

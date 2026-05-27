@@ -185,13 +185,28 @@ def build_tools_dock(
     layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)
-    layout.addStretch(1)
     container.setLayout(layout)
+
+    _row_label = layout.indexOf(label_selector)
+    _row_pipeline = layout.indexOf(pipeline_form)
+    _row_totalseg = layout.indexOf(totalseg_roi)
 
     def _update_aux_panel_layout(show_labels: bool) -> None:
         is_pipeline = pipeline_form.isVisible()
+        is_ts = totalseg_roi.isVisible()
         label_selector.set_expanded(show_labels)
         pipeline_form.set_expanded(is_pipeline)
+
+        expand_row: int | None = None
+        if show_labels:
+            expand_row = _row_label
+        elif is_pipeline:
+            expand_row = _row_pipeline
+        elif is_ts:
+            expand_row = _row_totalseg
+
+        for i in range(layout.count()):
+            layout.setStretch(i, 1 if i == expand_row else 0)
 
     def _signal_value(event: Any) -> Any:
         return event.value if hasattr(event, "value") else event

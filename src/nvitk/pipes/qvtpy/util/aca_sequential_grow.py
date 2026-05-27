@@ -169,7 +169,7 @@ def _distance_from_junction_voxels(
     ji, jj, jk = (int(junction[0]), int(junction[1]), int(junction[2]))
     junc = np.zeros(shape).astype(bool)
     junc[ji, jj, jk] = True
-    return as_backend_array(to_numpy(ndi.distance_transform_edt(~junc)), dtype=np.float32)
+    return as_backend_array(ndi.distance_transform_edt(~junc))
 
 
 @dataclass(frozen=True)
@@ -225,13 +225,11 @@ def _prune_aca_stray_islands(
     overlap = laca_out & raca_out
     if np.any(overlap):
         d_laca = as_backend_array(
-            to_numpy(ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))),
-            dtype=np.float32,
-        )
+            ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))
+        ).astype(np.float32)
         d_raca = as_backend_array(
-            to_numpy(ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))),
-            dtype=np.float32,
-        )
+            ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))
+        ).astype(np.float32)
         coords = np.argwhere(overlap)
         dl = d_laca[coords[:, 0], coords[:, 1], coords[:, 2]]
         dr = d_raca[coords[:, 0], coords[:, 1], coords[:, 2]]
@@ -304,13 +302,12 @@ def _split_aca_merged_by_junction_plane(
     n_split = 0
 
     d_laca = as_backend_array(
-        to_numpy(ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))),
-        dtype=np.float32,
-    )
+        ndi.distance_transform_edt(~as_backend_array(laca_seeds).astype(bool))
+    ).astype(np.float32)
+    
     d_raca = as_backend_array(
-        to_numpy(ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))),
-        dtype=np.float32,
-    )
+        ndi.distance_transform_edt(~as_backend_array(raca_seeds).astype(bool))
+    ).astype(np.float32)
 
     if np.any(split_zone):
         coords = np.argwhere(split_zone)

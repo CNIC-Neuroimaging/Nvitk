@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-PIPELINE_FORM_SCROLL_MAX = 300
+PIPELINE_FORM_SCROLL_MIN = 120
 
 
 def _cli_long_option(param: click.Parameter) -> str:
@@ -104,13 +104,19 @@ class PipelineCliForm(QGroupBox):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
     def set_expanded(self, expanded: bool) -> None:
-        """Show pipeline options in a bounded scroll area."""
-        cap = PIPELINE_FORM_SCROLL_MAX if expanded else 200
-        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self.setSizePolicy(policy)
-        self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self._scroll.setMinimumHeight(120 if expanded else 0)
-        self._scroll.setMaximumHeight(cap)
+        """Fill remaining dock height when visible."""
+        if expanded:
+            expanding = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            self.setSizePolicy(expanding)
+            self._scroll.setSizePolicy(expanding)
+            self._scroll.setMinimumHeight(120)
+            self._scroll.setMaximumHeight(16777215)
+        else:
+            compact = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.setSizePolicy(compact)
+            self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self._scroll.setMinimumHeight(0)
+            self._scroll.setMaximumHeight(200)
 
     def set_script(self, script_name: str) -> None:
         if script_name == self._script:

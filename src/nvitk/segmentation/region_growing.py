@@ -208,9 +208,8 @@ def dilate_bool_barrier(mask: np.ndarray, *, radius_vox: int = 0) -> np.ndarray:
     if rad <= 0 or not np.any(m):
         return m
     return as_backend_array(
-        as_backend_array(dilate(m.astype(np.uint8), footprint=rad, connectivity=1)),
-        dtype=bool,
-    )
+        dilate(m.astype(np.uint8), footprint=rad, connectivity=1)
+    ).astype(bool)
 
 
 def forbidden_other_labels(

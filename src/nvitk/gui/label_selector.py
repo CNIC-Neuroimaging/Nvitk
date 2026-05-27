@@ -27,8 +27,8 @@ from nvitk.gui.label_catalog import (
     schema_keys,
 )
 
-# Cap scroll height so the Tools dock does not resize the main window when shown.
-LABEL_SELECTOR_SCROLL_MAX = 260
+# Minimum scroll height when the label picker is visible (no upper cap — dock stretch fills).
+LABEL_SELECTOR_SCROLL_MIN = 80
 
 
 def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
@@ -99,6 +99,7 @@ class LabelSelectorWidget(QGroupBox):
         root.addLayout(btn_row)
         root.addWidget(self._scroll, stretch=1)
         self.setLayout(root)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         self._btn_all.clicked.connect(self.select_all)
         self._btn_none.clicked.connect(self.select_none)
@@ -142,13 +143,19 @@ class LabelSelectorWidget(QGroupBox):
         return self._schema_key
 
     def set_expanded(self, expanded: bool) -> None:
-        """Show the label list in a bounded scroll area (never resize the main window)."""
-        cap = LABEL_SELECTOR_SCROLL_MAX if expanded else 200
-        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self.setSizePolicy(policy)
-        self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self._scroll.setMinimumHeight(80 if expanded else 0)
-        self._scroll.setMaximumHeight(cap)
+        """Fill remaining dock height when visible; collapse when hidden."""
+        if expanded:
+            expanding = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            self.setSizePolicy(expanding)
+            self._scroll.setSizePolicy(expanding)
+            self._scroll.setMinimumHeight(LABEL_SELECTOR_SCROLL_MIN)
+            self._scroll.setMaximumHeight(16777215)
+        else:
+            compact = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.setSizePolicy(compact)
+            self._scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self._scroll.setMinimumHeight(0)
+            self._scroll.setMaximumHeight(200)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
         self._layer_ref = layer
