@@ -67,7 +67,9 @@ def convex_hull_3d(mask: Image | Any) -> Image | Any:
     pts = np.stack([g.ravel() for g in grid], axis=1).astype(np.float64)
     A = hull.equations[:, :-1]
     b = hull.equations[:, -1]
-    inside = np.all(A @ pts.T + b <= 1e-6, axis=0)
+    # hull.equations rows are (normal_vector, offset) for halfspaces: A x + b <= 0.
+    # Broadcast b across all points: (n_planes, 1) + (n_planes, n_points).
+    inside = np.all((A @ pts.T) + b[:, None] <= 1e-6, axis=0)
     sub = inside.reshape(grid[0].shape).astype(np.uint8)
     out = np.zeros(m.shape, dtype=np.uint8)
     out[mins[0] : maxs[0], mins[1] : maxs[1], mins[2] : maxs[2]] = sub

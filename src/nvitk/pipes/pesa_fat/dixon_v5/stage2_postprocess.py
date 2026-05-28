@@ -23,7 +23,7 @@ from nvitk.core.click_backend import backend_click_option, set_default_backend
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io import imread, imsave
-from nvitk.morphology import erode
+from nvitk.morphology import dilate, erode
 from nvitk.pipes.pesa_fat.common.paths import (
     BatchLayout,
     layout,
@@ -36,6 +36,7 @@ from nvitk.pipes.pesa_fat.dixon_v5.labels import (
     THORAX_LABELS,
 )
 from nvitk.segmentation.labels import biggest_cc, get_label
+from nvitk.segmentation.hull_edt import convex_hull_3d
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.types import Image
 
@@ -100,6 +101,36 @@ def _kidney_erode(kidney: Image, iterations: int = _KIDNEY_ERODE) -> Image:
     return kidney
 
 
+def _kidney_remove_pelvis(kidney: Image, *, dilate_iters: int = 1) -> Image:
+    """Remove estimated renal pelvis from a kidney mask.
+
+    Steps:
+    - Compute 3D convex hull of the kidney
+    - Pelvis candidate = hull \\ kidney
+    - Keep biggest CC of candidate (if any)
+    - Dilate candidate one iter
+    - Subtract candidate from kidney
+    """
+    binary = (kidney.data > 0).astype(np.uint8)
+    if not bool(binary.any()):
+        return kidney.with_data(binary)
+
+    hull = convex_hull_3d(kidney.with_data(binary))
+    hull_arr = hull.data if hasattr(hull, "data") else hull
+    pelvis = ((np.asarray(hull_arr) > 0) & (binary == 0)).astype(np.uint8)
+    if not bool(pelvis.any()):
+        return kidney.with_data(binary)
+
+    pelvis_img = biggest_cc(kidney.with_data(pelvis))
+    if not bool(pelvis_img.data.any()):
+        return kidney.with_data(binary)
+
+    pelvis_dil = dilate(pelvis_img, footprint=1, iterations=int(dilate_iters), mode="binary")
+    pelvis_mask = (pelvis_dil.data > 0)
+    cleaned = (binary > 0) & (~pelvis_mask)
+    return kidney.with_data(cleaned.astype(np.uint8))
+
+
 # ---------------------------------------------------------------------------
 # Per-region mask builders
 # ---------------------------------------------------------------------------
@@ -130,6 +161,8 @@ def build_thorax_mask(
     pancreas = _biggest_cc_or_empty(thorax_total_mr, get_class_id("pancreas", "total_mr"))
     kidney_l = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_left", "total_mr"))
     kidney_r = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_right", "total_mr"))
+    kidney_l = _kidney_remove_pelvis(kidney_l, dilate_iters=1)
+    kidney_r = _kidney_remove_pelvis(kidney_r, dilate_iters=1)
 
     out[liver.data > 0] = THORAX_LABELS["LIVER"]
     out[pancreas.data > 0] = THORAX_LABELS["PANCREAS"]

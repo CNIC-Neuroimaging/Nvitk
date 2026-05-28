@@ -25,6 +25,9 @@ from nvitk.pipes.pesa_fat.common.paths import (
     layout,
     parse_subjects,
 )
+from nvitk.pipes.pesa_fat.common import stage0_convert
+from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
+from nvitk.pipes.pesa_fat.common.db_publish import publish_stage3_excel
 from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
@@ -44,6 +47,7 @@ from nvitk.pipes.pesa_fat.dixon_v5 import (
 
 
 log = Logger()
+INPUT_SOURCE_CHOICES = ("paths", "xnat")
 
 
 STAGE_MODULES: dict[str, str] = {
@@ -114,6 +118,16 @@ def _run_local(
                     stage2_postprocess.run_subject(subj, lay, backend=backend)
                 elif s == "stage3":
                     stage3_measure.run_subject(subj, lay, backend=backend)
+                    try:
+                        per_subject = lay.results_dir / cfg.STAGE3_DIR / "per_subject" / f"{subj}.xlsx"
+                        if per_subject.exists():
+                            publish_stage3_excel(
+                                subject_uid=subj,
+                                excel_path=per_subject,
+                                pipeline="dixon-v5",
+                            )
+                    except Exception as exc:
+                        log.warning("DB publish skipped for %s (dixon-v5): %s", subj, exc)
             except Exception as exc:
                 import traceback
                 traceback.print_exc()
@@ -306,7 +320,13 @@ def _run_sge(
 
 @click.command("nvitk-pesa-fat-dixon")
 @backend_click_option()
-@click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
+@click.option(
+    "--batch",
+    required=False,
+    default="auto",
+    show_default=True,
+    help="Batch name (e.g. '202602_Week4'). Use 'auto' with --input-source xnat.",
+)
 @click.option(
     "--subjects",
     default=None,
@@ -338,6 +358,24 @@ def _run_sge(
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--input-source",
+    type=click.Choice(INPUT_SOURCE_CHOICES, case_sensitive=False),
+    default="paths",
+    show_default=True,
+    help="Input source: on-disk DICOM paths, or download DICOMs from XNAT + run stage0 before stage1-3 (local only).",
+)
+@click.option(
+    "--xnat-config",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Optional XNAT config file (JSON/YAML). If omitted, uses NVITK_XNAT_CONFIG or ~/.config/nvitk/xnat.*",
+)
+@click.option(
+    "--xnat-session",
+    default=None,
+    help="XNAT experiment label to use (if omitted, uses newest experiment that matches required sequences).",
+)
 @click.option(
     "--device",
     type=click.Choice(["gpu", "cpu"]),
@@ -379,6 +417,9 @@ def main(
     dicom_root: Path | None,
     nifti_root: Path | None,
     results_root: Path | None,
+    input_source: str,
+    xnat_config: Path | None,
+    xnat_session: str | None,
     backend: str,
     device: str,
     model_dir: Path | None,
@@ -401,6 +442,8 @@ def main(
         except Exception as exc:
             log.warning(f'debugpy not available. Continuing without debugpy: \nException: {exc}')
 
+    if str(batch).strip().lower() == "auto" and str(input_source).strip().lower() != "xnat":
+        raise click.ClickException("--batch auto is only valid with --input-source xnat.")
     lay = layout(
         batch,
         dicom_root=dicom_root or DEFAULT_DICOM_ROOT,
@@ -430,6 +473,26 @@ def main(
         )
 
     if submit == "local":
+        src = str(input_source).strip().lower()
+        if src == "xnat":
+            req = XnatPesaFatRequest(project_id="IA_PET_V5", session_label=xnat_session)
+            dl = download_pesa_fat_dicoms_from_xnat(
+                batch=batch,
+                subjects=subj_list,
+                dicom_root=lay.dicom_root,
+                xnat_config_path=xnat_config,
+                request=req,
+            )
+            for subj in subj_list:
+                subj_batch, _ = dl.get(subj, (lay.batch, {}))
+                lay_s = lay if subj_batch == lay.batch else layout(
+                    subj_batch,
+                    dicom_root=dicom_root or DEFAULT_DICOM_ROOT,
+                    nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
+                    results_root=results_root or DEFAULT_RESULTS_ROOT,
+                    model_root=model_dir or cfg.MODELS_PATH,
+                )
+                stage0_convert.run_subject(subj, lay_s, compress=True)
         _run_local(
             lay,
             subj_list,

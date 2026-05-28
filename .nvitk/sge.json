@@ -1,13 +1,11 @@
 {
   "schema": "nvitk.sge.v1",
   "defaults": {
-    "sge_project": "GPU",
-    "sge_account": "Prod",
+    "sge_project": "MCC_GPU",
+    "sge_account": "MCC_GPU",
     "sge_queue": null,
     "sge_ngpu": 1,
-    "sge_h_vmem": "50G",
-    "sge_cpu_ngpu": 0,
-    "sge_cpu_h_vmem": "32G"
+    "sge_h_vmem": "25G"
   },
   "paths": {
     "nvitk_src_dir": "/data3/BIOIT_IMAGE/nvitk/src",
@@ -22,7 +20,7 @@
   },
   "pipelines": {
     "eicab": {
-      "sge_project": "Prod",
+      "sge_project": "MCC_GPU",
       "sge_ngpu": 0,
       "sge_h_vmem": "25G",
       "log_subdir": "eICAB",
@@ -67,7 +65,7 @@
       "sge_job_prefix": "nvitk-tool",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif",
       "sge_ngpu": 0,
-      "sge_h_vmem": "32G"
+      "sge_h_vmem": "25G"
     }
   }
 }

@@ -137,6 +137,10 @@ gui = [
   "magicgui>=0.8.0",
   "superqt>=0.6.0",
 ]
+qcportal = [
+  "fastapi>=0.110.0",
+  "uvicorn>=0.27.0",
+]
 # Standalone pipeline CLIs (same distribution; extras document install intent).
 "nvitk-bbtpy" = []
 "nvitk-gpetpy" = []
@@ -181,6 +185,7 @@ pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-gui = "nvitk.gui.main:main"
 nvitk-gui-sge-worker = "nvitk.gui.sge_worker:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
+nvitk-sync-sge-container = "nvitk.registry.cli_sync_sge:main"
 
 # -----------------------------------------------------------------------------
 # Pipeline scripts
@@ -191,6 +196,7 @@ nvitk-pesa-fat-ctpet = "nvitk.pipes.pesa_fat.ct_pet_v5.run:main"
 nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
 nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
 nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
+nvitk-pesa-fat-qc-portal = "nvitk.pipes.pesa_fat.qc.portal_cli:main"
 
 # ────────────────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"

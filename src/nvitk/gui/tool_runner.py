@@ -201,7 +201,8 @@ def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
         "connectivity": int(params.get("connectivity") or 2),
     }
     if op == "fill_holes":
-        kw = {"connectivity": kw["connectivity"]}
+        # nvitk.morphology.binary.fill_holes does not accept connectivity; it uses scipy.ndimage.binary_fill_holes.
+        kw = {"mode": kw["mode"]}
     with run_with_backend():
         return coerce_tool_output(fn(img, **kw))
 
@@ -1035,14 +1036,34 @@ def _run_mask_binary_op(
 ) -> np.ndarray:
     from nvitk.segmentation import mask_ops
 
+    def _as_bool_mask_from_labels(data: np.ndarray, ids: list[int] | None) -> np.ndarray:
+        arr = np.asarray(data)
+        if not ids:
+            return (arr != 0)
+        return np.isin(arr, _label_ids_array(ids))
+
     ref_name = str(params.get("reference_layer") or "").strip()
     if not ref_name:
         raise ValueError("Select the second mask layer (reference).")
     ref_layer = _resolve_layer(viewer, ref_name)
-    a_img = layer_to_image(layer, mask_data)
-    _, b_img, resampled = align_mask_to_reference_layer(
-        ref_layer, layer, mask_data, order=0
-    )
+
+    # A: active layer selected labels (preferred) or fallback to precomputed mask_data.
+    a_ids = list(params.get("selected_label_ids") or [])
+    if not a_ids:
+        # label_ids already passed in by run_gui_tool via prepare_layer_data; keep compatibility.
+        a_img = layer_to_image(layer, mask_data)
+    else:
+        a_img_raw = layer_to_image(layer)
+        a_mask = _as_bool_mask_from_labels(to_numpy(a_img_raw.data), a_ids).astype(np.uint8)
+        a_img = a_img_raw.with_data(as_backend_array(a_mask))
+
+    # B: reference layer label selection (optional).
+    ref_ids = parse_label_ids(str(params.get("reference_label_ids") or ""))
+    b_mask_data = to_numpy(layer_to_image(ref_layer).data)
+    b_mask = _as_bool_mask_from_labels(b_mask_data, ref_ids).astype(np.uint8)
+    b_img_raw = layer_to_image(ref_layer).with_data(as_backend_array(b_mask))
+
+    _, b_img, resampled = align_mask_to_reference_layer(ref_layer, layer, b_img_raw.data, order=0)
     if resampled:
         gui_log(f"Resampled '{ref_layer.name}' onto active layer grid.")
     fn = getattr(mask_ops, op_name)

@@ -34,6 +34,7 @@ def _compact_magicgui_panel(native: QWidget) -> None:
 def _show_label_picker(category: str, tool_id: str, target_mode: str) -> bool:
     if target_mode in ("label", "all_labels") and category in (
         "Morphology",
+        "Segmentation",
         "Centerline",
         "Measure",
         "Filters",
@@ -244,11 +245,13 @@ def build_tools_dock(
     layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)
+    layout.addStretch(1)
     container.setLayout(layout)
 
     _row_label = layout.indexOf(label_selector)
     _row_pipeline = layout.indexOf(pipeline_form)
     _row_totalseg = layout.indexOf(totalseg_roi)
+    _row_spacer = layout.count() - 1
 
     def _update_aux_panel_layout(show_labels: bool) -> None:
         is_pipeline = pipeline_form.isVisible()
@@ -266,6 +269,13 @@ def build_tools_dock(
 
         for i in range(layout.count()):
             layout.setStretch(i, 1 if i == expand_row else 0)
+
+        # If no aux panel is expanded/visible, anchor everything to the top by
+        # putting the extra space into the final spacer stretch.
+        if expand_row is None:
+            layout.setStretch(_row_spacer, 1)
+        else:
+            layout.setStretch(_row_spacer, 0)
 
     def _signal_value(event: Any) -> Any:
         return event.value if hasattr(event, "value") else event

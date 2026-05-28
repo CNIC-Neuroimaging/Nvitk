@@ -61,101 +61,146 @@ section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
 """
 
 
-def build_report_html(
-    *,
-    batch: str,
-    subject: str,
-    ctpet_masks_html: list[str],
-    dixon_masks_html: list[str],
-    ctpet_measurements_table: str,
-    dixon_measurements_table: str,
-    ctpet_hotspot_gallery: str,
-    dixon_hotspot_gallery: str,
-    ctpet_axial_html: list[str],
-    dixon_axial_html: list[str],
-) -> str:
-    def join_iframes(parts: list[str]) -> str:
-        if not parts:
-            return "<p><em>No mask overview exports.</em></p>"
-        out: list[str] = []
-        for p in parts:
-            if p.lstrip().startswith("<iframe") or "<iframe" in p:
-                out.append(p)
-            else:
-                out.append(f'<div class="iframe-wrap"><iframe title="masks" src="{p}"></iframe></div>')
-        return "\n".join(out)
+def _join_iframes(parts: list[str]) -> str:
+    if not parts:
+        return "<p><em>No mask overview exports.</em></p>"
+    out: list[str] = []
+    for p in parts:
+        if p.lstrip().startswith("<iframe") or "<iframe" in p:
+            out.append(p)
+        else:
+            out.append(f'<div class="iframe-wrap"><iframe title="masks" src="{p}"></iframe></div>')
+    return "\n".join(out)
 
-    ct_masks = join_iframes(ctpet_masks_html)
-    dx_masks = join_iframes(dixon_masks_html)
-    ct_ax = "\n".join(ctpet_axial_html) if ctpet_axial_html else "<p><em>No slice QC.</em></p>"
-    dx_ax = "\n".join(dixon_axial_html) if dixon_axial_html else "<p><em>No slice QC.</em></p>"
 
+def _base_doc(*, title: str, batch: str, subject: str, body_html: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>PESA-Fat QC — {batch} — {subject}</title>
+<title>{title} — {batch} — {subject}</title>
 <style>{_CSS}</style>
 </head>
 <body>
 <div class="container">
   <div class="header">
-    <h1>PESA-Fat QC report</h1>
+    <h1>{title}</h1>
     <div class="meta">Batch <code>{batch}</code> · Subject <code>{subject}</code></div>
   </div>
-
-<section id="ctpet">
-<h2>CT-PET pipeline</h2>
-
-<div class="card">
-  <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
-  <div class="card-b">{ct_masks}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
-  <div class="card-b">{ctpet_hotspot_gallery}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Slice views</h3><div class="muted">axial (current)</div></div>
-  <div class="card-b">{ct_ax}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
-  <div class="card-b"><div class="table-wrap">{ctpet_measurements_table}</div></div>
-</div>
-</section>
-
-<section id="dixon">
-<h2>Dixon pipeline</h2>
-
-<div class="card">
-  <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
-  <div class="card-b">{dx_masks}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
-  <div class="card-b">{dixon_hotspot_gallery}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Slice views</h3><div class="muted">axial (current)</div></div>
-  <div class="card-b">{dx_ax}</div>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
-  <div class="card-b"><div class="table-wrap">{dixon_measurements_table}</div></div>
-</div>
-</section>
-
+{body_html}
 </div>
 </body>
 </html>
 """
 
 
-__all__ = ["build_report_html"]
+def build_ctpet_report_html(
+    *,
+    batch: str,
+    subject: str,
+    review_widget: str = "",
+    masks_html: list[str],
+    hotspot_gallery: str,
+    axial_html: list[str],
+    measurements_table: str,
+) -> str:
+    masks = _join_iframes(masks_html)
+    ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
+    body = f"""
+{review_widget}
+<section id="ctpet">
+<h2>CT-PET pipeline</h2>
+
+<div class="card">
+  <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{masks}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{hotspot_gallery}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Slice views</h3><div class="muted">axial</div></div>
+  <div class="card-b">{ax}</div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
+  <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
+</div>
+</section>
+"""
+    return _base_doc(title="PESA-Fat QC (CT-PET)", batch=batch, subject=subject, body_html=body)
+
+
+def build_dixon_report_html(
+    *,
+    batch: str,
+    subject: str,
+    review_widget: str = "",
+    masks_html: list[str],
+    hotspot_gallery: str,
+    axial_html: list[str],
+    measurements_table: str,
+    extra_sections_html: str = "",
+) -> str:
+    masks = _join_iframes(masks_html)
+    ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
+    hotspot_block = (
+        f'''
+<div class="card">
+  <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
+  <div class="card-b">{hotspot_gallery}</div>
+</div>
+'''.strip()
+        if str(hotspot_gallery).strip()
+        else ""
+    )
+
+    body = f"""
+{review_widget}
+<section id=\"dixon\">
+<h2>Dixon pipeline</h2>
+
+<div class=\"card\">
+  <div class=\"card-h\"><h3>Segmentation overview (3D)</h3><div class=\"muted\">interactive</div></div>
+  <div class=\"card-b\">{masks}</div>
+</div>
+
+{hotspot_block}
+
+<div class=\"card\">
+  <div class=\"card-h\"><h3>Slice views</h3><div class=\"muted\">axial</div></div>
+  <div class=\"card-b\">{ax}</div>
+</div>
+
+{extra_sections_html}
+
+<div class=\"card\">
+  <div class=\"card-h\"><h3>Measurements</h3><div class=\"muted\">out-of-range highlighted</div></div>
+  <div class=\"card-b\"><div class=\"table-wrap\">{measurements_table}</div></div>
+</div>
+</section>
+"""
+    return _base_doc(title="PESA-Fat QC (Dixon)", batch=batch, subject=subject, body_html=body)
+
+
+def build_report_html(**kwargs: object) -> str:
+    """Backward-compatible wrapper for older callers (single combined page)."""
+    return build_ctpet_report_html(  # type: ignore[arg-type]
+        batch=str(kwargs.get("batch", "")),
+        subject=str(kwargs.get("subject", "")),
+        masks_html=list(kwargs.get("ctpet_masks_html") or []),
+        hotspot_gallery=str(kwargs.get("ctpet_hotspot_gallery") or ""),
+        axial_html=list(kwargs.get("ctpet_axial_html") or []),
+        measurements_table=str(kwargs.get("ctpet_measurements_table") or ""),
+    )
+
+
+__all__ = [
+    "build_report_html",
+    "build_ctpet_report_html",
+    "build_dixon_report_html",
+]

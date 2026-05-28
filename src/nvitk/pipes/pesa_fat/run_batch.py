@@ -73,6 +73,7 @@ from nvitk.cluster.sge import (
     write_script_header,
 )
 from nvitk.pipes.pesa_fat.common import stage0_convert
+from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5 import run as ctpet_run
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dixon_cfg
@@ -85,6 +86,7 @@ log = Logger()
 
 PIPELINE_CHOICES = ("ct-pet-v5", "dixon-v5")
 STAGE_CHOICES = ("stage0", "stage1", "stage2", "stage3", "stage4")
+INPUT_SOURCE_CHOICES = ("paths", "xnat")
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +552,13 @@ def _run_sge(
 
 @click.command("nvitk-pesa-fat")
 @backend_click_option()
-@click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
+@click.option(
+    "--batch",
+    required=False,
+    default="auto",
+    show_default=True,
+    help="Batch name (e.g. '202602_Week4'). Use 'auto' with --input-source xnat.",
+)
 @click.option(
     "--subjects",
     default=None,
@@ -577,6 +585,24 @@ def _run_sge(
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--input-source",
+    type=click.Choice(INPUT_SOURCE_CHOICES, case_sensitive=False),
+    default="paths",
+    show_default=True,
+    help="Input source: on-disk DICOM paths, or download DICOMs from XNAT before stage0 (local only).",
+)
+@click.option(
+    "--xnat-config",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Optional XNAT config file (JSON/YAML). If omitted, uses NVITK_XNAT_CONFIG or ~/.config/nvitk/xnat.*",
+)
+@click.option(
+    "--xnat-session",
+    default=None,
+    help="XNAT experiment label to use (if omitted, uses newest experiment that matches required sequences).",
+)
 @click.option(
     "--device",
     type=click.Choice(["gpu", "cpu"]),
@@ -644,6 +670,9 @@ def main(
     dicom_root: Path | None,
     nifti_root: Path | None,
     results_root: Path | None,
+    input_source: str,
+    xnat_config: Path | None,
+    xnat_session: str | None,
     backend: str,
     device: str,
     model_dir: Path | None,
@@ -703,6 +732,52 @@ def main(
         results_root=results_root or DEFAULT_RESULTS_ROOT,
         model_root=model_dir,
     )
+
+    src = str(input_source).strip().lower()
+    if src == "xnat":
+        if submit != "local":
+            raise click.ClickException("--input-source xnat is supported only for --submit local.")
+        req = XnatPesaFatRequest(project_id="IA_PET_V5", session_label=xnat_session)
+        # Resolve subject list without relying on batch folders (which may not exist yet).
+        subj_list = parse_subjects(subjects) or []
+        if not subj_list:
+            raise click.ClickException("--input-source xnat requires --subjects.")
+        dl = download_pesa_fat_dicoms_from_xnat(
+            batch=batch,
+            subjects=subj_list,
+            dicom_root=(dicom_root or DEFAULT_DICOM_ROOT),
+            xnat_config_path=xnat_config,
+            request=req,
+        )
+        # Run each derived batch separately to preserve the existing folder-based layout.
+        by_batch: dict[str, list[str]] = {}
+        for s, (b, _paths) in dl.items():
+            by_batch.setdefault(b, []).append(s)
+        for b in sorted(by_batch.keys()):
+            lay_b = layout(
+                b,
+                dicom_root=dicom_root or DEFAULT_DICOM_ROOT,
+                nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
+                results_root=results_root or DEFAULT_RESULTS_ROOT,
+                model_root=model_dir,
+            )
+            _run_local(
+                lay_b,
+                sorted(by_batch[b]),
+                pipelines_sel,
+                stages_sel,
+                backend=backend,
+                device=device,
+                model_dir=model_dir,
+                overwrite=overwrite,
+                regions=region_tuple,
+                compress=not no_compress,
+                exclude_ureter=exclude_ureter,
+            )
+        return
+
+    if str(batch).strip().lower() == "auto":
+        raise click.ClickException("--batch auto is only valid with --input-source xnat.")
 
     source = "dicom" if "stage0" in stages_sel else "nifti"
     subj_list = _subject_list(lay, subjects, source)

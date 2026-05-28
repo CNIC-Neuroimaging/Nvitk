@@ -84,7 +84,7 @@ def gui_sge_job_root() -> str:
 
 
 def resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: Path | None = None) -> Path:
-    """Cluster nvitk Singularity image from ``paths.nvitk_container`` or pipeline override."""
+    """Cluster nvitk Singularity image from pipeline override, ``sge.json``, or container registry."""
     if pipe:
         for key in ("default_sge_container_root", "sge_container_root", "container_path"):
             raw = pipe.get(key)
@@ -94,6 +94,14 @@ def resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: 
     raw = paths.get("nvitk_container")
     if raw is not None and str(raw).strip():
         return Path(os.path.expanduser(str(raw).strip()))
+    try:
+        from nvitk.registry.containers import resolve_nvitk_cluster_sif
+
+        reg_path = resolve_nvitk_cluster_sif()
+        if reg_path is not None:
+            return reg_path
+    except Exception:
+        pass
     if fallback is not None:
         return fallback
     return Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
