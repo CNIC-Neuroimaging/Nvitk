@@ -32,6 +32,7 @@ _MEASURE_NOTIFY = frozenset({
     "masked_stats",
     "integrated_intensity",
     "suv_stats",
+    "intensity_similarity",
     "dice",
     "jaccard",
     "voxel_metrics",
@@ -487,6 +488,10 @@ def run_gui_tool(
         notify(_format_metrics({k: round(float(v), 6) for k, v in stats.items()}))
         return None
 
+    if tool_id == "intensity_similarity":
+        _run_intensity_similarity(viewer, layer, params)
+        return None
+
     if tool_id == "dice":
         from nvitk.measure.voxel import dice
 
@@ -532,7 +537,13 @@ def run_gui_tool(
         return None
 
     if tool_id == "viz_pet_hotspots":
-        _run_viz_pet_hotspots(viewer, layer, proc_data, params, label_ids=label_ids)
+        # prepare_layer_data already merged selected labels into a binary ROI mask.
+        hotspot_label_ids = (
+            None if target_mode in ("label", "binary_mask", "all_labels") else label_ids
+        )
+        _run_viz_pet_hotspots(
+            viewer, layer, proc_data, params, label_ids=hotspot_label_ids
+        )
         return None
 
     if tool_id == "centerline_cut_junctions":
@@ -1610,6 +1621,45 @@ def _run_measure_mask_hemodynamics(
                 f"Label {lid} [{res.method}]: PI={res.pi:.3f} RI={res.ri:.3f}{extra} — {res.note}"
             )
     notify("\n".join(lines))
+
+
+def _run_intensity_similarity(
+    viewer: Any,
+    primary_layer: Any,
+    params: dict[str, Any],
+) -> None:
+    """Pearson/Spearman/MAE/RMSE between two intensity images (no mask)."""
+    from nvitk.measure.compare import correlation_stats
+
+    ref_name = str(params.get("reference_layer") or "").strip()
+    if not ref_name:
+        raise ValueError("Select a second image layer to compare.")
+    other_layer = _resolve_layer(viewer, ref_name)
+    if other_layer is primary_layer:
+        raise ValueError("Choose a different layer than the active image.")
+
+    primary_img, other_on_primary, resampled = align_mask_to_reference_layer(
+        other_layer, primary_layer, order=1
+    )
+    if resampled:
+        gui_log(
+            f"Resampled '{getattr(other_layer, 'name', 'layer')}' onto "
+            f"'{getattr(primary_layer, 'name', 'layer')}' for comparison."
+        )
+
+    a = layer_data_for_tool(primary_img.data)
+    b = layer_data_for_tool(other_on_primary.data)
+    if tuple(a.shape) != tuple(b.shape):
+        raise ValueError(
+            f"Shape mismatch after alignment: {tuple(a.shape)} vs {tuple(b.shape)}"
+        )
+
+    stats = correlation_stats(a, b)
+    display = {
+        k: round(float(v), 6) if k != "n_samples" else int(v)
+        for k, v in stats.items()
+    }
+    notify(_format_metrics(display))
 
 
 def _run_viz_pet_hotspots(

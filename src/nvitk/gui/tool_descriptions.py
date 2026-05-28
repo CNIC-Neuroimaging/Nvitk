@@ -65,6 +65,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "masked_stats": "Intensity statistics inside a mask.",
     "integrated_intensity": "Sum of intensities inside a mask.",
     "suv_stats": "SUV statistics for a region on a PET layer.",
+    "intensity_similarity": (
+        "Compare intensities of the active image vs another layer (Pearson, Spearman, MAE, RMSE)."
+    ),
     "measure_generate_suv": "Build an SUV image from PET metadata.",
     "dice": "Dice overlap vs a reference mask.",
     "jaccard": "Jaccard index vs a reference mask.",

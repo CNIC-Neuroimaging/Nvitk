@@ -78,8 +78,8 @@ _ORGANS_TO_REMOVE = (
     "liver",
 )
 _ORGANS_TO_DILATE = {
-    "kidney_right": 5,
-    "kidney_left": 5,
+    "kidney_right": 7,
+    "kidney_left": 7,
     "liver": 1,
     "urinary_bladder": 7,
 }

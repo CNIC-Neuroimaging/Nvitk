@@ -1,4 +1,4 @@
-"""PESA-Fat QC portal (static HTML + Excel-backed review endpoint)."""
+"""PESA-Fat QC portal (static HTML + Excel and DB-backed review endpoint)."""
 
 from __future__ import annotations
 
@@ -37,12 +37,15 @@ def review_widget_html(
         "structures": structs,
     }
     return f"""
-<div class="card">
-  <div class="card-h"><h3>Review</h3><div class="muted">writes to reviews.xlsx via portal</div></div>
+<div class="card" id="{dom}_card">
+  <div class="card-h"><h3>Review</h3><div class="muted">saves to reviews.xlsx · Sync Database pushes to NVITK DB</div></div>
   <div class="card-b">
     <div class="muted" style="margin-bottom:8px">Reviewer: <input id="{dom}_reviewer" placeholder="name" style="padding:6px 8px;border-radius:8px;border:1px solid rgba(229,229,229,0.18);background:rgba(0,0,0,0.25);color:#fff;"/></div>
     <div id="{dom}_rows" style="display:grid;grid-template-columns:1fr;gap:8px"></div>
     <div class="muted" id="{dom}_status" style="margin-top:10px"></div>
+    <div style="margin-top:12px">
+      <button type="button" id="{dom}_sync" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(252,163,17,0.5);background:rgba(252,163,17,0.15);color:#fca311;font-weight:600;cursor:pointer">Sync Database</button>
+    </div>
   </div>
 </div>
 <script>
@@ -51,16 +54,20 @@ def review_widget_html(
   const rows = document.getElementById('{dom}_rows');
   const reviewerInput = document.getElementById('{dom}_reviewer');
   const status = document.getElementById('{dom}_status');
+  const syncBtn = document.getElementById('{dom}_sync');
+  const commentInputs = {{}};
+  const inputStyle = 'padding:6px 8px;border-radius:8px;border:1px solid rgba(229,229,229,0.18);background:rgba(0,0,0,0.25);color:#fff;width:100%;box-sizing:border-box;font:inherit;';
   const mk = (tag, attrs={{}}, txt=null) => {{
     const el = document.createElement(tag);
     for (const [k,v] of Object.entries(attrs)) el.setAttribute(k, v);
     if (txt !== null) el.textContent = txt;
     return el;
   }};
-  const post = async (structure, qc_status) => {{
+  const postReview = async (structure, qc_status) => {{
     const reviewer = reviewerInput.value || '';
+    const comment = (commentInputs[structure] && commentInputs[structure].value) || '';
     status.textContent = `Saving ${{structure}} → ${{qc_status}}...`;
-    const body = {{...ctx, structure, qc_status, reviewer, comment: ''}};
+    const body = {{...ctx, structure, qc_status, reviewer, comment}};
     const res = await fetch('/review', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -68,22 +75,77 @@ def review_widget_html(
     }});
     if (!res.ok) {{
       status.textContent = `Save failed (${{res.status}}).`;
-      return;
+      return false;
     }}
-    status.textContent = `Saved ${{structure}} → ${{qc_status}}.`;
+    status.textContent = `Saved ${{structure}} → ${{qc_status}}` + (comment ? ' (with comment)' : '') + ' (Excel).';
+    return true;
   }};
-  const addRow = (structure) => {{
-    const wrap = mk('div', {{style:'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid rgba(229,229,229,0.18);border-radius:10px;background:rgba(0,0,0,0.20)'}});
-    wrap.appendChild(mk('div', {{}}, structure));
-    const sel = mk('select', {{style:'padding:6px 8px;border-radius:8px;border:1px solid rgba(229,229,229,0.18);background:rgba(0,0,0,0.25);color:#fff;'}});
-    for (const opt of ['PENDING','OK','FAIL']) {{
-      sel.appendChild(mk('option', {{value: opt}}, opt));
+  const loadState = async () => {{
+    const q = new URLSearchParams({{
+      batch: ctx.batch,
+      subject: ctx.subject,
+      pipeline: ctx.pipeline,
+    }});
+    try {{
+      const res = await fetch('/review/state?' + q.toString());
+      if (!res.ok) return {{}};
+      return await res.json();
+    }} catch (e) {{
+      return {{}};
     }}
-    sel.addEventListener('change', () => post(structure, sel.value));
-    wrap.appendChild(sel);
+  }};
+  const addRow = (structure, saved) => {{
+    const wrap = mk('div', {{style:'display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid rgba(229,229,229,0.18);border-radius:10px;background:rgba(0,0,0,0.20)'}});
+    const top = mk('div', {{style:'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap'}});
+    top.appendChild(mk('div', {{style:'font-weight:600'}}, structure));
+    const sel = mk('select', {{style:inputStyle + 'width:auto;min-width:110px'}});
+    const initial = (saved && saved.qc_status) ? saved.qc_status : 'PENDING';
+    for (const opt of ['PENDING','OK','FAIL']) {{
+      const o = mk('option', {{value: opt}}, opt);
+      if (opt === initial) o.selected = true;
+      sel.appendChild(o);
+    }}
+    const commentEl = document.createElement('textarea');
+    commentEl.setAttribute('rows', '2');
+    commentEl.setAttribute('placeholder', 'Comment (optional)');
+    commentEl.setAttribute('style', inputStyle + 'resize:vertical;min-height:2.4em;');
+    if (saved && saved.comment) commentEl.value = saved.comment;
+    commentInputs[structure] = commentEl;
+    const saveRow = () => postReview(structure, sel.value);
+    sel.addEventListener('change', saveRow);
+    commentEl.addEventListener('blur', saveRow);
+    top.appendChild(sel);
+    wrap.appendChild(top);
+    wrap.appendChild(commentEl);
     rows.appendChild(wrap);
   }};
-  for (const s of ctx.structures) addRow(s);
+  syncBtn.addEventListener('click', async () => {{
+    syncBtn.disabled = true;
+    status.textContent = 'Syncing to database (may take a moment)...';
+    try {{
+      const res = await fetch('/review/sync-db', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify(ctx),
+      }});
+      const data = await res.json().catch(() => ({{}}));
+      if (!res.ok || !data.ok) {{
+        status.textContent = `Database sync failed: ${{data.error || data.db_error || res.status}}`;
+        return;
+      }}
+      const st = data.stats || {{}};
+      status.textContent = `Database synced (${{st.synced_structures || 0}} structures, ${{st.updated_measurements || 0}} measurement rows).`;
+    }} catch (e) {{
+      status.textContent = 'Database sync failed: ' + e;
+    }} finally {{
+      syncBtn.disabled = false;
+    }}
+  }});
+  (async () => {{
+    const state = await loadState();
+    if (state.reviewer) reviewerInput.value = state.reviewer;
+    for (const s of ctx.structures) addRow(s, state.structures && state.structures[s]);
+  }})();
 }})();
 </script>
 """.strip()
@@ -179,14 +241,23 @@ def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
     wb.save(path)
 
 
-def create_qc_portal_app(*, qc_root: Path, reviews_xlsx: Path, results_root: Path | None = None, default_batch: str | None = None):
+def create_qc_portal_app(
+    *,
+    qc_root: Path,
+    reviews_xlsx: Path,
+    results_root: Path | None = None,
+    default_batch: str | None = None,
+    publish_db: bool = True,
+):
     """Return a FastAPI app serving QC HTML and POST /review.
 
     The app serves:
     - `GET /` dashboard (when `results_root` is provided by the CLI wrapper)
     - `GET /batch/{batch}` convenience redirect to a batch QC index
     - `GET /files/...` static file server rooted at `results_root`
-    - `POST /review` Excel upsert endpoint used by the embedded widgets
+    - `POST /review` upserts reviews.xlsx only (fast)
+    - `GET /review/state` returns saved reviews for a report
+    - `POST /review/sync-db` batch-publishes a report to NVITK DB + SQLite index
     """
     try:
         from fastapi import FastAPI
@@ -235,6 +306,31 @@ def create_qc_portal_app(*, qc_root: Path, reviews_xlsx: Path, results_root: Pat
         async def root_redirect():
             return RedirectResponse(url="/qc/index.html")
 
+    @app.get("/review/state")
+    async def get_review_state(
+        batch: str,
+        subject: str,
+        pipeline: str,
+    ):
+        batch = str(batch).strip()
+        subject = str(subject).strip()
+        pipeline = str(pipeline).strip()
+        rows = _read_reviews_xlsx(reviews_xlsx)
+        structures: dict[str, dict[str, str]] = {}
+        reviewer = ""
+        for r in rows:
+            if r.batch != batch or r.subject != subject or r.pipeline != pipeline:
+                continue
+            structures[r.structure] = {
+                "qc_status": r.qc_status,
+                "reviewer": r.reviewer,
+                "reviewed_at": r.reviewed_at,
+                "comment": r.comment,
+            }
+            if r.reviewer and not reviewer:
+                reviewer = r.reviewer
+        return JSONResponse({"reviewer": reviewer, "structures": structures})
+
     @app.post("/review")
     async def post_review(payload: dict[str, Any]):
         try:
@@ -252,9 +348,55 @@ def create_qc_portal_app(*, qc_root: Path, reviews_xlsx: Path, results_root: Pat
             if row.qc_status not in {"PENDING", "OK", "FAIL"}:
                 row = ReviewRow(**{**row.__dict__, "qc_status": "PENDING"})  # type: ignore[misc]
             upsert_review_row_excel(reviews_xlsx, row)
-            return JSONResponse({"ok": True})
+            return JSONResponse({"ok": True, "excel": True})
         except Exception as exc:
             log.warning("review write failed: %s", exc)
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    @app.post("/review/sync-db")
+    async def sync_review_db(payload: dict[str, Any]):
+        batch = str(payload.get("batch", "")).strip()
+        subject = str(payload.get("subject", "")).strip()
+        pipeline = str(payload.get("pipeline", "")).strip()
+        if not batch or not subject or not pipeline:
+            return JSONResponse(
+                {"ok": False, "error": "batch, subject, and pipeline are required"},
+                status_code=400,
+            )
+        if not publish_db:
+            return JSONResponse(
+                {"ok": False, "error": "Database publish disabled for this portal instance"},
+                status_code=400,
+            )
+        try:
+            from nvitk.pipes.pesa_fat.common.db_publish import try_sync_qc_reviews_for_report
+
+            all_rows = _read_reviews_xlsx(reviews_xlsx)
+            row_dicts = [
+                {
+                    "batch": r.batch,
+                    "subject": r.subject,
+                    "pipeline": r.pipeline,
+                    "structure": r.structure,
+                    "qc_status": r.qc_status,
+                    "reviewer": r.reviewer,
+                    "reviewed_at": r.reviewed_at,
+                    "comment": r.comment,
+                    "report_relpath": r.report_relpath,
+                }
+                for r in all_rows
+            ]
+            stats, db_error = try_sync_qc_reviews_for_report(
+                batch=batch,
+                subject=subject,
+                pipeline=pipeline,
+                rows=row_dicts,
+            )
+            if db_error:
+                return JSONResponse({"ok": False, "db_error": db_error}, status_code=400)
+            return JSONResponse({"ok": True, "stats": stats})
+        except Exception as exc:
+            log.warning("review DB sync failed: %s", exc)
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     return app
@@ -314,16 +456,13 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
     return rows
 
 
-def _overall_status(rows: list[ReviewRow]) -> str:
-    """Collapse per-structure statuses into one status for a subject+pipeline."""
-    if not rows:
-        return "PENDING"
-    statuses = {r.qc_status for r in rows}
-    if "FAIL" in statuses:
-        return "FAIL"
-    if statuses == {"OK"}:
-        return "OK"
-    return "PENDING"
+def _overall_status(rows: list[ReviewRow], *, pipeline: str) -> str:
+    """Collapse per-structure statuses; OK only when every expected structure is OK."""
+    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, overall_status
+
+    by_struct = {r.structure: r.qc_status for r in rows}
+    expected = expected_review_structures(pipeline)
+    return overall_status(by_struct, expected_structures=expected or None)
 
 
 def _discover_batches(results_root: Path) -> list[str]:
@@ -384,8 +523,8 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
     for row in processed:
         b = row["batch"]
         s = row["subject"]
-        ct_stat = _overall_status(by_key.get((b, s, "ct-pet-v5"), []))
-        dx_stat = _overall_status(by_key.get((b, s, "dixon-v5"), []))
+        ct_stat = _overall_status(by_key.get((b, s, "ct-pet-v5"), []), pipeline="ct-pet-v5")
+        dx_stat = _overall_status(by_key.get((b, s, "dixon-v5"), []), pipeline="dixon-v5")
         ct_link = f"<a href='{_esc(row['ct_href'])}'>CT-PET</a>" if row["ct_href"] else "<span class='muted'>—</span>"
         dx_link = f"<a href='{_esc(row['dx_href'])}'>Dixon</a>" if row["dx_href"] else "<span class='muted'>—</span>"
         table_rows.append(
@@ -458,7 +597,7 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
     </div>
 
     <div class="card">
-      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">overall status aggregated from reviews.xlsx</div></div>
+      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">OK only when every structure is OK · use Sync Database on each report for NVITK DB</div></div>
       <div class="card-b">
         <div class="table-wrap">
           <table>

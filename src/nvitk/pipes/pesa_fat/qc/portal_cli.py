@@ -1,4 +1,4 @@
-"""CLI: run the PESA-Fat QC portal (static HTML + Excel-backed reviews)."""
+"""CLI: run the PESA-Fat QC portal (static HTML + Excel/DB-backed reviews)."""
 
 from __future__ import annotations
 
@@ -23,6 +23,12 @@ from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
     default=None,
     help="Excel file to store reviews (default: RESULTS/res_qc/reviews.xlsx).",
 )
+@click.option(
+    "--no-db",
+    is_flag=True,
+    default=False,
+    help="Skip NVITK database publish on review (Excel only).",
+)
 @click.option("--log-level", default="INFO", show_default=True)
 def main(
     batch: str | None,
@@ -30,9 +36,10 @@ def main(
     host: str,
     port: int,
     reviews_xlsx: Path | None,
+    no_db: bool,
     log_level: str,
 ) -> None:
-    """Serve QC HTML and accept review updates via POST /review."""
+    """Serve QC HTML and accept review updates via POST /review (Excel + DB)."""
     Logger(level=log_level.upper())
     results_root_eff = (results_root or DEFAULT_RESULTS_ROOT)
     reviews = reviews_xlsx or (Path(results_root_eff) / RES_QC_DIR / "reviews.xlsx")
@@ -52,6 +59,7 @@ def main(
         reviews_xlsx=reviews,
         results_root=Path(results_root_eff),
         default_batch=batch,
+        publish_db=not no_db,
     )
     try:
         import uvicorn

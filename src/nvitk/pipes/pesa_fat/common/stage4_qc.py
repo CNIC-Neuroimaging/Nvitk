@@ -49,24 +49,9 @@ RES_QC_DIR = "res_qc"
 
 
 def _filter_review_structures(structures: list[str] | tuple[str, ...]) -> list[str]:
-    """Remove unwanted review labels (shared policy for CT-PET and Dixon)."""
-    out: list[str] = []
-    for s in structures:
-        k = str(s).strip()
-        if not k:
-            continue
-        ku = k.upper()
-        if ku == "CORP":
-            continue
-        if ku.endswith("_LR"):
-            continue
-        if ku == "MO" or ku.startswith("MO_"):
-            continue
-        out.append(k)
-    # Keep BN explicitly if present in the input (never filtered above, but keep stable intent).
-    if any(str(s).strip().upper() == "BN" for s in structures) and not any(x.upper() == "BN" for x in out):
-        out.append("BN")
-    return sorted(set(out))
+    from nvitk.pipes.pesa_fat.qc.review_policy import filter_review_structures
+
+    return filter_review_structures(structures)
 
 
 def _index_html(batch: str, links: list[tuple[str, str, str]]) -> str:
@@ -238,7 +223,14 @@ def run_qc_subject(
             structures=structures_dx,
             report_relpath=f"{subject}/{out_dx.name}",
         )
-        heat = build_dixon_measurement_heatmap_html(lay, subject, metric="FF")
+        heat = build_dixon_measurement_heatmap_html(
+            lay,
+            subject,
+            metric="FF",
+            margin_vox=margin_vox,
+            assets_dir=assets / "heatmap" / "dixon",
+            assets_rel=f"{rel_assets}/heatmap/dixon",
+        )
         extra = f'''
 <div class="card">
   <div class="card-h"><h3>Measurement heatmap</h3><div class="muted">FF inside masks · WATER outside</div></div>

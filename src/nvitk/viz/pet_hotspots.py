@@ -103,7 +103,14 @@ def _roi_mask(mask_arr: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarr
         return mask_arr > 0
     if len(label_ids) == 0:
         raise ValidationError("label_ids cannot be empty (pass None for all nonzero labels).")
-    return np.isin(mask_arr, to_numpy(label_ids).astype(np.int64))
+    ids = to_numpy(label_ids).astype(np.int64)
+    positive = mask_arr[mask_arr > 0]
+    if positive.size > 0:
+        uniq = np.unique(positive)
+        # Multi-label selection was binarized to 0/1 upstream; original ids no longer apply.
+        if uniq.size == 1 and int(uniq[0]) == 1 and not np.all(np.isin(ids, (0, 1))):
+            return mask_arr > 0
+    return np.isin(mask_arr, ids)
 
 
 def _select_hotspots(

@@ -714,6 +714,19 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "intensity_similarity",
+        "Measure",
+        "Image intensity similarity",
+        (ParamSpec("reference_layer", "Second image layer", "layer", ""),),
+        needs_reference_layer=True,
+        run_mode="notify",
+        description=(
+            "Compare voxel intensities of the active image vs a second layer "
+            "(Pearson, Spearman, MAE, RMSE). Resamples the second image onto the "
+            "active grid when affines differ. No mask required."
+        ),
+    ),
+    GuiToolSpec(
         "measure_generate_suv",
         "Measure",
         "Generate SUV volume from PET",
@@ -840,6 +853,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "mean_intensity",
     "integrated_intensity",
     "label_stats",
+    "intensity_similarity",
     "dice",
     "jaccard",
     "voxel_metrics",

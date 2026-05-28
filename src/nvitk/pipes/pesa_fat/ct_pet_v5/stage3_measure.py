@@ -123,7 +123,7 @@ def process_subject(
                 kinds=(suv_kind,),
                 stats=tuple(s for _, s in _SUV_STATS),
                 philips=philips,
-                revert_scaling=not philips,
+                revert_scaling=False,
             )
             suv_prefix = f"SUV{suv_kind}" if not suv_kind.startswith("SUV") else suv_kind
             for suffix, stat in _SUV_STATS:

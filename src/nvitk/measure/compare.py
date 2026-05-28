@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.types import Image
 
@@ -37,22 +37,22 @@ def _ravel(x: Any) -> Any:
 
 def _float(x: Any) -> float:
     """Final scalar conversion to Python float (host hop)."""
-    arr = to_numpy(x)
+    arr = as_backend_array(x)
     return float(arr) if arr.ndim == 0 else float(arr.item())
 
 def pearson(a: Any, b: Any) -> tuple[float, float]:
     """Return ``(pearson_r, pearson_p)`` for two 1-D arrays."""
     # scipy.stats.pearsonr requires NumPy; materialize here only.
-    ah = to_numpy(resolve_array(a)).ravel()
-    bh = to_numpy(resolve_array(b)).ravel()
+    ah = as_backend_array(resolve_array(a)).ravel()
+    bh = as_backend_array(resolve_array(b)).ravel()
     r, p = scipy.stats().pearsonr(ah, bh)
     return float(r), float(p)
 
 
 def spearman(a: Any, b: Any) -> tuple[float, float]:
     """Return ``(spearman_r, spearman_p)`` for two 1-D arrays."""
-    ah = to_numpy(resolve_array(a)).ravel()
-    bh = to_numpy(resolve_array(b)).ravel()
+    ah = as_backend_array(resolve_array(a)).ravel()
+    bh = as_backend_array(resolve_array(b)).ravel()
     r, p = scipy.stats().spearmanr(ah, bh)
     return float(r), float(p)
 
@@ -83,10 +83,9 @@ def correlation_stats(a: Any, b: Any) -> dict[str, float]:
     if ah.shape != bh.shape:
         raise ValueError(f"Shape mismatch: {ah.shape} vs {bh.shape}")
 
-    # scipy.stats.* requires NumPy; keep this as the only host hop.
-    ah_np = to_numpy(ah)
-    bh_np = to_numpy(bh)
-    _stats = scipy.stats()
+    ah_np = as_backend_array(ah)
+    bh_np = as_backend_array(bh)
+    _stats = scipy.stats
     pr, pp = _stats.pearsonr(ah_np, bh_np)
     sr, sp = _stats.spearmanr(ah_np, bh_np)
 
