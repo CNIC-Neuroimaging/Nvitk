@@ -143,6 +143,8 @@ def _format_tool_row(tool: ToolEntry, depth: int) -> str:
     cmd_style = "bold bright_cyan"
     if tool.command.startswith("nvitk-pesa") or tool.command.startswith("nvitk-qvt"):
         cmd_style = "bold gold1"
+    elif tool.command in ("nvitk-ants", "nvitk-fireants", "nvitk-flirt"):
+        cmd_style = "bold bright_blue"
     elif tool.command.startswith("nvitk-"):
         cmd_style = "bold bright_green"
     elif tool.command in ("dcm2nii", "stl2nifti", "phase2volume", "nikon2nifti"):

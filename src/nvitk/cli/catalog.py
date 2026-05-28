@@ -76,6 +76,8 @@ _CMD_TO_SUBMODULE: dict[str, str] = {
     "nvitk-totalseg": "segmentation",
     "nvitk-eicab": "segmentation",
     "nvitk-flirt": "registration",
+    "nvitk-ants": "registration",
+    "nvitk-fireants": "registration",
     "nvitk-morph": "morphology",
     "nvitk-restore": "restoration",
     "nvitk-filter": "filters",

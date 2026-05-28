@@ -48,6 +48,27 @@ PIPELINE_CHOICES = ("ct-pet-v5", "dixon-v5")
 RES_QC_DIR = "res_qc"
 
 
+def _filter_review_structures(structures: list[str] | tuple[str, ...]) -> list[str]:
+    """Remove unwanted review labels (shared policy for CT-PET and Dixon)."""
+    out: list[str] = []
+    for s in structures:
+        k = str(s).strip()
+        if not k:
+            continue
+        ku = k.upper()
+        if ku == "CORP":
+            continue
+        if ku.endswith("_LR"):
+            continue
+        if ku == "MO" or ku.startswith("MO_"):
+            continue
+        out.append(k)
+    # Keep BN explicitly if present in the input (never filtered above, but keep stable intent).
+    if any(str(s).strip().upper() == "BN" for s in structures) and not any(x.upper() == "BN" for x in out):
+        out.append("BN")
+    return sorted(set(out))
+
+
 def _index_html(batch: str, links: list[tuple[str, str, str]]) -> str:
     items = "\n".join(
         f"<li><code>{subj}</code> · <a href='{href_ct}'>CT-PET</a> · <a href='{href_dx}'>Dixon</a></li>"
@@ -183,7 +204,11 @@ def run_qc_subject(
     wrote_dx: Path | None = None
 
     if "ct-pet-v5" in pipelines:
-        structures_ct = sorted({spec.column_prefix for spec in ct_cfg.SUV_SPECS} | {spec.column.replace("_VOL", "") for spec in ct_cfg.VOL_SPECS})
+        structures_ct = sorted(
+            {spec.column_prefix for spec in ct_cfg.SUV_SPECS}
+            | {spec.column.replace("_VOL", "") for spec in ct_cfg.VOL_SPECS}
+        )
+        structures_ct = _filter_review_structures(structures_ct)
         review_ct = review_widget_html(
             batch=lay.batch,
             subject=subject,
@@ -205,7 +230,7 @@ def run_qc_subject(
         log.info("CT-PET QC report written to %s", out_ct)
 
     if "dixon-v5" in pipelines:
-        structures_dx = [spec.prefix for spec in dx_cfg.MEASURE_SPECS]
+        structures_dx = _filter_review_structures([spec.prefix for spec in dx_cfg.MEASURE_SPECS])
         review_dx = review_widget_html(
             batch=lay.batch,
             subject=subject,

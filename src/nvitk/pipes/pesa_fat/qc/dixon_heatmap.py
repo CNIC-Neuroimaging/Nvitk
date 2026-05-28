@@ -23,6 +23,7 @@ from nvitk.io import imread
 from nvitk.pipes.pesa_fat.common.paths import BatchLayout, resolve_nii_optional
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 from nvitk.segmentation.labels import get_label
+from nvitk.core import to_numpy
 from nvitk.types import Image
 
 
@@ -34,10 +35,10 @@ def _png_data_uri(png_bytes: bytes) -> str:
 def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> np.ndarray:
     if len(label_ids) == 1:
         m = get_label(label_img, label_ids[0], missing="empty").data
-        return (np.asarray(m) > 0)
-    first = np.asarray(get_label(label_img, label_ids[0], missing="empty").data).copy()
+        return (to_numpy(m) > 0)
+    first = to_numpy(get_label(label_img, label_ids[0], missing="empty").data).copy()
     for lid in label_ids[1:]:
-        extra = np.asarray(get_label(label_img, lid, missing="empty").data)
+        extra = to_numpy(get_label(label_img, lid, missing="empty").data)
         first[extra > 0] = 1
     return (first > 0)
 
@@ -62,9 +63,9 @@ def _render_panel(
     vmax: float | None,
     cmap: str,
 ) -> bytes:
-    water = np.asarray(water_xyz[:, :, z], dtype=float)
-    val = np.asarray(value_xyz[:, :, z], dtype=float)
-    mask = np.asarray(mask_xyz[:, :, z], dtype=bool)
+    water = to_numpy(water_xyz[:, :, z]).astype(float)
+    val = to_numpy(value_xyz[:, :, z]).astype(float)
+    mask = to_numpy(mask_xyz[:, :, z]).astype(bool)
 
     fig, ax = plt.subplots(figsize=(5.8, 5.8))
     ax.axis("off")
@@ -130,8 +131,8 @@ def build_dixon_measurement_heatmap_html(
         except Exception:
             continue
 
-        water_xyz = np.asarray(water_img.data)
-        val_xyz = np.asarray(val_img.data)
+        water_xyz = to_numpy(water_img.data)
+        val_xyz = to_numpy(val_img.data)
         mask_xyz = _build_binary_mask(label_img, tuple(int(x) for x in roi["label_ids"]))
         if water_xyz.shape != val_xyz.shape or water_xyz.shape != mask_xyz.shape:
             continue
@@ -170,8 +171,8 @@ def build_dixon_measurement_heatmap_html(
       </select>
     </div>
   </div>
-  <div style=\"margin-top:10px\">
-    <img id=\"{dom}_img\" src=\"{_esc(images[first_key])}\" style=\"width:100%;max-width:820px;border-radius:10px;border:1px solid rgba(229,229,229,0.18);\"/>
+  <div class="scroll-x" style="margin-top:10px">
+    <img id=\"{dom}_img\" src=\"{_esc(images[first_key])}\" style=\"width:820px;max-width:none;border-radius:10px;border:1px solid rgba(229,229,229,0.18);\"/>
   </div>
 </div>
 <script>

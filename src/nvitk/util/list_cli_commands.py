@@ -37,7 +37,7 @@ def categorize_command(cmd: str, module: str) -> str:
         return "Image Conversion"
     if any(seg in cmd for seg in ("nvitk-totalseg", "nvitk-eicab")):
         return "Segmentation"
-    if "nvitk-flirt" in cmd:
+    if cmd.startswith("nvitk-flirt") or cmd in ("nvitk-ants", "nvitk-fireants"):
         return "Registration"
     if cmd.startswith("nvitk-pesa-fat"):
         return "PESA-Fat Analysis"

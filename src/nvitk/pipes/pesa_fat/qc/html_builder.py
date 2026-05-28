@@ -58,6 +58,7 @@ section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
 .qc-measurements tr:hover td { background: rgba(252,163,17,0.10); }
 
 .axial-blocks { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.scroll-x { overflow-x: auto; }
 """
 
 
@@ -107,7 +108,6 @@ def build_ctpet_report_html(
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
     body = f"""
-{review_widget}
 <section id="ctpet">
 <h2>CT-PET pipeline</h2>
 
@@ -131,6 +131,7 @@ def build_ctpet_report_html(
   <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
 </div>
 </section>
+{review_widget}
 """
     return _base_doc(title="PESA-Fat QC (CT-PET)", batch=batch, subject=subject, body_html=body)
 
@@ -160,7 +161,6 @@ def build_dixon_report_html(
     )
 
     body = f"""
-{review_widget}
 <section id=\"dixon\">
 <h2>Dixon pipeline</h2>
 
@@ -183,6 +183,7 @@ def build_dixon_report_html(
   <div class=\"card-b\"><div class=\"table-wrap\">{measurements_table}</div></div>
 </div>
 </section>
+{review_widget}
 """
     return _base_doc(title="PESA-Fat QC (Dixon)", batch=batch, subject=subject, body_html=body)
 

@@ -13,7 +13,7 @@ from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
 
 
 @click.command("nvitk-pesa-fat-qc-portal")
-@click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
+@click.option("--batch", required=False, default=None, help="Optional batch name (e.g. '202602_Week4').")
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
 @click.option("--host", default="0.0.0.0", show_default=True)
 @click.option("--port", type=int, default=8008, show_default=True)
@@ -25,7 +25,7 @@ from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
 )
 @click.option("--log-level", default="INFO", show_default=True)
 def main(
-    batch: str,
+    batch: str | None,
     results_root: Path | None,
     host: str,
     port: int,
@@ -34,14 +34,25 @@ def main(
 ) -> None:
     """Serve QC HTML and accept review updates via POST /review."""
     Logger(level=log_level.upper())
-    lay = layout(batch, results_root=results_root or DEFAULT_RESULTS_ROOT)
-    qc_root = lay.results_dir / RES_QC_DIR
-    if not qc_root.is_dir():
-        raise click.ClickException(f"QC directory not found: {qc_root}")
     results_root_eff = (results_root or DEFAULT_RESULTS_ROOT)
     reviews = reviews_xlsx or (Path(results_root_eff) / RES_QC_DIR / "reviews.xlsx")
 
-    app = create_qc_portal_app(qc_root=qc_root, reviews_xlsx=reviews)
+    if batch:
+        lay = layout(batch, results_root=results_root_eff)
+        qc_root = lay.results_dir / RES_QC_DIR
+        if not qc_root.is_dir():
+            raise click.ClickException(f"QC directory not found: {qc_root}")
+    else:
+        # Dashboard mode (no single batch): use RESULTS root as the static tree.
+        qc_root = Path(results_root_eff) / RES_QC_DIR  # unused for file serving; kept for app factory shape
+        qc_root.mkdir(parents=True, exist_ok=True)
+
+    app = create_qc_portal_app(
+        qc_root=qc_root,
+        reviews_xlsx=reviews,
+        results_root=Path(results_root_eff),
+        default_batch=batch,
+    )
     try:
         import uvicorn
     except Exception as exc:

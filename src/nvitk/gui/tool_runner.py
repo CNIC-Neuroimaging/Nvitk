@@ -895,6 +895,138 @@ def run_gui_tool(
         notify(f"FLIRT output layer from {out_path}")
         return None
 
+    if tool_id == "reg_ants_register":
+        from nvitk.registration.ants import ants_register
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        moving_path = _ensure_nifti_path(layer, prefix="ants_moving")
+        fixed_path = _ensure_nifti_path(ref_layer, prefix="ants_fixed")
+        out_dir = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix="nvitk_ants_reg_"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tot = str(params.get("type_of_transform") or "SyN").strip() or "SyN"
+        write_comp = bool(params.get("write_composite_transform") or False)
+        verbose = bool(params.get("verbose") or False)
+        notify(f"ANTsPy register: moving→fixed ({tot}), output {out_dir}")
+        res = ants_register(
+            fixed_path=fixed_path,
+            moving_path=moving_path,
+            out_dir=out_dir,
+            type_of_transform=tot,
+            write_composite_transform=write_comp,
+            verbose=verbose,
+        )
+        notify(f"ANTs warped: {res.warped_moving_path}")
+        try:
+            from nvitk.io import imread
+
+            warped = imread(res.warped_moving_path)
+            viewer.add_image(
+                coerce_tool_output(warped),
+                **_layer_kwargs_from(ref_layer, "ants_warped"),
+            )
+        except Exception:
+            pass
+        return None
+
+    if tool_id == "reg_ants_apply":
+        from nvitk.registration.ants import ants_apply
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        fixed_path = _ensure_nifti_path(ref_layer, prefix="ants_fixed")
+        moving_path = _ensure_nifti_path(layer, prefix="ants_moving")
+        tr = str(params.get("transform_paths") or "").strip()
+        if not tr:
+            raise ValueError("Set transform_paths (comma-separated).")
+        transform_paths = [Path(p.strip()) for p in tr.split(",") if p.strip()]
+        for p in transform_paths:
+            if not p.is_file():
+                raise ValueError(f"Transform not found: {p}")
+        out_s = str(params.get("out_path") or "").strip()
+        out_path = Path(out_s) if out_s else (Path(tempfile.mkdtemp(prefix="nvitk_ants_apply_")) / "resampled.nii.gz")
+        interpolator = str(params.get("interpolator") or "linear").strip() or "linear"
+        verbose = bool(params.get("verbose") or False)
+        notify(f"ANTs apply: {moving_path.name} → {out_path}")
+        ants_apply(
+            fixed_path=fixed_path,
+            moving_path=moving_path,
+            out_path=out_path,
+            transforms=transform_paths,
+            interpolator=interpolator,
+            verbose=verbose,
+        )
+        from nvitk.io import imread
+
+        out_img = imread(out_path)
+        viewer.add_image(
+            coerce_tool_output(out_img),
+            **_layer_kwargs_from(ref_layer, "ants_applied"),
+        )
+        notify(f"ANTs output layer from {out_path}")
+        return None
+
+    if tool_id == "reg_fireants_register":
+        from nvitk.registration.fireants import fireants_register
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        moving_path = _ensure_nifti_path(layer, prefix="fireants_moving")
+        fixed_path = _ensure_nifti_path(ref_layer, prefix="fireants_fixed")
+        out_dir = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix="nvitk_fireants_reg_"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        device = str(params.get("device") or "cuda:0").strip() or "cuda:0"
+        verbose = bool(params.get("verbose") or False)
+        notify(f"FireANTs register: moving→fixed (device={device}), output {out_dir}")
+        res = fireants_register(
+            fixed_path=fixed_path,
+            moving_path=moving_path,
+            out_dir=out_dir,
+            device=device,
+            verbose=verbose,
+        )
+        notify(f"FireANTs warped: {res.warped_moving_path}")
+        try:
+            from nvitk.io import imread
+
+            warped = imread(res.warped_moving_path)
+            viewer.add_image(
+                coerce_tool_output(warped),
+                **_layer_kwargs_from(ref_layer, "fireants_warped"),
+            )
+        except Exception:
+            pass
+        return None
+
+    if tool_id == "reg_fireants_apply":
+        from nvitk.registration.fireants import fireants_apply
+
+        ref_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        fixed_path = _ensure_nifti_path(ref_layer, prefix="fireants_fixed")
+        moving_path = _ensure_nifti_path(layer, prefix="fireants_moving")
+        tr = str(params.get("transform_paths") or "").strip()
+        if not tr:
+            raise ValueError("Set transform_paths (comma-separated).")
+        transform_paths = [Path(p.strip()) for p in tr.split(",") if p.strip()]
+        for p in transform_paths:
+            if not p.is_file():
+                raise ValueError(f"Transform not found: {p}")
+        out_s = str(params.get("out_path") or "").strip()
+        out_path = Path(out_s) if out_s else (Path(tempfile.mkdtemp(prefix="nvitk_fireants_apply_")) / "resampled.nii.gz")
+        notify(f"FireANTs apply: {moving_path.name} → {out_path}")
+        fireants_apply(
+            fixed_path=fixed_path,
+            moving_path=moving_path,
+            out_path=out_path,
+            transforms=transform_paths,
+        )
+        from nvitk.io import imread
+
+        out_img = imread(out_path)
+        viewer.add_image(
+            coerce_tool_output(out_img),
+            **_layer_kwargs_from(ref_layer, "fireants_applied"),
+        )
+        notify(f"FireANTs output layer from {out_path}")
+        return None
+
     raise NotImplementedError(f"Tool '{tool_id}' is not implemented in the GUI runner.")
 
 

@@ -57,7 +57,8 @@ dependencies = [
   "pylibjpeg>=2.0.1",
   "vtk>=9.3.1",
   # "pyradiomics>=3.0.1",
-  "SimpleITK>=2.5.2",
+  # "SimpleITK>=2.5.2",
+  "SimpleITK==2.2.1",
   "scikit-image>=0.25.2",
   "opencv-python>=4.11",
   
@@ -169,6 +170,8 @@ nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
 # Registration scripts
 # -----------------------------------------------------------------------------
 nvitk-flirt = "nvitk.registration.cli:main"
+nvitk-ants = "nvitk.cli.ants:main"
+nvitk-fireants = "nvitk.cli.fireants:main"
 
 # -----------------------------------------------------------------------------
 # Image module CLIs (filters, morphology, restoration, measure, transform)
