@@ -143,10 +143,12 @@ def _run_local(
                                 pipeline="ct-pet-v5",
                             )
                     except Exception as exc:
+                        import traceback
+                        log.warning(traceback.format_exc())
                         log.warning("DB publish skipped for %s (ct-pet-v5): %s", subj, exc)
             except Exception as exc:
                 import traceback
-                traceback.print_exc()
+                log.warning(traceback.format_exc())
                 log.error(f"[{subj}] {s} failed: {exc}")
 
     if "stage3" in stages_sel:

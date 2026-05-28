@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup
+from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import setup, using
 from nvitk.types import Image
 
 setup(globals())
@@ -28,11 +28,11 @@ setup(globals())
 
 def _centroid_world_x(coords_voxel: np.ndarray, affine: np.ndarray) -> float:
     """Project a voxel-space centroid onto the world x axis using *affine*."""
-    homog = as_backend_array(
-        [coords_voxel[0], coords_voxel[1], coords_voxel[2], 1.0]
-    ).astype(float)
-    
-    return float((as_backend_array(affine).astype(float) @ homog)[0])
+    with using("cpu"):
+        coords_voxel = to_numpy(coords_voxel)
+        affine = to_numpy(affine)
+        homog = [coords_voxel[0], coords_voxel[1], coords_voxel[2], 1.0]
+        return float((affine @ homog)[0])
 
 
 def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[Image, Image]:

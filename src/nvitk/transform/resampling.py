@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, get_current_backend
 from nvitk.types import Image
 
 setup(globals())
@@ -15,7 +15,7 @@ def _require_affine(image: Image, name: str) -> np.ndarray:
     affine = image.affine
     if affine is None:
         raise ValueError(f"Image '{name}' has no affine in its metadata.")
-    affine = to_numpy(affine).astype(float)
+    affine = affine.astype(float)
     if affine.shape != (4, 4):
         raise ValueError(f"Affine for '{name}' must be (4, 4); got {affine.shape}.")
     return affine
@@ -59,8 +59,10 @@ def resample_to(
     if source.ndim != 3 or target.ndim != 3:
         raise ValueError("resample_to currently supports 3D images only.")
 
-    aff_source = _require_affine(source, "source")
-    aff_target = _require_affine(target, "target")
+    source = source.to_backend(get_current_backend())
+    target = target.to_backend(get_current_backend())
+    aff_source = as_backend_array(_require_affine(source, "source"))
+    aff_target = as_backend_array(_require_affine(target, "target"))
 
     # Host-side 4x4 linear algebra; cheap.
     aff_target_inv = np.linalg.inv(aff_target)
@@ -84,7 +86,7 @@ def resample_to(
 
     md = dict(source.metadata or {})
     target_md = target.metadata or {}
-    md["affine"] = to_numpy(aff_target).astype(float)
+    md["affine"] = aff_target.astype(float)
     for key in ("spacing", "x_res", "y_res", "z_res", "orientation"):
         if key in target_md:
             md[key] = target_md[key]

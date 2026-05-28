@@ -1,3 +1,5 @@
-"""gPET pipeline package (``nvitk-gpetpy``; not implemented)."""
+"""gPET pipeline package (``nvitk-gpetpy``)."""
 
-__all__: list[str] = []
+from .layout import GpetLayout
+
+__all__: list[str] = ["GpetLayout"]

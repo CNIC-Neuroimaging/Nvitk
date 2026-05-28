@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Tuple
 
-import numpy as np
-
+from nvitk.core import setup
+from nvitk.core.backend import using
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.types import Image
 
+setup(globals())
+
 
 def _as_bool_mask(mask: Image | Any) -> np.ndarray:
-    arr = to_numpy(mask.data if isinstance(mask, Image) else mask)
+    arr = mask.data if isinstance(mask, Image) else mask
     return as_backend_array(arr > 0).astype(bool)
 
 
@@ -42,38 +44,39 @@ def convex_hull_slicewise(mask: Image | Any, *, axis: int = -1) -> Image | Any:
         idx[axis_n] = i
         sl = out[tuple(idx)]
         if sl.any():
-            out[tuple(idx)] = convex_hull_image(sl)
-    return _wrap_like(mask, out.astype(np.uint8))
+            out[tuple(idx)] = convex_hull_image(to_numpy(sl))
+    return _wrap_like(mask, as_backend_array(out).astype(np.uint8))
 
 
 def convex_hull_3d(mask: Image | Any) -> Image | Any:
     """Fill the 3D convex hull of all foreground voxels."""
-    from scipy.spatial import ConvexHull
-
     m = _as_bool_mask(mask)
     coords = np.argwhere(m)
     if coords.shape[0] < 4:
-        raw = to_numpy(mask.data if isinstance(mask, Image) else mask)
+        raw = mask.data if isinstance(mask, Image) else mask
         return _wrap_like(mask, np.zeros_like(raw, dtype=np.uint8))
 
-    hull = ConvexHull(coords)
-    mins = coords.min(axis=0)
-    maxs = coords.max(axis=0) + 1
-    grid = np.mgrid[
-        mins[0] : maxs[0],
-        mins[1] : maxs[1],
-        mins[2] : maxs[2],
-    ]
-    pts = np.stack([g.ravel() for g in grid], axis=1).astype(np.float64)
-    A = hull.equations[:, :-1]
-    b = hull.equations[:, -1]
-    # hull.equations rows are (normal_vector, offset) for halfspaces: A x + b <= 0.
-    # Broadcast b across all points: (n_planes, 1) + (n_planes, n_points).
-    inside = np.all((A @ pts.T) + b[:, None] <= 1e-6, axis=0)
-    sub = inside.reshape(grid[0].shape).astype(np.uint8)
-    out = np.zeros(m.shape, dtype=np.uint8)
-    out[mins[0] : maxs[0], mins[1] : maxs[1], mins[2] : maxs[2]] = sub
-    return _wrap_like(mask, out)
+    with using("cpu"):
+        coords = to_numpy(coords)
+        hull = scipy.spatial.ConvexHull(coords)
+    
+        mins = coords.min(axis=0)
+        maxs = coords.max(axis=0) + 1
+        grid = np.mgrid[
+            mins[0] : maxs[0],
+            mins[1] : maxs[1],
+            mins[2] : maxs[2],
+        ]
+        pts = np.stack([g.ravel() for g in grid], axis=1).astype(np.float64)
+        A = hull.equations[:, :-1]
+        b = hull.equations[:, -1]
+        # hull.equations rows are (normal_vector, offset) for halfspaces: A x + b <= 0.
+        # Broadcast b across all points: (n_planes, 1) + (n_planes, n_points).
+        inside = np.all((A @ pts.T) + b[:, None] <= 1e-6, axis=0)
+        sub = inside.reshape(grid[0].shape).astype(np.uint8)
+        out = np.zeros(m.shape, dtype=np.uint8)
+        out[mins[0] : maxs[0], mins[1] : maxs[1], mins[2] : maxs[2]] = sub
+    return _wrap_like(mask, as_backend_array(out))
 
 
 def distance_transform(
@@ -88,8 +91,6 @@ def distance_transform(
     When *radius_mm* is set, return a binary tube (distance ≤ *radius_mm*).
     Otherwise return float32 distance (mm if *spacing* is provided).
     """
-    from scipy import ndimage as ndi
-
     m = _as_bool_mask(mask)
     inv = ~m
     sp = spacing

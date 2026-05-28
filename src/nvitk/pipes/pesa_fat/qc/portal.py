@@ -59,7 +59,7 @@ def review_widget_html(
   }};
   const post = async (structure, qc_status) => {{
     const reviewer = reviewerInput.value || '';
-    status.textContent = `Saving ${structure} → ${qc_status}...`;
+    status.textContent = `Saving ${{structure}} → ${{qc_status}}...`;
     const body = {{...ctx, structure, qc_status, reviewer, comment: ''}};
     const res = await fetch('/review', {{
       method: 'POST',
@@ -67,10 +67,10 @@ def review_widget_html(
       body: JSON.stringify(body),
     }});
     if (!res.ok) {{
-      status.textContent = `Save failed (${res.status}).`;
+      status.textContent = `Save failed (${{res.status}}).`;
       return;
     }}
-    status.textContent = `Saved ${structure} → ${qc_status}.`;
+    status.textContent = `Saved ${{structure}} → ${{qc_status}}.`;
   }};
   const addRow = (structure) => {{
     const wrap = mk('div', {{style:'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid rgba(229,229,229,0.18);border-radius:10px;background:rgba(0,0,0,0.20)'}});

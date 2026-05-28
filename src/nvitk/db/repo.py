@@ -77,8 +77,10 @@ def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatC
                         password=_pwd,
                         verify=settings["db"]["xnat_config"]["verify"],
                     )
-                return repo
+            return repo
     except Exception as e:
+        import traceback
+        log.warning(traceback.format_exc())
         raise SettingsError(f"Error getting repo from settings: {e}")
 
 

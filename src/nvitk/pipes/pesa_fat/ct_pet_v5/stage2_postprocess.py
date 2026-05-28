@@ -54,6 +54,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
 from nvitk.segmentation.hemisphere import split_lr_by_cc
 from nvitk.segmentation.labels import biggest_cc, combine_labels, get_label
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
+from nvitk.segmentation.hull_edt import convex_hull_3d
 from nvitk.transform import resample_pet_to_mask
 from nvitk.types import Image
 
@@ -98,23 +99,6 @@ def _spacing(img: Image) -> tuple[float, float, float]:
             img.metadata.get("z_res", 1.0) if img.metadata else 1.0,
         )
     return tuple(float(v) for v in sp)
-
-
-def _chull_organ_3d(organ: Image) -> Image:
-    """Slicewise 2D convex hull along Z (falls back to the binary mask if skimage missing)."""
-    try:
-        from skimage.morphology import convex_hull_image
-    except Exception:
-        return organ
-
-    host = to_numpy(organ.data)
-    for i in range(host.shape[-1]):
-        if host[..., i].any():
-            host[..., i] = convex_hull_image(host[..., i])
-    out = host
-    if get_current_backend() == "cupy":
-        out = to_cupy(out)
-    return organ.with_data(out)
 
 
 def _process_bladder(bladder: Image, pet: Image) -> Image:
@@ -240,10 +224,10 @@ def _remove_organs(fat_arr: Any, total: Image, pet: Image) -> Any:
     kr = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
     kl = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
     if bool(kr.data.any()):
-        kr_ch = _chull_organ_3d(kr).data
+        kr_ch = convex_hull_3d(kr).data
         organs[kr_ch > 0] = 1
     if bool(kl.data.any()):
-        kl_ch = _chull_organ_3d(kl).data
+        kl_ch = convex_hull_3d(kl).data
         organs[kl_ch > 0] = 1
 
     bladder = get_label(total, get_class_id("urinary_bladder", "total"), missing="empty")
@@ -372,12 +356,12 @@ def build_organs_mask(total: Image) -> Image:
             kr = get_label(total, get_class_id("kidney_right", "total"), missing="empty")
             kl = get_label(total, get_class_id("kidney_left", "total"), missing="empty")
             if bool(kr.data.any()):
-                kr_ch = _chull_organ_3d(kr).data
+                kr_ch = convex_hull_3d(kr).data
                 kr_ch_dilated = dilate(total.copy().with_data(kr_ch), footprint=5).data
                 m[kr_ch_dilated > 0] = 0
                 out[m > 0] = out_id
             if bool(kl.data.any()):
-                kl_ch = _chull_organ_3d(kl).data
+                kl_ch = convex_hull_3d(kl).data
                 kl_ch_dilated = dilate(total.copy().with_data(kl_ch), footprint=5).data
                 m[kl_ch_dilated > 0] = 0
                 out[m > 0] = out_id
@@ -425,6 +409,8 @@ def build_muscles_mask(total: Image, muscles: Image) -> Image:
             out[d_left.data > 0] = MUSCLES_LABELS["DELTOIDES_L"]
             out[d_right.data > 0] = MUSCLES_LABELS["DELTOIDES_R"]
         except Exception as exc:
+            import traceback
+            log.warning(traceback.format_exc())
             log.warning(f"deltoid CC split failed ({exc}); keeping bilateral")
             out[deltoid.data > 0] = MUSCLES_LABELS["DELTOIDES_L"]
 

@@ -1,11 +1,22 @@
-"""gPET pipeline defaults (not implemented)."""
+"""gPET pipeline defaults.
+
+The defaults mirror PESA-Fat roots so `gpetpy` can run on the same workstation /
+filesystem without extra config.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_NIFTI_ROOT: Path | None = None
-DEFAULT_RESULTS_ROOT: Path | None = None
+from .layout import (
+    DEFAULT_DICOM_ROOT as _DEFAULT_DICOM_ROOT,
+    DEFAULT_NIFTI_ROOT as _DEFAULT_NIFTI_ROOT,
+    DEFAULT_RESULTS_ROOT as _DEFAULT_RESULTS_ROOT,
+)
+
+DEFAULT_DICOM_ROOT: Path = _DEFAULT_DICOM_ROOT
+DEFAULT_NIFTI_ROOT: Path = _DEFAULT_NIFTI_ROOT
+DEFAULT_RESULTS_ROOT: Path = _DEFAULT_RESULTS_ROOT
 PIPELINE_SUBDIR: str = "gpetpy"
 
 SGE_LOG_DIR: Path | None = None
