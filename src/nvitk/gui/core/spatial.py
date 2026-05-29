@@ -111,7 +111,7 @@ def layer_to_image(layer: Any, data: np.ndarray | None = None) -> Image:
 
 def _time_axis_index(layer: Any) -> int:
     """Array axis index for cardiac phase (``T`` / ``C``) on a 4D+ layer."""
-    from nvitk.gui.orientation import _axes_string_from_layer
+    from nvitk.gui.core.orientation import _axes_string_from_layer
 
     axes = (_axes_string_from_layer(layer) or "").upper()
     nd = int(getattr(getattr(layer, "data", None), "ndim", 0) or 0)
@@ -277,7 +277,7 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
     text = "  |  ".join(parts)
     if viewer is not None and getattr(layer, "data", None) is not None:
         try:
-            from nvitk.gui.orientation import (
+            from nvitk.gui.core.orientation import (
                 axial_dim_order,
                 napari_dim_order_3d,
                 superior_voxel_axis,

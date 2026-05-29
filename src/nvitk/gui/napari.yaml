@@ -5,7 +5,7 @@ contributions:
   commands:
     - id: nvitk.read_paths
       title: Read with nvitk.io
-      python_name: nvitk.gui.io_napari:read_paths
+      python_name: nvitk.gui.io.napari_io:read_paths
   readers:
     - command: nvitk.read_paths
       filename_patterns:

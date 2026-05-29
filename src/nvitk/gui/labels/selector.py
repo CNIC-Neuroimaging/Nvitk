@@ -20,13 +20,13 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.array import to_numpy
-from nvitk.gui.label_catalog import (
+from nvitk.gui.labels.catalog import (
     all_schemas,
     get_schema,
     guess_schema_from_layer,
     schema_keys,
 )
-from nvitk.gui.label_visibility import label_source_data, unique_layer_labels
+from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
 
 LABEL_SELECTOR_SCROLL_MIN = 80
 

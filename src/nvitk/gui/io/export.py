@@ -12,8 +12,8 @@ from nvitk.io import imsave
 from nvitk.io._common import guess_write_type
 from nvitk.types import Image, Mesh
 
-from nvitk.gui.spatial import layer_affine, layer_to_image as spatial_layer_to_image
-from nvitk.gui.tool_runner import notify
+from nvitk.gui.core.spatial import layer_affine, layer_to_image as spatial_layer_to_image
+from nvitk.gui.tools.runner import notify
 
 
 def layer_to_image(layer: Any, *, use_file_affine: bool = True) -> Image:

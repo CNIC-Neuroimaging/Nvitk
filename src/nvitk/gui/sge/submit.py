@@ -9,15 +9,15 @@ from typing import Any, Callable
 from nvitk.cluster import sge_json
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.remote_transfer import resolve_cluster_host, upload_staged_job
-from nvitk.gui.gui_backend import gpu_enabled
-from nvitk.gui.sge_dialog import SgeSubmitDialog
-from nvitk.gui.sge_job import emit_gui_sge_script, stage_job_locally
-from nvitk.gui.sge_models import SgeConnection, SgePendingJob
-from nvitk.gui.sge_poll import register_sge_monitor, store_pending_job
-from nvitk.gui.tool_panel import _collect_params, _update_reference_layers
-from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
-from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids
-from nvitk.gui.tools_registry import is_sge_capable, sge_block_reason, tool_by_id, tool_id_from_label
+from nvitk.gui.core.backend import gpu_enabled
+from nvitk.gui.sge.dialog import SgeSubmitDialog
+from nvitk.gui.sge.job import emit_gui_sge_script, stage_job_locally
+from nvitk.gui.sge.models import SgeConnection, SgePendingJob
+from nvitk.gui.sge.poll import register_sge_monitor, store_pending_job
+from nvitk.gui.tools.panel import _collect_params, _update_reference_layers
+from nvitk.gui.tools.presets import apply_preset_to_panel, preset_key_from_title
+from nvitk.gui.tools.runner import log_tool_failure, notify, parse_label_ids
+from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason, tool_by_id, tool_id_from_label
 
 
 def _resolve_remote_job_root(user_root: str, job_id: str) -> str:
@@ -43,7 +43,7 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
         return
 
     def _on_finished(job_id: str, done: Any) -> None:
-        from nvitk.gui.sge_poll import update_pending_job_status
+        from nvitk.gui.sge.poll import update_pending_job_status
 
         payload = done.to_dict() if hasattr(done, "to_dict") else done
         update_pending_job_status(app_state, job_id, status="done", done_payload=payload)
@@ -57,7 +57,7 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
             )
 
     def _on_failed(job_id: str, done: Any) -> None:
-        from nvitk.gui.sge_poll import update_pending_job_status
+        from nvitk.gui.sge.poll import update_pending_job_status
 
         payload = done.to_dict() if hasattr(done, "to_dict") else done
         update_pending_job_status(app_state, job_id, status="failed", done_payload=payload)
@@ -96,7 +96,7 @@ def submit_gui_sge(
         notify(sge_block_reason(tool_id), error=True)
         return False
 
-    from nvitk.gui.label_visibility import infer_target_mode
+    from nvitk.gui.labels.visibility import infer_target_mode
 
     spec = tool_by_id(tool_id)
     layer = viewer.layers.selection.active or viewer.layers[-1]

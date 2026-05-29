@@ -22,17 +22,17 @@ from nvitk.cluster.remote_transfer import (
     is_safe_gui_job_root,
     remove_remote_job_tree,
 )
-from nvitk.gui.io_napari import open_paths_with_nvitk
-from nvitk.gui.sge_dialog import _default_host, _default_remote_job_root
-from nvitk.gui.sge_models import (
+from nvitk.gui.io.napari_io import open_paths_with_nvitk
+from nvitk.gui.sge.dialog import _default_host, _default_remote_job_root
+from nvitk.gui.sge.models import (
     SgeConnection,
     SgeDoneMarker,
     remote_done_path,
     remote_output_dir,
     verify_local_downloads,
 )
-from nvitk.gui.sge_poll import read_done_marker, resolve_session_import, update_pending_job_status
-from nvitk.gui.tool_runner import log_tool_failure, notify
+from nvitk.gui.sge.poll import read_done_marker, resolve_session_import, update_pending_job_status
+from nvitk.gui.tools.runner import log_tool_failure, notify
 
 
 @dataclass(frozen=True)

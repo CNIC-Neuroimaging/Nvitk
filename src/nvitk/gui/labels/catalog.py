@@ -221,7 +221,7 @@ def guess_schema_from_layer(layer: Any | None) -> str | None:
     """Heuristic schema from layer name or ``nvitk_metadata['source']``."""
     if layer is None:
         return None
-    from nvitk.gui.spatial import nvitk_metadata_from_layer
+    from nvitk.gui.core.spatial import nvitk_metadata_from_layer
 
     meta = nvitk_metadata_from_layer(layer)
     blob = " ".join(

@@ -13,18 +13,18 @@ from nvitk.core.array import to_numpy
 from nvitk.meshlab import mesh_from_image, marching_cubes_multilabel
 from nvitk.types import Image, Mesh
 
-from nvitk.gui.export_napari import export_selected_layer
-from nvitk.gui.io_napari import (
+from nvitk.gui.io.export import export_selected_layer
+from nvitk.gui.io.napari_io import (
     install_nvitk_io,
     install_nvitk_layer_hooks,
     open_paths_with_nvitk,
 )
-from nvitk.gui.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
-from nvitk.gui.log_panel import build_log_dock_widget
-from nvitk.gui.tool_runner import notify
-from nvitk.gui.dicom_tags_panel import DicomTagsPanel, layer_has_dicom_tags
-from nvitk.gui.tools_dock import build_tools_dock
-from nvitk.gui.warnings import install_napari_display_warnings
+from nvitk.gui.core.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
+from nvitk.gui.core.log_panel import build_log_dock_widget
+from nvitk.gui.tools.runner import notify
+from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
+from nvitk.gui.tools.dock import build_tools_dock
+from nvitk.gui.core.warnings import install_napari_display_warnings
 
 
 def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
@@ -111,7 +111,7 @@ def run_app() -> None:
         _on_layers_changed()
 
     try:
-        from nvitk.gui.data_browser_panel import DataBrowserPanel
+        from nvitk.gui.panels.data_browser import DataBrowserPanel
 
         xnat_panel = DataBrowserPanel(
             viewer,
@@ -124,8 +124,8 @@ def run_app() -> None:
         xnat_panel.setWordWrap(True)
         data_tab_label = "Data"
 
-    from nvitk.gui.gpu_toggle import backend_label
-    from nvitk.gui.log_panel import gui_log
+    from nvitk.gui.tools.gpu_toggle import backend_label
+    from nvitk.gui.core.log_panel import gui_log
 
     gui_log(f"Compute backend: {backend_label()}")
 
@@ -135,7 +135,7 @@ def run_app() -> None:
             notify("No layers loaded.", error=True)
             return
         layer = viewer.layers.selection.active or viewer.layers[-1]
-        from nvitk.gui.spatial import layer_to_image
+        from nvitk.gui.core.spatial import layer_to_image
 
         img = layer_to_image(layer)
         spatial = layer_spatial_kwargs(layer)

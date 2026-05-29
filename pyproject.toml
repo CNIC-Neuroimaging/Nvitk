@@ -185,7 +185,7 @@ nvitk-transform = "nvitk.cli.transform:main"
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-gui = "nvitk.gui.main:main"
-nvitk-gui-sge-worker = "nvitk.gui.sge_worker:main"
+nvitk-gui-sge-worker = "nvitk.gui.sge.worker:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
 nvitk-sync-sge-container = "nvitk.registry.cli_sync_sge:main"
 

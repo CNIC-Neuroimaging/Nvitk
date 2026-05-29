@@ -14,14 +14,14 @@ from typing import Any
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import get_global_backend, using, setup
-from nvitk.gui.gui_backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
-from nvitk.gui.log_panel import gui_log, run_subprocess_logged
-from nvitk.gui.spatial import (
+from nvitk.gui.core.backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
+from nvitk.gui.core.log_panel import gui_log, run_subprocess_logged
+from nvitk.gui.core.spatial import (
     align_mask_to_reference_layer,
     layer_to_image,
     nvitk_metadata_from_layer,
 )
-from nvitk.gui.tools_registry import tool_by_id
+from nvitk.gui.tools.registry import tool_by_id
 from nvitk.types import Image
 
 setup(globals())
@@ -270,8 +270,8 @@ def run_gui_tool(
         return None
 
     if tool_id == "orient_volume":
-        from nvitk.gui.spatial import orientation_text
-        from nvitk.gui.orientation import configure_viewer_for_layer
+        from nvitk.gui.core.spatial import orientation_text
+        from nvitk.gui.core.orientation import configure_viewer_for_layer
         from nvitk.io._common import orientation_codes_from_affine
 
         raw = layer_data_for_tool(layer.data)
@@ -293,7 +293,7 @@ def run_gui_tool(
         if current == target:
             notify(f"Layer is already {target}.")
             return None
-        from nvitk.gui.orientation import reorient_layer_for_view
+        from nvitk.gui.core.orientation import reorient_layer_for_view
 
         previous, new_axes = reorient_layer_for_view(layer, target)
         new_aff = np.asarray(to_numpy(layer.affine), dtype=float)
@@ -668,7 +668,7 @@ def run_gui_tool(
         return coerce_tool_output(out.data if hasattr(out, "data") else out)
 
     if tool_id == "seg_distance_transform":
-        from nvitk.gui.spatial import layer_spacing
+        from nvitk.gui.core.spatial import layer_spacing
         from nvitk.segmentation.hull_edt import distance_transform
 
         sp = layer_spacing(layer) if bool(params.get("edt_use_spacing", True)) else None
@@ -766,7 +766,7 @@ def run_gui_tool(
         intensity = as_backend_array(ref.data).astype(np.float64)
         seed_ids = list(params.get("selected_label_ids") or label_ids or [])
         if bool(params.get("seed_from_label")) and seed_ids:
-            from nvitk.gui.tool_presets import label_centroid_voxel
+            from nvitk.gui.tools.presets import label_centroid_voxel
 
             sz, sy, sx = label_centroid_voxel(mask, int(seed_ids[0]))
         else:
@@ -1158,7 +1158,7 @@ def run_gui_tool_headless(
 
 
 def _layer_spacing(layer: Any) -> tuple[float, float, float]:
-    from nvitk.gui.spatial import layer_spacing
+    from nvitk.gui.core.spatial import layer_spacing
 
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
@@ -1322,7 +1322,7 @@ def _run_centerline_detect_junctions(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> None:
-    from nvitk.gui.centerline_flexion import (
+    from nvitk.gui.viz.centerline import (
         JUNCTION_POINTS_LAYER,
         add_junction_points_layer,
         detect_junctions_from_layer,
@@ -1350,7 +1350,7 @@ def _run_centerline_detect_junctions(
 
 def _resolve_centerline_mask_layer(viewer: Any) -> Any:
     """3D centerline mask recorded when junctions were detected."""
-    from nvitk.gui.centerline_flexion import JUNCTION_META_KEY, JUNCTION_POINTS_LAYER
+    from nvitk.gui.viz.centerline import JUNCTION_META_KEY, JUNCTION_POINTS_LAYER
 
     for lyr in viewer.layers:
         if lyr.name != JUNCTION_POINTS_LAYER:
@@ -1375,7 +1375,7 @@ def _run_centerline_cut_junctions(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> np.ndarray:
-    from nvitk.gui.centerline_flexion import (
+    from nvitk.gui.viz.centerline import (
         centerline_polyline_for_label,
         read_junction_coords,
         split_label_at_junctions,
@@ -1411,7 +1411,7 @@ def _run_centerline_cut_junctions(
 
 
 def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    from nvitk.gui.loc_points import add_locs_layer, load_locs_csv
+    from nvitk.gui.viz.loc_points import add_locs_layer, load_locs_csv
     from nvitk.pipes.qvtpy import config as qcfg
 
     mode = str(params.get("loc_mode") or "load_csv").strip()
@@ -1453,7 +1453,7 @@ def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
 
 
 def _run_qvtpy_stage(tool_id: str, params: dict[str, Any]) -> None:
-    from nvitk.gui.qvtpy_stages import build_qvtpy_stage_argv
+    from nvitk.gui.pipeline.qvtpy_stages import build_qvtpy_stage_argv
 
     argv = build_qvtpy_stage_argv(tool_id, params)
     notify(f"Running: {' '.join(argv)}")
@@ -1470,7 +1470,7 @@ def _run_measure_centerline_arc_length(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> None:
-    from nvitk.gui.centerline_flexion import centerline_polyline_for_label
+    from nvitk.gui.viz.centerline import centerline_polyline_for_label
     from nvitk.morphology.polyline_graph import extract_polylines_from_centerline
     from nvitk.pipes.qvtpy.util.loc_selection import polyline_cumulative_arc_length
 
@@ -1539,7 +1539,7 @@ def _run_measure_centerline_arc_length(
 
 
 def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    from nvitk.gui.loc_points import load_locs_csv
+    from nvitk.gui.viz.loc_points import load_locs_csv
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
     from nvitk.pipes.qvtpy import config as qcfg
     from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
@@ -1721,7 +1721,7 @@ def _run_viz_pet_hotspots(
     *,
     label_ids: list[int] | None,
 ) -> None:
-    from nvitk.gui.napari_viz import add_hotspot_points_layer, hotspot_points_from_volumes
+    from nvitk.gui.viz.layers import add_hotspot_points_layer, hotspot_points_from_volumes
     from nvitk.viz.pet_hotspots import HotspotMode
 
     ref_name = str(params.get("reference_layer") or "").strip()
@@ -1760,7 +1760,7 @@ def _run_viz_flowshow_napari(
     *,
     label_ids: list[int] | None,
 ) -> None:
-    from nvitk.gui.napari_viz import add_animated_flow_vectors_layer, flow_vectors_all_times
+    from nvitk.gui.viz.layers import add_animated_flow_vectors_layer, flow_vectors_all_times
 
     ap_name = str(params.get("ap_layer") or "").strip()
     rl_name = str(params.get("rl_layer") or "").strip()
@@ -1825,7 +1825,7 @@ def _run_viz_flowshow_napari(
 
 
 def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
-    from nvitk.gui.spatial import layer_spatial_kwargs
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
 
     return {"name": f"{layer.name}_{name}", **layer_spatial_kwargs(layer)}
 

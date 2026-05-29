@@ -23,7 +23,7 @@ def main(backend: str) -> None:
         raise SystemExit(1) from exc
 
     from nvitk.gui.app import run_app
-    from nvitk.gui.warnings import install_napari_display_warnings
+    from nvitk.gui.core.warnings import install_napari_display_warnings
 
     install_napari_display_warnings()
     apply_cli_backend(backend)

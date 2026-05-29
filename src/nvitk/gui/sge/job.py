@@ -14,8 +14,8 @@ from typing import Any
 
 from nvitk.cli._sge import emit_submit_script
 from nvitk.cluster.sge import python_module_argv
-from nvitk.gui.spatial import layer_to_image
-from nvitk.gui.tools_registry import params_for_tool
+from nvitk.gui.core.spatial import layer_to_image
+from nvitk.gui.tools.registry import params_for_tool
 from nvitk.io import imsave
 
 _LAYER_NONE = "(none)"
@@ -180,7 +180,7 @@ def emit_gui_sge_script(
     """Write ``submit.sh`` into *local_staging* with cluster-side bind paths."""
     data_root, output_root, _remote_script = build_remote_paths(remote_job_root)
     job_arg = shlex.quote("/nvitk/data/job.json")
-    python_cmd = " ".join([*python_module_argv("nvitk.gui.sge_worker"), "--job", job_arg])
+    python_cmd = " ".join([*python_module_argv("nvitk.gui.sge.worker"), "--job", job_arg])
     job_name = f"gui_{job.tool_id}"[:200]
     script_path = local_staging / "submit.sh"
     emit_submit_script(

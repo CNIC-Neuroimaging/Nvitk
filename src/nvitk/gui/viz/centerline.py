@@ -73,7 +73,7 @@ def add_junction_points_layer(
             }
         },
     }
-    from nvitk.gui.spatial import layer_affine
+    from nvitk.gui.core.spatial import layer_affine
 
     aff = layer_affine(reference_layer)
     if aff is not None:

@@ -81,7 +81,7 @@ _ORGANS_TO_DILATE = {
     "kidney_right": 7,
     "kidney_left": 7,
     "liver": 1,
-    "urinary_bladder": 7,
+    "urinary_bladder": 10,
 }
 
 

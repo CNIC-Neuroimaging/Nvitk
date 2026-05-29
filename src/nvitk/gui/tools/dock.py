@@ -7,24 +7,24 @@ from typing import Any, Callable
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from nvitk.gui.gpu_toggle import build_gpu_toggle_button
-from nvitk.gui.label_catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
-from nvitk.gui.label_selector import LabelSelectorWidget
-from nvitk.gui.label_visibility import (
+from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
+from nvitk.gui.labels.catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
+from nvitk.gui.labels.selector import LabelSelectorWidget
+from nvitk.gui.labels.visibility import (
     apply_label_visibility,
     is_label_like_layer,
     layer_in_viewer,
     restore_label_visibility,
 )
-from nvitk.gui.pipeline_form import PipelineCliForm
-from nvitk.gui.tool_presets import cursor_voxel_indices
-from nvitk.gui.tool_panel import build_tool_panel
-from nvitk.gui.tools_registry import (
+from nvitk.gui.pipeline.form import PipelineCliForm
+from nvitk.gui.tools.presets import cursor_voxel_indices
+from nvitk.gui.tools.panel import build_tool_panel
+from nvitk.gui.tools.registry import (
     TOOL_IDS_USING_LABEL_PICKER,
     tool_by_id,
     tool_id_from_label,
 )
-from nvitk.gui.totalseg_selector import TotalSegRoiWidget
+from nvitk.gui.tools.totalseg_selector import TotalSegRoiWidget
 
 
 def _compact_magicgui_panel(native: QWidget) -> None:
@@ -165,7 +165,7 @@ def build_tools_dock(
             if picked:
                 return picked
         if layer is not None:
-            from nvitk.gui.label_visibility import label_source_data, unique_layer_labels
+            from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
 
             return unique_layer_labels(label_source_data(layer))
         return []
@@ -254,7 +254,7 @@ def build_tools_dock(
         try:
             z, y, x = cursor_voxel_indices(viewer, layer)
         except Exception as exc:
-            from nvitk.gui.tool_runner import notify
+            from nvitk.gui.tools.runner import notify
 
             notify(str(exc), error=True)
             return
@@ -276,9 +276,9 @@ def build_tools_dock(
 
     layout.addWidget(build_gpu_toggle_button(), 0)
 
-    from nvitk.gui.tools_registry import is_sge_capable, sge_block_reason
-    from nvitk.gui.sge_retrieve import import_sge_job
-    from nvitk.gui.sge_submit import submit_gui_sge
+    from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
+    from nvitk.gui.sge.retrieve import import_sge_job
+    from nvitk.gui.sge.submit import submit_gui_sge
 
     btn_run_sge = QPushButton("Run SGE")
     btn_import_sge = QPushButton("Import SGE results")

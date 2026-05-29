@@ -6,10 +6,10 @@ from typing import Any, Callable
 
 from magicgui import magicgui
 
-from nvitk.gui.label_visibility import infer_target_mode
-from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
-from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
-from nvitk.gui.tools_registry import (
+from nvitk.gui.labels.visibility import infer_target_mode
+from nvitk.gui.tools.presets import apply_preset_to_panel, preset_key_from_title
+from nvitk.gui.tools.runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
+from nvitk.gui.tools.registry import (
     categories,
     default_category,
     default_operation,

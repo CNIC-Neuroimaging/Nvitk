@@ -48,9 +48,9 @@ from nvitk.db.xnat_projects import (
     get_xnat_project,
     list_xnat_project_ids,
 )
-from nvitk.gui.io_napari import open_paths_with_nvitk
-from nvitk.gui.log_panel import gui_log
-from nvitk.gui.pipeline_data_presets import (
+from nvitk.gui.io.napari_io import open_paths_with_nvitk
+from nvitk.gui.core.log_panel import gui_log
+from nvitk.gui.pipeline.data_presets import (
     LocalAsset,
     PipelineRoots,
     get_pipeline_preset,
@@ -60,7 +60,7 @@ from nvitk.gui.pipeline_data_presets import (
     list_pipeline_preset_ids,
     load_preset_roots,
 )
-from nvitk.gui.tool_runner import notify
+from nvitk.gui.tools.runner import notify
 
 log = Logger()
 

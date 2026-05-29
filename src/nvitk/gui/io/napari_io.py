@@ -8,12 +8,12 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from nvitk.core.array import to_numpy
-from nvitk.gui.orientation import (
+from nvitk.gui.core.orientation import (
     configure_viewer_for_layer,
     prepare_for_napari,
     suppress_nonorthogonal_slice_warning,
 )
-from nvitk.gui.warnings import install_napari_display_warnings
+from nvitk.gui.core.warnings import install_napari_display_warnings
 
 install_napari_display_warnings()
 from nvitk.io import imread
@@ -280,7 +280,7 @@ def _layer_from_list_event(event: Any) -> Any | None:
 
 
 def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
-    from nvitk.gui.orientation import configure_viewer_for_layer, ensure_4d_scale_only_layer
+    from nvitk.gui.core.orientation import configure_viewer_for_layer, ensure_4d_scale_only_layer
 
     layer = _layer_from_list_event(event)
     if layer is None:
@@ -304,7 +304,7 @@ def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
 
 def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:
     """Re-apply 4D dims when selecting a 4D layer (3D oblique affines can pollute viewer.dims)."""
-    from nvitk.gui.orientation import _axes_string_from_layer, _synchronize_4d_dims, ensure_4d_scale_only_layer
+    from nvitk.gui.core.orientation import _axes_string_from_layer, _synchronize_4d_dims, ensure_4d_scale_only_layer
 
     if not viewer.layers:
         return

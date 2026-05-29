@@ -26,7 +26,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nvitk.gui.pipeline_stages import (
+from nvitk.gui.pipeline.stages import (
     PipelineStageDef,
     PipelineStageSpec,
     StageInputBinding,

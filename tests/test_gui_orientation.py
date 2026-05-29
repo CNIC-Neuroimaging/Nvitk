@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from nvitk.gui.orientation import reorient_layer_for_view
+from nvitk.gui.core.orientation import reorient_layer_for_view
 
 
 class _FakeEvents:

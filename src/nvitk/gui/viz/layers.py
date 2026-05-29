@@ -8,7 +8,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.gui.spatial import layer_affine, layer_spacing
+from nvitk.gui.core.spatial import layer_affine, layer_spacing
 from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
 from nvitk.viz.pet_hotspots import HotspotMode, _roi_mask, _select_hotspots
 
@@ -184,7 +184,7 @@ def _subsample_mask_indices(mask: np.ndarray, max_points: int, label_ids: list[i
 
 def _time_axis_index_from_layer(layer: Any) -> int:
     """Array axis index for cardiac phase (``T`` / ``C``) on a 4D phase layer."""
-    from nvitk.gui.orientation import _axes_string_from_layer
+    from nvitk.gui.core.orientation import _axes_string_from_layer
 
     axes = (_axes_string_from_layer(layer) or "").upper()
     nd = int(getattr(getattr(layer, "data", None), "ndim", 0) or 0)
@@ -420,7 +420,7 @@ def _phase_dim_steps(viewer: Any, phase_layer: Any) -> list[int]:
 def _install_phase_dims(viewer: Any, phase_layer: Any) -> None:
     """One-time 4D dims setup after adding vectors: ranges/labels, keep camera + scrubber."""
     from napari.components.dims import RangeTuple
-    from nvitk.gui.orientation import (
+    from nvitk.gui.core.orientation import (
         _axes_string_from_layer,
         _layer_display_scale,
         ensure_4d_scale_only_layer,
@@ -457,7 +457,7 @@ def _install_phase_dims(viewer: Any, phase_layer: Any) -> None:
 def _repair_time_dim_range(viewer: Any, phase_layer: Any) -> None:
     """Fix cardiac-phase slider extent if vector layer updates polluted dims.range."""
     from napari.components.dims import RangeTuple
-    from nvitk.gui.orientation import _layer_display_scale, ensure_4d_scale_only_layer
+    from nvitk.gui.core.orientation import _layer_display_scale, ensure_4d_scale_only_layer
 
     if getattr(phase_layer, "data", None) is None or int(phase_layer.data.ndim) <= 3:
         return

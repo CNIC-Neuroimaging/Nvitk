@@ -1,7 +1,7 @@
 """GUI helpers aligned with the global nvitk backend (:mod:`nvitk.core.backend`).
 
 The active backend is set by ``nvitk-gui --backend cpu|gpu``, the dock GPU toggle
-(:mod:`nvitk.gui.gpu_toggle`), or :func:`~nvitk.core.backend.set_default_backend`.
+(:mod:`nvitk.gui.tools.gpu_toggle`), or :func:`~nvitk.core.backend.set_default_backend`.
 """
 
 from __future__ import annotations

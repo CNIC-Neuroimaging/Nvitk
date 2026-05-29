@@ -6,7 +6,7 @@ import json
 from typing import Any, Callable
 
 from nvitk.cluster.remote_transfer import read_remote_text, remote_path_exists, sftp_session
-from nvitk.gui.sge_models import SgeDoneMarker, SgePendingJob, SgeConnection, remote_done_path
+from nvitk.gui.sge.models import SgeDoneMarker, SgePendingJob, SgeConnection, remote_done_path
 
 try:
     from qtpy.QtCore import QObject, QTimer, Signal

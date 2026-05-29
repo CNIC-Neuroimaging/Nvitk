@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from nvitk.gui.pipes_catalog import PIPELINE_TOOLS
+from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
 
 ParamKind = Literal[
     "int",
@@ -813,7 +813,7 @@ def params_for_tool(tool_id: str) -> tuple[ParamSpec, ...]:
 
 def operation_help_text(tool_id: str | None) -> str:
     """Brief description for the selected tool (Tools panel)."""
-    from nvitk.gui.tool_descriptions import tool_description_text
+    from nvitk.gui.tools.descriptions import tool_description_text
 
     if not tool_id:
         return tool_description_text("", fallback_label="Select a category and operation.")

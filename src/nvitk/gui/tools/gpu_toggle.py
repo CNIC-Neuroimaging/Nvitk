@@ -10,7 +10,7 @@ from typing import Callable
 
 from nvitk.core.backend import BackendName, get_global_backend, is_gpu_available
 from nvitk.core.click_backend import apply_cli_backend
-from nvitk.gui.log_panel import gui_log
+from nvitk.gui.core.log_panel import gui_log
 
 
 def backend_label() -> str:

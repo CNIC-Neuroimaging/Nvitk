@@ -53,8 +53,8 @@ def main(job_path: Path) -> None:
     data_dir = job_path.parent
     output_dir = Path("/nvitk/output")
 
-    from nvitk.gui.sge_job import GuiSgeJob
-    from nvitk.gui.tool_runner import run_gui_tool_headless
+    from nvitk.gui.sge.job import GuiSgeJob
+    from nvitk.gui.tools.runner import run_gui_tool_headless
 
     job = GuiSgeJob.from_dict(spec)
     exit_code = 0

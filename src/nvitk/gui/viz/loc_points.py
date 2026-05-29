@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from nvitk.gui.spatial import layer_affine
+from nvitk.gui.core.spatial import layer_affine
 
 LOC_CSV_COLUMNS: tuple[str, ...] = (
     "vessel_id",
