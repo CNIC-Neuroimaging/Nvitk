@@ -27,8 +27,10 @@ from nvitk.pipes.pesa_fat.qc.hotspot_embed import (
 )
 from nvitk.pipes.pesa_fat.qc.html_builder import build_ctpet_report_html, build_dixon_report_html
 from nvitk.pipes.pesa_fat.qc.measurements_table import (
+    copy_measurements_xlsx_for_qc,
     dataframe_to_html_table,
     load_per_subject_tables,
+    measurements_download_button_html,
 )
 from nvitk.pipes.pesa_fat.qc.pet_axial import (
     build_ctpet_slice_viewer_html,
@@ -201,6 +203,14 @@ def run_qc_subject(
             structures=structures_ct,
             report_relpath=f"{subject}/{out_ct.name}",
         )
+        ct_xlsx_href = copy_measurements_xlsx_for_qc(
+            lay=lay,
+            subject=subject,
+            pipeline="ct-pet-v5",
+            assets_dir=assets,
+            rel_assets=rel_assets,
+        )
+        ct_download = measurements_download_button_html(ct_xlsx_href)
         html_ct = build_ctpet_report_html(
             batch=lay.batch,
             subject=subject,
@@ -209,6 +219,7 @@ def run_qc_subject(
             hotspot_gallery=ct_hot,
             axial_html=ctpet_axial_parts,
             measurements_table=ct_table,
+            measurements_download=ct_download,
         )
         out_ct.write_text(html_ct, encoding="utf-8")
         wrote_ct = out_ct
@@ -237,6 +248,14 @@ def run_qc_subject(
   <div class="card-b">{heat}</div>
 </div>
 '''.strip()
+        dx_xlsx_href = copy_measurements_xlsx_for_qc(
+            lay=lay,
+            subject=subject,
+            pipeline="dixon-v5",
+            assets_dir=assets,
+            rel_assets=rel_assets,
+        )
+        dx_download = measurements_download_button_html(dx_xlsx_href)
         html_dx = build_dixon_report_html(
             batch=lay.batch,
             subject=subject,
@@ -245,6 +264,7 @@ def run_qc_subject(
             hotspot_gallery=dx_hot,
             axial_html=dixon_axial_parts,
             measurements_table=dx_table,
+            measurements_download=dx_download,
             extra_sections_html=extra,
         )
         out_dx.write_text(html_dx, encoding="utf-8")

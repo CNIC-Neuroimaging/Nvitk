@@ -597,7 +597,7 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
     </div>
 
     <div class="card">
-      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">OK only when every structure is OK · use Sync Database on each report for NVITK DB</div></div>
+      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">OK only when every structure is OK · FAIL if there is any issue with the report</div></div>
       <div class="card-b">
         <div class="table-wrap">
           <table>

@@ -59,6 +59,18 @@ section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
 
 .axial-blocks { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .scroll-x { overflow-x: auto; }
+.qc-dl-btn {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(252,163,17,0.5);
+  background: rgba(252,163,17,0.15);
+  color: #fca311;
+  font-weight: 600;
+  font-size: 12px;
+  text-decoration: none;
+}
+.qc-dl-btn:hover { background: rgba(252,163,17,0.28); text-decoration: none; }
 """
 
 
@@ -104,6 +116,7 @@ def build_ctpet_report_html(
     hotspot_gallery: str,
     axial_html: list[str],
     measurements_table: str,
+    measurements_download: str = "",
 ) -> str:
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
@@ -127,7 +140,7 @@ def build_ctpet_report_html(
 </div>
 
 <div class="card">
-  <div class="card-h"><h3>Measurements</h3><div class="muted">out-of-range highlighted</div></div>
+  <div class="card-h"><h3>Measurements</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">{measurements_download}<span class="muted">out-of-range highlighted</span></div></div>
   <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
 </div>
 </section>
@@ -145,6 +158,7 @@ def build_dixon_report_html(
     hotspot_gallery: str,
     axial_html: list[str],
     measurements_table: str,
+    measurements_download: str = "",
     extra_sections_html: str = "",
 ) -> str:
     masks = _join_iframes(masks_html)
@@ -179,7 +193,7 @@ def build_dixon_report_html(
 {extra_sections_html}
 
 <div class=\"card\">
-  <div class=\"card-h\"><h3>Measurements</h3><div class=\"muted\">out-of-range highlighted</div></div>
+  <div class=\"card-h\"><h3>Measurements</h3><div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap\">{measurements_download}<span class=\"muted\">out-of-range highlighted</span></div></div>
   <div class=\"card-b\"><div class=\"table-wrap\">{measurements_table}</div></div>
 </div>
 </section>

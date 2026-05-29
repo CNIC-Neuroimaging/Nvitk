@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
+
+from nvitk.pipes.pesa_fat.common.paths import BatchLayout
+from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
+from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
+
+PesaFatQcPipeline = Literal["ct-pet-v5", "dixon-v5"]
 
 from nvitk.pipes.pesa_fat.qc.expected_ranges import cell_level
 
@@ -109,7 +117,60 @@ def _format_cell(val: object) -> str:
     return str(val)
 
 
+def stage3_measurements_xlsx_path(
+    lay: BatchLayout,
+    subject: str,
+    pipeline: PesaFatQcPipeline,
+) -> Path:
+    """Path to the stage-3 per-subject measurements workbook."""
+    subj = str(subject).strip()
+    if pipeline == "ct-pet-v5":
+        return lay.results_dir / ct_cfg.STAGE3_DIR / "per_subject" / f"{subj}.xlsx"
+    return lay.results_dir / dx_cfg.STAGE3_DIR / "per_subject" / f"{subj}.xlsx"
+
+
+def copy_measurements_xlsx_for_qc(
+    *,
+    lay: BatchLayout,
+    subject: str,
+    pipeline: PesaFatQcPipeline,
+    assets_dir: Path,
+    rel_assets: str,
+) -> str | None:
+    """Copy stage-3 Excel beside QC HTML assets; return relative download href."""
+    src = stage3_measurements_xlsx_path(lay, subject, pipeline)
+    if not src.is_file():
+        return None
+    subj = str(subject).strip()
+    tag = "ctpet" if pipeline == "ct-pet-v5" else "dixon"
+    fname = f"measurements_{tag}_{subj}.xlsx"
+    dest_dir = Path(assets_dir) / "measurements"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest_dir / fname)
+    rel = str(rel_assets).strip().rstrip("/")
+    return f"{rel}/measurements/{fname}"
+
+
+def measurements_download_button_html(
+    href: str | None,
+    *,
+    label: str = "Download Table",
+) -> str:
+    """Link button to download the measurements Excel (relative to the QC report)."""
+    if not href:
+        return '<span class="muted">Excel not available</span>'
+    safe_href = _esc(href)
+    safe_label = _esc(label)
+    return (
+        f'<a class="qc-dl-btn" href="{safe_href}" download>{safe_label}</a>'
+    )
+
+
 __all__ = [
+    "PesaFatQcPipeline",
+    "copy_measurements_xlsx_for_qc",
     "dataframe_to_html_table",
     "load_per_subject_tables",
+    "measurements_download_button_html",
+    "stage3_measurements_xlsx_path",
 ]
