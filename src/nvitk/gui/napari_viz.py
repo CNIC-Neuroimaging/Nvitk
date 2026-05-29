@@ -35,12 +35,12 @@ def hotspot_points_from_volumes(
     suv: np.ndarray,
     mask: np.ndarray,
     *,
-    label_ids: Sequence[int] | None = None,
-    hotspot: HotspotMode = "top_percent",
-    top_percent: float = 0.1,
-    top_k: int | None = None,
-    threshold: float | None = None,
-    max_points: int = 20000,
+    label_ids = None,
+    hotspot = "top_percent",
+    top_percent = 0.1,
+    top_k = None,
+    threshold = None,
+    max_points = 20000,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
     """
     Return Napari point coordinates (N,3), SUV values, and feature columns.
@@ -82,7 +82,7 @@ class HotspotPointsState:
     """Tracks SUV hotspot layer and Napari 0.7 style-sync callbacks."""
 
     layer: Any
-    disconnect_style_sync: Callable[[], None] | None = None
+    disconnect_style_sync = None
 
 
 def stop_hotspot_points_sync(viewer: Any) -> None:
@@ -139,16 +139,16 @@ def add_hotspot_points_layer(
     features: dict[str, np.ndarray],
     *,
     reference_layer: Any,
-    name: str = HOTSPOTS_LAYER,
-    point_size: float = DEFAULT_HOTSPOT_POINT_SIZE,
-    colormap: str = DEFAULT_HOTSPOT_COLORMAP,
+    name = HOTSPOTS_LAYER,
+    point_size = DEFAULT_HOTSPOT_POINT_SIZE,
+    colormap = DEFAULT_HOTSPOT_COLORMAP,
 ) -> Any:
     stop_hotspot_points_sync(viewer)
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)
     size = float(point_size)
-    kwargs: dict[str, Any] = {"size": size, "symbol": "o", "border_width_is_relative": False}
+    kwargs = {"size": size, "symbol": "o", "border_width_is_relative": False}
     if coords.shape[0] == 0:
         kwargs["face_color"] = "red"
     else:
@@ -198,7 +198,7 @@ def _time_axis_index_from_layer(layer: Any) -> int:
 
 def _move_time_axis_last(*arrays: np.ndarray, time_axis: int) -> tuple[np.ndarray, ...]:
     """Ensure the cardiac-phase axis is last (required by velocity_mm_s_from_phases)."""
-    out: list[np.ndarray] = []
+    out = []
     for arr in arrays:
         a = to_numpy(arr)
         if int(time_axis) != a.ndim - 1 and a.ndim >= 4:
@@ -211,7 +211,7 @@ def _displacement_from_velocity(
     velocities_mm_s: np.ndarray,
     *,
     max_arrow_voxels: float,
-    speed_percentile: float = 95.0,
+    speed_percentile = 95.0,
 ) -> np.ndarray:
     """Unit direction × capped length; color still uses true speed in features."""
     vel = to_numpy(velocities_mm_s).astype(np.float64)
@@ -258,11 +258,11 @@ def flow_vectors_all_times(
     fh: np.ndarray,
     mask: np.ndarray,
     *,
-    phase_layer: Any | None = None,
-    label_ids: list[int] | None = None,
-    max_points: int = 4000,
-    max_arrow_voxels: float = 5.0,
-    speed_percentile: float = 95.0,
+    phase_layer = None,
+    label_ids = None,
+    max_points = 4000,
+    max_arrow_voxels = 5.0,
+    speed_percentile = 95.0,
 ) -> FlowVectorCache:
     """Precompute subsampled velocity glyphs for every cardiac phase."""
     time_axis = _time_axis_index_from_layer(phase_layer) if phase_layer is not None else -1
@@ -326,11 +326,11 @@ def flow_vectors_at_time(
     mask: np.ndarray,
     time_index: int,
     *,
-    phase_layer: Any | None = None,
-    label_ids: list[int] | None = None,
-    max_points: int = 4000,
-    max_arrow_voxels: float = 5.0,
-    speed_percentile: float = 95.0,
+    phase_layer = None,
+    label_ids = None,
+    max_points = 4000,
+    max_arrow_voxels = 5.0,
+    speed_percentile = 95.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (positions Nx3, displacement Nx3, speed N) for one cardiac phase."""
     cache = flow_vectors_all_times(
@@ -366,15 +366,15 @@ def add_flow_vectors_layer(
     vectors: np.ndarray,
     *,
     reference_layer: Any,
-    name: str = FLOW_VECTORS_LAYER,
-    features: dict[str, np.ndarray] | None = None,
-    speed_limits: tuple[float, float] | None = None,
-    colormap: str = "turbo",
+    name = FLOW_VECTORS_LAYER,
+    features = None,
+    speed_limits = None,
+    colormap = "turbo",
 ) -> Any:
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)
-    kwargs: dict[str, Any] = {
+    kwargs = {
         "name": name,
         "vector_style": "arrow",
         "edge_width": DEFAULT_FLOW_EDGE_WIDTH,
@@ -512,8 +512,8 @@ def _update_flow_vector_layer(
     cache: FlowVectorCache,
     time_index: int,
     *,
-    viewer: Any | None = None,
-    phase_layer: Any | None = None,
+    viewer = None,
+    phase_layer = None,
 ) -> None:
     data, features = flow_vector_frame(cache, time_index)
     layer.data = data
@@ -527,11 +527,11 @@ def add_animated_flow_vectors_layer(
     cache: FlowVectorCache,
     *,
     phase_layer: Any,
-    spatial_reference_layer: Any | None = None,
-    name: str = FLOW_VECTORS_LAYER,
-    initial_time: int = 0,
-    sync_dims: bool = True,
-    colormap: str = "turbo",
+    spatial_reference_layer = None,
+    name = FLOW_VECTORS_LAYER,
+    initial_time = 0,
+    sync_dims = True,
+    colormap = "turbo",
 ) -> FlowVectorPlayback:
     """Add flow vectors; sync glyph data to the Napari dims slider / play bar."""
     stop_flow_vector_playback(viewer)
@@ -545,7 +545,7 @@ def add_animated_flow_vectors_layer(
         if lyr.name == name:
             viewer.layers.remove(lyr)
 
-    kwargs: dict[str, Any] = {
+    kwargs = {
         "name": name,
         "vector_style": "arrow",
         "edge_width": DEFAULT_FLOW_EDGE_WIDTH,

@@ -202,7 +202,7 @@ def _extract_zeiss_raw_oct(
 
         if is_jp2_file or is_jp2_codestream:
             try:
-                import glymur  # type: ignore
+                import glymur
 
                 temp_file = tempfile.NamedTemporaryFile(suffix=".jp2", delete=False)
                 try:

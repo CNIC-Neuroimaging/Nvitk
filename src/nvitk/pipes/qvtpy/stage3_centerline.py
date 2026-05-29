@@ -288,7 +288,7 @@ def run_subject(
 # ---------------------------------------------------------------------------
 
 
-def _stage3_cli_options(func):  # type: ignore[no-untyped-def]
+def _stage3_cli_options(func):
     func = click.option("--subject", required=True)(func)
     func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
     func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
@@ -419,7 +419,7 @@ def main(
         nifti_root=nifti_root,
         output_root=output_root,
         skip_existing=skip_existing,
-        eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+        eicab_mask=eicab_mask.lower(),
         cd_up_thresh=cd_up_thresh,
         cd_shift_hm=cd_shift_hm,
         venous_min_component_frac=venous_min_component_frac,

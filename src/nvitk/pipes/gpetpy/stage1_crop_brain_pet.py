@@ -154,7 +154,7 @@ def run_subject(
     out_meta = lay.stage1_meta()
     if not overwrite and out_pet.exists() and out_mask.exists() and out_meta.exists():
         meta = json.loads(out_meta.read_text(encoding="utf-8"))
-        return CropMeta(**meta)  # type: ignore[arg-type]
+        return CropMeta(**meta)
 
     # 1) TotalSegmentator on CT → multilabel seg
     ts_task = "total"
@@ -215,7 +215,7 @@ def run_subject(
     # 6) Crop PET + mask; update affine
     pet_data = as_backend_array(pet.data)[:, :, z0:z1]
     mask_data = as_backend_array(mask_pet.data)[:, :, z0:z1]
-    new_aff = _crop_affine_z(pet.affine, z0)  # type: ignore[arg-type]
+    new_aff = _crop_affine_z(pet.affine, z0)
 
     pet_md = dict(pet.metadata or {})
     pet_md["affine"] = new_aff

@@ -28,8 +28,8 @@ def detect_junctions_from_layer(
     layer: Any,
     *,
     label_id: int | None,
-    min_degree: int = 3,
-    reskeletonize: bool = False,
+    min_degree = 3,
+    reskeletonize = False,
 ) -> np.ndarray:
     """Junction voxel coordinates from a 3D centerline mask."""
     arr = _require_centerline_volume(layer)
@@ -46,8 +46,8 @@ def add_junction_points_layer(
     junctions: np.ndarray,
     *,
     reference_layer: Any,
-    source_layer_name: str = "",
-    min_degree: int = 3,
+    source_layer_name = "",
+    min_degree = 3,
 ) -> Any:
     """Add or replace skeleton junction markers."""
     for lyr in list(viewer.layers):
@@ -57,11 +57,11 @@ def add_junction_points_layer(
     coords = to_numpy(junctions).astype(np.float64)
     if coords.ndim == 1:
         coords = coords.reshape(0, 3)
-    features: dict[str, np.ndarray] = {}
+    features = {}
     if coords.shape[0] > 0:
         features["skeleton_degree"] = np.full(coords.shape[0], int(min_degree), dtype=int)
 
-    kwargs: dict[str, Any] = {
+    kwargs = {
         "size": 12,
         "face_color": "magenta",
         "symbol": "star",
@@ -104,7 +104,7 @@ def read_junction_coords(viewer: Any) -> np.ndarray:
 def cluster_junction_coords(
     junctions: np.ndarray,
     *,
-    cluster_radius_vox: int = 1,
+    cluster_radius_vox = 1,
 ) -> np.ndarray:
     """Collapse nearby junction markers to one representative voxel per cluster."""
     pts = to_numpy(junctions).astype(np.int32)
@@ -112,13 +112,13 @@ def cluster_junction_coords(
         return np.zeros((0, 3), dtype=np.int32)
     rad = max(0, int(cluster_radius_vox))
     visited = np.zeros(pts.shape[0], dtype=bool)
-    reps: list[np.ndarray] = []
+    reps = []
     for i in range(pts.shape[0]):
         if visited[i]:
             continue
         cluster_idx = [i]
         visited[i] = True
-        q: deque[int] = deque([i])
+        q = deque([i])
         while q:
             cur = q.popleft()
             for j in range(pts.shape[0]):
@@ -138,20 +138,20 @@ def _nearest_polyline_indices(
     polyline: np.ndarray,
     junctions: np.ndarray,
     *,
-    min_separation_points: int = 2,
+    min_separation_points = 2,
 ) -> list[int]:
     """Map each junction cluster to one cut index on an ordered centerline polyline."""
     if junctions.size == 0 or polyline.shape[0] == 0:
         return []
     p = to_numpy(polyline).astype(np.float64)
     reps = cluster_junction_coords(junctions, cluster_radius_vox=1)
-    cuts: list[int] = []
+    cuts = []
     for j in reps.astype(np.float64):
         d2 = np.sum((p - j.reshape(1, 3)) ** 2, axis=1)
         cuts.append(int(np.argmin(d2)))
     sep = max(1, int(min_separation_points))
     ordered = sorted({int(c) for c in cuts if 0 < int(c) < int(p.shape[0])})
-    merged: list[int] = []
+    merged = []
     for c in ordered:
         if merged and abs(c - merged[-1]) < sep:
             continue
@@ -165,7 +165,7 @@ def split_label_at_junctions(
     centerline_polyline: np.ndarray,
     junction_coords: np.ndarray,
     *,
-    new_label_start: int | None = None,
+    new_label_start = None,
 ) -> tuple[np.ndarray, list[int]]:
     """
     Split *source_label_id* into new labels at junctions along *centerline_polyline*.
@@ -218,7 +218,7 @@ def centerline_polyline_for_label(
     centerline_layer: Any,
     label_id: int,
     *,
-    reskeletonize: bool = False,
+    reskeletonize = False,
 ) -> np.ndarray:
     """Longest-path polyline through one label on a centerline mask (for junction cuts)."""
     from nvitk.morphology.centerline import compute_centerlines

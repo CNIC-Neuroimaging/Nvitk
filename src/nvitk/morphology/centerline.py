@@ -30,7 +30,7 @@ def skeletonize_binary(mask) -> Any:
 
 def _require_skeletonize():
     try:
-        from skimage.morphology import skeletonize  # type: ignore
+        from skimage.morphology import skeletonize
     except Exception as exc:
         import traceback
         log.exception(traceback.format_exc())

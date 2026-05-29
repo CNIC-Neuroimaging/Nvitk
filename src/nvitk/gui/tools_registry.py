@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from nvitk.gui.pipes_catalog import PIPELINE_TOOLS
-from nvitk.gui.qvtpy_stages import STAGE_SPECS, default_dicom_root
 
 ParamKind = Literal[
     "int",
@@ -77,43 +76,8 @@ _LABEL_IDS = ParamSpec("label_ids", "Label id(s) comma-separated", "str", "1")
 _NEW_ID = ParamSpec("new_id", "Output label id", "int", 1, min=0, max=9999)
 _OUTPUT_DIR = ParamSpec("output_dir", "Output directory", "str", "")
 _WORKING_DIR = ParamSpec("working_dir", "Working directory", "str", "")
-_QVT_SUBJECT = ParamSpec("subject", "Subject id", "str", "")
-_QVT_NIFTI_ROOT = ParamSpec("nifti_root", "NIfTI root", "str", "")
-_QVT_OUTPUT_ROOT = ParamSpec("output_root", "Output root", "str", "")
-_QVT_DICOM_ROOT = ParamSpec("dicom_root", "DICOM root", "str", default_dicom_root())
-_QVT_SKIP = ParamSpec("skip_existing", "Skip existing outputs", "bool", False)
-_QVT_STAGE_COMMON = (_QVT_SUBJECT, _QVT_NIFTI_ROOT, _QVT_OUTPUT_ROOT, _QVT_DICOM_ROOT, _QVT_SKIP)
-_QVT_STAGE0_EXTRA = (
-    ParamSpec("compute_phase_derived", "Compute phase derivatives", "bool", True),
-    ParamSpec("phase_background_correction", "Phase background correction", "bool", True),
-    ParamSpec("no_cd_4d_background_correction", "Disable CD 4D background correction", "bool", False),
-)
-_QVT_STAGE3_EXTRA = (
-    ParamSpec("eicab_mask", "eICAB mask", "choice", "cw", choices=("cw", "wb")),
-)
 
 
-def _qvtpy_stage_gui_specs() -> tuple[GuiToolSpec, ...]:
-    out: list[GuiToolSpec] = []
-    for s in STAGE_SPECS:
-        params = list(_QVT_STAGE_COMMON)
-        if s.tool_id == "qvtpy_stage0_convert":
-            params.extend(_QVT_STAGE0_EXTRA)
-        if s.tool_id == "qvtpy_stage3_centerline":
-            params.extend(_QVT_STAGE3_EXTRA)
-        if s.is_download:
-            params = [_QVT_SUBJECT, _QVT_DICOM_ROOT, _QVT_SKIP]
-        out.append(
-            GuiToolSpec(
-                s.tool_id,
-                "Centerline",
-                s.label,
-                tuple(params),
-                run_mode="notify",
-                description=f"Run python -m {s.module}",
-            )
-        )
-    return tuple(out)
 def _totalseg_task_choices() -> tuple[str, ...]:
     try:
         from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
@@ -228,7 +192,6 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "Split a label at junction markers from Detect skeleton junctions."
         ),
     ),
-    *_qvtpy_stage_gui_specs(),
     GuiToolSpec(
         "siphon_correct",
         "Morphology",
@@ -583,6 +546,26 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
         needs_reference_layer=True,
         run_mode="notify",
+    ),
+    GuiToolSpec(
+        "orient_volume",
+        "Transform",
+        "View / reorient orientation",
+        (
+            ParamSpec("orient_mode", "Action", "choice", "view", choices=("view", "reorient")),
+            ParamSpec(
+                "target_orientation",
+                "Target orientation",
+                "choice",
+                "RAS",
+                choices=("RAS", "LPS", "LAS", "RPS", "RSA", "LPI", "LSA", "RPI", "LIA", "RIA"),
+            ),
+        ),
+        needs_3d=True,
+        description=(
+            "Show NIfTI axis codes (RAS/LPS/…) or mirror/permute the Napari display "
+            "to a target layout (e.g. RAS→LAS flips left/right in the viewer)."
+        ),
     ),
     GuiToolSpec(
         "isotropy",

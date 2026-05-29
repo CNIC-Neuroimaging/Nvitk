@@ -614,7 +614,7 @@ def main(
                             nifti_root=nifti_root,
                             output_root=output_root,
                             skip_existing=skip_existing,
-                            reference=stage2_reference,  # type: ignore[arg-type]
+                            reference=stage2_reference,
                             dof=stage2_dof,
                             cost=stage2_cost,
                         ),
@@ -628,7 +628,7 @@ def main(
                             nifti_root=nifti_root,
                             output_root=output_root,
                             skip_existing=skip_existing,
-                            eicab_mask=eicab_mask.lower(),  # type: ignore[arg-type]
+                            eicab_mask=eicab_mask.lower(),
                             eicab_prefer_pp=eicab_prefer_pp,
                             cd_up_thresh=cd_up_thresh,
                             cd_shift_hm=cd_shift_hm,
@@ -648,7 +648,7 @@ def main(
                             output_root=output_root,
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
-                            thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                            thr_algorithm=thr_algorithm_4dflow.lower(),
                             region_growing=region_growing,
                             rg_intensity_frac=rg_intensity_frac,
                             rg_intensity_frac_explore=rg_intensity_frac_explore,
@@ -670,7 +670,7 @@ def main(
                             output_root=output_root,
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
-                            thr_algorithm=thr_algorithm_4dflow.lower(),  # type: ignore[arg-type]
+                            thr_algorithm=thr_algorithm_4dflow.lower(),
                             region_growing=region_growing,
                             rg_intensity_frac=rg_intensity_frac,
                             rg_intensity_frac_explore=rg_intensity_frac_explore,
@@ -708,7 +708,7 @@ def main(
                             skip_existing=skip_existing,
                             cross_section_radius_vox=cross_section_radius_vox,
                             measure_resegment=measure_resegment,
-                            measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
+                            measure_thr_algorithm=measure_thr_algorithm.lower(),
                             cross_section_res=cross_section_res,
                             cross_section_plane_interp=cross_section_plane_interp,
                         ),
@@ -797,7 +797,7 @@ def main(
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
-                        reference=stage2_reference,  # type: ignore[arg-type]
+                        reference=stage2_reference,
                         dof=stage2_dof,
                         cost=stage2_cost,
                         hold_jid=prev_jid,

@@ -624,7 +624,7 @@ class PipelineRunTracker:
                 raise
             return None
         if callable(detail):
-            detail_str = detail(result)  # type: ignore[arg-type]
+            detail_str = detail(result)
         elif detail:
             detail_str = str(detail)
         else:

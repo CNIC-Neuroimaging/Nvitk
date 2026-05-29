@@ -251,7 +251,7 @@ def _lr_voxel_axis_for_radiological(affine: np.ndarray | None, ndim: int) -> int
 
 
 def _apply_voxel_axis_flip(layer: Any, axis: int) -> None:
-    """Flip one voxel axis via affine (keeps world coordinates consistent)."""
+    """Mirror one voxel axis in the viewer by negating that column of the affine."""
     aff = getattr(layer, "affine", None)
     if aff is None:
         return
@@ -268,6 +268,79 @@ def _apply_voxel_axis_flip(layer: Any, axis: int) -> None:
     flip[axis, axis] = -1.0
     flip[axis, 3] = float(n - 1)
     layer.affine = aff @ flip
+
+
+def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
+    """
+    Change Napari display to *target* axis codes (e.g. ``LAS``).
+
+    Sign-only changes (R↔L, A↔P, S↔I) mirror the viewer via affine flips without
+    rewriting voxel data. Permutations reorder ``layer.data`` and rebuild a display
+    affine so the on-screen layout matches *target*.
+
+    Unlike :meth:`nvitk.types.Image.orient_to`, this does not preserve world-space
+    coordinates; the goal is a visible left/right (or axis) flip in the viewer.
+    """
+    import nibabel as nib
+
+    target_codes = str(target).strip().upper()
+    if len(target_codes) != 3:
+        raise ValueError(f"target orientation must have length 3, got {target!r}")
+
+    aff = getattr(layer, "affine", None)
+    data = getattr(layer, "data", None)
+    if aff is None or data is None:
+        raise ValueError("layer requires data and affine for display reorientation.")
+    if int(data.ndim) < 3:
+        raise ValueError("display reorientation requires at least 3 dimensions.")
+
+    aff_arr = to_numpy(aff).astype(float)
+    data_arr = to_numpy(data)
+    current_codes = "".join(nib.orientations.aff2axcodes(aff_arr))
+    if current_codes == target_codes:
+        return current_codes, None
+
+    old_ornt = nib.orientations.io_orientation(aff_arr)
+    target_ornt = nib.orientations.axcodes2ornt(tuple(target_codes))
+    xfm = nib.orientations.ornt_transform(old_ornt, target_ornt)
+    flip_only = all(int(xfm[i, 0]) == i for i in range(3))
+
+    new_axes: str | None = None
+    if flip_only:
+        for i in range(3):
+            if int(xfm[i, 1]) < 0:
+                _apply_voxel_axis_flip(layer, i)
+    else:
+        spacing = np.linalg.norm(aff_arr[:3, :3], axis=0)
+        new_data = nib.orientations.apply_orientation(data_arr, xfm)
+        perm = [int(xfm[i, 0]) for i in range(3)]
+        new_spacing = [float(spacing[p]) for p in perm]
+        zoom_affine = np.diag([*new_spacing, 1.0])
+        id_ornt = nib.orientations.io_orientation(np.eye(4))
+        id_to_target = nib.orientations.ornt_transform(id_ornt, target_ornt)
+        new_affine = zoom_affine @ nib.orientations.inv_ornt_aff(id_to_target, new_data.shape)
+        layer.data = new_data
+        layer.affine = np.asarray(new_affine, dtype=float)
+
+        axes_str = _axes_string_from_layer(layer)
+        if axes_str is not None and len(axes_str) >= 3:
+            tail = axes_str[3:]
+            spatial = [axes_str[p] for p in perm]
+            candidate = "".join(spatial) + tail
+            if len(candidate) == int(new_data.ndim):
+                new_axes = candidate
+
+    try:
+        layer.events.affine(value=layer.affine)
+    except Exception:
+        pass
+    if not flip_only:
+        try:
+            layer.events.data(value=layer.data)
+        except Exception:
+            pass
+
+    return current_codes, new_axes
 
 
 def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
@@ -316,7 +389,7 @@ def _synchronize_4d_dims(
     ndim = len(shape)
     sc = _layer_display_scale(layer, ndim)
     ranges = []
-    point: list[float] = []
+    point = []
     for i, n in enumerate(shape):
         step = sc[i]
         stop = float(max(0, n - 1)) * step

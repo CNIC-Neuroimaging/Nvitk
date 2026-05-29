@@ -177,7 +177,7 @@ def _list_valid_measures() -> list[str]:
 
 def _require_pyvista():
     try:
-        import pyvista as pv  # type: ignore
+        import pyvista as pv
     except ImportError as exc:
         raise ImportError(
             "Extra mask overlays require 'pyvista'. Install it with: pip install pyvista"

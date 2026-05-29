@@ -46,8 +46,8 @@ def build_log_dock_widget() -> QWidget:
 def run_subprocess_logged(
     argv: list[str],
     *,
-    cwd: str | None = None,
-    on_line: Callable[[str], None] | None = None,
+    cwd = None,
+    on_line = None,
 ) -> int:
     """Run a command and stream stdout/stderr into :func:`gui_log`."""
     cmd = " ".join(argv)

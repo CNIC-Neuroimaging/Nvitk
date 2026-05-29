@@ -150,7 +150,7 @@ def get_kernel(name: str):
 
     try:
         import cupy as cp
-    except Exception as exc:  # pragma: no cover - CPU-only install path
+    except Exception as exc:
         raise RuntimeError(
             "CuPy is required for GPU bilateral filtering. "
             "Install with `pip install cupy-cuda12x` (or matching your CUDA)."

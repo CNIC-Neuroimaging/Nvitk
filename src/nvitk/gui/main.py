@@ -10,7 +10,7 @@ from nvitk.core.click_backend import apply_cli_backend, backend_click_option
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@backend_click_option()
+@backend_click_option(default="cpu")
 def main(backend: str) -> None:
     """Launch the Napari workbench for nvitk image tools."""
     try:

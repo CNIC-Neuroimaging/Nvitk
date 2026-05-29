@@ -77,9 +77,9 @@ def submit_gui_sge(
     tool_panel: Any,
     app_state: dict[str, Any],
     *,
-    get_label_ids: Callable[[], list[int]] | None = None,
-    get_totalseg_roi: Callable[[], list[str] | None] | None = None,
-    parent: Any = None,
+    get_label_ids = None,
+    get_totalseg_roi = None,
+    parent = None,
 ) -> bool:
     """Validate tool/layer, stage locally, upload, and SSH-run ``submit.sh``."""
     if not viewer.layers:
@@ -96,15 +96,18 @@ def submit_gui_sge(
         notify(sge_block_reason(tool_id), error=True)
         return False
 
+    from nvitk.gui.label_visibility import infer_target_mode
+
     spec = tool_by_id(tool_id)
-    target_mode = tool_panel.target_mode.value
     layer = viewer.layers.selection.active or viewer.layers[-1]
 
-    ids: list[int] = []
+    ids = []
     if get_label_ids is not None:
         ids = list(get_label_ids())
     if not ids:
         ids = parse_label_ids(tool_panel.label_ids.value)
+
+    target_mode = infer_target_mode(layer, label_ids=ids or None)
 
     if spec and spec.run_mode == "layer" and target_mode == "label" and not ids:
         notify("Select at least one label (checkbox list or id field).", error=True)

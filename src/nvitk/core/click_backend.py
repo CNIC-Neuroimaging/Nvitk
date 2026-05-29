@@ -34,7 +34,7 @@ def backend_click_option(*, default: str = "gpu") -> Callable[[F], F]:
             apply_cli_backend(kwargs.get("backend", default))
             return f(*args, **kwargs)
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator
 

@@ -329,7 +329,7 @@ def main(
     )
     paths.require_vwi_bb_rel_path(vwi_bb_rel_path or wvi_rel_path)
     rel = vwi_bb_rel_path or wvi_rel_path
-    mask_kind: EicabMaskKind = eicab_mask.lower()  # type: ignore[assignment]
+    mask_kind: EicabMaskKind = eicab_mask.lower()
 
     stages_sel = _normalize_stages(stages)
     if with_download and STAGE_DOWNLOAD not in stages_sel:
@@ -426,10 +426,10 @@ def main(
                         eicab_subdir=eicab_subdir,
                         eicab_mask=mask_kind,
                         eicab_dilate=eicab_dilate,
-                        thr_algorithm=thr_algorithm,  # type: ignore[arg-type]
+                        thr_algorithm=thr_algorithm,
                         min_component_frac=min_component_frac,
                         min_centerline_points=min_centerline_points,
-                        vwi_preprocess=vwi_preprocess,  # type: ignore[arg-type]
+                        vwi_preprocess=vwi_preprocess,
                         vwi_median_size=vwi_median_size,
                         vwi_gaussian_sigma=vwi_gaussian_sigma,
                     ),

@@ -215,11 +215,30 @@ def _load_raw_ts_mask_dixon(
     return combined
 
 
+def _flip_lr_2d(arr: np.ndarray) -> np.ndarray:
+    """Flip left–right (patient R/L) for QC slice display."""
+    return np.ascontiguousarray(np.asarray(arr)[::-1, ...])
+
+
 def _full_volume_display_range(vol: np.ndarray) -> tuple[float, float]:
     v = np.asarray(vol, dtype=np.float64)
     finite = v[np.isfinite(v)]
     if finite.size == 0:
         return 0.0, 1.0
+    lo, hi = np.nanpercentile(finite, (2, 98))
+    if hi <= lo:
+        lo, hi = float(np.nanmin(finite)), float(np.nanmax(finite))
+    return float(lo), float(hi)
+
+
+def _display_range_block(vol: np.ndarray, mask: np.ndarray, z0: int, z1: int) -> tuple[float, float]:
+    """Intensity window from voxels inside *mask* over axial block ``z0..z1``."""
+    sub = np.asarray(vol)[:, :, z0 : z1 + 1]
+    m = np.asarray(mask)[:, :, z0 : z1 + 1]
+    sel = sub[m]
+    finite = sel[np.isfinite(sel)] if sel.size else np.array([], dtype=np.float64)
+    if finite.size == 0:
+        return _full_volume_display_range(sub)
     lo, hi = np.nanpercentile(finite, (2, 98))
     if hi <= lo:
         lo, hi = float(np.nanmin(finite)), float(np.nanmax(finite))
@@ -298,6 +317,11 @@ def _render_slice_png(
     v = np.asarray(vol_2d, dtype=np.float64)
     m_pp = np.asarray(mask_pp_2d) > 0
     m_raw = np.asarray(mask_raw_2d) > 0 if mask_raw_2d is not None else None
+    v = _flip_lr_2d(v)
+    if m_pp is not None:
+        m_pp = _flip_lr_2d(m_pp)
+    if m_raw is not None:
+        m_raw = _flip_lr_2d(m_raw)
     if rotate90:
         v = np.rot90(v, k=1)
         m_pp = np.rot90(m_pp, k=1)
@@ -339,13 +363,20 @@ def _viewer_html(
     roi_to_cor_mid: dict[str, int],
     roi_to_sag_mid: dict[str, int],
     default_roi: str | None = None,
+    review_ctx: dict | None = None,
 ) -> str:
+    from nvitk.pipes.pesa_fat.qc.slice_review import embedded_review_panel_html, embedded_review_panel_js
+
     def js_map(d: dict[str, list[str]]) -> str:
         return json.dumps(d)
 
     roi_opts = "".join(f"<option value='{_safe_stem(r)}'>{r}</option>" for r in roi_names)
     key_map = {_safe_stem(r): r for r in roi_names}
     key_js = json.dumps(key_map)
+    review_panel = embedded_review_panel_html(dom_id) if review_ctx else ""
+    review_js = embedded_review_panel_js(dom_id, review_ctx) if review_ctx else ""
+    fn_open = "(async function() {" if review_ctx else "(function() {"
+    fn_close = "})();"
 
     return f"""
 <div class="slice-viewer" id="{dom_id}">
@@ -353,26 +384,27 @@ def _viewer_html(
     <strong>{title}</strong>
     <label>ROI <select id="{dom_id}_roi">{roi_opts}</select></label>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;align-items:start">
-    <div style="grid-column:1">
+  <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:12px;margin-top:10px;align-items:start">
+    <div style="grid-column:1;grid-row:1">
       <div class="muted">Axial</div>
       <img id="{dom_id}_ax_img" style="max-width:560px;width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
       <div><input type="range" id="{dom_id}_ax_r" min="0" max="0" value="0" step="1"/></div>
     </div>
-    <div style="grid-column:2">
+    <div style="grid-column:2;grid-row:1">
       <div class="muted">Sagittal</div>
       <img id="{dom_id}_sg_img" style="max-width:560px;width:100%;max-height:420px;object-fit:contain;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
       <div><input type="range" id="{dom_id}_sg_r" min="0" max="0" value="0" step="1"/></div>
     </div>
-    <div style="grid-column:1 / span 2">
+    <div style="grid-column:1;grid-row:2">
       <div class="muted">Coronal</div>
       <img id="{dom_id}_co_img" style="max-width:560px;width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.15)"/>
       <div><input type="range" id="{dom_id}_co_r" min="0" max="0" value="0" step="1"/></div>
     </div>
+    {review_panel}
   </div>
 </div>
 <script>
-(function() {{
+{fn_open}
   var keyToRoi = {key_js};
   var axial = {js_map(roi_to_axial)};
   var cor = {js_map(roi_to_cor)};
@@ -387,7 +419,13 @@ def _viewer_html(
   var axR = document.getElementById("{dom_id}_ax_r");
   var coR = document.getElementById("{dom_id}_co_r");
   var sgR = document.getElementById("{dom_id}_sg_r");
-
+  {review_js}
+  function emitAxial() {{
+    var roi = keyToRoi[sel.value];
+    document.dispatchEvent(new CustomEvent('qcSliceViewerAxial', {{
+      detail: {{domId: '{dom_id}', roi: roi, sliceIdx: parseInt(axR.value, 10)}}
+    }}));
+  }}
   function updRoi() {{
     var key = sel.value;
     var roi = keyToRoi[key];
@@ -403,12 +441,14 @@ def _viewer_html(
     axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
     coImg.src = co.length ? co[parseInt(coR.value,10)] : "";
     sgImg.src = sg.length ? sg[parseInt(sgR.value,10)] : "";
+    if (typeof showReviewForRoi === 'function') showReviewForRoi(roi);
+    emitAxial();
   }}
-
   axR.oninput = function() {{
     var roi = keyToRoi[sel.value];
     var ax = axial[roi] || [];
     axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
+    emitAxial();
   }};
   coR.oninput = function() {{
     var roi = keyToRoi[sel.value];
@@ -420,14 +460,13 @@ def _viewer_html(
     var sg = sag[roi] || [];
     sgImg.src = sg.length ? sg[parseInt(sgR.value,10)] : "";
   }};
-
   sel.onchange = updRoi;
   var preferred = {default_roi!r};
   if (preferred && Object.values(keyToRoi).indexOf(preferred) >= 0) {{
     for (var k in keyToRoi) {{ if (keyToRoi[k] === preferred) {{ sel.value = k; break; }} }}
   }}
   updRoi();
-}})();
+{fn_close}
 </script>
 """
 
@@ -439,6 +478,7 @@ def build_ctpet_slice_viewer_html(
     margin_vox: int = 3,
     assets_dir: Path | None = None,
     assets_rel: str | None = None,
+    review_ctx: dict | None = None,
 ) -> str:
     """Compact axial+sagittal viewer on CT (with mask contours)."""
     nifti_dir = lay.subject_nifti_dir(subject)
@@ -448,7 +488,6 @@ def build_ctpet_slice_viewer_html(
 
     ct = imread(str(resolve_nii(nifti_dir, ct_cfg.INPUT_STEM)), axes="XYZ")
     ct_arr = to_numpy(ct.data)
-    vmin, vmax = _full_volume_display_range(ct_arr)
     sagittal_y_height = _figsize_for_slice(ct_arr[:, :, min(ct_arr.shape[2] // 2, ct_arr.shape[2] - 1)])[1]
     img_store = _SliceImageStore(
         assets_dir=assets_dir,
@@ -491,6 +530,7 @@ def build_ctpet_slice_viewer_html(
         # Only crop in Z (show full XY with neighbors)
         z0 = max(0, z0 - margin_vox)
         z1 = min(ct_arr.shape[2] - 1, z1 + margin_vox)
+        vmin, vmax = _display_range_block(ct_arr, m, z0, z1)
 
         # axial slices over z
         z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
@@ -588,6 +628,7 @@ def build_ctpet_slice_viewer_html(
         roi_to_cor_mid=roi_co_mid,
         roi_to_sag_mid=roi_sg_mid,
         default_roi="HIGADO",
+        review_ctx=review_ctx,
     )
 
 
@@ -617,6 +658,7 @@ def build_dixon_slice_viewer_html(
     margin_vox: int = 3,
     assets_dir: Path | None = None,
     assets_rel: str | None = None,
+    review_ctx: dict | None = None,
 ) -> str:
     """Compact axial+sagittal viewer on Dixon WATER (fallback FF)."""
     nifti_dir = lay.subject_nifti_dir(subject)
@@ -777,6 +819,7 @@ def build_dixon_slice_viewer_html(
         roi_to_cor_mid=roi_co_mid,
         roi_to_sag_mid=roi_sg_mid,
         default_roi="LIVER",
+        review_ctx=review_ctx,
     )
 
 

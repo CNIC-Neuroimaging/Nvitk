@@ -10,11 +10,11 @@ from nvitk.gui.sge_models import SgeDoneMarker, SgePendingJob, SgeConnection, re
 
 try:
     from qtpy.QtCore import QObject, QTimer, Signal
-except Exception:  # pragma: no cover - headless tests
-    QObject = object  # type: ignore[misc, assignment]
-    QTimer = None  # type: ignore[misc, assignment]
+except Exception:
+    QObject = object
+    QTimer = None
 
-    class Signal:  # type: ignore[no-redef]
+    class Signal:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
@@ -31,7 +31,7 @@ def read_done_marker(
     user: str,
     password: str,
     remote_job_root: str,
-    port: int = 22,
+    port = 22,
 ) -> SgeDoneMarker | None:
     """Return parsed ``output/.done`` when present, else ``None``."""
     done_path = remote_done_path(remote_job_root)
@@ -72,7 +72,7 @@ class SgeJobMonitor(QObject):
             if self._timer is not None:
                 self._timer.stop()
             return
-        finished: list[str] = []
+        finished = []
         for job_id, job in list(self._jobs.items()):
             try:
                 done = read_done_marker(
@@ -101,8 +101,8 @@ class SgeJobMonitor(QObject):
 def register_sge_monitor(
     app_state: dict[str, Any],
     *,
-    on_finished: Callable[[str, SgeDoneMarker], None] | None = None,
-    on_failed: Callable[[str, SgeDoneMarker], None] | None = None,
+    on_finished = None,
+    on_failed = None,
 ) -> SgeJobMonitor:
     """Create or return the shared :class:`SgeJobMonitor` stored in *app_state*."""
     mon = app_state.get("_sge_monitor")
@@ -110,9 +110,9 @@ def register_sge_monitor(
         return mon
     mon = SgeJobMonitor()
     if on_finished is not None:
-        mon.job_finished.connect(lambda jid, done: on_finished(jid, done))  # type: ignore[arg-type]
+        mon.job_finished.connect(lambda jid, done: on_finished(jid, done))
     if on_failed is not None:
-        mon.job_failed.connect(lambda jid, done: on_failed(jid, done))  # type: ignore[arg-type]
+        mon.job_failed.connect(lambda jid, done: on_failed(jid, done))
     app_state["_sge_monitor"] = mon
     return mon
 
@@ -148,8 +148,8 @@ def update_pending_job_status(
     job_id: str,
     *,
     status: str,
-    done_payload: dict[str, Any] | None = None,
-    local_download_dir: str | None = None,
+    done_payload = None,
+    local_download_dir = None,
 ) -> None:
     bucket = app_state.get("sge_pending_jobs") or []
     if not isinstance(bucket, list):
@@ -167,7 +167,7 @@ def update_pending_job_status(
 def resolve_session_import(
     app_state: dict[str, Any],
     *,
-    job_id: str | None = None,
+    job_id = None,
 ) -> tuple[SgeConnection, str, str | None]:
     """Return ``(connection, remote_job_root, job_id)`` from the current GUI session."""
     last = app_state.get("sge_last_connection") or {}

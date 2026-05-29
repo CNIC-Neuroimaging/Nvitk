@@ -538,7 +538,7 @@ def repair_ica_donut_3d(
         from scipy import ndimage as ndi_cpu
 
         if fixed_anchor:
-            cut_anchor = tuple(int(v) for v in anchor)  # type: ignore[arg-type]
+            cut_anchor = tuple(int(v) for v in anchor)
             anchor_dt = float(ndi_cpu.distance_transform_edt(mask)[cut_anchor])
             top_y = int(cut_anchor[1])
             log.step(
@@ -654,7 +654,7 @@ def repair_ica_donut_3d(
             "fixed_anchor": bool(fixed_anchor),
         }
         if not fixed_anchor:
-            iter_rec["cycle_len"] = int(len(cycle))  # type: ignore[possibly-undefined]
+            iter_rec["cycle_len"] = int(len(cycle))
         rlog.iters.append(iter_rec)
         if rep_try.beta1 == 0:
             log.ok(f"[{label_name}] iter {it}: genus cleared with r={chosen_radius}")

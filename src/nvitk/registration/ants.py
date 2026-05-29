@@ -88,7 +88,7 @@ class AntsRegistrationResult:
 
 def _require_ants() -> Any:
     try:
-        import ants  # type: ignore[import-not-found]
+        import ants
     except Exception as exc:
         raise BackendUnavailableError(
             "ANTsPy is not installed. Install with: pip install antspyx"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ct_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dx_cfg
 
@@ -30,6 +32,16 @@ def filter_review_structures(structures: list[str] | tuple[str, ...]) -> list[st
     return sorted(set(out))
 
 
+def is_reviewable_structure(name: str, *, reviewable_structures: Iterable[str] | None = None) -> bool:
+    """True when *name* participates in QC review (excludes ``*_LR`` composites)."""
+    k = str(name).strip()
+    if not k or k.upper().endswith("_LR"):
+        return False
+    if reviewable_structures is None:
+        return True
+    return k in {str(s).strip() for s in reviewable_structures if str(s).strip()}
+
+
 def expected_review_structures(pipeline: str) -> list[str]:
     """All structures that must be reviewed OK for dashboard overall OK."""
     pl = str(pipeline).strip().lower()
@@ -40,7 +52,12 @@ def expected_review_structures(pipeline: str) -> list[str]:
         )
         return filter_review_structures(structs)
     if pl == "dixon-v5":
-        return filter_review_structures([spec.prefix for spec in dx_cfg.MEASURE_SPECS])
+        names: list[str] = []
+        for spec in dx_cfg.MEASURE_SPECS:
+            p = spec.prefix
+            name = p.replace("DIXON_", "", 1) if p.startswith("DIXON_") else p
+            names.append(name)
+        return filter_review_structures(names)
     return []
 
 
@@ -49,30 +66,50 @@ def overall_status(
     *,
     expected_structures: list[str] | None = None,
 ) -> str:
-    """Aggregate per-structure QC into one status for a subject+pipeline.
+    """Legacy aggregate: PENDING / OK / FAIL."""
+    label, _tone = portal_display_status(
+        reviews_by_structure, expected_structures=expected_structures
+    )
+    if label == "REVISED":
+        if _tone == "fail":
+            return "FAIL"
+        return "OK"
+    return label
 
-    When *expected_structures* is set, ``OK`` requires every expected structure to be ``OK``.
-    Any ``FAIL`` → ``FAIL``; otherwise ``PENDING``.
+
+def portal_display_status(
+    reviews_by_structure: dict[str, str],
+    *,
+    expected_structures: list[str] | None = None,
+) -> tuple[str, str]:
+    """Return ``(label, tone)`` for dashboard cells.
+
+    - ``PENDING`` / ``pending`` — any expected structure still pending.
+    - ``REVISED`` / ``ok`` — all reviewed, not all FAIL (green).
+    - ``REVISED`` / ``fail`` — all reviewed and all FAIL (red).
     """
     if expected_structures:
-        if any(reviews_by_structure.get(s) == "FAIL" for s in expected_structures):
-            return "FAIL"
-        if all(reviews_by_structure.get(s) == "OK" for s in expected_structures):
-            return "OK"
-        return "PENDING"
+        statuses = [reviews_by_structure.get(s, "PENDING") for s in expected_structures]
+        if any(s == "PENDING" for s in statuses):
+            return ("PENDING", "pending")
+        if all(s == "FAIL" for s in statuses):
+            return ("REVISED", "fail")
+        return ("REVISED", "ok")
 
     if not reviews_by_structure:
-        return "PENDING"
-    statuses = set(reviews_by_structure.values())
-    if "FAIL" in statuses:
-        return "FAIL"
-    if statuses == {"OK"}:
-        return "OK"
-    return "PENDING"
+        return ("PENDING", "pending")
+    statuses = list(reviews_by_structure.values())
+    if any(s == "PENDING" for s in statuses):
+        return ("PENDING", "pending")
+    if all(s == "FAIL" for s in statuses):
+        return ("REVISED", "fail")
+    return ("REVISED", "ok")
 
 
 __all__ = [
     "filter_review_structures",
     "expected_review_structures",
+    "is_reviewable_structure",
     "overall_status",
+    "portal_display_status",
 ]

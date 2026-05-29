@@ -87,7 +87,7 @@ def build_qvtpy_stage_argv(tool_id: str, params: dict[str, Any]) -> list[str]:
     if spec is None:
         raise ValueError(f"Unknown QVTpy stage tool: {tool_id}")
 
-    argv: list[str] = [sys.executable, "-m", spec.module]
+    argv = [sys.executable, "-m", spec.module]
 
     if spec.is_download:
         argv.extend(["--dicom-root", _req(params, "dicom_root")])

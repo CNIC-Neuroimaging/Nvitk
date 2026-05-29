@@ -28,11 +28,11 @@ def set_gui_backend(backend: str, *, log: bool = True) -> BackendName:
                 "GPU backend unavailable (no CUDA/CuPy). Using CPU (NumPy).",
                 error=True,
             )
-        return resolved  # type: ignore[return-value]
+        return resolved
     resolved = apply_cli_backend(requested)
     if log:
         gui_log(f"Backend: {backend_label()} ({resolved})")
-    return resolved  # type: ignore[return-value]
+    return resolved
 
 
 def set_gpu_backend(enabled: bool, *, log: bool = True) -> BackendName:

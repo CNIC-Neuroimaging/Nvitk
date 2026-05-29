@@ -44,7 +44,7 @@ def _reference_and_mask_images(
     viewer: Any,
     mask_layer: Any,
     reference_layer_name: str,
-    mask_data: np.ndarray | None = None,
+    mask_data = None,
 ) -> tuple[Image, Image]:
     """Reference grid + mask (affine-resampled when Napari shows them aligned)."""
     ref_layer = _resolve_layer(viewer, reference_layer_name)
@@ -215,7 +215,7 @@ def run_gui_tool(
     *,
     target_mode: str,
     label_ids: list[int] | None,
-    params: dict[str, Any] | None = None,
+    params = None,
 ) -> np.ndarray | None:
     spec = tool_by_id(tool_id)
     if spec is None:
@@ -269,13 +269,64 @@ def run_gui_tool(
         _run_measure_loc_hemodynamics(viewer, layer, params)
         return None
 
+    if tool_id == "orient_volume":
+        from nvitk.gui.spatial import orientation_text
+        from nvitk.gui.orientation import configure_viewer_for_layer
+        from nvitk.io._common import orientation_codes_from_affine
+
+        raw = layer_data_for_tool(layer.data)
+        src = layer_to_image(layer, raw)
+        if src.affine is None:
+            raise ValueError("Active layer has no affine; orientation requires spatial metadata.")
+        if src.ndim != 3:
+            raise ValueError("View / reorient orientation requires a 3D layer.")
+        current = orientation_codes_from_affine(src.affine) or "unknown"
+        target = str(params.get("target_orientation") or "RAS").upper()
+        mode = str(params.get("orient_mode") or "view").lower()
+        if mode == "view":
+            detail = orientation_text(layer, viewer)
+            notify(
+                f"Current orientation: {current}\n"
+                f"Target (reorient): {target}\n\n{detail}"
+            )
+            return None
+        if current == target:
+            notify(f"Layer is already {target}.")
+            return None
+        from nvitk.gui.orientation import reorient_layer_for_view
+
+        previous, new_axes = reorient_layer_for_view(layer, target)
+        new_aff = np.asarray(to_numpy(layer.affine), dtype=float)
+        meta = dict(getattr(layer, "metadata", None) or {})
+        if new_axes:
+            meta["axes"] = new_axes
+        nv = dict(meta.get("nvitk_metadata") or {})
+        nv["affine"] = new_aff
+        nv["orientation"] = target
+        for i, key in enumerate(("x_res", "y_res", "z_res")):
+            nv[key] = float(np.linalg.norm(new_aff[:3, i]))
+        spacing = (nv["x_res"], nv["y_res"], nv["z_res"])
+        nv["spacing"] = spacing
+        meta["nvitk_metadata"] = nv
+        meta["orientation"] = target
+        layer.metadata = meta
+        if new_axes and len(new_axes) == int(layer.data.ndim):
+            layer.axis_labels = tuple(new_axes)
+        configure_viewer_for_layer(viewer, layer, configure_dims=True)
+        try:
+            viewer.reset_view()
+        except Exception:
+            pass
+        notify(f"Reoriented {previous} → {target}.")
+        return None
+
     bk = get_global_backend()
     data = layer_data_for_tool(layer.data)
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
 
     if tool_id in _MEASURE_NOTIFY:
-        per_label_ids: list[int] | None = label_ids
+        per_label_ids = label_ids
         if target_mode == "all_labels":
             per_label_ids = label_ids or _unique_labels(data)
             if not per_label_ids:
@@ -301,7 +352,7 @@ def run_gui_tool(
     if tool_id == "bilateral":
         from nvitk.restoration import bilateral
 
-        kw: dict[str, Any] = {
+        kw = {
             "do_3d": bool(params.get("do_3d")),
             "axis": int(params.get("axis") or 0),
             "backend": bk,
@@ -401,7 +452,7 @@ def run_gui_tool(
         axis = int(params.get("axis", -1))
         factor = float(params.get("factor") or 0)
         order = int(params.get("order") or 1)
-        kw: dict[str, Any] = {"order": order}
+        kw = {"order": order}
         if axis >= 0:
             kw["axis"] = axis
         if factor > 0:
@@ -1085,7 +1136,7 @@ def run_gui_tool_headless(
     aux: dict[str, Image],
     target_mode: str,
     label_ids: list[int] | None,
-    params: dict[str, Any] | None = None,
+    params = None,
 ) -> np.ndarray | None:
     """Run a layer tool without Napari (cluster worker entry point)."""
     primary_name = str(getattr(primary, "name", None) or "input")
@@ -1441,7 +1492,7 @@ def _run_measure_centerline_arc_length(
     elif not targets:
         targets = [0]
 
-    lines: list[str] = []
+    lines = []
     if targets == [0]:
         polys = extract_polylines_from_centerline(
             arr,
@@ -1596,7 +1647,7 @@ def _run_measure_mask_hemodynamics(
         else:
             mag = cd = vel_mag = as_backend_array(ref_layer.data).astype(np.float64)
     method = str(params.get("hemo_method") or "both")
-    lines: list[str] = []
+    lines = []
     for lid in lids:
         results = measure_mask_hemodynamics(
             mask_data,
@@ -1607,7 +1658,7 @@ def _run_measure_mask_hemodynamics(
             cd=cd,
             vel_mag=vel_mag,
             label_id=int(lid),
-            method=method,  # type: ignore[arg-type]
+            method=method,
             voxel_spacing=voxel_spacing,
             radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
             measure_resegment=bool(params.get("measure_resegment", True)),
@@ -1681,7 +1732,7 @@ def _run_viz_pet_hotspots(
         to_numpy(ref_img.data),
         to_numpy(mask_img.data),
         label_ids=label_ids,
-        hotspot=mode,  # type: ignore[arg-type]
+        hotspot=mode,
         top_percent=float(params.get("top_percent") or 0.1),
         max_points=int(params.get("max_points") or 20000),
     )
@@ -1791,7 +1842,7 @@ def _run_measure_per_label(
     """Run a measure tool once per label id and log each result."""
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
-    lines: list[str] = []
+    lines = []
     for lid in label_ids:
         proc, _ = prepare_layer_data(data, target_mode="label", label_ids=[lid])
         img = layer_to_image(layer, proc)

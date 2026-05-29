@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from magicgui import magicgui
 
+from nvitk.gui.label_visibility import infer_target_mode
 from nvitk.gui.tool_presets import apply_preset_to_panel, preset_key_from_title
 from nvitk.gui.tool_runner import log_tool_failure, notify, parse_label_ids, run_gui_tool
 from nvitk.gui.tools_registry import (
@@ -22,7 +23,7 @@ from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
 
 
 def _collect_params(widget: Any, tool_id: str) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+    out = {}
     for pspec in params_for_tool(tool_id):
         w = getattr(widget, pspec.name, None)
         if w is None:
@@ -128,44 +129,13 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "eicab_mask",
         "length_scale",
         "sync_dims",
+        "orient_mode",
+        "target_orientation",
     )
     for name in all_names:
         sub = getattr(widget, name, None)
         if sub is not None:
             sub.visible = name in visible
-
-    if tool_id.startswith("qvtpy_stage"):
-        for name in all_names:
-            sub = getattr(widget, name, None)
-            if sub is not None:
-                sub.visible = False
-        for name in ("subject", "skip_existing"):
-            sub = getattr(widget, name, None)
-            if sub is not None:
-                sub.visible = True
-        if tool_id == "qvtpy_stage0_download":
-            for name in ("dicom_root",):
-                sub = getattr(widget, name, None)
-                if sub is not None:
-                    sub.visible = True
-        else:
-            for name in ("nifti_root", "output_root", "dicom_root"):
-                sub = getattr(widget, name, None)
-                if sub is not None:
-                    sub.visible = True
-        if tool_id == "qvtpy_stage0_convert":
-            for name in (
-                "compute_phase_derived",
-                "phase_background_correction",
-                "no_cd_4d_background_correction",
-            ):
-                sub = getattr(widget, name, None)
-                if sub is not None:
-                    sub.visible = True
-        if tool_id == "qvtpy_stage3_centerline":
-            sub = getattr(widget, "eicab_mask", None)
-            if sub is not None:
-                sub.visible = True
 
 
 _LAYER_NONE = "(none)"
@@ -207,11 +177,11 @@ def build_tool_panel(
     *,
     layer_display_kwargs: Callable[..., dict[str, Any]],
     on_layers_changed: Callable[[], None],
-    record_step: Callable[[dict[str, Any]], None] | None = None,
-    get_label_ids: Callable[[], list[int]] | None = None,
-    get_pipeline_argv_builder: Callable[[], Any] | None = None,
-    get_totalseg_roi: Callable[[], list[str] | None] | None = None,
-    label_selector: Any | None = None,
+    record_step = None,
+    get_label_ids = None,
+    get_pipeline_argv_builder = None,
+    get_totalseg_roi = None,
+    label_selector = None,
 ) -> Any:
     """Return magicgui FunctionGui for the Tools tab."""
     _ = label_selector
@@ -229,11 +199,6 @@ def build_tool_panel(
                 tool_id_from_label(default_category(), default_operation(default_category()))
             ),
             "enabled": False,
-        },
-        target_mode={
-            "choices": ["raw", "binary_mask", "label", "all_labels"],
-            "label": "Process target",
-            "value": "raw",
         },
         label_ids={"label": "Label id(s) (comma-separated)", "value": ""},
         overlay_mode={"choices": ["add_layer", "replace_active"], "label": "Output mode"},
@@ -401,13 +366,18 @@ def build_tool_panel(
             "value": False,
         },
         eicab_mask={"choices": ["cw", "wb"], "label": "eICAB mask (stage 3)", "value": "cw"},
+        orient_mode={"choices": ["view", "reorient"], "label": "Action", "value": "view"},
+        target_orientation={
+            "choices": ["RAS", "LPS", "LAS", "RPS", "RSA", "LPI", "LSA", "RPI", "LIA", "RIA"],
+            "label": "Target orientation",
+            "value": "RAS",
+        },
         call_button="Run tool",
     )
     def tool_panel(
         category: str,
         operation: str,
         operation_help: str,
-        target_mode: str,
         label_ids: str,
         overlay_mode: str,
         footprint: int,
@@ -499,6 +469,8 @@ def build_tool_panel(
         phase_background_correction: bool,
         no_cd_4d_background_correction: bool,
         eicab_mask: str,
+        orient_mode: str,
+        target_orientation: str,
     ) -> None:
         if not viewer.layers:
             notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)
@@ -511,7 +483,7 @@ def build_tool_panel(
         run_mode = spec.run_mode if spec else "layer"
         layer = viewer.layers.selection.active or viewer.layers[-1]
 
-        ids: list[int] = []
+        ids = []
         if get_label_ids is not None:
             ids = list(get_label_ids())
         if not ids:
@@ -519,6 +491,7 @@ def build_tool_panel(
         if tool_id == "siphon_correct" and ids:
             correction_ids = ",".join(str(i) for i in ids)
 
+        target_mode = infer_target_mode(layer, label_ids=ids or None)
         if run_mode == "layer" and target_mode == "label" and not ids:
             notify("Select at least one label (checkbox list or id field).", error=True)
             return
@@ -540,7 +513,10 @@ def build_tool_panel(
             exe = str(spec.cli_command if spec else "").strip()
             if exe:
                 try:
-                    params["pipeline_argv"] = form.build_argv(exe)
+                    params["pipeline_argv"] = form.build_argv(exe, active_layer=layer)
+                    params["pipeline_layer_bindings"] = form.build_layer_bindings(
+                        active_layer=layer
+                    )
                 except ValueError as exc:
                     notify(str(exc), error=True)
                     return

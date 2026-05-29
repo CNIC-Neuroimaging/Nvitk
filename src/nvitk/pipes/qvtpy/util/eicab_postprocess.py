@@ -232,7 +232,7 @@ def postprocess_eicab_directory(
     eicab_dir = Path(eicab_dir)
     res = resolve_eicab_mask(
         eicab_dir,
-        preference=preference,  # type: ignore[arg-type]
+        preference=preference,
         prefer_postprocessed=False,
     )
     intensity_p = Path(tof_path) if tof_path is not None else find_tof_resampled_volume(eicab_dir)

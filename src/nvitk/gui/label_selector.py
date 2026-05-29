@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,29 +26,15 @@ from nvitk.gui.label_catalog import (
     guess_schema_from_layer,
     schema_keys,
 )
+from nvitk.gui.label_visibility import label_source_data, unique_layer_labels
 
-# Minimum scroll height when the label picker is visible (no upper cap — dock stretch fills).
 LABEL_SELECTOR_SCROLL_MIN = 80
-
-
-def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
-    flat = to_numpy(data).ravel()
-    if flat.size == 0:
-        return []
-    if np.issubdtype(flat.dtype, np.floating):
-        vals = np.unique(flat[np.isfinite(flat)])
-        labels = [int(round(v)) for v in vals if v != 0]
-    else:
-        vals = np.unique(flat)
-        labels = [int(v) for v in vals if int(v) != 0]
-    labels.sort()
-    if len(labels) > max_labels:
-        return labels[:max_labels]
-    return labels
 
 
 class LabelSelectorWidget(QGroupBox):
     """Select label ids using an optional named vocabulary (eICAB, QVTpy, TS, …)."""
+
+    selection_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Label selection", parent)
@@ -108,6 +94,12 @@ class LabelSelectorWidget(QGroupBox):
         self._btn_guess.clicked.connect(self._guess_schema)
 
         self._layer_ref: Any | None = None
+
+    def _emit_selection_changed(self) -> None:
+        self.selection_changed.emit()
+
+    def _wire_checkbox(self, cb: QCheckBox) -> None:
+        cb.toggled.connect(lambda _checked: self._emit_selection_changed())
 
     def _on_schema_changed(self, _index: int) -> None:
         key = self._schema_combo.currentData()
@@ -171,7 +163,7 @@ class LabelSelectorWidget(QGroupBox):
             return
 
         schema = get_schema(self._schema_key)
-        layer_ids = unique_layer_labels(to_numpy(layer.data))
+        layer_ids = unique_layer_labels(label_source_data(layer))
         if self._show_full.isChecked() and schema and schema.id_to_name:
             ids = sorted(set(schema.id_to_name.keys()) | set(layer_ids))
         else:
@@ -193,25 +185,41 @@ class LabelSelectorWidget(QGroupBox):
             in_layer = lid in layer_ids
             cb = QCheckBox(text)
             cb.setProperty("label_id", lid)
+            cb.blockSignals(True)
             cb.setChecked(in_layer)
+            cb.blockSignals(False)
             if self._show_full.isChecked() and not in_layer:
                 cb.setEnabled(False)
                 cb.setStyleSheet("color: gray;")
+            self._wire_checkbox(cb)
             self._inner_layout.addWidget(cb)
             self._checks.append(cb)
+        self._emit_selection_changed()
 
     def select_all(self) -> None:
+        changed = False
         for cb in self._checks:
-            if cb.isEnabled():
+            if cb.isEnabled() and not cb.isChecked():
+                cb.blockSignals(True)
                 cb.setChecked(True)
+                cb.blockSignals(False)
+                changed = True
+        if changed:
+            self._emit_selection_changed()
 
     def select_none(self) -> None:
+        changed = False
         for cb in self._checks:
-            if cb.isEnabled():
+            if cb.isEnabled() and cb.isChecked():
+                cb.blockSignals(True)
                 cb.setChecked(False)
+                cb.blockSignals(False)
+                changed = True
+        if changed:
+            self._emit_selection_changed()
 
     def selected_ids(self) -> list[int]:
-        out: list[int] = []
+        out = []
         for cb in self._checks:
             if cb.isChecked() and cb.isEnabled():
                 out.append(int(cb.property("label_id")))
@@ -220,10 +228,10 @@ class LabelSelectorWidget(QGroupBox):
     def selected_names(self) -> list[str]:
         """Human names for checked ids (falls back to ``Label_<id>``)."""
         schema = get_schema(self._schema_key)
-        names: list[str] = []
+        names = []
         for lid in self.selected_ids():
             if schema and schema.name_for(lid):
-                names.append(schema.name_for(lid))  # type: ignore[arg-type]
+                names.append(schema.name_for(lid))
             else:
                 names.append(f"Label_{lid}")
         return names

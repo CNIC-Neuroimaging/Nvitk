@@ -143,7 +143,7 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
 def _build_totalsegmentator_schemas() -> dict[str, LabelSchema]:
     from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS, get_class_map
 
-    out: dict[str, LabelSchema] = {}
+    out = {}
     for task in AVAILABLE_TASKS:
         key = f"ts:{task}"
         cmap = get_class_map(task)

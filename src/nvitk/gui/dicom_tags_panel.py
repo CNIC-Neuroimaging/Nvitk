@@ -30,7 +30,7 @@ def _nvitk_metadata(layer: Any | None) -> dict[str, Any]:
 
 def dicom_tags_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Collect DICOM tag entries from nvitk layer metadata."""
-    tags: dict[str, Any] = {}
+    tags = {}
     for key, value in metadata.items():
         if not isinstance(key, str) or not _is_dicom_tag_key(key):
             continue

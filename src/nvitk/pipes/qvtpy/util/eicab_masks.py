@@ -163,7 +163,7 @@ def resolve_eicab_mask(
     When *prefer_postprocessed* is True and a ``*_pp`` sibling of the base mask exists,
     that post-processed file is returned (``postprocessed=True``).
     """
-    pref = preference.strip().lower()  # type: ignore[assignment]
+    pref = preference.strip().lower()
     if pref not in ("cw", "wb"):
         raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
 
@@ -221,7 +221,7 @@ def resolve_eicab_mask(
                 original_path=_glob_first(eicab_dir, _CW_PATTERNS),
             )
 
-    base = _resolve_base_mask(eicab_dir, pref)  # type: ignore[arg-type]
+    base = _resolve_base_mask(eicab_dir, pref)
     return base
 
 

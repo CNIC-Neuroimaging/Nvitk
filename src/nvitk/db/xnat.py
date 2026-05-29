@@ -1059,7 +1059,7 @@ def sync_xnat_project(
                             )
 
                     if download_niftis:
-                        nifti_base = Path(nifti_download_root) if nifti_download_root is not None else Path(download_root)  # type: ignore[arg-type]
+                        nifti_base = Path(nifti_download_root) if nifti_download_root is not None else Path(download_root)
                         nifti_dir = nifti_base / subject_uid / sequence_label / "nifti"
                         if skip_existing and nifti_dir.exists() and _list_local_nifti_files(nifti_dir):
                             nifti_files = _list_local_nifti_files(nifti_dir)

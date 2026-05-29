@@ -112,7 +112,7 @@ class _GlyphCacheAll:
 
 def _require_pyvista() -> Any:
     try:
-        import pyvista as pv  # type: ignore
+        import pyvista as pv
     except ImportError as exc:
         raise ImportError(
             "flowshow requires 'pyvista'. Install it with: pip install pyvista"
@@ -164,7 +164,7 @@ def _unwrap_vtk_interactor(plotter: Any) -> Any | None:
 
 def _install_repeating_timer_observer(vtk_iren: Any, timer_ms: int, callback: Callable[..., None]) -> bool:
     """Return True if a repeating timer + TimerEvent observer were registered."""
-    import vtk as vtk_mod  # type: ignore
+    import vtk as vtk_mod
 
     created = False
     for name in ("CreateRepeatingTimer", "create_repeating_timer"):
@@ -183,7 +183,7 @@ def _install_repeating_timer_observer(vtk_iren: Any, timer_ms: int, callback: Ca
 
 def _require_widgets() -> Any:
     try:
-        import ipywidgets as widgets  # type: ignore
+        import ipywidgets as widgets
     except ImportError as exc:
         raise ImportError(
             "flowshow interactive controls require 'ipywidgets'. "
@@ -253,8 +253,8 @@ class _VtkGlyphPipeline:
         speed_clim_eff: tuple[float, float],
         tt0: int,
     ) -> None:
-        import vtk  # type: ignore
-        from vtk.util import numpy_support  # type: ignore
+        import vtk
+        from vtk.util import numpy_support
 
         self.coords = coords.astype(np.int64, copy=False)
         self.color = color
@@ -314,14 +314,14 @@ class _VtkGlyphPipeline:
 
     def set_color_by_speed(self, enabled: bool) -> None:
         """When enabled, color glyphs by |v| using the 'mag' array."""
-        import vtk  # type: ignore
+        import vtk
 
         if enabled:
             lo, hi = self.speed_clim_eff
             # Prefer PyVista LUT generation (supports named cmaps like 'turbo').
             lut = None
             try:
-                import pyvista as pv  # type: ignore
+                import pyvista as pv
 
                 lt = pv.LookupTable(cmap=str(getattr(self.vec, "speed_cmap", "turbo")), n_values=256)
                 # Some PyVista versions expose to_vtk(); otherwise it is already a vtkLookupTable.
@@ -364,7 +364,7 @@ class _VtkGlyphPipeline:
                 pass
 
     def set_scale_by_magnitude(self, enabled: bool, scale_factor: float) -> None:
-        import vtk  # type: ignore
+        import vtk
 
         if enabled:
             self._glyph.SetScaleModeToScaleByScalar()
@@ -381,7 +381,7 @@ class _VtkGlyphPipeline:
             self._glyph.SetScaleFactor(1.0)
 
     def update_time(self, tt: int) -> None:
-        from vtk.util import numpy_support  # type: ignore
+        from vtk.util import numpy_support
 
         v = self.vel[
             self.coords[:, 0],
@@ -1138,12 +1138,12 @@ def _flowshow_desktop(
     # Left viewport keeps normal 3D trackball camera controls.
     # ---------------------------------------------------------------------
     try:
-        import vtk  # type: ignore
+        import vtk
 
         vtk_iren = _unwrap_vtk_interactor(plotter)
         if vtk_iren is not None and hasattr(vtk_iren, "SetInteractorStyle"):
 
-            class _RightPanelWheelOnlyStyle(vtk.vtkInteractorStyleTrackballCamera):  # type: ignore[misc]
+            class _RightPanelWheelOnlyStyle(vtk.vtkInteractorStyleTrackballCamera):
                 def __init__(self, *, left_renderer: Any, right_renderer: Any) -> None:
                     super().__init__()
                     self._left_renderer = left_renderer
@@ -1353,7 +1353,7 @@ def _flowshow_desktop(
                     ren = plotter.renderers[1]
                     rm = getattr(ren, "RemoveActor", None)
                     if callable(rm):
-                        rm(a)  # type: ignore[arg-type]
+                        rm(a)
                         continue
                 except Exception:
                     log.exception("RemoveActor failed in _clear_right_planes")
@@ -1602,8 +1602,8 @@ def _flowshow_desktop(
             return
 
         try:
-            import vtk  # type: ignore
-            from vtk.util import numpy_support  # type: ignore
+            import vtk
+            from vtk.util import numpy_support
 
             def _vtk_image_from_2d(img2d: np.ndarray) -> Any:
                 arr = to_numpy(img2d, dtype=np.float32)
@@ -1899,7 +1899,7 @@ def _flowshow_desktop(
     # This avoids silent failures across PyVista/VTK backends where enable_point_picking
     # might not fire or might not return a usable point.
     try:
-        import vtk  # type: ignore
+        import vtk
 
         vtk_iren = _unwrap_vtk_interactor(plotter)
         if vtk_iren is not None:
@@ -1945,7 +1945,7 @@ def _flowshow_desktop(
                         pass
                     return
                 try:
-                    ok = int(picker.Pick(float(x), float(y), 0.0, plotter.renderers[0]))  # type: ignore[arg-type]
+                    ok = int(picker.Pick(float(x), float(y), 0.0, plotter.renderers[0]))
                 except Exception as e:
                     log.error(traceback.format_exc())
                     log.exception(e)
@@ -2235,7 +2235,7 @@ def _flowshow_desktop(
 
         if "radial" in str(interior_field["mode"]):
             try:
-                from scipy.ndimage import distance_transform_edt  # type: ignore
+                from scipy.ndimage import distance_transform_edt
             except Exception as e:
                 log.error(traceback.format_exc())
                 log.exception(e)
@@ -2327,7 +2327,7 @@ def _flowshow_desktop(
                 clim = speed_clim
             if mask_field["radial"]:
                 try:
-                    from scipy.ndimage import distance_transform_edt  # type: ignore
+                    from scipy.ndimage import distance_transform_edt
                 except Exception as e:
                     log.error(traceback.format_exc())
                     log.exception(e)
@@ -2432,9 +2432,9 @@ def _flowshow_desktop(
             hud_txt += " | LOC"
         try:
             if hasattr(hud, "SetText"):
-                hud.SetText(0, hud_txt)  # type: ignore[attr-defined]
+                hud.SetText(0, hud_txt)
             elif hasattr(hud, "SetInput"):
-                hud.SetInput(hud_txt)  # type: ignore[attr-defined]
+                hud.SetInput(hud_txt)
         except Exception:
             pass
         if not state["camera_ready"]:
@@ -2487,7 +2487,7 @@ def _flowshow_desktop(
     # vector controls on the right.
     # Replace sliders with numeric input boxes (VTK text box widgets).
     try:
-        import vtk  # type: ignore
+        import vtk
         # Some VTK builds do not ship interaction widgets (vtkTextBoxWidget).
         # If missing, disable numeric text boxes gracefully.
         if not hasattr(vtk, "vtkTextBoxWidget"):

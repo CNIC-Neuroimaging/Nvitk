@@ -75,7 +75,7 @@ def _napari_scale(img: Image, ndim: int) -> tuple[float, ...] | None:
     if len(axes) != ndim:
         axes = default_nifti_axes(ndim)
     md = img.metadata or {}
-    vals: list[float] = []
+    vals = []
     for ch in axes:
         r = _resolution_for_axis(md, ch)
         if r is None:
@@ -114,7 +114,7 @@ def _nvitk_layer_metadata(
         pass
     if affine_source is not None:
         nvitk_md["affine_source"] = to_numpy(affine_source).astype(float)
-    out: dict[str, Any] = {"nvitk_metadata": nvitk_md}
+    out = {"nvitk_metadata": nvitk_md}
     if img.axes:
         out["axes"] = img.axes
     return out
@@ -138,7 +138,7 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
         axes=axes_str,
         metadata=img.metadata,
     )
-    layer_meta: dict[str, Any] = {
+    layer_meta = {
         "name": img.name or path.stem,
         "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
         "axis_labels": _axis_labels_for_image(img, data.ndim),
@@ -169,7 +169,7 @@ def _read_layer_data(path: str) -> list[LayerData] | None:
     except Exception:
         return None
     images = result if isinstance(result, list) else [result]
-    out: list[LayerData] = []
+    out = []
     for i, img in enumerate(images):
         if not img.name:
             img.name = f"{pth.stem}_{i}" if len(images) > 1 else pth.stem
@@ -185,7 +185,7 @@ def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
     function. When that function is invoked, returns layer data tuples.
     """
     if isinstance(path, list):
-        layer_data: list[LayerData] = []
+        layer_data = []
         for p in path:
             chunk = _read_layer_data(p)
             if chunk:
@@ -199,7 +199,7 @@ def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
 
 def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
     data, layer_meta, _ = _prepare_layer_tuple(img, path)
-    kwargs: dict[str, Any] = {
+    kwargs = {
         "name": layer_meta["name"],
         "metadata": layer_meta["metadata"],
     }
@@ -224,12 +224,12 @@ def open_paths_with_nvitk(
     viewer: Any,
     paths: str | Path | Sequence[str | Path],
     *,
-    stack: bool = False,
+    stack = False,
 ) -> list[Any]:
     """Open one or more paths with nvitk.io and add Napari layers."""
     _ = stack
     path_list = _normalize_paths(paths)
-    layers: list[Any] = []
+    layers = []
 
     for path in path_list:
         if not _nvitk_can_open(path):
@@ -340,7 +340,7 @@ def install_nvitk_layer_hooks(viewer: Any) -> None:
     def _active_layer_callback(event: Any) -> None:
         _on_active_layer_sync_dims(viewer, event)
 
-    viewer._nvitk_layer_hooks = True  # type: ignore[attr-defined]
+    viewer._nvitk_layer_hooks = True
 
 
 def install_nvitk_io(viewer: Any) -> None:
@@ -367,8 +367,8 @@ def install_nvitk_io(viewer: Any) -> None:
 
     def _qt_open(
         filenames,
-        stack: bool = False,
-        choose_plugin: bool = False,
+        stack = False,
+        choose_plugin = False,
         plugin=None,
         layer_type=None,
         **kwargs,

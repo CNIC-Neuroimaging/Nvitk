@@ -15,50 +15,33 @@ class PipelineGuiSpec:
 
 PIPELINE_TOOLS: tuple[PipelineGuiSpec, ...] = (
     PipelineGuiSpec(
-        "pipeline_pesa_fat",
-        "PESA-FAT batch",
-        "nvitk-pesa-fat",
-        "Full PESA-FAT batch driver (Dixon + CT-PET pipelines).",
-    ),
-    PipelineGuiSpec(
         "pipeline_pesa_fat_ctpet",
-        "PESA-FAT CT-PET v5",
+        "PESA-Fat CT-PET",
         "nvitk-pesa-fat-ctpet",
+        "CT-PET v5 segmentation, post-processing, and measurement.",
     ),
     PipelineGuiSpec(
         "pipeline_pesa_fat_dixon",
-        "PESA-FAT Dixon v5",
+        "PESA-Fat DIXON",
         "nvitk-pesa-fat-dixon",
-    ),
-    PipelineGuiSpec(
-        "pipeline_pesa_fat_hotspot",
-        "PESA-FAT hotspot QC",
-        "nvitk-pesa-fat-hotspot",
-    ),
-    PipelineGuiSpec(
-        "pipeline_pesa_fat_qc",
-        "PESA-FAT stage4 QC",
-        "nvitk-pesa-fat-qc",
+        "Dixon v5 fat segmentation, post-processing, and measurement.",
     ),
     PipelineGuiSpec(
         "pipeline_qvtpy",
-        "QVTpy (4D flow)",
+        "QVTPy (4DFlows)",
         "nvitk-qvtpy",
         "XNAT/DICOM → centerlines → 4D flow segmentation.",
     ),
     PipelineGuiSpec(
-        "pipeline_qvtpy_flowshow",
-        "QVTpy FlowShow",
-        "nvitk-qvtpy-flowshow",
-    ),
-    PipelineGuiSpec(
         "pipeline_bbtpy",
-        "BBTpy (brain TOF)",
+        "BBTPy",
         "nvitk-bbtpy",
+        "Black-blood TOF registration and segmentation.",
     ),
     PipelineGuiSpec(
         "pipeline_gpetpy",
-        "GPETpy",
+        "GPETPy",
         "nvitk-gpetpy",
+        "PET brain crop pipeline.",
     ),
 )

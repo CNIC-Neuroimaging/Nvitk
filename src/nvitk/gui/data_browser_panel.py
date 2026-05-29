@@ -109,7 +109,7 @@ class _XnatDownloadWorker(QThread):
                 project=self._project_id,
                 password=self._password or None,
             )
-            opened_dirs: list[Path] = []
+            opened_dirs = []
             with connect_xnat(conn) as session:
                 for row in self._scan_rows:
                     subject_uid = str(row.get("subject_uid") or "")
@@ -138,8 +138,8 @@ class DataBrowserPanel(QWidget):
         viewer: Any,
         app_state: dict[str, Any],
         *,
-        on_inputs_opened: Callable[[list[str]], None] | None = None,
-        parent: QWidget | None = None,
+        on_inputs_opened = None,
+        parent = None,
     ) -> None:
         super().__init__(parent)
         self._viewer = viewer
@@ -453,7 +453,7 @@ class DataBrowserPanel(QWidget):
 
     def _local_subjects_status_text(self, preset_id: str) -> str:
         assert self._local_roots is not None
-        sources: list[str] = []
+        sources = []
         if self._include_nifti.isChecked():
             sources.append("NIfTI")
         if self._include_dicom.isChecked():
@@ -694,7 +694,7 @@ class DataBrowserPanel(QWidget):
         self._status.setText(f"{len(assets)} asset(s) for {subject}.")
 
     def _selected_xnat_rows(self) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
+        rows = []
         for i in range(self._resource_list.count()):
             item = self._resource_list.item(i)
             if item.checkState() != Qt.Checked:
@@ -705,7 +705,7 @@ class DataBrowserPanel(QWidget):
         return rows
 
     def _selected_local_assets(self) -> list[LocalAsset]:
-        assets: list[LocalAsset] = []
+        assets = []
         for i in range(self._resource_list.count()):
             item = self._resource_list.item(i)
             if item.checkState() != Qt.Checked:
@@ -727,7 +727,7 @@ class DataBrowserPanel(QWidget):
             notify("Check at least one asset to load.", error=True)
             return
         opened = 0
-        paths: list[str] = []
+        paths = []
         for asset in assets:
             path = asset.path
             if not path.exists():
@@ -771,8 +771,8 @@ class DataBrowserPanel(QWidget):
             return
 
         use_temp = self._temp_only.isChecked() or not self._download_path.text().strip()
-        download_root: Path | None = None
-        temp_parent: Path | None = None
+        download_root = None
+        temp_parent = None
         if use_temp:
             if self._temp_session_root is None:
                 self._temp_session_root = Path(tempfile.mkdtemp(prefix="nvitk_xnat_gui_"))
@@ -815,7 +815,7 @@ class DataBrowserPanel(QWidget):
             self._app_state["inputs"] = inputs
 
     def _on_download_ok(self, dirs: list) -> None:
-        paths: list[str] = []
+        paths = []
         opened = 0
         for d in dirs:
             path = Path(d)

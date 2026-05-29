@@ -28,7 +28,7 @@ from nvitk.gui.warnings import install_napari_display_warnings
 
 
 def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
-    if not state.get("record_enabled", True):
+    if not state.get("record_enabled", False):
         return
     step = dict(step)
     step.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
@@ -37,7 +37,7 @@ def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
 
 def _layer_display_kwargs(layer: Any, *, name: str) -> dict[str, Any]:
     """Preserve spatial metadata from a source layer when adding tool outputs."""
-    kwargs: dict[str, Any] = {"name": name}
+    kwargs = {"name": name}
     meta = dict(getattr(layer, "metadata", None) or {})
     if meta:
         kwargs["metadata"] = meta
@@ -80,8 +80,8 @@ def run_app() -> None:
     install_nvitk_io(viewer)
     install_nvitk_layer_hooks(viewer)
 
-    app_state: dict[str, Any] = {
-        "record_enabled": True,
+    app_state = {
+        "record_enabled": False,
         "steps": [],
         "inputs": [],
         "outputs": [],
@@ -113,7 +113,7 @@ def run_app() -> None:
     try:
         from nvitk.gui.data_browser_panel import DataBrowserPanel
 
-        xnat_panel: Any = DataBrowserPanel(
+        xnat_panel = DataBrowserPanel(
             viewer,
             app_state,
             on_inputs_opened=_on_xnat_inputs_opened,
@@ -157,7 +157,7 @@ def run_app() -> None:
             if not isinstance(mesh, Mesh):
                 continue
             surf = mesh.to_napari_surface()
-            surf_kwargs: dict[str, Any] = {"name": mesh.name, **spatial}
+            surf_kwargs = {"name": mesh.name, **spatial}
             viewer.add_surface(
                 (surf["vertices"], surf["faces"]),
                 **surf_kwargs,
@@ -197,11 +197,11 @@ def run_app() -> None:
             notify("No valid paths in the batch list.", error=True)
 
     @magicgui(
-        record_steps={"label": "Record pipeline steps", "value": True},
+        record_steps={"label": "Record pipeline steps", "value": False},
         labels_opacity={"label": "Labels overlay opacity", "min": 0.0, "max": 1.0, "value": 0.6},
         call_button="Overlay mask as Labels (0=transparent)",
     )
-    def layers_panel(record_steps: bool = True, labels_opacity: float = 0.6) -> None:
+    def layers_panel(record_steps: bool = False, labels_opacity: float = 0.6) -> None:
         app_state["record_enabled"] = record_steps
         if not viewer.layers:
             notify("No layer selected.", error=True)
@@ -235,11 +235,11 @@ def run_app() -> None:
         _on_layers_changed()
 
     @magicgui(
-        record_steps={"label": "Record pipeline steps", "value": True},
+        record_steps={"label": "Record pipeline steps", "value": False},
         path={"label": "Export path", "value": "pipeline.json"},
         call_button="Export pipeline JSON",
     )
-    def export_panel(record_steps: bool = True, path: str = "pipeline.json") -> None:
+    def export_panel(record_steps: bool = False, path: str = "pipeline.json") -> None:
         app_state["record_enabled"] = record_steps
         doc = {
             "record_enabled": app_state["record_enabled"],
@@ -271,9 +271,9 @@ def run_app() -> None:
         call_button="Export active layer",
     )
     def save_panel(
-        path: str = "output.nii.gz",
-        use_file_affine: bool = True,
-        force_type: str = "",
+        path = "output.nii.gz",
+        use_file_affine = True,
+        force_type = "",
     ) -> None:
         out = path.strip()
         if not out:

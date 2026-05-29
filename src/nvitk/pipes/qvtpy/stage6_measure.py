@@ -395,7 +395,7 @@ def main(
         skip_existing=skip_existing,
         cross_section_radius_vox=cross_section_radius_vox,
         measure_resegment=measure_resegment,
-        measure_thr_algorithm=measure_thr_algorithm.lower(),  # type: ignore[arg-type]
+        measure_thr_algorithm=measure_thr_algorithm.lower(),
         cross_section_res=cross_section_res,
         cross_section_plane_interp=cross_section_plane_interp,
     )

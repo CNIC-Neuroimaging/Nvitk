@@ -87,7 +87,7 @@ def _load_file(path: Path) -> dict[str, Any]:
     suffix = path.suffix.lower()
     if suffix in {".yaml", ".yml"}:
         try:
-            import yaml  # type: ignore[import-not-found]
+            import yaml
         except ImportError as exc:
             raise ImportError(
                 "YAML config requires PyYAML. Install with: pip install pyyaml"
@@ -107,7 +107,7 @@ def _load_file(path: Path) -> dict[str, Any]:
 
 def _password_from_keyring(server: str) -> str | None:
     try:
-        import keyring  # type: ignore[import-not-found]
+        import keyring
     except ImportError:
         return None
     return keyring.get_password(KEYRING_SERVICE, f"xnat:{server}")
@@ -203,7 +203,7 @@ def keyring_set_main() -> None:
     except ImportError as exc:
         raise ImportError('Install click: pip install "click>=8"') from exc
     try:
-        import keyring  # type: ignore[import-not-found]
+        import keyring
     except ImportError as exc:
         raise ImportError("Install keyring: pip install keyring") from exc
 

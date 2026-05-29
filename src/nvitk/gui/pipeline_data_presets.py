@@ -160,11 +160,11 @@ def _is_cohort_dir_name(name: str) -> bool:
 def list_local_cohorts(
     *,
     nifti_root: Path | str,
-    dicom_root: Path | str | None = None,
-    results_root: Path | str | None = None,
+    dicom_root = None,
+    results_root = None,
 ) -> list[str]:
     """Discover cohort folders (e.g. ``202602_Week1``) at the roots of a PESA-Fat tree."""
-    found: set[str] = set()
+    found = set()
     for raw in (nifti_root, dicom_root, results_root):
         if raw is None:
             continue
@@ -210,10 +210,10 @@ def resolve_pesa_fat_batch(
 def load_preset_roots(
     preset_id: str,
     *,
-    dicom_root: Path | str | None = None,
-    nifti_root: Path | str | None = None,
-    results_root: Path | str | None = None,
-    batch: str | None = None,
+    dicom_root = None,
+    nifti_root = None,
+    results_root = None,
+    batch = None,
 ) -> PipelineRoots:
     """Load default roots from a pipeline config, with optional overrides."""
     spec = get_pipeline_preset(preset_id)
@@ -270,7 +270,7 @@ def _list_subject_dirs(root: Path, globs: tuple[str, ...]) -> set[str]:
     """PESA* (etc.) folder names directly under *root*."""
     if not root.is_dir():
         return set()
-    found: set[str] = set()
+    found = set()
     for pattern in globs:
         for path in root.glob(pattern):
             if path.is_dir() and _matches_subject_globs(path.name, globs):
@@ -290,7 +290,7 @@ def _batch_bases(roots: PipelineRoots) -> tuple[Path, Path, Path]:
 
 def _subjects_from_results_tree(r_base: Path, globs: tuple[str, ...]) -> set[str]:
     """Collect PESA* under ``<cohort>/res_*`` (skip ``per_subject`` leaves)."""
-    found: set[str] = set()
+    found = set()
     if not r_base.is_dir():
         return found
     for stage in sorted(r_base.glob("res_*")):
@@ -306,14 +306,14 @@ def _subjects_from_results_tree(r_base: Path, globs: tuple[str, ...]) -> set[str
 def list_local_subjects(
     roots: PipelineRoots,
     *,
-    include_dicom: bool = True,
-    include_nifti: bool = True,
-    include_results: bool = True,
+    include_dicom = True,
+    include_nifti = True,
+    include_results = True,
 ) -> list[str]:
     """Discover subject folder names from enabled roots (independent of asset filters)."""
     n_base, d_base, r_base = _batch_bases(roots)
     globs = roots.subject_globs
-    found: set[str] = set()
+    found = set()
 
     if include_nifti:
         found.update(_list_subject_dirs(n_base, globs))
@@ -347,7 +347,7 @@ def _discover_dicom_assets(subject_dir: Path) -> list[LocalAsset]:
 def _discover_nifti_assets(subject_dir: Path, *, max_files: int = 200) -> list[LocalAsset]:
     if not subject_dir.is_dir():
         return []
-    assets: list[LocalAsset] = []
+    assets = []
     for path in sorted(subject_dir.rglob("*")):
         if not path.is_file() or not _is_nifti_file(path):
             continue
@@ -363,7 +363,7 @@ def _discover_nifti_assets(subject_dir: Path, *, max_files: int = 200) -> list[L
 
 
 def _discover_results_assets(roots: PipelineRoots, subject: str) -> list[LocalAsset]:
-    assets: list[LocalAsset] = []
+    assets = []
     base = roots.subject_results_base(subject)
 
     if roots.layout == "batch":
@@ -401,12 +401,12 @@ def list_local_assets(
     roots: PipelineRoots,
     subject: str,
     *,
-    include_dicom: bool = True,
-    include_nifti: bool = True,
-    include_results: bool = True,
+    include_dicom = True,
+    include_nifti = True,
+    include_results = True,
 ) -> list[LocalAsset]:
     """List openable DICOM series, NIfTI files, and result masks for *subject*."""
-    out: list[LocalAsset] = []
+    out = []
     if include_dicom:
         out.extend(_discover_dicom_assets(roots.subject_dicom_dir(subject)))
     if include_nifti:

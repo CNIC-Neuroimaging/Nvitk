@@ -37,7 +37,8 @@ from nvitk.pipes.pesa_fat.qc.pet_axial import (
     build_dixon_slice_viewer_html,
 )
 from nvitk.pipes.pesa_fat.qc.dixon_heatmap import build_dixon_measurement_heatmap_html
-from nvitk.pipes.pesa_fat.qc.portal import review_widget_html
+from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures
+from nvitk.pipes.pesa_fat.qc.slice_review import report_header_toolbar_html, review_context
 from nvitk.pipes.pesa_fat.qc.pyvista_scenes import (
     export_ctpet_overview_html,
     export_dixon_overview_html,
@@ -48,12 +49,6 @@ log = Logger()
 
 PIPELINE_CHOICES = ("ct-pet-v5", "dixon-v5")
 RES_QC_DIR = "res_qc"
-
-
-def _filter_review_structures(structures: list[str] | tuple[str, ...]) -> list[str]:
-    from nvitk.pipes.pesa_fat.qc.review_policy import filter_review_structures
-
-    return filter_review_structures(structures)
 
 
 def _index_html(batch: str, links: list[tuple[str, str, str]]) -> str:
@@ -87,6 +82,33 @@ def run_qc_subject(
     out_ct = out_dir / f"qc_ctpet_{subject}.html"
     out_dx = out_dir / f"qc_dixon_{subject}.html"
 
+    structures_ct = (
+        expected_review_structures("ct-pet-v5") if "ct-pet-v5" in pipelines else []
+    )
+    structures_dx = expected_review_structures("dixon-v5") if "dixon-v5" in pipelines else []
+    review_ctx_ct = (
+        review_context(
+            batch=lay.batch,
+            subject=subject,
+            pipeline="ct-pet-v5",
+            report_relpath=f"{subject}/{out_ct.name}",
+            structures=structures_ct,
+        )
+        if structures_ct
+        else None
+    )
+    review_ctx_dx = (
+        review_context(
+            batch=lay.batch,
+            subject=subject,
+            pipeline="dixon-v5",
+            report_relpath=f"{subject}/{out_dx.name}",
+            structures=structures_dx,
+        )
+        if structures_dx
+        else None
+    )
+
     ctpet_masks: list[str] = []
     dixon_masks: list[str] = []
     ctpet_axial_parts: list[str] = []
@@ -107,6 +129,7 @@ def run_qc_subject(
                 margin_vox=margin_vox,
                 assets_dir=assets / "slices" / "ctpet",
                 assets_rel=f"{rel_assets}/slices/ctpet",
+                review_ctx=review_ctx_ct,
             )
         )
 
@@ -124,6 +147,7 @@ def run_qc_subject(
                 margin_vox=margin_vox,
                 assets_dir=assets / "slices" / "dixon",
                 assets_rel=f"{rel_assets}/slices/dixon",
+                review_ctx=review_ctx_dx,
             )
         )
 
@@ -191,16 +215,10 @@ def run_qc_subject(
     wrote_dx: Path | None = None
 
     if "ct-pet-v5" in pipelines:
-        structures_ct = sorted(
-            {spec.column_prefix for spec in ct_cfg.SUV_SPECS}
-            | {spec.column.replace("_VOL", "") for spec in ct_cfg.VOL_SPECS}
-        )
-        structures_ct = _filter_review_structures(structures_ct)
-        review_ct = review_widget_html(
+        header_ct = report_header_toolbar_html(
             batch=lay.batch,
             subject=subject,
             pipeline="ct-pet-v5",
-            structures=structures_ct,
             report_relpath=f"{subject}/{out_ct.name}",
         )
         ct_xlsx_href = copy_measurements_xlsx_for_qc(
@@ -214,7 +232,7 @@ def run_qc_subject(
         html_ct = build_ctpet_report_html(
             batch=lay.batch,
             subject=subject,
-            review_widget=review_ct,
+            header_toolbar=header_ct,
             masks_html=ctpet_masks,
             hotspot_gallery=ct_hot,
             axial_html=ctpet_axial_parts,
@@ -226,25 +244,25 @@ def run_qc_subject(
         log.info("CT-PET QC report written to %s", out_ct)
 
     if "dixon-v5" in pipelines:
-        structures_dx = _filter_review_structures([spec.prefix for spec in dx_cfg.MEASURE_SPECS])
-        review_dx = review_widget_html(
+        from nvitk.pipes.pesa_fat.qc.pet_axial import _safe_stem
+
+        header_dx = report_header_toolbar_html(
             batch=lay.batch,
             subject=subject,
             pipeline="dixon-v5",
-            structures=structures_dx,
             report_relpath=f"{subject}/{out_dx.name}",
         )
         heat = build_dixon_measurement_heatmap_html(
             lay,
             subject,
-            metric="FF",
             margin_vox=margin_vox,
             assets_dir=assets / "heatmap" / "dixon",
             assets_rel=f"{rel_assets}/heatmap/dixon",
+            slice_viewer_dom_id=f"dx_sv_{_safe_stem(subject)}",
         )
         extra = f'''
 <div class="card">
-  <div class="card-h"><h3>Measurement heatmap</h3><div class="muted">FF inside masks · WATER outside</div></div>
+  <div class="card-h"><h3>Measurement heatmap</h3><div class="muted">FF/T2 raw underlay · colormap inside mask</div></div>
   <div class="card-b">{heat}</div>
 </div>
 '''.strip()
@@ -259,7 +277,7 @@ def run_qc_subject(
         html_dx = build_dixon_report_html(
             batch=lay.batch,
             subject=subject,
-            review_widget=review_dx,
+            header_toolbar=header_dx,
             masks_html=dixon_masks,
             hotspot_gallery=dx_hot,
             axial_html=dixon_axial_parts,

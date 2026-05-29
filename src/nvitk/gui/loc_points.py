@@ -54,8 +54,8 @@ def locs_to_napari_points(
 
     Prefers sub-voxel ``centerline_x/y/z`` when present; falls back to ``i/j/k``.
     """
-    coords: list[np.ndarray] = []
-    features: dict[str, list] = {c: [] for c in LOC_CSV_COLUMNS}
+    coords = []
+    features = {c: [] for c in LOC_CSV_COLUMNS}
 
     for row in rows:
         if all(k in row and str(row.get(k, "")).strip() for k in ("centerline_x", "centerline_y", "centerline_z")):
@@ -95,15 +95,15 @@ def add_locs_layer(
     viewer: Any,
     rows: list[dict[str, Any]],
     *,
-    reference_layer: Any | None = None,
-    name: str = LOC_LAYER_NAME,
+    reference_layer = None,
+    name = LOC_LAYER_NAME,
 ) -> Any:
     """Add or replace a Points layer for LOC rows."""
     coords, features = locs_to_napari_points(rows, reference_layer)
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)
-    kwargs: dict[str, Any] = {
+    kwargs = {
         "size": 8,
         "face_color": "vessel_id",
         "symbol": "o",

@@ -61,7 +61,7 @@ def layer_spacing(layer: Any) -> tuple[float, ...] | None:
 
 def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
     """Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``."""
-    kwargs: dict[str, Any] = {}
+    kwargs = {}
     aff = getattr(layer, "affine", None)
     if aff is not None:
         kwargs["affine"] = to_numpy(aff).astype(float)
@@ -131,7 +131,7 @@ def spatial_volume_image(layer: Any, data: np.ndarray | None = None) -> Image:
         return img
 
     t_ax = _time_axis_index(layer)
-    sl: list[slice] = [slice(None)] * arr.ndim
+    sl = [slice(None)] * arr.ndim
     sl[t_ax] = 0
     data3 = np.ascontiguousarray(arr[tuple(sl)])
     meta = dict(img.metadata or {})
@@ -193,9 +193,9 @@ def layers_need_resample(
 def align_mask_to_reference_layer(
     mask_layer: Any,
     reference_layer: Any,
-    mask_data: np.ndarray | None = None,
+    mask_data = None,
     *,
-    order: int = 0,
+    order = 0,
 ) -> tuple[Image, Image, bool]:
     """
     Return ``(reference_image, mask_on_reference_grid, was_resampled)``.

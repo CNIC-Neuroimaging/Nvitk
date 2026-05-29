@@ -66,7 +66,7 @@ class GuiSgeJob:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GuiSgeJob:
         aux_raw = data.get("aux_layers") or {}
-        aux: list[AuxLayerSpec] = []
+        aux = []
         if isinstance(aux_raw, dict):
             for param, info in aux_raw.items():
                 if isinstance(info, dict):
@@ -132,7 +132,7 @@ def stage_job_locally(
     params: dict[str, Any],
     target_mode: str,
     label_ids: list[int] | None,
-    gpu: bool = False,
+    gpu = False,
 ) -> tuple[Path, GuiSgeJob]:
     """Export inputs + ``job.json`` under a local staging directory."""
     staging = _staging_root()
@@ -143,7 +143,7 @@ def stage_job_locally(
 
     _export_layer(layer, data_dir / INPUT_NAME)
 
-    aux: list[AuxLayerSpec] = []
+    aux = []
     for pspec in params_for_tool(tool_id):
         if pspec.kind != "layer":
             continue

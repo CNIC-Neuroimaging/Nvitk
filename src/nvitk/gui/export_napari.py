@@ -75,8 +75,8 @@ def export_layer(
     layer: Any,
     path: str | Path,
     *,
-    use_file_affine: bool = True,
-    force_type: str | None = None,
+    use_file_affine = True,
+    force_type = None,
 ) -> None:
     """Export the active Napari layer using nvitk I/O."""
     path = Path(path)
@@ -105,8 +105,8 @@ def export_selected_layer(
     viewer: Any,
     path: str,
     *,
-    use_file_affine: bool = True,
-    force_type: str | None = None,
+    use_file_affine = True,
+    force_type = None,
 ) -> None:
     """Export the selected layer, or the topmost layer if none selected."""
     if not viewer.layers:

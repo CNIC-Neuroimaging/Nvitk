@@ -71,6 +71,17 @@ section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
   text-decoration: none;
 }
 .qc-dl-btn:hover { background: rgba(252,163,17,0.28); text-decoration: none; }
+.qc-revise-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(252,163,17,0.5);
+  background: rgba(252,163,17,0.15);
+  color: #fca311;
+  font-weight: 600;
+  cursor: pointer;
+}
+.qc-revise-btn:hover { background: rgba(252,163,17,0.28); }
+.qc-revise-btn:disabled { opacity: 0.55; cursor: default; }
 """
 
 
@@ -86,7 +97,16 @@ def _join_iframes(parts: list[str]) -> str:
     return "\n".join(out)
 
 
-def _base_doc(*, title: str, batch: str, subject: str, body_html: str) -> str:
+def _base_doc(*, title: str, batch: str, subject: str, body_html: str, header_toolbar: str = "") -> str:
+    toolbar = header_toolbar.strip()
+    header_inner = f"""
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div>
+        <h1>{title}</h1>
+        <div class="meta">Batch <code>{batch}</code> · Subject <code>{subject}</code></div>
+      </div>
+      {toolbar}
+    </div>"""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -97,11 +117,16 @@ def _base_doc(*, title: str, batch: str, subject: str, body_html: str) -> str:
 <body>
 <div class="container">
   <div class="header">
-    <h1>{title}</h1>
-    <div class="meta">Batch <code>{batch}</code> · Subject <code>{subject}</code></div>
+{header_inner}
   </div>
 {body_html}
 </div>
+<script>
+window.addEventListener('pagehide', function() {{
+  document.querySelectorAll('img[src]').forEach(function(img) {{ img.removeAttribute('src'); }});
+  document.querySelectorAll('iframe[src]').forEach(function(el) {{ el.removeAttribute('src'); }});
+}});
+</script>
 </body>
 </html>
 """
@@ -111,7 +136,7 @@ def build_ctpet_report_html(
     *,
     batch: str,
     subject: str,
-    review_widget: str = "",
+    header_toolbar: str = "",
     masks_html: list[str],
     hotspot_gallery: str,
     axial_html: list[str],
@@ -144,16 +169,21 @@ def build_ctpet_report_html(
   <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
 </div>
 </section>
-{review_widget}
 """
-    return _base_doc(title="PESA-Fat QC (CT-PET)", batch=batch, subject=subject, body_html=body)
+    return _base_doc(
+        title="PESA-Fat QC (CT-PET)",
+        batch=batch,
+        subject=subject,
+        body_html=body,
+        header_toolbar=header_toolbar,
+    )
 
 
 def build_dixon_report_html(
     *,
     batch: str,
     subject: str,
-    review_widget: str = "",
+    header_toolbar: str = "",
     masks_html: list[str],
     hotspot_gallery: str,
     axial_html: list[str],
@@ -197,14 +227,19 @@ def build_dixon_report_html(
   <div class=\"card-b\"><div class=\"table-wrap\">{measurements_table}</div></div>
 </div>
 </section>
-{review_widget}
 """
-    return _base_doc(title="PESA-Fat QC (Dixon)", batch=batch, subject=subject, body_html=body)
+    return _base_doc(
+        title="PESA-Fat QC (Dixon)",
+        batch=batch,
+        subject=subject,
+        body_html=body,
+        header_toolbar=header_toolbar,
+    )
 
 
 def build_report_html(**kwargs: object) -> str:
     """Backward-compatible wrapper for older callers (single combined page)."""
-    return build_ctpet_report_html(  # type: ignore[arg-type]
+    return build_ctpet_report_html(
         batch=str(kwargs.get("batch", "")),
         subject=str(kwargs.get("subject", "")),
         masks_html=list(kwargs.get("ctpet_masks_html") or []),

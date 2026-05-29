@@ -20,7 +20,7 @@ class SgePendingJob:
     remote_job_root: str
     connection: SgeConnection
     output_name: str = "output.nii.gz"
-    status: str = "submitted"  # submitted | running | done | failed | retrieved
+    status: str = "submitted"
     done_payload: dict[str, Any] | None = None
     local_download_dir: str | None = None
 
@@ -69,7 +69,7 @@ def verify_local_downloads(local_dir: Path, done: SgeDoneMarker) -> list[Path]:
     expected = done.output_files or []
     if not expected:
         raise ValueError("Done marker lists no output files.")
-    paths: list[Path] = []
+    paths = []
     for name in expected:
         lp = local_dir / name
         if not lp.is_file() or lp.stat().st_size <= 0:

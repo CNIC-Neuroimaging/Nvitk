@@ -22,7 +22,7 @@ def _write_done_marker(
     job_id: str,
     exit_code: int,
     output_files: list[str],
-    error: str | None = None,
+    error = None,
 ) -> None:
     payload = {
         "job_id": job_id,
@@ -58,13 +58,13 @@ def main(job_path: Path) -> None:
 
     job = GuiSgeJob.from_dict(spec)
     exit_code = 0
-    err_msg: str | None = None
-    output_files: list[str] = []
+    err_msg = None
+    output_files = []
 
     try:
         primary = imread(data_dir / job.input_name, backend="numpy")
 
-        aux: dict[str, Image] = {}
+        aux = {}
         for aux_spec in job.aux_layers:
             aux[aux_spec.layer_name] = imread(data_dir / aux_spec.file, backend="numpy")
 

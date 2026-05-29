@@ -155,6 +155,13 @@ def _safe(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
 
 
+def _reviewable_structure(name: str, *, pipeline: str) -> bool:
+    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, is_reviewable_structure
+
+    expected = expected_review_structures(pipeline)
+    return is_reviewable_structure(name, reviewable_structures=expected)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -188,7 +195,7 @@ _HEADERS = [
 def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
     try:
         import openpyxl
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise BackendUnavailableError('openpyxl is required for QC review Excel writes.') from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,12 +270,20 @@ def create_qc_portal_app(
         from fastapi import FastAPI
         from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
         from fastapi.staticfiles import StaticFiles
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise BackendUnavailableError(
             'QC portal requires FastAPI. Install with: pip install "fastapi>=0.110" "uvicorn>=0.27"'
         ) from exc
 
     app = FastAPI(title="nvitk PESA-Fat QC portal")
+
+    @app.middleware("http")
+    async def _no_cache_html(request, call_next):
+        response = await call_next(request)
+        ctype = response.headers.get("content-type", "")
+        if "text/html" in ctype or request.url.path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     qc_root = Path(qc_root).resolve()
     # Keep backward compatibility: if invoked with a single batch qc_root,
@@ -321,6 +336,8 @@ def create_qc_portal_app(
         for r in rows:
             if r.batch != batch or r.subject != subject or r.pipeline != pipeline:
                 continue
+            if not _reviewable_structure(r.structure, pipeline=pipeline):
+                continue
             structures[r.structure] = {
                 "qc_status": r.qc_status,
                 "reviewer": r.reviewer,
@@ -339,14 +356,19 @@ def create_qc_portal_app(
                 subject=str(payload.get("subject", "")).strip(),
                 pipeline=str(payload.get("pipeline", "")).strip(),
                 structure=str(payload.get("structure", "")).strip(),
-                qc_status=str(payload.get("qc_status", "PENDING")).strip().upper(),  # type: ignore[arg-type]
+                qc_status=str(payload.get("qc_status", "PENDING")).strip().upper(),
                 reviewer=str(payload.get("reviewer", "")).strip(),
                 reviewed_at=_utc_now_iso(),
                 comment=str(payload.get("comment", "")).strip(),
                 report_relpath=str(payload.get("report_relpath", "")).strip(),
             )
             if row.qc_status not in {"PENDING", "OK", "FAIL"}:
-                row = ReviewRow(**{**row.__dict__, "qc_status": "PENDING"})  # type: ignore[misc]
+                row = ReviewRow(**{**row.__dict__, "qc_status": "PENDING"})
+            if not _reviewable_structure(row.structure, pipeline=row.pipeline):
+                return JSONResponse(
+                    {"ok": False, "error": f"Structure {row.structure!r} is not reviewable"},
+                    status_code=400,
+                )
             upsert_review_row_excel(reviews_xlsx, row)
             return JSONResponse({"ok": True, "excel": True})
         except Exception as exc:
@@ -385,6 +407,7 @@ def create_qc_portal_app(
                     "report_relpath": r.report_relpath,
                 }
                 for r in all_rows
+                if _reviewable_structure(r.structure, pipeline=r.pipeline)
             ]
             stats, db_error = try_sync_qc_reviews_for_report(
                 batch=batch,
@@ -446,7 +469,7 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
                 subject=subject,
                 pipeline=pipeline,
                 structure=structure,
-                qc_status=qc_status,  # type: ignore[arg-type]
+                qc_status=qc_status,
                 reviewer=reviewer,
                 reviewed_at=reviewed_at,
                 comment=comment,
@@ -456,13 +479,16 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
     return rows
 
 
-def _overall_status(rows: list[ReviewRow], *, pipeline: str) -> str:
-    """Collapse per-structure statuses; OK only when every expected structure is OK."""
-    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, overall_status
+def _portal_status(rows: list[ReviewRow], *, pipeline: str) -> tuple[str, str]:
+    """Return (label, css_class_suffix) for dashboard cells."""
+    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, portal_display_status
 
     by_struct = {r.structure: r.qc_status for r in rows}
     expected = expected_review_structures(pipeline)
-    return overall_status(by_struct, expected_structures=expected or None)
+    label, tone = portal_display_status(by_struct, expected_structures=expected or None)
+    if label == "REVISED":
+        return label, f"revised_{tone}"
+    return label, tone
 
 
 def _discover_batches(results_root: Path) -> list[str]:
@@ -519,20 +545,25 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
         by_key.setdefault((r.batch, r.subject, r.pipeline), []).append(r)
 
     processed = _discover_processed_subjects(results_root)
+    subjects = sorted({row["subject"] for row in processed})
+    subject_datalist = "\n".join(f"<option value='{_esc(s)}'></option>" for s in subjects)
+
     table_rows: list[str] = []
     for row in processed:
         b = row["batch"]
         s = row["subject"]
-        ct_stat = _overall_status(by_key.get((b, s, "ct-pet-v5"), []), pipeline="ct-pet-v5")
-        dx_stat = _overall_status(by_key.get((b, s, "dixon-v5"), []), pipeline="dixon-v5")
+        ct_label, ct_css = _portal_status(by_key.get((b, s, "ct-pet-v5"), []), pipeline="ct-pet-v5")
+        dx_label, dx_css = _portal_status(by_key.get((b, s, "dixon-v5"), []), pipeline="dixon-v5")
         ct_link = f"<a href='{_esc(row['ct_href'])}'>CT-PET</a>" if row["ct_href"] else "<span class='muted'>—</span>"
         dx_link = f"<a href='{_esc(row['dx_href'])}'>Dixon</a>" if row["dx_href"] else "<span class='muted'>—</span>"
         table_rows.append(
-            "<tr>"
+            "<tr data-subject='"
+            + _esc(s).lower()
+            + "'>"
             f"<td><code>{_esc(b)}</code></td>"
             f"<td><code>{_esc(s)}</code></td>"
-            f"<td class='st {ct_stat.lower()}'>{_esc(ct_stat)}</td>"
-            f"<td class='st {dx_stat.lower()}'>{_esc(dx_stat)}</td>"
+            f"<td class='st {ct_css}'>{_esc(ct_label)}</td>"
+            f"<td class='st {dx_css}'>{_esc(dx_label)}</td>"
             f"<td>{ct_link} · {dx_link}</td>"
             "</tr>"
         )
@@ -581,9 +612,19 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
     th {{ position: sticky; top: 0; background: rgba(20,33,61,0.92); }}
     code {{ color: #fff; }}
     .st {{ font-weight: 700; }}
-    .st.ok {{ color: #7CFC9A; }}
-    .st.fail {{ color: #FF6B6B; }}
+    .st.revised_ok {{ color: #7CFC9A; }}
+    .st.revised_fail {{ color: #FF6B6B; }}
     .st.pending {{ color: #FFE08A; }}
+    .search-bar {{
+      width: min(420px, 100%);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(229,229,229,0.25);
+      background: rgba(0,0,0,0.25);
+      color: #fff;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }}
   </style>
 </head>
 <body>
@@ -597,8 +638,10 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
     </div>
 
     <div class="card">
-      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">OK only when every structure is OK · FAIL if there is any issue with the report</div></div>
+      <div class="card-h"><h2>Processed subjects (all batches)</h2><div class="muted">REVISED (green) when all structures reviewed · REVISED (red) when all FAIL</div></div>
       <div class="card-b">
+        <input class="search-bar" id="subject-search" type="search" list="subject-list" placeholder="Search subject…" autocomplete="off"/>
+        <datalist id="subject-list">{subject_datalist}</datalist>
         <div class="table-wrap">
           <table>
             <thead>
@@ -618,6 +661,20 @@ def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
       </div>
     </div>
   </div>
+  <script>
+  (function() {{
+    var input = document.getElementById('subject-search');
+    var tbody = document.querySelector('table tbody');
+    if (!input || !tbody) return;
+    input.addEventListener('input', function() {{
+      var q = (input.value || '').trim().toLowerCase();
+      tbody.querySelectorAll('tr[data-subject]').forEach(function(tr) {{
+        var subj = tr.getAttribute('data-subject') || '';
+        tr.style.display = !q || subj.indexOf(q) >= 0 ? '' : 'none';
+      }});
+    }});
+  }})();
+  </script>
 </body>
 </html>
 """

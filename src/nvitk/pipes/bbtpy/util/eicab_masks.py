@@ -60,7 +60,7 @@ def resolve_eicab_mask(
     If the requested mask is missing but the alternate exists, logs a warning and
     uses the alternate. Raises :class:`FileNotFoundError` if neither exists.
     """
-    pref = preference.strip().lower()  # type: ignore[assignment]
+    pref = preference.strip().lower()
     if pref not in ("cw", "wb"):
         raise ValueError(f"eicab_mask preference must be 'cw' or 'wb', got {preference!r}")
 

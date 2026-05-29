@@ -53,7 +53,7 @@ class SgeCleanupDialog(QDialog):
         parent=None,
         *,
         remote_job_root: str,
-        job_id: str = "",
+        job_id = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("SGE remote cleanup")
@@ -112,10 +112,10 @@ class SgeManualImportDialog(QDialog):
         self,
         parent=None,
         *,
-        host: str = "",
-        user: str = "",
-        password: str = "",
-        remote_job_root: str = "",
+        host = "",
+        user = "",
+        password = "",
+        remote_job_root = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Import SGE results (manual)")
@@ -219,7 +219,7 @@ def import_sge_results_to_viewer(
     viewer: Any,
     result: SgeRetrieveResult,
     *,
-    on_layers_changed: Callable[[], None] | None = None,
+    on_layers_changed = None,
 ) -> SgeRetrieveResult:
     count = 0
     for path in result.downloaded_files:
@@ -292,11 +292,11 @@ def import_sge_job(
     viewer: Any,
     app_state: dict[str, Any],
     *,
-    job_id: str | None = None,
-    parent: Any = None,
-    on_layers_changed: Callable[[], None] | None = None,
-    prompt_cleanup: bool = True,
-    manual_fallback: bool = True,
+    job_id = None,
+    parent = None,
+    on_layers_changed = None,
+    prompt_cleanup = True,
+    manual_fallback = True,
 ) -> bool:
     """Download + import using session credentials; cleanup dialog only after success."""
     if app_state.get("_sge_import_in_progress"):
@@ -311,10 +311,10 @@ def import_sge_job(
 
     app_state["_sge_import_in_progress"] = True
 
-    conn: SgeConnection | None = None
+    conn = None
     root = ""
-    resolved_job_id: str | None = job_id
-    result: SgeRetrieveResult | None = None
+    resolved_job_id = job_id
+    result = None
 
     try:
         try:
@@ -391,8 +391,8 @@ def import_sge_from_dialog(
     viewer: Any,
     app_state: dict[str, Any],
     *,
-    parent: Any = None,
-    on_layers_changed: Callable[[], None] | None = None,
+    parent = None,
+    on_layers_changed = None,
 ) -> bool:
     """Import using session credentials (same entry point as the Tools dock button)."""
     return import_sge_job(
