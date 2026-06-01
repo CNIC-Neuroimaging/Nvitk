@@ -304,7 +304,11 @@ def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
 
 def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:
     """Re-apply 4D dims when selecting a 4D layer (3D oblique affines can pollute viewer.dims)."""
-    from nvitk.gui.core.orientation import _axes_string_from_layer, _synchronize_4d_dims, ensure_4d_scale_only_layer
+    from nvitk.gui.core.orientation import (
+        _axes_string_from_layer,
+        _synchronize_4d_dims,
+        ensure_4d_scale_only_layer,
+    )
 
     if not viewer.layers:
         return

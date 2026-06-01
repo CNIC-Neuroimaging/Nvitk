@@ -29,6 +29,9 @@ notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
 # .nvitk/sge.json
 
 src/nvitk.egg-info/
+docs/
+tests/
+test/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

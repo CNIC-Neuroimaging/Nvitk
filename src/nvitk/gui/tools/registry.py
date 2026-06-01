@@ -459,6 +459,54 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "export_view_png",
+        "Visualization",
+        "Export 3D view (PNG)",
+        (
+            ParamSpec("output_path", "Output PNG path", "str", "view.png"),
+            ParamSpec("canvas_only", "Canvas only (no window chrome)", "bool", True),
+        ),
+        run_mode="notify",
+        description=(
+            "Save a PNG of the Napari 3D canvas (camera, orientation, colormap) "
+            "matching the current viewer."
+        ),
+    ),
+    GuiToolSpec(
+        "export_view_gif",
+        "Visualization",
+        "Export 3D view (GIF, 4D)",
+        (
+            ParamSpec("output_path", "Output GIF path", "str", "view.gif"),
+            ParamSpec("gif_fps", "Frames per second", "float", 8.0, min=0.5, max=60.0),
+            ParamSpec("time_axis", "Time axis (-1=auto)", "int", -1, min=-1, max=7),
+            ParamSpec("canvas_only", "Canvas only (no window chrome)", "bool", True),
+        ),
+        run_mode="notify",
+        description=(
+            "Animate the 3D view over the time/cardiac slider (4D images or synced "
+            "4D flow-vector overlays)."
+        ),
+    ),
+    GuiToolSpec(
+        "volume_projection",
+        "Transform",
+        "Volume projection",
+        (
+            ParamSpec("projection_axis", "Axis (-1=auto Z)", "int", -1, min=-1, max=7),
+            ParamSpec(
+                "projection_method",
+                "Method",
+                "choice",
+                "max",
+                choices=("max", "mean", "median", "min", "std", "sum"),
+            ),
+        ),
+        description=(
+            "Collapse a 3D or 4D image along one axis (max, mean, median, min, std, sum)."
+        ),
+    ),
+    GuiToolSpec(
         "reg_flirt_rigid",
         "Registration",
         "FLIRT rigid register",

@@ -52,6 +52,16 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
         "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."
     ),
+    "export_view_png": (
+        "Save the Napari 3D render window as PNG (same camera and orientation as on screen)."
+    ),
+    "export_view_gif": (
+        "Export an animated GIF: one 3D screenshot per cardiac phase (4D image or "
+        "4D flow vectors overlay)."
+    ),
+    "volume_projection": (
+        "Maximum / mean / median (etc.) intensity projection along a chosen axis."
+    ),
     "reg_flirt_rigid": "Rigid FLIRT registration to a reference volume.",
     "reg_flirt_apply": "Apply a saved FLIRT transform to a volume.",
     "isotropy": "Resample to near-isotropic voxel spacing.",

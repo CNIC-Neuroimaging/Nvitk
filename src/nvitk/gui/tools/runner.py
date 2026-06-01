@@ -269,6 +269,38 @@ def run_gui_tool(
         _run_measure_loc_hemodynamics(viewer, layer, params)
         return None
 
+    if tool_id == "export_view_png":
+        from nvitk.gui.viz.view_capture import export_view_png
+
+        out = str(params.get("output_path") or "view.png").strip()
+        if not out:
+            raise ValueError("Set an output PNG path.")
+        export_view_png(
+            viewer,
+            out,
+            canvas_only=bool(params.get("canvas_only", True)),
+        )
+        notify(f"Saved 3D view → {out}")
+        return None
+
+    if tool_id == "export_view_gif":
+        from nvitk.gui.viz.view_capture import export_view_gif
+
+        out = str(params.get("output_path") or "view.gif").strip()
+        if not out:
+            raise ValueError("Set an output GIF path.")
+        t_axis = int(params.get("time_axis", -1))
+        n = export_view_gif(
+            viewer,
+            out,
+            fps=float(params.get("gif_fps") or 8.0),
+            time_axis=t_axis if t_axis >= 0 else None,
+            canvas_only=bool(params.get("canvas_only", True)),
+            layer=layer,
+        )
+        notify(f"Saved {n}-frame GIF → {out}")
+        return None
+
     if tool_id == "orient_volume":
         from nvitk.gui.core.spatial import orientation_text
         from nvitk.gui.core.orientation import configure_viewer_for_layer
@@ -445,6 +477,30 @@ def run_gui_tool(
                 return out
             sk = skeletonize_binary(arr > 0)
             return as_backend_array(sk).astype(np.uint8)
+
+    if tool_id == "volume_projection":
+        from nvitk.gui.core.orientation import _axes_string_from_layer
+        from nvitk.transform.projection import project_volume
+
+        axis = int(params.get("projection_axis", -1))
+        if axis < 0:
+            axes_str = _axes_string_from_layer(layer)
+            if axes_str and "Z" in axes_str.upper():
+                axis = axes_str.upper().index("Z")
+            else:
+                axis = min(2, int(img.ndim) - 1)
+        method = str(params.get("projection_method") or "max")
+        if int(img.ndim) < 3:
+            raise ValueError("Volume projection requires at least 3 dimensions.")
+        if axis < 0 or axis >= int(img.ndim):
+            raise ValueError(f"Projection axis {axis} is invalid for ndim={img.ndim}.")
+        with using(bk):
+            out_img = project_volume(img, axis=axis, method=method)
+        notify(
+            f"Projection ({method}) along axis {axis}: "
+            f"{tuple(img.data.shape)} → {tuple(out_img.data.shape)}"
+        )
+        return coerce_tool_output(out_img.data)
 
     if tool_id == "isotropy":
         from nvitk.transform.isotropy import isotropy

@@ -259,6 +259,56 @@ def run_app() -> None:
         notify("Cleared recorded pipeline steps.")
 
     @magicgui(
+        path={"label": "View PNG path", "value": "view.png"},
+        view_canvas_only={"label": "Canvas only", "value": True},
+        call_button="Export 3D view (PNG)",
+    )
+    def export_view_png_panel(path: str = "view.png", view_canvas_only: bool = True) -> None:
+        from nvitk.gui.viz.view_capture import export_view_png
+
+        out = path.strip()
+        if not out:
+            notify("Set a PNG path.", error=True)
+            return
+        try:
+            export_view_png(viewer, out, canvas_only=view_canvas_only)
+        except Exception as exc:
+            notify(f"View export failed: {exc}", error=True)
+            return
+        notify(f"Saved 3D view → {out}")
+
+    @magicgui(
+        path={"label": "View GIF path", "value": "view.gif"},
+        gif_fps={"label": "Frames per second", "value": 8.0, "min": 0.5, "max": 60.0},
+        view_canvas_only={"label": "Canvas only", "value": True},
+        call_button="Export 3D view (GIF, 4D)",
+    )
+    def export_view_gif_panel(
+        path: str = "view.gif",
+        gif_fps: float = 8.0,
+        view_canvas_only: bool = True,
+    ) -> None:
+        from nvitk.gui.viz.view_capture import export_view_gif
+
+        out = path.strip()
+        if not out:
+            notify("Set a GIF path.", error=True)
+            return
+        layer = viewer.layers.selection.active or (viewer.layers[-1] if viewer.layers else None)
+        try:
+            n = export_view_gif(
+                viewer,
+                out,
+                fps=float(gif_fps),
+                canvas_only=view_canvas_only,
+                layer=layer,
+            )
+        except Exception as exc:
+            notify(f"GIF export failed: {exc}", error=True)
+            return
+        notify(f"Saved {n}-frame GIF → {out}")
+
+    @magicgui(
         path={"label": "Output path", "value": "output.nii.gz"},
         use_file_affine={
             "label": "Use original file affine (from nvitk metadata)",
@@ -365,7 +415,16 @@ def run_app() -> None:
     tabs.addTab(mesh_panel.native, "Mesh")
     tabs.addTab(batch_panel.native, "Batch")
     tabs.addTab(layers_tab, "Layers")
-    tabs.addTab(save_panel.native, "Export")
+    export_tab = QWidget()
+    export_layout = QVBoxLayout()
+    export_layout.setAlignment(Qt.AlignTop)
+    export_layout.setSpacing(6)
+    export_layout.addWidget(export_view_png_panel.native)
+    export_layout.addWidget(export_view_gif_panel.native)
+    export_layout.addWidget(save_panel.native)
+    export_layout.addStretch(1)
+    export_tab.setLayout(export_layout)
+    tabs.addTab(export_tab, "Export")
     tabs.addTab(export_panel.native, "Pipeline")
     tabs.addTab(pipeline_panel.native, "Pipeline log")
     layout.addWidget(tabs, stretch=1)

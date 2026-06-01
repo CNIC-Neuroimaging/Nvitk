@@ -131,6 +131,12 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "sync_dims",
         "orient_mode",
         "target_orientation",
+        "output_path",
+        "canvas_only",
+        "gif_fps",
+        "time_axis",
+        "projection_axis",
+        "projection_method",
     )
     for name in all_names:
         sub = getattr(widget, name, None)
