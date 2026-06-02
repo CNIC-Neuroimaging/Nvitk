@@ -85,6 +85,40 @@ def python_module_argv(module: str, *, python: str = "python") -> list[str]:
     return [python, "-m", module]
 
 
+def python_script_argv(
+    script_path_in_container: str,
+    *,
+    python: str = "python",
+) -> list[str]:
+    """Argv prefix to run a ``.py`` file by absolute path inside the container.
+
+    Prefer this over :func:`python_module_argv` when the cluster image does not ship
+    optional subpackages (e.g. ``nvitk.gui.sge``) but the repo is bind-mounted at
+    ``SingularityBinds.src``. ``PYTHONPATH`` must still include that src root.
+    """
+    path = str(script_path_in_container).strip()
+    if not path.startswith("/"):
+        raise ValueError(
+            f"script_path_in_container must be absolute inside the container, got {path!r}"
+        )
+    return [python, path]
+
+
+def gui_sge_worker_script_path(binds: SingularityBinds | None = None) -> str:
+    """Absolute in-container path to :mod:`nvitk.gui.sge.worker` (bind-mounted source)."""
+    root = (binds or SingularityBinds()).src.rstrip("/")
+    return f"{root}/nvitk/gui/sge/worker.py"
+
+
+def gui_sge_worker_argv(
+    binds: SingularityBinds | None = None,
+    *,
+    python: str = "python",
+) -> list[str]:
+    """Argv prefix for the Napari GUI SGE headless worker."""
+    return python_script_argv(gui_sge_worker_script_path(binds), python=python)
+
+
 def build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str:
     """Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds."""
     env_exports = " ".join(
@@ -450,6 +484,9 @@ __all__ = [
     "build_qsub_command",
     "build_singularity_command",
     "python_module_argv",
+    "python_script_argv",
+    "gui_sge_worker_script_path",
+    "gui_sge_worker_argv",
     "emit_sge_submission_summary_to_terminal",
     "format_sge_submission_summary",
     "submit_chain",
