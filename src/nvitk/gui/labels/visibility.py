@@ -211,7 +211,7 @@ def restore_label_visibility(
 
     src = meta.pop(_NVITK_LABEL_SOURCE_KEY, None)
     if src is not None:
-        layer.data = np.asarray(src, dtype=to_numpy(layer.data).dtype, copy=False)
+        layer.data = np.asarray(src, dtype=to_numpy(layer.data).dtype)
     layer.metadata = meta
 
 
