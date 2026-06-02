@@ -124,14 +124,15 @@ def build_qsub_command(
     log_file = paths.log_dir / f"{job.job_name}.log"
     err_file = paths.err_dir / f"{job.job_name}.err"
 
+    from nvitk.cluster.sge import qsub_l_resource_args
+
     argv = [
         "qsub",
         "-P", resources.project,
         "-terse",
         "-N", job.job_name,
         "-A", resources.account,
-        "-l", f"ngpu={resources.ngpu}",
-        "-l", f"h_vmem={resources.h_vmem}",
+        *qsub_l_resource_args(resources),
         "-o", str(log_file),
         "-e", str(err_file),
     ]

@@ -1,8 +1,8 @@
 {
   "schema": "nvitk.sge.v1",
   "defaults": {
-    "sge_project": "MCC_GPU",
-    "sge_account": "MCC_GPU",
+    "sge_project": "GPU",
+    "sge_account": "Prod",
     "sge_queue": null,
     "sge_ngpu": 1,
     "sge_h_vmem": "25G"
@@ -20,7 +20,7 @@
   },
   "pipelines": {
     "eicab": {
-      "sge_project": "MCC_GPU",
+      "sge_project": "GPU",
       "sge_ngpu": 0,
       "sge_h_vmem": "25G",
       "log_subdir": "eICAB",
@@ -30,8 +30,8 @@
       "default_vasculature_host_dir": "/programs/Neuro/vasculature2"
     },
     "totalsegmentator": {
-      "sge_project": "MCC_GPU",
-      "sge_account": "MCC_GPU",
+      "sge_project": "XSGPU",
+      "sge_account": "XSGPU",
       "log_subdir": "totalseg",
       "err_subdir": "totalseg",
       "default_sge_model_root": "/references/AI_models/totalsegmentator",
@@ -56,7 +56,7 @@
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
       "sge_project": "MCC_GPU",
       "sge_account": "MCC_GPU",
-      "sge_ngpu": 0,
+      "sge_ngpu": 1,
       "sge_h_vmem": "30G"
     },
     "image_tools": {
@@ -64,8 +64,11 @@
       "err_subdir": "image_tools",
       "sge_job_prefix": "nvitk-tool",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif",
-      "sge_ngpu": 0,
-      "sge_h_vmem": "25G"
+      "sge_project": "XSGPU",
+      "sge_account": "XSGPU",
+      "sge_h_vmem": "25G",
+      "sge_ngpu": null,
+      "sge_queue": null
     }
   }
 }

@@ -17,6 +17,55 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence, TextIO
 
+# Longest prefix first so ``XSGPU`` matches ``XS``, not ``S``.
+_VIRTUAL_GPU_PROJECT_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("XS", "xsgpu"),
+    ("S", "sgpu"),
+    ("L", "lgpu"),
+)
+
+
+def sge_virtual_gpu_resource_name(project: str | None) -> str | None:
+    """
+    Virtual-GPU ``qsub -l`` resource for *project*, or ``None`` for classic ``ngpu``.
+
+    Projects whose ``-P`` name starts with ``L``, ``S``, or ``XS`` (e.g. ``LGPU``,
+    ``SGPU``, ``XSGPU``) use ``-l lgpu=0``, ``-l sgpu=0``, or ``-l xsgpu=0`` instead of
+    ``-l ngpu=…``. The original ``GPU`` / ``MCC_GPU`` projects keep ``-l ngpu``.
+    """
+    proj = str(project or "").strip().upper()
+    for prefix, resource in _VIRTUAL_GPU_PROJECT_PREFIXES:
+        if proj.startswith(prefix):
+            return resource
+    return None
+
+
+def sge_project_uses_virtual_gpu_resource(project: str | None) -> bool:
+    """True when ``qsub`` must use ``-l lgpu|sgpu|xsgpu=0`` instead of ``-l ngpu``."""
+    return sge_virtual_gpu_resource_name(project) is not None
+
+
+def sge_project_uses_xsgpu_resource(project: str | None) -> bool:
+    """True when *project* is an XS* virtual-GPU queue (``-l xsgpu=0``)."""
+    return sge_virtual_gpu_resource_name(project) == "xsgpu"
+
+
+def sge_project_omits_ngpu_request(project: str | None) -> bool:
+    """Alias for :func:`sge_project_uses_virtual_gpu_resource`."""
+    return sge_project_uses_virtual_gpu_resource(project)
+
+
+def qsub_l_resource_args(resources: SgeResources) -> list[str]:
+    """``qsub`` ``-l`` option pairs derived from *resources*."""
+    args: list[str] = []
+    vgpu = sge_virtual_gpu_resource_name(resources.project)
+    if vgpu is not None:
+        args.extend(["-l", f"{vgpu}=0"])
+    else:
+        args.extend(["-l", f"ngpu={resources.ngpu}"])
+    args.extend(["-l", f"h_vmem={resources.h_vmem}"])
+    return args
+
 
 @dataclass
 class SingularityBinds:
@@ -161,8 +210,7 @@ def build_qsub_command(
         "-terse",
         "-N", spec.job_name,
         "-A", spec.resources.account,
-        "-l", f"ngpu={spec.resources.ngpu}",
-        "-l", f"h_vmem={spec.resources.h_vmem}",
+        *qsub_l_resource_args(spec.resources),
         "-o", str(log_file),
         "-e", str(err_file),
     ]
@@ -189,6 +237,13 @@ def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
     return joined or "none"
 
 
+def _sge_gpu_resource_log_line(resources: SgeResources) -> str:
+    vgpu = sge_virtual_gpu_resource_name(resources.project)
+    if vgpu is not None:
+        return f"  sge_{vgpu} (-l):     0 (virtual GPU; no -l ngpu)"
+    return f"  sge_ngpu (-l):    {resources.ngpu}"
+
+
 def format_sge_submission_summary(
     spec: StageSpec,
     paths: ClusterPaths,
@@ -206,7 +261,7 @@ def format_sge_submission_summary(
         f"  hold_jid:        {_hold_jid_repr(hold_jid)}",
         f"  sge_project (-P): {r.project}",
         f"  sge_account (-A): {r.account}",
-        f"  sge_ngpu (-l):    {r.ngpu}",
+        _sge_gpu_resource_log_line(r),
         f"  sge_h_vmem (-l):  {r.h_vmem}",
         f"  sge_queue (-q):   {r.queue if r.queue else '(default)'}",
         f"  use_nv (outer):   {spec.use_nv}",
@@ -487,6 +542,11 @@ __all__ = [
     "python_script_argv",
     "gui_sge_worker_script_path",
     "gui_sge_worker_argv",
+    "sge_virtual_gpu_resource_name",
+    "sge_project_uses_virtual_gpu_resource",
+    "sge_project_uses_xsgpu_resource",
+    "sge_project_omits_ngpu_request",
+    "qsub_l_resource_args",
     "emit_sge_submission_summary_to_terminal",
     "format_sge_submission_summary",
     "submit_chain",
