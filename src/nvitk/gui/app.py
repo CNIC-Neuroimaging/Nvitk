@@ -81,6 +81,7 @@ def run_app() -> None:
     install_nvitk_layer_hooks(viewer)
 
     app_state = {
+        "viewer": viewer,
         "record_enabled": False,
         "steps": [],
         "inputs": [],
@@ -468,6 +469,9 @@ def run_app() -> None:
         def _close_with_xnat_cleanup(event: Any) -> None:
             if hasattr(xnat_panel, "cleanup_temp_dirs"):
                 xnat_panel.cleanup_temp_dirs()
+            from nvitk.gui.sge.poll import shutdown_sge_monitor
+
+            shutdown_sge_monitor(app_state)
             if _orig_close is not None:
                 _orig_close(event)
 

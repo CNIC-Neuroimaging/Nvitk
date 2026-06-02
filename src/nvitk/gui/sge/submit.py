@@ -44,17 +44,21 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
 
     def _on_finished(job_id: str, done: Any) -> None:
         from nvitk.gui.sge.poll import update_pending_job_status
+        from nvitk.gui.sge.retrieve import import_sge_job
 
         payload = done.to_dict() if hasattr(done, "to_dict") else done
         update_pending_job_status(app_state, job_id, status="done", done_payload=payload)
+        viewer = app_state.get("viewer")
+        if viewer is None:
+            return
         notify(f"SGE job finished: {job_id}. Downloading results …")
-        importer = app_state.get("import_sge_job")
-        if callable(importer):
-            importer(job_id)
-        else:
-            notify(
-                "Use Import SGE results to load outputs into Napari.",
-            )
+        import_sge_job(
+            viewer,
+            app_state,
+            job_id=job_id,
+            auto_delete_remote=True,
+            manual_fallback=False,
+        )
 
     def _on_failed(job_id: str, done: Any) -> None:
         from nvitk.gui.sge.poll import update_pending_job_status
@@ -68,7 +72,22 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
             error=True,
         )
 
-    register_sge_monitor(app_state, on_finished=_on_finished, on_failed=_on_failed)
+    parent = None
+    viewer = app_state.get("viewer")
+    if viewer is not None:
+        try:
+            parent = viewer.window._qt_viewer
+        except Exception:
+            try:
+                parent = viewer.window._qt_window
+            except Exception:
+                parent = None
+    register_sge_monitor(
+        app_state,
+        on_finished=_on_finished,
+        on_failed=_on_failed,
+        parent=parent,
+    )
     app_state["_sge_monitor_registered"] = True
 
 
@@ -194,7 +213,7 @@ def submit_gui_sge(
                 f"  job_id: {job.job_id}\n"
                 f"  remote: {remote_job_root}\n"
                 f"  tool: {tool_id}\n"
-                f"Results will auto-import when output/.done appears (~15s poll)."
+                f"Results will auto-import when output/.done appears (~5s poll)."
             )
         else:
             notify(

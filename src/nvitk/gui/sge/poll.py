@@ -51,7 +51,7 @@ class SgeJobMonitor(QObject):
     job_finished = Signal(str, object)
     job_failed = Signal(str, object)
 
-    def __init__(self, parent: QObject | None = None, interval_ms: int = 15000) -> None:
+    def __init__(self, parent: QObject | None = None, interval_ms: int = 5000) -> None:
         super().__init__(parent)
         self._jobs: dict[str, SgePendingJob] = {}
         self._timer = QTimer(self) if QTimer is not None else None
@@ -103,18 +103,29 @@ def register_sge_monitor(
     *,
     on_finished = None,
     on_failed = None,
+    parent: QObject | None = None,
 ) -> SgeJobMonitor:
     """Create or return the shared :class:`SgeJobMonitor` stored in *app_state*."""
     mon = app_state.get("_sge_monitor")
     if isinstance(mon, SgeJobMonitor):
         return mon
-    mon = SgeJobMonitor()
+    mon = SgeJobMonitor(parent=parent)
     if on_finished is not None:
         mon.job_finished.connect(lambda jid, done: on_finished(jid, done))
     if on_failed is not None:
         mon.job_failed.connect(lambda jid, done: on_failed(jid, done))
     app_state["_sge_monitor"] = mon
     return mon
+
+
+def shutdown_sge_monitor(app_state: dict[str, Any]) -> None:
+    """Stop polling and block auto-import after the Napari window closes."""
+    app_state.pop("viewer", None)
+    mon = app_state.get("_sge_monitor")
+    if isinstance(mon, SgeJobMonitor):
+        if mon._timer is not None:
+            mon._timer.stop()
+        mon._jobs.clear()
 
 
 def store_pending_job(app_state: dict[str, Any], job: SgePendingJob) -> None:
@@ -221,6 +232,7 @@ __all__ = [
     "read_done_marker",
     "register_sge_monitor",
     "resolve_session_import",
+    "shutdown_sge_monitor",
     "store_pending_job",
     "update_pending_job_status",
 ]

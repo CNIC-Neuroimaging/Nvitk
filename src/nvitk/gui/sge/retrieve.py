@@ -45,66 +45,6 @@ class SgeRetrieveResult:
     remote_deleted: bool
 
 
-class SgeCleanupDialog(QDialog):
-    """After a successful import, optionally delete the remote job directory."""
-
-    def __init__(
-        self,
-        parent=None,
-        *,
-        remote_job_root: str,
-        job_id = "",
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("SGE remote cleanup")
-        self.setMinimumWidth(480)
-        self._delete_remote = False
-
-        intro = QLabel(
-            "Results were downloaded and loaded into Napari. "
-            "You may delete the remote job directory or keep it on the cluster."
-        )
-        intro.setWordWrap(True)
-
-        path_label = QLabel(remote_job_root)
-        path_label.setWordWrap(True)
-        path_label.setTextInteractionFlags(
-            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
-        )
-
-        if job_id:
-            job_label = QLabel(f"Job id: {job_id}")
-            job_label.setWordWrap(True)
-        else:
-            job_label = None
-
-        buttons = QDialogButtonBox()
-        btn_delete = buttons.addButton("Delete remote directory", QDialogButtonBox.DestructiveRole)
-        btn_keep = buttons.addButton("Keep on cluster", QDialogButtonBox.AcceptRole)
-        btn_delete.clicked.connect(self._accept_delete)
-        btn_keep.clicked.connect(self._accept_keep)
-
-        layout = QVBoxLayout()
-        layout.addWidget(intro)
-        if job_label is not None:
-            layout.addWidget(job_label)
-        layout.addWidget(QLabel("Remote path:"))
-        layout.addWidget(path_label)
-        layout.addWidget(buttons)
-        self.setLayout(layout)
-
-    def _accept_delete(self) -> None:
-        self._delete_remote = True
-        self.accept()
-
-    def _accept_keep(self) -> None:
-        self._delete_remote = False
-        self.accept()
-
-    def should_delete_remote(self) -> bool:
-        return self._delete_remote
-
-
 class SgeManualImportDialog(QDialog):
     """Fallback when session credentials are missing (e.g. after GUI restart)."""
 
@@ -237,21 +177,6 @@ def import_sge_results_to_viewer(
     )
 
 
-def _prompt_remote_cleanup(
-    *,
-    parent: Any,
-    remote_job_root: str,
-    job_id: str,
-) -> bool:
-    dlg = SgeCleanupDialog(
-        parent=parent,
-        remote_job_root=remote_job_root,
-        job_id=job_id,
-    )
-    dlg.exec()
-    return dlg.should_delete_remote()
-
-
 def _apply_remote_cleanup(
     *,
     connection: SgeConnection,
@@ -295,10 +220,10 @@ def import_sge_job(
     job_id = None,
     parent = None,
     on_layers_changed = None,
-    prompt_cleanup = True,
-    manual_fallback = True,
+    auto_delete_remote: bool = False,
+    manual_fallback: bool = False,
 ) -> bool:
-    """Download + import using session credentials; cleanup dialog only after success."""
+    """Download + import using session credentials from the current GUI session."""
     if app_state.get("_sge_import_in_progress"):
         return False
 
@@ -352,17 +277,12 @@ def import_sge_job(
             local_download_dir=str(result.local_dir),
         )
 
-        if prompt_cleanup:
-            if _prompt_remote_cleanup(
-                parent=parent,
+        if auto_delete_remote:
+            result = _apply_remote_cleanup(
+                connection=conn,
                 remote_job_root=root,
-                job_id=result.done.job_id or resolved_job_id or "",
-            ):
-                result = _apply_remote_cleanup(
-                    connection=conn,
-                    remote_job_root=root,
-                    result=result,
-                )
+                result=result,
+            )
 
         msg = (
             f"Imported {result.imported_layers} layer(s) from {root}.\n"
@@ -370,8 +290,6 @@ def import_sge_job(
         )
         if result.remote_deleted:
             msg += f"\nRemote directory deleted: {root}"
-        else:
-            msg += f"\nRemote data kept at: {root}"
         notify(msg)
         return True
     except Exception as exc:
@@ -387,29 +305,9 @@ def import_sge_job(
         app_state["_sge_import_in_progress"] = False
 
 
-def import_sge_from_dialog(
-    viewer: Any,
-    app_state: dict[str, Any],
-    *,
-    parent = None,
-    on_layers_changed = None,
-) -> bool:
-    """Import using session credentials (same entry point as the Tools dock button)."""
-    return import_sge_job(
-        viewer,
-        app_state,
-        parent=parent,
-        on_layers_changed=on_layers_changed,
-        prompt_cleanup=True,
-        manual_fallback=True,
-    )
-
-
 __all__ = [
-    "SgeCleanupDialog",
     "SgeManualImportDialog",
     "SgeRetrieveResult",
-    "import_sge_from_dialog",
     "import_sge_job",
     "import_sge_results_to_viewer",
     "retrieve_sge_results",

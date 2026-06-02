@@ -47,7 +47,7 @@ class SgeSubmitDialog(QDialog):
 
         intro = QLabel(
             "Export the active layer, upload inputs to the cluster, and submit "
-            "a Singularity job. When finished, use Import SGE results to download outputs."
+            "a Singularity job. Results download and import automatically when the job completes."
         )
         intro.setWordWrap(True)
 
