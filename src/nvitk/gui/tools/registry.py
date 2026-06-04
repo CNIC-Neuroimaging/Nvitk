@@ -459,6 +459,41 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "viz_vessel_cross_sections",
+        "Visualization",
+        "Vessel cross-sections",
+        (
+            ParamSpec("cd_layer", "Complex difference image layer", "layer", ""),
+            ParamSpec("segmentation_layer", "Segmentation mask (optional)", "layer", ""),
+            ParamSpec("cross_section_radius_vox", "Plane half-size (vox)", "float", 12.0, min=1.0),
+            ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
+            ParamSpec("interpolate_plane", "Interpolate plane sampling", "bool", True),
+            ParamSpec("interp_vals", "Samples per voxel (auto res)", "int", 4, min=1, max=16),
+            ParamSpec("measure_resegment", "Resegment in cross-section plane", "bool", True),
+            ParamSpec(
+                "thr_algorithm",
+                "2D threshold method",
+                "choice",
+                "lsthr",
+                choices=("otsu", "lsthr", "lthr"),
+            ),
+            ParamSpec(
+                "centerline_window",
+                "Tangent window",
+                "choice",
+                "5",
+                choices=("3", "5"),
+            ),
+            ParamSpec("show_segmentation_3d", "Show segmentation in 3D", "bool", True),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Active layer = centerline mask; pick CD and optional segmentation in parameters. "
+            "Click in 3D for oblique cross-sections; plane normal sense follows the click side."
+        ),
+    ),
+    GuiToolSpec(
         "export_view_png",
         "Visualization",
         "Export 3D view (PNG)",

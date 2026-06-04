@@ -80,7 +80,7 @@ def run_app() -> None:
     install_nvitk_io(viewer)
     install_nvitk_layer_hooks(viewer)
 
-    app_state = {
+    app_state: dict[str, Any] = {
         "viewer": viewer,
         "record_enabled": False,
         "steps": [],
@@ -91,6 +91,7 @@ def run_app() -> None:
         "sge_pending_jobs": [],
         "sge_last_connection": {},
     }
+    viewer._nvitk_app_state = app_state
 
     layer_list = QListWidget()
 
@@ -470,8 +471,10 @@ def run_app() -> None:
             if hasattr(xnat_panel, "cleanup_temp_dirs"):
                 xnat_panel.cleanup_temp_dirs()
             from nvitk.gui.sge.poll import shutdown_sge_monitor
+            from nvitk.gui.viz.vessel_cross_sections import shutdown_vessel_cross_sections
 
             shutdown_sge_monitor(app_state)
+            shutdown_vessel_cross_sections(app_state)
             if _orig_close is not None:
                 _orig_close(event)
 

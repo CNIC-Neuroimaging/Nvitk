@@ -70,6 +70,116 @@ def layer_spatial_kwargs(layer: Any) -> dict[str, Any]:
     return kwargs
 
 
+def data_indices_to_world(points: np.ndarray, layer: Any) -> np.ndarray:
+    """Map voxel indices in layer data axis order to world coordinates."""
+    pts = to_numpy(points).astype(np.float64)
+    if pts.ndim == 1:
+        pts = pts.reshape(1, -1)
+    if pts.shape[1] < 3:
+        return pts
+    aff = layer_affine(layer)
+    if aff is None:
+        return pts[:, :3]
+    a = to_numpy(aff).astype(np.float64)
+    if a.shape != (4, 4):
+        return pts[:, :3]
+    homog = np.concatenate([pts[:, :3], np.ones((pts.shape[0], 1))], axis=1)
+    return (homog @ a.T)[:, :3]
+
+
+def spatial_vector_3d(vector: Any, event: Any | None = None) -> np.ndarray | None:
+    """Map Napari ndim-D *vector* (e.g. view_direction) to 3 displayed spatial components."""
+    if vector is None:
+        return None
+    arr = to_numpy(vector).astype(np.float64).ravel()
+    if arr.size == 3:
+        return arr.reshape(3)
+    displayed = getattr(event, "dims_displayed", None) if event is not None else None
+    if displayed is not None:
+        disp = [int(d) for d in displayed if 0 <= int(d) < arr.size]
+        if len(disp) >= 3:
+            return arr[disp[:3]].reshape(3)
+    if arr.size >= 3:
+        return arr[:3].reshape(3)
+    return None
+
+
+def world_vector_to_data(
+    layer: Any,
+    vector: Any,
+    event: Any | None = None,
+) -> np.ndarray | None:
+    """Map a Napari world direction to a unit vector in layer data (voxel) space."""
+    v = spatial_vector_3d(vector, event)
+    if v is None:
+        return None
+    aff = layer_affine(layer)
+    if aff is None:
+        n = float(np.linalg.norm(v))
+        return v.reshape(3) / n if n > 1e-9 else None
+    r = to_numpy(aff).astype(np.float64)[:3, :3]
+    try:
+        v_d = np.linalg.solve(r, v.reshape(3))
+    except np.linalg.LinAlgError:
+        v_d = np.linalg.pinv(r) @ v.reshape(3)
+    n = float(np.linalg.norm(v_d))
+    return (v_d / n).astype(np.float64) if n > 1e-9 else None
+
+
+def view_direction_into_scene(
+    layer: Any,
+    view_direction: Any,
+    event: Any | None = None,
+) -> np.ndarray | None:
+    """
+    Unit view ray direction in data space, from the camera through the scene.
+
+    Napari ``dims.view_direction`` points from the scene toward the camera; the pick
+    ray uses the opposite (into the volume).
+    """
+    d = world_vector_to_data(layer, view_direction, event)
+    if d is None:
+        return None
+    return -d
+
+
+def world_to_data_coords(layer: Any, position: Any) -> np.ndarray | None:
+    """Map a Napari world click to sub-voxel data coordinates on *layer*'s 3D grid."""
+    if position is None:
+        return None
+    shape = getattr(getattr(layer, "data", None), "shape", None)
+    if shape is None or len(shape) < 3:
+        return None
+    try:
+        data_pos = layer.world_to_data(position)
+        pos = to_numpy(data_pos).astype(np.float64).ravel()
+    except Exception:
+        pos = to_numpy(position).astype(np.float64).ravel()
+        aff = layer_affine(layer)
+        if aff is not None and pos.size >= 3:
+            inv = np.linalg.inv(to_numpy(aff).astype(np.float64))
+            homog = np.array([pos[0], pos[1], pos[2], 1.0], dtype=np.float64)
+            pos = (inv @ homog)[:3]
+    if pos.size < 3:
+        return None
+    return np.array(
+        [
+            np.clip(float(pos[0]), 0.0, float(shape[0] - 1)),
+            np.clip(float(pos[1]), 0.0, float(shape[1] - 1)),
+            np.clip(float(pos[2]), 0.0, float(shape[2] - 1)),
+        ],
+        dtype=np.float64,
+    )
+
+
+def world_to_data_indices(layer: Any, position: Any) -> np.ndarray | None:
+    """Map a Napari world click to rounded voxel indices on *layer*'s 3D grid."""
+    coords = world_to_data_coords(layer, position)
+    if coords is None:
+        return None
+    return np.round(coords).astype(np.float32)
+
+
 def find_spatial_reference_layer(viewer: Any, layer: Any) -> Any:
     """Pick a layer with affine/scale on the same voxel grid as *layer*."""
     if layer_spatial_kwargs(layer):
@@ -250,13 +360,22 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
 
     Shown in the viewer to clarify R/L, A/P, S/I along array axes 0, 1, 2.
     """
+    layer_type = type(layer).__name__
+    if layer_type in ("Shapes", "Points", "Vectors", "Tracks", "Surface"):
+        return f"{getattr(layer, 'name', layer_type)} ({layer_type})"
+
     aff = layer_affine(layer)
     if aff is None:
-        sp = layer_spacing(layer)
-        if sp is not None:
+        sp = layer_spacing(layer) or ()
+        if len(sp) >= 3:
             return (
                 f"No affine — voxel spacing (axis 0,1,2): "
                 f"{sp[0]:.4g}, {sp[1]:.4g}, {sp[2]:.4g} mm"
+            )
+        if len(sp) == 2:
+            return (
+                f"No affine — voxel spacing (axis 0,1): "
+                f"{sp[0]:.4g}, {sp[1]:.4g} mm"
             )
         return "No affine — display uses voxel indices"
 
@@ -300,6 +419,23 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
     return text
 
 
+def _layer_for_orientation_status(viewer: Any) -> Any | None:
+    """Prefer a volume layer over Shapes/Points overlays for the status bar."""
+    active = viewer.layers.selection.active
+    if active is not None and type(active).__name__ not in (
+        "Shapes",
+        "Points",
+        "Vectors",
+        "Tracks",
+        "Surface",
+    ):
+        return active
+    for lyr in reversed(list(viewer.layers)):
+        if type(lyr).__name__ in ("Image", "Labels"):
+            return lyr
+    return viewer.layers[-1] if viewer.layers else None
+
+
 def attach_orientation_status(viewer: Any, label_widget: Any) -> None:
     """Keep *label_widget* (Qt QLabel) in sync with the active layer / dims."""
 
@@ -307,7 +443,10 @@ def attach_orientation_status(viewer: Any, label_widget: Any) -> None:
         if not viewer.layers:
             label_widget.setText("Orientation: —")
             return
-        layer = viewer.layers.selection.active or viewer.layers[-1]
+        layer = _layer_for_orientation_status(viewer)
+        if layer is None:
+            label_widget.setText("Orientation: —")
+            return
         label_widget.setText(orientation_text(layer, viewer))
 
     try:

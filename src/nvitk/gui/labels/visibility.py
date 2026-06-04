@@ -44,11 +44,16 @@ def label_source_data(layer: Any) -> np.ndarray:
 
 
 def _compute_is_label_like(layer: Any) -> bool:
+    if type(layer).__name__ in ("Shapes", "Points", "Vectors", "Tracks", "Surface"):
+        return False
     if type(layer).__name__ == "Labels":
         return True
     if getattr(layer, "data", None) is None:
         return False
-    arr = to_numpy(label_source_data(layer))
+    try:
+        arr = to_numpy(label_source_data(layer))
+    except (ValueError, TypeError):
+        return False
     if arr.ndim not in (2, 3):
         return False
 

@@ -52,6 +52,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
         "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."
     ),
+    "viz_vessel_cross_sections": (
+        "Active layer = centerline mask; choose CD and optional segmentation in parameters. "
+        "Per-label paths from the mask; click in 3D for oblique cross-sections "
+        "(plane normal sense follows the click)."
+    ),
     "export_view_png": (
         "Save the Napari 3D render window as PNG (same camera and orientation as on screen)."
     ),

@@ -42,6 +42,8 @@ def _show_label_picker(category: str, tool_id: str, layer: Any | None) -> bool:
         return False
     if tool_id in TOOL_IDS_USING_LABEL_PICKER:
         return True
+    if tool_id == "viz_vessel_cross_sections":
+        return False
     return category in (
         "Morphology",
         "Segmentation",
@@ -376,11 +378,17 @@ def build_tools_dock(
     @viewer.layers.events.removed.connect
     def _on_layer_removed_refresh_pipeline(_event: Any) -> None:
         pipeline_form.refresh_layer_combos()
+        from nvitk.gui.tools.panel import _update_reference_layers
+
+        _update_reference_layers(tool_panel, viewer)
         _schedule_active_layer_sync()
 
     @viewer.layers.events.inserted.connect
     def _on_layer_inserted_refresh_pipeline(_event: Any) -> None:
         pipeline_form.refresh_layer_combos()
+        from nvitk.gui.tools.panel import _update_reference_layers
+
+        _update_reference_layers(tool_panel, viewer)
 
     tool_panel.category.changed.connect(lambda e: _sync_aux_panels())
     tool_panel.operation.changed.connect(lambda e: _sync_aux_panels())

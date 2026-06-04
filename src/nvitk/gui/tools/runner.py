@@ -69,6 +69,14 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
     raise ValueError(f"Layer not found: {name}")
 
 
+def _layer_param(params: dict[str, Any], key: str) -> str:
+    """Layer dropdown value; treats ``(none)`` and empty as unset."""
+    raw = str(params.get(key) or "").strip()
+    if raw in ("", "(none)"):
+        return ""
+    return raw
+
+
 def _format_metrics(metrics: dict[str, Any]) -> str:
     lines = [f"{k}: {v}" for k, v in metrics.items()]
     return "\n".join(lines)
@@ -229,6 +237,10 @@ def run_gui_tool(
 
     if tool_id == "centerline_detect_junctions":
         _run_centerline_detect_junctions(viewer, layer, label_ids, params)
+        return None
+
+    if tool_id == "viz_vessel_cross_sections":
+        _run_viz_vessel_cross_sections(viewer, layer, params)
         return None
 
     if tool_id == "viz_flowshow":
@@ -1505,7 +1517,10 @@ def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     rows = load_locs_csv(csv_path)
     ref = layer
     add_locs_layer(viewer, rows, reference_layer=ref)
-    notify(f"Loaded {len(rows)} LOCs from {csv_path}")
+    notify(
+        f"Loaded {len(rows)} LOCs from {csv_path} "
+        "(adjust size/symbol/color in the LOCs layer panel)."
+    )
 
 
 def _run_qvtpy_stage(tool_id: str, params: dict[str, Any]) -> None:
@@ -1806,6 +1821,76 @@ def _run_viz_pet_hotspots(
     notify(
         f"Added {coords.shape[0]} SUV hotspot point(s) in Napari "
         f"(colormap={params.get('cmap') or 'viridis'}; adjust size/symbol in the layer panel)."
+    )
+
+
+def _run_viz_vessel_cross_sections(
+    viewer: Any,
+    centerline_layer: Any,
+    params: dict[str, Any],
+) -> None:
+    from nvitk.gui.viz.vessel_cross_sections import install_vessel_cross_sections
+
+    cd_name = _layer_param(params, "cd_layer")
+    if not cd_name:
+        raise ValueError(
+            "Select a complex difference image layer in the tool parameters "
+            "(Complex difference layer dropdown)."
+        )
+    intensity_layer = _resolve_layer(viewer, cd_name)
+    if to_numpy(intensity_layer.data).ndim != 3:
+        raise ValueError("Complex difference layer must be 3D.")
+
+    cl_data = to_numpy(centerline_layer.data)
+    if cl_data.ndim != 3:
+        raise ValueError(
+            "Select the centerline mask as the active layer in the layer list "
+            "(3D multilabel skeleton mask), then run the tool."
+        )
+    cl_layer = centerline_layer
+    _, cl_img, cl_rs = align_mask_to_reference_layer(
+        cl_layer, intensity_layer, to_numpy(cl_layer.data), order=0
+    )
+    if cl_rs:
+        gui_log(
+            f"Resampled centerline '{cl_layer.name}' onto '{intensity_layer.name}'."
+        )
+    centerline_mask = to_numpy(cl_img.data)
+
+    seg_arr = None
+    seg_name = _layer_param(params, "segmentation_layer")
+    if seg_name:
+        seg_layer = _resolve_layer(viewer, seg_name)
+        _, seg_img, seg_rs = align_mask_to_reference_layer(
+            seg_layer, intensity_layer, to_numpy(seg_layer.data), order=0
+        )
+        if seg_rs:
+            gui_log(
+                f"Resampled segmentation '{seg_layer.name}' onto '{intensity_layer.name}'."
+            )
+        seg_arr = to_numpy(seg_img.data).astype(np.int32, copy=False)
+
+    if not bool(params.get("measure_resegment", True)) and seg_arr is None:
+        raise ValueError(
+            "Disable re-segmentation only when a segmentation layer is provided."
+        )
+
+    app_state = getattr(viewer, "_nvitk_app_state", None)
+    if not isinstance(app_state, dict):
+        app_state = {}
+
+    install_vessel_cross_sections(
+        viewer,
+        app_state,
+        intensity_layer=intensity_layer,
+        centerline_mask=centerline_mask,
+        segmentation=seg_arr,
+        params=params,
+    )
+    notify(
+        f"Vessel cross-sections active (centerline: {cl_layer.name}, CD: {intensity_layer.name}).\n"
+        "Hide 'Vessel centerlines (xs)' to disable picking. Left-click near a centerline "
+        "to inspect; click elsewhere to pan/zoom. Normal arrow follows centerline order."
     )
 
 

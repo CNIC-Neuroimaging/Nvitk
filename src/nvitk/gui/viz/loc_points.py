@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from nvitk.gui.core.spatial import layer_affine
+from nvitk.gui.viz.layers import init_points_layer_style, install_points_style_sync
 
 LOC_CSV_COLUMNS: tuple[str, ...] = (
     "vessel_id",
@@ -30,6 +31,9 @@ LOC_CSV_COLUMNS: tuple[str, ...] = (
 )
 
 LOC_LAYER_NAME = "LOCs"
+DEFAULT_LOC_POINT_SIZE = 10.0
+DEFAULT_LOC_FACE_COLOR = "#ffd700"
+DEFAULT_LOC_SYMBOL = "o"
 
 
 def load_locs_csv(path: str | Path) -> list[dict[str, Any]]:
@@ -104,15 +108,24 @@ def add_locs_layer(
         if lyr.name == name:
             viewer.layers.remove(lyr)
     kwargs = {
-        "size": 8,
-        "face_color": "vessel_id",
-        "symbol": "o",
+        "size": DEFAULT_LOC_POINT_SIZE,
+        "face_color": DEFAULT_LOC_FACE_COLOR,
+        "symbol": DEFAULT_LOC_SYMBOL,
+        "border_width": 0,
+        "border_width_is_relative": False,
     }
     if reference_layer is not None:
         aff = layer_affine(reference_layer)
         if aff is not None:
             kwargs["affine"] = aff
     layer = viewer.add_points(coords, name=name, features=features, **kwargs)
+    init_points_layer_style(
+        layer,
+        size=DEFAULT_LOC_POINT_SIZE,
+        symbol=DEFAULT_LOC_SYMBOL,
+        face_color=DEFAULT_LOC_FACE_COLOR,
+    )
+    install_points_style_sync(layer, sync_face_color=True)
     return layer
 
 

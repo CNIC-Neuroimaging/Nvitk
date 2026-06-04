@@ -98,8 +98,29 @@ def stop_hotspot_points_sync(viewer: Any) -> None:
     setattr(viewer, "_nvitk_hotspot_points_state", None)
 
 
-def install_points_style_sync(layer: Any) -> Callable[[], None]:
-    """Napari 0.7+: broadcast ``current_size`` / ``current_symbol`` to all points."""
+def _point_feature_columns(layer: Any) -> set[str]:
+    """Column names on a Napari Points ``features`` table (dict or DataFrame)."""
+    feat = getattr(layer, "features", None)
+    if feat is None:
+        return set()
+    cols = getattr(feat, "columns", None)
+    if cols is not None:
+        return {str(c) for c in cols}
+    if isinstance(feat, dict):
+        return {str(k) for k in feat.keys()}
+    return set()
+
+
+def install_points_style_sync(
+    layer: Any,
+    *,
+    sync_face_color: bool = False,
+) -> Callable[[], None]:
+    """
+    Napari 0.5+: broadcast layer-panel style controls to all points.
+
+    Without this, the GUI sliders only affect the next added or selected points.
+    """
     def _sync_size(_event: Any = None) -> None:
         if len(layer.data) == 0:
             return
@@ -115,22 +136,53 @@ def install_points_style_sync(layer: Any) -> Callable[[], None]:
             return
         layer.border_width = float(layer.current_border_width)
 
+    def _sync_face_color(_event: Any = None) -> None:
+        if len(layer.data) == 0:
+            return
+        val = layer.current_face_color
+        if isinstance(val, str) and val in _point_feature_columns(layer):
+            return
+        layer.face_color = val
+
     layer.events.current_size.connect(_sync_size)
     layer.events.current_symbol.connect(_sync_symbol)
     layer.events.current_border_width.connect(_sync_border)
+    callbacks = [
+        (layer.events.current_size, _sync_size),
+        (layer.events.current_symbol, _sync_symbol),
+        (layer.events.current_border_width, _sync_border),
+    ]
+    if sync_face_color and hasattr(layer.events, "current_face_color"):
+        layer.events.current_face_color.connect(_sync_face_color)
+        callbacks.append((layer.events.current_face_color, _sync_face_color))
 
     def disconnect() -> None:
-        for evt, cb in (
-            (layer.events.current_size, _sync_size),
-            (layer.events.current_symbol, _sync_symbol),
-            (layer.events.current_border_width, _sync_border),
-        ):
+        for evt, cb in callbacks:
             try:
                 evt.disconnect(cb)
             except Exception:
                 pass
 
     return disconnect
+
+
+def init_points_layer_style(
+    layer: Any,
+    *,
+    size: float,
+    symbol: str,
+    face_color: Any,
+) -> None:
+    """Set scalar style on all points and align Napari ``current_*`` controls."""
+    layer.size = float(size)
+    layer.symbol = symbol
+    layer.face_color = face_color
+    if hasattr(layer, "current_size"):
+        layer.current_size = float(size)
+    if hasattr(layer, "current_symbol"):
+        layer.current_symbol = symbol
+    if hasattr(layer, "current_face_color"):
+        layer.current_face_color = face_color
 
 
 def add_hotspot_points_layer(

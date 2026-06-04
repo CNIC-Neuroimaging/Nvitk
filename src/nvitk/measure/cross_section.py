@@ -37,6 +37,7 @@ class CrossSectionResult:
     v: np.ndarray
     pixel_spacing_mm: tuple[float, float]
     plane_res: int
+    intensity_2d: np.ndarray | None = None
 
 
 def plane_basis_from_tangent(tangent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -81,6 +82,134 @@ def _normalize_slice(sl: Any) -> Any:
     if hi <= 0.0:
         return np.zeros_like(sl)
     return sl / hi
+
+
+def segment_in_plane_cd_only(
+    cd_sl: np.ndarray,
+    *,
+    min_component_fraction: float = 0.05,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+) -> tuple[np.ndarray, float]:
+    """Threshold a single complex-difference (or intensity) oblique slice in-plane."""
+    from nvitk.morphology.components import (
+        keep_component_closest_to_center,
+        label_connected,
+        remove_small_components,
+    )
+
+    fused = _normalize_slice(cd_sl)
+    if thr_algorithm == "otsu":
+        pos = fused[fused > 0]
+        if pos.size < 2:
+            return np.zeros(fused.shape, dtype=bool), 0.0
+        try:
+            from skimage.filters import threshold_otsu
+        except ImportError as exc:
+            raise ImportError("otsu requires scikit-image") from exc
+        try:
+            t = float(threshold_otsu(pos))
+        except ValueError:
+            return np.zeros(fused.shape, dtype=bool), 0.0
+        binary = (fused > t).astype(bool, copy=False)
+    else:
+        binary = binary_mask_sliding_threshold_2d(
+            fused,
+            shift_hm_flag=(thr_algorithm == "lthr"),
+        )
+    n_fg = int(np.count_nonzero(binary))
+    if n_fg == 0:
+        return np.zeros(binary.shape, dtype=bool), 0.0
+    min_size = max(1, int(round(float(min_component_fraction) * n_fg)))
+    binary = as_backend_array(
+        remove_small_components(binary, min_size=min_size, connectivity=1)
+    ).astype(bool, copy=False)
+    if not np.any(binary):
+        return np.zeros(binary.shape, dtype=bool), 0.0
+    labeled, _ = label_connected(binary, connectivity=1)
+    best_mask = as_backend_array(
+        keep_component_closest_to_center(labeled)
+    ).astype(bool, copy=False)
+    return best_mask.astype(bool, copy=False), float(_circularity_proxy(best_mask))
+
+
+def cross_section_at_point(
+    center_xyz: np.ndarray,
+    tangent: np.ndarray,
+    *,
+    cd: np.ndarray,
+    voxel_spacing: tuple[float, float, float],
+    radius_vox: float = _DEFAULT_RADIUS_VOX,
+    interp_vals: int = _DEFAULT_INTERP_VALS,
+    cross_section_res: int = 0,
+    plane_interp_order: int = 1,
+    measure_resegment: bool = True,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+    volume_seg: np.ndarray | None = None,
+    volume_label_id: int = 0,
+) -> CrossSectionResult:
+    """Oblique cross-section at a centerline point using a single 3D intensity volume."""
+    u, v = plane_basis_from_tangent(tangent)
+    res_display = _plane_res_nearest(radius_vox, cross_section_res)
+    center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
+    tang = as_backend_array(tangent).astype(np.float64).reshape(3)
+
+    cd_sl_display = oblique_slice(
+        cd,
+        center_xyz=center,
+        u_xyz=u,
+        v_xyz=v,
+        radius_vox=radius_vox,
+        res=res_display,
+        order=0,
+    )
+
+    if measure_resegment:
+        res_meas = _plane_res(radius_vox, interp_vals, cross_section_res)
+        order_meas = int(plane_interp_order)
+        cd_sl = oblique_slice(
+            cd,
+            center_xyz=center,
+            u_xyz=u,
+            v_xyz=v,
+            radius_vox=radius_vox,
+            res=res_meas,
+            order=order_meas,
+        )
+        mask, circ = segment_in_plane_cd_only(cd_sl, thr_algorithm=thr_algorithm)
+    else:
+        if volume_seg is None:
+            raise ValueError("volume_seg is required when measure_resegment is False")
+        seg_sl = oblique_slice(
+            volume_seg.astype(np.float32),
+            center_xyz=center,
+            u_xyz=u,
+            v_xyz=v,
+            radius_vox=radius_vox,
+            res=res_display,
+            order=0,
+        )
+        mask = as_backend_array(np.round(seg_sl) == int(volume_label_id)).astype(bool)
+        circ = _circularity_proxy(mask)
+
+    area_mm2 = _cross_section_area_mm2(
+        mask,
+        voxel_spacing=voxel_spacing,
+        tangent=tang,
+        radius_vox=radius_vox,
+        interp_vals=interp_vals,
+    )
+    return CrossSectionResult(
+        mask_2d=mask,
+        area_mm2=area_mm2,
+        circularity=float(circ),
+        center_xyz=center,
+        tangent=tang,
+        u=u,
+        v=v,
+        pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
+        plane_res=res_display,
+        intensity_2d=to_numpy(cd_sl_display),
+    )
 
 
 def segment_in_plane(
@@ -162,6 +291,14 @@ def _plane_res(radius_vox: float, interp_vals: int, cross_section_res: int) -> i
     r = float(radius_vox)
     iv = max(1, int(interp_vals))
     return max(8, int(round(2.0 * r * iv)) + 1)
+
+
+def _plane_res_nearest(radius_vox: float, cross_section_res: int) -> int:
+    """One sample per voxel across the disk (no supersampling)."""
+    if cross_section_res > 0:
+        return int(cross_section_res)
+    r = float(radius_vox)
+    return max(8, int(np.ceil(2.0 * r)) + 1)
 
 
 def _cross_section_area_mm2(
@@ -400,11 +537,13 @@ __all__ = [
     "CrossSectionResult",
     "ThrAlgorithm",
     "cross_section_at_loc",
+    "cross_section_at_point",
     "flow_series_ml_s",
     "masked_plane_velocity_series",
     "plane_basis_from_tangent",
     "segment_along_polyline",
     "segment_at_point",
     "segment_in_plane",
+    "segment_in_plane_cd_only",
     "tilt_corrected_spacing_mm",
 ]

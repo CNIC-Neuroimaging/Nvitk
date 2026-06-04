@@ -94,6 +94,14 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "ap_layer",
         "rl_layer",
         "fh_layer",
+        "cd_layer",
+        "segmentation_layer",
+        "cross_section_res",
+        "interpolate_plane",
+        "interp_vals",
+        "thr_algorithm",
+        "centerline_window",
+        "show_segmentation_3d",
         "loc_arterial_strategy",
         "cross_section_radius_vox",
         "measure_resegment",
@@ -150,6 +158,11 @@ _LAYER_NONE = "(none)"
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
     names = [lyr.name for lyr in viewer.layers]
     optional_choices = [_LAYER_NONE, *names]
+    _optional_layer_attrs = (
+        "barrier_layer",
+        "centerline_barrier_layer",
+        "segmentation_layer",
+    )
     for attr in (
         "reference_layer",
         "barrier_layer",
@@ -157,13 +170,15 @@ def _update_reference_layers(widget: Any, viewer: Any) -> None:
         "ap_layer",
         "rl_layer",
         "fh_layer",
+        "cd_layer",
+        "segmentation_layer",
         "organ_layer",
         "body_layer",
     ):
         ref = getattr(widget, attr, None)
         if ref is None:
             continue
-        if attr in ("barrier_layer", "centerline_barrier_layer"):
+        if attr in _optional_layer_attrs:
             ref.choices = optional_choices
             if ref.value not in optional_choices:
                 ref.value = _LAYER_NONE
@@ -171,6 +186,18 @@ def _update_reference_layers(widget: Any, viewer: Any) -> None:
             ref.choices = names
             if names and ref.value not in names:
                 ref.value = names[0] if attr == "reference_layer" else ""
+
+
+def _prefill_vessel_cross_section_layers(widget: Any, viewer: Any) -> None:
+    """Default CD layer dropdown from the active layer (centerline = active layer)."""
+    if not viewer.layers:
+        return
+    active = viewer.layers.selection.active or viewer.layers[-1]
+    aname = active.name
+    names = [lyr.name for lyr in viewer.layers]
+    cd = getattr(widget, "cd_layer", None)
+    if cd is not None and aname in names and not str(cd.value or "").strip():
+        cd.value = aname
 
 
 def _update_phase_layers(widget: Any, viewer: Any) -> None:
@@ -314,6 +341,37 @@ def build_tool_panel(
         ap_layer={"label": "AP phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
         rl_layer={"label": "RL phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
         fh_layer={"label": "FH phase layer", "widget_type": "ComboBox", "choices": [""], "value": ""},
+        cd_layer={
+            "label": "Complex difference layer",
+            "widget_type": "ComboBox",
+            "choices": [""],
+            "value": "",
+        },
+        segmentation_layer={
+            "label": "Segmentation mask (optional)",
+            "widget_type": "ComboBox",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
+        },
+        cross_section_res={
+            "label": "Plane resolution (0=auto)",
+            "min": 0,
+            "max": 1024,
+            "value": 0,
+        },
+        interpolate_plane={"label": "Interpolate plane sampling", "value": True},
+        interp_vals={"label": "Samples per voxel (auto res)", "min": 1, "max": 16, "value": 4},
+        thr_algorithm={
+            "choices": ["otsu", "lsthr", "lthr"],
+            "label": "2D threshold method",
+            "value": "lsthr",
+        },
+        centerline_window={
+            "choices": ["3", "5"],
+            "label": "Tangent window",
+            "value": "5",
+        },
+        show_segmentation_3d={"label": "Show segmentation in 3D", "value": True},
         loc_arterial_strategy={
             "choices": ["qvtpy", "midpoint"],
             "label": "Arterial LOC strategy",
@@ -440,6 +498,14 @@ def build_tool_panel(
         ap_layer: str,
         rl_layer: str,
         fh_layer: str,
+        cd_layer: str,
+        segmentation_layer: str,
+        cross_section_res: int,
+        interpolate_plane: bool,
+        interp_vals: int,
+        thr_algorithm: str,
+        centerline_window: str,
+        show_segmentation_3d: bool,
         loc_arterial_strategy: str,
         cross_section_radius_vox: float,
         measure_resegment: bool,
@@ -610,6 +676,8 @@ def build_tool_panel(
         if tid:
             _set_param_visibility(tool_panel, tid)
         _update_reference_layers(tool_panel, viewer)
+        if tid == "viz_vessel_cross_sections":
+            _prefill_vessel_cross_section_layers(tool_panel, viewer)
         _sync_operation_help()
 
     tid0 = tool_id_from_label(default_category(), default_operation(default_category()))
