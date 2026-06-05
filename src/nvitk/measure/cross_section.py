@@ -142,6 +142,7 @@ def cross_section_at_point(
     interp_vals: int = _DEFAULT_INTERP_VALS,
     cross_section_res: int = 0,
     plane_interp_order: int = 1,
+    cs_supersampling: bool = False,
     measure_resegment: bool = True,
     thr_algorithm: ThrAlgorithm = "lsthr",
     volume_seg: np.ndarray | None = None,
@@ -150,6 +151,12 @@ def cross_section_at_point(
     """Oblique cross-section at a centerline point using a single 3D intensity volume."""
     u, v = plane_basis_from_tangent(tangent)
     res_display = _plane_res_nearest(radius_vox, cross_section_res)
+    res_meas = resolve_plane_res(
+        radius_vox,
+        cross_section_res=cross_section_res,
+        interp_vals=interp_vals,
+        supersampling=cs_supersampling,
+    )
     center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
     tang = as_backend_array(tangent).astype(np.float64).reshape(3)
 
@@ -164,7 +171,6 @@ def cross_section_at_point(
     )
 
     if measure_resegment:
-        res_meas = _plane_res(radius_vox, interp_vals, cross_section_res)
         order_meas = int(plane_interp_order)
         cd_sl = oblique_slice(
             cd,
@@ -185,18 +191,18 @@ def cross_section_at_point(
             u_xyz=u,
             v_xyz=v,
             radius_vox=radius_vox,
-            res=res_display,
+            res=res_meas,
             order=0,
         )
-        mask = as_backend_array(np.round(seg_sl) == int(volume_label_id)).astype(bool)
+        mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
         circ = _circularity_proxy(mask)
 
     area_mm2 = _cross_section_area_mm2(
         mask,
         voxel_spacing=voxel_spacing,
         tangent=tang,
+        plane_res=res_meas,
         radius_vox=radius_vox,
-        interp_vals=interp_vals,
     )
     return CrossSectionResult(
         mask_2d=mask,
@@ -207,7 +213,7 @@ def cross_section_at_point(
         u=u,
         v=v,
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
-        plane_res=res_display,
+        plane_res=res_meas,
         intensity_2d=to_numpy(cd_sl_display),
     )
 
@@ -301,16 +307,53 @@ def _plane_res_nearest(radius_vox: float, cross_section_res: int) -> int:
     return max(8, int(np.ceil(2.0 * r)) + 1)
 
 
+def resolve_plane_res(
+    radius_vox: float,
+    *,
+    cross_section_res: int = 0,
+    interp_vals: int = _DEFAULT_INTERP_VALS,
+    supersampling: bool = False,
+) -> int:
+    """Oblique plane grid size; explicit *cross_section_res* overrides supersampling."""
+    if int(cross_section_res) > 0:
+        return int(cross_section_res)
+    if supersampling:
+        return _plane_res(radius_vox, interp_vals, 0)
+    return _plane_res_nearest(radius_vox, 0)
+
+
+def _mask_from_volume_seg_slice(
+    seg_sl: np.ndarray,
+    volume_label_id: int,
+    *,
+    keep_central_cc: bool = True,
+) -> np.ndarray:
+    """Label mask on an oblique seg slice; optionally keep CC nearest plane center."""
+    from nvitk.morphology.components import (
+        keep_component_closest_to_center,
+        label_connected,
+    )
+
+    mask = as_backend_array(np.round(seg_sl) == int(volume_label_id)).astype(bool)
+    if not keep_central_cc or not np.any(mask):
+        return mask
+    labeled, n_cc = label_connected(mask, connectivity=1)
+    if n_cc <= 1:
+        return mask
+    return as_backend_array(keep_component_closest_to_center(labeled)).astype(bool)
+
+
 def _cross_section_area_mm2(
     mask: np.ndarray,
     *,
     voxel_spacing: tuple[float, float, float],
     tangent: np.ndarray,
+    plane_res: int,
     radius_vox: float,
-    interp_vals: int,
 ) -> float:
     px, py = tilt_corrected_spacing_mm(voxel_spacing, tangent)
-    scale = (2.0 * float(radius_vox) + 1.0) / (2.0 * float(radius_vox) * float(interp_vals) + 1.0)
+    native_span = 2.0 * float(radius_vox) + 1.0
+    scale = native_span / float(max(1, int(plane_res)))
     d_area = (px / 10.0) * (py / 10.0) * (scale**2)
     return float(np.count_nonzero(mask)) * d_area * 100.0
 
@@ -327,6 +370,7 @@ def cross_section_at_loc(
     interp_vals: int = _DEFAULT_INTERP_VALS,
     cross_section_res: int = 0,
     plane_interp_order: int = 1,
+    cs_supersampling: bool = False,
     measure_resegment: bool = True,
     thr_algorithm: ThrAlgorithm = "lsthr",
     volume_seg: np.ndarray | None = None,
@@ -334,7 +378,12 @@ def cross_section_at_loc(
 ) -> CrossSectionResult:
     """Oblique cross-section at a LOC; resegment in-plane or sample stage-4 mask."""
     u, v = plane_basis_from_tangent(tangent)
-    res = _plane_res(radius_vox, interp_vals, cross_section_res)
+    res = resolve_plane_res(
+        radius_vox,
+        cross_section_res=cross_section_res,
+        interp_vals=interp_vals,
+        supersampling=cs_supersampling,
+    )
     order = int(plane_interp_order)
     center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
     tang = as_backend_array(tangent).astype(np.float64).reshape(3)
@@ -386,15 +435,15 @@ def cross_section_at_loc(
             res=res,
             order=0,
         )
-        mask = as_backend_array(np.round(seg_sl) == int(volume_label_id)).astype(bool)
+        mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
         circ = _circularity_proxy(mask)
 
     area_mm2 = _cross_section_area_mm2(
         mask,
         voxel_spacing=voxel_spacing,
         tangent=tang,
+        plane_res=res,
         radius_vox=radius_vox,
-        interp_vals=interp_vals,
     )
     return CrossSectionResult(
         mask_2d=mask,
@@ -540,7 +589,7 @@ __all__ = [
     "cross_section_at_point",
     "flow_series_ml_s",
     "masked_plane_velocity_series",
-    "plane_basis_from_tangent",
+    "resolve_plane_res",
     "segment_along_polyline",
     "segment_at_point",
     "segment_in_plane",

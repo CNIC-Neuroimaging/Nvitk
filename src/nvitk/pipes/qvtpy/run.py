@@ -425,7 +425,7 @@ def _emit_stage0_convert(
 # --- stage 6 ---
 @click.option(
     "--measure-resegment/--no-measure-resegment",
-    default=True,
+    default=False,
     show_default=True,
 )
 @click.option(
@@ -437,6 +437,12 @@ def _emit_stage0_convert(
 )
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=2, show_default=True)
+@click.option(
+    "--cs-supersampling/--no-cs-supersampling",
+    default=False,
+    show_default=True,
+    help="Stage6: supersample oblique cross-section grid (~4×).",
+)
 def main(
     dicom_root: Path,
     nifti_root: Path,
@@ -495,6 +501,7 @@ def main(
     measure_thr_algorithm: str,
     cross_section_res: int,
     cross_section_plane_interp: int,
+    cs_supersampling: bool,
     backend: str,
 ) -> None:
     Logger()
@@ -711,6 +718,7 @@ def main(
                             measure_thr_algorithm=measure_thr_algorithm.lower(),
                             cross_section_res=cross_section_res,
                             cross_section_plane_interp=cross_section_plane_interp,
+                            cs_supersampling=cs_supersampling,
                         ),
                     )
 
@@ -931,6 +939,7 @@ def main(
                         measure_thr_algorithm=measure_thr_algorithm,
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
+                        cs_supersampling=cs_supersampling,
                         backend=backend,
                     )
                 except Exception as exc:

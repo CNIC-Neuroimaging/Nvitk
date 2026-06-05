@@ -133,10 +133,11 @@ def run_subject(
     output_root: Path,
     skip_existing: bool = False,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
-    measure_resegment: bool = True,
+    measure_resegment: bool = False,
     measure_thr_algorithm: ThrAlgorithm = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
     write_cross_section_qc: bool = True,
 ) -> Path:
     """Measure flow metrics at each LOC; return stage-6 output directory."""
@@ -214,6 +215,7 @@ def run_subject(
         thr_algorithm=measure_thr_algorithm,
         cross_section_res=cross_section_res,
         cross_section_plane_interp=cross_section_plane_interp,
+        cs_supersampling=cs_supersampling,
         volume_seg=volume_seg,
     )
     qc_paths: list[str] = []
@@ -242,6 +244,7 @@ def run_subject(
                     radius_vox=cross_section_radius_vox,
                     cross_section_res=cross_section_res,
                     plane_interp_order=int(cross_section_plane_interp),
+                    cs_supersampling=cs_supersampling,
                     measure_resegment=measure_resegment,
                     thr_algorithm=measure_thr_algorithm,
                     volume_seg=volume_seg,
@@ -265,6 +268,7 @@ def run_subject(
                 "n_rows": len(rows_out),
                 "n_timepoints": nt,
                 "measure_resegment": bool(measure_resegment),
+                "cs_supersampling": bool(cs_supersampling),
                 "measure_thr_algorithm": str(measure_thr_algorithm),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
                 "cross_section_plane_interp": int(cross_section_plane_interp),
@@ -296,10 +300,11 @@ def submit_subject_sge(
     hold_jid: str | None = None,
     emit: TextIO | None = None,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
-    measure_resegment: bool = True,
+    measure_resegment: bool = False,
     measure_thr_algorithm: str = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-6 SGE job. Returns qsub job id."""
@@ -323,6 +328,8 @@ def submit_subject_sge(
         "--measure-thr-algorithm",
         shlex.quote(str(measure_thr_algorithm)),
     ]
+    if cs_supersampling:
+        parts.append("--cs-supersampling")
     if skip_existing:
         parts.append("--skip-existing")
     if not measure_resegment:
@@ -363,9 +370,9 @@ def submit_subject_sge(
 @click.option("--cross-section-radius-vox", type=float, default=_DEFAULT_RADIUS_VOX, show_default=True)
 @click.option(
     "--measure-resegment/--no-measure-resegment",
-    default=True,
+    default=False,
     show_default=True,
-    help="Recompute in-plane segmentation at each LOC (default on).",
+    help="Recompute in-plane segmentation at each LOC (default off).",
 )
 @click.option(
     "--measure-thr-algorithm",
@@ -376,6 +383,12 @@ def submit_subject_sge(
 )
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
+@click.option(
+    "--cs-supersampling/--no-cs-supersampling",
+    default=False,
+    show_default=True,
+    help="Supersample oblique cross-section grid (~4×); default is native voxel sampling.",
+)
 def main(
     subject: str,
     nifti_root: Path,
@@ -386,6 +399,7 @@ def main(
     measure_thr_algorithm: str,
     cross_section_res: int,
     cross_section_plane_interp: int,
+    cs_supersampling: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -398,6 +412,7 @@ def main(
         measure_thr_algorithm=measure_thr_algorithm.lower(),
         cross_section_res=cross_section_res,
         cross_section_plane_interp=cross_section_plane_interp,
+        cs_supersampling=cs_supersampling,
     )
 
 

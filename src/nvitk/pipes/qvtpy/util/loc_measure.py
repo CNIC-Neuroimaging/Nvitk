@@ -35,10 +35,11 @@ def measure_loc_row(
     vz: np.ndarray,
     voxel_spacing: tuple[float, float, float],
     cross_section_radius_vox: float = 10.0,
-    measure_resegment: bool = True,
+    measure_resegment: bool = False,
     thr_algorithm: ThrAlgorithm = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
     volume_seg: np.ndarray | None = None,
 ) -> dict[str, float | int | str]:
     """PI/RI and time series for one LOC row (stage-5 ``locs.csv`` format)."""
@@ -66,6 +67,7 @@ def measure_loc_row(
         radius_vox=cross_section_radius_vox,
         cross_section_res=cross_section_res,
         plane_interp_order=int(cross_section_plane_interp),
+        cs_supersampling=cs_supersampling,
         measure_resegment=measure_resegment,
         thr_algorithm=thr_algorithm,
         volume_seg=volume_seg,
@@ -110,10 +112,11 @@ def run_loc_measurements(
     vz: np.ndarray,
     voxel_spacing: tuple[float, float, float],
     cross_section_radius_vox: float = 10.0,
-    measure_resegment: bool = True,
+    measure_resegment: bool = False,
     thr_algorithm: ThrAlgorithm = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
     volume_seg: np.ndarray | None = None,
 ) -> list[dict[str, float | int | str]]:
     """Measure all LOCs; returns rows suitable for ``loc_measurements.csv``."""
@@ -136,6 +139,7 @@ def run_loc_measurements(
                 thr_algorithm=thr_algorithm,
                 cross_section_res=cross_section_res,
                 cross_section_plane_interp=cross_section_plane_interp,
+                cs_supersampling=cs_supersampling,
                 volume_seg=volume_seg,
             )
         )
