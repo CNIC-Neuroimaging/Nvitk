@@ -12,14 +12,16 @@ from nvitk.morphology import compute_centerlines
 from nvitk.viz.centerline_pick import (
     CenterlinePick,
     choose_plane_normal_sense,
+    frame_from_tangent,
     pick_centerline,
+    refine_pick_to_vertex_if_closer,
     smooth_polyline_display,
     tangent_from_centerline,
+    tangent_window_indices,
     unit_vector,
 )
 
 from nvitk.gui.core.spatial import (
-    data_indices_to_world,
     layer_spatial_kwargs,
     layer_spacing,
     view_direction_into_scene,
@@ -29,11 +31,16 @@ from nvitk.gui.viz.layers import DEFAULT_FLOW_EDGE_WIDTH
 from nvitk.gui.viz.cross_section_panel import CrossSectionPanel, attach_cross_section_dock
 
 XS_CENTERLINES = "Vessel centerlines (xs)"
+XS_CL_POINTS = "Centerline points (xs)"
 XS_PICK = "Cross-section pick"
 XS_PLANE = "Cross-section plane (xs)"
 XS_NORMAL = "Cross-section normal (xs)"
+XS_TANGENT = "Tangent segment (xs)"
 XS_SEG = "Vessel seg (xs)"
 XS_OVERLAY_META = "nvitk_vessel_xs_overlay"
+
+_XS_COLOR_SELECTED = "red"
+_XS_COLOR_TANGENT_NEIGHBOR = "lime"
 
 _TAB10 = (
     "#1f77b4",
@@ -64,6 +71,28 @@ def _intensity_volume(layer: Any) -> np.ndarray:
 
 def _overlay_metadata() -> dict[str, Any]:
     return {XS_OVERLAY_META: True}
+
+
+def _overlay_spatial_kwargs(reference_layer: Any) -> dict[str, Any]:
+    return layer_spatial_kwargs(reference_layer)
+
+
+def _configure_overlay_points_layer(layer: Any) -> None:
+    try:
+        layer.editable = False
+    except Exception:
+        pass
+    try:
+        layer.mode = "pan_zoom"
+    except Exception:
+        pass
+
+
+def _configure_overlay_shapes_layer(layer: Any) -> None:
+    try:
+        layer.editable = False
+    except Exception:
+        pass
 
 
 def _is_left_mouse_button(event: Any) -> bool:
@@ -143,19 +172,62 @@ def _normal_display_half_length_vox(layer: Any, radius_vox: float) -> float:
     return max(1.0, float(radius_vox) * 0.35)
 
 
-def _normal_half_line_world(
+def _tangent_display_half_length_vox(layer: Any, radius_vox: float) -> float:
+    return max(2.5, _normal_display_half_length_vox(layer, radius_vox) * 2.5)
+
+
+def _normal_half_line_data(
+    center_vox: np.ndarray,
+    tangent: np.ndarray,
+    *,
+    half_length_vox: float,
+) -> np.ndarray:
+    """Single segment along +normal in layer data (voxel) coordinates."""
+    c = to_numpy(center_vox).astype(np.float64).reshape(3)
+    t = unit_vector(to_numpy(tangent).astype(np.float64).reshape(3))
+    half_len = float(half_length_vox)
+    return np.stack([c, c + half_len * t], axis=0).astype(np.float32)
+
+
+def _arrow_chevrons(
+    tip: np.ndarray,
+    direction: np.ndarray,
+    *,
+    size_vox: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Two short paths forming an arrowhead at *tip* pointing along *direction*."""
+    t = unit_vector(to_numpy(direction).astype(np.float64).reshape(3))
+    u, _v = frame_from_tangent(t)
+    tip = to_numpy(tip).astype(np.float64).reshape(3)
+    size = float(size_vox)
+    base = tip - size * t
+    wing = size * 0.42
+    left = base + wing * (u + 0.35 * t)
+    right = base + wing * (-u + 0.35 * t)
+    return (
+        np.stack([tip, left], axis=0).astype(np.float32),
+        np.stack([tip, right], axis=0).astype(np.float32),
+    )
+
+
+def _tangent_display_paths_data(
     center_vox: np.ndarray,
     tangent: np.ndarray,
     *,
     reference_layer: Any,
-    half_length_vox: float,
-) -> np.ndarray:
-    """Single red segment along +normal only (world coordinates for Shapes)."""
+    radius_vox: float,
+) -> list[np.ndarray]:
+    """Extended tangent line plus arrowheads at both ends (data coordinates)."""
     c = to_numpy(center_vox).astype(np.float64).reshape(3)
     t = unit_vector(to_numpy(tangent).astype(np.float64).reshape(3))
-    half_len = float(half_length_vox)
-    seg = np.stack([c, c + half_len * t], axis=0)
-    return data_indices_to_world(seg, reference_layer)
+    half_len = _tangent_display_half_length_vox(reference_layer, radius_vox)
+    arrow_size = max(0.6, half_len * 0.22)
+    start = c - half_len * t
+    end = c + half_len * t
+    main = np.stack([start, end], axis=0).astype(np.float32)
+    a1, a2 = _arrow_chevrons(end, t, size_vox=arrow_size)
+    b1, b2 = _arrow_chevrons(start, -t, size_vox=arrow_size)
+    return [main, a1, a2, b1, b2]
 
 
 def _centerlines_layer_visible(centerlines_layer: Any | None) -> bool:
@@ -184,6 +256,86 @@ def _params_from_dict(params: dict[str, Any]) -> dict[str, Any]:
         "centerline_window": int(str(params.get("centerline_window") or "5")),
         "show_segmentation_3d": bool(params.get("show_segmentation_3d", True)),
     }
+
+
+def _label_color_map(centerlines: dict[int, np.ndarray]) -> dict[int, str]:
+    return {
+        int(lbl): _TAB10[i % len(_TAB10)]
+        for i, lbl in enumerate(sorted(centerlines.keys()))
+    }
+
+
+def _stack_centerline_points(
+    centerlines: dict[int, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (N, 3) points and parallel vessel label id per row."""
+    pts_list: list[np.ndarray] = []
+    labels: list[int] = []
+    for lbl in sorted(centerlines.keys()):
+        pts = centerlines[lbl]
+        if pts is None or pts.shape[0] == 0:
+            continue
+        for row in np.asarray(pts, dtype=np.float32):
+            pts_list.append(row)
+            labels.append(int(lbl))
+    if not pts_list:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.int32)
+    return np.stack(pts_list, axis=0), np.asarray(labels, dtype=np.int32)
+
+
+def _default_centerline_point_colors(
+    point_labels: np.ndarray,
+    label_colors: dict[int, str],
+) -> list[str]:
+    return [label_colors[int(lbl)] for lbl in point_labels]
+
+
+def _centerline_point_colors_for_pick(
+    point_labels: np.ndarray,
+    pick: CenterlinePick,
+    centerlines: dict[int, np.ndarray],
+    *,
+    window: int,
+    label_colors: dict[int, str],
+) -> list[str]:
+    colors = _default_centerline_point_colors(point_labels, label_colors)
+    pts = centerlines.get(int(pick.label))
+    if pts is None:
+        return colors
+    a, b = tangent_window_indices(pts, pick.index, window=window)
+    local_idx = 0
+    for row, lbl in enumerate(point_labels):
+        if int(lbl) != int(pick.label):
+            continue
+        if local_idx == int(pick.index):
+            colors[row] = _XS_COLOR_SELECTED
+        elif a <= local_idx <= b:
+            colors[row] = _XS_COLOR_TANGENT_NEIGHBOR
+        local_idx += 1
+    return colors
+
+
+def _add_centerline_points_layer(
+    viewer: Any,
+    centerlines: dict[int, np.ndarray],
+    *,
+    reference_layer: Any,
+) -> tuple[Any, np.ndarray, dict[int, str]] | tuple[None, np.ndarray, dict[int, str]]:
+    stacked, point_labels = _stack_centerline_points(centerlines)
+    label_colors = _label_color_map(centerlines)
+    if stacked.shape[0] == 0:
+        return None, point_labels, label_colors
+    kwargs = {
+        "name": XS_CL_POINTS,
+        "size": max(0.25, _overlay_point_size(reference_layer) * 0.55),
+        "face_color": _default_centerline_point_colors(point_labels, label_colors),
+        "symbol": "disc",
+        "metadata": _overlay_metadata(),
+    }
+    kwargs.update(_overlay_spatial_kwargs(reference_layer))
+    layer = viewer.add_points(stacked.astype(np.float64), **kwargs)
+    _configure_overlay_points_layer(layer)
+    return layer, point_labels, label_colors
 
 
 def build_centerlines_dict(
@@ -233,7 +385,7 @@ def _add_centerline_paths(
         if pts is None or pts.shape[0] < 2:
             continue
         disp = smooth_polyline_display(pts)
-        paths.append(data_indices_to_world(disp, reference_layer))
+        paths.append(disp.astype(np.float32))
         colors.append(_TAB10[i % len(_TAB10)])
     if not paths:
         return None
@@ -243,6 +395,7 @@ def _add_centerline_paths(
         "name": XS_CENTERLINES,
         "metadata": _overlay_metadata(),
     }
+    kwargs.update(_overlay_spatial_kwargs(reference_layer))
     try:
         layer = viewer.add_shapes(
             paths,
@@ -250,6 +403,7 @@ def _add_centerline_paths(
             edge_color=colors,
             **kwargs,
         )
+        _configure_overlay_shapes_layer(layer)
         return layer
     except TypeError:
         kwargs.pop("edge_color", None)
@@ -314,10 +468,13 @@ def install_vessel_cross_sections(
     if not centerlines:
         raise ValueError("No centerlines found (check centerline mask labels and min length).")
 
-    names = {XS_CENTERLINES, XS_PICK, XS_PLANE, XS_NORMAL, XS_SEG}
+    names = {XS_CENTERLINES, XS_CL_POINTS, XS_PICK, XS_PLANE, XS_NORMAL, XS_TANGENT, XS_SEG}
     _remove_layers_named(viewer, names)
 
     centerlines_layer = _add_centerline_paths(
+        viewer, centerlines, reference_layer=intensity_layer
+    )
+    cl_points_layer, cl_point_labels, cl_label_colors = _add_centerline_points_layer(
         viewer, centerlines, reference_layer=intensity_layer
     )
     if segmentation is not None and p["show_segmentation_3d"]:
@@ -330,9 +487,12 @@ def install_vessel_cross_sections(
         face_color="red",
         symbol="o",
         metadata=_overlay_metadata(),
+        **_overlay_spatial_kwargs(intensity_layer),
     )
+    _configure_overlay_points_layer(pick_layer)
     plane_layer: Any | None = None
     normal_layer: Any | None = None
+    tangent_layer: Any | None = None
     edge_w = _overlay_edge_width(intensity_layer)
 
     panel = CrossSectionPanel()
@@ -348,6 +508,10 @@ def install_vessel_cross_sections(
         "pick_layer": pick_layer,
         "plane_layer": plane_layer,
         "normal_layer": normal_layer,
+        "tangent_layer": tangent_layer,
+        "cl_points_layer": cl_points_layer,
+        "cl_point_labels": cl_point_labels,
+        "cl_label_colors": cl_label_colors,
         "panel": panel,
         "intensity_layer": intensity_layer,
         "centerlines_layer": centerlines_layer,
@@ -357,40 +521,92 @@ def install_vessel_cross_sections(
     def _update_plane_and_normal(pick: CenterlinePick, tangent: np.ndarray) -> None:
         nonlocal plane_layer, normal_layer
         corners = _plane_square_corners(pick.point, tangent, p["radius_vox"])
-        corners_w = data_indices_to_world(corners, intensity_layer)
-        normal_w = _normal_half_line_world(
+        normal_data = _normal_half_line_data(
             pick.point,
             tangent,
-            reference_layer=intensity_layer,
             half_length_vox=_normal_display_half_length_vox(
                 intensity_layer, p["radius_vox"]
             ),
         )
+        shape_kwargs = {
+            "shape_type": "polygon",
+            "edge_color": "red",
+            "face_color": [1.0, 0.0, 0.0, 0.08],
+            "edge_width": edge_w,
+            "metadata": _overlay_metadata(),
+            **_overlay_spatial_kwargs(intensity_layer),
+        }
         if plane_layer is None:
             plane_layer = viewer.add_shapes(
-                [corners_w],
-                shape_type="polygon",
-                edge_color="red",
-                face_color=[1.0, 0.0, 0.0, 0.08],
-                edge_width=edge_w,
+                [corners],
                 name=XS_PLANE,
-                metadata=_overlay_metadata(),
+                **shape_kwargs,
             )
+            _configure_overlay_shapes_layer(plane_layer)
             state["plane_layer"] = plane_layer
         else:
-            plane_layer.data = [corners_w]
+            plane_layer.data = [corners]
+        normal_shape_kwargs = {
+            "shape_type": "path",
+            "edge_color": "red",
+            "edge_width": edge_w * 1.5,
+            "name": XS_NORMAL,
+            "metadata": _overlay_metadata(),
+            **_overlay_spatial_kwargs(intensity_layer),
+        }
         if normal_layer is None:
             normal_layer = viewer.add_shapes(
-                [normal_w],
-                shape_type="path",
-                edge_color="red",
-                edge_width=edge_w * 1.5,
-                name=XS_NORMAL,
-                metadata=_overlay_metadata(),
+                [normal_data],
+                **normal_shape_kwargs,
             )
+            _configure_overlay_shapes_layer(normal_layer)
             state["normal_layer"] = normal_layer
         else:
-            normal_layer.data = [normal_w]
+            normal_layer.data = [normal_data]
+
+    def _update_tangent_visual(pick: CenterlinePick, tangent: np.ndarray) -> None:
+        nonlocal tangent_layer
+        cl_layer = state.get("cl_points_layer")
+        point_labels = state.get("cl_point_labels")
+        label_colors = state.get("cl_label_colors")
+        if (
+            cl_layer is not None
+            and point_labels is not None
+            and label_colors is not None
+            and int(point_labels.shape[0]) > 0
+        ):
+            cl_layer.face_color = _centerline_point_colors_for_pick(
+                point_labels,
+                pick,
+                centerlines,
+                window=p["centerline_window"],
+                label_colors=label_colors,
+            )
+        tang_paths = _tangent_display_paths_data(
+            pick.point,
+            tangent,
+            reference_layer=intensity_layer,
+            radius_vox=p["radius_vox"],
+        )
+        tang_edge_w = edge_w * 2.0
+        shape_kwargs = {
+            "shape_type": "path",
+            "edge_color": "red",
+            "edge_width": tang_edge_w,
+            "name": XS_TANGENT,
+            "metadata": _overlay_metadata(),
+            **_overlay_spatial_kwargs(intensity_layer),
+        }
+        if tangent_layer is None:
+            tangent_layer = viewer.add_shapes(
+                tang_paths,
+                **shape_kwargs,
+            )
+            _configure_overlay_shapes_layer(tangent_layer)
+            state["tangent_layer"] = tangent_layer
+        else:
+            tangent_layer.data = tang_paths
+            tangent_layer.edge_width = tang_edge_w
 
     def _apply_pick(pick: CenterlinePick, click_xyz: np.ndarray) -> None:
         pts = centerlines[pick.label]
@@ -425,11 +641,9 @@ def install_vessel_cross_sections(
             panel.clear(f"Cross-section failed: {exc}")
             return
 
-        pick_layer.data = data_indices_to_world(
-            np.asarray(pick.point, dtype=np.float64).reshape(1, 3),
-            intensity_layer,
-        )
+        pick_layer.data = np.asarray(pick.point, dtype=np.float64).reshape(1, 3)
         _update_plane_and_normal(pick, tang)
+        _update_tangent_visual(pick, tang)
 
         intensity_2d = result.intensity_2d
         if intensity_2d is None:
@@ -506,6 +720,12 @@ def install_vessel_cross_sections(
             click_xyz = pick.point
         else:
             click_xyz = click_xyz.astype(np.float32, copy=False)
+        pick = refine_pick_to_vertex_if_closer(
+            pick,
+            centerlines,
+            click_xyz,
+            max_distance_vox=max(2.0, _pick_max_distance_vox(p) * 0.35),
+        )
         _apply_pick(pick, click_xyz)
         try:
             event.handled = True
@@ -527,6 +747,13 @@ def install_vessel_cross_sections(
     try:
         intensity_layer.mode = "pan_zoom"
         viewer.layers.selection.active = intensity_layer
+        for lyr in (cl_points_layer, pick_layer, centerlines_layer):
+            if lyr is None:
+                continue
+            if getattr(lyr, "name", "") in (XS_CL_POINTS, XS_PICK):
+                _configure_overlay_points_layer(lyr)
+            else:
+                _configure_overlay_shapes_layer(lyr)
     except Exception:
         pass
 
@@ -542,9 +769,11 @@ def install_vessel_cross_sections(
 
 __all__ = [
     "XS_CENTERLINES",
+    "XS_CL_POINTS",
     "XS_PICK",
     "XS_PLANE",
     "XS_NORMAL",
+    "XS_TANGENT",
     "XS_SEG",
     "build_centerlines_dict",
     "install_vessel_cross_sections",

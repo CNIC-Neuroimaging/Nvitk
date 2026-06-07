@@ -19,16 +19,27 @@ def unit_vector(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
-def tangent_from_centerline(points: np.ndarray, idx: int, *, window: int = 5) -> np.ndarray:
-    """Tangent at ``points[idx]`` from neighbors (window 3 or 5)."""
+def tangent_window_indices(
+    points: np.ndarray,
+    idx: int,
+    *,
+    window: int = 5,
+) -> tuple[int, int]:
+    """Inclusive index range ``[a, b]`` used by ``tangent_from_centerline``."""
     w = int(window)
     if w not in (3, 5):
         w = 5
     k = 1 if w == 3 else 2
+    n = int(np.asarray(points).shape[0])
+    a = max(0, int(idx) - k)
+    b = min(n - 1, int(idx) + k)
+    return a, b
+
+
+def tangent_from_centerline(points: np.ndarray, idx: int, *, window: int = 5) -> np.ndarray:
+    """Tangent at ``points[idx]`` from neighbors (window 3 or 5)."""
     pts = np.asarray(points, dtype=np.float32)
-    n = pts.shape[0]
-    a = max(0, idx - k)
-    b = min(n - 1, idx + k)
+    a, b = tangent_window_indices(pts, idx, window=window)
     if b == a:
         return np.array([1.0, 0.0, 0.0], dtype=np.float32)
     return unit_vector(pts[b] - pts[a])
@@ -395,6 +406,35 @@ def pick_centerline(
     return best
 
 
+def refine_pick_to_vertex_if_closer(
+    pick: CenterlinePick,
+    centerlines: Mapping[int, np.ndarray],
+    click_xyz: np.ndarray,
+    *,
+    max_distance_vox: float = 2.5,
+) -> CenterlinePick:
+    """Prefer the nearest polyline vertex when the click is closer to it than the segment snap."""
+    pts = centerlines.get(int(pick.label))
+    if pts is None:
+        return pick
+    pts_arr = np.asarray(pts, dtype=np.float64)
+    click = np.asarray(click_xyz, dtype=np.float64).reshape(3)
+    pick_pt = np.asarray(pick.point, dtype=np.float64).reshape(3)
+    d2_vertex = np.sum((pts_arr - click.reshape(1, 3)) ** 2, axis=1)
+    vi = int(np.argmin(d2_vertex))
+    max_d2 = float(max_distance_vox) ** 2
+    if float(d2_vertex[vi]) > max_d2:
+        return pick
+    if float(d2_vertex[vi]) >= float(np.sum((pick_pt - click) ** 2)):
+        return pick
+    return CenterlinePick(
+        label=int(pick.label),
+        index=vi,
+        point=pts_arr[vi].astype(np.float32, copy=False),
+        distance_sq=float(d2_vertex[vi]),
+    )
+
+
 def smooth_polyline_display(
     points: np.ndarray,
     *,
@@ -429,7 +469,9 @@ __all__ = [
     "centerline_label_near_click",
     "choose_plane_normal_sense",
     "pick_centerline",
+    "refine_pick_to_vertex_if_closer",
     "smooth_polyline_display",
     "tangent_from_centerline",
+    "tangent_window_indices",
     "unit_vector",
 ]
