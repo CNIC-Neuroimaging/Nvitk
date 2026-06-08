@@ -8,18 +8,28 @@ from collections import defaultdict
 from pathlib import Path
 import base64
 
+import numpy as np
+
+from nvitk.core.array import to_numpy
 from nvitk.core.exceptions import ValidationError
 from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.run_hotspot import (
+    _ctpet_load_extra_mask_on_pet_grid,
     _list_valid_measures,
     _load_ctpet_inputs,
     _load_dixon_inputs,
+    _require_pyvista,
     _resolve_measure_ctpet,
     _resolve_measure_dixon,
+    _surface_from_binary,
 )
 from nvitk.viz import show_hotspots
+from nvitk.viz.pet_hotspots import _roi_mask
 
 log = Logger()
+
+_GRASA_V_BATCH_SUV = "GRASA_V_BATCH_SUV"
+_URETER_OVERLAY_OPACITY = 0.5
 
 
 def _safe_name(s: str) -> str:
@@ -43,6 +53,41 @@ def _write_text_with_retries(path: Path, text: str, *, retries: int = 3, sleep_s
             if attempt < retries:
                 time.sleep(float(sleep_s))
     return False
+
+
+def _ureter_on_roi_z_slices(ureter: np.ndarray, roi: np.ndarray) -> np.ndarray:
+    """Keep ureter voxels only on axial slices where *roi* is non-empty."""
+    ureter_bin = np.asarray(ureter) > 0
+    z_has_roi = np.any(roi, axis=(0, 1))
+    return ureter_bin & z_has_roi[np.newaxis, np.newaxis, :]
+
+
+def _add_grasa_v_batch_ureter_overlay(pl, *, lay, subject: str, pet, mask_img, label_ids) -> None:
+    """Overlay stage-2 ureter surface for GRASA_V_BATCH_SUV hotspot exports."""
+    try:
+        ureter_img = _ctpet_load_extra_mask_on_pet_grid(lay, subject, "ureter", pet)
+    except ValidationError as exc:
+        log.debug("GRASA_V_BATCH_SUV ureter overlay skipped: %s", exc)
+        return
+    if ureter_img is None:
+        return
+
+    mask_arr = to_numpy(mask_img.data)
+    roi = _roi_mask(mask_arr, label_ids)
+    ureter_bin = _ureter_on_roi_z_slices(to_numpy(ureter_img.data), roi)
+    if not bool(np.any(ureter_bin)):
+        log.debug("GRASA_V_BATCH_SUV ureter overlay empty after z-slice gating")
+        return
+
+    pv = _require_pyvista()
+    surf = _surface_from_binary(pv, ureter_bin.astype(np.uint8))
+    pl.add_mesh(
+        surf,
+        color="#00A6FB",
+        opacity=float(_URETER_OVERLAY_OPACITY),
+        show_scalar_bar=False,
+    )
+    pl.add_text("+ ureter", position="lower_left", font_size=10)
 
 
 def _export_html_with_retries(pl, path: Path, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
@@ -96,8 +141,9 @@ def export_hotspot_gallery_for_batch(
             title = f"{'CT-PET' if ct else 'DIXON'} {measure} | {subject} | {lay.batch}"
             sb_title = "SUV" if ct is not None else measure.rsplit("_", 1)[-1]
             try:
+                pet = None
                 if ct is not None:
-                    img, mask_img, label_ids, _pet = _load_ctpet_inputs(lay, subject, ct)
+                    img, mask_img, label_ids, pet = _load_ctpet_inputs(lay, subject, ct)
                 else:
                     dx = _resolve_measure_dixon(measure)
                     img, mask_img, label_ids = _load_dixon_inputs(lay, subject, dx)
@@ -115,6 +161,15 @@ def export_hotspot_gallery_for_batch(
                     allow_empty_hotspot=True,
                     scalar_bar_title=sb_title,
                 )
+                if ct is not None and measure == _GRASA_V_BATCH_SUV and pet is not None:
+                    _add_grasa_v_batch_ureter_overlay(
+                        pl,
+                        lay=lay,
+                        subject=subject,
+                        pet=pet,
+                        mask_img=mask_img,
+                        label_ids=label_ids,
+                    )
                 fname = f"hotspot_{_safe_name(subject)}_{_safe_name(measure)}.html"
                 path = out_dir / fname
                 try:

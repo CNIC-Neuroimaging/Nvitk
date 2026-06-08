@@ -36,6 +36,7 @@ from typing import Any, Dict, Tuple
 
 from nvitk.core import setup
 from nvitk.core import as_backend_array, to_numpy
+from nvitk.types import Image
 
 setup(globals())
 
@@ -55,7 +56,7 @@ def _convex_hull_slicewise_z(vol_uint8: np.ndarray) -> np.ndarray:
     from nvitk.segmentation.hull_edt import convex_hull_slicewise
 
     out = convex_hull_slicewise(vol_uint8, axis=-1)
-    data = out.data if hasattr(out, "data") else out
+    data = out.data if isinstance(out, Image) else out
     return as_backend_array(data)
 
 

@@ -1,8 +1,8 @@
 """Dixon QC: measurement heatmap inside segmentation masks.
 
 Per-ROI axial slice stacks with a range slider (same interaction model as slice views):
-- Outside masks: raw FF or T2 (grayscale), depending on the selected metric.
-- Inside mask: same metric as a heatmap overlay.
+- Outside masks: Dixon WATER sequence (grayscale underlay, same as slice views).
+- Inside mask: FF or T2 metric as a heatmap overlay.
 """
 
 from __future__ import annotations
@@ -260,6 +260,17 @@ def build_dixon_measurement_heatmap_html(
         if not z_indices:
             continue
 
+        water_p = resolve_nii_optional(subject_nifti, f"{dx_cfg.INPUT_PREFIX}_{region_u}_WATER")
+        if water_p is None:
+            continue
+        try:
+            water_xyz = to_numpy(imread(str(water_p), axes="XYZ").data)
+        except Exception:
+            continue
+        if water_xyz.shape != mask_xyz.shape:
+            continue
+        base_vmin, base_vmax = _full_volume_display_range(water_xyz)
+
         roi_has_metric = False
         for metric in _METRICS:
             suffix = _metric_suffix(metric)
@@ -278,14 +289,12 @@ def build_dixon_measurement_heatmap_html(
                 assets_rel=assets_rel,
                 prefix=f"dxhm_{_safe_stem(subject)}_{metric.lower()}",
             )
-            base_vmin, base_vmax = _full_volume_display_range(val_xyz)
             metric_vmin, metric_vmax = _heatmap_metric_range(val_xyz, mask_xyz)
             ax_uris: list[str] = []
             for z in z_indices:
-                sl = val_xyz[:, :, z]
                 png = _render_heatmap_slice_png(
-                    base_2d=sl,
-                    value_2d=sl,
+                    base_2d=water_xyz[:, :, z],
+                    value_2d=val_xyz[:, :, z],
                     mask_2d=mask_xyz[:, :, z],
                     title=f"{disp} axial z={z} ({metric})",
                     base_vmin=base_vmin,

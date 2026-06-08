@@ -155,6 +155,7 @@ PESA_FAT_QC_REVIEWS_COLUMNS: dict[str, str] = {
     "subject_uid": "string",
     "pipeline": "string",
     "structure": "string",
+    "review_aspect": "string",
     "qc_status": "string",
     "reviewer": "string",
     "reviewed_at": "string",
@@ -188,7 +189,7 @@ def _ensure_pesa_fat_qc_reviews_table(repo: DataRepo) -> None:
         "path": rel_path,
         "kind": "derived",
         "description": "PESA-Fat QC portal review decisions (mirrors reviews.xlsx).",
-        "key_columns": ["batch", "subject_uid", "pipeline", "structure"],
+        "key_columns": ["batch", "subject_uid", "pipeline", "structure", "review_aspect"],
         "columns": dict(PESA_FAT_QC_REVIEWS_COLUMNS),
         "row_count": 0,
         "last_updated": utc_now_iso(),
@@ -206,6 +207,7 @@ def publish_qc_review(
     subject: str,
     pipeline: str,
     structure: str,
+    review_aspect: str = "MEASUREMENT",
     qc_status: str,
     reviewer: str = "",
     reviewed_at: str | None = None,
@@ -216,10 +218,12 @@ def publish_qc_review(
 ) -> dict[str, int]:
     """Persist a QC review to DB tables (``image_measurements`` + ``pesa_fat_qc_reviews``).
 
-    - Sets ``qc_status`` on all ``image_measurements`` rows for the subject/pipeline whose
-      ``variable_id`` matches the reviewed structure.
+    - For ``review_aspect=MEASUREMENT``, sets ``qc_status`` on matching ``image_measurements``.
+    - ``review_aspect=SEGMENTATION`` is audit-only in ``pesa_fat_qc_reviews``.
     - Upserts one audit row into ``pesa_fat_qc_reviews`` (created on first use if absent).
     """
+    from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
+
     repo = resolve_repo(repo)
     ctx = _infer_publish_context(pipeline)
     status = str(qc_status).strip().upper()
@@ -228,9 +232,10 @@ def publish_qc_review(
     reviewed_at_eff = reviewed_at or utc_now_iso()
     subject_uid = str(subject).strip()
     structure_s = str(structure).strip()
+    aspect_s = str(review_aspect or DEFAULT_REVIEW_ASPECT).strip().upper()
 
     updated_measurements = 0
-    if repo.catalog.table_exists("image_measurements"):
+    if aspect_s == "MEASUREMENT" and repo.catalog.table_exists("image_measurements"):
         all_df = repo.get("image_measurements", cohort_id=False)
         if not all_df.empty and "variable_id" in all_df.columns:
             sp_mask = (
@@ -279,6 +284,7 @@ def publish_qc_review(
                 "subject_uid": subject_uid,
                 "pipeline": str(pipeline).strip(),
                 "structure": structure_s,
+                "review_aspect": aspect_s,
                 "qc_status": status,
                 "reviewer": str(reviewer).strip(),
                 "reviewed_at": reviewed_at_eff,
@@ -291,7 +297,7 @@ def publish_qc_review(
     repo.upsert_table(
         PESA_FAT_QC_REVIEWS_TABLE,
         review_row,
-        key_columns=["batch", "subject_uid", "pipeline", "structure"],
+        key_columns=["batch", "subject_uid", "pipeline", "structure", "review_aspect"],
         provenance={
             "importer": "pesa_fat_qc_review",
             "batch": str(batch),
@@ -336,6 +342,8 @@ def sync_qc_reviews_for_report(
             "qc_reviews": 0,
         }
 
+    from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
+
     updated_measurements = 0
     if repo.catalog.table_exists("image_measurements"):
         all_df = repo.get("image_measurements", cohort_id=False)
@@ -345,6 +353,9 @@ def sync_qc_reviews_for_report(
                 all_df["subject_uid"].astype("string").fillna("") == subject_uid
             ) & (all_df["pipeline_id"].astype("string").fillna("") == ctx.pipeline_id)
             for r in report_rows:
+                aspect_s = str(r.get("review_aspect") or DEFAULT_REVIEW_ASPECT).strip().upper()
+                if aspect_s != "MEASUREMENT":
+                    continue
                 status = str(r.get("qc_status", "PENDING")).strip().upper()
                 if status not in {"OK", "FAIL"}:
                     continue
@@ -385,6 +396,7 @@ def sync_qc_reviews_for_report(
         if status not in {"OK", "FAIL", "PENDING"}:
             status = "PENDING"
         structure_s = str(r.get("structure", "")).strip()
+        aspect_s = str(r.get("review_aspect") or DEFAULT_REVIEW_ASPECT).strip().upper()
         if not structure_s:
             continue
         synced += 1
@@ -394,6 +406,7 @@ def sync_qc_reviews_for_report(
                 "subject_uid": subject_uid,
                 "pipeline": pipeline_s,
                 "structure": structure_s,
+                "review_aspect": aspect_s,
                 "qc_status": status,
                 "reviewer": str(r.get("reviewer", "")).strip(),
                 "reviewed_at": str(r.get("reviewed_at") or utc_now_iso()),
@@ -406,7 +419,7 @@ def sync_qc_reviews_for_report(
         repo.upsert_table(
             PESA_FAT_QC_REVIEWS_TABLE,
             pd.DataFrame(audit_rows),
-            key_columns=["batch", "subject_uid", "pipeline", "structure"],
+            key_columns=["batch", "subject_uid", "pipeline", "structure", "review_aspect"],
             provenance={
                 "importer": "pesa_fat_qc_review_sync",
                 "batch": batch_s,

@@ -97,8 +97,26 @@ def _join_iframes(parts: list[str]) -> str:
     return "\n".join(out)
 
 
-def _base_doc(*, title: str, batch: str, subject: str, body_html: str, header_toolbar: str = "") -> str:
+def _measurements_card(measurements_table: str, measurements_download: str = "") -> str:
+    return f"""
+<div class="card">
+  <div class="card-h"><h3>Measurements</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">{measurements_download}<span class="muted">out-of-range highlighted</span></div></div>
+  <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
+</div>
+""".strip()
+
+
+def _base_doc(
+    *,
+    title: str,
+    batch: str,
+    subject: str,
+    body_html: str,
+    header_toolbar: str = "",
+    footer_toolbar: str = "",
+) -> str:
     toolbar = header_toolbar.strip()
+    footer = footer_toolbar.strip()
     header_inner = f"""
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
       <div>
@@ -107,6 +125,7 @@ def _base_doc(*, title: str, batch: str, subject: str, body_html: str, header_to
       </div>
       {toolbar}
     </div>"""
+    footer_block = f'\n  <div class="header" style="margin-top:18px">{footer}</div>' if footer else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -119,7 +138,7 @@ def _base_doc(*, title: str, batch: str, subject: str, body_html: str, header_to
   <div class="header">
 {header_inner}
   </div>
-{body_html}
+{body_html}{footer_block}
 </div>
 <script>
 window.addEventListener('pagehide', function() {{
@@ -137,6 +156,7 @@ def build_ctpet_report_html(
     batch: str,
     subject: str,
     header_toolbar: str = "",
+    footer_toolbar: str = "",
     masks_html: list[str],
     hotspot_gallery: str,
     axial_html: list[str],
@@ -145,6 +165,7 @@ def build_ctpet_report_html(
 ) -> str:
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
+    measurements = _measurements_card(measurements_table, measurements_download)
     body = f"""
 <section id="ctpet">
 <h2>CT-PET pipeline</h2>
@@ -153,6 +174,8 @@ def build_ctpet_report_html(
   <div class="card-h"><h3>Segmentation overview (3D)</h3><div class="muted">interactive</div></div>
   <div class="card-b">{masks}</div>
 </div>
+
+{measurements}
 
 <div class="card">
   <div class="card-h"><h3>Hotspots</h3><div class="muted">interactive</div></div>
@@ -163,11 +186,6 @@ def build_ctpet_report_html(
   <div class="card-h"><h3>Slice views</h3><div class="muted">axial</div></div>
   <div class="card-b">{ax}</div>
 </div>
-
-<div class="card">
-  <div class="card-h"><h3>Measurements</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">{measurements_download}<span class="muted">out-of-range highlighted</span></div></div>
-  <div class="card-b"><div class="table-wrap">{measurements_table}</div></div>
-</div>
 </section>
 """
     return _base_doc(
@@ -176,6 +194,7 @@ def build_ctpet_report_html(
         subject=subject,
         body_html=body,
         header_toolbar=header_toolbar,
+        footer_toolbar=footer_toolbar,
     )
 
 
@@ -184,6 +203,7 @@ def build_dixon_report_html(
     batch: str,
     subject: str,
     header_toolbar: str = "",
+    footer_toolbar: str = "",
     masks_html: list[str],
     hotspot_gallery: str,
     axial_html: list[str],
@@ -193,6 +213,7 @@ def build_dixon_report_html(
 ) -> str:
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
+    measurements = _measurements_card(measurements_table, measurements_download)
     hotspot_block = (
         f'''
 <div class="card">
@@ -213,6 +234,8 @@ def build_dixon_report_html(
   <div class=\"card-b\">{masks}</div>
 </div>
 
+{measurements}
+
 {hotspot_block}
 
 <div class=\"card\">
@@ -221,11 +244,6 @@ def build_dixon_report_html(
 </div>
 
 {extra_sections_html}
-
-<div class=\"card\">
-  <div class=\"card-h\"><h3>Measurements</h3><div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap\">{measurements_download}<span class=\"muted\">out-of-range highlighted</span></div></div>
-  <div class=\"card-b\"><div class=\"table-wrap\">{measurements_table}</div></div>
-</div>
 </section>
 """
     return _base_doc(
@@ -234,6 +252,7 @@ def build_dixon_report_html(
         subject=subject,
         body_html=body,
         header_toolbar=header_toolbar,
+        footer_toolbar=footer_toolbar,
     )
 
 

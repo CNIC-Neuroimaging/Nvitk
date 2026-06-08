@@ -38,7 +38,11 @@ from nvitk.pipes.pesa_fat.qc.pet_axial import (
 )
 from nvitk.pipes.pesa_fat.qc.dixon_heatmap import build_dixon_measurement_heatmap_html
 from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures
-from nvitk.pipes.pesa_fat.qc.slice_review import report_header_toolbar_html, review_context
+from nvitk.pipes.pesa_fat.qc.slice_review import (
+    report_footer_toolbar_html,
+    report_header_toolbar_html,
+    review_context,
+)
 from nvitk.pipes.pesa_fat.qc.pyvista_scenes import (
     export_ctpet_overview_html,
     export_dixon_overview_html,
@@ -215,11 +219,18 @@ def run_qc_subject(
     wrote_dx: Path | None = None
 
     if "ct-pet-v5" in pipelines:
+        report_relpath_ct = f"{subject}/{out_ct.name}"
         header_ct = report_header_toolbar_html(
             batch=lay.batch,
             subject=subject,
             pipeline="ct-pet-v5",
-            report_relpath=f"{subject}/{out_ct.name}",
+            report_relpath=report_relpath_ct,
+        )
+        footer_ct = report_footer_toolbar_html(
+            batch=lay.batch,
+            subject=subject,
+            pipeline="ct-pet-v5",
+            report_relpath=report_relpath_ct,
         )
         ct_xlsx_href = copy_measurements_xlsx_for_qc(
             lay=lay,
@@ -233,6 +244,7 @@ def run_qc_subject(
             batch=lay.batch,
             subject=subject,
             header_toolbar=header_ct,
+            footer_toolbar=footer_ct,
             masks_html=ctpet_masks,
             hotspot_gallery=ct_hot,
             axial_html=ctpet_axial_parts,
@@ -246,11 +258,18 @@ def run_qc_subject(
     if "dixon-v5" in pipelines:
         from nvitk.pipes.pesa_fat.qc.pet_axial import _safe_stem
 
+        report_relpath_dx = f"{subject}/{out_dx.name}"
         header_dx = report_header_toolbar_html(
             batch=lay.batch,
             subject=subject,
             pipeline="dixon-v5",
-            report_relpath=f"{subject}/{out_dx.name}",
+            report_relpath=report_relpath_dx,
+        )
+        footer_dx = report_footer_toolbar_html(
+            batch=lay.batch,
+            subject=subject,
+            pipeline="dixon-v5",
+            report_relpath=report_relpath_dx,
         )
         heat = build_dixon_measurement_heatmap_html(
             lay,
@@ -262,7 +281,7 @@ def run_qc_subject(
         )
         extra = f'''
 <div class="card">
-  <div class="card-h"><h3>Measurement heatmap</h3><div class="muted">FF/T2 raw underlay · colormap inside mask</div></div>
+  <div class="card-h"><h3>Measurement heatmap</h3><div class="muted">WATER underlay · colormap inside mask</div></div>
   <div class="card-b">{heat}</div>
 </div>
 '''.strip()
@@ -278,6 +297,7 @@ def run_qc_subject(
             batch=lay.batch,
             subject=subject,
             header_toolbar=header_dx,
+            footer_toolbar=footer_dx,
             masks_html=dixon_masks,
             hotspot_gallery=dx_hot,
             axial_html=dixon_axial_parts,

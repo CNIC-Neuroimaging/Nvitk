@@ -368,7 +368,7 @@ def _run_local(
     overwrite: bool,
     regions: tuple[str, ...],
     compress: bool,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     if "stage0" in stages_sel:
         log.info("=" * 78)
@@ -443,7 +443,7 @@ def _run_sge(
     dry_run: bool,
     log_level: str,
     emit: TextIO | None = None,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     run_stage0 = "stage0" in stages_sel
     pipe_stages = [s for s in stages_sel if s not in ("stage0", "stage4")]
@@ -658,7 +658,11 @@ def _run_sge(
     default=None,
     help="(sge) SSH username (else prompt).",
 )
-@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
+@click.option(
+    "--exclude-ureter/--no-exclude-ureter",
+    default=True,
+    help="Exclude PET ureter from BATCH visceral fat labels (default: on).",
+)
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
 def main(
@@ -688,7 +692,7 @@ def main(
     remote_user: str | None,
     log_level: str,
     debug: bool,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     """Run the full PESA-Fat pipeline (stage 0 + ct-pet-v5 + dixon-v5) for a batch."""
     Logger(level=log_level.upper())

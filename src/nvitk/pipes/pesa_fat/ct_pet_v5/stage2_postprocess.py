@@ -58,6 +58,16 @@ from nvitk.segmentation.hull_edt import convex_hull_3d
 from nvitk.transform import resample_pet_to_mask
 from nvitk.types import Image
 
+# Output mask file → label name(s) to clear where PET ureter overlaps.
+URETER_EXCLUSION_BY_MASK: dict[str, tuple[str, ...]] = {
+    "FAT_BATCH": ("GRASA_V_BATCH",),
+}
+
+_LABEL_MAPS_BY_MASK_FILE: dict[str, dict[str, int]] = {
+    "FAT": FAT_LABELS,
+    "FAT_BATCH": FAT_BATCH_LABELS,
+}
+
 setup(globals())
 
 log = Logger()
@@ -256,12 +266,34 @@ def _remove_organs(fat_arr: Any, total: Image, pet: Image) -> Any:
     return out
 
 
+def _ureter_exclusion_label_ids(mask_file: str) -> list[int]:
+    """Resolve configured label names for *mask_file* to integer IDs."""
+    label_names = URETER_EXCLUSION_BY_MASK.get(mask_file, ())
+    label_map = _LABEL_MAPS_BY_MASK_FILE.get(mask_file, {})
+    return [int(label_map[name]) for name in label_names if name in label_map]
+
+
+def _apply_ureter_exclusion(
+    label_img: np.ndarray,
+    ureter_mask: np.ndarray,
+    *,
+    mask_file: str,
+) -> None:
+    """Zero configured label(s) in *label_img* where *ureter_mask* is positive."""
+    ureter = ureter_mask > 0
+    if not ureter.any():
+        return
+    for label_id in _ureter_exclusion_label_ids(mask_file):
+        sel = (label_img == label_id) & ureter
+        label_img[sel] = 0
+
+
 def build_fat_mask(
     tissue_types: Image,
     total: Image,
     body: Image,
     pet: Image,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
     output_dir: Path | None = None,
 ) -> Image:
     """Visceral/subcutaneous fat clean-up (extremities, organs, PET-guided bladder)."""
@@ -323,7 +355,6 @@ def build_fat_mask(
         if output_dir:
             _resampled_ureter = resampled_ureter.copy().with_data(resampled_ureter.data.astype(np.uint8))
             imsave(str(output_dir / "_URETER.nii.gz"), _resampled_ureter, axes="XYZ")
-        out[resampled_ureter.data > 0] = 0
 
     # ---- FAT BATCH --------------------------------------------------------
     vertebrae_l3_l4 = _vertebrae_l3_l4_labels(total)
@@ -335,7 +366,11 @@ def build_fat_mask(
     out_batch[fat_s_batch > 0] = FAT_BATCH_LABELS["GRASA_SC_BATCH"]
 
     if exclude_ureter:
-        out_batch[resampled_ureter.data > 0] = 0
+        _apply_ureter_exclusion(
+            out_batch,
+            resampled_ureter.data,
+            mask_file="FAT_BATCH",
+        )
 
     return tissue_types.copy().with_data(out), tissue_types.copy().with_data(out_batch)
 
@@ -430,7 +465,7 @@ def _imread(path_parent: Path, stem: str, axes: str = "XYZ") -> Image:
     return imread(str(resolve_nii(path_parent, stem)), axes=axes)
 
 
-def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = False) -> None:
+def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = True) -> None:
     total = _imread(segmentation_dir, "total")
     tissue_types = _imread(segmentation_dir, "tissue_types")
     muscles = _imread(segmentation_dir, "thigh_shoulder_muscles")
@@ -457,7 +492,7 @@ def run_subject(
     lay: BatchLayout,
     *,
     backend: str = "cupy",
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> Path:
     """Build the five stage-2 outputs for a single subject."""
     try:
@@ -491,7 +526,11 @@ def run_subject(
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
 @click.option("--log-level", default="INFO")
-@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
+@click.option(
+    "--exclude-ureter/--no-exclude-ureter",
+    default=True,
+    help="Exclude PET ureter from configured BATCH visceral fat labels (default: on).",
+)
 def main(
     batch: str,
     subject: str,
@@ -500,7 +539,7 @@ def main(
     results_root: Path | None,
     backend: str,
     log_level: str,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     """CT-PET v5 stage 2 worker (single subject)."""
     Logger(level=log_level.upper())

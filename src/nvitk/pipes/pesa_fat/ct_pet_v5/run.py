@@ -120,7 +120,7 @@ def _run_local(
     device: str,
     model_dir: Path | None,
     overwrite: bool,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     for subj in subjects:
         log.info(f"=== CT-PET v5 LOCAL | subject={subj} | stages={stages_sel} ===")
@@ -175,7 +175,7 @@ def _build_python_cmd(
     device: str,
     overwrite: bool,
     log_level: str,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> str:
     """Build the ``python -m nvitk.pipes...stageX --batch ... --subject ...`` cmd.
 
@@ -207,7 +207,7 @@ def _build_python_cmd(
         shlex.quote(c_out),
         "--log-level",
         log_level,
-        "--exclude-ureter" if exclude_ureter and stage == "stage2" else "",
+        "--no-exclude-ureter" if not exclude_ureter and stage == "stage2" else "",
     ]
     if stage == "stage1":
         parts += ["--device", device, "--model-dir", shlex.quote(c_model)]
@@ -245,7 +245,7 @@ def submit_subject_chain(
     dry_run: bool = False,
     log_level: str = "INFO",
     emit: TextIO | None = None,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> list[str]:
     """Submit the CT-PET v5 SGE chain for a *single* subject.
 
@@ -313,7 +313,7 @@ def _run_sge(
     dry_run: bool,
     log_level: str,
     emit: TextIO | None = None,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> dict[str, list[str]]:
     all_jids: dict[str, list[str]] = {}
     for subj in subjects:
@@ -428,7 +428,11 @@ def _run_sge(
 )
 @click.option("--log-level", default="INFO", show_default=True)
 @click.option("--debug", is_flag=True, help="Debug mode.")
-@click.option("--exclude-ureter", is_flag=True, default=False, help="Exclude ureter from the fat mask.")
+@click.option(
+    "--exclude-ureter/--no-exclude-ureter",
+    default=True,
+    help="Exclude PET ureter from BATCH visceral fat labels (default: on).",
+)
 def main(
     batch: str,
     subjects: str | None,
@@ -451,7 +455,7 @@ def main(
     emit_script: Path | None,
     log_level: str,
     debug: bool,
-    exclude_ureter: bool = False,
+    exclude_ureter: bool = True,
 ) -> None:
     """CT-PET v5 pipeline master (local or SGE dispatch)."""
     Logger(level=log_level.upper())

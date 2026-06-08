@@ -25,6 +25,8 @@ def review_widget_html(
     structures: Iterable[str],
     report_relpath: str,
 ) -> str:
+    from nvitk.pipes.pesa_fat.qc.review_policy import REVIEW_ASPECTS, REVIEW_ASPECT_LABELS
+
     structs = [str(s).strip() for s in structures if str(s).strip()]
     if not structs:
         return "<p><em>No QC structures defined.</em></p>"
@@ -35,6 +37,8 @@ def review_widget_html(
         "pipeline": pipeline,
         "report_relpath": report_relpath,
         "structures": structs,
+        "aspects": list(REVIEW_ASPECTS),
+        "aspect_labels": REVIEW_ASPECT_LABELS,
     }
     return f"""
 <div class="card" id="{dom}_card">
@@ -63,11 +67,14 @@ def review_widget_html(
     if (txt !== null) el.textContent = txt;
     return el;
   }};
-  const postReview = async (structure, qc_status) => {{
+  const rowKey = (structure, aspect) => structure + '::' + aspect;
+  const postReview = async (structure, review_aspect, qc_status) => {{
     const reviewer = reviewerInput.value || '';
-    const comment = (commentInputs[structure] && commentInputs[structure].value) || '';
-    status.textContent = `Saving ${{structure}} → ${{qc_status}}...`;
-    const body = {{...ctx, structure, qc_status, reviewer, comment}};
+    const key = rowKey(structure, review_aspect);
+    const comment = (commentInputs[key] && commentInputs[key].value) || '';
+    const aspectLabel = (ctx.aspect_labels && ctx.aspect_labels[review_aspect]) || review_aspect;
+    status.textContent = `Saving ${{structure}} (${{aspectLabel}}) → ${{qc_status}}...`;
+    const body = {{...ctx, structure, review_aspect, qc_status, reviewer, comment}};
     const res = await fetch('/review', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -77,7 +84,7 @@ def review_widget_html(
       status.textContent = `Save failed (${{res.status}}).`;
       return false;
     }}
-    status.textContent = `Saved ${{structure}} → ${{qc_status}}` + (comment ? ' (with comment)' : '') + ' (Excel).';
+    status.textContent = `Saved ${{structure}} (${{aspectLabel}}) → ${{qc_status}}` + (comment ? ' (with comment)' : '') + ' (Excel).';
     return true;
   }};
   const loadState = async () => {{
@@ -94,10 +101,12 @@ def review_widget_html(
       return {{}};
     }}
   }};
-  const addRow = (structure, saved) => {{
+  const addRow = (structure, review_aspect, saved) => {{
+    const key = rowKey(structure, review_aspect);
+    const aspectLabel = (ctx.aspect_labels && ctx.aspect_labels[review_aspect]) || review_aspect;
     const wrap = mk('div', {{style:'display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid rgba(229,229,229,0.18);border-radius:10px;background:rgba(0,0,0,0.20)'}});
     const top = mk('div', {{style:'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap'}});
-    top.appendChild(mk('div', {{style:'font-weight:600'}}, structure));
+    top.appendChild(mk('div', {{style:'font-weight:600'}}, structure + ' · ' + aspectLabel));
     const sel = mk('select', {{style:inputStyle + 'width:auto;min-width:110px'}});
     const initial = (saved && saved.qc_status) ? saved.qc_status : 'PENDING';
     for (const opt of ['PENDING','OK','FAIL']) {{
@@ -110,8 +119,8 @@ def review_widget_html(
     commentEl.setAttribute('placeholder', 'Comment (optional)');
     commentEl.setAttribute('style', inputStyle + 'resize:vertical;min-height:2.4em;');
     if (saved && saved.comment) commentEl.value = saved.comment;
-    commentInputs[structure] = commentEl;
-    const saveRow = () => postReview(structure, sel.value);
+    commentInputs[key] = commentEl;
+    const saveRow = () => postReview(structure, review_aspect, sel.value);
     sel.addEventListener('change', saveRow);
     commentEl.addEventListener('blur', saveRow);
     top.appendChild(sel);
@@ -134,7 +143,7 @@ def review_widget_html(
         return;
       }}
       const st = data.stats || {{}};
-      status.textContent = `Database synced (${{st.synced_structures || 0}} structures, ${{st.updated_measurements || 0}} measurement rows).`;
+      status.textContent = `Database synced (${{st.synced_structures || 0}} entries, ${{st.updated_measurements || 0}} measurement rows).`;
     }} catch (e) {{
       status.textContent = 'Database sync failed: ' + e;
     }} finally {{
@@ -144,7 +153,12 @@ def review_widget_html(
   (async () => {{
     const state = await loadState();
     if (state.reviewer) reviewerInput.value = state.reviewer;
-    for (const s of ctx.structures) addRow(s, state.structures && state.structures[s]);
+    for (const s of ctx.structures) {{
+      const savedStruct = (state.structures && state.structures[s]) || {{}};
+      for (const aspect of (ctx.aspects || [])) {{
+        addRow(s, aspect, savedStruct[aspect] || null);
+      }}
+    }}
   }})();
 }})();
 </script>
@@ -155,11 +169,10 @@ def _safe(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
 
 
-def _reviewable_structure(name: str, *, pipeline: str) -> bool:
-    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, is_reviewable_structure
+def _reviewable_entry(structure: str, aspect: str, *, pipeline: str) -> bool:
+    from nvitk.pipes.pesa_fat.qc.review_policy import is_reviewable_entry
 
-    expected = expected_review_structures(pipeline)
-    return is_reviewable_structure(name, reviewable_structures=expected)
+    return is_reviewable_entry(structure, aspect, pipeline=pipeline)
 
 
 def _utc_now_iso() -> str:
@@ -172,6 +185,7 @@ class ReviewRow:
     subject: str
     pipeline: str
     structure: str
+    review_aspect: str
     qc_status: QcStatus
     reviewer: str = ""
     reviewed_at: str = ""
@@ -184,6 +198,7 @@ _HEADERS = [
     "subject",
     "pipeline",
     "structure",
+    "review_aspect",
     "qc_status",
     "reviewer",
     "reviewed_at",
@@ -219,8 +234,8 @@ def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
             ws.cell(row=1, column=i, value=h)
 
     def key_match(r: int) -> bool:
-        vals = tuple(ws.cell(row=r, column=i).value for i in range(1, 5))
-        want = (row.batch, row.subject, row.pipeline, row.structure)
+        vals = tuple(ws.cell(row=r, column=i).value for i in range(1, 6))
+        want = (row.batch, row.subject, row.pipeline, row.structure, row.review_aspect)
         return vals == want
 
     target_row = None
@@ -236,6 +251,7 @@ def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
         row.subject,
         row.pipeline,
         row.structure,
+        row.review_aspect,
         row.qc_status,
         row.reviewer,
         row.reviewed_at or _utc_now_iso(),
@@ -331,14 +347,14 @@ def create_qc_portal_app(
         subject = str(subject).strip()
         pipeline = str(pipeline).strip()
         rows = _read_reviews_xlsx(reviews_xlsx)
-        structures: dict[str, dict[str, str]] = {}
+        structures: dict[str, dict[str, dict[str, str]]] = {}
         reviewer = ""
         for r in rows:
             if r.batch != batch or r.subject != subject or r.pipeline != pipeline:
                 continue
-            if not _reviewable_structure(r.structure, pipeline=pipeline):
+            if not _reviewable_entry(r.structure, r.review_aspect, pipeline=pipeline):
                 continue
-            structures[r.structure] = {
+            structures.setdefault(r.structure, {})[r.review_aspect] = {
                 "qc_status": r.qc_status,
                 "reviewer": r.reviewer,
                 "reviewed_at": r.reviewed_at,
@@ -350,12 +366,16 @@ def create_qc_portal_app(
 
     @app.post("/review")
     async def post_review(payload: dict[str, Any]):
+        from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
+
         try:
+            review_aspect = str(payload.get("review_aspect", DEFAULT_REVIEW_ASPECT)).strip().upper()
             row = ReviewRow(
                 batch=str(payload.get("batch", "")).strip(),
                 subject=str(payload.get("subject", "")).strip(),
                 pipeline=str(payload.get("pipeline", "")).strip(),
                 structure=str(payload.get("structure", "")).strip(),
+                review_aspect=review_aspect,
                 qc_status=str(payload.get("qc_status", "PENDING")).strip().upper(),
                 reviewer=str(payload.get("reviewer", "")).strip(),
                 reviewed_at=_utc_now_iso(),
@@ -364,9 +384,12 @@ def create_qc_portal_app(
             )
             if row.qc_status not in {"PENDING", "OK", "FAIL"}:
                 row = ReviewRow(**{**row.__dict__, "qc_status": "PENDING"})
-            if not _reviewable_structure(row.structure, pipeline=row.pipeline):
+            if not _reviewable_entry(row.structure, row.review_aspect, pipeline=row.pipeline):
                 return JSONResponse(
-                    {"ok": False, "error": f"Structure {row.structure!r} is not reviewable"},
+                    {
+                        "ok": False,
+                        "error": f"Review entry ({row.structure!r}, {row.review_aspect!r}) is not reviewable",
+                    },
                     status_code=400,
                 )
             upsert_review_row_excel(reviews_xlsx, row)
@@ -400,6 +423,7 @@ def create_qc_portal_app(
                     "subject": r.subject,
                     "pipeline": r.pipeline,
                     "structure": r.structure,
+                    "review_aspect": r.review_aspect,
                     "qc_status": r.qc_status,
                     "reviewer": r.reviewer,
                     "reviewed_at": r.reviewed_at,
@@ -407,7 +431,7 @@ def create_qc_portal_app(
                     "report_relpath": r.report_relpath,
                 }
                 for r in all_rows
-                if _reviewable_structure(r.structure, pipeline=r.pipeline)
+                if _reviewable_entry(r.structure, r.review_aspect, pipeline=r.pipeline)
             ]
             stats, db_error = try_sync_qc_reviews_for_report(
                 batch=batch,
@@ -443,6 +467,8 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
     # Map header to index
     header = [str(c.value).strip() if c.value is not None else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
     idx = {h: i for i, h in enumerate(header)}
+    from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
+
     required = {"batch", "subject", "pipeline", "structure", "qc_status"}
     if not required.issubset(idx.keys()):
         return []
@@ -452,6 +478,11 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
             subject = str(r[idx["subject"]] or "").strip()
             pipeline = str(r[idx["pipeline"]] or "").strip()
             structure = str(r[idx["structure"]] or "").strip()
+            review_aspect = (
+                str(r[idx["review_aspect"]] or DEFAULT_REVIEW_ASPECT).strip().upper()
+                if "review_aspect" in idx
+                else DEFAULT_REVIEW_ASPECT
+            )
             qc_status = str(r[idx["qc_status"]] or "PENDING").strip().upper()
             reviewer = str(r[idx.get("reviewer", -1)] or "").strip() if "reviewer" in idx else ""
             reviewed_at = str(r[idx.get("reviewed_at", -1)] or "").strip() if "reviewed_at" in idx else ""
@@ -469,6 +500,7 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
                 subject=subject,
                 pipeline=pipeline,
                 structure=structure,
+                review_aspect=review_aspect,
                 qc_status=qc_status,
                 reviewer=reviewer,
                 reviewed_at=reviewed_at,
@@ -481,11 +513,15 @@ def _read_reviews_xlsx(path: Path) -> list[ReviewRow]:
 
 def _portal_status(rows: list[ReviewRow], *, pipeline: str) -> tuple[str, str]:
     """Return (label, css_class_suffix) for dashboard cells."""
-    from nvitk.pipes.pesa_fat.qc.review_policy import expected_review_structures, portal_display_status
+    from nvitk.pipes.pesa_fat.qc.review_policy import portal_display_status
 
-    by_struct = {r.structure: r.qc_status for r in rows}
-    expected = expected_review_structures(pipeline)
-    label, tone = portal_display_status(by_struct, expected_structures=expected or None)
+    by_struct: dict[str, dict[str, dict[str, str]]] = {}
+    for r in rows:
+        by_struct.setdefault(r.structure, {})[r.review_aspect] = {
+            "qc_status": r.qc_status,
+            "comment": r.comment,
+        }
+    label, tone = portal_display_status(by_struct, pipeline=pipeline)
     if label == "REVISED":
         return label, f"revised_{tone}"
     return label, tone

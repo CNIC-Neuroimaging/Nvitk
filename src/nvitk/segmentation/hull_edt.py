@@ -44,7 +44,8 @@ def convex_hull_slicewise(mask: Image | Any, *, axis: int = -1) -> Image | Any:
         idx[axis_n] = i
         sl = out[tuple(idx)]
         if sl.any():
-            out[tuple(idx)] = convex_hull_image(to_numpy(sl))
+            _aux = convex_hull_image(to_numpy(sl))
+            out[tuple(idx)] = as_backend_array(_aux)
     return _wrap_like(mask, as_backend_array(out).astype(np.uint8))
 
 

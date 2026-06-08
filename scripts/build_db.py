@@ -47,16 +47,8 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from import_new_vars import (
-    DEFAULT_PATHS,
-    derive_apoe_group,
-    derive_pulse_pressure_map,
-    import_att_csv,
-    import_cognitive_wide,
-    import_t1_volumetry,
-    import_wmh_csv,
-    rename_sys_dias_delta_to_pp,
-)
+from import_new_vars import DEFAULT_PATHS, run_import_new_vars
+from nvitk.db.variable_units import register_all_variable_units
 
 DEFAULT_DATASET_ROOT = Path("~/nvitk/dataset/nvitk-dataset")
 DEFAULT_DB_BASE = Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/")
@@ -167,47 +159,6 @@ PESABRAIN_BUILD_STEPS: tuple[PesabrainImportStep, ...] = (
     ),
 )
 
-CURATED_VARIABLES: list[dict[str, Any]] = [
-    {"variable_id": "age_at_mri", "domain": "clinical", "table": "clinical_measurements", "unit": "Years"},
-    {"variable_id": "weight", "domain": "clinical", "table": "clinical_measurements", "unit": "kg"},
-    {"variable_id": "height", "domain": "clinical", "table": "clinical_measurements", "unit": "cm"},
-    {"variable_id": "bmi", "domain": "clinical", "table": "clinical_measurements", "unit": "kg/m2"},
-    {
-        "variable_id": "psqto000",
-        "domain": "clinical",
-        "table": "clinical_measurements",
-        "unit": "0: non; 1: active; 2: former; 3: social",
-    },
-    {"variable_id": "lbxhdd", "domain": "clinical", "table": "clinical_measurements", "unit": "mg/dL"},
-    {"variable_id": "lbdlld", "domain": "clinical", "table": "clinical_measurements", "unit": "mg/dL"},
-    {"variable_id": "lbxtc", "domain": "clinical", "table": "clinical_measurements", "unit": "mg/dL"},
-    {"variable_id": "bpxsym", "domain": "clinical", "table": "clinical_measurements", "unit": "mmHg"},
-    {"variable_id": "dpxdim", "domain": "clinical", "table": "clinical_measurements", "unit": "mmHg"},
-    {"variable_id": "bpxpls", "domain": "clinical", "table": "clinical_measurements", "unit": "bpm"},
-    {"variable_id": "tas", "domain": "clinical", "table": "clinical_measurements", "unit": "mmHg"},
-    {"variable_id": "tad", "domain": "clinical", "table": "clinical_measurements", "unit": "mmHg"},
-    {"variable_id": "sys_dias_delta", "domain": "clinical", "table": "clinical_measurements", "unit": "mmHg"},
-    {"variable_id": "hematocrit", "domain": "clinical", "table": "clinical_measurements", "unit": "%"},
-    {"variable_id": "tacsctot", "domain": "clinical", "table": "clinical_measurements", "unit": "Agaston Units"},
-    {"variable_id": "left_carotid_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "right_carotid_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "total_carotid_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "total_femoral_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "total_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "right_femoral_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {"variable_id": "left_femoral_plaque_vol", "domain": "clinical", "table": "clinical_measurements", "unit": "mm3"},
-    {
-        "variable_id": "apoe",
-        "domain": "clinical",
-        "table": "clinical_measurements",
-        "unit": "Apolipoprotein E Aplotype Status",
-    },
-    {"variable_id": "flow_mean", "domain": "image", "table": "image_measurements", "unit": "mL/min"},
-    {"variable_id": "flow_tseries", "domain": "image", "table": "image_measurements", "unit": "mL/min"},
-    {"variable_id": "mean_cbf", "domain": "image", "table": "image_measurements", "unit": "mL/100g/min"},
-]
-
-
 def _reset_catalog_from_template(dataset_root: Path) -> None:
     """Replace catalog manifests with the clean repo template (long-form schemas only)."""
     if not CATALOG_TEMPLATE_ROOT.is_dir():
@@ -249,37 +200,6 @@ def _import_pesabrain_steps(
             build_sqlite_index=False,
             pipeline_id=step.pipeline_id,
         )
-
-
-def _run_new_vars_steps(
-    repo: DataRepo,
-    *,
-    import_run_id: str,
-    paths: dict[str, Path],
-    log: Any,
-) -> None:
-    import_t1_volumetry(
-        repo,
-        paths["t1_cortical"],
-        variable_id="t1_cortical_volume",
-        atlas_key="cortical",
-        source_batch_id=import_run_id,
-        log=log,
-    )
-    import_t1_volumetry(
-        repo,
-        paths["t1_subcortical"],
-        variable_id="t1_subcortical_volume",
-        atlas_key="subcortical",
-        source_batch_id=import_run_id,
-        log=log,
-    )
-    import_cognitive_wide(repo, paths["cognitive"], source_batch_id=import_run_id, log=log)
-    rename_sys_dias_delta_to_pp(repo, log=log)
-    derive_pulse_pressure_map(repo, source_batch_id=import_run_id, log=log)
-    derive_apoe_group(repo, source_batch_id=import_run_id, log=log)
-    import_att_csv(repo, paths["att"], source_batch_id=import_run_id, log=log)
-    import_wmh_csv(repo, paths["wmh"], source_batch_id=import_run_id, log=log)
 
 
 def build_database(
@@ -386,7 +306,7 @@ def build_database(
     paths["att"] = db_base_path / "ATT_native_results.csv"
     if not paths["att"].is_file():
         paths["att"] = DEFAULT_PATHS["att"]
-    _run_new_vars_steps(repo, import_run_id=import_run_id, paths=paths, log=log)
+    run_import_new_vars(repo, paths=paths, source_batch_id=import_run_id, log=log)
 
     normalize_session_visit_labels(repo)
     enrich_sessions_available_scans(repo)
@@ -396,8 +316,7 @@ def build_database(
     subjects = rebuild_subjects_table(repo)
     log(f"Rebuilt subjects table: {len(subjects)} rows")
 
-    for entry in CURATED_VARIABLES:
-        repo.register_variables([entry])
+    register_all_variable_units(repo, log=log)
 
     if build_sqlite_index:
         repo.build_sqlite_index()

@@ -161,8 +161,8 @@ def build_thorax_mask(
     pancreas = _biggest_cc_or_empty(thorax_total_mr, get_class_id("pancreas", "total_mr"))
     kidney_l = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_left", "total_mr"))
     kidney_r = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_right", "total_mr"))
-    kidney_l = _kidney_remove_pelvis(kidney_l, dilate_iters=1)
-    kidney_r = _kidney_remove_pelvis(kidney_r, dilate_iters=1)
+    kidney_l = _kidney_remove_pelvis(kidney_l, dilate_iters=2)
+    kidney_r = _kidney_remove_pelvis(kidney_r, dilate_iters=2)
 
     out[liver.data > 0] = THORAX_LABELS["LIVER"]
     out[pancreas.data > 0] = THORAX_LABELS["PANCREAS"]

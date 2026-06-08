@@ -347,7 +347,6 @@ def derive_pulse_pressure_map(repo: DataRepo, *, source_batch_id: str, log: Any 
         values="value_num",
         aggfunc="first",
     ).reset_index()
-    print(pivot.columns)
     if "bpxdim" not in pivot.columns or "pp" not in pivot.columns:
         log("pulse_pressure_map: skip (missing pivoted columns)")
         return pd.DataFrame()
@@ -362,7 +361,7 @@ def derive_pulse_pressure_map(repo: DataRepo, *, source_batch_id: str, log: Any 
         source_column="pulse_pressure_map",
         value_column="pulse_pressure_map",
         value_kind="float",
-        unit=None,
+        unit="mmHg",
         source_batch_id=source_batch_id,
     )
     rows = build_clinical_measurement_rows(agg, spec)
@@ -382,6 +381,7 @@ def derive_pulse_pressure_map(repo: DataRepo, *, source_batch_id: str, log: Any 
             source_file="import_new_vars",
             source_sheet="derived",
             value_kind="float",
+            unit="mmHg",
         ),
         provenance={"importer": "import_new_vars", "step": "pulse_pressure_map"},
         build_sqlite_index=True,
@@ -653,6 +653,52 @@ STEPS = (
 )
 
 
+def run_import_new_vars(
+    repo: DataRepo,
+    *,
+    paths: dict[str, Path] | None = None,
+    source_batch_id: str = DEFAULT_BATCH,
+    steps: Iterable[str] | None = None,
+    log: Any = print,
+) -> None:
+    """Run T1/cognitive imports, clinical derivations (pp, MAP, APOE group), ATT, and WMH."""
+    resolved_paths = dict(DEFAULT_PATHS)
+    if paths:
+        resolved_paths.update(paths)
+    step_set = set(steps) if steps is not None else set(STEPS)
+
+    if "t1_cortical" in step_set:
+        import_t1_volumetry(
+            repo,
+            resolved_paths["t1_cortical"],
+            variable_id="t1_cortical_volume",
+            atlas_key="cortical",
+            source_batch_id=source_batch_id,
+            log=log,
+        )
+    if "t1_subcortical" in step_set:
+        import_t1_volumetry(
+            repo,
+            resolved_paths["t1_subcortical"],
+            variable_id="t1_subcortical_volume",
+            atlas_key="subcortical",
+            source_batch_id=source_batch_id,
+            log=log,
+        )
+    if "cognitive" in step_set:
+        import_cognitive_wide(repo, resolved_paths["cognitive"], source_batch_id=source_batch_id, log=log)
+    if "rename_pp" in step_set:
+        rename_sys_dias_delta_to_pp(repo, log=log)
+    if "pulse_map" in step_set:
+        derive_pulse_pressure_map(repo, source_batch_id=source_batch_id, log=log)
+    if "apoe_group" in step_set:
+        derive_apoe_group(repo, source_batch_id=source_batch_id, log=log)
+    if "att" in step_set:
+        import_att_csv(repo, resolved_paths["att"], source_batch_id=source_batch_id, log=log)
+    if "wmh" in step_set:
+        import_wmh_csv(repo, resolved_paths["wmh"], source_batch_id=source_batch_id, log=log)
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset-root", type=Path, required=True, help="Dataset root (catalog + tables/)")
@@ -677,37 +723,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(f"dry-run: would execute steps {sorted(steps)} on {args.dataset_root}")
         return
 
-    batch = args.source_batch_id
-    if "t1_cortical" in steps:
-        import_t1_volumetry(
-            repo,
-            args.t1_cortical,
-            variable_id="t1_cortical_volume",
-            atlas_key="cortical",
-            source_batch_id=batch,
-            log=log,
-        )
-    if "t1_subcortical" in steps:
-        import_t1_volumetry(
-            repo,
-            args.t1_subcortical,
-            variable_id="t1_subcortical_volume",
-            atlas_key="subcortical",
-            source_batch_id=batch,
-            log=log,
-        )
-    if "cognitive" in steps:
-        import_cognitive_wide(repo, args.cognitive, source_batch_id=batch, log=log)
-    if "rename_pp" in steps:
-        rename_sys_dias_delta_to_pp(repo, log=log)
-    if "pulse_map" in steps:
-        derive_pulse_pressure_map(repo, source_batch_id=batch, log=log)
-    if "apoe_group" in steps:
-        derive_apoe_group(repo, source_batch_id=batch, log=log)
-    if "att" in steps:
-        import_att_csv(repo, args.att, source_batch_id=batch, log=log)
-    if "wmh" in steps:
-        import_wmh_csv(repo, args.wmh, source_batch_id=batch, log=log)
+    paths = {
+        "t1_cortical": args.t1_cortical,
+        "t1_subcortical": args.t1_subcortical,
+        "cognitive": args.cognitive,
+        "att": args.att,
+        "wmh": args.wmh,
+    }
+    run_import_new_vars(repo, paths=paths, source_batch_id=args.source_batch_id, steps=steps, log=log)
 
     if args.build_sqlite_index:
         repo.build_sqlite_index()
