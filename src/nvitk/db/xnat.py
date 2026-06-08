@@ -322,9 +322,19 @@ def resolve_xnat_scan_from_scan_row(session: Any, row: Mapping[str, Any]) -> Any
     if not scan_id:
         raise ValueError("scan row has no scan_id")
     parts = str(session_uid).split(":", 2)
-    if len(parts) != 3:
-        raise ValueError(f"session_uid must be project:subject:experiment, got {session_uid!r}")
-    project_id, subject_key, experiment_label = parts
+    if len(parts) == 3:
+        project_id, subject_key, experiment_label = parts
+    elif len(parts) == 2:
+        project_id, experiment_label = parts
+        subject_key = str(row.get("subject_uid") or "").strip()
+        if not subject_key:
+            raise ValueError(
+                f"session_uid is project:experiment ({session_uid!r}); scan row must include subject_uid"
+            )
+    else:
+        raise ValueError(
+            f"session_uid must be project:subject:experiment or project:experiment, got {session_uid!r}"
+        )
     project = session.projects[project_id]
     subject = None
     if subject_key in project.subjects:
@@ -520,6 +530,20 @@ def _netrc_machine_candidates(server: str) -> list[str]:
     return out
 
 
+def _normalize_netrc_machine(machine: str) -> str:
+    """Canonical host for comparing netrc ``machine`` names (handles trailing slashes)."""
+    text = str(machine).strip().rstrip("/")
+    if "://" in text:
+        parsed = urlparse(text)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            netloc = netloc.rsplit("@", 1)[-1]
+        if netloc.count(":") == 1:
+            netloc = netloc.split(":", 1)[0]
+        return netloc.rstrip("/").lower()
+    return text.lower()
+
+
 def _credentials_from_netrc(
     server: str,
     netrc_path: str | Path,
@@ -530,7 +554,7 @@ def _credentials_from_netrc(
 
     If *preferred_user* is set, only an entry whose login matches is returned
     (so explicit ``config.user`` can be paired with the password from netrc).
-    """
+  """
     path = Path(netrc_path).expanduser()
     if not path.is_file():
         return None, None
@@ -540,55 +564,89 @@ def _credentials_from_netrc(
         return None, None
 
     machines = _netrc_machine_candidates(server)
+    target_hosts = {_normalize_netrc_machine(m) for m in machines}
 
-    if preferred_user:
-        for machine in machines:
-            try:
-                login, _account, password = n.authenticators(machine)
-            except (KeyError, TypeError):
-                continue
-            if login == preferred_user and password:
-                return login, password
-        return None, None
-
-    for machine in machines:
+    def _try_machine(machine: str) -> tuple[str | None, str | None]:
         try:
             login, _account, password = n.authenticators(machine)
         except (KeyError, TypeError):
+            return None, None
+        if not login or not password:
+            return None, None
+        if preferred_user and login != preferred_user:
+            return None, None
+        return login, password
+
+    for machine in machines:
+        login, password = _try_machine(machine)
+        if login and password:
+            return login, password
+
+    for netrc_machine in n.hosts:
+        if _normalize_netrc_machine(netrc_machine) not in target_hosts:
             continue
+        login, password = _try_machine(netrc_machine)
         if login and password:
             return login, password
     return None, None
+
+
+def _xnat_auth_help_message(config: XnatConnectionConfig, *, netrc_path: Path | None = None) -> str:
+    netrc_hint = str(netrc_path) if netrc_path is not None else (config.netrc_file or "~/.netrc")
+    return (
+        f"XNAT credentials missing for {config.server!r} (project {config.project!r}).\n"
+        "Provide authentication using one of:\n"
+        f"  - netrc: add a machine entry in {netrc_hint} for the XNAT host\n"
+        "  - environment: XNAT_USER and XNAT_PASSWORD\n"
+        "  - config file: ~/.config/nvitk/xnat.yaml (or NVITK_XNAT_CONFIG)\n"
+        "  - CLI: --xnat-user and --xnat-password on build_db.py / nvitk xnat sync\n"
+        "  - keyring: password_keyring: true in xnat.yaml (see xnat_config.py)"
+    )
+
+
+def _resolve_xnat_login(config: XnatConnectionConfig) -> tuple[str | None, str | None, Path | None]:
+    user = config.user
+    password = config.password
+    netrc_path: Path | None = None
+    if config.netrc_file:
+        netrc_path = Path(config.netrc_file).expanduser()
+        nu, np = _credentials_from_netrc(config.server, netrc_path, preferred_user=user)
+        if nu is not None:
+            user = nu
+        if np is not None:
+            password = np
+    elif user and not password:
+        default_netrc = Path.home() / ".netrc"
+        if default_netrc.is_file():
+            netrc_path = default_netrc
+            nu, np = _credentials_from_netrc(config.server, netrc_path, preferred_user=user)
+            if nu is not None:
+                user = nu
+            if np is not None:
+                password = np
+    return user, password, netrc_path
 
 
 def connect_xnat(config: XnatConnectionConfig):
     if xnat is None:
         raise BackendUnavailableError('xnat is not installed. Please install it with "pip install xnat".')
 
-    user = config.user
-    password = config.password
-    if config.netrc_file:
-        nu, np = _credentials_from_netrc(
-            config.server,
-            config.netrc_file,
-            preferred_user=user,
-        )
-        if nu is not None:
-            user = nu
-        if np is not None:
-            password = np
+    user, password, netrc_path = _resolve_xnat_login(config)
+
+    if not user or not password:
+        try:
+            from xnat.exceptions import XNATAuthError
+        except ImportError:
+            XNATAuthError = RuntimeError  # type: ignore[misc, assignment]
+        raise XNATAuthError(_xnat_auth_help_message(config, netrc_path=netrc_path))
 
     kwargs: dict[str, Any] = {
         "server": config.server,
         "verify": config.verify,
         "default_timeout": config.default_timeout,
+        "user": user,
+        "password": password,
     }
-    if user:
-        kwargs["user"] = user
-    if password:
-        kwargs["password"] = password
-    if config.netrc_file and not (user and password):
-        kwargs["netrc_file"] = config.netrc_file
     return xnat.connect(**kwargs)
 
 
@@ -904,6 +962,7 @@ def sync_xnat_project(
     skip_existing: bool = True,
     build_sqlite_index: bool = False,
     cohort_id: str | None = None,
+    source_batch_id: str | None = None,
 ) -> dict[str, pd.DataFrame]:
     if download_niftis:
         base = nifti_download_root if nifti_download_root is not None else download_root
@@ -914,6 +973,7 @@ def sync_xnat_project(
         classify_scan_for_project,
         default_sequences_for_project,
         session_modality_from_classifications,
+        visit_label_for_project,
     )
 
     subject_labels = resolve_subject_labels(
@@ -930,7 +990,7 @@ def sync_xnat_project(
             )
         except KeyError:
             pass
-    source_batch_id = f"xnat_{utc_now_iso().replace(':', '').replace('-', '')}"
+    source_batch_id = source_batch_id or f"xnat_{utc_now_iso().replace(':', '').replace('-', '')}"
 
     subject_rows: list[dict[str, Any]] = []
     session_rows: list[dict[str, Any]] = []
@@ -965,7 +1025,9 @@ def sync_xnat_project(
                     "subject_uid": subject_uid,
                     "id_namespace": "xnat_subject",
                     "id_value": subject_label,
-                    "id_source": config.project,
+                    "id_source": "xnat",
+                    "source_file": pd.NA,
+                    "source_sheet": pd.NA,
                     "is_primary": True,
                     "source_batch_id": source_batch_id,
                     "updated_at": utc_now_iso(),
@@ -975,7 +1037,7 @@ def sync_xnat_project(
             experiments = list(getattr(subject, "experiments", {}).values())
             for experiment in experiments:
                 experiment_label = str(_coalesce_attr(experiment, "label", "id") or "")
-                session_uid = f"{config.project}:{subject_uid}:{experiment_label}"
+                session_uid = f"{config.project}:{experiment_label}"
 
                 scans = list(getattr(experiment, "scans", {}).values())
                 classified_scans: list[tuple[Any, str, str, str, dict[str, Any]]] = []
@@ -1016,7 +1078,7 @@ def sync_xnat_project(
                         "modality": session_modality_from_classifications(
                             [item[4] for item in classified_scans]
                         ),
-                        "visit_label": pd.NA,
+                        "visit_label": visit_label_for_project(config.project),
                         "acquired_at": pd.to_datetime(_coalesce_attr(experiment, "date"), errors="coerce"),
                         "source_batch_id": source_batch_id,
                         "updated_at": utc_now_iso(),

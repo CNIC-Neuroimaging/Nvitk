@@ -42,6 +42,70 @@ def write_json(path: str | Path, payload: dict[str, Any]) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Measurement table column allowlists (long-form storage only)
+# ──────────────────────────────────────────────────────────────────────────────
+
+CLINICAL_MEASUREMENT_COLUMNS: tuple[str, ...] = (
+    "subject_uid",
+    "visit_id",
+    "variable_id",
+    "value_num",
+    "value_text",
+    "unit",
+    "value_kind",
+    "source_table",
+    "source_file",
+    "source_sheet",
+    "source_column",
+    "source_batch_id",
+    "measured_at",
+)
+
+COGNITIVE_MEASUREMENT_COLUMNS: tuple[str, ...] = CLINICAL_MEASUREMENT_COLUMNS
+
+IMAGE_MEASUREMENT_COLUMNS: tuple[str, ...] = (
+    "subject_uid",
+    "session_id",
+    "modality",
+    "region_id",
+    "region_label",
+    "frame_index",
+    "variable_id",
+    "value_num",
+    "value_text",
+    "unit",
+    "value_kind",
+    "pipeline_id",
+    "pipeline_name",
+    "qc_status",
+    "source_asset",
+    "source_table",
+    "source_file",
+    "source_sheet",
+    "source_column",
+    "source_batch_id",
+    "measured_at",
+)
+
+MEASUREMENT_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "clinical_measurements": CLINICAL_MEASUREMENT_COLUMNS,
+    "cognitive_measurements": COGNITIVE_MEASUREMENT_COLUMNS,
+    "image_measurements": IMAGE_MEASUREMENT_COLUMNS,
+}
+
+
+def restrict_to_manifest_columns(
+    df: pd.DataFrame,
+    allowed_columns: tuple[str, ...] | list[str],
+) -> pd.DataFrame:
+    """Keep only *allowed_columns* present in *df*; drop wide-format ghost columns."""
+    if df.empty:
+        return df.copy()
+    keep = [column for column in allowed_columns if column in df.columns]
+    return df.loc[:, keep].copy()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Manifest dtypes & DataFrames
 # ──────────────────────────────────────────────────────────────────────────────
 

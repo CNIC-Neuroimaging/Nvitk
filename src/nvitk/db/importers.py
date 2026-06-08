@@ -115,7 +115,7 @@ ID_NAMESPACE_EXACT = {
     "subject_id",
     "subject_uid",
     "id",
-    'pesa_id'
+    "pesa_id",
     "session",
     "session_id",
     "session_uid",
@@ -132,9 +132,19 @@ ID_NAMESPACE_EXACT = {
     "codigoimagen_x",
     "codi_sub",
     "pesa",
+    "sex",
+    "birth_date",
+    "fechanacimiento",
 }
 LOCAL_PROJECT_ID = "local_db"
-DEFAULT_VISIT_LABEL = '4'
+VISIT_PLAQUE = "3"
+VISIT_PESA_BRAIN = "4"
+VISIT_IA_PET_V5 = "5"
+DEFAULT_VISIT_LABEL = VISIT_PESA_BRAIN
+PLAQUE_SOURCE_FILENAME = "PESABrain_Echography_CarotidePlaque_20260216.xlsx"
+ID_SOURCE_PESABRAIN_EXCEL = "pesabrain_excel"
+ID_SOURCE_XNAT = "xnat"
+ID_SOURCE_DERIVED = "derived"
 
 CLINICAL_METADATA_COLUMNS = {
     "age_at_mri",
@@ -206,7 +216,16 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
         SourceSpec("PESABrain_TAC_20260318.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
     ],
     "PESABrain_Echography_CarotidePlaque_20260216.xlsx": [
-        SourceSpec("PESABrain_Echography_CarotidePlaque_20260216.xlsx", "Sheet1", "clinical_wide", "clinical", "wide", cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="All"),
+        SourceSpec(
+            "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+            "Sheet1",
+            "clinical_wide",
+            "clinical",
+            "wide",
+            cohort_id="PESA-Brain",
+            default_visit_label=VISIT_PLAQUE,
+            batch_id="All",
+        ),
     ],
     "PESABrain_4DFlow_LocalizedPI_20260216.xlsx": [
         SourceSpec("PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_AnalysisDB_Batch1", "image_wide", "image", "wide", modality="4dflow", default_pipeline_id='4dflow_v1', cohort_id="PESA-Brain", default_visit_label=DEFAULT_VISIT_LABEL, batch_id="4DFlow-Processed"),
@@ -313,6 +332,35 @@ def _is_identifier_column(column: str) -> bool:
     if normalized.startswith("codigo") or normalized.startswith("codigoprueba"):
         return True
     return False
+
+
+def _measurement_skip_columns(raw: pd.DataFrame, *, domain: str) -> set[Any]:
+    """Columns to exclude when melting wide measurement sheets into long form."""
+    skip: set[Any] = {
+        "subject_uid",
+        _first_matching_column(raw, SUBJECT_UID_CANDIDATES),
+        _first_matching_column(raw, SESSION_CANDIDATES),
+        _first_matching_column(raw, VISIT_CANDIDATES),
+        _first_matching_column(raw, DATE_CANDIDATES),
+    }
+    if domain == "image":
+        skip |= CLINICAL_METADATA_COLUMNS
+    for column in raw.columns:
+        col_str = str(column)
+        if col_str.startswith("Unnamed:"):
+            skip.add(column)
+        if _is_identifier_column(col_str):
+            skip.add(column)
+    return skip
+
+
+def _membership_source_for_spec(spec: SourceSpec) -> str:
+    batch = spec.batch_id or "All"
+    return f"pesabrain:{batch}"
+
+
+def _local_session_uid(subject_uid: str, session_label: str) -> str:
+    return f"local:{subject_uid}:{session_label}"
 
 
 def _region_id(value: str | None) -> str | None:
@@ -507,7 +555,9 @@ def harvest_subject_ids_from_frame(
                     "subject_uid": subject_uid,
                     "id_namespace": normalized,
                     "id_value": value,
-                    "id_source": id_source or _source_table_name(source_path, sheet_name),
+                    "id_source": id_source or ID_SOURCE_PESABRAIN_EXCEL,
+                    "source_file": source_path.name,
+                    "source_sheet": sheet_name,
                     "is_primary": normalized in {"patient_id", "seqn", "subject", "subject_id", "codigoimagen"},
                     "source_batch_id": source_batch_id,
                     "updated_at": now,
@@ -658,12 +708,22 @@ def harvest_sessions_from_frame(
     scanner_column = _first_matching_column(raw, ["scanner"])
     scans_column = _first_matching_column(raw, ["scans"])
 
+    session_labels = raw[session_column].astype("string")
+    subject_uids = raw["subject_uid"].astype("string")
+    session_uids = pd.Series(
+        [
+            _local_session_uid(str(subj), str(label))
+            for subj, label in zip(subject_uids, session_labels, strict=False)
+        ],
+        dtype="string",
+    )
+
     frame = pd.DataFrame(
         {
-            "session_uid": raw[session_column].astype("string"),
-            "subject_uid": raw["subject_uid"].astype("string"),
+            "session_uid": session_uids,
+            "subject_uid": subject_uids,
             "project_id": LOCAL_PROJECT_ID,
-            "experiment_label": raw[session_column].astype("string"),
+            "experiment_label": session_labels,
             "modality": modality or "mr",
             "visit_label": raw[visit_column].astype("string") if visit_column else pd.Series([default_visit_label if default_visit_label else pd.NA] * len(raw), dtype="string"),
             "scanner": raw[scanner_column].astype("string") if scanner_column else pd.Series([pd.NA] * len(raw), dtype="string"),
@@ -720,10 +780,11 @@ def _clinical_frame(
         source_file=source_path.name,
         source_sheet=sheet_name,
     )
+    default_visit = default_visit_label if default_visit_label is not None else DEFAULT_VISIT_LABEL
     frame = pd.DataFrame(
         {
             "subject_uid": raw["subject_uid"].astype("string").where(raw["subject_uid"].notna(), pd.NA),
-            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([DEFAULT_VISIT_LABEL] * len(raw), dtype="string"),
+            "visit_id": raw[visit_column].astype("string") if visit_column else pd.Series([default_visit] * len(raw), dtype="string"),
             "variable_id": variable_id or normalize_variable_id(column),
             "value_num": value_num,
             "value_text": value_text,
@@ -737,8 +798,8 @@ def _clinical_frame(
             "measured_at": _parse_datetime_series(raw[date_column]) if date_column else pd.Series([pd.NaT] * len(raw), dtype="datetime64[ns]"),
         }
     )
-    if frame['visit_id'].isna().any():
-        frame['visit_id'] = pd.Series([DEFAULT_VISIT_LABEL] * len(frame), dtype="string")
+    if frame["visit_id"].isna().any():
+        frame["visit_id"] = pd.Series([default_visit] * len(frame), dtype="string")
     frame = frame[(frame["value_num"].notna()) | (frame["value_text"].notna())]
     return frame, variable
 
@@ -814,26 +875,28 @@ def _parse_generic_clinical_wide(
     sheet_name: str,
     source_batch_id: str,
     default_visit_label: str | None = None,
+    harvest_sessions: bool = False,
 ) -> pd.DataFrame:
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
-    harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id, modality=None, default_visit_label=default_visit_label)
+    if harvest_sessions:
+        harvest_sessions_from_frame(
+            repo,
+            raw,
+            source_path=source_path,
+            sheet_name=sheet_name,
+            source_batch_id=source_batch_id,
+            modality=None,
+            default_visit_label=default_visit_label,
+        )
 
     visit_column = _first_matching_column(raw, VISIT_CANDIDATES)
     date_column = _first_matching_column(raw, DATE_CANDIDATES)
-    skip_columns = {
-        "subject_uid",
-        _first_matching_column(raw, SUBJECT_UID_CANDIDATES),
-        _first_matching_column(raw, SESSION_CANDIDATES),
-        visit_column,
-        date_column,
-    }
+    skip_columns = _measurement_skip_columns(raw, domain="clinical")
     measurements: list[pd.DataFrame] = []
     variables: list[dict[str, Any]] = []
     for column in raw.columns:
         if column in skip_columns:
-            continue
-        if str(column).startswith("Unnamed:"):
             continue
         frame, variable = _clinical_frame(
             raw,
@@ -884,26 +947,27 @@ def _parse_generic_image_wide(
     source_batch_id: str,
     modality: str,
     pipeline_id: str | None = None,
+    harvest_sessions: bool = False,
 ) -> pd.DataFrame:
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
-    harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id, modality=modality)
+    if harvest_sessions:
+        harvest_sessions_from_frame(
+            repo,
+            raw,
+            source_path=source_path,
+            sheet_name=sheet_name,
+            source_batch_id=source_batch_id,
+            modality=modality,
+        )
 
     session_column = _first_matching_column(raw, SESSION_CANDIDATES)
     date_column = _first_matching_column(raw, DATE_CANDIDATES)
-    skip_columns = {
-        "subject_uid",
-        _first_matching_column(raw, SUBJECT_UID_CANDIDATES),
-        session_column,
-        _first_matching_column(raw, VISIT_CANDIDATES),
-        date_column,
-    }
+    skip_columns = _measurement_skip_columns(raw, domain="image")
     measurements: list[pd.DataFrame] = []
     variables: list[dict[str, Any]] = []
     for column in raw.columns:
         if column in skip_columns:
-            continue
-        if str(column).startswith("Unnamed:"):
             continue
         variable_id, region_id, region_label = _parse_image_wide_column(source_path.name, column)
         pid = pipeline_id or _resolve_import_pipeline_id(repo, modality)
@@ -1270,6 +1334,124 @@ def _parse_dropdown_dictionary(
     return pd.DataFrame(entries)
 
 
+def normalize_session_visit_labels(repo: DataRepo) -> pd.DataFrame:
+    """Set ``sessions.visit_label`` from ``project_id`` (PESA_Brain/local → 4, IA_PET_V5 → 5)."""
+    from .xnat_projects import visit_label_for_project
+
+    if not repo.catalog.table_exists("sessions"):
+        return pd.DataFrame()
+    sessions = repo.get("sessions", cohort_id=False)
+    if sessions.empty or "project_id" not in sessions.columns:
+        return sessions
+    out = sessions.copy()
+    out["visit_label"] = out["project_id"].astype("string").map(visit_label_for_project).astype("string")
+    repo.write_table("sessions", out, provenance={"importer": "normalize_session_visit_labels"})
+    return out
+
+
+def enrich_sessions_available_scans(repo: DataRepo) -> pd.DataFrame:
+    """Populate ``sessions.available_scans`` from the ``scans`` table (comma-separated asset slots)."""
+    if not repo.catalog.table_exists("sessions"):
+        return pd.DataFrame()
+    sessions = repo.get("sessions", cohort_id=False)
+    if sessions.empty:
+        return sessions
+    if not repo.catalog.table_exists("scans"):
+        return sessions
+    scans = repo.get("scans", cohort_id=False)
+    if scans.empty or "session_uid" not in scans.columns:
+        return sessions
+
+    def _scan_token(row: pd.Series) -> str | None:
+        for column in ("asset_slot", "scan_label", "series_description", "scan_id"):
+            if column not in row.index:
+                continue
+            value = row.get(column)
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    tokens: dict[str, list[str]] = {}
+    for _, row in scans.iterrows():
+        session_uid = row.get("session_uid")
+        if session_uid is None or (isinstance(session_uid, float) and pd.isna(session_uid)):
+            continue
+        token = _scan_token(row)
+        if token is None:
+            continue
+        key = str(session_uid)
+        bucket = tokens.setdefault(key, [])
+        if token not in bucket:
+            bucket.append(token)
+
+    out = sessions.copy()
+    out["available_scans"] = out["session_uid"].astype("string").map(
+        lambda uid: ", ".join(sorted(tokens.get(str(uid), [])))
+        if uid is not None and str(uid) in tokens
+        else pd.NA
+    )
+    out["available_scans"] = out["available_scans"].astype("string")
+    repo.write_table("sessions", out, provenance={"importer": "enrich_sessions_available_scans"})
+    return out
+
+
+def normalize_measurement_visit_ids(repo: DataRepo) -> None:
+    """Align ``visit_id`` on clinical/cognitive measurements with project/source rules."""
+    if repo.catalog.table_exists("clinical_measurements"):
+        clinical = repo.get("clinical_measurements", cohort_id=False)
+        if not clinical.empty and "visit_id" in clinical.columns:
+            clinical = clinical.copy()
+            if "source_file" in clinical.columns:
+                plaque = clinical["source_file"].astype("string") == PLAQUE_SOURCE_FILENAME
+                clinical.loc[plaque, "visit_id"] = VISIT_PLAQUE
+                clinical.loc[~plaque, "visit_id"] = VISIT_PESA_BRAIN
+            else:
+                clinical["visit_id"] = VISIT_PESA_BRAIN
+            repo.write_table(
+                "clinical_measurements",
+                clinical,
+                provenance={"importer": "normalize_measurement_visit_ids"},
+            )
+    if repo.catalog.table_exists("cognitive_measurements"):
+        cognitive = repo.get("cognitive_measurements", cohort_id=False)
+        if not cognitive.empty and "visit_id" in cognitive.columns:
+            cognitive = cognitive.copy()
+            cognitive["visit_id"] = VISIT_PESA_BRAIN
+            repo.write_table(
+                "cognitive_measurements",
+                cognitive,
+                provenance={"importer": "normalize_measurement_visit_ids"},
+            )
+
+
+def prune_redundant_local_sessions(repo: DataRepo) -> pd.DataFrame:
+    """Drop ``local_db`` sessions for subjects that already have a non-local session (e.g. XNAT)."""
+    if not repo.catalog.table_exists("sessions"):
+        return pd.DataFrame()
+    sessions = repo.get("sessions", cohort_id=False)
+    if sessions.empty or "project_id" not in sessions.columns:
+        return sessions
+
+    has_canonical = (
+        sessions[sessions["project_id"].astype("string") != LOCAL_PROJECT_ID]["subject_uid"]
+        .dropna()
+        .astype("string")
+        .unique()
+    )
+    if len(has_canonical) == 0:
+        return sessions
+
+    canonical_set = set(has_canonical)
+    is_local = sessions["project_id"].astype("string") == LOCAL_PROJECT_ID
+    is_redundant = sessions["subject_uid"].astype("string").isin(canonical_set)
+    pruned = sessions.loc[~(is_local & is_redundant)].copy()
+    repo.write_table("sessions", pruned, provenance={"importer": "prune_redundant_local_sessions"})
+    return pruned
+
+
 def rebuild_subjects_table(repo: DataRepo) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for table_name in ("subject_ids", "clinical_measurements", "image_measurements", "sessions"):
@@ -1299,15 +1481,26 @@ def rebuild_subjects_table(repo: DataRepo) -> pd.DataFrame:
             return None
 
         clinical_subset = clinical[clinical["subject_uid"] == subject_uid] if not clinical.empty else pd.DataFrame()
-        sex_value = None
+
+        sex_value = pick_id("sex")
         birth_date = pd.NaT
-        if not clinical_subset.empty:
+        birth_raw = pick_id("birth_date", "fechanacimiento")
+        if birth_raw is not None:
+            birth_date = pd.to_datetime(birth_raw, errors="coerce")
+
+        if sex_value is None and not clinical_subset.empty:
             sex_rows = clinical_subset[clinical_subset["variable_id"] == "sex"]
             if not sex_rows.empty:
-                sex_value = normalize_string(sex_rows.iloc[0].get("value_text")) or normalize_string(sex_rows.iloc[0].get("value_num"))
+                sex_value = normalize_string(sex_rows.iloc[0].get("value_text")) or normalize_string(
+                    sex_rows.iloc[0].get("value_num")
+                )
+        if pd.isna(birth_date) and not clinical_subset.empty:
             birth_rows = clinical_subset[clinical_subset["variable_id"].isin(["birth_date", "fechanacimiento"])]
             if not birth_rows.empty:
-                birth_date = pd.to_datetime(birth_rows.iloc[0].get("measured_at"), errors="coerce")
+                row0 = birth_rows.iloc[0]
+                birth_date = pd.to_datetime(row0.get("value_text"), errors="coerce")
+                if pd.isna(birth_date):
+                    birth_date = pd.to_datetime(row0.get("measured_at"), errors="coerce")
 
         rows.append(
             {
@@ -1345,7 +1538,7 @@ def import_source_spec(
             repo,
             source_path,
             source_batch_id=source_batch_id,
-            id_source=_source_table_name(source_path, spec.sheet),
+            id_source=ID_SOURCE_PESABRAIN_EXCEL,
             sheet_name=spec.sheet,
         )
     if spec.source_kind == "cohort":
@@ -1359,9 +1552,24 @@ def import_source_spec(
     if spec.source_kind == "subject_catalog":
         raw = ensure_subject_uid(raw, candidates=["subject", "patient_id", "codigoimagen"])
         harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
-        return harvest_sessions_from_frame(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality="mr")
+        return harvest_sessions_from_frame(
+            repo,
+            raw,
+            source_path=source_path,
+            sheet_name=spec.sheet,
+            source_batch_id=source_batch_id,
+            modality="mr",
+            default_visit_label=spec.default_visit_label or DEFAULT_VISIT_LABEL,
+        )
     if spec.source_kind == "clinical_wide":
-        return _parse_generic_clinical_wide(repo, raw, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id)
+        return _parse_generic_clinical_wide(
+            repo,
+            raw,
+            source_path=source_path,
+            sheet_name=spec.sheet,
+            source_batch_id=source_batch_id,
+            default_visit_label=spec.default_visit_label,
+        )
     if spec.source_kind == "image_wide":
         return _parse_generic_image_wide(repo, raw, pipeline_id=resolved_pipeline_id, source_path=source_path, sheet_name=spec.sheet, source_batch_id=source_batch_id, modality=spec.modality or "image")
     if spec.source_kind == "image_timeseries_long":
@@ -1431,7 +1639,7 @@ def import_pesabrain_db_directory(
             cohort_resolved,
             cohort_uids,
             source_batch_id=batch_id,
-            membership_source="import_pesabrain_db_directory",
+            membership_source=f"pesabrain:{cohort_resolved}",
         )
 
     if build_sqlite_index:
@@ -1482,7 +1690,7 @@ def import_pesabrain_source(
             cohort_resolved,
             uids,
             source_batch_id=batch_id,
-            membership_source=f"import_pesabrain_source:{filename}",
+            membership_source=_membership_source_for_spec(spec),
         )
     subjects = rebuild_subjects_table(repo) if rebuild_subjects else pd.DataFrame()
     if build_sqlite_index:

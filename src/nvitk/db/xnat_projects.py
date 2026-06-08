@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 ClassifierName = Literal["pesabrain", "ia_pet_v5"]
 
 _REGION_BY_SCAN_LAST_DIGIT: dict[str, str] = {"1": "HEAD", "2": "THORAX", "3": "LEGS"}
+
+VISIT_PLAQUE = "3"
+VISIT_PESA_BRAIN = "4"
+VISIT_IA_PET_V5 = "5"
+
+VISIT_LABEL_BY_PROJECT: dict[str, str] = {
+    "PESA_Brain": VISIT_PESA_BRAIN,
+    "IA_PET_V5": VISIT_IA_PET_V5,
+    "local_db": VISIT_PESA_BRAIN,
+}
+
+
+def visit_label_for_project(project_id: str) -> str:
+    """Default visit label for imaging sessions tied to an XNAT (or local) project."""
+    return VISIT_LABEL_BY_PROJECT.get(str(project_id).strip(), VISIT_PESA_BRAIN)
 
 
 @dataclass(frozen=True)
@@ -31,6 +46,10 @@ PESA_BRAIN_SEQUENCES: tuple[str, ...] = (
     "3D_T1",
     "3D_T2_HR",
     "3D_FLAIR",
+    "SWI_QSM",
+    "QSM",
+    "CAROTID_QF",
+    "RESTING_STATE_MB",
 )
 
 IA_PET_V5_SEQUENCES: tuple[str, ...] = (
@@ -73,6 +92,22 @@ def get_xnat_project(project_id: str) -> XnatProjectSpec:
 
 def default_sequences_for_project(project_id: str) -> tuple[str, ...]:
     return get_xnat_project(project_id).default_sequences
+
+
+def sequences_csv(sequences: Iterable[str]) -> str:
+    """Comma-separated sequence keys for :func:`~nvitk.db.xnat.sync_xnat_project` filters."""
+    return ",".join(sequences)
+
+
+def build_default_xnat_sequences_csv() -> str:
+    """Union of PESA_Brain and IA_PET_V5 default sequence keys (deduplicated, stable order)."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for seq in (*PESA_BRAIN_SEQUENCES, *IA_PET_V5_SEQUENCES):
+        if seq not in seen:
+            seen.add(seq)
+            merged.append(seq)
+    return sequences_csv(merged)
 
 
 def _dixon_region_from_scan_id(scan_id: str | None) -> str | None:

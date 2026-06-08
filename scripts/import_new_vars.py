@@ -69,7 +69,7 @@ def _noop_print(*_a: Any, **_k: Any) -> None:
 def ensure_cognitive_table(repo: DataRepo) -> None:
     if repo.catalog.table_exists("cognitive_measurements"):
         return
-    repo.catalog.ensure_table_definition("cognitive_measurements", clone_from="clinical_measurements")
+    repo.catalog.ensure_cognitive_measurements_table()
 
 
 def ensure_measurement_pipeline(

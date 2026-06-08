@@ -17,6 +17,7 @@ from nvitk.core.exceptions import ValidationError
 
 from .exceptions import ManifestError, TableNotFoundError
 from .storage import (
+    COGNITIVE_MEASUREMENT_COLUMNS,
     coerce_bool,
     empty_dataframe,
     infer_manifest_dtypes,
@@ -82,23 +83,31 @@ class DatasetCatalog:
     @classmethod
     def create_scaffold(cls, root: str | Path) -> Path:
         destination = Path(root).expanduser().resolve()
-        template_root = Path(__file__).resolve().parents[3] / "dataset"
+        package_root = Path(__file__).resolve().parents[3]
+        template_root = package_root / "dataset" / "catalog"
+        if not template_root.exists():
+            template_root = package_root / "dataset" / "nvitk-dataset" / "catalog"
         destination.mkdir(parents=True, exist_ok=True)
 
-        for relative in [
-            Path("README.md"),
-            Path("catalog") / "repository.json",
-            Path("catalog") / "tables.json",
-            Path("catalog") / "variables.json",
-            Path("catalog") / "measurement_pipelines.json",
-            Path("catalog") / "schema" / "repository.schema.json",
-            Path("catalog") / "schema" / "tables.schema.json",
-            Path("catalog") / "schema" / "variables.schema.json",
-        ]:
-            source = template_root / relative
-            target = destination / relative
+        catalog_files = (
+            "repository.json",
+            "tables.json",
+            "variables.json",
+            "measurement_pipelines.json",
+        )
+        for name in catalog_files:
+            source = template_root / name
+            target = destination / "catalog" / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            if source.exists():
+                shutil.copy2(source, target)
+
+        schema_src = template_root / "schema"
+        schema_dst = destination / "catalog" / "schema"
+        if schema_src.is_dir():
+            schema_dst.mkdir(parents=True, exist_ok=True)
+            for schema_file in schema_src.glob("*.json"):
+                shutil.copy2(schema_file, schema_dst / schema_file.name)
 
         (destination / "tables").mkdir(parents=True, exist_ok=True)
         (destination / "cache").mkdir(parents=True, exist_ok=True)
@@ -207,6 +216,67 @@ class DatasetCatalog:
 
         tables = self.tables_manifest.setdefault("tables", {})
         tables[name] = new_payload
+        self.tables_manifest["last_updated"] = utc_now_iso()
+        write_json(self.tables_manifest_path, self.tables_manifest)
+        self.refresh()
+        return dest
+
+    def ensure_cognitive_measurements_table(self) -> Path:
+        """Register ``cognitive_measurements`` with the canonical long-form schema."""
+        if self.table_exists("cognitive_measurements"):
+            return self.get_table("cognitive_measurements").path
+
+        columns = {
+            "subject_uid": "string",
+            "visit_id": "string",
+            "variable_id": "string",
+            "value_num": "float64",
+            "value_text": "string",
+            "unit": "string",
+            "value_kind": "string",
+            "source_table": "string",
+            "source_file": "string",
+            "source_sheet": "string",
+            "source_column": "string",
+            "source_batch_id": "string",
+            "measured_at": "datetime64[ns]",
+        }
+        if tuple(columns) != COGNITIVE_MEASUREMENT_COLUMNS:
+            columns = {name: columns.get(name, "string") for name in COGNITIVE_MEASUREMENT_COLUMNS}
+
+        table_root = self.repository_manifest.get("table_root", "tables").strip().rstrip("/")
+        rel_path = f"{table_root}/cognitive_measurements.parquet"
+        new_payload: dict[str, Any] = {
+            "path": rel_path,
+            "kind": "measurements",
+            "description": "Long-form cognitive test variables linked to subjects and optional visits.",
+            "key_columns": [
+                "subject_uid",
+                "visit_id",
+                "variable_id",
+                "source_file",
+                "source_sheet",
+                "source_column",
+            ],
+            "index_columns": [
+                "subject_uid",
+                "visit_id",
+                "variable_id",
+                "source_file",
+                "source_sheet",
+                "source_column",
+            ],
+            "wide_index_columns": ["subject_uid", "visit_id"],
+            "wide_key_columns": ["variable_id"],
+            "value_columns": ["value_num", "value_text"],
+            "columns": columns,
+            "row_count": 0,
+            "last_updated": utc_now_iso(),
+        }
+        dest = self.root / rel_path
+        write_parquet_table(dest, empty_dataframe(columns))
+        tables = self.tables_manifest.setdefault("tables", {})
+        tables["cognitive_measurements"] = new_payload
         self.tables_manifest["last_updated"] = utc_now_iso()
         write_json(self.tables_manifest_path, self.tables_manifest)
         self.refresh()

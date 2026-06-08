@@ -26,7 +26,17 @@ from .exceptions import FilterError, SettingsError
 from .filters import apply_filters, ensure_list, merge_filters
 from .xnat_config import XnatConnectionConfig, load_xnat_profile, resolve_xnat_connection
 from .sqlite_index import SQLiteIndex
-from .storage import coerce_bool, coerce_dataframe_to_manifest, empty_dataframe, normalize_variable_id, read_parquet_table, utc_now_iso, write_parquet_table
+from .storage import (
+    MEASUREMENT_TABLE_COLUMNS,
+    coerce_bool,
+    coerce_dataframe_to_manifest,
+    empty_dataframe,
+    normalize_variable_id,
+    read_parquet_table,
+    restrict_to_manifest_columns,
+    utc_now_iso,
+    write_parquet_table,
+)
 
 log = Logger()
 
@@ -1262,6 +1272,12 @@ class DataRepo:
             result = self._filter_dataframe_by_cohort(result, str(cohort_eff))
         return result
 
+    def _enforce_measurement_columns(self, table: str, df: pd.DataFrame) -> pd.DataFrame:
+        allowed = MEASUREMENT_TABLE_COLUMNS.get(table)
+        if allowed is None:
+            return df
+        return restrict_to_manifest_columns(df, allowed)
+
     def write_table(
         self,
         table: str,
@@ -1276,6 +1292,7 @@ class DataRepo:
         Set ``build_sqlite_index=True`` to rebuild the SQLite index for *table* after the write.
         """
         definition = self.catalog.get_table(table)
+        df = self._enforce_measurement_columns(table, df)
         write_parquet_table(definition.path, df)
         merged_provenance = {"written_at": utc_now_iso()}
         if provenance:
@@ -1300,8 +1317,10 @@ class DataRepo:
         Returns the combined frame after :meth:`write_table`.
         """
         definition = self.catalog.get_table(table)
+        df = self._enforce_measurement_columns(table, df)
         existing = self.get(table, cohort_id=False)
         combined = pd.concat([existing, df], ignore_index=True)
+        combined = self._enforce_measurement_columns(table, combined)
         keys = key_columns or list(definition.key_columns)
         if keys:
             present_keys = [column for column in keys if column in combined.columns]

@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -174,8 +175,13 @@ def resolve_xnat_connection(
         netrc = str(p["netrc_file"])
     if netrc is None and os.getenv("XNAT_NETRC"):
         netrc = os.getenv("XNAT_NETRC")
+    if netrc is None:
+        default_netrc = Path.home() / ".netrc"
+        if default_netrc.is_file():
+            netrc = str(default_netrc)
 
-    ver = verify if verify is not None else p.get("verify", True)
+    # CNIC XNAT uses an internal CA; default to verify=False unless profile/CLI enables it.
+    ver = verify if verify is not None else bool(p.get("verify", False))
     if not isinstance(ver, bool):
         ver = bool(ver)
 
@@ -192,6 +198,49 @@ def resolve_xnat_connection(
         verify=ver,
         default_timeout=timeout,
     )
+
+
+def finalize_xnat_connection(
+    config: XnatConnectionConfig,
+    *,
+    prompt_password: bool = True,
+    force_prompt_password: bool = False,
+) -> XnatConnectionConfig:
+    """Optionally prompt for XNAT password on an interactive terminal.
+
+    When *force_prompt_password* is True (e.g. ``--xnat-config`` without an explicit
+    password), netrc/keyring passwords are ignored and the user is prompted.
+    """
+    if not prompt_password:
+        return config
+
+    from .xnat import _resolve_xnat_login
+
+    resolved_user, resolved_password, _ = _resolve_xnat_login(config)
+    user = resolved_user or config.user
+    password = config.password or resolved_password
+
+    if force_prompt_password:
+        password = None
+    elif config.password:
+        password = config.password
+
+    if password and not force_prompt_password:
+        return replace(config, user=user, password=password)
+
+    if not sys.stdin.isatty():
+        return replace(config, user=user, password=password)
+
+    import getpass
+
+    if not user:
+        user = input(f"XNAT username for {config.server}: ").strip()
+    if not user:
+        raise ValueError(f"XNAT username is required for {config.server!r}")
+    pwd = getpass.getpass(f"XNAT password for {user}: ")
+    if not pwd:
+        raise ValueError("XNAT password is required")
+    return replace(config, user=user, password=pwd)
 
 
 def keyring_set_main() -> None:
