@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ._common import make_ball_footprint
 from .binary import close, dilate, erode, fill_holes, open
-from .centerline import compute_centerlines, skeletonize_binary
+from .centerline import compute_centerlines, skeletonize_binary, skeletonize_labeled
 from .centerline_siphon import (
     GenusReport,
     SiphonCorrectionResult,
@@ -59,4 +59,5 @@ __all__ = [
     "remove_small_components",
     "remove_small_components_by_fraction",
     "skeletonize_binary",
+    "skeletonize_labeled",
 ]

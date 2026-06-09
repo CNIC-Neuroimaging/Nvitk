@@ -37,8 +37,10 @@ def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
 
 def _layer_display_kwargs(layer: Any, *, name: str) -> dict[str, Any]:
     """Preserve spatial metadata from a source layer when adding tool outputs."""
+    from nvitk.gui.labels.visibility import copy_layer_metadata_for_output
+
     kwargs = {"name": name}
-    meta = dict(getattr(layer, "metadata", None) or {})
+    meta = copy_layer_metadata_for_output(getattr(layer, "metadata", None))
     if meta:
         kwargs["metadata"] = meta
     kwargs.update(layer_spatial_kwargs(layer))

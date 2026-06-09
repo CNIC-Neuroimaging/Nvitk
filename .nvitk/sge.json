@@ -30,8 +30,8 @@
       "default_vasculature_host_dir": "/programs/Neuro/vasculature2"
     },
     "totalsegmentator": {
-      "sge_project": "LGPU",
-      "sge_account": "LGPU",
+      "sge_project": "GPU",
+      "sge_account": "GPU",
       "log_subdir": "totalseg",
       "err_subdir": "totalseg",
       "default_sge_model_root": "/references/AI_models/totalsegmentator",

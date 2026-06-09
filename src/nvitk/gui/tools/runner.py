@@ -154,6 +154,32 @@ def _label_ids_array(label_ids: list[int]) -> np.ndarray:
     return to_numpy(label_ids)
 
 
+def _skeletonize_input_and_labels(
+    layer: Any,
+    *,
+    target_mode: str,
+    label_ids: list[int] | None,
+) -> tuple[Any, list[int]]:
+    """Multilabel mask + label ids for skeletonize (preserve per-vessel ids in output)."""
+    from nvitk.gui.labels.visibility import label_source_data
+
+    src = as_backend_array(label_source_data(layer))
+    all_labels = _unique_labels(src)
+    if not all_labels:
+        raise ValueError("No non-zero labels in the active layer.")
+
+    mode = target_mode.strip().lower()
+    if mode == "label":
+        if not label_ids:
+            raise ValueError("Select at least one label for skeletonize.")
+        labels = [int(x) for x in label_ids]
+        src_np = to_numpy(src)
+        work = np.where(np.isin(src_np, _label_ids_array(labels)), src_np, 0)
+        return as_backend_array(work), labels
+
+    return src, all_labels
+
+
 def prepare_layer_data(
     data: np.ndarray,
     *,
@@ -245,6 +271,10 @@ def run_gui_tool(
 
     if tool_id == "viz_flowshow":
         _run_viz_flowshow_napari(viewer, layer, params, label_ids=label_ids)
+        return None
+
+    if tool_id == "viz_flow_streamlines":
+        _run_viz_flow_streamlines_napari(viewer, layer, params, label_ids=label_ids)
         return None
 
     if tool_id == "measure_generate_suv":
@@ -369,6 +399,19 @@ def run_gui_tool(
     if not gpu_enabled():
         data = as_backend_array(to_numpy(data))
 
+    if tool_id == "skeletonize":
+        from nvitk.morphology.centerline import skeletonize_labeled
+
+        work, labels = _skeletonize_input_and_labels(
+            layer, target_mode=target_mode, label_ids=label_ids
+        )
+        if not gpu_enabled():
+            work = as_backend_array(to_numpy(work))
+        with using(bk):
+            return coerce_tool_output(
+                skeletonize_labeled(work, labels=labels, min_points=1)
+            )
+
     if tool_id in _MEASURE_NOTIFY:
         per_label_ids = label_ids
         if target_mode == "all_labels":
@@ -465,30 +508,6 @@ def run_gui_tool(
                     connectivity=int(params.get("connectivity") or 1),
                 )
             )
-
-    if tool_id == "skeletonize":
-        from nvitk.morphology.centerline import compute_centerlines, skeletonize_binary
-
-        arr = as_backend_array(img.data)
-        labels = _unique_labels(arr)
-        with using(bk):
-            if len(labels) > 1:
-                paths = compute_centerlines(arr, labels=labels, min_points=5)
-                out = np.zeros(arr.shape, dtype=np.uint8)
-                for lid, pts in paths.items():
-                    pts_i = np.round(as_backend_array(pts)).astype(int)
-                    for x, y, z in pts_i:
-                        if (
-                            0 <= x < out.shape[0]
-                            and 0 <= y < out.shape[1]
-                            and 0 <= z < out.shape[2]
-                        ):
-                            out[x, y, z] = int(lid)
-                if not out.any():
-                    raise ValueError("No centerline points found.")
-                return out
-            sk = skeletonize_binary(arr > 0)
-            return as_backend_array(sk).astype(np.uint8)
 
     if tool_id == "volume_projection":
         from nvitk.gui.core.orientation import _axes_string_from_layer
@@ -1962,6 +1981,113 @@ def _run_viz_flowshow_napari(
         f"Added {cache.positions.shape[0]} flow vector(s) × {cache.n_time} phases "
         f"(speed {lo:.2f}–{hi:.2f} mm/s; arrow length capped). "
         "Scrub or play cardiac phase with Napari's dims slider."
+    )
+
+
+def _run_viz_flow_streamlines_napari(
+    viewer: Any,
+    mask_layer: Any,
+    params: dict[str, Any],
+    *,
+    label_ids: list[int] | None,
+) -> None:
+    from nvitk.gui.viz.flow_streamlines import (
+        add_animated_flow_streamlines_layer,
+        build_flow_streamline_cache,
+        precompute_flow_streamline_frames,
+    )
+
+    mask_data = to_numpy(mask_layer.data)
+    if mask_data.ndim != 3:
+        raise ValueError(
+            "Active layer must be a 3D vessel segmentation mask. "
+            "Select the segmentation labels layer, then run the tool."
+        )
+    if not bool((mask_data > 0).any()):
+        raise ValueError("Active segmentation mask has no foreground labels.")
+
+    ap_name = str(params.get("ap_layer") or "").strip()
+    rl_name = str(params.get("rl_layer") or "").strip()
+    fh_name = str(params.get("fh_layer") or "").strip()
+    if not ap_name or not rl_name or not fh_name:
+        raise ValueError("Select AP, RL, and FH phase layers.")
+
+    ap_layer = _resolve_layer(viewer, ap_name)
+    rl_layer = _resolve_layer(viewer, rl_name)
+    fh_layer = _resolve_layer(viewer, fh_name)
+    ref_name = str(params.get("reference_layer") or "").strip()
+    if ref_name:
+        ref_layer = _resolve_layer(viewer, ref_name)
+        _, mask_on_ref, _ = align_mask_to_reference_layer(
+            mask_layer, ref_layer, to_numpy(mask_layer.data), order=0
+        )
+        mask_arr = to_numpy(mask_on_ref.data)
+        spatial_ref = ref_layer if int(getattr(ref_layer.data, "ndim", 0)) <= 3 else ap_layer
+    else:
+        ref_layer = ap_layer
+        _, mask_on_ref, _ = align_mask_to_reference_layer(
+            mask_layer, ap_layer, to_numpy(mask_layer.data), order=0
+        )
+        mask_arr = to_numpy(mask_on_ref.data)
+        spatial_ref = ap_layer
+
+    if not bool((mask_arr > 0).any()):
+        notify("No voxels in mask for flow streamlines.", error=True)
+        return
+
+    notify(
+        f"Precomputing streamlines for {int(np.unique(mask_arr[mask_arr > 0]).size)} "
+        f"label(s) across cardiac phases…"
+    )
+    cache = build_flow_streamline_cache(
+        ap_layer.data,
+        rl_layer.data,
+        fh_layer.data,
+        mask_arr,
+        phase_layer=ap_layer,
+        label_ids=label_ids,
+        trace_mode=str(params.get("trace_mode") or "streamlines"),
+        n_seeds=int(params.get("n_seeds") or 64),
+        max_length=float(params.get("max_length") or 35.0),
+        stream_seed=int(params.get("stream_seed") or 42),
+        integration_direction=str(params.get("integration_direction") or "forward"),
+        seed_mode=str(params.get("seed_mode") or "planar"),
+        seed_plane_axis=int(params.get("seed_plane_axis") or 2),
+        seed_plane_side=str(params.get("seed_plane_side") or "min"),
+        dt_seconds=float(params.get("dt_seconds") or 1.0),
+        resample_paths=bool(params.get("resample_paths", False)),
+        resample_spacing_vox=float(params.get("resample_spacing_vox") or 0.5),
+        edge_width=float(params.get("edge_width") or 0.25),
+        opacity=float(params.get("opacity") or 0.55),
+        colormap=str(params.get("cmap") or params.get("colormap") or "turbo"),
+        color_metric=str(params.get("color_metric") or "speed"),
+        per_vertex_color=bool(params.get("per_vertex_color", True)),
+    )
+    precompute_flow_streamline_frames(cache)
+
+    t0 = int(params.get("time_index") or 0)
+    sync_dims = bool(params.get("sync_dims", True))
+    colormap = str(params.get("cmap") or params.get("colormap") or "turbo")
+
+    playback = add_animated_flow_streamlines_layer(
+        viewer,
+        cache,
+        phase_layer=ap_layer,
+        spatial_reference_layer=spatial_ref,
+        initial_time=t0,
+        sync_dims=sync_dims,
+    )
+    layer_name = str(getattr(playback.layer, "name", "Flow streamlines"))
+    notify(
+        f"Added layer {layer_name!r}: {cache.params.trace_mode} "
+        f"({cache.params.n_seeds} seeds × {cache.n_time} phases). "
+        f"Color: {cache.color_metric} / {colormap!r}"
+        + (
+            f" ({cache.speed_lo:.2f}–{cache.speed_hi:.2f} mm/s for speed)"
+            if cache.color_metric == "speed"
+            else ""
+        )
+        + f". Active mask: {mask_layer.name}. Scrub cardiac phase with Napari's dims slider."
     )
 
 

@@ -11,7 +11,17 @@ from nvitk.core.array import to_numpy
 _NVITK_LABEL_SOURCE_KEY = "nvitk_label_source"
 _NVITK_VISIBLE_IDS_KEY = "nvitk_visible_ids"
 _NVITK_COLOR_BACKUP_KEY = "nvitk_label_color_backup"
+NVITK_LAYER_METADATA_KEYS = frozenset(
+    {_NVITK_LABEL_SOURCE_KEY, _NVITK_VISIBLE_IDS_KEY, _NVITK_COLOR_BACKUP_KEY}
+)
 _MAX_LABEL_LIKE_IDS = 64
+
+
+def copy_layer_metadata_for_output(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy user metadata for a new layer; drop live label-visibility cache."""
+    if not metadata:
+        return {}
+    return {k: v for k, v in metadata.items() if k not in NVITK_LAYER_METADATA_KEYS}
 
 
 def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
@@ -37,10 +47,14 @@ def _layer_metadata(layer: Any) -> dict[str, Any]:
 
 def label_source_data(layer: Any) -> np.ndarray:
     """Full label array (before visibility filter), for tools that need the source."""
+    current = to_numpy(layer.data)
     meta = _layer_metadata(layer)
-    if _NVITK_LABEL_SOURCE_KEY in meta:
-        return np.asarray(meta[_NVITK_LABEL_SOURCE_KEY])
-    return to_numpy(layer.data)
+    cached = meta.get(_NVITK_LABEL_SOURCE_KEY)
+    if cached is not None:
+        src = np.asarray(cached)
+        if src.shape == current.shape:
+            return src
+    return current
 
 
 def _compute_is_label_like(layer: Any) -> bool:
@@ -115,13 +129,19 @@ def infer_target_mode(
 
 def ensure_label_source(layer: Any) -> np.ndarray:
     """Return unfiltered label data, caching a copy in layer metadata once."""
+    current = to_numpy(layer.data)
     meta = _layer_metadata(layer)
     src = meta.get(_NVITK_LABEL_SOURCE_KEY)
-    if src is None:
-        src = np.array(to_numpy(layer.data), copy=True)
-        meta[_NVITK_LABEL_SOURCE_KEY] = src
-        layer.metadata = meta
-    return np.asarray(src)
+    if src is not None:
+        src_arr = np.asarray(src)
+        if src_arr.shape == current.shape:
+            return src_arr
+        meta.pop(_NVITK_LABEL_SOURCE_KEY, None)
+        meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
+    src = np.array(current, copy=True)
+    meta[_NVITK_LABEL_SOURCE_KEY] = src
+    layer.metadata = meta
+    return src
 
 
 def _visibility_key(selected_ids: list[int]) -> tuple[int, ...]:
@@ -216,12 +236,17 @@ def restore_label_visibility(
 
     src = meta.pop(_NVITK_LABEL_SOURCE_KEY, None)
     if src is not None:
-        layer.data = np.asarray(src, dtype=to_numpy(layer.data).dtype)
+        current = to_numpy(layer.data)
+        src_arr = np.asarray(src)
+        if src_arr.shape == current.shape:
+            layer.data = np.asarray(src_arr, dtype=current.dtype)
     layer.metadata = meta
 
 
 __all__ = [
+    "NVITK_LAYER_METADATA_KEYS",
     "apply_label_visibility",
+    "copy_layer_metadata_for_output",
     "ensure_label_source",
     "infer_target_mode",
     "is_label_like_layer",

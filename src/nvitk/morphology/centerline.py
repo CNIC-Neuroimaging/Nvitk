@@ -28,6 +28,45 @@ def skeletonize_binary(mask) -> Any:
     return as_backend_array(sk).astype(bool)
 
 
+def skeletonize_labeled(
+    mask,
+    *,
+    labels: Sequence[int] | None = None,
+    min_points: int = 1,
+) -> Any:
+    """Skeletonize each label region independently; output keeps original label ids.
+
+    For a binary mask (labels ``[1]``), skeleton voxels are written as ``1``.
+    For multilabel masks, each label's skeleton voxels carry that label's id.
+    """
+    arr = as_backend_array(mask)
+    if arr.ndim not in (2, 3):
+        raise ValidationError("skeletonize_labeled expects a 2D or 3D mask.")
+    arr_np = to_numpy(arr)
+    labs = labels or sorted(int(v) for v in np.unique(arr_np) if int(v) != 0)
+    if not labs:
+        raise ValidationError("skeletonize_labeled: mask has no non-zero labels.")
+
+    if np.issubdtype(arr_np.dtype, np.integer):
+        out_dtype = arr_np.dtype
+    else:
+        max_lab = max(labs)
+        out_dtype = np.uint8 if max_lab <= 255 else (np.uint16 if max_lab <= 65535 else np.int32)
+
+    out = np.zeros(arr_np.shape, dtype=out_dtype)
+    for lbl in labs:
+        roi = arr_np == int(lbl)
+        if not np.any(roi):
+            continue
+        sk = to_numpy(skeletonize_binary(roi)) > 0
+        if int(sk.sum()) < int(min_points):
+            continue
+        out[sk] = int(lbl)
+    if not bool(np.any(out)):
+        raise ValidationError("skeletonize_labeled: no skeleton voxels produced.")
+    return as_backend_array(out)
+
+
 def _require_skeletonize():
     try:
         from skimage.morphology import skeletonize
@@ -186,5 +225,10 @@ def centerline_tangents(points_xyz: Any, *, k_half: int = 2) -> Any:
     return tang.astype(np.float32, copy=False)
 
 
-__all__ = ["centerline_tangents", "compute_centerlines", "skeletonize_binary"]
+__all__ = [
+    "centerline_tangents",
+    "compute_centerlines",
+    "skeletonize_binary",
+    "skeletonize_labeled",
+]
 

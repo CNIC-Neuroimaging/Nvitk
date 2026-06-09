@@ -13,7 +13,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "label_cc": "Label connected components in a mask.",
     "remove_small_components": "Remove connected components below a minimum size.",
     "morph_biggest_cc": "Keep only the largest connected component.",
-    "skeletonize": "Reduce a mask to a 1-voxel-thick skeleton / centerline.",
+    "skeletonize": (
+        "Reduce a mask to a 1-voxel-thick skeleton / centerline; "
+        "multilabel masks keep each label id on its skeleton voxels."
+    ),
     "centerline_detect_junctions": (
         "Mark skeleton branch points (degree ≥ N) on a 3D centerline mask."
     ),
@@ -51,6 +54,12 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "viz_flowshow": (
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
         "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."
+    ),
+    "viz_flow_streamlines": (
+        "4D flow streamlines or pathlines in Napari. Active layer = vessel segmentation mask. "
+        "Streamlines: instantaneous flow at each cardiac phase. Pathlines: particle tracks "
+        "integrated forward through time from the selected phase. Color by speed, arc length, "
+        "integration time, or fixed; optional per-vertex gradient. Planar inlet seeding by default."
     ),
     "viz_vessel_cross_sections": (
         "Active layer = centerline mask; choose CD and optional segmentation in parameters. "
