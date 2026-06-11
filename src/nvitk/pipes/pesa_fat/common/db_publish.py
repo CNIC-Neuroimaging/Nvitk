@@ -123,6 +123,7 @@ def publish_stage3_excel(
     pipeline: str,
     repo: DataRepo | None = None,
     build_sqlite_index: bool = True,
+    source_batch_id: str | None = None,
 ) -> pd.DataFrame:
     """Upsert rows into ``image_measurements`` with overwrite semantics."""
     repo = resolve_repo(repo)
@@ -134,6 +135,9 @@ def publish_stage3_excel(
     if rows.empty:
         log.warning("No stage3 measurements to publish: %s", excel_path)
         return rows
+    if source_batch_id and "source_batch_id" in rows.columns:
+        rows = rows.copy()
+        rows["source_batch_id"] = str(source_batch_id).strip()
     # Overwrite existing values for the same subject/pipeline/variable (region/frame included when present).
     key = ["subject_uid", "pipeline_id", "variable_id", "region_id", "frame_index"]
     return repo.upsert_table(

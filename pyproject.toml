@@ -186,9 +186,7 @@ nvitk-transform = "nvitk.cli.transform:main"
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-gui = "nvitk.gui.main:main"
-nvitk-gui-sge-worker = "nvitk.gui.sge.worker:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
-nvitk-sync-sge-container = "nvitk.registry.cli_sync_sge:main"
 
 # -----------------------------------------------------------------------------
 # Pipeline scripts
@@ -200,10 +198,10 @@ nvitk-pesa-fat-dixon = "nvitk.pipes.pesa_fat.dixon_v5.run:main"
 nvitk-pesa-fat-hotspot = "nvitk.pipes.pesa_fat.run_hotspot:main"
 nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 nvitk-pesa-fat-qc-portal = "nvitk.pipes.pesa_fat.qc.portal_cli:main"
+nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 
 # ────────────────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
-nvitk-gpetpy = "nvitk.pipes.gpetpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 

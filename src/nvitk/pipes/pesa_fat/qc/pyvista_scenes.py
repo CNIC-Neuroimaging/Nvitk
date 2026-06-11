@@ -11,14 +11,13 @@ from nvitk.core.array import to_numpy
 from nvitk.core.logger import Logger
 from nvitk.io import imread
 from nvitk.pipes.pesa_fat.common.paths import BatchLayout, resolve_nii_optional
+from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz, export_plotter_html
 from nvitk.segmentation.total_segmentator.class_maps import get_class_map
 
 log = Logger()
 
 
 def _require_pyvista():
-    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz, export_plotter_html
-
     configure_headless_viz()
     try:
         import pyvista as pv
