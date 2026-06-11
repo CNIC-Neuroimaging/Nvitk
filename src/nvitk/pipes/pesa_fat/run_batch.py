@@ -287,9 +287,6 @@ def _emit_stage4_qc_stage(
             "NVITK_HEADLESS": "1",
             "PYVISTA_OFF_SCREEN": "true",
             "MPLBACKEND": "Agg",
-            "LIBGL_ALWAYS_SOFTWARE": "1",
-            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe",
-            "GALLIUM_DRIVER": "llvmpipe",
         },
     )
     submit_stage(

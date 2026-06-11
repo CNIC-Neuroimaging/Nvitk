@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import html
-import importlib.util
+import io
 import os
 import time
 from functools import lru_cache
@@ -29,10 +30,11 @@ def configure_headless_viz() -> None:
     """
     if _headless_mode():
         os.environ["PYVISTA_OFF_SCREEN"] = "true"
-        # Prefer software GL on CPU nodes without /dev/dri access (avoids EGL probing).
-        os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
-        os.environ.setdefault("MESA_LOADER_DRIVER_OVERRIDE", "llvmpipe")
-        os.environ.setdefault("GALLIUM_DRIVER", "llvmpipe")
+        # LIBGL_ALWAYS_SOFTWARE conflicts with VTK EGL offscreen on SGE nodes
+        # ("Not allowed to force software rendering when API explicitly selects
+        # a hardware device") and causes long /dev/dri permission-denied probes.
+        for key in ("LIBGL_ALWAYS_SOFTWARE", "MESA_LOADER_DRIVER_OVERRIDE", "GALLIUM_DRIVER"):
+            os.environ.pop(key, None)
     else:
         os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
     os.environ.setdefault("MPLBACKEND", "Agg")
@@ -48,23 +50,35 @@ def configure_headless_viz() -> None:
         pv.OFF_SCREEN = True
         if _headless_mode():
             os.environ["PYVISTA_OFF_SCREEN"] = "true"
-        else:
             if hasattr(pv, "start_xvfb"):
                 try:
                     pv.start_xvfb()
                 except Exception:
                     pass
+        elif hasattr(pv, "start_xvfb"):
+            try:
+                pv.start_xvfb()
+            except Exception:
+                pass
     except ImportError:
         pass
 
 
 @lru_cache(maxsize=1)
+def _trame_export_import_error() -> str | None:
+    """Return an error string when PyVista ``export_html`` deps are missing."""
+    try:
+        from trame_vtk.tools.vtksz2html import write_html  # noqa: F401, PLC0415
+        from pyvista.trame import PyVistaLocalView  # noqa: F401, PLC0415
+    except ImportError as exc:
+        return str(exc)
+    return None
+
+
+@lru_cache(maxsize=1)
 def trame_export_available() -> bool:
     """Return True when PyVista ``export_html`` dependencies are importable."""
-    for name in ("trame", "trame_vtk", "trame_vuetify"):
-        if importlib.util.find_spec(name) is None:
-            return False
-    return True
+    return _trame_export_import_error() is None
 
 
 def warn_if_trame_missing() -> None:
@@ -72,9 +86,11 @@ def warn_if_trame_missing() -> None:
     if _TRAME_WARNED or trame_export_available():
         return
     _TRAME_WARNED = True
+    detail = _trame_export_import_error() or "unknown import error"
     log.warning(
-        "PyVista HTML export needs trame (pip install 'pyvista[jupyter]'); "
-        "3D QC embeds will use fallback placeholders."
+        "PyVista HTML export needs trame-vtk (pip install 'pyvista[jupyter]' or trame-vtk); "
+        "3D QC embeds will use static screenshot fallbacks. (%s)",
+        detail,
     )
 
 
@@ -102,6 +118,30 @@ def write_export_fallback_html(path: Path, message: str, *, retries: int = 3, sl
     return False
 
 
+def _write_plotter_screenshot_html(pl, path: Path, *, note: str = "") -> bool:
+    """Embed an off-screen plotter screenshot in a minimal HTML page."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        buf = io.BytesIO()
+        pl.screenshot(buf)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        note_html = f"<p>{html.escape(note)}</p>" if note else ""
+        text = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+            "<style>body{margin:0;background:#111;color:#ddd;font-family:sans-serif}"
+            "img{display:block;max-width:100%;height:auto;margin:0 auto}</style>"
+            "</head><body>"
+            f"{note_html}"
+            f"<img alt='3D scene' src='data:image/png;base64,{b64}'/>"
+            "</body></html>"
+        )
+        path.write_text(text, encoding="utf-8")
+        return True
+    except Exception as exc:
+        log.warning("screenshot HTML fallback failed (%s): %s", path, exc)
+        return False
+
+
 def export_plotter_html(
     pl,
     path: Path,
@@ -110,21 +150,36 @@ def export_plotter_html(
     sleep_s: float = 1.0,
     fallback_message: str | None = None,
 ) -> bool:
-    """Export a PyVista plotter to HTML with retries; optional fallback page on failure."""
+    """Export a PyVista plotter to HTML with retries; screenshot fallback on failure."""
     warn_if_trame_missing()
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _screenshot_or_text(note: str) -> bool:
+        if _write_plotter_screenshot_html(pl, path, note=note):
+            return True
+        return write_export_fallback_html(path, note)
+
     if not trame_export_available():
-        msg = fallback_message or (
-            "Interactive 3D export unavailable: install trame (pip install 'pyvista[jupyter]')."
+        note = fallback_message or (
+            "Interactive 3D export unavailable: install trame-vtk "
+            "(pip install 'pyvista[jupyter]')."
         )
-        return write_export_fallback_html(path, msg)
+        try:
+            return _screenshot_or_text(note)
+        finally:
+            try:
+                pl.close()
+            except Exception:
+                pass
 
     last_exc: Exception | None = None
+    ok = False
     try:
         for attempt in range(1, int(retries) + 1):
             try:
                 pl.export_html(str(path))
-                return True
+                ok = True
+                break
             except OSError as exc:
                 last_exc = exc
                 log.warning(
@@ -141,19 +196,19 @@ def export_plotter_html(
                 log.warning("export_html failed (%s): %s", path, exc)
                 break
     finally:
+        if not ok:
+            if last_exc is not None:
+                log.warning("Giving up exporting %s after %d attempt(s).", path, retries)
+            note = fallback_message or "Interactive 3D export failed."
+            if last_exc is not None:
+                note = f"{note} ({last_exc!s})"
+            ok = _screenshot_or_text(note)
         try:
             pl.close()
         except Exception:
             pass
 
-    if last_exc is not None:
-        log.warning("Giving up exporting %s after %d attempt(s).", path, retries)
-        if fallback_message is not None:
-            return write_export_fallback_html(
-                path,
-                f"{fallback_message} ({last_exc!s})",
-            )
-    return False
+    return ok
 
 
 __all__ = [
