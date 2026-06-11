@@ -11,6 +11,7 @@ adding a version column; for now we keep only the latest value.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal
@@ -19,7 +20,8 @@ import pandas as pd
 
 from nvitk.core.logger import Logger
 from nvitk.db.exceptions import SettingsError, TableNotFoundError
-from nvitk.db.repo import DataRepo, get_repo_from_settings
+from nvitk.db.repo import DataRepo, get_repo, get_repo_from_settings
+from nvitk.db.settings_paths import sge_dataset_root_path
 from nvitk.db.storage import empty_dataframe, utc_now_iso, write_json, write_parquet_table
 
 log = Logger()
@@ -44,13 +46,72 @@ def _infer_publish_context(pipeline: str) -> PublishContext:
     raise ValueError(f"Unknown PESA-Fat pipeline {pipeline!r}")
 
 
-def resolve_repo(repo: DataRepo | None = None) -> DataRepo:
+def resolve_repo(repo: DataRepo | None = None, *, prefer_sge: bool | None = None) -> DataRepo:
     if repo is not None:
         return repo
+    use_sge = prefer_sge
+    if use_sge is None:
+        use_sge = os.environ.get("NVITK_SGE", "").lower() in ("1", "true", "yes")
+    if use_sge and sge_dataset_root_path(must_exist=True) is not None:
+        return get_repo(prefer_sge=True)
     got = get_repo_from_settings()
     if isinstance(got, tuple):
         return got[0]
     return got
+
+
+def _sge_db_publish_enabled() -> bool:
+    if os.environ.get("NVITK_SGE", "").lower() not in ("1", "true", "yes"):
+        return False
+    return sge_dataset_root_path(must_exist=True) is not None
+
+
+def maybe_publish_stage3_on_sge(
+    *,
+    subject_uid: str,
+    excel_path: Path,
+    pipeline: str,
+    batch: str,
+) -> None:
+    """Upsert stage-3 measurements into the cluster DB when running under SGE."""
+    if not _sge_db_publish_enabled():
+        return
+    try:
+        rows = publish_stage3_excel(
+            subject_uid=subject_uid,
+            excel_path=excel_path,
+            pipeline=pipeline,
+            prefer_sge=True,
+            build_sqlite_index=False,
+            source_batch_id=batch,
+        )
+        if not rows.empty:
+            log.info(
+                "SGE DB: published %d image_measurements row(s) for %s / %s",
+                len(rows),
+                subject_uid,
+                pipeline,
+            )
+    except Exception as exc:
+        log.warning(
+            "SGE DB publish skipped for %s / %s (%s): %s",
+            subject_uid,
+            pipeline,
+            excel_path,
+            exc,
+        )
+
+
+def rebuild_sge_sqlite_index_if_configured() -> None:
+    """Rebuild the SQLite catalog on the cluster dataset root after batch stage 3."""
+    if not _sge_db_publish_enabled():
+        return
+    try:
+        repo = get_repo(prefer_sge=True)
+        log.info("SGE DB: rebuilding SQLite index at %s", repo.sqlite.db_path)
+        repo.build_sqlite_index()
+    except Exception as exc:
+        log.warning("SGE DB: SQLite index rebuild failed: %s", exc)
 
 
 def _stable_region_id(column: str) -> str | None:
@@ -122,11 +183,12 @@ def publish_stage3_excel(
     excel_path: Path,
     pipeline: str,
     repo: DataRepo | None = None,
+    prefer_sge: bool | None = None,
     build_sqlite_index: bool = True,
     source_batch_id: str | None = None,
 ) -> pd.DataFrame:
     """Upsert rows into ``image_measurements`` with overwrite semantics."""
-    repo = resolve_repo(repo)
+    repo = resolve_repo(repo, prefer_sge=prefer_sge)
     rows = build_image_measurement_rows_from_stage3_excel(
         subject_uid=subject_uid,
         excel_path=excel_path,
@@ -468,6 +530,8 @@ def try_publish_qc_review(**kwargs: Any) -> tuple[dict[str, int] | None, str | N
 __all__ = [
     "PESA_FAT_QC_REVIEWS_TABLE",
     "publish_stage3_excel",
+    "maybe_publish_stage3_on_sge",
+    "rebuild_sge_sqlite_index_if_configured",
     "publish_qc_review",
     "sync_qc_reviews_for_report",
     "try_publish_qc_review",

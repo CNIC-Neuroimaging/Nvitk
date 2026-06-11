@@ -28,6 +28,7 @@ from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io import imread
 from nvitk.measure import Measurer
+from nvitk.pipes.pesa_fat.common.db_publish import maybe_publish_stage3_on_sge
 from nvitk.pipes.pesa_fat.common.paths import BatchLayout, layout, resolve_nii
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
 from nvitk.segmentation.labels import get_label
@@ -182,6 +183,12 @@ def run_subject(
     df = pd.DataFrame([row], columns=column_order())
     df.to_excel(output, index=False)
     log.info(f"[{subject}] wrote {output}")
+    maybe_publish_stage3_on_sge(
+        subject_uid=subject,
+        excel_path=output,
+        pipeline=cfg.PIPELINE_NAME,
+        batch=lay.batch,
+    )
     return output
 
 

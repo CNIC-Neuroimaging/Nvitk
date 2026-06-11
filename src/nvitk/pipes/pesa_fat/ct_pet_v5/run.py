@@ -44,6 +44,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
 from nvitk.pipes.pesa_fat.common import stage0_convert
 from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
 from nvitk.pipes.pesa_fat.common.db_publish import publish_stage3_excel
+from nvitk.pipes.pesa_fat.common.sge_db import pesa_fat_sge_db_submission
 from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
@@ -141,6 +142,7 @@ def _run_local(
                                 subject_uid=subj,
                                 excel_path=per_subject,
                                 pipeline="ct-pet-v5",
+                                source_batch_id=lay.batch,
                             )
                     except Exception as exc:
                         import traceback
@@ -266,10 +268,19 @@ def submit_subject_chain(
             err_dir=paths.err_dir,
         )
     binds = SingularityBinds()
+    db_env, db_binds = pesa_fat_sge_db_submission()
 
     specs: list[StageSpec] = []
     for s in stages_sel:
         resources = _stage_resources(s, device=device)
+        stage_env = {
+            "PYTHONPATH": str(binds.src),
+            "TOTALSEG_HOME_DIR": str(binds.models),
+        }
+        stage_binds: tuple[tuple[Path, str], ...] = ()
+        if s == "stage3" and db_env:
+            stage_env.update(db_env)
+            stage_binds = db_binds
         specs.append(
             StageSpec(
                 job_name=f"{cfg.SGE_JOB_PREFIX}_{s}_{subject}",
@@ -287,10 +298,8 @@ def submit_subject_chain(
                 resources=resources,
                 binds=binds,
                 use_nv=True,
-                extra_env={
-                    "PYTHONPATH": str(binds.src),
-                    "TOTALSEG_HOME_DIR": str(binds.models),
-                }
+                extra_env=stage_env,
+                extra_host_binds=stage_binds,
             )
         )
     jids = submit_chain(specs, paths, base_hold=base_hold, dry_run=dry_run, emit=emit)

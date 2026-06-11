@@ -53,45 +53,101 @@ def _default_dataset_root() -> Path:
     return Path(__file__).resolve().parents[3] / "dataset" / "nvitk-dataset"
 
 
+def _local_dataset_root_from_settings(db: dict[str, Any]) -> str | Path:
+    fallback = db.get("local_fallback_root")
+    if fallback is not None and str(fallback).strip():
+        log.info("Using local root: %s", fallback)
+        return fallback
+    root = db.get("root")
+    if root is not None and str(root).strip():
+        log.info("Using remote root: %s", root)
+        return root
+    return _default_dataset_root()
+
+
+def get_repo(
+    *,
+    prefer_sge: bool | None = None,
+    root: Path | str | None = None,
+    use_sqlite: bool | None = None,
+    auto_scaffold: bool | None = None,
+) -> DataRepo:
+    """Open :class:`DataRepo` using env, SGE root, or workstation settings."""
+    from .settings_paths import load_db_settings_block, sge_dataset_root_path
+
+    db = load_db_settings_block()
+    sqlite_index = db.get("sqlite_index", True) if use_sqlite is None else use_sqlite
+    auto_scaff = db.get("auto_scaffold", False) if auto_scaffold is None else auto_scaffold
+
+    if root is not None:
+        return DataRepo(
+            root=Path(root).expanduser().resolve(),
+            use_sqlite=sqlite_index,
+            auto_scaffold=auto_scaff,
+        )
+
+    use_sge = prefer_sge
+    if use_sge is None:
+        use_sge = os.environ.get("NVITK_SGE", "").lower() in ("1", "true", "yes")
+
+    if use_sge:
+        sge_root = sge_dataset_root_path(must_exist=True)
+        if sge_root is not None:
+            log.info("Using SGE dataset root: %s", sge_root)
+            return DataRepo(root=sge_root, use_sqlite=sqlite_index, auto_scaffold=auto_scaff)
+
+    env_root = os.getenv("NVITK_DATASET_ROOT", "").strip()
+    if env_root:
+        return DataRepo(
+            root=Path(env_root).expanduser().resolve(),
+            use_sqlite=sqlite_index,
+            auto_scaffold=auto_scaff,
+        )
+
+    local_root = _local_dataset_root_from_settings(db)
+    return DataRepo(
+        root=Path(local_root).expanduser().resolve(),
+        use_sqlite=sqlite_index,
+        auto_scaffold=auto_scaff,
+    )
+
+
 def get_repo_from_settings(return_xnat_config: bool = False) -> DataRepo | XnatConnectionConfig:
     """Get :class:`DataRepo` from settings file, optionally with :class:`XnatConnectionConfig`."""
     try:
-        import json
-        with open(Path(__file__).resolve().parents[3] / ".nvitk" / "settings.json", "r") as f:
-            settings = json.load(f)
-            if "local_fallback_root" in settings["db"] and settings["db"]["local_fallback_root"] is not None:
-                log.info(f"Using local root: {settings['db']['local_fallback_root']}")
-                root = settings["db"]["local_fallback_root"]
-            else: 
-                log.info(f"Using remote root: {settings['db']['root']}")
-                root = settings["db"]["root"]
+        from .settings_paths import load_db_settings_block
 
-            repo = DataRepo(
-                root=root,
-                use_sqlite=settings["db"]["sqlite_index"],
-                auto_scaffold=settings["db"]["auto_scaffold"],
-            )
-            if return_xnat_config:
-                if "xnat_config" in settings["db"]:
-                    _net_file, _urs, _pwd = None, None, None
-                    try: _net_file = settings["db"]["xnat_config"]["netrc_file"]
-                    except Exception: _urs, _pwd = settings["db"]["xnat_config"]["user"], settings["db"]["xnat_config"]["password"]
-                    finally:
-                        if _net_file is None and (_urs is None or _pwd is None):
-                            raise SettingsError("XNAT config requires netrc_file or user and password")
-                    return repo, XnatConnectionConfig(
-                        server=settings["db"]["xnat_config"]["server"],
-                        project=settings["db"]["xnat_config"]["project"],
-                        netrc_file=_net_file,
-                        user=_urs,
-                        password=_pwd,
-                        verify=settings["db"]["xnat_config"]["verify"],
-                    )
-            return repo
+        db = load_db_settings_block()
+        if not db:
+            raise SettingsError("No db settings found (.nvitk/settings.json missing or empty)")
+
+        repo = get_repo(use_sqlite=db.get("sqlite_index"), auto_scaffold=db.get("auto_scaffold"))
+        if return_xnat_config:
+            if "xnat_config" in db:
+                _net_file, _urs, _pwd = None, None, None
+                try:
+                    _net_file = db["xnat_config"]["netrc_file"]
+                except Exception:
+                    _urs, _pwd = db["xnat_config"]["user"], db["xnat_config"]["password"]
+                finally:
+                    if _net_file is None and (_urs is None or _pwd is None):
+                        raise SettingsError("XNAT config requires netrc_file or user and password")
+                return repo, XnatConnectionConfig(
+                    server=db["xnat_config"]["server"],
+                    project=db["xnat_config"]["project"],
+                    netrc_file=_net_file,
+                    user=_urs,
+                    password=_pwd,
+                    verify=db["xnat_config"]["verify"],
+                )
+        return repo
+    except SettingsError:
+        raise
     except Exception as e:
         import traceback
+
         log.warning(traceback.format_exc())
-        raise SettingsError(f"Error getting repo from settings: {e}")
+        raise SettingsError(f"Error getting repo from settings: {e}") from e
 
 
 # Default cohort for API queries when ``cohort_id`` is omitted (see :meth:`DataRepo._resolve_cohort`).

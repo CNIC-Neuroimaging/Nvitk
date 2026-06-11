@@ -50,7 +50,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from import_new_vars import DEFAULT_PATHS, run_import_new_vars
 from nvitk.db.variable_units import register_all_variable_units
 
-DEFAULT_DATASET_ROOT = Path("~/nvitk/dataset/nvitk-dataset")
+DEFAULT_DATASET_ROOT = Path("/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset")
 DEFAULT_DB_BASE = Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/")
 DEFAULT_NEW_VARS = Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/")
 DEFAULT_IMPORT_RUN_ID = "pesabrain_build_v1"

@@ -1,11 +1,12 @@
 {
     "version": "0.2.0",
     "db": {
-        "root":                "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/nvitk-dataset/",
+        "root":                "/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset",
         "raw_mount_root":      "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/",
         "local_dicom_root":    "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DATA/DICOM/",
         "local_nifti_root":    "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DATA/NIfTI/",
-        "local_fallback_root": "~/nvitk/dataset/nvitk-dataset",
+        "local_fallback_root": "/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset",
+        "sge_root": "/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset",
         "sqlite_index":        true,
         "auto_scaffold":       false,
         "xnat_config": { 

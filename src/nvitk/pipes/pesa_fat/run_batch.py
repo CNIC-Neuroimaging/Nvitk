@@ -83,6 +83,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5 import run as ctpet_run
 from nvitk.pipes.pesa_fat.dixon_v5 import config as dixon_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import run as dixon_run
+from nvitk.pipes.pesa_fat.common.sge_db import pesa_fat_sge_db_submission
 from nvitk.pipes.pesa_fat.common.stage4_qc import run_qc as run_stage4_qc
 
 
@@ -223,6 +224,7 @@ def _emit_batch_aggregate_stage(
         return
     paths = _pipeline_cluster_paths(lay, container, src_dir)
     binds = SingularityBinds()
+    db_env, db_binds = pesa_fat_sge_db_submission()
     spec = StageSpec(
         job_name=f"PESAFat_batch_aggregate_{lay.batch}",
         python_cmd=_aggregate_python_cmd(
@@ -243,7 +245,9 @@ def _emit_batch_aggregate_stage(
         extra_env={
             "PYTHONPATH": str(binds.src),
             "TOTALSEG_HOME_DIR": str(binds.models),
+            **db_env,
         },
+        extra_host_binds=db_binds,
     )
     submit_stage(spec, paths, hold_jid=hold_jid, dry_run=False, emit=emit)
 

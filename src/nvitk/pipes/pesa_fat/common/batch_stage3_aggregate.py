@@ -13,6 +13,7 @@ import click
 
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
+from nvitk.pipes.pesa_fat.common.db_publish import rebuild_sge_sqlite_index_if_configured
 from nvitk.pipes.pesa_fat.common.paths import layout, parse_subjects
 from nvitk.pipes.pesa_fat.common.stage3_batch_summary import aggregate_stage3_summary
 
@@ -69,6 +70,8 @@ def main(
         if p not in ("ct-pet-v5", "dixon-v5"):
             raise click.BadParameter(f"Unknown pipeline {raw!r}")
         aggregate_stage3_summary(lay, subj_list, p)
+
+    rebuild_sge_sqlite_index_if_configured()
 
 
 if __name__ == "__main__":
