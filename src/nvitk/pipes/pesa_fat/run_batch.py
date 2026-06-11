@@ -59,10 +59,14 @@ from nvitk.pipes.pesa_fat.common.paths import (
     DEFAULT_RESULTS_ROOT,
     BatchLayout,
     default_submit_script_path,
+    group_subjects_by_batch,
     layout,
+    layout_cluster,
+    layout_local,
     parse_subjects,
 )
 from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.remote_transfer import resolve_cluster_host, ssh_exec
 from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
@@ -73,6 +77,7 @@ from nvitk.cluster.sge import (
     write_script_header,
 )
 from nvitk.pipes.pesa_fat.common import stage0_convert
+from nvitk.pipes.pesa_fat.common.cluster_upload import upload_batch_dicoms
 from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as ctpet_cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5 import run as ctpet_run
@@ -279,6 +284,8 @@ def _emit_stage4_qc_stage(
         extra_env={
             "PYTHONPATH": str(binds.src),
             "TOTALSEG_HOME_DIR": str(binds.models),
+            "PYVISTA_OFF_SCREEN": "true",
+            "MPLBACKEND": "Agg",
         },
     )
     submit_stage(
@@ -288,6 +295,229 @@ def _emit_stage4_qc_stage(
         dry_run=False,
         emit=emit,
     )
+
+
+def _require_paramiko() -> None:
+    try:
+        import paramiko  # noqa: F401
+    except ImportError as exc:
+        raise click.ClickException(
+            "Remote SGE / XNAT upload requires Paramiko. "
+            "Install with: pip install 'nvitk[cluster]'"
+        ) from exc
+
+
+def _prompt_ssh_credentials(
+    remote_host: str | None,
+    remote_user: str | None,
+) -> tuple[str, str, str]:
+    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+    host_resolved = resolve_cluster_host(CLUSTER_HOST_ALIASES.get(host_key, host_key))
+    user = remote_user or click.prompt("SSH user")
+    password = getpass.getpass("SSH password: ")
+    return host_resolved, user, password
+
+
+def _write_sge_script(
+    lay: BatchLayout,
+    subj_list: list[str],
+    pipelines_sel: list[str],
+    stages_sel: list[str],
+    *,
+    script_path: Path,
+    backend: str,
+    device: str,
+    model_dir: Path | None,
+    overwrite: bool,
+    regions: tuple[str, ...],
+    container: Path,
+    src_dir: Path,
+    dry_run: bool,
+    log_level: str,
+    exclude_ureter: bool,
+) -> Path:
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(script_path, "w", encoding="utf-8") as fh:
+        write_script_header(
+            fh,
+            log_dir=ctpet_cfg.SGE_LOG_DIR,
+            err_dir=ctpet_cfg.SGE_ERR_DIR,
+            title=f"batch={lay.batch} pipelines={','.join(pipelines_sel)}",
+        )
+        _run_sge(
+            lay,
+            subj_list,
+            pipelines_sel,
+            stages_sel,
+            backend=backend,
+            device=device,
+            model_dir=model_dir,
+            overwrite=overwrite,
+            regions=regions,
+            container=container,
+            src_dir=src_dir,
+            dry_run=dry_run,
+            log_level=log_level,
+            emit=fh,
+            exclude_ureter=exclude_ureter,
+        )
+    log.info("PESA-Fat batch '%s' script written: %s", lay.batch, script_path)
+    return script_path
+
+
+def _ssh_run_scripts(
+    host: str,
+    user: str,
+    password: str,
+    script_paths: list[Path],
+) -> bool:
+    if not script_paths:
+        return True
+    if len(script_paths) == 1:
+        return run_sge_script_ssh(host, user, password, script_paths[0])
+    joined = " && ".join(f"bash {shlex.quote(str(p))}" for p in script_paths)
+    log.info("SSH remote exec (%d scripts): %s", len(script_paths), joined)
+    code, out, err = ssh_exec(host=host, user=user, password=password, command=joined)
+    if out.strip():
+        log.info("SSH stdout (tail):\n%s", out[-2000:])
+    if err.strip():
+        log.warning("SSH stderr (tail):\n%s", err[-2000:])
+    return code == 0
+
+
+def _run_xnat_then_sge(
+    batch: str,
+    subj_list: list[str],
+    pipelines_sel: list[str],
+    stages_sel: list[str],
+    *,
+    dicom_root: Path | None,
+    nifti_root: Path | None,
+    results_root: Path | None,
+    model_dir: Path | None,
+    xnat_config: Path | None,
+    xnat_session: str | None,
+    backend: str,
+    device: str,
+    overwrite: bool,
+    regions: tuple[str, ...],
+    container: Path,
+    src_dir: Path,
+    dry_run: bool,
+    log_level: str,
+    emit_script: Path | None,
+    no_remote: bool,
+    remote_host: str | None,
+    remote_user: str | None,
+    exclude_ureter: bool,
+) -> None:
+    """Download from XNAT locally, SFTP DICOMs to cluster, emit and run SGE per batch."""
+    _require_paramiko()
+    local_storage = layout_local(
+        batch,
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=results_root,
+        model_root=model_dir,
+    )
+    cluster_storage = layout_cluster(
+        batch,
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=results_root,
+        model_root=model_dir,
+    )
+    log.info("=" * 78)
+    log.info("XNAT + SGE | local DICOM root: %s", local_storage.dicom_root)
+    log.info("XNAT + SGE | cluster DICOM root: %s", cluster_storage.dicom_root)
+    log.info("=" * 78)
+
+    host, user, password = _prompt_ssh_credentials(remote_host, remote_user)
+
+    req = XnatPesaFatRequest(project_id="IA_PET_V5", session_label=xnat_session)
+    log.info("=" * 78)
+    log.info("XNAT download (local) | subjects=%s", ",".join(subj_list))
+    log.info("=" * 78)
+    dl = download_pesa_fat_dicoms_from_xnat(
+        batch=batch,
+        subjects=subj_list,
+        dicom_root=local_storage.dicom_root,
+        xnat_config_path=xnat_config,
+        request=req,
+    )
+    by_batch = group_subjects_by_batch(dl)
+    script_paths: list[Path] = []
+
+    for batch_name in sorted(by_batch.keys()):
+        subjects_for_batch = by_batch[batch_name]
+        local_lay = layout_local(
+            batch_name,
+            dicom_root=dicom_root,
+            nifti_root=nifti_root,
+            results_root=results_root,
+            model_root=model_dir,
+        )
+        cluster_lay = layout_cluster(
+            batch_name,
+            dicom_root=dicom_root,
+            nifti_root=nifti_root,
+            results_root=results_root,
+            model_root=model_dir,
+        )
+        log.info("=" * 78)
+        log.info(
+            "Upload DICOMs | batch=%s | subjects=%s | remote=%s",
+            batch_name,
+            ",".join(subjects_for_batch),
+            cluster_lay.dicom_root,
+        )
+        log.info("=" * 78)
+        upload_batch_dicoms(
+            local_lay,
+            cluster_lay,
+            subjects_for_batch,
+            host=host,
+            user=user,
+            password=password,
+        )
+
+        if emit_script is not None and len(by_batch) == 1:
+            script_path = emit_script
+        else:
+            script_path = default_submit_script_path(batch_name)
+        script_paths.append(
+            _write_sge_script(
+                cluster_lay,
+                subjects_for_batch,
+                pipelines_sel,
+                stages_sel,
+                script_path=script_path,
+                backend=backend,
+                device=device,
+                model_dir=model_dir,
+                overwrite=overwrite,
+                regions=regions,
+                container=container,
+                src_dir=src_dir,
+                dry_run=dry_run,
+                log_level=log_level,
+                exclude_ureter=exclude_ureter,
+            )
+        )
+
+    log.info("=" * 78)
+    log.info("On the cluster login node: %s", " && ".join(f"bash {p}" for p in script_paths))
+    log.info("=" * 78)
+
+    if no_remote:
+        return
+
+    log.reset(restart_progress=False)
+    ok = _ssh_run_scripts(host, user, password, script_paths)
+    if not ok:
+        log.warning(
+            "Remote execution did not complete successfully. Run manually on the cluster."
+        )
 
 
 def _submit_stage0(
@@ -590,7 +820,7 @@ def _run_sge(
     type=click.Choice(INPUT_SOURCE_CHOICES, case_sensitive=False),
     default="paths",
     show_default=True,
-    help="Input source: on-disk DICOM paths, or download DICOMs from XNAT before stage0 (local only).",
+    help="Input source: on-disk paths, or XNAT download (local run or upload+SGE when --submit sge).",
 )
 @click.option(
     "--xnat-config",
@@ -729,45 +959,68 @@ def main(
             f"Unknown dixon regions {unknown_regions}. Valid: {tuple(dixon_cfg.REGIONS)}"
         )
 
-    lay = layout(
+    lay_local_paths = layout_local(
         batch,
-        dicom_root=dicom_root or DEFAULT_DICOM_ROOT,
-        nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
-        results_root=results_root or DEFAULT_RESULTS_ROOT,
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=results_root,
         model_root=model_dir,
     )
 
     src = str(input_source).strip().lower()
     if src == "xnat":
-        if submit != "local":
-            raise click.ClickException("--input-source xnat is supported only for --submit local.")
-        req = XnatPesaFatRequest(project_id="IA_PET_V5", session_label=xnat_session)
-        # Resolve subject list without relying on batch folders (which may not exist yet).
         subj_list = parse_subjects(subjects) or []
         if not subj_list:
             raise click.ClickException("--input-source xnat requires --subjects.")
+        if submit == "sge":
+            if container is None:
+                container = ctpet_cfg.CONTAINER_PATH
+            src_resolved = Path(src_dir) if src_dir is not None else DEFAULT_NVITK_SRC_DIR
+            _run_xnat_then_sge(
+                batch,
+                subj_list,
+                pipelines_sel,
+                stages_sel,
+                dicom_root=dicom_root,
+                nifti_root=nifti_root,
+                results_root=results_root,
+                model_dir=model_dir,
+                xnat_config=xnat_config,
+                xnat_session=xnat_session,
+                backend=backend,
+                device=device,
+                overwrite=overwrite,
+                regions=region_tuple,
+                container=container,
+                src_dir=src_resolved,
+                dry_run=dry_run,
+                log_level=log_level,
+                emit_script=emit_script,
+                no_remote=no_remote,
+                remote_host=remote_host,
+                remote_user=remote_user,
+                exclude_ureter=exclude_ureter,
+            )
+            return
+        req = XnatPesaFatRequest(project_id="IA_PET_V5", session_label=xnat_session)
         dl = download_pesa_fat_dicoms_from_xnat(
             batch=batch,
             subjects=subj_list,
-            dicom_root=(dicom_root or DEFAULT_DICOM_ROOT),
+            dicom_root=lay_local_paths.dicom_root,
             xnat_config_path=xnat_config,
             request=req,
         )
-        # Run each derived batch separately to preserve the existing folder-based layout.
-        by_batch: dict[str, list[str]] = {}
-        for s, (b, _paths) in dl.items():
-            by_batch.setdefault(b, []).append(s)
-        for b in sorted(by_batch.keys()):
-            lay_b = layout(
+        for b, batch_subjects in group_subjects_by_batch(dl).items():
+            lay_b = layout_local(
                 b,
-                dicom_root=dicom_root or DEFAULT_DICOM_ROOT,
-                nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,
-                results_root=results_root or DEFAULT_RESULTS_ROOT,
+                dicom_root=dicom_root,
+                nifti_root=nifti_root,
+                results_root=results_root,
                 model_root=model_dir,
             )
             _run_local(
                 lay_b,
-                sorted(by_batch[b]),
+                batch_subjects,
                 pipelines_sel,
                 stages_sel,
                 backend=backend,
@@ -784,11 +1037,11 @@ def main(
         raise click.ClickException("--batch auto is only valid with --input-source xnat.")
 
     source = "dicom" if "stage0" in stages_sel else "nifti"
-    subj_list = _subject_list(lay, subjects, source)
+    subj_list = _subject_list(lay_local_paths, subjects, source)
 
     if submit == "local":
         _run_local(
-            lay,
+            lay_local_paths,
             subj_list,
             pipelines_sel,
             stages_sel,
@@ -808,47 +1061,43 @@ def main(
     if container is None:
         container = ctpet_cfg.CONTAINER_PATH
     src_resolved = Path(src_dir) if src_dir is not None else DEFAULT_NVITK_SRC_DIR
+    lay_cluster = layout_cluster(
+        batch,
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=results_root,
+        model_root=model_dir,
+    )
 
     script_path = emit_script if emit_script is not None else default_submit_script_path(batch)
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(script_path, "w", encoding="utf-8") as fh:
-        write_script_header(
-            fh,
-            log_dir=ctpet_cfg.SGE_LOG_DIR,
-            err_dir=ctpet_cfg.SGE_ERR_DIR,
-            title=f"batch={batch} pipelines={','.join(pipelines_sel)}",
-        )
-        _run_sge(
-            lay,
-            subj_list,
-            pipelines_sel,
-            stages_sel,
-            backend=backend,
-            device=device,
-            model_dir=model_dir,
-            overwrite=overwrite,
-            regions=region_tuple,
-            container=container,
-            src_dir=src_resolved,
-            dry_run=dry_run,
-            log_level=log_level,
-            emit=fh,
-            exclude_ureter=exclude_ureter,
-        )
+    _write_sge_script(
+        lay_cluster,
+        subj_list,
+        pipelines_sel,
+        stages_sel,
+        script_path=script_path,
+        backend=backend,
+        device=device,
+        model_dir=model_dir,
+        overwrite=overwrite,
+        regions=region_tuple,
+        container=container,
+        src_dir=src_resolved,
+        dry_run=dry_run,
+        log_level=log_level,
+        exclude_ureter=exclude_ureter,
+    )
     log.info("=" * 78)
-    log.info("PESA-Fat batch '%s' script written: %s", batch, script_path)
     log.info("On the cluster login node: bash %s", script_path)
     log.info("=" * 78)
 
     if no_remote:
         return
 
+    _require_paramiko()
     log.reset(restart_progress=False)
-    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
-    host_resolved = CLUSTER_HOST_ALIASES.get(host_key, host_key)
-    user = remote_user or click.prompt("SSH user")
-    password = getpass.getpass("SSH password: ")
-    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    host, user, password = _prompt_ssh_credentials(remote_host, remote_user)
+    ok = run_sge_script_ssh(host, user, password, script_path)
     if not ok:
         log.warning(
             "Remote execution did not complete successfully. Run manually on the "

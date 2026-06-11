@@ -18,6 +18,9 @@ log = Logger()
 
 
 def _require_pyvista():
+    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz
+
+    configure_headless_viz()
     try:
         import pyvista as pv
     except ImportError as exc:

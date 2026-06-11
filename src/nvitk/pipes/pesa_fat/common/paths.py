@@ -23,10 +23,11 @@ DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-
 DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
 DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
 DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
-# DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/DICOM")
-# DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/NIFTI")
-# DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
-# DEFAULT_MODEL_ROOT   = Path("/home/imarcoss/ai_models/TotalSegmentator/v2.0.0")
+
+LOCAL_DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/DICOM")
+LOCAL_DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/NIFTI")
+LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
+LOCAL_DEFAULT_MODEL_ROOT   = Path("/home/imarcoss/ai_models/TotalSegmentator/v2.0.0")
 
 DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")
 DEFAULT_SGE_SCRIPTS_DIR = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS")
@@ -158,10 +159,120 @@ def layout(
     )
 
 
+def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
+    """Resolve workstation root: CLI flag > ``local_*`` in sge.json > :data:`LOCAL_DEFAULT_*`."""
+    config_key = f"local_{key}"
+    raw = _ppipe_paths.get(config_key)
+    if fallback is not None:
+        return Path(fallback)
+    if raw is not None and str(raw).strip():
+        return Path(os.path.expanduser(str(raw).strip()))
+    return {
+        "dicom_root": LOCAL_DEFAULT_DICOM_ROOT,
+        "nifti_root": LOCAL_DEFAULT_NIFTI_ROOT,
+        "results_root": LOCAL_DEFAULT_RESULTS_ROOT,
+        "model_root": LOCAL_DEFAULT_MODEL_ROOT,
+    }[key]
+
+
+def layout_local(
+    batch: str,
+    *,
+    dicom_root: Path | str | None = None,
+    nifti_root: Path | str | None = None,
+    results_root: Path | str | None = None,
+    model_root: Path | str | None = None,
+) -> BatchLayout:
+    """Workstation layout for XNAT download and ``--submit local``.
+
+    Uses ``pipelines.pesa_fat_paths.local_*`` from ``.nvitk/sge.json`` when CLI
+    ``--*-root`` flags are omitted (never the cluster ``cluster_*`` / ``DEFAULT_*`` paths).
+    """
+    return BatchLayout(
+        batch=batch,
+        dicom_root=_local_path_from_config(
+            "dicom_root", fallback=Path(dicom_root) if dicom_root else None
+        ),
+        nifti_root=_local_path_from_config(
+            "nifti_root", fallback=Path(nifti_root) if nifti_root else None
+        ),
+        results_root=_local_path_from_config(
+            "results_root", fallback=Path(results_root) if results_root else None
+        ),
+        model_root=_local_path_from_config(
+            "model_root", fallback=Path(model_root) if model_root else None
+        ),
+    )
+
+
+def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
+    raw = _ppipe_paths.get(key)
+    if raw is not None and str(raw).strip():
+        return Path(os.path.expanduser(str(raw).strip()))
+    if fallback is not None:
+        return Path(fallback)
+    return {
+        "cluster_dicom_root": DEFAULT_DICOM_ROOT,
+        "cluster_nifti_root": DEFAULT_NIFTI_ROOT,
+        "cluster_results_root": DEFAULT_RESULTS_ROOT,
+        "cluster_model_root": DEFAULT_MODEL_ROOT,
+    }[key]
+
+
+def layout_cluster(
+    batch: str,
+    *,
+    dicom_root: Path | str | None = None,
+    nifti_root: Path | str | None = None,
+    results_root: Path | str | None = None,
+    model_root: Path | str | None = None,
+) -> BatchLayout:
+    """Cluster-side :class:`BatchLayout` for SGE binds and SFTP upload targets.
+
+    Reads ``pipelines.pesa_fat_paths`` from ``.nvitk/sge.json`` when set;
+    otherwise falls back to CLI ``--*-root`` flags or :data:`DEFAULT_*_ROOT`.
+    """
+    ct_pet = _sj.pipeline_section("pesa_fat_ct_pet")
+    model_fb = model_root
+    if model_fb is None:
+        raw_model = ct_pet.get("default_sge_model_root")
+        if raw_model is not None and str(raw_model).strip():
+            model_fb = Path(os.path.expanduser(str(raw_model).strip()))
+    return BatchLayout(
+        batch=batch,
+        dicom_root=_cluster_path_from_config(
+            "cluster_dicom_root", fallback=Path(dicom_root) if dicom_root else None
+        ),
+        nifti_root=_cluster_path_from_config(
+            "cluster_nifti_root", fallback=Path(nifti_root) if nifti_root else None
+        ),
+        results_root=_cluster_path_from_config(
+            "cluster_results_root", fallback=Path(results_root) if results_root else None
+        ),
+        model_root=_cluster_path_from_config(
+            "cluster_model_root", fallback=Path(model_fb) if model_fb else None
+        ),
+    )
+
+
+def group_subjects_by_batch(
+    download_map: dict[str, tuple[str, dict]],
+) -> dict[str, list[str]]:
+    """Group XNAT download results ``{subject: (batch, paths)}`` by batch name."""
+    by_batch: dict[str, list[str]] = {}
+    for subject, (batch_name, _paths) in download_map.items():
+        by_batch.setdefault(str(batch_name), []).append(str(subject))
+    return {b: sorted(subs) for b, subs in sorted(by_batch.items())}
+
+
 __all__ = [
     "BatchLayout",
     "CLUSTER_HOST_ALIASES",
     "DEFAULT_DICOM_ROOT",
+    "LOCAL_DEFAULT_DICOM_ROOT",
+    "LOCAL_DEFAULT_MODEL_ROOT",
+    "LOCAL_DEFAULT_NIFTI_ROOT",
+    "LOCAL_DEFAULT_RESULTS_ROOT",
     "DEFAULT_MODEL_ROOT",
     "DEFAULT_NVITK_SRC_DIR",
     "DEFAULT_NIFTI_ROOT",
@@ -170,7 +281,10 @@ __all__ = [
     "SUBJECT_GLOB",
     "NIFTI_EXTS",
     "default_submit_script_path",
+    "group_subjects_by_batch",
     "layout",
+    "layout_cluster",
+    "layout_local",
     "parse_subjects",
     "resolve_nii",
     "resolve_nii_optional",

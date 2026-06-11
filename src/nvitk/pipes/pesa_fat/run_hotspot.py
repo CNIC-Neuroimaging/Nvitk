@@ -176,6 +176,9 @@ def _list_valid_measures() -> list[str]:
     return sorted(set(out))
 
 def _require_pyvista():
+    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz
+
+    configure_headless_viz()
     try:
         import pyvista as pv
     except ImportError as exc:

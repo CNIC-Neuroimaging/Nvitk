@@ -69,6 +69,16 @@
       "sge_h_vmem": "25G",
       "sge_ngpu": null,
       "sge_queue": null
+    },
+    "pesa_fat_paths": {
+      "local_dicom_root": "/home/imarcoss/DATA/BioIT/PESA-Fat/DICOM",
+      "local_nifti_root": "/home/imarcoss/DATA/BioIT/PESA-Fat/NIFTI",
+      "local_results_root": "/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS",
+      "local_model_root": "/home/imarcoss/ai_models/TotalSegmentator/v2.0.0",
+      "cluster_dicom_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM",
+      "cluster_nifti_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI",
+      "cluster_results_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS",
+      "cluster_model_root": "/references/AI_models/totalsegmentator"
     }
   }
 }
