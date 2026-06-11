@@ -318,6 +318,19 @@ def _prompt_ssh_credentials(
     return host_resolved, user, password
 
 
+def _pesa_fat_extra_sge_dirs(pipelines_sel: list[str]) -> list[Path]:
+    """Log/err dirs beyond CT-PET defaults (e.g. Dixon uses its own subdir)."""
+    extra: list[Path] = []
+    if "dixon-v5" in pipelines_sel:
+        extra.extend(
+            (
+                dixon_cfg.SGE_LOG_DIR,
+                dixon_cfg.SGE_ERR_DIR,
+            )
+        )
+    return extra
+
+
 def _write_sge_script(
     lay: BatchLayout,
     subj_list: list[str],
@@ -342,6 +355,7 @@ def _write_sge_script(
             fh,
             log_dir=ctpet_cfg.SGE_LOG_DIR,
             err_dir=ctpet_cfg.SGE_ERR_DIR,
+            extra_dirs=_pesa_fat_extra_sge_dirs(pipelines_sel),
             title=f"batch={lay.batch} pipelines={','.join(pipelines_sel)}",
         )
         _run_sge(
