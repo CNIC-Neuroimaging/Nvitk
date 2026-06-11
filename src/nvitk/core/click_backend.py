@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from functools import wraps
 from typing import Any, Callable, TypeVar
 
@@ -29,10 +30,14 @@ def backend_click_option(*, default: str = "gpu") -> Callable[[F], F]:
             help="Array backend: cpu (NumPy) or gpu (CuPy).",
         )(f)
 
+        accepts_backend = "backend" in inspect.signature(f).parameters
+
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             backend_val = kwargs.pop("backend", default)
             apply_cli_backend(backend_val)
+            if accepts_backend:
+                kwargs["backend"] = backend_val
             return f(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]
