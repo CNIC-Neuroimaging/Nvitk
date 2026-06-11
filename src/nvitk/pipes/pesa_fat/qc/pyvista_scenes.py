@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import colorsys
-import time
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +17,7 @@ log = Logger()
 
 
 def _require_pyvista():
-    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz
+    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz, export_plotter_html
 
     configure_headless_viz()
     try:
@@ -150,34 +149,6 @@ def _add_label_volume_surfaces(
         )
 
 
-def _export_html_with_retries(pl, out_html: Path, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
-    """Export plotter HTML with retries for flaky network filesystems."""
-    out_html.parent.mkdir(parents=True, exist_ok=True)
-    last_exc: Exception | None = None
-    for attempt in range(1, int(retries) + 1):
-        try:
-            pl.export_html(str(out_html))
-            return True
-        except OSError as exc:
-            last_exc = exc
-            log.warning(
-                "export_html failed (%s) [attempt %d/%d]: %s",
-                out_html,
-                attempt,
-                retries,
-                exc,
-            )
-            if attempt < retries:
-                time.sleep(float(sleep_s))
-        except Exception as exc:
-            last_exc = exc
-            log.warning("export_html failed (%s): %s", out_html, exc)
-            break
-    if last_exc is not None:
-        log.warning("Giving up exporting %s after %d attempt(s).", out_html, retries)
-    return False
-
-
 def _add_colored_vertebrae_surfaces(
     pl,
     pv,
@@ -300,7 +271,12 @@ def export_ctpet_overview_html(
         )
     pl.view_isometric()
 
-    return out_html if _export_html_with_retries(pl, out_html) else None
+    ok = export_plotter_html(
+        pl,
+        out_html,
+        fallback_message=f"CT-PET mask overview export failed for {subject}.",
+    )
+    return out_html if ok else None
 
 
 def export_dixon_overview_html(
@@ -355,7 +331,12 @@ def export_dixon_overview_html(
         )
     pl.view_isometric()
 
-    return out_html if _export_html_with_retries(pl, out_html) else None
+    ok = export_plotter_html(
+        pl,
+        out_html,
+        fallback_message=f"Dixon mask overview export failed for {subject}.",
+    )
+    return out_html if ok else None
 
 
 __all__ = [

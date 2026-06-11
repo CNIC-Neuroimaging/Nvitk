@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections import defaultdict
 from pathlib import Path
 import base64
@@ -23,6 +22,7 @@ from nvitk.pipes.pesa_fat.run_hotspot import (
     _resolve_measure_dixon,
     _surface_from_binary,
 )
+from nvitk.pipes.pesa_fat.qc.headless import export_plotter_html
 from nvitk.viz import show_hotspots
 from nvitk.viz.pet_hotspots import _roi_mask
 
@@ -34,25 +34,6 @@ _URETER_OVERLAY_OPACITY = 0.5
 
 def _safe_name(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
-
-
-def _write_text_with_retries(path: Path, text: str, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    for attempt in range(1, int(retries) + 1):
-        try:
-            path.write_text(text, encoding="utf-8")
-            return True
-        except OSError as exc:
-            log.warning(
-                "write_text failed (%s) [attempt %d/%d]: %s",
-                path,
-                attempt,
-                retries,
-                exc,
-            )
-            if attempt < retries:
-                time.sleep(float(sleep_s))
-    return False
 
 
 def _ureter_on_roi_z_slices(ureter: np.ndarray, roi: np.ndarray) -> np.ndarray:
@@ -88,28 +69,6 @@ def _add_grasa_v_batch_ureter_overlay(pl, *, lay, subject: str, pet, mask_img, l
         show_scalar_bar=False,
     )
     pl.add_text("+ ureter", position="lower_left", font_size=10)
-
-
-def _export_html_with_retries(pl, path: Path, *, retries: int = 3, sleep_s: float = 1.0) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    for attempt in range(1, int(retries) + 1):
-        try:
-            pl.export_html(str(path))
-            return True
-        except OSError as exc:
-            log.warning(
-                "export_html failed (%s) [attempt %d/%d]: %s",
-                path,
-                attempt,
-                retries,
-                exc,
-            )
-            if attempt < retries:
-                time.sleep(float(sleep_s))
-        except Exception as exc:
-            log.warning("export_html failed (%s): %s", path, exc)
-            break
-    return False
 
 
 def export_hotspot_gallery_for_batch(
@@ -172,18 +131,13 @@ def export_hotspot_gallery_for_batch(
                     )
                 fname = f"hotspot_{_safe_name(subject)}_{_safe_name(measure)}.html"
                 path = out_dir / fname
-                try:
-                    ok = _export_html_with_retries(pl, path)
-                    if not ok:
-                        raise OSError(f"export_html failed for {path}")
-                except Exception as exc:
-                    import traceback
-                    log.warning(traceback.format_exc())
-                    log.warning("[%s] hotspot export failed %s: %s", subject, measure, exc)
-                    _write_text_with_retries(
-                        "<!DOCTYPE html><html><body><p>Hotspot HTML export failed: "
-                        f"{exc!s}</p></body></html>",
-                    )
+                ok = export_plotter_html(
+                    pl,
+                    path,
+                    fallback_message=f"Hotspot HTML export failed for {subject} / {measure}.",
+                )
+                if not ok:
+                    log.warning("[%s] hotspot export failed %s: %s", subject, measure, path)
                 rel = f"{rel_assets_root}/{fname}"
                 entries.append((subject, measure, rel))
             except (ValidationError, FileNotFoundError, OSError) as exc:

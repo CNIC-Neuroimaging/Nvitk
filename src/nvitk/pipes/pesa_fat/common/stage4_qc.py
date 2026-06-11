@@ -322,9 +322,10 @@ def run_qc(
     margin_vox: int = 3,
 ) -> Path:
     """Build per-subject QC reports and a batch index; returns the index path."""
-    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz
+    from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz, warn_if_trame_missing
 
     configure_headless_viz()
+    warn_if_trame_missing()
     lay = layout(
         batch,
         nifti_root=nifti_root or DEFAULT_NIFTI_ROOT,

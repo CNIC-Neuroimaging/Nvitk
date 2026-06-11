@@ -284,8 +284,12 @@ def _emit_stage4_qc_stage(
         extra_env={
             "PYTHONPATH": str(binds.src),
             "TOTALSEG_HOME_DIR": str(binds.models),
+            "NVITK_HEADLESS": "1",
             "PYVISTA_OFF_SCREEN": "true",
             "MPLBACKEND": "Agg",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe",
+            "GALLIUM_DRIVER": "llvmpipe",
         },
     )
     submit_stage(
