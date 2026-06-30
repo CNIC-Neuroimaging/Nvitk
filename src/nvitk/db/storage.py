@@ -198,6 +198,24 @@ def write_parquet_table(path: str | Path, df: pd.DataFrame) -> None:
     """Write *df* to Parquet (no index); creates parent directories."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    
+    # DJC: prueba de diagnóstico
+    # print("shape:", df.shape)
+    # print("target:", target)
+    # tmp = "/tmp/debug_image_measurements.parquet"
+    # df.to_parquet(tmp, index=False, engine="pyarrow")
+    # print(f"tmp write OK: {tmp}")
+    # # prueba de diagnóstico
+    # debug_target = "/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset/tables/test2.parquet"
+    # df.to_parquet(
+    #     debug_target,
+    #     index=False,
+    #     engine="pyarrow",
+    # )
+    # print("DEBUG write OK:", debug_target)
+    # # DJC: prueba de diagnóstico
+    
+    print(f"Writing Parquet table to {target}")
     df.to_parquet(target, index=False, engine="pyarrow")
 
 

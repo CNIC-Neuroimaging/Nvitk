@@ -41,6 +41,7 @@ from .xnat import (
     xnat_sequence_to_asset_slot,
 )
 from .xnat_projects import (
+    classify_experiment_ia_pet_v5,
     classify_scan_for_project,
     classify_scan_ia_pet_v5,
     get_xnat_project,
@@ -68,6 +69,7 @@ __all__ = [
     "SQLiteIndex",
     "XnatConnectionConfig",
     "classify_scan",
+    "classify_experiment_ia_pet_v5",
     "classify_scan_for_project",
     "classify_scan_ia_pet_v5",
     "connect_xnat",

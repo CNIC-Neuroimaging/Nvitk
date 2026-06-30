@@ -6,9 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Literal
 
-ClassifierName = Literal["pesabrain", "ia_pet_v5"]
+from nvitk.pipes.pesa_fat.common.dixon_regions import classify_dixon_scans_by_slice_location
 
-_REGION_BY_SCAN_LAST_DIGIT: dict[str, str] = {"1": "HEAD", "2": "THORAX", "3": "LEGS"}
+ClassifierName = Literal["pesabrain", "ia_pet_v5"]
 
 VISIT_PLAQUE = "3"
 VISIT_PESA_BRAIN = "4"
@@ -110,13 +110,13 @@ def build_default_xnat_sequences_csv() -> str:
     return sequences_csv(merged)
 
 
-def _dixon_region_from_scan_id(scan_id: str | None) -> str | None:
-    if not scan_id:
-        return None
-    digits = re.sub(r"\D", "", str(scan_id))
-    if not digits:
-        return None
-    return _REGION_BY_SCAN_LAST_DIGIT.get(digits[-1])
+def _scan_attr(scan: Any, *names: str) -> str:
+    for name in names:
+        if hasattr(scan, name):
+            value = getattr(scan, name)
+            if value is not None:
+                return str(value).strip()
+    return ""
 
 
 def classify_scan_ia_pet_v5(
@@ -127,24 +127,22 @@ def classify_scan_ia_pet_v5(
     experiment_label: str | None = None,
 ) -> dict[str, Any] | None:
     """
-    Classify PESA-Fat IA_PET_V5 scans (Dixon MR + CT/PET).
+    Classify a single PESA-Fat IA_PET_V5 scan (Dixon MR + CT/PET).
 
-    Dixon regions use the last digit of ``scan_id`` (401→HEAD, 402→THORAX, 403→LEGS).
+    Dixon scans return a candidate marker (``dixon=True``); region assignment
+    requires :func:`classify_experiment_ia_pet_v5` at experiment scope.
     """
-    del experiment_label  # reserved for future session-aware rules
+    del scan_id, experiment_label
     if quality is not None and str(quality).strip().lower() != "usable":
         return None
 
     description = series_description or ""
 
     if re.search(r"mdixon|dixon.?quant", description, flags=re.IGNORECASE):
-        region = _dixon_region_from_scan_id(scan_id)
-        if region is None:
-            return None
         return {
             "modality": "mr",
             "orientation": None,
-            "sequence": f"DIXON_{region}",
+            "dixon": True,
         }
 
     if re.search(r"body.*low\s*dose\s*ct|low\s*dose\s*ct", description, flags=re.IGNORECASE):
@@ -166,6 +164,69 @@ def classify_scan_ia_pet_v5(
         }
 
     return None
+
+
+def classify_experiment_ia_pet_v5(
+    scans: list[Any],
+    *,
+    experiment_label: str | None = None,
+) -> list[tuple[Any, str, str, str, dict[str, Any]]]:
+    """Classify all scans in one IA_PET_V5 experiment.
+
+    Returns ``(scan, scan_id, series_description, quality, classification)`` tuples
+    with one entry per sequence label (first scan wins for duplicates).
+    """
+    del experiment_label
+    dixon_candidates: list[tuple[Any, str]] = []
+    preliminary: list[tuple[Any, str, str, str, dict[str, Any]]] = []
+
+    for scan in scans:
+        scan_id = _scan_attr(scan, "id", "label", "name")
+        desc = _scan_attr(scan, "series_description", "type", "label")
+        quality = _scan_attr(scan, "quality")
+        cls = classify_scan_ia_pet_v5(desc, quality or None, scan_id=scan_id)
+        if cls is None:
+            continue
+        if cls.get("dixon"):
+            dixon_candidates.append((scan, scan_id))
+            continue
+        preliminary.append((scan, scan_id, desc, quality, cls))
+
+    results: list[tuple[Any, str, str, str, dict[str, Any]]] = list(preliminary)
+
+    if dixon_candidates:
+        scan_ids = [scan_id for _, scan_id in dixon_candidates]
+        scans_by_id = {scan_id: scan for scan, scan_id in dixon_candidates}
+        seq_by_scan_id = classify_dixon_scans_by_slice_location(scan_ids, scans_by_id)
+        for scan, scan_id in dixon_candidates:
+            sequence = seq_by_scan_id.get(scan_id)
+            if not sequence:
+                continue
+            desc = _scan_attr(scan, "series_description", "type", "label")
+            quality = _scan_attr(scan, "quality")
+            results.append(
+                (
+                    scan,
+                    scan_id,
+                    desc,
+                    quality,
+                    {
+                        "modality": "mr",
+                        "orientation": None,
+                        "sequence": sequence,
+                    },
+                )
+            )
+
+    seen_sequences: set[str] = set()
+    unique: list[tuple[Any, str, str, str, dict[str, Any]]] = []
+    for item in results:
+        sequence = str(item[4].get("sequence") or "").strip()
+        if not sequence or sequence in seen_sequences:
+            continue
+        seen_sequences.add(sequence)
+        unique.append(item)
+    return unique
 
 
 def session_modality_from_classifications(classifications: list[dict[str, Any]]) -> str:
@@ -215,3 +276,26 @@ def classify_scan_for_project(
         scan_id=scan_id,
         experiment_label=experiment_label,
     )
+
+
+__all__ = [
+    "IA_PET_V5_SEQUENCES",
+    "PESA_BRAIN_SEQUENCES",
+    "VISIT_IA_PET_V5",
+    "VISIT_LABEL_BY_PROJECT",
+    "VISIT_PESA_BRAIN",
+    "VISIT_PLAQUE",
+    "XNAT_PROJECTS",
+    "XnatProjectSpec",
+    "build_default_xnat_sequences_csv",
+    "classify_experiment_ia_pet_v5",
+    "classify_scan_for_project",
+    "classify_scan_ia_pet_v5",
+    "default_sequences_for_project",
+    "get_scan_classifier",
+    "get_xnat_project",
+    "list_xnat_project_ids",
+    "sequences_csv",
+    "session_modality_from_classifications",
+    "visit_label_for_project",
+]

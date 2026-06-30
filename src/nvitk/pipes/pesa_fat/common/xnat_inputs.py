@@ -15,7 +15,12 @@ from typing import Any, Iterable
 from nvitk.core.logger import Logger
 from nvitk.db.xnat import connect_xnat, download_scan_dicoms
 from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
-from nvitk.db.xnat_projects import classify_scan_for_project, default_sequences_for_project
+from nvitk.db.xnat_projects import (
+    classify_experiment_ia_pet_v5,
+    classify_scan_for_project,
+    default_sequences_for_project,
+    get_xnat_project,
+)
 
 log = Logger()
 
@@ -69,7 +74,19 @@ def batch_from_session_date(value: Any) -> str:
 
 def _classify_scans_for_experiment(project_id: str, experiment: Any) -> dict[str, Any]:
     scans = list(getattr(experiment, "scans", {}).values())
-    selected: dict[str, Any] = {}
+    exp_label = _experiment_label(experiment)
+    if get_xnat_project(project_id).classifier == "ia_pet_v5":
+        selected: dict[str, Any] = {}
+        for scan, _scan_id, _desc, _quality, cls in classify_experiment_ia_pet_v5(
+            scans,
+            experiment_label=exp_label,
+        ):
+            seq = str(cls.get("sequence") or "").strip()
+            if seq:
+                selected.setdefault(seq, scan)
+        return selected
+
+    selected = {}
     for scan in scans:
         scan_id = str(_coalesce_attr(scan, "id", "label", "name") or "")
         desc = str(_coalesce_attr(scan, "series_description", "type", "label") or "")
@@ -79,14 +96,13 @@ def _classify_scans_for_experiment(project_id: str, experiment: Any) -> dict[str
             desc,
             quality,
             scan_id=scan_id,
-            experiment_label=_experiment_label(experiment),
+            experiment_label=exp_label,
         )
         if cls is None:
             continue
         seq = str(cls.get("sequence") or "").strip()
         if not seq:
             continue
-        # Keep the first scan for each sequence.
         selected.setdefault(seq, scan)
     return selected
 
@@ -103,13 +119,30 @@ def _debug_experiment_scans(project_id: str, experiment: Any) -> str:
         desc = str(_coalesce_attr(scan, "series_description", "type", "label") or "")
         quality = str(_coalesce_attr(scan, "quality") or "")
         try:
-            cls = classify_scan_for_project(
-                project_id,
-                desc,
-                quality,
-                scan_id=scan_id,
-                experiment_label=exp_label,
-            )
+            if get_xnat_project(project_id).classifier == "ia_pet_v5":
+                matches = [
+                    cls
+                    for s, sid, d, q, cls in classify_experiment_ia_pet_v5(
+                        scans,
+                        experiment_label=exp_label,
+                    )
+                    if sid == scan_id
+                ]
+                cls = matches[0] if matches else classify_scan_for_project(
+                    project_id,
+                    desc,
+                    quality,
+                    scan_id=scan_id,
+                    experiment_label=exp_label,
+                )
+            else:
+                cls = classify_scan_for_project(
+                    project_id,
+                    desc,
+                    quality,
+                    scan_id=scan_id,
+                    experiment_label=exp_label,
+                )
         except Exception as exc:
             cls = {"error": str(exc)}
         lines.append(

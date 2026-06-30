@@ -14,7 +14,7 @@ Responsibilities (applied to a single ``PESA*`` subject at a time):
       * ``CT_<series>.nii``           -> ``CT.nii``
       * ``PT_<series>.nii``           -> ``PT.nii``
       * ``MR_<series>_<metric>.nii``  -> ``DIXON_<REGION>_<metric>.nii``
-        (region from the series-number last digit: 1=HEAD, 2=THORAX, 3=LEGS)
+        (region from DICOM slice location: lowest→HEAD, middle→THORAX, highest→LEGS)
 
 The script is idempotent: converted subject folders that already contain
 NIfTI files are skipped; already-renamed targets are kept (``Path.replace`` is
@@ -45,10 +45,10 @@ from nvitk.pipes.pesa_fat.common.paths import (
 )
 
 
+from nvitk.pipes.pesa_fat.common.dixon_regions import build_series_region_map
+
+
 log = Logger()
-
-
-_REGION_BY_LAST_DIGIT: dict[str, str] = {"1": "HEAD", "2": "THORAX", "3": "LEGS"}
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,11 @@ class RenameResult:
     reason: str
 
 
-def _plan_rename(src: Path) -> RenameResult:
+def _plan_rename(
+    src: Path,
+    *,
+    series_region_map: dict[str, str] | None = None,
+) -> RenameResult:
     name = src.name
     if name.startswith("CT_") and (name.endswith(".nii") or name.endswith(".nii.gz")):
         ext = ".nii.gz" if name.endswith(".nii.gz") else ".nii"
@@ -81,8 +85,9 @@ def _plan_rename(src: Path) -> RenameResult:
         if len(parts) < 2:
             return RenameResult(src, None, "mr-missing-suffix")
         series, suffix = parts
-        last_digit = series[-1] if series else ""
-        region = _REGION_BY_LAST_DIGIT.get(last_digit)
+        region = None
+        if series_region_map is not None:
+            region = series_region_map.get(series)
         if region is None:
             return RenameResult(src, None, f"mr-unknown-series:{series}")
         return RenameResult(src, src.with_name(f"DIXON_{region}_{suffix}{ext}"), "mr")
@@ -95,11 +100,36 @@ def _iter_nifti_files(folder: Path) -> Iterable[Path]:
     return sorted([*folder.glob("*.nii"), *folder.glob("*.nii.gz")])
 
 
-def rename_subject_folder(folder: Path) -> dict[str, int]:
+def _mr_series_numbers_from_folder(folder: Path) -> set[str]:
+    series: set[str] = set()
+    for src in _iter_nifti_files(folder):
+        name = src.name
+        if not name.startswith("MR_"):
+            continue
+        ext = ".nii.gz" if name.endswith(".nii.gz") else ".nii"
+        rest = name[len("MR_") :]
+        rest = rest[: -len(ext)]
+        parts = rest.split("_", 1)
+        if len(parts) >= 1 and parts[0]:
+            series.add(parts[0])
+    return series
+
+
+def rename_subject_folder(
+    folder: Path,
+    *,
+    dicom_dir: Path | None = None,
+) -> dict[str, int]:
     """Apply the stage-0 rename policy to every NIfTI file in ``folder``."""
+    series_region_map: dict[str, str] | None = None
+    mr_series = _mr_series_numbers_from_folder(folder)
+    if mr_series and dicom_dir is not None:
+        log.info("Assigning Dixon regions from DICOM slice locations ...")
+        series_region_map = build_series_region_map(dicom_dir, mr_series)
+
     counts = {"renamed": 0, "kept": 0, "skipped": 0}
     for src in _iter_nifti_files(folder):
-        plan = _plan_rename(src)
+        plan = _plan_rename(src, series_region_map=series_region_map)
         if plan.dst is None:
             counts["skipped"] += 1
             log.debug(f"skip: {src.name} ({plan.reason})")
@@ -168,7 +198,7 @@ def run_subject(
             skip_existing=skip_existing,
         )
 
-    summary = rename_subject_folder(subject_nifti)
+    summary = rename_subject_folder(subject_nifti, dicom_dir=subject_dicom)
     log.info(
         f"[{subject}] rename done: "
         + ", ".join(f"{k}={v}" for k, v in summary.items())

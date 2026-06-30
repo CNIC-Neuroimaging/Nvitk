@@ -970,8 +970,10 @@ def sync_xnat_project(
             raise ValueError("download_niftis requires download_root or nifti_download_root to be set.")
 
     from .xnat_projects import (
+        classify_experiment_ia_pet_v5,
         classify_scan_for_project,
         default_sequences_for_project,
+        get_xnat_project,
         session_modality_from_classifications,
         visit_label_for_project,
     )
@@ -1041,21 +1043,38 @@ def sync_xnat_project(
 
                 scans = list(getattr(experiment, "scans", {}).values())
                 classified_scans: list[tuple[Any, str, str, str, dict[str, Any]]] = []
-                for scan in scans:
-                    scan_id = str(_coalesce_attr(scan, "id", "label", "name") or "")
-                    series_description = str(
-                        _coalesce_attr(scan, "series_description", "type", "label") or ""
-                    )
-                    quality = str(_coalesce_attr(scan, "quality") or "")
-                    classification = classify_scan_for_project(
-                        config.project,
-                        series_description,
-                        quality,
-                        scan_id=scan_id,
+                try:
+                    project_spec = get_xnat_project(config.project)
+                except KeyError:
+                    project_spec = None
+
+                if project_spec is not None and project_spec.classifier == "ia_pet_v5":
+                    candidate_items = classify_experiment_ia_pet_v5(
+                        scans,
                         experiment_label=experiment_label,
                     )
-                    if classification is None:
-                        continue
+                else:
+                    candidate_items = []
+                    for scan in scans:
+                        scan_id = str(_coalesce_attr(scan, "id", "label", "name") or "")
+                        series_description = str(
+                            _coalesce_attr(scan, "series_description", "type", "label") or ""
+                        )
+                        quality = str(_coalesce_attr(scan, "quality") or "")
+                        classification = classify_scan_for_project(
+                            config.project,
+                            series_description,
+                            quality,
+                            scan_id=scan_id,
+                            experiment_label=experiment_label,
+                        )
+                        if classification is None:
+                            continue
+                        candidate_items.append(
+                            (scan, scan_id, series_description, quality, classification)
+                        )
+
+                for scan, scan_id, series_description, quality, classification in candidate_items:
                     if allowed_sequences and classification["sequence"] not in allowed_sequences:
                         if not (
                             classification["sequence"] == "4DFLOW_GENERIC"
