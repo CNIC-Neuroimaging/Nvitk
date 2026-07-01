@@ -34,19 +34,19 @@
       "sge_account": "GPU",
       "log_subdir": "totalseg",
       "err_subdir": "totalseg",
-      "default_sge_model_root": "/references/AI_models/totalsegmentator",
+      "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.07.11.sif"
     },
     "pesa_fat_ct_pet": {
       "log_subdir": "PESAFatV5-CT-PET",
       "err_subdir": "PESAFatV5-CT-PET",
-      "default_sge_model_root": "/references/AI_models/totalsegmentator",
+      "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.07.11.sif"
     },
     "pesa_fat_dixon": {
       "log_subdir": "PESAFatV5-DIXON",
       "err_subdir": "PESAFatV5-DIXON",
-      "default_sge_model_root": "/references/AI_models/totalsegmentator",
+      "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.07.11.sif"
     },
     "qvtpy": {
@@ -78,7 +78,7 @@
       "cluster_dicom_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM",
       "cluster_nifti_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI",
       "cluster_results_root": "/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS",
-      "cluster_model_root": "/references/AI_models/totalsegmentator"
+      "cluster_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"
     }
   }
 }
