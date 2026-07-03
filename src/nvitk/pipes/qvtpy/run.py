@@ -198,6 +198,7 @@ def _xnat_convert_subject(
             xnat_config=xnat_config,
             sequences=sequences,
             skip_existing=convert_kwargs.get("skip_existing", False),
+            skip_existing_downloads=convert_kwargs.get("skip_existing_downloads", False),
         )
         return stage0_convert.run_subject(
             subject,
@@ -360,6 +361,15 @@ def _emit_stage0_convert(
     help="(sge) Host tree mounted at /nvitk/src/.",
 )
 @click.option("--skip-existing", is_flag=True, default=False)
+@click.option(
+    "--skip-existing-downloads",
+    is_flag=True,
+    default=False,
+    help=(
+        "Skip XNAT download when all requested sequences already exist under the "
+        "local subject DICOM tree; fetch only missing sequences otherwise."
+    ),
+)
 @click.option(
     "--output-root",
     type=click.Path(path_type=Path),
@@ -564,6 +574,7 @@ def main(
     container: Path,
     src_dir: Path | None,
     skip_existing: bool,
+    skip_existing_downloads: bool,
     output_root: Path | None,
     emit_script: Path | None,
     no_remote: bool,
@@ -670,8 +681,8 @@ def main(
         run_dl = True
         if not save_dicoms:
             log.info(
-                "--from-source xnat with --submit sge: DICOMs download locally then "
-                f"upload to cluster ({cluster_paths.dicom_root})."
+                "--from-source xnat with --submit sge: per-subject XNAT download -> "
+                f"cluster SFTP ({cluster_paths.dicom_root}), then delete local staging."
             )
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
@@ -736,7 +747,7 @@ def main(
     ) as run:
         if run_dl:
             if submit == "sge":
-                log.info("stage0_d runs locally; SGE covers other selected stages.")
+                log.info("stage0_d streams locally to cluster; SGE covers other selected stages.")
             from nvitk.db.xnat import requested_sequence_set
 
             if xnat_conn is None:
@@ -745,54 +756,63 @@ def main(
                 stage0_download.DEFAULT_SEQUENCES
             )
 
-            def _download() -> None:
-                stage0_download.run_download(
-                    subject_list,
-                    dicom_root=dicom_download_root,
-                    xnat_config=xnat_conn,
-                    sequences=seq_set,
-                    skip_existing=skip_existing,
-                    report=report,
+            if submit == "sge" and use_xnat and subject_list:
+                from nvitk.pipes.qvtpy.util.cluster_upload import (
+                    prompt_ssh_credentials,
+                    stream_subjects_xnat_to_cluster,
                 )
 
-            run.run_stage(
-                "(cohort)",
-                STAGE_DOWNLOAD,
-                _download,
-                detail=f"{len(subject_list)} subject(s)",
-            )
+                ssh_host_resolved, ssh_user, ssh_password = prompt_ssh_credentials(
+                    remote_host=remote_host,
+                    remote_user=remote_user,
+                    host_aliases=cfg.CLUSTER_HOST_ALIASES,
+                )
 
-            if submit == "sge" and use_xnat and subject_list:
-                from nvitk.pipes.qvtpy.util.cluster_upload import upload_subjects_dicoms
-
-                try:
-                    import paramiko  # noqa: F401
-                except ImportError as exc:
-                    raise click.ClickException(
-                        "SGE + XNAT upload requires Paramiko (pip install paramiko)."
-                    ) from exc
-
-                host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
-                ssh_host_resolved = cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
-                ssh_user = remote_user or click.prompt("SSH user")
-                ssh_password = getpass.getpass("SSH password: ")
-
-                def _upload() -> None:
-                    upload_subjects_dicoms(
-                        local_paths,
-                        cluster_paths,
+                def _stream_xnat_to_cluster() -> None:
+                    results = stream_subjects_xnat_to_cluster(
                         subject_list,
+                        local_paths=local_paths,
+                        cluster_paths=cluster_paths,
+                        xnat_config=xnat_conn,
+                        sequences=seq_set,
                         host=ssh_host_resolved,
                         user=ssh_user,
                         password=ssh_password,
-                        skip_if_remote_nonempty=skip_existing,
+                        skip_existing=skip_existing,
+                        skip_existing_downloads=skip_existing_downloads,
+                        delete_local_after_upload=True,
+                    )
+                    if report:
+                        stage0_download.print_qc_report_from_results(
+                            results, subject_list, seq_set
+                        )
+
+                run.run_stage(
+                    "(cohort)",
+                    STAGE_DOWNLOAD,
+                    _stream_xnat_to_cluster,
+                    detail=(
+                        f"{len(subject_list)} subject(s) "
+                        f"XNAT -> {cluster_paths.dicom_root} (local staging cleared)"
+                    ),
+                )
+            else:
+                def _download() -> None:
+                    stage0_download.run_download(
+                        subject_list,
+                        dicom_root=dicom_download_root,
+                        xnat_config=xnat_conn,
+                        sequences=seq_set,
+                        skip_existing=skip_existing,
+                        skip_existing_downloads=skip_existing_downloads,
+                        report=report,
                     )
 
                 run.run_stage(
                     "(cohort)",
-                    "upload_dicoms",
-                    _upload,
-                    detail=f"{len(subject_list)} subject(s) -> {cluster_paths.dicom_root}",
+                    STAGE_DOWNLOAD,
+                    _download,
+                    detail=f"{len(subject_list)} subject(s)",
                 )
 
         xnat_seq_set: set[str] = set()
@@ -811,6 +831,7 @@ def main(
                     convert_kwargs = dict(
                         compute_phase_derived=compute_phase_derived,
                         skip_existing=skip_existing,
+                        skip_existing_downloads=skip_existing_downloads,
                         phase_background_correction=phase_background_correction,
                         phase_bg_poly_order=phase_bg_poly_order,
                         phase_bg_static_percentile=phase_bg_static_percentile,

@@ -272,6 +272,44 @@ def _dir_has_files(directory: Path) -> bool:
     return False
 
 
+def sequence_slot_dir(sequence: str) -> str:
+    """Lowercase slot folder name for a sequence key (e.g. ``TOF`` -> ``tof``)."""
+    slot = SLOT_DIRS.get(sequence)
+    if slot is None:
+        slot = re.sub(r"[^0-9a-z]+", "_", sequence.lower()).strip("_") or "unknown"
+    return slot
+
+
+def local_subject_dicoms_complete(
+    dicom_root: str | Path,
+    subject: str,
+    sequences: Iterable[str],
+) -> bool:
+    """Return True when every requested sequence has files under the local subject tree."""
+    subj_dir = Path(dicom_root).expanduser() / subject
+    for sequence in sequences:
+        if not _dir_has_files(subj_dir / sequence_slot_dir(sequence)):
+            return False
+    return True
+
+
+def collect_local_subject_dicoms(
+    dicom_root: str | Path,
+    subject: str,
+    sequences: Iterable[str],
+) -> dict[str, list[Path]]:
+    """Build a :func:`download_subject`-shaped result from an on-disk local tree."""
+    subj_dir = Path(dicom_root).expanduser() / subject
+    out: dict[str, list[Path]] = {}
+    for sequence in sequences:
+        slot_dir = subj_dir / sequence_slot_dir(sequence)
+        if _dir_has_files(slot_dir):
+            out[sequence] = sorted(p for p in slot_dir.rglob("*") if p.is_file())
+        else:
+            out[sequence] = []
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Per-subject and batch download
 # ---------------------------------------------------------------------------
@@ -320,9 +358,7 @@ def download_subject(
                 )
                 continue
 
-            slot = SLOT_DIRS.get(sequence)
-            if slot is None:
-                slot = re.sub(r"[^0-9a-z]+", "_", sequence.lower()).strip("_") or "unknown"
+            slot = sequence_slot_dir(sequence)
 
             scan_id = str(_coalesce_attr(scan, "id", "label", "name") or "")
             target_dir = dicom_root / subject_label / slot
@@ -362,6 +398,7 @@ def run_download(
     xnat_config: XnatConnectionConfig,
     sequences: Iterable[str] | None = None,
     skip_existing: bool = True,
+    skip_existing_downloads: bool = False,
     report: bool = False,
 ) -> dict[str, dict[str, list[Path]]]:
     """Download requested DICOM sequences for a list of subjects.
@@ -378,17 +415,32 @@ def run_download(
     log.info(f"  sequences  : {sorted(seq_set)}")
     log.info(f"  xnat       : {xnat_config.server} / {xnat_config.project}")
 
+    log.info(f"  skip_existing_downloads: {skip_existing_downloads}")
+
     results: dict[str, dict[str, list[Path]]] = {}
     with connect_xnat(xnat_config) as session:
         for subject_label in subjects:
             try:
+                if skip_existing_downloads and local_subject_dicoms_complete(
+                    root, subject_label, seq_set
+                ):
+                    log.info(
+                        f"[{subject_label}] all requested sequences present locally "
+                        "— skip XNAT download"
+                    )
+                    results[subject_label] = collect_local_subject_dicoms(
+                        root, subject_label, seq_set
+                    )
+                    continue
+
+                per_seq_skip = skip_existing_downloads or skip_existing
                 results[subject_label] = download_subject(
                     session,
                     xnat_config.project,
                     subject_label,
                     dicom_root=root,
                     sequences=seq_set,
-                    skip_existing=skip_existing,
+                    skip_existing=per_seq_skip,
                 )
             except LookupError as exc:
                 log.warning(f"[{subject_label}] {exc}")
@@ -406,6 +458,66 @@ def run_download(
         print_qc_report(root, subjects, required_slots)
 
     return results
+
+
+def print_qc_report_from_results(
+    results: dict[str, dict[str, list[Path]]],
+    subjects: Iterable[str],
+    sequences: Iterable[str],
+) -> dict[str, Any]:
+    """Print QC summary from in-memory download results (no local tree required)."""
+    seq_list = sorted(set(sequences))
+    slot_by_seq: dict[str, str] = {}
+    for seq in seq_list:
+        slot = SLOT_DIRS.get(seq) or re.sub(r"[^0-9a-z]+", "_", seq.lower()).strip("_")
+        if slot:
+            slot_by_seq[seq] = slot
+
+    subj_list = sorted(set(subjects))
+    complete: list[str] = []
+    incomplete: dict[str, list[str]] = {}
+
+    for subj in subj_list:
+        by_seq = results.get(subj, {})
+        missing: list[str] = []
+        for seq in seq_list:
+            slot = slot_by_seq.get(seq, seq.lower())
+            if not by_seq.get(seq):
+                missing.append(f"{slot}[missing or empty]")
+        if not missing:
+            complete.append(subj)
+        else:
+            incomplete[subj] = missing
+
+    bar = "=" * 60
+    print(bar)
+    print("DICOM completeness report (from download results)")
+    slots = [slot_by_seq[s] for s in seq_list if s in slot_by_seq]
+    print(f"  sequences req : {' '.join(slots)}")
+    print(bar)
+    print(f"Subjects scanned : {len(subj_list)}")
+    print(f"Complete         : {len(complete)}")
+    print(f"Incomplete       : {len(incomplete)}")
+    print()
+
+    if incomplete:
+        print("-- Incomplete subjects (missing sequences) --")
+        width = max((len(s) for s in incomplete.keys()), default=0)
+        for subj in sorted(incomplete.keys()):
+            print(f"  {subj:<{width}}  ->  {' '.join(incomplete[subj])}")
+        print()
+
+    if complete:
+        print("-- Complete subjects --")
+        for subj in complete:
+            print(f"  {subj}")
+        print()
+
+    return {
+        "complete": complete,
+        "incomplete": incomplete,
+        "n_subjects": len(subj_list),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +647,16 @@ def print_qc_report(
     help="Skip a sequence when its destination directory already has files.",
 )
 @click.option(
+    "--skip-existing-downloads",
+    is_flag=True,
+    default=False,
+    help=(
+        "When all requested sequences are already on disk under the local subject "
+        "tree, skip the XNAT download for that subject. Missing sequences are "
+        "still fetched from XNAT."
+    ),
+)
+@click.option(
     "--database",
     "database_root",
     type=click.Path(path_type=Path),
@@ -559,6 +681,7 @@ def main(
     password: str | None,
     netrc_file: Path | None,
     skip_existing: bool,
+    skip_existing_downloads: bool,
     report: bool,
     database_root: Path | None,
 ) -> None:
@@ -595,6 +718,7 @@ def main(
         xnat_config=conn,
         sequences=seq_set,
         skip_existing=skip_existing,
+        skip_existing_downloads=skip_existing_downloads,
         report=report,
     )
 
@@ -602,11 +726,15 @@ def main(
 __all__ = [
     "DEFAULT_SEQUENCES",
     "SLOT_DIRS",
+    "collect_local_subject_dicoms",
     "download_subject",
     "load_subjects",
+    "local_subject_dicoms_complete",
     "resolve_subjects_for_xnat_pipeline",
     "print_qc_report",
+    "print_qc_report_from_results",
     "run_download",
+    "sequence_slot_dir",
     "main",
 ]
 
