@@ -31,16 +31,18 @@ SGE_JOB_PREFIX: str = "QVTPY"
 
 
 # ---------------------------------------------------------------------------
-# Roots (host-side)
+# Roots (cluster defaults; see util.paths for local vs cluster layout)
 # ---------------------------------------------------------------------------
 
-DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM")
-DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
-
-# DEFAULT_DICOM_ROOT   = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/DICOM")
-# DEFAULT_NIFTI_ROOT   = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/NIFTI")
-# DEFAULT_RESULTS_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy")
+from nvitk.pipes.qvtpy.util.paths import (  # noqa: E402
+    CLUSTER_HOST_ALIASES,
+    DEFAULT_DICOM_ROOT,
+    DEFAULT_NIFTI_ROOT,
+    DEFAULT_RESULTS_ROOT,
+    LOCAL_DEFAULT_DICOM_ROOT,
+    LOCAL_DEFAULT_NIFTI_ROOT,
+    LOCAL_DEFAULT_RESULTS_ROOT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -108,9 +110,13 @@ CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe, fallback=CONTAINER_PATH
 __all__ = [
     "PIPELINE_NAME",
     "SGE_JOB_PREFIX",
+    "CLUSTER_HOST_ALIASES",
     "DEFAULT_DICOM_ROOT",
     "DEFAULT_NIFTI_ROOT",
     "DEFAULT_RESULTS_ROOT",
+    "LOCAL_DEFAULT_DICOM_ROOT",
+    "LOCAL_DEFAULT_NIFTI_ROOT",
+    "LOCAL_DEFAULT_RESULTS_ROOT",
     "STAGE0_DIR",
     "STAGE1_EICAB_DIR",
     "QVT_SUBDIR",

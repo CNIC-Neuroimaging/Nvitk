@@ -59,6 +59,14 @@
       "sge_ngpu": 1,
       "sge_h_vmem": "30G"
     },
+    "qvtpy_paths": {
+      "local_dicom_root": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM",
+      "local_nifti_root": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI",
+      "local_results_root": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy",
+      "cluster_dicom_root": "/data_lab_MCC/imarcoss/LabMCC/DATA/DICOM",
+      "cluster_nifti_root": "/data_lab_MCC/imarcoss/LabMCC/DATA/NIFTI",
+      "cluster_results_root": "/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy"
+    },
     "image_tools": {
       "log_subdir": "image_tools",
       "err_subdir": "image_tools",

@@ -172,41 +172,62 @@ def resolve_subjects_for_xnat_pipeline(
     subjects: str | None,
     subjects_file: str | Path | None,
     xnat_config: XnatConnectionConfig,
+    database_root: str | Path | None = None,
 ) -> tuple[list[str], XnatConnectionConfig]:
     """Resolve subjects for qvtpy when sourcing DICOMs from XNAT.
 
     When *subjects* is a single cohort alias (e.g. ``PESA-Brain``), expand to all
     subject labels in that XNAT project and override ``xnat_config.project``.
+
+    When *database_root* is set, pre-filter to subjects with all qvtpy sequences
+    indexed in the catalog ``scans`` table (TOF + 3× 4DFlow).
     """
     from nvitk.db.xnat import list_xnat_project_subject_labels
     from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
+    from nvitk.pipes.qvtpy.util.db_subject_filter import (
+        filter_subjects_by_qvtpy_scan_availability,
+    )
 
     if subjects_file is not None:
-        return (
-            load_subjects(subjects=subjects, subjects_file=subjects_file),
-            xnat_config,
-        )
-
-    if subjects is None:
+        labels = load_subjects(subjects=subjects, subjects_file=subjects_file)
+        conn = xnat_config
+    elif subjects is None:
         raise click.ClickException(
             "Provide exactly one of --subjects or --subjects-file."
         )
+    else:
+        project_id = resolve_xnat_project_cohort_token(subjects)
+        if project_id is None:
+            labels = load_subjects(subjects=subjects, subjects_file=None)
+            conn = xnat_config
+        else:
+            conn = replace(xnat_config, project=project_id)
+            labels = list_xnat_project_subject_labels(conn)
+            if not labels:
+                raise click.ClickException(
+                    f"No subjects found in XNAT project {project_id!r} "
+                    f"(from cohort alias {subjects!r})."
+                )
+            log.info(
+                f"XNAT cohort alias {subjects!r} -> project {project_id!r} "
+                f"({len(labels)} subject(s))"
+            )
 
-    project_id = resolve_xnat_project_cohort_token(subjects)
-    if project_id is None:
-        return load_subjects(subjects=subjects, subjects_file=None), xnat_config
+    if database_root is not None:
+        try:
+            labels = filter_subjects_by_qvtpy_scan_availability(
+                labels,
+                database_root=database_root,
+                project_id=conn.project,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if not labels:
+            raise click.ClickException(
+                "No subjects remain after database scan pre-filter "
+                f"(project={conn.project!r})."
+            )
 
-    conn = replace(xnat_config, project=project_id)
-    labels = list_xnat_project_subject_labels(conn)
-    if not labels:
-        raise click.ClickException(
-            f"No subjects found in XNAT project {project_id!r} "
-            f"(from cohort alias {subjects!r})."
-        )
-    log.info(
-        f"XNAT cohort alias {subjects!r} -> project {project_id!r} "
-        f"({len(labels)} subject(s))"
-    )
     return labels, conn
 
 
@@ -467,9 +488,8 @@ def print_qc_report(
 @click.option(
     "--dicom-root",
     type=click.Path(path_type=Path),
-    default=cfg.DEFAULT_DICOM_ROOT,
-    show_default=True,
-    help="Destination root for downloaded DICOMs.",
+    default=None,
+    help="Destination root for downloaded DICOMs (default: local layout from config).",
 )
 @click.option(
     "--subjects",
@@ -515,6 +535,13 @@ def print_qc_report(
     help="Skip a sequence when its destination directory already has files.",
 )
 @click.option(
+    "--database",
+    "database_root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Dataset root with indexed scans (pre-filter TOF + 3× 4DFlow availability).",
+)
+@click.option(
     "--report",
     is_flag=True,
     default=False,
@@ -533,8 +560,13 @@ def main(
     netrc_file: Path | None,
     skip_existing: bool,
     report: bool,
+    database_root: Path | None,
 ) -> None:
     Logger()
+
+    from nvitk.pipes.qvtpy.util.paths import layout_local
+
+    local_paths = layout_local(dicom_root=dicom_root if dicom_root else None)
 
     profile = load_xnat_profile(xnat_config_path)
     conn = resolve_xnat_connection(
@@ -550,6 +582,7 @@ def main(
         subjects=subjects,
         subjects_file=subjects_file,
         xnat_config=conn,
+        database_root=database_root,
     )
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
@@ -558,7 +591,7 @@ def main(
 
     run_download(
         subject_list,
-        dicom_root=dicom_root,
+        dicom_root=local_paths.dicom_root,
         xnat_config=conn,
         sequences=seq_set,
         skip_existing=skip_existing,

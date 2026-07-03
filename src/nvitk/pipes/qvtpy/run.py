@@ -313,8 +313,18 @@ def _emit_stage0_convert(
 
 @click.command("nvitk-qvtpy")
 @backend_click_option()
-@click.option("--dicom-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_DICOM_ROOT)
-@click.option("--nifti-root", type=click.Path(path_type=Path), default=cfg.DEFAULT_NIFTI_ROOT)
+@click.option(
+    "--dicom-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override DICOM root (default: local or cluster layout from config).",
+)
+@click.option(
+    "--nifti-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override NIfTI root (default: local or cluster layout from config).",
+)
 @click.option(
     "--stages",
     "stages_spec",
@@ -353,9 +363,8 @@ def _emit_stage0_convert(
 @click.option(
     "--output-root",
     type=click.Path(path_type=Path),
-    default=cfg.DEFAULT_RESULTS_ROOT,
-    show_default=True,
-    help="Results root (eICAB + qvtpy stages).",
+    default=None,
+    help="Results root (default: local or cluster layout from config).",
 )
 @click.option("--emit-script", type=click.Path(path_type=Path), default=None)
 @click.option("--no-remote", is_flag=True)
@@ -399,6 +408,17 @@ def _emit_stage0_convert(
     help="Sequences for stage0_d.",
 )
 @click.option("--xnat-config", "xnat_config_path", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--database",
+    "database_root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Dataset catalog root with indexed XNAT scans (enables pre-filter: subject "
+        "must have TOF + 4DFLOW_AP/RL/FH in the scans table). Omit to download "
+        "requested sequences for all resolved subjects."
+    ),
+)
 @click.option("--report", is_flag=True, default=False)
 @click.option("--report-derived", is_flag=True, default=False)
 # --- stage 1 ---
@@ -535,8 +555,8 @@ def _emit_stage0_convert(
     help="Stage6: render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
 )
 def main(
-    dicom_root: Path,
-    nifti_root: Path,
+    dicom_root: Path | None,
+    nifti_root: Path | None,
     stages_spec: str,
     subjects: str | None,
     subjects_file: Path | None,
@@ -544,7 +564,7 @@ def main(
     container: Path,
     src_dir: Path | None,
     skip_existing: bool,
-    output_root: Path,
+    output_root: Path | None,
     emit_script: Path | None,
     no_remote: bool,
     remote_host: str | None,
@@ -557,6 +577,7 @@ def main(
     phase_bg_static_percentile: float,
     sequences: str,
     xnat_config_path: Path | None,
+    database_root: Path | None,
     report: bool,
     report_derived: bool,
     eicab_container: Path | None,
@@ -600,6 +621,36 @@ def main(
 ) -> None:
     Logger()
 
+    from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local
+
+    local_paths = layout_local(
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=output_root,
+    )
+    cluster_paths = layout_cluster(
+        dicom_root=dicom_root,
+        nifti_root=nifti_root,
+        results_root=output_root,
+    )
+    if submit == "sge":
+        dicom_root_eff = cluster_paths.dicom_root
+        nifti_root_eff = cluster_paths.nifti_root
+        output_root_eff = cluster_paths.results_root
+        dicom_download_root = local_paths.dicom_root
+    else:
+        dicom_root_eff = local_paths.dicom_root
+        nifti_root_eff = local_paths.nifti_root
+        output_root_eff = local_paths.results_root
+        dicom_download_root = local_paths.dicom_root
+
+    log.info(f"Layout | submit={submit}")
+    log.info(f"  local   dicom={local_paths.dicom_root} nifti={local_paths.nifti_root}")
+    log.info(f"  cluster dicom={cluster_paths.dicom_root} nifti={cluster_paths.nifti_root}")
+    log.info(f"  active  dicom={dicom_root_eff} nifti={nifti_root_eff} results={output_root_eff}")
+    if submit == "sge" and from_source.lower() == "xnat":
+        log.info(f"  XNAT download target (local): {dicom_download_root}")
+
     stages = _parse_stages(stages_spec)
     run_dl = STAGE_DOWNLOAD in stages
     run_conv = STAGE_CONVERT in stages
@@ -619,8 +670,8 @@ def main(
         run_dl = True
         if not save_dicoms:
             log.info(
-                "--from-source xnat with --submit sge: DICOMs persist under "
-                "--dicom-root (ignoring --no-save-dicoms) for cluster access."
+                "--from-source xnat with --submit sge: DICOMs download locally then "
+                f"upload to cluster ({cluster_paths.dicom_root})."
             )
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
@@ -640,6 +691,7 @@ def main(
                 subjects=subjects,
                 subjects_file=subjects_file,
                 xnat_config=xnat_conn,
+                database_root=database_root,
             )
         else:
             from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
@@ -656,7 +708,7 @@ def main(
     else:
         if run_dl:
             raise click.ClickException("stage0_d requires --subjects or --subjects-file.")
-        fallback_root = dicom_root if run_conv else nifti_root
+        fallback_root = dicom_root_eff if run_conv else nifti_root_eff
         subject_list = _iter_subjects(fallback_root)
         if not subject_list:
             raise click.ClickException(
@@ -666,6 +718,10 @@ def main(
 
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
+
+    ssh_host_resolved: str | None = None
+    ssh_user: str | None = None
+    ssh_password: str | None = None
 
     active_stages = (
         stages if submit == "local" else [s for s in stages if s == STAGE_DOWNLOAD]
@@ -692,7 +748,7 @@ def main(
             def _download() -> None:
                 stage0_download.run_download(
                     subject_list,
-                    dicom_root=dicom_root,
+                    dicom_root=dicom_download_root,
                     xnat_config=xnat_conn,
                     sequences=seq_set,
                     skip_existing=skip_existing,
@@ -705,6 +761,39 @@ def main(
                 _download,
                 detail=f"{len(subject_list)} subject(s)",
             )
+
+            if submit == "sge" and use_xnat and subject_list:
+                from nvitk.pipes.qvtpy.util.cluster_upload import upload_subjects_dicoms
+
+                try:
+                    import paramiko  # noqa: F401
+                except ImportError as exc:
+                    raise click.ClickException(
+                        "SGE + XNAT upload requires Paramiko (pip install paramiko)."
+                    ) from exc
+
+                host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+                ssh_host_resolved = cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
+                ssh_user = remote_user or click.prompt("SSH user")
+                ssh_password = getpass.getpass("SSH password: ")
+
+                def _upload() -> None:
+                    upload_subjects_dicoms(
+                        local_paths,
+                        cluster_paths,
+                        subject_list,
+                        host=ssh_host_resolved,
+                        user=ssh_user,
+                        password=ssh_password,
+                        skip_if_remote_nonempty=skip_existing,
+                    )
+
+                run.run_stage(
+                    "(cohort)",
+                    "upload_dicoms",
+                    _upload,
+                    detail=f"{len(subject_list)} subject(s) -> {cluster_paths.dicom_root}",
+                )
 
         xnat_seq_set: set[str] = set()
         if use_xnat and run_conv and submit == "local":
@@ -734,8 +823,8 @@ def main(
                                 s,
                                 xnat_config=xnat_conn,
                                 sequences=xnat_seq_set,
-                                dicom_root=dicom_root,
-                                nifti_root=nifti_root,
+                                dicom_root=dicom_root_eff,
+                                nifti_root=nifti_root_eff,
                                 save_dicoms=save_dicoms,
                                 convert_kwargs=kw,
                             ),
@@ -746,8 +835,8 @@ def main(
                             STAGE_CONVERT,
                             lambda s=subj, kw=convert_kwargs: stage0_convert.run_subject(
                                 s,
-                                dicom_root=dicom_root,
-                                nifti_root=nifti_root,
+                                dicom_root=dicom_root_eff,
+                                nifti_root=nifti_root_eff,
                                 **kw,
                             ),
                         )
@@ -757,8 +846,8 @@ def main(
                         STAGE_EICAB,
                         lambda s=subj: stage1_eicab.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             resolution=eicab_resolution,
                             device=eicab_device,
@@ -774,8 +863,8 @@ def main(
                         STAGE_REG,
                         lambda s=subj: stage2_registration.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             reference=stage2_reference,
                             dof=stage2_dof,
@@ -788,8 +877,8 @@ def main(
                         STAGE_CENTERLINE,
                         lambda s=subj: stage3_centerline.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             eicab_mask=eicab_mask.lower(),
                             eicab_prefer_pp=eicab_prefer_pp,
@@ -807,8 +896,8 @@ def main(
                         STAGE_SEG,
                         lambda s=subj: stage4_4dflow_segmentation.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow.lower(),
@@ -829,8 +918,8 @@ def main(
                         STAGE_SEG_T,
                         lambda s=subj: stage4t_4dflow_t_segmentation.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             crop_padding_bbox=crop_padding_bbox,
                             thr_algorithm=thr_algorithm_4dflow.lower(),
@@ -851,8 +940,8 @@ def main(
                         STAGE_LOC,
                         lambda s=subj: stage5_loc_generation.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             loc_arterial_strategy=loc_arterial_strategy,
                             cross_section_radius_vox=cross_section_radius_vox,
@@ -866,8 +955,8 @@ def main(
                         STAGE_MEASURE,
                         lambda s=subj: stage6_measure.run_subject(
                             s,
-                            nifti_root=nifti_root,
-                            output_root=output_root,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                             cross_section_radius_vox=cross_section_radius_vox,
                             measure_resegment=measure_resegment,
@@ -884,7 +973,7 @@ def main(
                         STAGE_MORPHOMETRICS,
                         lambda s=subj: stage7_morphometrics.run_subject(
                             s,
-                            output_root=output_root,
+                            output_root=output_root_eff,
                             skip_existing=skip_existing,
                         ),
                     )
@@ -892,7 +981,7 @@ def main(
     if submit == "local":
         if run_conv and report:
             stage0_convert.print_nifti_qc_report(
-                nifti_root, subject_list, check_derived=report_derived
+                nifti_root_eff, subject_list, check_derived=report_derived
             )
         return
 
@@ -921,8 +1010,8 @@ def main(
                     prev_jid = _emit_stage0_convert(
                         fh,
                         subj,
-                        dicom_root=dicom_root,
-                        nifti_root=nifti_root,
+                        dicom_root=dicom_root_eff,
+                        nifti_root=nifti_root_eff,
                         container=container,
                         src_dir=src_p,
                         compute_phase_derived=compute_phase_derived,
@@ -941,8 +1030,8 @@ def main(
                 try:
                     jid = stage1_eicab.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         skip_existing=skip_existing,
                         resolution=eicab_resolution,
                         device=eicab_device,
@@ -967,8 +1056,8 @@ def main(
                 try:
                     prev_jid = stage2_registration.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -988,8 +1077,8 @@ def main(
                 try:
                     prev_jid = stage3_centerline.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1014,8 +1103,8 @@ def main(
                 try:
                     prev_jid = stage4_4dflow_segmentation.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1043,8 +1132,8 @@ def main(
                 try:
                     prev_jid = stage4t_4dflow_t_segmentation.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1072,8 +1161,8 @@ def main(
                 try:
                     prev_jid = stage5_loc_generation.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1094,8 +1183,8 @@ def main(
                 try:
                     prev_jid = stage6_measure.submit_subject_sge(
                         subj,
-                        nifti_root=nifti_root,
-                        output_root=output_root,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1119,7 +1208,7 @@ def main(
                 try:
                     stage7_morphometrics.submit_subject_sge(
                         subj,
-                        output_root=output_root,
+                        output_root=output_root_eff,
                         container=container,
                         src_dir=src_p,
                         skip_existing=skip_existing,
@@ -1145,10 +1234,15 @@ def main(
         return
 
     log.reset(restart_progress=False)
-    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
-    host_resolved = eicab_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
-    user = remote_user or click.prompt("SSH user")
-    password = getpass.getpass("SSH password: ")
+    if ssh_host_resolved and ssh_user and ssh_password:
+        host_resolved = ssh_host_resolved
+        user = ssh_user
+        password = ssh_password
+    else:
+        host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
+        host_resolved = cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
+        user = remote_user or click.prompt("SSH user")
+        password = getpass.getpass("SSH password: ")
     ok = run_sge_script_ssh(host_resolved, user, password, script_path)
     if not ok:
         log.warning(
