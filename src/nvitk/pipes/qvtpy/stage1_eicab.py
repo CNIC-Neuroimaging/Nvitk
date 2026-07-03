@@ -12,7 +12,7 @@
 **Execution**
 
 - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
-- ``--submit sge`` — :func:`nvitk.segmentation.eicab.cluster.submit_eicab_job` per subject.
+- ``--submit sge`` — host ``singularity run`` eICAB (+ optional nvitk post-steps) per subject.
 - ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA RG; writes ``*_pp`` mask and ``centerlines_mask_pp.nii.gz`` (originals unchanged).
 - ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
 """

@@ -96,43 +96,23 @@ def prune_eicab_outputs(
                 pass
 
 
-def run_eicab(
+def build_eicab_singularity_argv(
     input_nii: str | Path,
     output_dir: str | Path,
     *,
+    tmp_dir: str | Path,
+    container: str | Path,
     resolution: float = 0.625,
     simple_segmentation: bool = False,
     attention: bool = False,
     device: str = "cpu",
-    container: str | Path,
-    tmp_dir: str | Path,
-    keep_aux_outputs: bool = False,
     vasculature_host_path: str | Path | None = None,
-    check: bool = True,
-    capture_output: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    """Run eICAB via ``singularity run`` (same contract as legacy BioImaging).
-
-    *vasculature_host_path* should be the **host** directory bind-mounted to
-    ``/programs/Neuro/vasculature2`` (see ``run_eicab_inference.sh``). When
-    omitted and the path does not exist, the vasculature bind is skipped (only
-    sensible for debugging).
-    """
+) -> list[str]:
+    """Build ``singularity run`` argv for eICAB on the cluster host (host paths)."""
     input_p = Path(input_nii).resolve()
     output_p = Path(output_dir).resolve()
     tmp_p = Path(tmp_dir).resolve()
     container_p = Path(container).resolve()
-
-    if not container_p.is_file():
-        raise FileNotFoundError(
-            f"eICAB Singularity image not found: {container_p}. "
-            "Set a valid path with --container or update "
-            "`nvitk.segmentation.eicab.config.CONTAINER_PATH`."
-        )
-    if not input_p.is_file():
-        raise FileNotFoundError(f"Input NIfTI not found: {input_p}")
-    output_p.mkdir(parents=True, exist_ok=True)
-    tmp_p.mkdir(parents=True, exist_ok=True)
 
     if input_p.name.endswith(".nii.gz") or input_p.suffix == ".gz":
         container_input = "/TOF.nii.gz"
@@ -192,6 +172,58 @@ def run_eicab(
         cmd.append("-s")
     if attention:
         cmd.append("-a")
+    return cmd
+
+
+def run_eicab(
+    input_nii: str | Path,
+    output_dir: str | Path,
+    *,
+    resolution: float = 0.625,
+    simple_segmentation: bool = False,
+    attention: bool = False,
+    device: str = "cpu",
+    container: str | Path,
+    tmp_dir: str | Path,
+    keep_aux_outputs: bool = False,
+    vasculature_host_path: str | Path | None = None,
+    check: bool = True,
+    capture_output: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run eICAB via ``singularity run`` (same contract as legacy BioImaging).
+
+    *vasculature_host_path* should be the **host** directory bind-mounted to
+    ``/programs/Neuro/vasculature2`` (see ``run_eicab_inference.sh``). When
+    omitted and the path does not exist, the vasculature bind is skipped (only
+    sensible for debugging).
+    """
+    input_p = Path(input_nii).resolve()
+    output_p = Path(output_dir).resolve()
+    tmp_p = Path(tmp_dir).resolve()
+    container_p = Path(container).resolve()
+
+    if not container_p.is_file():
+        raise FileNotFoundError(
+            f"eICAB Singularity image not found: {container_p}. "
+            "Set a valid path with --container or update "
+            "`nvitk.segmentation.eicab.config.CONTAINER_PATH`."
+        )
+    if not input_p.is_file():
+        raise FileNotFoundError(f"Input NIfTI not found: {input_p}")
+    output_p.mkdir(parents=True, exist_ok=True)
+    tmp_p.mkdir(parents=True, exist_ok=True)
+
+    cmd = build_eicab_singularity_argv(
+        input_p,
+        output_p,
+        tmp_dir=tmp_p,
+        container=container_p,
+        resolution=resolution,
+        simple_segmentation=simple_segmentation,
+        attention=attention,
+        device=device,
+        vasculature_host_path=vasculature_host_path,
+    )
 
     log.info("Running eICAB: %s", " ".join(cmd))
     proc = subprocess.run(
@@ -219,4 +251,9 @@ def run_eicab(
     return proc
 
 
-__all__ = ["prune_eicab_outputs", "run_eicab", "segmentation_outputs_to_keep"]
+__all__ = [
+    "build_eicab_singularity_argv",
+    "prune_eicab_outputs",
+    "run_eicab",
+    "segmentation_outputs_to_keep",
+]

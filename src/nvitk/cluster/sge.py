@@ -523,6 +523,46 @@ def submit_stage(
     return result.stdout.strip()
 
 
+def submit_host_stage(
+    spec: StageSpec,
+    paths: ClusterPaths,
+    host_shell_cmd: str,
+    *,
+    hold_jid: str | Sequence[str] | None = None,
+    dry_run: bool = False,
+    emit: TextIO | None = None,
+) -> str:
+    """Submit *host_shell_cmd* to SGE directly (no outer ``singularity exec`` wrapper).
+
+    Use when the job must invoke ``singularity run`` on the cluster host itself
+    (e.g. eICAB inference), avoiding nested Singularity inside a pipeline container.
+    """
+    qsub_argv = build_qsub_command(spec, paths, hold_jid=hold_jid)
+    emit_sge_submission_summary_to_terminal(
+        spec,
+        paths,
+        hold_jid=hold_jid,
+        qsub_argv=qsub_argv,
+        singularity_cmd=host_shell_cmd,
+    )
+
+    if emit is not None:
+        return _emit_stage_block(emit, spec, host_shell_cmd, qsub_argv, hold_jid)
+
+    if dry_run:
+        return "DRY_RUN"
+
+    paths.ensure_dirs()
+    result = subprocess.run(
+        qsub_argv,
+        input=host_shell_cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def submit_chain(
     stages: Iterable[StageSpec],
     paths: ClusterPaths,
@@ -560,6 +600,7 @@ __all__ = [
     "emit_sge_submission_summary_to_terminal",
     "format_sge_submission_summary",
     "submit_chain",
+    "submit_host_stage",
     "submit_stage",
     "format_sge_driver_script_variables",
     "write_script_header",
