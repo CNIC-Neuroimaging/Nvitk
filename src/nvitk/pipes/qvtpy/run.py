@@ -635,8 +635,8 @@ def main(
     from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local
 
     local_paths = layout_local(
-        dicom_root=dicom_root,
-        nifti_root=nifti_root,
+        dicom_root=cfg.LOCAL_DEFAULT_DICOM_ROOT if dicom_root is None else dicom_root,
+        nifti_root=cfg.LOCAL_DEFAULT_NIFTI_ROOT if nifti_root is None else nifti_root,
         results_root=output_root,
     )
     cluster_paths = layout_cluster(
@@ -1057,7 +1057,7 @@ def main(
                         resolution=eicab_resolution,
                         device=eicab_device,
                         eicab_container=eicab_container,
-                        pipeline_container=None,
+                        pipeline_container=container,
                         src_dir=src_p,
                         vasculature_dir=vasculature_dir,
                         post_process_eicab=post_process_eicab,

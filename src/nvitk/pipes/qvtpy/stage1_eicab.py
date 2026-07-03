@@ -120,6 +120,13 @@ def _eicab_out_dir(
     return output_root / subject / subdir
 
 
+def _resolve_pipeline_container(pipeline_container: Path | None) -> Path:
+    """Outer SGE image (Python 3 + singularity client); inner eICAB stays in eicab .sif."""
+    if pipeline_container is not None:
+        return Path(pipeline_container)
+    return Path(cfg.CONTAINER_PATH)
+
+
 def _require_eicab_for_postprocess(out_dir: Path) -> None:
     """Raise if *out_dir* lacks eICAB multilabel + TOF_resampled for post-process."""
     if not _output_has_segmentation(out_dir):
@@ -308,7 +315,7 @@ def submit_subject_sge(
     tmp.mkdir(parents=True, exist_ok=True)
 
     eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
-    pipeline_c = Path(pipeline_container) if pipeline_container is not None else eicab_cfg.PIPELINE_CONTAINER_PATH
+    pipeline_c = _resolve_pipeline_container(pipeline_container)
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     vas_host = (
         Path(vasculature_dir).expanduser()
@@ -330,6 +337,8 @@ def submit_subject_sge(
     log.info(f"qvtpy stage1 eICAB (sge) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
+    log.info(f"  outer container (run_job): {pipeline_c}")
+    log.info(f"  inner container (eICAB):   {eicab_c}")
 
     return submit_eicab_job(
         job_name=jn,
@@ -486,7 +495,7 @@ def _submit_postprocess_only_sge(
     "--pipeline-container",
     type=click.Path(path_type=Path),
     default=None,
-    help="(sge) Outer pipeline Singularity image (default: eicab.config.PIPELINE_CONTAINER_PATH).",
+    help="(sge) Outer pipeline Singularity image with Python 3 (default: qvtpy CONTAINER_PATH).",
 )
 @click.option(
     "--src-dir",
