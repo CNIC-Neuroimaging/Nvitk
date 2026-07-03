@@ -111,9 +111,42 @@ def keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray:
     return as_backend_array(out.astype(np.int32, copy=False))
 
 
+def keep_seed_connected_per_label(
+    labels: np.ndarray,
+    seed_mask: np.ndarray,
+    *,
+    label_ids: frozenset[int] | set[int],
+) -> np.ndarray:
+    """Per-label cleanup: seed-connected CCs for *label_ids*, largest CC elsewhere."""
+    from nvitk.morphology.components import keep_components_touching_seeds
+
+    arr = as_backend_array(labels).astype(np.int32, copy=False)
+    seeds = as_backend_array(seed_mask).astype(np.int32, copy=False)
+    out = arr.copy()
+    for lid in sorted(int(v) for v in np.unique(arr) if int(v) != 0):
+        roi = out == lid
+        if not np.any(roi):
+            continue
+        if int(lid) in label_ids:
+            kept = keep_components_touching_seeds(roi, seeds == lid, connectivity=1)
+            out[roi] = 0
+            out[as_backend_array(kept).astype(bool)] = lid
+        else:
+            labeled, num = label_connected(roi, connectivity=1)
+            labeled_np = as_backend_array(labeled)
+            if int(num) <= 1:
+                continue
+            counts = np.bincount(labeled_np.ravel())
+            largest_comp = int(1 + np.argmax(counts[1:]))
+            out[roi] = 0
+            out[labeled_np == largest_comp] = lid
+    return as_backend_array(out.astype(np.int32, copy=False))
+
+
 __all__ = [
     "clean_binary_mask",
     "clean_multilabel_islands",
     "clean_venous_slab_mask",
     "keep_largest_component_per_label",
+    "keep_seed_connected_per_label",
 ]

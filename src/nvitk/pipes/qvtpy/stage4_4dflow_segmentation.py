@@ -48,6 +48,8 @@ from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     _DEFAULT_RG_INTENSITY_FRAC,
     _RG_INTENSITY_FRAC_ACA,
     _RG_INTENSITY_FRAC_EXPLORE,
+    _RG_MAX_GROW_FRAC_DEFAULT,
+    _RG_MAX_IMAGE_FRAC_DEFAULT,
     build_seg_4dflow_local,
     vessel_stats_to_dict,
 )
@@ -105,6 +107,10 @@ def _segmentation_meta(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
+    rg_max_grow_frac: float,
+    rg_max_image_frac: float,
+    venous_region_growing: bool,
+    segment_acomm: bool,
     aca_sequential_grow_info: dict[str, Any] | None,
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -125,9 +131,13 @@ def _segmentation_meta(
         "rg_intensity_frac_aca_labels": "ACA (ids 4-5)",
         "eicab_rg_barrier_label_ids": [15, 16],
         "eicab_rg_barrier_vessels": "PCA,basilar",
-        "rg_skip_labels": "all venous (ids 31-34)",
-        "venous_region_growing": False,
-        "comm_segmentation_strategy": "centerline_rg_only",
+        "rg_skip_labels": "STRV only (id 32)" if venous_region_growing else "all venous (ids 31-34)",
+        "venous_region_growing": bool(venous_region_growing),
+        "rg_max_grow_frac": float(rg_max_grow_frac),
+        "rg_max_image_frac": float(rg_max_image_frac),
+        "segment_acomm": bool(segment_acomm),
+        "eicab_pcomm_barrier_label_ids": [15, 16],
+        "comm_segmentation_strategy": "centerline_plus_threshold_rg",
         "post_threshold_clean": "largest_cc_per_label",
         "centerlines_from_seg": "centerlines_mask_4dflow.nii.gz",
         "cl_barrier_radius": int(cl_barrier_radius),
@@ -162,6 +172,10 @@ def run_subject(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT,
+    rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
+    venous_region_growing: bool = True,
+    segment_acomm: bool = False,
 ) -> Path:
     """Build multilabel 4D-flow segmentation locally; return stage-4 output directory."""
     s3 = _stage3_dir(output_root, subject)
@@ -221,6 +235,10 @@ def run_subject(
         aca_sequential_grow=bool(aca_sequential_grow),
         aca_overlap_min_voxels=int(aca_overlap_min_voxels),
         acomm_junction_radius=int(acomm_junction_radius),
+        rg_max_grow_frac=float(rg_max_grow_frac),
+        rg_max_image_frac=float(rg_max_image_frac),
+        venous_region_growing=bool(venous_region_growing),
+        segment_acomm=bool(segment_acomm),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
@@ -267,6 +285,10 @@ def run_subject(
                 aca_sequential_grow=aca_sequential_grow,
                 aca_overlap_min_voxels=aca_overlap_min_voxels,
                 acomm_junction_radius=acomm_junction_radius,
+                rg_max_grow_frac=rg_max_grow_frac,
+                rg_max_image_frac=rg_max_image_frac,
+                venous_region_growing=venous_region_growing,
+                segment_acomm=segment_acomm,
                 aca_sequential_grow_info=(
                     None
                     if result.aca_sequential_grow is None
@@ -348,6 +370,32 @@ def _stage4_cli_options(func):
         show_default=True,
         help="Vox: only overlap within this distance of AComm junction is Voronoi-split.",
     )(func)
+    func = click.option(
+        "--rg-max-grow-frac",
+        type=float,
+        default=_RG_MAX_GROW_FRAC_DEFAULT,
+        show_default=True,
+        help="Roll back a region grow if grown voxels exceed this multiple of the seed.",
+    )(func)
+    func = click.option(
+        "--rg-max-image-frac",
+        type=float,
+        default=_RG_MAX_IMAGE_FRAC_DEFAULT,
+        show_default=True,
+        help="Roll back a region grow if the label exceeds this fraction of the volume.",
+    )(func)
+    func = click.option(
+        "--venous-region-growing/--no-venous-region-growing",
+        default=True,
+        show_default=True,
+        help="Conservative CD region growing for venous sinuses (SSSV/LTSV/RTSV).",
+    )(func)
+    func = click.option(
+        "--segment-acomm/--no-segment-acomm",
+        default=False,
+        show_default=True,
+        help="Grow AComm as its own label; off by default (used only for ACA L/R split).",
+    )(func)
     return func
 
 
@@ -372,6 +420,10 @@ def submit_subject_sge(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT,
+    rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
+    venous_region_growing: bool = True,
+    segment_acomm: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-4 SGE job. Returns qsub job id."""
@@ -404,6 +456,10 @@ def submit_subject_sge(
         str(int(aca_overlap_min_voxels)),
         "--acomm-junction-radius",
         str(int(acomm_junction_radius)),
+        "--rg-max-grow-frac",
+        str(float(rg_max_grow_frac)),
+        "--rg-max-image-frac",
+        str(float(rg_max_image_frac)),
     ]
     if region_growing:
         parts.append("--region-growing")
@@ -413,6 +469,14 @@ def submit_subject_sge(
         parts.append("--aca-sequential-grow")
     else:
         parts.append("--no-aca-sequential-grow")
+    if venous_region_growing:
+        parts.append("--venous-region-growing")
+    else:
+        parts.append("--no-venous-region-growing")
+    if segment_acomm:
+        parts.append("--segment-acomm")
+    else:
+        parts.append("--no-segment-acomm")
     if skip_existing:
         parts.append("--skip-existing")
     python_cmd = " ".join(parts)
@@ -461,6 +525,10 @@ def main(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
+    rg_max_grow_frac: float,
+    rg_max_image_frac: float,
+    venous_region_growing: bool,
+    segment_acomm: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -479,6 +547,10 @@ def main(
         aca_sequential_grow=aca_sequential_grow,
         aca_overlap_min_voxels=aca_overlap_min_voxels,
         acomm_junction_radius=acomm_junction_radius,
+        rg_max_grow_frac=rg_max_grow_frac,
+        rg_max_image_frac=rg_max_image_frac,
+        venous_region_growing=venous_region_growing,
+        segment_acomm=segment_acomm,
     )
 
 

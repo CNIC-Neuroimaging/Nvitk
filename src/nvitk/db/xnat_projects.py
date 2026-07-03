@@ -82,6 +82,37 @@ def list_xnat_project_ids() -> list[str]:
     return sorted(XNAT_PROJECTS.keys())
 
 
+def _normalize_cohort_token(token: str) -> str:
+    return re.sub(r"[^0-9a-z]+", "", str(token).strip().lower())
+
+
+def resolve_xnat_project_cohort_token(subjects: str | None) -> str | None:
+    """Return XNAT ``project_id`` when *subjects* is a single cohort/project alias.
+
+    Recognizes ``PESA-Brain`` / ``PESA_Brain``, ``IA-PET-V5`` / ``IA_PET_V5``, and
+    registered :data:`XNAT_PROJECTS` keys.
+    """
+    if subjects is None:
+        return None
+    from nvitk.db.xnat import parse_subject_tokens
+
+    tokens = parse_subject_tokens(subjects)
+    if len(tokens) != 1:
+        return None
+    token = tokens[0]
+    if token in XNAT_PROJECTS:
+        return token
+    key = _normalize_cohort_token(token)
+    for spec in XNAT_PROJECTS.values():
+        if key in {
+            _normalize_cohort_token(spec.project_id),
+            _normalize_cohort_token(spec.cohort_id),
+            _normalize_cohort_token(spec.display_name),
+        }:
+            return spec.project_id
+    return None
+
+
 def get_xnat_project(project_id: str) -> XnatProjectSpec:
     key = str(project_id).strip()
     if key not in XNAT_PROJECTS:
@@ -295,6 +326,7 @@ __all__ = [
     "get_scan_classifier",
     "get_xnat_project",
     "list_xnat_project_ids",
+    "resolve_xnat_project_cohort_token",
     "sequences_csv",
     "session_modality_from_classifications",
     "visit_label_for_project",

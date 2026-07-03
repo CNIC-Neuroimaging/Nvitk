@@ -1,8 +1,9 @@
 """Sequential ACA region growing and AComm junction overlap correction (qvtpy).
 
 Called from :func:`~nvitk.pipes.qvtpy.util.vessel_cd_segmentation.build_seg_4dflow_local`
-when ``aca_sequential_grow`` is enabled: grow LACA then RACA without mutual barriers,
-then split overlap at the AComm junction plane when voxel overlap exceeds a threshold.
+when ``aca_sequential_grow`` is enabled: grow LACA then RACA with explore-style
+segmentation/centerline barriers (MCA, ICA, comms, …), allow L/R overlap only
+inside a small AComm junction proximity zone, then plane-split overlap.
 """
 
 from __future__ import annotations
@@ -14,50 +15,270 @@ from nvitk.core.backend import setup
 from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected
 from nvitk.pipes.qvtpy.labels import (
+    EICAB_ACOMM,
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
     QVTPY_LACA,
+    QVTPY_LICA,
+    QVTPY_LPCOMM,
+    QVTPY_MCA_IDS,
     QVTPY_RACA,
+    QVTPY_RICA,
+    QVTPY_RPCOMM,
 )
+from nvitk.morphology import dilate
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
     AcaSequentialGrowInfo,
     VesselSegStats,
+    _RG_EXPLORE_CL_BARRIER_RADIUS,
+    _RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
+    _RG_EXPLORE_SEG_BARRIER_RADIUS,
+    _RG_MAX_GROW_FRAC_DEFAULT,
+    _RG_MAX_IMAGE_FRAC_DEFAULT,
+    _dilate_bool_mask,
+    _dilated_labels_barrier,
+    _dilated_other_segmentation_barrier_excluding,
     explore_region_grow_forbidden,
+    merge_forbidden,
     rg_abs_floor_for_label,
+    rg_caps_exceeded,
     rg_intensity_frac_for_label,
 )
 from nvitk.segmentation.region_growing import region_grow_binary_mask
 
 setup(globals())
 
+_ACA_SEED_DILATE_RADIUS: int = 1
+_ACA_PRUNE_MIN_RETAIN_FRAC: float = 0.55
 _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
+_ACOMM_BRIDGE_DILATE_RADIUS: int = 1
 _ACA_SPLIT_AXIS_NAMES: tuple[str, str] = ("x", "y")
+
+
+def _dilate_seed_mask(seed_mask: np.ndarray, *, radius: int) -> np.ndarray:
+    seeds = as_backend_array(seed_mask).astype(bool)
+    if int(radius) <= 0 or not np.any(seeds):
+        return seeds
+    return as_backend_array(
+        dilate(seeds.astype(np.uint8), footprint=int(radius), connectivity=1)
+    ).astype(bool)
+
+
+def _region_grow_binary_capped(
+    mask: np.ndarray,
+    cd: np.ndarray,
+    *,
+    intensity_frac: float,
+    abs_floor: float | None,
+    forbidden: np.ndarray | None,
+    max_grow_frac: float | None,
+    max_image_frac: float | None,
+) -> str | None:
+    """Grow a boolean *mask* in place; roll back added voxels if a cap is breached."""
+    pre = as_backend_array(mask).astype(bool, copy=True)
+    n_pre = int(np.count_nonzero(pre))
+    region_grow_binary_mask(
+        mask,
+        cd,
+        intensity_frac=float(intensity_frac),
+        abs_floor=abs_floor,
+        forbidden=forbidden,
+    )
+    post = as_backend_array(mask).astype(bool)
+    n_post = int(np.count_nonzero(post))
+    reason = rg_caps_exceeded(
+        n_pre,
+        n_post,
+        int(post.size),
+        max_grow_frac=max_grow_frac,
+        max_image_frac=max_image_frac,
+    )
+    if reason is not None:
+        added = post & ~pre
+        mask[added] = False
+        return reason
+    return None
 
 def _aca_seed_mask(
     centerlines_mask: np.ndarray,
     eicab_qvtpy: np.ndarray | None,
     label_id: int,
 ) -> tuple[np.ndarray, str]:
-    """Thin ACA seeds: stage-3 centerline primary, skeletonized eICAB fallback."""
+    """Thin ACA seeds: stage-3 centerline primary, union with skeletonized eICAB."""
     lid = int(label_id)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
-    seeds = as_backend_array(clm == lid).astype(bool)
-    if np.any(seeds):
-        return seeds, "centerline"
+    cl_seeds = as_backend_array(clm == lid).astype(bool)
+    eicab_seeds = np.zeros_like(cl_seeds).astype(bool)
+    if eicab_qvtpy is not None:
+        eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+        raw = as_backend_array(eq == lid).astype(bool)
+        if np.any(raw):
+            try:
+                skel = skeletonize_binary(raw)
+                skel_np = as_backend_array(skel).astype(bool)
+                eicab_seeds = skel_np if np.any(skel_np) else raw
+            except Exception:
+                eicab_seeds = raw
+    if np.any(cl_seeds) and np.any(eicab_seeds):
+        merged = cl_seeds | eicab_seeds
+    elif np.any(cl_seeds):
+        merged = cl_seeds
+    elif np.any(eicab_seeds):
+        merged = eicab_seeds
+    else:
+        merged = cl_seeds
+    merged = _dilate_seed_mask(merged, radius=_ACA_SEED_DILATE_RADIUS)
+    if np.any(cl_seeds) and np.any(eicab_seeds):
+        return merged, "centerline+eicab"
+    if np.any(cl_seeds):
+        return merged, "centerline"
+    if np.any(eicab_seeds):
+        return merged, "eicab_skeleton"
+    return merged, "none"
+
+
+def _acomm_bridge_seeds(
+    eicab_qvtpy: np.ndarray | None,
+    laca_seeds: np.ndarray,
+    raca_seeds: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Thin eICAB AComm voxels added to both ACA seeds (no junction ball)."""
     if eicab_qvtpy is None:
-        return seeds, "none"
+        return laca_seeds, raca_seeds
     eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
-    raw = as_backend_array(eq == lid).astype(bool)
-    if not np.any(raw):
-        return seeds, "none"
-    try:
-        skel = skeletonize_binary(raw)
-        skel_np = as_backend_array(skel).astype(bool)
-        if np.any(skel_np):
-            return skel_np, "eicab_skeleton"
-    except Exception:
-        pass
-    return raw, "eicab_mask"
+    acomm = as_backend_array(eq == int(QVTPY_ACOMM)).astype(bool)
+    if not np.any(acomm):
+        return laca_seeds, raca_seeds
+    bridge = _dilate_seed_mask(acomm, radius=_ACOMM_BRIDGE_DILATE_RADIUS)
+    return (
+        as_backend_array(laca_seeds | bridge).astype(bool),
+        as_backend_array(raca_seeds | bridge).astype(bool),
+    )
+
+
+def _junction_proximity_mask(
+    shape: tuple[int, int, int],
+    junction: tuple[int, int, int] | None,
+    *,
+    radius_vox: int,
+) -> np.ndarray | None:
+    """Voxels within *radius_vox* of the AComm junction (L/R may overlap here)."""
+    if junction is None or int(radius_vox) <= 0:
+        return None
+    dist = _distance_from_junction_voxels(shape, junction)
+    return as_backend_array(dist <= float(radius_vox)).astype(bool)
+
+
+def _mask_outside_proximity(mask: np.ndarray, proximity: np.ndarray | None) -> np.ndarray:
+    """Barrier from *mask* excluding the junction proximity zone."""
+    m = as_backend_array(mask).astype(bool)
+    if proximity is None or not np.any(proximity):
+        return m
+    return m & ~as_backend_array(proximity).astype(bool)
+
+
+def _aca_neighbour_label_ids(label_id: int) -> frozenset[int]:
+    """Segmented neighbours that most often steal ACA RG (MCA, parent ICA, PComms)."""
+    lid = int(label_id)
+    parent_ica = int(QVTPY_LICA) if lid == int(QVTPY_LACA) else int(QVTPY_RICA)
+    # AComm (QVTPY_ACOMM) is intentionally omitted — it must not wall ACA growth.
+    pcomms = frozenset({int(QVTPY_LPCOMM), int(QVTPY_RPCOMM)})
+    return frozenset(
+        int(x)
+        for x in (QVTPY_MCA_IDS | pcomms | frozenset({parent_ica}))
+        if int(x) != lid
+    )
+
+
+def _acomm_non_barrier_voxels(
+    shape: tuple[int, int, int],
+    centerlines_mask: np.ndarray,
+    eicab_qvtpy: np.ndarray | None,
+    eicab_native: np.ndarray | None,
+) -> np.ndarray:
+    """Foreground where eICAB / qvtpy AComm must never act as an ACA RG barrier."""
+    mask = np.zeros(shape, dtype=bool)
+    clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    mask |= as_backend_array(clm == int(QVTPY_ACOMM)).astype(bool)
+    if eicab_qvtpy is not None:
+        eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+        mask |= as_backend_array(eq == int(QVTPY_ACOMM)).astype(bool)
+    if eicab_native is not None:
+        en = as_backend_array(eicab_native).astype(np.int32, copy=False)
+        mask |= as_backend_array(en == int(EICAB_ACOMM)).astype(bool)
+    if not np.any(mask):
+        return mask
+    return _dilate_bool_mask(mask, radius=1)
+
+
+def _aca_region_grow_forbidden(
+    seg: np.ndarray,
+    centerlines_mask: np.ndarray,
+    label_id: int,
+    *,
+    opposite_mask: np.ndarray,
+    junction: tuple[int, int, int] | None,
+    junction_radius: int,
+    rg_barrier_radius: int,
+    eicab_qvtpy: np.ndarray | None = None,
+    eicab_native: np.ndarray | None = None,
+) -> np.ndarray:
+    """Explore-style RG barriers for one ACA; opposite ACA blocked outside junction proximity."""
+    lid = int(label_id)
+    opp_id = int(QVTPY_RACA) if lid == int(QVTPY_LACA) else int(QVTPY_LACA)
+    exclude = frozenset({opp_id, int(QVTPY_ACOMM)})
+    rg_rad = max(0, int(rg_barrier_radius))
+
+    forb = explore_region_grow_forbidden(
+        seg,
+        centerlines_mask,
+        lid,
+        exclude_label_ids=exclude,
+        seg_barrier_radius=_RG_EXPLORE_SEG_BARRIER_RADIUS,
+        cl_barrier_radius=_RG_EXPLORE_CL_BARRIER_RADIUS,
+    )
+    forb = merge_forbidden(
+        forb,
+        _dilated_other_segmentation_barrier_excluding(
+            seg,
+            lid,
+            exclude_label_ids=exclude,
+            radius=rg_rad,
+        ),
+        _dilated_labels_barrier(
+            seg,
+            _aca_neighbour_label_ids(lid),
+            radius=_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
+        ),
+    )
+    proximity = _junction_proximity_mask(seg.shape, junction, radius_vox=junction_radius)
+    opp_bar = _dilate_bool_mask(opposite_mask, radius=rg_rad)
+    opp_bar = _mask_outside_proximity(opp_bar, proximity)
+    if np.any(opp_bar):
+        forb = merge_forbidden(forb, opp_bar)
+    acomm_clear = _acomm_non_barrier_voxels(
+        seg.shape,
+        centerlines_mask,
+        eicab_qvtpy,
+        eicab_native,
+    )
+    if np.any(acomm_clear):
+        forb = as_backend_array(forb).astype(bool)
+        forb[acomm_clear] = False
+    assert forb is not None
+    return forb
+
+def aca_seed_volume(
+    centerlines_mask: np.ndarray,
+    eicab_qvtpy: np.ndarray | None,
+) -> np.ndarray:
+    """Centerlines mask with ACA labels extended by eICAB skeleton seeds."""
+    clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    out = clm.copy()
+    for lid in QVTPY_ACA_IDS:
+        seeds, _ = _aca_seed_mask(clm, eicab_qvtpy, int(lid))
+        out[seeds] = int(lid)
+    return out
 
 
 def _acomm_junction_voxel(eicab_qvtpy: np.ndarray) -> tuple[int, int, int] | None:
@@ -215,13 +436,21 @@ def _prune_aca_stray_islands(
     laca_seeds: np.ndarray,
     raca_seeds: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Drop ACA CCs that do not touch that label's centerline seeds; swap to the other ACA."""
-    l_keep, l_stray = _aca_seed_connected_keep_mask(laca_mask, laca_seeds)
-    r_keep, r_stray = _aca_seed_connected_keep_mask(raca_mask, raca_seeds)
+    """Drop ACA CCs that do not touch dilated centerline seeds; swap to the other ACA."""
+    l_seed = _dilate_seed_mask(laca_seeds, radius=3)
+    r_seed = _dilate_seed_mask(raca_seeds, radius=3)
+    n_l_pre = int(np.count_nonzero(laca_mask))
+    n_r_pre = int(np.count_nonzero(raca_mask))
+    l_keep, l_stray = _aca_seed_connected_keep_mask(laca_mask, l_seed)
+    r_keep, r_stray = _aca_seed_connected_keep_mask(raca_mask, r_seed)
     n_reassigned = int(np.count_nonzero(l_stray) + np.count_nonzero(r_stray))
 
     laca_out = as_backend_array(l_keep | r_stray).astype(bool)
     raca_out = as_backend_array(r_keep | l_stray).astype(bool)
+    if n_l_pre > 0 and int(np.count_nonzero(laca_out)) < int(_ACA_PRUNE_MIN_RETAIN_FRAC * n_l_pre):
+        laca_out = as_backend_array(laca_mask).astype(bool)
+    if n_r_pre > 0 and int(np.count_nonzero(raca_out)) < int(_ACA_PRUNE_MIN_RETAIN_FRAC * n_r_pre):
+        raca_out = as_backend_array(raca_mask).astype(bool)
     overlap = laca_out & raca_out
     if np.any(overlap):
         d_laca = as_backend_array(
@@ -407,6 +636,7 @@ def _region_grow_acas_sequential(
     centerlines_mask: np.ndarray,
     eicab_qvtpy: np.ndarray | None,
     *,
+    eicab_native: np.ndarray | None = None,
     opt_thresh_by_label: dict[int, float | None],
     rg_intensity_frac: float,
     rg_intensity_frac_aca: float,
@@ -415,15 +645,21 @@ def _region_grow_acas_sequential(
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
     stats_by_id: dict[int, VesselSegStats],
+    max_grow_frac: float | None = _RG_MAX_GROW_FRAC_DEFAULT,
+    max_image_frac: float | None = _RG_MAX_IMAGE_FRAC_DEFAULT,
 ) -> AcaSequentialGrowInfo:
-    """Grow LACA then RACA without blocking on the other ACA; fix close-approach overlap."""
+    """Grow LACA then RACA with explore-style barriers; L/R may mix only near AComm."""
     min_ov = max(0, int(aca_overlap_min_voxels))
     junc_rad = max(0, int(acomm_junction_radius))
-    exclude_raca = frozenset({int(QVTPY_RACA)})
-    exclude_laca = frozenset({int(QVTPY_LACA)})
+    rg_rad = max(0, int(rg_barrier_radius))
 
-    laca_mask = as_backend_array(seg == int(QVTPY_LACA)).astype(bool)
-    raca_mask = as_backend_array(seg == int(QVTPY_RACA)).astype(bool)
+    laca_seeds, _ = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_LACA)
+    raca_seeds, _ = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_RACA)
+    laca_seeds, raca_seeds = _acomm_bridge_seeds(eicab_qvtpy, laca_seeds, raca_seeds)
+    junction, _junction_src = _infer_aca_junction(laca_seeds, raca_seeds, eicab_qvtpy)
+
+    laca_mask = as_backend_array(seg == int(QVTPY_LACA)).astype(bool) | laca_seeds
+    raca_mask = as_backend_array(seg == int(QVTPY_RACA)).astype(bool) | raca_seeds
 
     frac_l = rg_intensity_frac_for_label(
         QVTPY_LACA,
@@ -438,32 +674,52 @@ def _region_grow_acas_sequential(
         venous_fracs=venous_fracs,
     )
 
-    forb_laca = explore_region_grow_forbidden(
+    grow_cap = max_grow_frac if max_grow_frac is not None else _RG_MAX_GROW_FRAC_DEFAULT
+    forb_laca = _aca_region_grow_forbidden(
         seg,
         centerlines_mask,
         QVTPY_LACA,
-        exclude_label_ids=exclude_raca,
+        opposite_mask=raca_mask,
+        junction=junction,
+        junction_radius=junc_rad,
+        rg_barrier_radius=rg_rad,
+        eicab_qvtpy=eicab_qvtpy,
+        eicab_native=eicab_native,
     )
-    region_grow_binary_mask(
+    reason_l = _region_grow_binary_capped(
         laca_mask,
         cd,
         intensity_frac=frac_l,
         abs_floor=rg_abs_floor_for_label(QVTPY_LACA, opt_thresh_by_label.get(QVTPY_LACA)),
         forbidden=forb_laca,
+        max_grow_frac=grow_cap,
+        max_image_frac=max_image_frac,
     )
-    forb_raca = explore_region_grow_forbidden(
+    forb_raca = _aca_region_grow_forbidden(
         seg,
         centerlines_mask,
         QVTPY_RACA,
-        exclude_label_ids=exclude_laca,
+        opposite_mask=laca_mask,
+        junction=junction,
+        junction_radius=junc_rad,
+        rg_barrier_radius=rg_rad,
+        eicab_qvtpy=eicab_qvtpy,
+        eicab_native=eicab_native,
     )
-    forb_raca = as_backend_array(forb_raca).astype(bool) & ~laca_mask
-    region_grow_binary_mask(
+    proximity = _junction_proximity_mask(laca_mask.shape, junction, radius_vox=junc_rad)
+    forb_raca = merge_forbidden(
+        forb_raca,
+        _mask_outside_proximity(as_backend_array(laca_mask).astype(bool), proximity),
+    )
+    assert forb_raca is not None
+    reason_r = _region_grow_binary_capped(
         raca_mask,
         cd,
         intensity_frac=frac_r,
         abs_floor=rg_abs_floor_for_label(QVTPY_RACA, opt_thresh_by_label.get(QVTPY_RACA)),
         forbidden=forb_raca,
+        max_grow_frac=grow_cap,
+        max_image_frac=max_image_frac,
     )
 
     overlap = laca_mask & raca_mask
@@ -488,11 +744,16 @@ def _region_grow_acas_sequential(
 
     _write_aca_masks_to_seg(seg, laca_mask, raca_mask)
 
-    for lid, frac in ((QVTPY_LACA, frac_l), (QVTPY_RACA, frac_r)):
+    for lid, frac, reason in (
+        (QVTPY_LACA, frac_l, reason_l),
+        (QVTPY_RACA, frac_r, reason_r),
+    ):
         st = stats_by_id[lid]
         st.region_growing_applied = True
         st.rg_intensity_frac_used = float(frac)
         st.n_voxels_after_region_growing = int(np.count_nonzero(seg == int(lid)))
+        if reason is not None:
+            st.warning = reason
 
     axis_name = None
     if split_info is not None and 0 <= int(split_info.split_axis) < len(_ACA_SPLIT_AXIS_NAMES):

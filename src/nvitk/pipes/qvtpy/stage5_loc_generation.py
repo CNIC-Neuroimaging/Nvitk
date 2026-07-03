@@ -136,6 +136,11 @@ def run_subject(
     arterial, venous, cl_meta = load_centerlines(s3, min_points=5, stage4_dir=s4)
     meta = load_centerline_meta(s3)
 
+    arterial_seg = None
+    seg_path = s4 / "seg_4dflow.nii.gz"
+    if seg_path.is_file():
+        arterial_seg = as_backend_array(imread(seg_path).data).astype(np.int32, copy=False)
+
     mag, cd, vel_mag, voxel_spacing = _load_contrast_volumes(nifti_root, subject)
 
     # ---- Venous mask for LOC heuristics (CD binary ∧ superior slab) ----------
@@ -163,6 +168,7 @@ def run_subject(
         radius_vox=cross_section_radius_vox,
         strategy=loc_arterial_strategy,
         endpoint_inset_frac=loc_endpoint_inset_frac,
+        arterial_seg=arterial_seg,
     )
     for rec in arterial_recs:
         rows.append(loc_record_to_dict(rec))

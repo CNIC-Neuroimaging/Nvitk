@@ -14,6 +14,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage4t`` — Same as stage 4 on each ``ComplexDifference_4D`` frame → ``seg_4dflow_4d`` (opt-in).
 - ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
 - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
+- ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
 
 SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
 :func:`nvitk.cluster.sge.submit_stage`).
@@ -55,6 +56,7 @@ from . import (
     stage4t_4dflow_t_segmentation,
     stage5_loc_generation,
     stage6_measure,
+    stage7_morphometrics,
 )
 
 
@@ -73,6 +75,7 @@ STAGE_SEG = "stage4"
 STAGE_SEG_T = "stage4t"
 STAGE_LOC = "stage5"
 STAGE_MEASURE = "stage6"
+STAGE_MORPHOMETRICS = "stage7"
 
 _STAGE_ALIASES: dict[str, str] = {
     "stage0_d": STAGE_DOWNLOAD,
@@ -106,6 +109,10 @@ _STAGE_ALIASES: dict[str, str] = {
     "stage6": STAGE_MEASURE,
     "stage6_measure": STAGE_MEASURE,
     "measure": STAGE_MEASURE,
+    "stage7": STAGE_MORPHOMETRICS,
+    "stage7_morphometrics": STAGE_MORPHOMETRICS,
+    "morphometrics": STAGE_MORPHOMETRICS,
+    "morpho": STAGE_MORPHOMETRICS,
 }
 
 _STAGES_ORDERED: tuple[str, ...] = (
@@ -118,6 +125,7 @@ _STAGES_ORDERED: tuple[str, ...] = (
     STAGE_SEG_T,
     STAGE_LOC,
     STAGE_MEASURE,
+    STAGE_MORPHOMETRICS,
 )
 
 _ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
@@ -133,6 +141,7 @@ _STAGE_LABELS: dict[str, str] = {
     STAGE_SEG_T: "CD segmentation (4D+t)",
     STAGE_LOC: "LOC generation",
     STAGE_MEASURE: "flow measurement",
+    STAGE_MORPHOMETRICS: "TOF morphometrics",
 }
 
 
@@ -162,6 +171,56 @@ def _iter_subjects(root: Path) -> list[str]:
     if not root.exists():
         return []
     return sorted([p.name for p in root.iterdir() if p.is_dir()])
+
+
+def _xnat_convert_subject(
+    subject: str,
+    *,
+    xnat_config,
+    sequences: set[str],
+    dicom_root: Path,
+    nifti_root: Path,
+    save_dicoms: bool,
+    convert_kwargs: dict,
+) -> Path:
+    """Download one subject's DICOMs from XNAT then convert to NIfTI.
+
+    When *save_dicoms* is true the DICOMs are persisted under *dicom_root*;
+    otherwise they are downloaded into a temporary directory that is removed
+    once conversion finishes (NIfTI outputs only).
+    """
+    import tempfile
+
+    if save_dicoms:
+        stage0_download.run_download(
+            [subject],
+            dicom_root=dicom_root,
+            xnat_config=xnat_config,
+            sequences=sequences,
+            skip_existing=convert_kwargs.get("skip_existing", False),
+        )
+        return stage0_convert.run_subject(
+            subject,
+            dicom_root=dicom_root,
+            nifti_root=nifti_root,
+            **convert_kwargs,
+        )
+
+    with tempfile.TemporaryDirectory(prefix=f"qvtpy_dicom_{subject}_") as tmp:
+        tmp_root = Path(tmp)
+        stage0_download.run_download(
+            [subject],
+            dicom_root=tmp_root,
+            xnat_config=xnat_config,
+            sequences=sequences,
+            skip_existing=False,
+        )
+        return stage0_convert.run_subject(
+            subject,
+            dicom_root=tmp_root,
+            nifti_root=nifti_root,
+            **convert_kwargs,
+        )
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -263,7 +322,14 @@ def _emit_stage0_convert(
     show_default=True,
     help="Comma-separated stages (see module docstring for names and aliases).",
 )
-@click.option("--subjects", default=None, help="Comma-separated subject list.")
+@click.option(
+    "--subjects",
+    default=None,
+    help=(
+        "Comma-separated subject list, or a cohort alias with --from-source xnat "
+        "(e.g. PESA-Brain runs all subjects in the XNAT PESA_Brain project)."
+    ),
+)
 @click.option(
     "--subjects-file",
     type=click.Path(path_type=Path),
@@ -296,6 +362,25 @@ def _emit_stage0_convert(
 @click.option("--remote-host", default=None)
 @click.option("--remote-user", default=None)
 # --- stage 0 ---
+@click.option(
+    "--from-source",
+    type=click.Choice(["local", "xnat"], case_sensitive=False),
+    default="local",
+    show_default=True,
+    help=(
+        "DICOM source for stage0_c. 'xnat' downloads from the XNAT PESA-Brain "
+        "project before conversion. (Distinct from pesa_fat's --input-source.)"
+    ),
+)
+@click.option(
+    "--save-dicoms/--no-save-dicoms",
+    default=False,
+    show_default=True,
+    help=(
+        "With --from-source xnat: persist DICOMs under --dicom-root when true; "
+        "when false download to a temp dir, convert, then delete (NIfTI only)."
+    ),
+)
 @click.option("--compute-phase-derived", is_flag=True, default=True)
 @click.option(
     "--phase-background-correction/--no-phase-background-correction",
@@ -328,7 +413,7 @@ def _emit_stage0_convert(
 @click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
 @click.option(
     "--post-process-eicab/--no-post-process-eicab",
-    default=True,
+    default=False,
     show_default=True,
     help="Stage1: Otsu ICA resegment + ICA region growing after eICAB.",
 )
@@ -371,7 +456,7 @@ def _emit_stage0_convert(
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
 @click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
-@click.option("--venous-min-branch-points", type=int, default=25, show_default=True)
+@click.option("--venous-min-branch-points", type=int, default=30, show_default=True)
 # --- stage 4 ---
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
@@ -431,7 +516,7 @@ def _emit_stage0_convert(
 @click.option(
     "--measure-thr-algorithm",
     type=click.Choice(["lsthr", "lthr", "otsu"], case_sensitive=False),
-    default="lthr",
+    default="otsu",
     show_default=True,
     help="Stage6: in-plane threshold when --measure-resegment.",
 )
@@ -439,9 +524,15 @@ def _emit_stage0_convert(
 @click.option("--cross-section-plane-interp", type=int, default=2, show_default=True)
 @click.option(
     "--cs-supersampling/--no-cs-supersampling",
-    default=False,
+    default=True,
     show_default=True,
     help="Stage6: supersample oblique cross-section grid (~4×).",
+)
+@click.option(
+    "--save-plots/--no-save-plots",
+    default=False,
+    show_default=True,
+    help="Stage6: render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
 )
 def main(
     dicom_root: Path,
@@ -458,6 +549,8 @@ def main(
     no_remote: bool,
     remote_host: str | None,
     remote_user: str | None,
+    from_source: str,
+    save_dicoms: bool,
     compute_phase_derived: bool,
     phase_background_correction: bool,
     phase_bg_poly_order: int,
@@ -502,6 +595,7 @@ def main(
     cross_section_res: int,
     cross_section_plane_interp: int,
     cs_supersampling: bool,
+    save_plots: bool,
     backend: str,
 ) -> None:
     Logger()
@@ -516,14 +610,49 @@ def main(
     run_s4t = STAGE_SEG_T in stages
     run_s5 = STAGE_LOC in stages
     run_s6 = STAGE_MEASURE in stages
+    run_s7 = STAGE_MORPHOMETRICS in stages
+
+    use_xnat = from_source.lower() == "xnat"
+    if use_xnat and run_conv and submit == "sge":
+        # SGE stages read DICOMs from the cluster tree, so the download must
+        # persist locally regardless of --save-dicoms; auto-insert stage0_d.
+        run_dl = True
+        if not save_dicoms:
+            log.info(
+                "--from-source xnat with --submit sge: DICOMs persist under "
+                "--dicom-root (ignoring --no-save-dicoms) for cluster access."
+            )
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
+    xnat_conn = None
+    if use_xnat:
+        from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
+
+        profile = load_xnat_profile(xnat_config_path)
+        xnat_conn = resolve_xnat_connection(profile)
+
     if subjects or subjects_file:
-        subject_list = stage0_download.load_subjects(
-            subjects=subjects,
-            subjects_file=subjects_file,
-        )
+        if use_xnat:
+            if xnat_conn is None:
+                raise click.ClickException("XNAT connection required for --from-source xnat.")
+            subject_list, xnat_conn = stage0_download.resolve_subjects_for_xnat_pipeline(
+                subjects=subjects,
+                subjects_file=subjects_file,
+                xnat_config=xnat_conn,
+            )
+        else:
+            from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
+
+            if subjects and not subjects_file and resolve_xnat_project_cohort_token(subjects):
+                raise click.ClickException(
+                    f"--subjects {subjects!r} is an XNAT cohort alias; "
+                    "use --from-source xnat to expand it to all project subjects."
+                )
+            subject_list = stage0_download.load_subjects(
+                subjects=subjects,
+                subjects_file=subjects_file,
+            )
     else:
         if run_dl:
             raise click.ClickException("stage0_d requires --subjects or --subjects-file.")
@@ -553,10 +682,9 @@ def main(
             if submit == "sge":
                 log.info("stage0_d runs locally; SGE covers other selected stages.")
             from nvitk.db.xnat import requested_sequence_set
-            from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
-            profile = load_xnat_profile(xnat_config_path)
-            conn = resolve_xnat_connection(profile)
+            if xnat_conn is None:
+                raise click.ClickException("stage0_d with --from-source xnat requires XNAT credentials.")
             seq_set = requested_sequence_set(sequences) or set(
                 stage0_download.DEFAULT_SEQUENCES
             )
@@ -565,7 +693,7 @@ def main(
                 stage0_download.run_download(
                     subject_list,
                     dicom_root=dicom_root,
-                    xnat_config=conn,
+                    xnat_config=xnat_conn,
                     sequences=seq_set,
                     skip_existing=skip_existing,
                     report=report,
@@ -578,23 +706,51 @@ def main(
                 detail=f"{len(subject_list)} subject(s)",
             )
 
+        xnat_seq_set: set[str] = set()
+        if use_xnat and run_conv and submit == "local":
+            from nvitk.db.xnat import requested_sequence_set
+
+            if xnat_conn is None:
+                raise click.ClickException("XNAT connection required for --from-source xnat.")
+            xnat_seq_set = requested_sequence_set(sequences) or set(
+                stage0_download.DEFAULT_SEQUENCES
+            )
+
         if submit == "local":
             for subj in subject_list:
                 if run_conv:
-                    run.run_stage(
-                        subj,
-                        STAGE_CONVERT,
-                        lambda s=subj: stage0_convert.run_subject(
-                            s,
-                            dicom_root=dicom_root,
-                            nifti_root=nifti_root,
-                            compute_phase_derived=compute_phase_derived,
-                            skip_existing=skip_existing,
-                            phase_background_correction=phase_background_correction,
-                            phase_bg_poly_order=phase_bg_poly_order,
-                            phase_bg_static_percentile=phase_bg_static_percentile,
-                        ),
+                    convert_kwargs = dict(
+                        compute_phase_derived=compute_phase_derived,
+                        skip_existing=skip_existing,
+                        phase_background_correction=phase_background_correction,
+                        phase_bg_poly_order=phase_bg_poly_order,
+                        phase_bg_static_percentile=phase_bg_static_percentile,
                     )
+                    if use_xnat:
+                        run.run_stage(
+                            subj,
+                            STAGE_CONVERT,
+                            lambda s=subj, kw=convert_kwargs: _xnat_convert_subject(
+                                s,
+                                xnat_config=xnat_conn,
+                                sequences=xnat_seq_set,
+                                dicom_root=dicom_root,
+                                nifti_root=nifti_root,
+                                save_dicoms=save_dicoms,
+                                convert_kwargs=kw,
+                            ),
+                        )
+                    else:
+                        run.run_stage(
+                            subj,
+                            STAGE_CONVERT,
+                            lambda s=subj, kw=convert_kwargs: stage0_convert.run_subject(
+                                s,
+                                dicom_root=dicom_root,
+                                nifti_root=nifti_root,
+                                **kw,
+                            ),
+                        )
                 if run_eicab:
                     run.run_stage(
                         subj,
@@ -719,6 +875,17 @@ def main(
                             cross_section_res=cross_section_res,
                             cross_section_plane_interp=cross_section_plane_interp,
                             cs_supersampling=cs_supersampling,
+                            save_plots=save_plots,
+                        ),
+                    )
+                if run_s7:
+                    run.run_stage(
+                        subj,
+                        STAGE_MORPHOMETRICS,
+                        lambda s=subj: stage7_morphometrics.run_subject(
+                            s,
+                            output_root=output_root,
+                            skip_existing=skip_existing,
                         ),
                     )
 
@@ -730,7 +897,7 @@ def main(
         return
 
     cluster_stages = (
-        run_conv or run_eicab or run_s2 or run_s3 or run_s4 or run_s4t or run_s5 or run_s6
+        run_conv or run_eicab or run_s2 or run_s3 or run_s4 or run_s4t or run_s5 or run_s6 or run_s7
     )
     if not cluster_stages:
         log.info("Nothing to submit to SGE (only stage0_d was selected). Done.")
@@ -925,7 +1092,7 @@ def main(
 
             if run_s6:
                 try:
-                    stage6_measure.submit_subject_sge(
+                    prev_jid = stage6_measure.submit_subject_sge(
                         subj,
                         nifti_root=nifti_root,
                         output_root=output_root,
@@ -940,12 +1107,30 @@ def main(
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
                         cs_supersampling=cs_supersampling,
+                        save_plots=save_plots,
                         backend=backend,
                     )
                 except Exception as exc:
                     import traceback
                     log.exception(traceback.format_exc())
                     log.exception(f"[{subj}] stage6 emit skipped: {exc}")
+
+            if run_s7:
+                try:
+                    stage7_morphometrics.submit_subject_sge(
+                        subj,
+                        output_root=output_root,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        backend=backend,
+                    )
+                except Exception as exc:
+                    import traceback
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage7 emit skipped: {exc}")
 
     log.info("=" * 78)
     log.info(f"qvtpy SGE script written: {script_path}")
@@ -983,6 +1168,7 @@ __all__ = [
     "STAGE_SEG_T",
     "STAGE_LOC",
     "STAGE_MEASURE",
+    "STAGE_MORPHOMETRICS",
 ]
 
 

@@ -41,11 +41,14 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_LICA,
     QVTPY_LMCA,
     QVTPY_NON_COMM_ARTERIAL_IDS,
+    QVTPY_PCA_IDS,
     QVTPY_RACA,
+    QVTPY_RICA,
     QVTPY_RG_EXPLORE_MORE_IDS,
     QVTPY_RG_INTENSITY_FRAC_VENOUS,
     QVTPY_RG_MCA_PCA_EXPLORE_IDS,
     QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS,
+    QVTPY_RG_PCOMM_EICAB_BARRIER_IDS,
     QVTPY_RG_SKIP_LABEL_IDS,
     QVTPY_RMCA,
     QVTPY_SMALL_ARTERIAL_IDS,
@@ -70,12 +73,26 @@ _CROP_MIN_COMPONENT_FRAC_SMALL = 0.0
 VESSEL_EXTRA_PADDING: int = 10
 _DEFAULT_RG_INTENSITY_FRAC: float = 0.45
 _RG_INTENSITY_FRAC_EXPLORE: float = 0.25
-_RG_INTENSITY_FRAC_ACA: float = 0.35
+_RG_INTENSITY_FRAC_ACA: float = 0.40
+# Communicating arteries: stricter (higher) gate + volume caps to curb the
+# persistent "grow into almost the whole image" failure.
+_RG_INTENSITY_FRAC_COMM: float = 0.60
 _RG_EXPLORE_SEG_BARRIER_RADIUS: int = 1
 _RG_EXPLORE_CL_BARRIER_RADIUS: int = 3
 _EICAB_RG_BARRIER_RADIUS: int = 1
 _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
 _ACA_OVERLAP_MIN_VOXELS_DEFAULT: int = 5
+
+# Region-growing volume safeguards (reject catastrophic over-grow / neighbour bleed).
+# A grow is rolled back when the label exceeds either cap after BFS.
+_RG_MAX_GROW_FRAC_DEFAULT: float = 15.0  # grown voxels vs. pre-grow seed voxels
+_RG_MAX_IMAGE_FRAC_DEFAULT: float = 0.05  # label voxels vs. whole volume
+_RG_MAX_IMAGE_FRAC_EXPLORE: float = 0.02  # stricter cap for MCA/PCA (leak into basilar/ICA)
+_RG_MAX_IMAGE_FRAC_COMM: float = 0.02  # stricter cap for communicating arteries
+_RG_MIN_GROW_ALLOW_VOXELS: int = 2000  # always allow at least this many grown voxels
+# Neighbour labels dilated as extra RG walls so PCA/PComm growth cannot slip into
+# the basilar, ICA, or the opposite communicating artery through the P1/junction gap.
+_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS: int = 3
 
 
 @dataclass(frozen=True)
@@ -295,10 +312,7 @@ def _dilate_bool_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
     m = as_backend_array(mask).astype(bool)
     if radius <= 0 or not np.any(m):
         return m
-    return as_backend_array(
-        as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)),
-        dtype=bool,
-    )
+    return as_backend_array(dilate(m.astype(np.uint8), footprint=int(radius), connectivity=1)).astype(bool)
 
 
 def _dilated_other_centerlines_barrier(
@@ -508,9 +522,98 @@ def _region_grow_vessel(
     )
 
 
+def rg_caps_exceeded(
+    n_pre: int,
+    n_post: int,
+    n_total: int,
+    *,
+    max_grow_frac: float | None,
+    max_image_frac: float | None,
+    min_grow_allow_voxels: int = _RG_MIN_GROW_ALLOW_VOXELS,
+) -> str | None:
+    """Return a rollback reason when a grown label breaches a volume cap, else None."""
+    if max_image_frac is not None and n_total > 0:
+        if n_post > float(max_image_frac) * float(n_total):
+            return (
+                f"rg rollback: {n_post} vox > {float(max_image_frac):.3f} of image "
+                f"({n_total} vox)"
+            )
+    if (
+        max_grow_frac is not None
+        and n_pre > 0
+        and n_post > max(float(max_grow_frac) * float(n_pre), float(min_grow_allow_voxels))
+    ):
+        return f"rg rollback: {n_post} vox > {float(max_grow_frac):.1f}x seed ({n_pre} vox)"
+    return None
+
+
+def _region_grow_vessel_capped(
+    seg: np.ndarray,
+    cd: np.ndarray,
+    label_id: int,
+    *,
+    rg_intensity_frac: float,
+    rg_abs_floor: float | None,
+    forbidden: np.ndarray | None = None,
+    max_grow_frac: float | None,
+    max_image_frac: float | None,
+) -> tuple[int, str | None]:
+    """Region grow *label_id*; roll back added voxels if a volume cap is breached.
+
+    Returns ``(n_label_voxels, rollback_reason)`` where the reason is ``None`` when
+    the grow was kept.
+    """
+    seg_np = as_backend_array(seg)
+    lid = int(label_id)
+    pre_mask = as_backend_array(seg_np == lid).astype(bool, copy=True)
+    n_pre = int(np.count_nonzero(pre_mask))
+    region_grow_into_label_volume(
+        seg_np,
+        cd,
+        lid,
+        intensity_frac=float(rg_intensity_frac),
+        abs_floor=rg_abs_floor,
+        forbidden=forbidden,
+    )
+    post_mask = as_backend_array(seg_np == lid).astype(bool)
+    n_post = int(np.count_nonzero(post_mask))
+    reason = rg_caps_exceeded(
+        n_pre,
+        n_post,
+        int(post_mask.size),
+        max_grow_frac=max_grow_frac,
+        max_image_frac=max_image_frac,
+    )
+    if reason is not None:
+        added = post_mask & ~pre_mask
+        seg_np[added] = 0
+        log.warning(f"label {lid}: {reason}; kept {n_pre} seed voxels")
+        return n_pre, reason
+    return n_post, None
+
+
 def _other_segmentation_barrier_undilated(seg: np.ndarray, label_id: int) -> np.ndarray:
     """Forbidden mask: any other label (no dilation)."""
     return _dilated_other_segmentation_barrier(seg, label_id, radius=0)
+
+
+def _dilated_labels_barrier(
+    seg: np.ndarray,
+    label_ids: frozenset[int] | set[int] | tuple[int, ...],
+    *,
+    radius: int = 1,
+) -> np.ndarray:
+    """Dilated forbidden mask from a specific set of already-segmented label ids."""
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
+    barrier = np.zeros(seg_np.shape, dtype=bool)
+    for lid in label_ids:
+        barrier |= as_backend_array(seg_np == int(lid)).astype(bool)
+    return _dilate_bool_mask(barrier, radius=int(radius))
+
+
+def _dilated_pca_barrier(seg: np.ndarray, *, radius: int = 1) -> np.ndarray:
+    """Dilated mask of already-segmented PCA voxels (wall for PComm growth)."""
+    return _dilated_labels_barrier(seg, QVTPY_PCA_IDS, radius=int(radius))
 
 
 def _segment_communicating_rg_only(
@@ -522,27 +625,66 @@ def _segment_communicating_rg_only(
     rg_intensity_frac: float,
     rg_intensity_frac_explore: float,
     stats_by_id: dict[int, VesselSegStats],
+    eicab_native: np.ndarray | None = None,
+    crop_padding_bbox: int = 3,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+    max_grow_frac: float | None = _RG_MAX_GROW_FRAC_DEFAULT,
+    max_image_frac: float | None = _RG_MAX_IMAGE_FRAC_COMM,
 ) -> None:
-    """Seed comm arteries from centerlines and region-grow with undilated barriers."""
+    """Seed comm arteries (centerline + local threshold) and region-grow with walls.
+
+    Posterior communicating arteries additionally use the registered eICAB SCA
+    (native ids 15/16) and dilated PCA segmentation as walls, and every comm grow
+    is bounded by :func:`rg_caps_exceeded` (stricter image-fraction cap).
+    """
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
+    shape = tuple(int(s) for s in clm.shape[:3])
+    sca_barrier = (
+        None if eicab_native is None else eicab_dropped_label_barrier(eicab_native)
+    )
     for lid in comm_label_ids:
         if not np.any(clm == lid):
             continue
         seg[clm == lid] = int(lid)
-        frac = rg_intensity_frac_for_label(
-            lid,
-            default_frac=rg_intensity_frac,
-            explore_frac=rg_intensity_frac_explore,
-            venous_fracs=None,
-        )
-        forbidden = _other_segmentation_barrier_undilated(seg, lid)
-        _region_grow_vessel(
+        # Densify seeds via a local CD threshold crop; centerline-only seeds are
+        # too sparse to anchor a reliable intensity reference for the RG gate.
+        roi = clm == lid
+        bbox_out = _bbox_with_vessel_padding(roi, shape, lid, default_pad=crop_padding_bbox)
+        if bbox_out is not None:
+            bbox, _fp = bbox_out
+            i0, i1, j0, j1, k0, k1 = bbox
+            cd_crop = cd[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
+            crop_mask, _opt, _warn = _threshold_crop(
+                cd_crop,
+                thr_algorithm,
+                min_component_frac=crop_min_fraction_for_label(lid),
+            )
+            cl_barrier = _dilated_other_centerlines_barrier(
+                clm, lid, bbox, radius=_RG_EXPLORE_CL_BARRIER_RADIUS
+            )
+            _paste_crop_mask(seg, crop_mask, lid, bbox, forbidden=cl_barrier)
+        frac = _RG_INTENSITY_FRAC_COMM
+        # Wall comm growth off from every other label (dilated, so it cannot creep
+        # one voxel at a time along ICA/MCA/PCA). PComm additionally uses the eICAB
+        # SCA territory, the dilated PCA, and the ICA/basilar trunks as walls so it
+        # stops at the PCA junction instead of leaking into ICA/PCA/basilar.
+        forbidden = _dilated_other_segmentation_barrier(seg, lid, radius=1)
+        if lid in QVTPY_RG_PCOMM_EICAB_BARRIER_IDS:
+            forbidden = merge_forbidden(
+                forbidden,
+                sca_barrier,
+                _dilated_pca_barrier(seg),
+                _dilated_labels_barrier(seg, QVTPY_ICA_BASILAR_IDS, radius=1),
+            )
+        n_lbl, reason = _region_grow_vessel_capped(
             seg,
             cd,
             lid,
             rg_intensity_frac=frac,
             rg_abs_floor=None,
             forbidden=forbidden,
+            max_grow_frac=max_grow_frac,
+            max_image_frac=max_image_frac,
         )
         st = stats_by_id.get(lid)
         if st is not None:
@@ -552,6 +694,8 @@ def _segment_communicating_rg_only(
             st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
             st.n_voxels_after_threshold = int(np.count_nonzero(seg == lid))
             st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
+            if reason is not None:
+                st.warning = reason
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +721,11 @@ def build_seg_4dflow_local(
     aca_sequential_grow: bool = True,
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    rg_max_grow_frac: float | None = _RG_MAX_GROW_FRAC_DEFAULT,
+    rg_max_image_frac: float | None = _RG_MAX_IMAGE_FRAC_DEFAULT,
+    venous_region_growing: bool = True,
+    segment_acomm: bool = False,
+    split_vertebral: bool = False,
 ) -> LocalSegResult:
     """Build multilabel ``seg_4dflow`` from CD and per-label centerline backbone."""
     cd = as_backend_array(cd).astype(np.float64)
@@ -597,6 +746,9 @@ def build_seg_4dflow_local(
     label_ids = sorted(int(v) for v in np.unique(clm) if int(v) > 0)
     phase1_ids = [lid for lid in label_ids if lid not in QVTPY_COMM_IDS]
     comm_ids = [lid for lid in label_ids if lid in QVTPY_COMM_IDS]
+    if not segment_acomm:
+        # AComm is used only to inform the ACA L/R junction; never grown as a mask.
+        comm_ids = [lid for lid in comm_ids if lid != int(QVTPY_ACOMM)]
     log.step(
         f"local CD segmentation: {len(phase1_ids)} peripheral + {len(comm_ids)} "
         f"communicating label(s), thr={thr_algorithm}, RG={region_growing}"
@@ -664,7 +816,15 @@ def build_seg_4dflow_local(
             )
         )
 
-    seg = keep_largest_component_per_label(seg)
+    # ACAs are grown sequentially below; only non-ACA labels get largest-CC cleanup here.
+    for lid in sorted(int(v) for v in np.unique(seg) if int(v) != 0):
+        if int(lid) in QVTPY_ACA_IDS:
+            continue
+        tmp = np.zeros_like(seg)
+        tmp[seg == lid] = lid
+        cleaned = keep_largest_component_per_label(tmp)
+        seg[seg == lid] = 0
+        seg[cleaned == lid] = lid
     for st in stats:
         st.n_voxels_after_island_clean = int(np.count_nonzero(seg == st.label_id))
 
@@ -687,6 +847,7 @@ def build_seg_4dflow_local(
                 cd,
                 clm,
                 eicab,
+                eicab_native=eicab_ids,
                 opt_thresh_by_label=opt_thresh_by_label,
                 rg_intensity_frac=rg_intensity_frac,
                 rg_intensity_frac_aca=rg_intensity_frac_aca,
@@ -695,6 +856,8 @@ def build_seg_4dflow_local(
                 aca_overlap_min_voxels=aca_overlap_min_voxels,
                 acomm_junction_radius=acomm_junction_radius,
                 stats_by_id=stats_by_id,
+                max_grow_frac=rg_max_grow_frac,
+                max_image_frac=rg_max_image_frac,
             )
 
         for st in stats:
@@ -722,6 +885,7 @@ def build_seg_4dflow_local(
                 venous_fracs=venous_rg,
             )
             floor = rg_abs_floor_for_label(lid, opt_thresh_by_label.get(lid))
+            label_max_image_frac = rg_max_image_frac
             if lid in QVTPY_RG_MCA_PCA_EXPLORE_IDS or lid == int(QVTPY_BASILAR):
                 rg_forbidden = explore_region_grow_forbidden(
                     seg,
@@ -729,27 +893,76 @@ def build_seg_4dflow_local(
                     lid,
                     eicab_native=eicab_ids,
                 )
+                # Explore vessels (MCA/PCA) and basilar leak most easily into their
+                # large neighbours; add the neighbouring segmented labels as dilated
+                # walls and tighten the image-fraction cap.
+                if rg_max_image_frac is not None:
+                    label_max_image_frac = min(
+                        float(rg_max_image_frac), _RG_MAX_IMAGE_FRAC_EXPLORE
+                    )
+                if lid in QVTPY_PCA_IDS:
+                    neighbour_ids = (
+                        (QVTPY_ICA_BASILAR_IDS | QVTPY_COMM_IDS) - {int(lid)}
+                    )
+                    rg_forbidden = merge_forbidden(
+                        rg_forbidden,
+                        _dilated_labels_barrier(
+                            seg,
+                            frozenset(int(x) for x in neighbour_ids),
+                            radius=_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
+                        ),
+                    )
+                elif lid == int(QVTPY_BASILAR):
+                    # ICA trunks (ICA/basilar group minus the basilar itself) + PCA.
+                    basilar_neighbours = QVTPY_PCA_IDS | (
+                        QVTPY_ICA_BASILAR_IDS - {int(QVTPY_BASILAR)}
+                    )
+                    rg_forbidden = merge_forbidden(
+                        rg_forbidden,
+                        _dilated_labels_barrier(
+                            seg,
+                            frozenset(int(x) for x in basilar_neighbours),
+                            radius=_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
+                        ),
+                    )
             elif lid in QVTPY_ACA_IDS:
                 continue
             elif lid in QVTPY_RG_EXPLORE_MORE_IDS:
                 rg_forbidden = explore_region_grow_forbidden(seg, clm, lid)
+            elif int(lid) in (QVTPY_LICA, QVTPY_RICA):
+                rg_forbidden = merge_forbidden(
+                    _dilated_other_segmentation_barrier(seg, lid, radius=rg_rad),
+                    _dilated_labels_barrier(
+                        seg,
+                        QVTPY_COMM_IDS | QVTPY_PCA_IDS,
+                        radius=_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
+                    ),
+                )
             else:
                 rg_forbidden = _dilated_other_segmentation_barrier(seg, lid, radius=rg_rad)
 
-            _region_grow_vessel(
+            _n_lbl, reason = _region_grow_vessel_capped(
                 seg,
                 cd,
                 lid,
                 rg_intensity_frac=frac,
                 rg_abs_floor=floor,
                 forbidden=rg_forbidden,
+                max_grow_frac=rg_max_grow_frac,
+                max_image_frac=label_max_image_frac,
             )
             st.region_growing_applied = True
             st.rg_intensity_frac_used = float(frac)
             st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
+            if reason is not None:
+                st.warning = reason
 
     vertebral_info: VertebralSplitResult | None = None
-    if int(QVTPY_BASILAR) in stats_by_id and np.any(seg == int(QVTPY_BASILAR)):
+    if (
+        split_vertebral
+        and int(QVTPY_BASILAR) in stats_by_id
+        and np.any(seg == int(QVTPY_BASILAR))
+    ):
         seg, vertebral_info = split_vertebral_from_basilar(seg)
         for lid in (QVTPY_BASILAR,):
             st = stats_by_id.get(int(lid))
@@ -782,6 +995,11 @@ def build_seg_4dflow_local(
             rg_intensity_frac=rg_intensity_frac,
             rg_intensity_frac_explore=rg_intensity_frac_explore,
             stats_by_id=stats_by_id,
+            eicab_native=eicab_ids,
+            crop_padding_bbox=int(crop_padding_bbox),
+            thr_algorithm=thr_algorithm,
+            max_grow_frac=rg_max_grow_frac,
+            max_image_frac=_RG_MAX_IMAGE_FRAC_COMM,
         )
 
     return LocalSegResult(
@@ -834,12 +1052,19 @@ __all__ = [
     "_ACA_OVERLAP_MIN_VOXELS_DEFAULT",
     "_DEFAULT_RG_INTENSITY_FRAC",
     "_RG_INTENSITY_FRAC_EXPLORE",
+    "_RG_INTENSITY_FRAC_ACA",
+    "_RG_INTENSITY_FRAC_COMM",
     "_RG_EXPLORE_SEG_BARRIER_RADIUS",
     "_RG_EXPLORE_CL_BARRIER_RADIUS",
+    "_RG_MAX_GROW_FRAC_DEFAULT",
+    "_RG_MAX_IMAGE_FRAC_DEFAULT",
+    "_RG_MAX_IMAGE_FRAC_EXPLORE",
+    "_RG_MAX_IMAGE_FRAC_COMM",
     "explore_region_grow_forbidden",
     "bbox_padding_for_label",
     "build_seg_4dflow_local",
     "crop_min_fraction_for_label",
+    "rg_caps_exceeded",
     "region_growing_enabled_for_label",
     "resolve_venous_rg_intensity_fracs",
     "rg_abs_floor_for_label",

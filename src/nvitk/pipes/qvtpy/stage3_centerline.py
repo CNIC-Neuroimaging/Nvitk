@@ -226,6 +226,7 @@ def run_subject(
     venous_branches = assign_venous_branches(
         venous_clean,
         min_points=venous_min_branch_points,
+        affine=as_backend_array(cd_img.affine) if getattr(cd_img, "affine", None) is not None else None,
     )
     venous_label_by_name = {
         name: venous_name_to_label_id(name) for name in venous_branches

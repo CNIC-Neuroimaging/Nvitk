@@ -83,8 +83,8 @@ def _filter_otsu_by_volume(
         otsu = ica_masks.get(int(lid))
         if otsu is None:
             continue
-        raw_n = int(np.count_nonzero(to_numpy(seg_np == int(lid))))
-        otsu_n = int(np.count_nonzero(to_numpy(otsu)))
+        raw_n = int(np.count_nonzero(seg_np == int(lid)))
+        otsu_n = int(np.count_nonzero(otsu))
         if raw_n > 0 and otsu_n > ratio * raw_n:
             msg = (
                 f"Otsu voxels ({otsu_n}) > {ratio:.0f}× raw ICA ({raw_n}) — keeping original"

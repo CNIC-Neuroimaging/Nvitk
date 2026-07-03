@@ -23,8 +23,10 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_ACA_IDS,
     QVTPY_BASILAR,
     QVTPY_ICA_BASILAR_IDS,
+    QVTPY_LICA,
     QVTPY_MCA_IDS,
     QVTPY_PCA_IDS,
+    QVTPY_RICA,
     NAME_LTSV,
     NAME_RTSV,
     NAME_SSSV,
@@ -37,9 +39,15 @@ from nvitk.pipes.qvtpy.labels import (
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
-# ICA, ACA, MCA, PCA: dual init/fin LOCs; basilar and vertebral arteries use midpoint only.
-QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset(
-    (QVTPY_ICA_BASILAR_IDS - {QVTPY_BASILAR}) | QVTPY_ACA_IDS | QVTPY_MCA_IDS | QVTPY_PCA_IDS
+# ACA: dual init/fin LOCs at ⅓ and ⅔ arc length.
+QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
+# MCA / PCA: dual init/fin LOCs at bifurcation-based stations (see pick_mca_pca_loc_indices).
+QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
+    QVTPY_MCA_IDS | QVTPY_PCA_IDS
+)
+# L/R ICA + basilar: one LOC each, ideally on a common axial (z) plane at max axial alignment.
+QVTPY_ICA_BASILAR_SINGLE_LOC_IDS: frozenset[int] = frozenset(
+    {QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR}
 )
 
 
@@ -120,6 +128,264 @@ def pick_index_at_arc_fraction(points: np.ndarray, frac: float) -> int:
     target = float(np.clip(frac, 0.0, 1.0)) * total
     idx = int(np.searchsorted(cum, target, side="left"))
     return int(np.clip(idx, 0, n - 1))
+
+
+def pick_index_arc_midpoint_between(points: np.ndarray, i0: int, i1: int) -> int:
+    """Polyline index at the arc-length midpoint between indices *i0* and *i1*."""
+    pts = to_numpy(points)
+    n = pts.shape[0]
+    if n < 1:
+        return 0
+    ia = int(np.clip(min(i0, i1), 0, n - 1))
+    ib = int(np.clip(max(i0, i1), 0, n - 1))
+    if ia == ib:
+        return ia
+    cum = polyline_cumulative_arc_length(pts)
+    target = 0.5 * (float(cum[ia]) + float(cum[ib]))
+    idx = int(np.searchsorted(cum, target, side="left"))
+    return int(np.clip(idx, ia, ib))
+
+
+def _voxel_tuple(row: np.ndarray) -> tuple[int, int, int]:
+    return (
+        int(round(float(row[0]))),
+        int(round(float(row[1]))),
+        int(round(float(row[2]))),
+    )
+
+
+def _nearest_polyline_index(
+    points: np.ndarray,
+    xyz: np.ndarray,
+    *,
+    max_dist_vox: float = 3.0,
+) -> int | None:
+    pts = to_numpy(points).astype(np.float64)
+    if pts.shape[0] < 1:
+        return None
+    d = np.linalg.norm(pts - to_numpy(xyz).reshape(1, 3), axis=1)
+    i = int(np.argmin(d))
+    if float(d[i]) > float(max_dist_vox):
+        return None
+    return i
+
+
+def _skeleton_coords_from_seg(seg: np.ndarray, label_id: int) -> np.ndarray:
+    from nvitk.morphology.centerline import skeletonize_binary
+
+    roi = to_numpy(seg) == int(label_id)
+    if not roi.any():
+        return np.zeros((0, 3), dtype=np.float32)
+    sk = to_numpy(skeletonize_binary(roi)) > 0
+    return np.argwhere(sk).astype(np.float32)
+
+
+def _chain_arc_length(path: list[tuple[int, int, int]]) -> float:
+    if len(path) < 2:
+        return 0.0
+    pts = np.asarray(path, dtype=np.float64)
+    return float(polyline_cumulative_arc_length(pts)[-1])
+
+
+def _longest_downstream_chain_from_junction(
+    j1: tuple[int, int, int],
+    adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+    deg: dict[tuple[int, int, int], int],
+    proximal_neighbor: tuple[int, int, int],
+) -> list[tuple[int, int, int]]:
+    branches: list[list[tuple[int, int, int]]] = []
+    for n in adj.get(j1, []):
+        if n == proximal_neighbor:
+            continue
+        path: list[tuple[int, int, int]] = [j1, n]
+        prev, cur = j1, n
+        while deg.get(cur, 0) == 2:
+            nbrs = [x for x in adj.get(cur, []) if x != prev]
+            if not nbrs:
+                break
+            nxt = nbrs[0]
+            path.append(nxt)
+            prev, cur = cur, nxt
+        branches.append(path)
+    if not branches:
+        return [j1]
+    return max(branches, key=_chain_arc_length)
+
+
+def _first_junction_or_endpoint_on_chain(
+    chain: list[tuple[int, int, int]],
+    deg: dict[tuple[int, int, int], int],
+    *,
+    min_degree: int = 3,
+) -> tuple[int, int, int]:
+    md = int(min_degree)
+    for v in chain[1:]:
+        if deg.get(v, 0) >= md:
+            return v
+    return chain[-1]
+
+
+def _proximal_neighbor_at_junction(
+    points: np.ndarray,
+    j1_idx: int,
+    j1_voxel: tuple[int, int, int],
+    adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+) -> tuple[int, int, int] | None:
+    neighbors = adj.get(j1_voxel, [])
+    if not neighbors:
+        return None
+    pts = to_numpy(points).astype(np.float64)
+    if j1_idx > 0:
+        ref = pts[j1_idx - 1]
+    else:
+        ref = pts[0]
+    dists = [float(np.linalg.norm(np.asarray(n, dtype=np.float64) - ref)) for n in neighbors]
+    return neighbors[int(np.argmin(dists))]
+
+
+def pick_mca_pca_loc_indices(
+    points: np.ndarray,
+    *,
+    seg: np.ndarray | None = None,
+    label_id: int | None = None,
+    junction_max_dist_vox: float = 3.0,
+) -> tuple[int, int | None]:
+    """Init/fin LOCs for MCA/PCA from skeleton bifurcations.
+
+  * ≥1 bifurcation — init at arc midpoint start → first bifurcation; fin at arc
+    midpoint first bifurcation → distal target on the longest downstream branch
+    (first junction on that branch, or branch endpoint).
+  * No bifurcation — init only at ¼ arc length from the vessel start; fin is ``None``.
+    """
+    pts = to_numpy(points).astype(np.float64)
+    n = pts.shape[0]
+    if n < 1:
+        return 0, None
+
+    junction_poly_indices: list[int] = []
+    sk_adj: dict[tuple[int, int, int], list[tuple[int, int, int]]] | None = None
+    sk_deg: dict[tuple[int, int, int], int] | None = None
+
+    if seg is not None and label_id is not None:
+        from nvitk.morphology.polyline_graph import collapse_junction_clusters, skeleton_graph
+
+        coords = _skeleton_coords_from_seg(seg, int(label_id))
+        if coords.shape[0] >= 3:
+            _nodes, sk_adj, sk_deg = skeleton_graph(coords)
+            junction_reps = collapse_junction_clusters(_nodes, sk_deg, min_degree=3)
+            for jv in junction_reps:
+                ji = _nearest_polyline_index(
+                    pts,
+                    np.asarray(jv, dtype=np.float64),
+                    max_dist_vox=junction_max_dist_vox,
+                )
+                if ji is not None and ji > 0:
+                    junction_poly_indices.append(int(ji))
+            junction_poly_indices = sorted(set(junction_poly_indices))
+
+    if not junction_poly_indices:
+        return pick_index_at_arc_fraction(pts, 0.25), None
+
+    j1_idx = int(junction_poly_indices[0])
+    init_idx = pick_index_arc_midpoint_between(pts, 0, j1_idx)
+
+    j2_idx = n - 1
+    if sk_adj is not None and sk_deg is not None:
+        j1_voxel = _voxel_tuple(pts[j1_idx])
+        if j1_voxel in sk_adj:
+            prox = _proximal_neighbor_at_junction(pts, j1_idx, j1_voxel, sk_adj)
+            if prox is not None:
+                downstream = _longest_downstream_chain_from_junction(
+                    j1_voxel, sk_adj, sk_deg, prox
+                )
+                distal = _first_junction_or_endpoint_on_chain(downstream, sk_deg)
+                mapped = _nearest_polyline_index(
+                    pts,
+                    np.asarray(distal, dtype=np.float64),
+                    max_dist_vox=junction_max_dist_vox,
+                )
+                if mapped is not None and mapped > j1_idx:
+                    j2_idx = int(mapped)
+
+    fin_idx = pick_index_arc_midpoint_between(pts, j1_idx, j2_idx)
+    if fin_idx <= init_idx:
+        fin_idx = int(np.clip(j1_idx + 1, 0, n - 1))
+    return init_idx, fin_idx
+
+
+def pick_axial_alignment_index(
+    points: np.ndarray,
+    *,
+    proximal_frac: float = 0.65,
+) -> int:
+    """Polyline index with strongest alignment to the superior (z) axis in the proximal segment."""
+    pts = to_numpy(points).astype(np.float64)
+    n = pts.shape[0]
+    if n < 1:
+        return 0
+    tangents = to_numpy(centerline_tangents(pts, k_half=2)).astype(np.float64)
+    limit = max(3, int(round(float(proximal_frac) * n)))
+    scores = np.abs(tangents[:limit, 2])
+    return int(np.argmax(scores))
+
+
+def pick_index_near_z(
+    points: np.ndarray,
+    target_z: float,
+    *,
+    candidate_indices: np.ndarray | None = None,
+) -> int:
+    """Index whose z coordinate is closest to *target_z* (optionally restricted to candidates)."""
+    pts = to_numpy(points).astype(np.float64)
+    n = pts.shape[0]
+    if n < 1:
+        return 0
+    if candidate_indices is None:
+        pool = np.arange(n, dtype=np.int32)
+    else:
+        pool = np.asarray(candidate_indices, dtype=np.int32).reshape(-1)
+        pool = pool[(pool >= 0) & (pool < n)]
+        if pool.size == 0:
+            pool = np.arange(n, dtype=np.int32)
+    z = pts[pool, 2]
+    return int(pool[int(np.argmin(np.abs(z - float(target_z))))])
+
+
+def select_ica_basilar_aligned_loc_indices(
+    arterial_polylines: dict[int, np.ndarray],
+    *,
+    proximal_frac: float = 0.65,
+    min_axial_score: float = 0.55,
+) -> dict[int, int]:
+    """Single LOC index per ICA/basilar vessel on a shared axial (z) plane.
+
+    Picks the proximal station of strongest z-axis alignment on each vessel, then
+    refines all three to the median z among those stations (before the ICA siphon).
+    """
+    present = [int(v) for v in QVTPY_ICA_BASILAR_SINGLE_LOC_IDS if int(v) in arterial_polylines]
+    if not present:
+        return {}
+
+    anchor_idx: dict[int, int] = {}
+    z_vals: list[float] = []
+    for vid in present:
+        pts = to_numpy(arterial_polylines[vid]).astype(np.float64)
+        idx = pick_axial_alignment_index(pts, proximal_frac=proximal_frac)
+        anchor_idx[vid] = idx
+        z_vals.append(float(pts[idx, 2]))
+
+    shared_z = float(np.median(z_vals))
+    out: dict[int, int] = {}
+    for vid in present:
+        pts = to_numpy(arterial_polylines[vid]).astype(np.float64)
+        tangents = to_numpy(centerline_tangents(pts, k_half=2)).astype(np.float64)
+        limit = max(3, int(round(float(proximal_frac) * pts.shape[0])))
+        axial = np.abs(tangents[:limit, 2])
+        good = np.where(axial >= float(min_axial_score))[0]
+        if good.size == 0:
+            good = np.array([anchor_idx[vid]], dtype=np.int32)
+        out[vid] = pick_index_near_z(pts, shared_z, candidate_indices=good)
+    return out
 
 
 def pick_dual_loc_indices(n: int, points: np.ndarray | None = None) -> tuple[int, int] | None:
@@ -501,6 +767,7 @@ def select_arterial_locs(
     radius_vox: float = 10.0,
     strategy: str = "qvtpy",
     endpoint_inset_frac: float = 0.08,
+    arterial_seg: np.ndarray | None = None,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
     """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json."""
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
@@ -508,16 +775,86 @@ def select_arterial_locs(
     meta_extra: dict[str, Any] = {
         "dual_loc_fallback_vessels": [],
         "loc_boundary_method_dual": "arc_length_tertiles",
+        "loc_boundary_method_mca_pca": "bifurcation_arc_midpoints",
         "loc_boundary_method_mid": "arc_length_midpoint",
         "arterial_centerline_source": "stage4_seg",
+        "arterial_seg_for_bifurcations": arterial_seg is not None,
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
+    ica_basilar_idx = (
+        select_ica_basilar_aligned_loc_indices(arterial_polylines)
+        if use_dual
+        else {}
+    )
+    if ica_basilar_idx:
+        meta_extra["ica_basilar_shared_z_locs"] = {
+            str(k): int(v) for k, v in ica_basilar_idx.items()
+        }
 
     for vid, pts in sorted(arterial_polylines.items()):
         pts_np = to_numpy(pts)
         vname = qvtpy_vessel_name(vid)
         if pts_np.shape[0] < 3:
+            continue
+
+        if use_dual and int(vid) in QVTPY_ICA_BASILAR_SINGLE_LOC_IDS:
+            if int(vid) not in ica_basilar_idx:
+                continue
+            out.append(
+                _arterial_loc_at_index(
+                    pts_np,
+                    ica_basilar_idx[int(vid)],
+                    vessel_id=vid,
+                    vessel_name=vname,
+                    segment_id=0,
+                    loc_role="mid",
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
+                )
+            )
+            continue
+
+        if use_dual and int(vid) in QVTPY_MCA_PCA_BIFURCATION_LOC_IDS:
+            init_idx, fin_idx = pick_mca_pca_loc_indices(
+                pts_np,
+                seg=arterial_seg,
+                label_id=int(vid),
+            )
+            out.append(
+                _arterial_loc_at_index(
+                    pts_np,
+                    init_idx,
+                    vessel_id=vid,
+                    vessel_name=vname,
+                    segment_id=0,
+                    loc_role="init",
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
+                )
+            )
+            if fin_idx is not None:
+                out.append(
+                    _arterial_loc_at_index(
+                        pts_np,
+                        fin_idx,
+                        vessel_id=vid,
+                        vessel_name=vname,
+                        segment_id=1,
+                        loc_role="fin",
+                        mag=mag,
+                        cd=cd,
+                        vel_mag=vel_mag,
+                        voxel_spacing=voxel_spacing,
+                        radius_vox=radius_vox,
+                    )
+                )
             continue
 
         if use_dual and int(vid) in QVTPY_DUAL_LOC_ARTERIAL_IDS:
@@ -612,6 +949,10 @@ __all__ = [
     "LocRecord",
     "loc_record_to_dict",
     "pick_dual_loc_indices",
+    "pick_mca_pca_loc_indices",
+    "pick_index_arc_midpoint_between",
+    "pick_axial_alignment_index",
+    "select_ica_basilar_aligned_loc_indices",
     "pick_equal_section_boundary_indices",
     "pick_arc_midpoint_in_mask",
     "pick_index_at_arc_fraction",

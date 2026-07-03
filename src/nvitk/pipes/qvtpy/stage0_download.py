@@ -26,6 +26,7 @@ step is **opt-in** (``stage0_d``); ``stage0_convert`` runs by default.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -164,6 +165,49 @@ def load_subjects(
     if suffix in (".csv", ".xlsx", ".xls"):
         return _read_subjects_dataframe(path)
     return resolve_subject_labels(subjects_file=path)
+
+
+def resolve_subjects_for_xnat_pipeline(
+    *,
+    subjects: str | None,
+    subjects_file: str | Path | None,
+    xnat_config: XnatConnectionConfig,
+) -> tuple[list[str], XnatConnectionConfig]:
+    """Resolve subjects for qvtpy when sourcing DICOMs from XNAT.
+
+    When *subjects* is a single cohort alias (e.g. ``PESA-Brain``), expand to all
+    subject labels in that XNAT project and override ``xnat_config.project``.
+    """
+    from nvitk.db.xnat import list_xnat_project_subject_labels
+    from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
+
+    if subjects_file is not None:
+        return (
+            load_subjects(subjects=subjects, subjects_file=subjects_file),
+            xnat_config,
+        )
+
+    if subjects is None:
+        raise click.ClickException(
+            "Provide exactly one of --subjects or --subjects-file."
+        )
+
+    project_id = resolve_xnat_project_cohort_token(subjects)
+    if project_id is None:
+        return load_subjects(subjects=subjects, subjects_file=None), xnat_config
+
+    conn = replace(xnat_config, project=project_id)
+    labels = list_xnat_project_subject_labels(conn)
+    if not labels:
+        raise click.ClickException(
+            f"No subjects found in XNAT project {project_id!r} "
+            f"(from cohort alias {subjects!r})."
+        )
+    log.info(
+        f"XNAT cohort alias {subjects!r} -> project {project_id!r} "
+        f"({len(labels)} subject(s))"
+    )
+    return labels, conn
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +474,10 @@ def print_qc_report(
 @click.option(
     "--subjects",
     default=None,
-    help="Comma/space separated subject IDs (e.g. 'PESA0001,PESA0002').",
+    help=(
+        "Comma/space separated subject IDs, or a cohort alias "
+        "(e.g. PESA-Brain expands to all XNAT PESA_Brain subjects)."
+    ),
 )
 @click.option(
     "--subjects-file",
@@ -489,12 +536,6 @@ def main(
 ) -> None:
     Logger()
 
-    subject_list = load_subjects(subjects=subjects, subjects_file=subjects_file)
-    if not subject_list:
-        raise click.ClickException("No subjects resolved from inputs.")
-
-    seq_set = requested_sequence_set(sequences) or set(DEFAULT_SEQUENCES)
-
     profile = load_xnat_profile(xnat_config_path)
     conn = resolve_xnat_connection(
         profile,
@@ -504,6 +545,16 @@ def main(
         password=password,
         netrc_file=str(netrc_file) if netrc_file else None,
     )
+
+    subject_list, conn = resolve_subjects_for_xnat_pipeline(
+        subjects=subjects,
+        subjects_file=subjects_file,
+        xnat_config=conn,
+    )
+    if not subject_list:
+        raise click.ClickException("No subjects resolved from inputs.")
+
+    seq_set = requested_sequence_set(sequences) or set(DEFAULT_SEQUENCES)
 
     run_download(
         subject_list,
@@ -520,6 +571,7 @@ __all__ = [
     "SLOT_DIRS",
     "download_subject",
     "load_subjects",
+    "resolve_subjects_for_xnat_pipeline",
     "print_qc_report",
     "run_download",
     "main",

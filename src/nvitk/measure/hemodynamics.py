@@ -10,10 +10,18 @@ backend; inputs are coerced with :func:`~nvitk.core.array.as_backend_array`.
 
 from __future__ import annotations
 
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 
 setup(globals())
+
+# PWV physiological acceptance window (m/s), matching QVTplus ``enc_PWV``.
+PWV_MIN_M_S: float = 0.0
+PWV_MAX_M_S: float = 30.0
+# Cross-section quality is scored on a 0-4 scale (QVTplus ``StdvFromMean`` range);
+# points below this threshold are excluded from PITC / PWV fits.
+QUALITY_SCALE_MAX: float = 4.0
+QUALITY_THRESH_DEFAULT: float = 2.5
 
 
 def pulsatility_index(flow_t, *, eps: float = 1e-9):
@@ -85,11 +93,305 @@ def through_plane_velocity_series(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Cross-section waveform quality (QVTplus StdvFromMean analogue)
+# ---------------------------------------------------------------------------
+
+
+def waveform_quality_score(flow_t, *, eps: float = 1e-9) -> float:
+    """Quality of a single flow waveform on a 0-4 scale (higher = cleaner).
+
+    Analogue of the QVTplus ``StdvFromMean`` metric adapted to a per-vessel mask:
+    a clean, high-amplitude cardiac waveform (small temporal roughness relative to
+    its pulsatile amplitude) scores near 4; a noisy or flat waveform scores near 0.
+    """
+    x = as_backend_array(flow_t).astype(np.float64).reshape(-1)
+    if x.size < 3:
+        return 0.0
+    amp = float(np.max(x) - np.min(x))
+    if amp <= eps:
+        return 0.0
+    roughness = float(np.std(np.diff(np.diff(x))))
+    roughness_ratio = roughness / (amp + eps)
+    return float(QUALITY_SCALE_MAX / (1.0 + roughness_ratio))
+
+
+# ---------------------------------------------------------------------------
+# Weighted linear regression + PITC
+# ---------------------------------------------------------------------------
+
+
+def weighted_linear_fit(x, y, weights=None, *, eps: float = 1e-12) -> dict[str, float]:
+    """Weighted least-squares fit ``y = slope * x + intercept``.
+
+    Returns ``slope``, ``intercept``, ``r2`` (weighted), and ``n`` (number of points).
+    """
+    xv = to_numpy(as_backend_array(x)).astype("float64").reshape(-1)
+    yv = to_numpy(as_backend_array(y)).astype("float64").reshape(-1)
+    n = int(min(xv.size, yv.size))
+    if n < 2:
+        return {"slope": float("nan"), "intercept": float("nan"), "r2": float("nan"), "n": n}
+    xv = xv[:n]
+    yv = yv[:n]
+    if weights is None:
+        wv = _np_ones_like(yv)
+    else:
+        wv = to_numpy(as_backend_array(weights)).astype("float64").reshape(-1)[:n]
+    wsum = float(wv.sum())
+    if wsum <= eps:
+        return {"slope": float("nan"), "intercept": float("nan"), "r2": float("nan"), "n": n}
+    xm = float((wv * xv).sum() / wsum)
+    ym = float((wv * yv).sum() / wsum)
+    sxx = float((wv * (xv - xm) ** 2).sum())
+    sxy = float((wv * (xv - xm) * (yv - ym)).sum())
+    if abs(sxx) <= eps:
+        return {"slope": float("nan"), "intercept": float(ym), "r2": float("nan"), "n": n}
+    slope = sxy / sxx
+    intercept = ym - slope * xm
+    pred = slope * xv + intercept
+    ss_res = float((wv * (yv - pred) ** 2).sum())
+    ss_tot = float((wv * (yv - ym) ** 2).sum())
+    r2 = float("nan") if ss_tot <= eps else 1.0 - ss_res / ss_tot
+    return {"slope": float(slope), "intercept": float(intercept), "r2": r2, "n": n}
+
+
+def _np_ones_like(a):
+    import numpy as _np
+
+    return _np.ones_like(a)
+
+
+def quality_weights(quality, *, thresh: float = QUALITY_THRESH_DEFAULT):
+    """Dempsey-style weights ``(Q - thresh) / (scale_max - thresh)`` clipped to >= 0."""
+    import numpy as _np
+
+    q = to_numpy(as_backend_array(quality)).astype("float64").reshape(-1)
+    denom = max(QUALITY_SCALE_MAX - float(thresh), 1e-9)
+    return _np.clip((q - float(thresh)) / denom, 0.0, None)
+
+
+def pitc_fit(
+    pi_values,
+    distances_mm,
+    quality=None,
+    *,
+    thresh: float = QUALITY_THRESH_DEFAULT,
+) -> dict[str, float]:
+    """Pulsatility Index Transmission Coefficient: slope of PI vs distance from root.
+
+    ``PI(d) = pitc_slope * d + pitc_intercept``. High-quality points are up-weighted
+    with :func:`quality_weights`. Returns the slope (1/mm), intercept (PI at root),
+    weighted R2, point count, and quality-weighted mean PI (``global_pi``).
+    """
+    import numpy as _np
+
+    pi = to_numpy(as_backend_array(pi_values)).astype("float64").reshape(-1)
+    dist = to_numpy(as_backend_array(distances_mm)).astype("float64").reshape(-1)
+    n = int(min(pi.size, dist.size))
+    pi = pi[:n]
+    dist = dist[:n]
+    if quality is None:
+        weights = _np.ones(n, dtype="float64")
+    else:
+        weights = quality_weights(quality, thresh=thresh)[:n]
+    keep = weights > 0
+    if int(keep.sum()) < 2:
+        return {
+            "pitc_slope": float("nan"),
+            "pitc_intercept": float("nan"),
+            "r2": float("nan"),
+            "n": int(keep.sum()),
+            "global_pi": float("nan"),
+        }
+    fit = weighted_linear_fit(dist[keep], pi[keep], weights[keep])
+    wsum = float(weights[keep].sum())
+    global_pi = float((weights[keep] * pi[keep]).sum() / wsum) if wsum > 0 else float("nan")
+    return {
+        "pitc_slope": fit["slope"],
+        "pitc_intercept": fit["intercept"],
+        "r2": fit["r2"],
+        "n": fit["n"],
+        "global_pi": global_pi,
+    }
+
+
+def damping_index(pi_proximal: float, pi_distal: float, *, eps: float = 1e-9) -> float:
+    """Pulsatility damping index ``(PI_prox - PI_dist) / PI_prox``."""
+    p = float(pi_proximal)
+    if abs(p) <= eps:
+        return float("nan")
+    return float((p - float(pi_distal)) / p)
+
+
+# ---------------------------------------------------------------------------
+# Pulse wave velocity (Bjornfoot optimizer + Fielding cross-correlation)
+# ---------------------------------------------------------------------------
+
+
+def normalize_waveform(flow_t, *, eps: float = 1e-9):
+    """Zero-mean, unit-std normalization along the last axis (per row)."""
+    x = as_backend_array(flow_t).astype(np.float64)
+    if x.ndim == 1:
+        x = x.reshape(1, -1)
+    mu = np.mean(x, axis=1, keepdims=True)
+    sd = np.std(x, axis=1, keepdims=True)
+    return (x - mu) / (sd + eps)
+
+
+def _circular_fractional_shift(x, shift_frames: float):
+    """Shift a periodic 1D waveform by *shift_frames* (fractional) via interpolation."""
+    import numpy as _np
+
+    xv = to_numpy(as_backend_array(x)).astype("float64").reshape(-1)
+    nt = xv.size
+    if nt == 0:
+        return xv
+    idx = (_np.arange(nt, dtype="float64") - float(shift_frames)) % nt
+    lo = _np.floor(idx).astype(int) % nt
+    hi = (lo + 1) % nt
+    frac = idx - _np.floor(idx)
+    return xv[lo] * (1.0 - frac) + xv[hi] * frac
+
+
+def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
+    """Integer lag (frames) maximizing circular cross-correlation and its correlation.
+
+    Ported from QVTplus ``slidingxCor``: both waveforms are normalized, then the
+    circular shift of *signal* that best matches *reference* is returned.
+    """
+    import numpy as _np
+
+    ref = to_numpy(as_backend_array(reference)).astype("float64").reshape(-1)
+    sig = to_numpy(as_backend_array(signal)).astype("float64").reshape(-1)
+    nt = int(min(ref.size, sig.size))
+    if nt < 2:
+        return 0.0, 0.0
+    ref = ref[:nt]
+    sig = sig[:nt]
+    ref = (ref - ref.mean()) / (ref.std() + 1e-9)
+    sig = (sig - sig.mean()) / (sig.std() + 1e-9)
+    best_lag = 0
+    best_corr = -_np.inf
+    for lag in range(nt):
+        shifted = _np.roll(sig, lag)
+        corr = float(_np.dot(ref, shifted) / nt)
+        if corr > best_corr:
+            best_corr = corr
+            best_lag = lag
+    if best_lag > nt // 2:
+        best_lag -= nt
+    return float(best_lag), float(best_corr)
+
+
+def pwv_fielding_xcor(
+    distances_m,
+    flow_matrix,
+    temporal_resolution_s: float,
+    *,
+    weights=None,
+    reference_index: int = 0,
+) -> dict[str, float]:
+    """Fielding-style PWV: cross-correlation lag vs distance, weighted linear fit.
+
+    *flow_matrix* is ``(n_stations, n_frames)`` ordered along the vessel. Lags are
+    measured relative to *reference_index*; ``tau = distance / PWV`` is fit so
+    ``PWV = 1 / slope``. Returns ``pwv_m_s``, ``r`` (mean |correlation|), and ``n``.
+    """
+    import numpy as _np
+
+    dist = to_numpy(as_backend_array(distances_m)).astype("float64").reshape(-1)
+    flows = to_numpy(as_backend_array(flow_matrix)).astype("float64")
+    if flows.ndim != 2 or flows.shape[0] < 2:
+        return {"pwv_m_s": float("nan"), "r": float("nan"), "n": int(flows.shape[0] if flows.ndim else 0)}
+    tr = float(temporal_resolution_s)
+    ref = flows[int(reference_index)]
+    lags_s = _np.zeros(flows.shape[0], dtype="float64")
+    corrs = _np.zeros(flows.shape[0], dtype="float64")
+    for i in range(flows.shape[0]):
+        lag_frames, corr = circular_cross_correlation_lag(ref, flows[i])
+        lags_s[i] = lag_frames * tr
+        corrs[i] = abs(corr)
+    fit = weighted_linear_fit(dist, lags_s, weights)
+    slope = fit["slope"]
+    pwv = 1.0 / slope if slope and _np.isfinite(slope) and abs(slope) > 1e-12 else float("nan")
+    return {"pwv_m_s": float(pwv), "r": float(_np.mean(corrs)), "n": int(flows.shape[0])}
+
+
+def pwv_bjornfoot_optimize(
+    distances_m,
+    flow_matrix,
+    temporal_resolution_s: float,
+    *,
+    weights=None,
+    pwv_bounds: tuple[float, float] = (0.5, 30.0),
+) -> dict[str, float]:
+    """Bjornfoot waveform-shift PWV estimate (J Cereb Blood Flow Metab 2021).
+
+    Each waveform is normalized; for a candidate PWV the per-station delay
+    ``dt_i = d_i / PWV`` aligns the waveforms to a shared template, and the total
+    weighted residual is minimized over PWV. Returns ``pwv_m_s`` and the residual cost.
+    """
+    import numpy as _np
+    from scipy.optimize import minimize_scalar
+
+    dist = to_numpy(as_backend_array(distances_m)).astype("float64").reshape(-1)
+    flows = to_numpy(as_backend_array(normalize_waveform(flow_matrix)))
+    if flows.ndim != 2 or flows.shape[0] < 2:
+        return {"pwv_m_s": float("nan"), "cost": float("nan"), "n": int(flows.shape[0] if flows.ndim else 0)}
+    tr = float(temporal_resolution_s)
+    n_stations = flows.shape[0]
+    if weights is None:
+        wv = _np.ones(n_stations, dtype="float64")
+    else:
+        wv = to_numpy(as_backend_array(weights)).astype("float64").reshape(-1)[:n_stations]
+    wsum = float(wv.sum()) or 1.0
+
+    def cost(pwv: float) -> float:
+        if pwv <= 0:
+            return 1e12
+        shift_frames = (dist / pwv) / tr
+        aligned = _np.vstack(
+            [_circular_fractional_shift(flows[i], shift_frames[i]) for i in range(n_stations)]
+        )
+        template = (wv[:, None] * aligned).sum(axis=0) / wsum
+        total = 0.0
+        for i in range(n_stations):
+            model = _circular_fractional_shift(template, -shift_frames[i])
+            total += wv[i] * float(_np.sum((model - flows[i]) ** 2))
+        return total
+
+    res = minimize_scalar(cost, bounds=tuple(pwv_bounds), method="bounded")
+    return {"pwv_m_s": float(res.x), "cost": float(res.fun), "n": int(n_stations)}
+
+
+def accept_pwv(pwv_m_s: float) -> bool:
+    """QVTplus acceptance gate: ``0 < PWV < 30`` m/s."""
+    try:
+        v = float(pwv_m_s)
+    except (TypeError, ValueError):
+        return False
+    return PWV_MIN_M_S < v < PWV_MAX_M_S
+
+
 __all__ = [
+    "PWV_MAX_M_S",
+    "PWV_MIN_M_S",
+    "QUALITY_SCALE_MAX",
+    "QUALITY_THRESH_DEFAULT",
+    "accept_pwv",
+    "circular_cross_correlation_lag",
+    "damping_index",
     "mean_flow_ml_s",
     "mean_velocity_mm_s",
+    "normalize_waveform",
+    "pitc_fit",
     "pulsatility_index",
+    "pwv_bjornfoot_optimize",
+    "pwv_fielding_xcor",
+    "quality_weights",
     "resistivity_index",
     "through_plane_velocity_series",
     "velocity_mm_s_from_phases",
+    "waveform_quality_score",
+    "weighted_linear_fit",
 ]

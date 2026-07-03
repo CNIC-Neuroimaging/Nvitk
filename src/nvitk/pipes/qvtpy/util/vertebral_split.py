@@ -14,7 +14,13 @@ from typing import Any
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
 from nvitk.morphology.centerline import compute_centerlines, skeletonize_binary
-from nvitk.pipes.qvtpy.labels import QVTPY_BASILAR, QVTPY_LVA, QVTPY_RVA
+from nvitk.pipes.qvtpy.labels import (
+    QVTPY_BASILAR,
+    QVTPY_LICA,
+    QVTPY_LVA,
+    QVTPY_RICA,
+    QVTPY_RVA,
+)
 
 setup(globals())
 
@@ -31,6 +37,7 @@ class VertebralSplitResult:
     basilar_voxels: int
     hemisphere_axis: str
     bifurcation_cut_k: int | None = None
+    confidence: float = 0.0
     lva_centerline: np.ndarray | None = None
     rva_centerline: np.ndarray | None = None
     message: str | None = None
@@ -49,6 +56,7 @@ class VertebralSplitResult:
             "basilar_voxels": int(self.basilar_voxels),
             "hemisphere_axis": self.hemisphere_axis,
             "bifurcation_cut_k": self.bifurcation_cut_k,
+            "vertebral_split_confidence": float(self.confidence),
             "message": self.message,
         }
         if self.lva_centerline is not None and self.lva_centerline.size > 0:
@@ -152,10 +160,46 @@ def _pair_inferior_branches(
     return b, a
 
 
+def _ica_left_direction(seg_np: np.ndarray) -> np.ndarray | None:
+    """Unit vector pointing from the right ICA toward the left ICA (patient L/R)."""
+    left = as_backend_array(np.argwhere(seg_np == int(QVTPY_LICA))).astype(np.float64)
+    right = as_backend_array(np.argwhere(seg_np == int(QVTPY_RICA))).astype(np.float64)
+    if left.size == 0 or right.size == 0:
+        return None
+    v = left.mean(axis=0) - right.mean(axis=0)
+    n = float(np.linalg.norm(v))
+    if n < 1e-6:
+        return None
+    return v / n
+
+
+def _order_branches_left_right(
+    a: set[tuple[int, int, int]],
+    b: set[tuple[int, int, int]],
+    seg_np: np.ndarray,
+) -> tuple[set[tuple[int, int, int]], set[tuple[int, int, int]], str]:
+    """Order (a, b) into (LVA_seeds, RVA_seeds).
+
+    Prefers the ICA-derived patient left direction; falls back to the mean-Y
+    heuristic when ICA labels are unavailable.
+    """
+    left_dir = _ica_left_direction(seg_np)
+    if left_dir is not None:
+        ca = as_backend_array(np.array(list(a), dtype=np.float64)).mean(axis=0)
+        cb = as_backend_array(np.array(list(b), dtype=np.float64)).mean(axis=0)
+        if float(np.dot(ca, left_dir)) >= float(np.dot(cb, left_dir)):
+            return a, b, "ica_direction"
+        return b, a, "ica_direction"
+    with using("numpy"):
+        mj_a = float(np.mean([p[1] for p in a]))
+        mj_b = float(np.mean([p[1] for p in b]))
+    return (a, b, "y") if mj_a <= mj_b else (b, a, "y")
+
+
 def split_vertebral_from_basilar(
     seg: np.ndarray,
     *,
-    min_branch_voxels: int = 5,
+    min_branch_voxels: int = 15,
     bifurcation_cut_margin: int = 2,
 ) -> tuple[np.ndarray, VertebralSplitResult]:
     """Relabel inferior basilar into LVA/RVA when a vertebro-basilar Y-junction is found.
@@ -222,7 +266,9 @@ def split_vertebral_from_basilar(
             hemisphere_axis="y",
             message="fewer than two inferior skeleton branches",
         )
-    lva_seeds, rva_seeds = branch_pair
+    lva_seeds, rva_seeds, hemisphere_axis = _order_branches_left_right(
+        branch_pair[0], branch_pair[1], seg_np
+    )
 
     cut_margin = max(0, int(bifurcation_cut_margin))
     cut_k = max(0, jk - cut_margin)
@@ -238,7 +284,7 @@ def split_vertebral_from_basilar(
             lva_voxels=0,
             rva_voxels=0,
             basilar_voxels=n_basilar,
-            hemisphere_axis="y",
+            hemisphere_axis=hemisphere_axis,
             bifurcation_cut_k=int(cut_k),
             message="VA domain empty after bifurcation cut",
         )
@@ -257,7 +303,7 @@ def split_vertebral_from_basilar(
             lva_voxels=n_lva,
             rva_voxels=n_rva,
             basilar_voxels=n_basilar,
-            hemisphere_axis="y",
+            hemisphere_axis=hemisphere_axis,
             bifurcation_cut_k=int(cut_k),
             message="inferior VA branch too small after skeleton flood-fill",
         )
@@ -276,6 +322,9 @@ def split_vertebral_from_basilar(
     if n_rva > 0:
         rva_cl = compute_centerlines(out, labels=[QVTPY_RVA], min_points=3).get(QVTPY_RVA)
 
+    balance = float(min(n_lva, n_rva)) / float(max(n_lva, n_rva)) if max(n_lva, n_rva) > 0 else 0.0
+    confidence = balance if hemisphere_axis == "ica_direction" else 0.5 * balance
+
     return out, VertebralSplitResult(
         split_applied=True,
         bifurcation_ijk=junction,
@@ -283,8 +332,9 @@ def split_vertebral_from_basilar(
         lva_voxels=n_lva,
         rva_voxels=n_rva,
         basilar_voxels=int(np.count_nonzero(superior)),
-        hemisphere_axis="y",
+        hemisphere_axis=hemisphere_axis,
         bifurcation_cut_k=int(cut_k),
+        confidence=confidence,
         lva_centerline=lva_cl,
         rva_centerline=rva_cl,
         message=None,

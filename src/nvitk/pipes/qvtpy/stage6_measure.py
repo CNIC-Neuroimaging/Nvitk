@@ -40,9 +40,11 @@ from nvitk.io.imageio import imread
 from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.measure.cross_section import ThrAlgorithm
-from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines
+from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines, load_centerlines
 from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
 from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
+from nvitk.pipes.qvtpy.util.vessel_hemodynamics import compute_vessel_hemodynamics
+from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
 from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
 setup(globals())
@@ -104,6 +106,57 @@ def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
     return (1.0, 1.0, 1.0)
 
 
+def _phase_temporal_resolution_s(ap_phase_path: Path) -> float | None:
+    """Cardiac-frame temporal resolution (s) from the phase NIfTI JSON sidecar.
+
+    dcm2niix / :mod:`nvitk.io.conversors` propagates ``t_res`` (seconds) and
+    ``FrameTime`` (ms) into the sidecar metadata. Returns ``None`` when no usable
+    timing field is present, so PWV can fail loudly rather than assume a value.
+    """
+    ap_img = imread(ap_phase_path)
+    meta = dict(ap_img.metadata or {})
+    for key in ("temporal_resolution", "t_res", "TemporalResolution"):
+        val = meta.get(key)
+        if val is not None:
+            try:
+                out = float(val)
+                if out > 0:
+                    return out
+            except (TypeError, ValueError):
+                pass
+    for key, scale in (("FrameTime", 1e-3), ("RepetitionTime", 1.0)):
+        val = meta.get(key)
+        if val is not None:
+            try:
+                out = float(val) * scale
+                if out > 0:
+                    return out
+            except (TypeError, ValueError):
+                pass
+    sidecars = sorted(ap_phase_path.parent.glob("*.json"))
+    for js in sidecars:
+        try:
+            data = json.loads(js.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for key, scale in (
+            ("temporal_resolution", 1.0),
+            ("t_res", 1.0),
+            ("TemporalResolution", 1.0),
+            ("FrameTime", 1e-3),
+            ("RepetitionTime", 1.0),
+        ):
+            val = data.get(key)
+            if val is not None:
+                try:
+                    out = float(val) * scale
+                    if out > 0:
+                        return out
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
 def _load_contrast(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     sub = nifti_root / subject / "4DFlow"
     cd_p = sub / "ComplexDifference_3D.nii.gz"
@@ -119,6 +172,157 @@ def _load_contrast(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarr
     if vmag.is_file():
         vel = as_backend_array(imread(vmag).data).astype(np.float64)
     return mag, cd, vel
+
+
+_PITC_PROFILE_FIELDS = [
+    "root_region_id",
+    "vessel_id",
+    "vessel_name",
+    "station_index",
+    "distance_mm",
+    "pi",
+    "quality",
+    "area_mm2",
+]
+
+_VESSEL_HEMO_FIELDS = [
+    "region_id",
+    "region_label",
+    "row_kind",
+    "pitc_slope",
+    "pitc_intercept",
+    "pitc_r2",
+    "pitc_n",
+    "global_pi",
+    "pwv_bjornfoot_m_s",
+    "pwv_fielding_m_s",
+    "pwv_r_fielding",
+    "pwv_n_stations",
+    "damping_index",
+]
+
+
+def _run_vessel_hemodynamics(
+    subject: str,
+    *,
+    out_dir: Path,
+    output_root: Path,
+    volume_seg: np.ndarray,
+    cd: np.ndarray,
+    mag: np.ndarray,
+    vel_mag: np.ndarray,
+    vx: np.ndarray,
+    vy: np.ndarray,
+    vz: np.ndarray,
+    voxel_spacing: tuple[float, float, float],
+    temporal_resolution_s: float | None,
+    radius_vox: float,
+    pitc_stride: int,
+    pitc_quality_thresh: float,
+    summary: dict[str, int],
+    save_plots: bool = False,
+    seg_metadata: dict | None = None,
+) -> None:
+    """Sample dense PITC/PWV and write ``pitc_profile.csv`` + ``vessel_hemodynamics.csv``."""
+    s3 = _stage3_dir(output_root, subject)
+    s4 = _stage4_dir(output_root, subject)
+    arterial, venous, _meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
+    centerlines = {int(k): to_numpy(v) for k, v in arterial.items()}
+    from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
+
+    venous_ids = {
+        k: int(v) for k, v in (_meta.get("venous_label_by_name") or {}).items()
+    }
+    for name, poly in venous.items():
+        lid = venous_name_to_label_id(str(name), venous_ids)
+        if lid is not None:
+            centerlines[int(lid)] = to_numpy(poly)
+    if not centerlines:
+        log.warning(f"[{subject}] stage6 PITC: no arterial centerlines; skipping")
+        return
+    hemo = compute_vessel_hemodynamics(
+        centerlines,
+        volume_seg=volume_seg,
+        cd=cd,
+        mag=mag,
+        vel_mag=vel_mag,
+        vx=vx,
+        vy=vy,
+        vz=vz,
+        voxel_spacing=voxel_spacing,
+        temporal_resolution_s=temporal_resolution_s,
+        stride=int(pitc_stride),
+        radius_vox=float(radius_vox),
+        quality_thresh=float(pitc_quality_thresh),
+        collect_plot_data=bool(save_plots),
+    )
+
+    with (out_dir / "pitc_profile.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=_PITC_PROFILE_FIELDS)
+        w.writeheader()
+        for row in hemo.profile_rows:
+            w.writerow({k: row.get(k, "") for k in _PITC_PROFILE_FIELDS})
+
+    with (out_dir / "vessel_hemodynamics.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=_VESSEL_HEMO_FIELDS)
+        w.writeheader()
+        for row in hemo.summary_rows:
+            w.writerow({k: row.get(k, "") for k in _VESSEL_HEMO_FIELDS})
+
+    summary["n_profile_stations"] = len(hemo.profile_rows)
+    summary["n_regions"] = sum(1 for r in hemo.summary_rows if r.get("row_kind") == "root")
+    log.info(
+        f"[{subject}] stage6 PITC/PWV: {summary['n_profile_stations']} stations, "
+        f"{summary['n_regions']} roots -> vessel_hemodynamics.csv"
+    )
+
+    if save_plots:
+        _save_measurement_plots(
+            subject,
+            out_dir=out_dir,
+            hemo=hemo,
+            volume_seg=volume_seg,
+            seg_metadata=seg_metadata,
+        )
+
+
+def _save_measurement_plots(
+    subject: str,
+    *,
+    out_dir: Path,
+    hemo,
+    volume_seg: np.ndarray,
+    seg_metadata: dict | None,
+) -> None:
+    """Render the PITC/PWV/flow figures and write per-region PITC branch masks."""
+    from nvitk.pipes.qvtpy.util.measure_plots import (
+        plot_flow_waveforms,
+        plot_pitc_figure,
+        plot_pwv_figure,
+        save_pitc_region_masks,
+    )
+
+    plots_dir = out_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        plot_pitc_figure(hemo.region_plot_data, plots_dir / "pitc.png")
+        plot_pwv_figure(hemo.region_plot_data, plots_dir / "pwv.png")
+        plot_flow_waveforms(
+            hemo.region_plot_data,
+            plots_dir / "flow_waveforms.png",
+            all_label_waveforms=hemo.all_label_waveforms,
+        )
+    except Exception as exc:  # noqa: BLE001 - plotting must not fail the stage
+        log.warning(f"[{subject}] stage6 measurement plots failed: {exc}")
+    try:
+        masks = save_pitc_region_masks(
+            volume_seg, out_dir / "pitc_masks", metadata=seg_metadata
+        )
+        log.info(f"[{subject}] stage6 PITC branch masks: {len(masks)} region(s)")
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        log.warning(traceback.format_exc())
+        log.warning(f"[{subject}] stage6 PITC mask export failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +343,10 @@ def run_subject(
     cross_section_plane_interp: int = 1,
     cs_supersampling: bool = False,
     write_cross_section_qc: bool = True,
+    skip_pitc: bool = False,
+    pitc_stride: int = 3,
+    pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    save_plots: bool = False,
 ) -> Path:
     """Measure flow metrics at each LOC; return stage-6 output directory."""
     # ---- Prerequisites: stage5 locs.csv --------------------------------------
@@ -155,6 +363,12 @@ def run_subject(
     # ---- Phase volumes → mm/s velocity time series ---------------------------
     inputs = discover_phase_inputs(nifti_root / subject)
     voxel_spacing = _voxel_spacing(inputs.ap_phase_path)
+    temporal_resolution_s = _phase_temporal_resolution_s(inputs.ap_phase_path)
+    if temporal_resolution_s is None:
+        log.warning(
+            f"[{subject}] stage6: no temporal resolution in phase metadata; "
+            "PWV will be skipped for this subject"
+        )
     mag, cd, vel_mag = _load_contrast(nifti_root, subject)
     volume_seg: np.ndarray | None = None
     if not measure_resegment:
@@ -256,17 +470,56 @@ def run_subject(
                 traceback.print_exc()
                 log.warning(f"[{subject}] QC PNG failed for {vname}: {exc}")
 
-    # ---- Write loc_measurements.csv + measure_meta.json ----------------------
+    # ---- Write loc_measurements.csv ------------------------------------------
     with meas_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows_out)
+
+    # ---- Dense PITC / PWV vessel hemodynamics --------------------------------
+    pitc_summary: dict[str, int] = {"n_profile_stations": 0, "n_regions": 0}
+    if not skip_pitc:
+        seg_metadata: dict | None = None
+        if save_plots:
+            seg_p = _stage4_dir(output_root, subject) / "seg_4dflow.nii.gz"
+            if seg_p.is_file():
+                seg_metadata = dict(imread(seg_p).metadata or {})
+        try:
+            _run_vessel_hemodynamics(
+                subject,
+                out_dir=out_dir,
+                output_root=output_root,
+                volume_seg=volume_seg if volume_seg is not None else _load_seg_4dflow(output_root, subject),
+                cd=cd,
+                mag=mag,
+                vel_mag=vel_mag,
+                vx=vx,
+                vy=vy,
+                vz=vz,
+                voxel_spacing=voxel_spacing,
+                temporal_resolution_s=temporal_resolution_s,
+                radius_vox=cross_section_radius_vox,
+                pitc_stride=pitc_stride,
+                pitc_quality_thresh=pitc_quality_thresh,
+                summary=pitc_summary,
+                save_plots=save_plots,
+                seg_metadata=seg_metadata,
+            )
+        except Exception as exc:
+            log.warning(f"[{subject}] stage6 PITC/PWV failed: {exc}")
 
     (out_dir / "measure_meta.json").write_text(
         json.dumps(
             {
                 "n_rows": len(rows_out),
                 "n_timepoints": nt,
+                "temporal_resolution_s": temporal_resolution_s,
+                "pitc_enabled": (not skip_pitc),
+                "pitc_stride": int(pitc_stride),
+                "pitc_quality_thresh": float(pitc_quality_thresh),
+                "pitc_n_profile_stations": pitc_summary["n_profile_stations"],
+                "pitc_n_regions": pitc_summary["n_regions"],
+                "save_plots": bool(save_plots),
                 "measure_resegment": bool(measure_resegment),
                 "cs_supersampling": bool(cs_supersampling),
                 "measure_thr_algorithm": str(measure_thr_algorithm),
@@ -281,6 +534,14 @@ def run_subject(
         encoding="utf-8",
     )
     log.info(f"[{subject}] stage6 measure -> {meas_csv}")
+
+    try:
+        from nvitk.pipes.qvtpy.common.db_publish import maybe_publish_stage6_on_sge
+
+        maybe_publish_stage6_on_sge(subject_uid=subject, stage6_dir=out_dir)
+    except Exception as exc:  # noqa: BLE001 - DB publish must never fail the stage
+        log.warning(f"[{subject}] stage6 DB publish hook skipped: {exc}")
+
     return out_dir
 
 
@@ -305,6 +566,10 @@ def submit_subject_sge(
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
     cs_supersampling: bool = False,
+    skip_pitc: bool = False,
+    pitc_stride: int = 3,
+    pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    save_plots: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-6 SGE job. Returns qsub job id."""
@@ -327,9 +592,17 @@ def submit_subject_sge(
         str(int(cross_section_plane_interp)),
         "--measure-thr-algorithm",
         shlex.quote(str(measure_thr_algorithm)),
+        "--pitc-stride",
+        str(int(pitc_stride)),
+        "--pitc-quality-thresh",
+        str(float(pitc_quality_thresh)),
     ]
     if cs_supersampling:
         parts.append("--cs-supersampling")
+    if skip_pitc:
+        parts.append("--skip-pitc")
+    if save_plots:
+        parts.append("--save-plots")
     if skip_existing:
         parts.append("--skip-existing")
     if not measure_resegment:
@@ -389,6 +662,27 @@ def submit_subject_sge(
     show_default=True,
     help="Supersample oblique cross-section grid (~4×); default is native voxel sampling.",
 )
+@click.option(
+    "--skip-pitc/--no-skip-pitc",
+    default=False,
+    show_default=True,
+    help="Skip dense PITC/PWV vessel hemodynamics (default: run).",
+)
+@click.option("--pitc-stride", type=int, default=3, show_default=True,
+              help="Centerline sampling stride (voxels) for the dense PITC profile.")
+@click.option(
+    "--pitc-quality-thresh",
+    type=float,
+    default=QUALITY_THRESH_DEFAULT,
+    show_default=True,
+    help="Cross-section quality threshold (0-4) for PITC/PWV inclusion.",
+)
+@click.option(
+    "--save-plots/--no-save-plots",
+    default=False,
+    show_default=True,
+    help="Render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
+)
 def main(
     subject: str,
     nifti_root: Path,
@@ -400,6 +694,10 @@ def main(
     cross_section_res: int,
     cross_section_plane_interp: int,
     cs_supersampling: bool,
+    skip_pitc: bool,
+    pitc_stride: int,
+    pitc_quality_thresh: float,
+    save_plots: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -413,6 +711,10 @@ def main(
         cross_section_res=cross_section_res,
         cross_section_plane_interp=cross_section_plane_interp,
         cs_supersampling=cs_supersampling,
+        skip_pitc=skip_pitc,
+        pitc_stride=pitc_stride,
+        pitc_quality_thresh=pitc_quality_thresh,
+        save_plots=save_plots,
     )
 
 

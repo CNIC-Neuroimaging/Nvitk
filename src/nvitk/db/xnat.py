@@ -832,6 +832,18 @@ def list_subjects_for_project(repo: Any, project_id: str) -> list[str]:
     return subjects
 
 
+def list_xnat_project_subject_labels(config: XnatConnectionConfig) -> list[str]:
+    """Sorted subject labels in the XNAT project from *config*."""
+    with connect_xnat(config) as session:
+        project = session.projects[config.project]
+        labels: list[str] = []
+        for key, subj in project.subjects.items():
+            label = str(_coalesce_attr(subj, "label", "id", "name") or key).strip()
+            if label:
+                labels.append(label)
+        return sorted(set(labels))
+
+
 def list_scans_for_subject(repo: Any, project_id: str, subject_uid: str) -> pd.DataFrame:
     """Scans for *subject_uid* in *project_id* (joined with sessions)."""
     if not repo.catalog.table_exists("scans") or not repo.catalog.table_exists("sessions"):

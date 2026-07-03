@@ -56,6 +56,7 @@ STAGE4_SEG_DIR: str = "stage4_4dflow_segmentation"
 STAGE4T_SEG_DIR: str = "stage4t_4dflow_t_segmentation"
 STAGE5_LOC_DIR: str = "stage5_loc_generation"
 STAGE6_MEASURE_DIR: str = "stage6_measure"
+STAGE7_MORPHOMETRICS_DIR: str = "stage7_morphometrics"
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ __all__ = [
     "STAGE4T_SEG_DIR",
     "STAGE5_LOC_DIR",
     "STAGE6_MEASURE_DIR",
+    "STAGE7_MORPHOMETRICS_DIR",
     "SGE_PROJECT",
     "SGE_ACCOUNT",
     "SGE_NGPU",
