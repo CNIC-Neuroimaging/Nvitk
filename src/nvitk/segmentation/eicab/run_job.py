@@ -33,7 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--attention", action="store_true")
     p.add_argument("--keep-aux-outputs", action="store_true")
     p.add_argument(
-        "--post-process-eicab/--no-post-process-eicab",
+        "--post-process-eicab",
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Otsu ICA resegment + region growing after eICAB.",
     )
