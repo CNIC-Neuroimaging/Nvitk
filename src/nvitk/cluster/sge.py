@@ -61,7 +61,7 @@ def qsub_l_resource_args(resources: SgeResources) -> list[str]:
     vgpu = sge_virtual_gpu_resource_name(resources.project)
     if vgpu is not None:
         args.extend(["-l", f"{vgpu}=0"])
-    else:
+    elif resources.ngpu:
         args.extend(["-l", f"ngpu={resources.ngpu}"])
     args.extend(["-l", f"h_vmem={resources.h_vmem}"])
     return args
@@ -241,7 +241,9 @@ def _sge_gpu_resource_log_line(resources: SgeResources) -> str:
     vgpu = sge_virtual_gpu_resource_name(resources.project)
     if vgpu is not None:
         return f"  sge_{vgpu} (-l):     0 (virtual GPU; no -l ngpu)"
-    return f"  sge_ngpu (-l):    {resources.ngpu}"
+    if resources.ngpu:
+        return f"  sge_ngpu (-l):    {resources.ngpu}"
+    return "  sge_ngpu (-l):    (omitted; CPU job)"
 
 
 def format_sge_submission_summary(
