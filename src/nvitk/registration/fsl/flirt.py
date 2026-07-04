@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,27 @@ from typing import Any
 from nvitk.core.logger import Logger
 
 log = Logger()
+
+
+def _ensure_fsl_env() -> None:
+    """FSL defaults to uncompressed NIFTI; NiPype validates the exact ``out_file`` path."""
+    os.environ["FSLOUTPUTTYPE"] = "NIFTI_GZ"
+    os.environ.setdefault("FSLMULTIFILEQUIT", "TRUE")
+
+
+def _resolve_nifti_path(path: Path) -> Path | None:
+    """Return *path* or a sibling ``.nii`` / ``.nii.gz`` if FSL wrote a different extension."""
+    if path.is_file():
+        return path
+    if path.suffix == ".gz" and path.name.endswith(".nii.gz"):
+        alt = path.with_name(path.name[: -len(".gz")])
+        if alt.is_file():
+            return alt
+    if path.suffix == ".nii":
+        alt = Path(f"{path}.gz")
+        if alt.is_file():
+            return alt
+    return None
 
 
 @dataclass(frozen=True)
@@ -52,6 +74,7 @@ def flirt_register_rigid(
     warped_path = out_d / warped_name
 
     _require_paths(moving_p, fixed_p)
+    _ensure_fsl_env()
 
     fl = FLIRT()
     fl.inputs.in_file = str(moving_p)
@@ -69,10 +92,22 @@ def flirt_register_rigid(
         fl.inputs.searchr_x = [float(searchr_x), float(searchr_x)]
 
     log.info(f"FLIRT rigid: moving={moving_p} reference={fixed_p} dof={dof}, cost={cost}")
-    runtime = fl.run()
+    try:
+        runtime = fl.run()
+    except FileNotFoundError as exc:
+        resolved = _resolve_nifti_path(warped_path)
+        if resolved is not None and mat_path.is_file():
+            log.warning(
+                f"FLIRT wrote {resolved.name} (expected {warped_path.name}); "
+                "set FSLOUTPUTTYPE=NIFTI_GZ for consistent outputs."
+            )
+            runtime = None
+        else:
+            raise exc from None
     if not mat_path.is_file():
         raise RuntimeError(f"FLIRT did not produce matrix file: {mat_path}")
-    return FlirtRigidResult(matrix_path=mat_path, warped_path=warped_path if warped_path.is_file() else None, runtime=runtime)
+    resolved_warped = _resolve_nifti_path(warped_path)
+    return FlirtRigidResult(matrix_path=mat_path, warped_path=resolved_warped, runtime=runtime)
 
 
 def flirt_apply_rigid(
@@ -92,6 +127,7 @@ def flirt_apply_rigid(
     outp = Path(out_file).resolve()
     outp.parent.mkdir(parents=True, exist_ok=True)
     _require_paths(inp, ref, mat)
+    _ensure_fsl_env()
 
     fl = FLIRT()
     fl.inputs.in_file = str(inp)
@@ -101,7 +137,18 @@ def flirt_apply_rigid(
     fl.inputs.interp = interp
     fl.inputs.out_file = str(outp)
     log.info(f"FLIRT apply: in={inp} ref={ref} mat={mat} interp={interp}")
-    fl.run()
-    if not outp.is_file():
+    try:
+        fl.run()
+    except FileNotFoundError as exc:
+        resolved = _resolve_nifti_path(outp)
+        if resolved is None:
+            raise exc from None
+        log.warning(
+            f"FLIRT apply wrote {resolved.name} (expected {outp.name}); "
+            "set FSLOUTPUTTYPE=NIFTI_GZ for consistent outputs."
+        )
+        return resolved
+    resolved = _resolve_nifti_path(outp)
+    if resolved is None:
         raise RuntimeError(f"FLIRT apply did not produce: {outp}")
-    return outp
+    return resolved

@@ -300,7 +300,7 @@ def _stage3_cli_options(func):
         default="cw",
         show_default=True,
     )(func)
-    func = click.option("--cd-up-thresh", type=float, default=None, help="CD sliding-threshold upper fraction.")
+    func = click.option("--cd-up-thresh", type=float, default=None, help="CD sliding-threshold upper fraction.")(func)
     func = click.option(
         "--cd-shift-hm/--no-cd-shift-hm",
         default=None,
