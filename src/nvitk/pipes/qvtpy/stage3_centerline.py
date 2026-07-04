@@ -24,14 +24,18 @@ from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.cluster.sge import (
     ClusterPaths,
-    SgeResources,
     SingularityBinds,
     StageSpec,
     python_module_argv,
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
+from nvitk.pipes.qvtpy.util.sge_backend import (
+    sge_backend_cli_args,
+    sge_qvtpy_stage_resources,
+    sge_stage_extra_env,
+    sge_stage_use_nv,
+)
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
@@ -383,15 +387,9 @@ def submit_subject_sge(
     spec = StageSpec(
         job_name=f"{cfg.SGE_JOB_PREFIX}_stage3_{subject}",
         python_cmd=python_cmd,
-        resources=SgeResources(
-            project=cfg.SGE_PROJECT,
-            account=cfg.SGE_ACCOUNT,
-            ngpu=0,
-            h_vmem=cfg.SGE_H_VMEM,
-            queue=cfg.SGE_QUEUE,
-        ),
+        resources=sge_qvtpy_stage_resources(backend),
         binds=binds,
-        use_nv=False,
+        use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)

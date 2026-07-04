@@ -34,7 +34,6 @@ import nvitk
 from nvitk.cluster.remote_submit import run_sge_script_ssh
 from nvitk.cluster.sge import (
     ClusterPaths,
-    SgeResources,
     SingularityBinds,
     StageSpec,
     python_module_argv,
@@ -42,6 +41,7 @@ from nvitk.cluster.sge import (
     write_script_header,
 )
 from nvitk.core.click_backend import backend_click_option, sge_backend_env
+from nvitk.pipes.qvtpy.util.sge_backend import sge_qvtpy_stage_resources, sge_stage_use_nv
 from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.segmentation.eicab import config as eicab_cfg
 
@@ -293,15 +293,9 @@ def _emit_stage0_convert(
     spec = StageSpec(
         job_name=f"{cfg.SGE_JOB_PREFIX}_stage0c_{subject}",
         python_cmd=python_cmd,
-        resources=SgeResources(
-            project=cfg.SGE_PROJECT,
-            account=cfg.SGE_ACCOUNT,
-            ngpu=cfg.SGE_NGPU,
-            h_vmem=cfg.SGE_H_VMEM,
-            queue=cfg.SGE_QUEUE,
-        ),
+        resources=sge_qvtpy_stage_resources(backend),
         binds=binds,
-        use_nv=False,
+        use_nv=sge_stage_use_nv(backend),
         extra_env=sge_backend_env(binds.src, backend),
     )
     return submit_stage(spec, paths, emit=fh)

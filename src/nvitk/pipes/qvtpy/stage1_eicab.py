@@ -48,7 +48,12 @@ from nvitk.segmentation.eicab.runner import run_eicab
 from . import config as cfg
 from .util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
 from .util.eicab_postprocess import postprocess_eicab_directory
-from .util.sge_backend import sge_backend_cli_args, sge_stage_extra_env
+from .util.sge_backend import (
+    sge_backend_cli_args,
+    sge_qvtpy_stage_resources,
+    sge_stage_extra_env,
+    sge_stage_use_nv,
+)
 
 log = Logger()
 
@@ -419,15 +424,9 @@ def _submit_postprocess_only_sge(
     spec = StageSpec(
         job_name=jn,
         python_cmd=python_cmd,
-        resources=SgeResources(
-            project=cfg.SGE_PROJECT,
-            account=cfg.SGE_ACCOUNT,
-            ngpu=0,
-            h_vmem=cfg.SGE_H_VMEM,
-            queue=cfg.SGE_QUEUE,
-        ),
+        resources=sge_qvtpy_stage_resources(backend, request_gpu=False),
         binds=binds,
-        use_nv=False,
+        use_nv=sge_stage_use_nv(backend, request_gpu=False),
         extra_env=sge_stage_extra_env(binds.src, backend),
     )
     log.info(f"qvtpy stage1 eICAB post-process only (sge) | subject={subject}")
