@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import getpass
 import re
 import shlex
 from datetime import datetime
@@ -30,6 +29,7 @@ import click
 
 import nvitk
 from nvitk.cluster.remote_submit import run_sge_script_ssh
+from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 from nvitk.cluster.sge import (
     ClusterPaths,
     SgeResources,
@@ -72,13 +72,6 @@ _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 def _default_nvitk_src_dir() -> Path:
     """Host directory mounted at ``/nvitk/src/`` (contains a ``nvitk/`` package tree)."""
     return Path(nvitk.__file__).resolve().parent.parent
-
-
-def _default_emit_script(label: str) -> Path:
-    stem = _SAFE.sub("_", label)[:60] or "batch"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    eicab_cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    return eicab_cfg.DEFAULT_SGE_SCRIPTS_DIR / f"submit_qvtpy_eicab_{stem}_{ts}.sh"
 
 
 def _iter_subjects_nifti(nifti_root: Path) -> list[str]:
@@ -609,12 +602,16 @@ def main(
                 log.warning(f"[{subj}] stage1 eICAB skipped: {exc}")
         return
 
-    # SGE: always emit a script, then SSH-execute (unless --no-remote / --dry-run).
+    # SGE: emit locally, upload via SFTP, then SSH-run on the cluster.
     label = subjects[0] if len(subjects) == 1 else f"batch_{len(subjects)}"
-    script_path = Path(emit_script) if emit_script is not None else _default_emit_script(label)
-    script_path.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    local_script_path, remote_script_path = resolve_sge_script_paths(
+        Path(emit_script) if emit_script is not None else None,
+        remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+        default_basename=f"submit_qvtpy_eicab_{label}_{ts}.sh",
+    )
 
-    with open(script_path, "w", encoding="utf-8") as fh:
+    with open(local_script_path, "w", encoding="utf-8") as fh:
         write_script_header(
             fh,
             log_dir=Path(log_dir) if log_dir is not None else eicab_cfg.SGE_LOG_DIR,
@@ -651,8 +648,8 @@ def main(
                 log.warning(f"[{subj}] stage1 eICAB emit skipped: {exc}")
 
     log.info("=" * 78)
-    log.info(f"qvtpy stage1 SGE script written: {script_path}")
-    log.info(f"On the cluster login node: bash {script_path}")
+    log.info(f"qvtpy stage1 SGE script written locally: {local_script_path}")
+    log.info(f"Cluster path: {remote_script_path}")
     log.info("=" * 78)
 
     if dry_run:
@@ -661,17 +658,35 @@ def main(
 
     if no_remote:
         log.info("Skipping remote SSH (--no-remote).")
+        log.info(f"Upload to cluster and run: bash {remote_script_path}")
         return
 
     log.reset(restart_progress=False)
-    host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
-    host_resolved = eicab_cfg.CLUSTER_HOST_ALIASES.get(host_key, host_key)
-    user = remote_user or click.prompt("SSH user")
-    password = getpass.getpass("SSH password: ")
-    ok = run_sge_script_ssh(host_resolved, user, password, script_path)
+    from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+
+    host_resolved, user, password = prompt_ssh_credentials(
+        remote_host=remote_host,
+        remote_user=remote_user,
+        host_aliases=cfg.CLUSTER_HOST_ALIASES,
+    )
+    cluster_exec_path = publish_sge_driver_script(
+        local_script_path,
+        remote_script_path,
+        host=host_resolved,
+        user=user,
+        password=password,
+    )
+    ok = run_sge_script_ssh(
+        host_resolved,
+        user,
+        password,
+        cluster_exec_path,
+        local_script_path=local_script_path,
+    )
     if not ok:
         log.warning(
-            f"Remote execution did not complete successfully. Run manually: bash {script_path}"
+            f"Remote execution did not complete successfully. Run manually on the cluster: "
+            f"bash {cluster_exec_path}"
         )
 
 

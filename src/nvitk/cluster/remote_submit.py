@@ -12,12 +12,17 @@ def run_sge_script_ssh(
     host: str,
     user: str,
     password: str,
-    script_path: Path,
+    script_path: Path | str,
     *,
+    local_script_path: Path | None = None,
     port: int = 22,
     timeout: float | None = None,
 ) -> bool:
     """Execute ``bash -lc <script>`` on *host* via Paramiko.
+
+    *script_path* is the path on the **cluster** login node. When the script was
+    staged locally and uploaded via SFTP, pass *local_script_path* for pre-flight
+    summaries (optional).
 
     Returns ``True`` if the remote session reports exit status 0.
     Does not log passwords. On import/paramiko errors, returns ``False``.
@@ -34,8 +39,8 @@ def run_sge_script_ssh(
         )
         return False
 
-    script_s = str(script_path)
-    remote_cmd = f"bash {shlex.quote(script_s)}"
+    remote_script = str(script_path)
+    remote_cmd = f"bash {shlex.quote(remote_script)}"
 
     quiet = os.environ.get("NVITK_QUIET_SGE_SUMMARY", "").lower() in {
         "1",
@@ -47,9 +52,10 @@ def run_sge_script_ssh(
         try:
             from nvitk.cluster.sge import format_sge_driver_script_variables
 
-            txt = script_path.read_text(encoding="utf-8", errors="replace")
+            summary_src = local_script_path if local_script_path is not None else Path(script_path)
+            txt = summary_src.read_text(encoding="utf-8", errors="replace")
             print(
-                format_sge_driver_script_variables(txt, script_path),
+                format_sge_driver_script_variables(txt, Path(remote_script)),
                 file=sys.stderr,
                 flush=True,
             )
@@ -57,7 +63,7 @@ def run_sge_script_ssh(
             log.warning("Could not read SGE driver script for summary: %s", exc)
         print(
             f"[nvitk|SGE] Remote exec via SSH: {user}@{host}:{port} "
-            f"bash {shlex.quote(script_s)}",
+            f"bash {shlex.quote(remote_script)}",
             file=sys.stderr,
             flush=True,
         )
