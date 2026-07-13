@@ -662,15 +662,15 @@ def main(
     run_s7 = STAGE_MORPHOMETRICS in stages
 
     use_xnat = from_source.lower() == "xnat"
-    if use_xnat and run_conv and submit == "sge":
-        # SGE stages read DICOMs from the cluster tree, so the download must
-        # persist locally regardless of --save-dicoms; auto-insert stage0_d.
-        run_dl = True
-        if not save_dicoms:
-            log.info(
-                "--from-source xnat with --submit sge: per-subject XNAT download -> "
-                f"cluster SFTP ({cluster_paths.dicom_root}), then delete local staging."
-            )
+    # if use_xnat and run_conv and submit == "sge":
+    #     # SGE stages read DICOMs from the cluster tree, so the download must
+    #     # persist locally regardless of --save-dicoms; auto-insert stage0_d.
+    #     run_dl = True
+    #     if not save_dicoms:
+    #         log.info(
+    #             "--from-source xnat with --submit sge: per-subject XNAT download -> "
+    #             f"cluster SFTP ({cluster_paths.dicom_root}), then delete local staging."
+    #         )
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
