@@ -160,11 +160,22 @@ def build_ctpet_report_html(
     masks_html: list[str],
     hotspot_gallery: str,
     axial_html: list[str],
+    pet_axial_html: list[str] | None = None,
     measurements_table: str,
     measurements_download: str = "",
 ) -> str:
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
+    pet_ax_parts = pet_axial_html or []
+    pet_ax = "\n".join(pet_ax_parts) if pet_ax_parts else ""
+    pet_ax_card = ""
+    if pet_ax:
+        pet_ax_card = f"""
+<div class="card">
+  <div class="card-h"><h3>PET slice views</h3><div class="muted">SUV underlay · masks resampled to PET</div></div>
+  <div class="card-b">{pet_ax}</div>
+</div>
+"""
     measurements = _measurements_card(measurements_table, measurements_download)
     body = f"""
 <section id="ctpet">
@@ -183,9 +194,10 @@ def build_ctpet_report_html(
 </div>
 
 <div class="card">
-  <div class="card-h"><h3>Slice views</h3><div class="muted">axial</div></div>
+  <div class="card-h"><h3>Slice views</h3><div class="muted">CT underlay</div></div>
   <div class="card-b">{ax}</div>
 </div>
+{pet_ax_card}
 </section>
 """
     return _base_doc(

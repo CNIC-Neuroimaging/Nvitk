@@ -1,0 +1,9 @@
+{
+    "server" : "https://http://10.149.82.76/",
+    "project" : "",
+    "user" : "imarcoss",
+    "password" : null,
+    "netrc_file" : null,
+    "verify" : false,
+    "default_timeout" : 600
+}

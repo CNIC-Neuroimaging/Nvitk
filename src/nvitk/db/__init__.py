@@ -40,6 +40,11 @@ from .xnat import (
     sync_xnat_project,
     xnat_sequence_to_asset_slot,
 )
+from .xnat_upload import (
+    resolve_subject_experiment,
+    upload_directory_to_xnat_resource,
+    xnat_resource_has_files,
+)
 from .xnat_projects import (
     classify_experiment_ia_pet_v5,
     classify_scan_for_project,

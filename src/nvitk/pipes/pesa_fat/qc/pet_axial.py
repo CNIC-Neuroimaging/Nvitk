@@ -471,29 +471,24 @@ def _viewer_html(
 """
 
 
-def build_ctpet_slice_viewer_html(
+def _build_ctpet_slice_viewer_core(
     lay: BatchLayout,
     subject: str,
     *,
-    margin_vox: int = 3,
-    assets_dir: Path | None = None,
-    assets_rel: str | None = None,
+    vol_arr: np.ndarray,
+    target_img: Image,
+    stage2: Path,
+    margin_vox: int,
+    img_store: _SliceImageStore,
+    dom_id: str,
+    title: str,
+    default_roi: str = "HIGADO",
     review_ctx: dict | None = None,
 ) -> str:
-    """Compact axial+sagittal viewer on CT (with mask contours)."""
-    nifti_dir = lay.subject_nifti_dir(subject)
-    stage2 = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
-    if not stage2.exists():
-        return f"<p><em>{_safe_stem(subject)}: no CT-PET stage-2 directory.</em></p>"
-
-    ct = imread(str(resolve_nii(nifti_dir, ct_cfg.INPUT_STEM)), axes="XYZ")
-    ct_arr = to_numpy(ct.data)
-    sagittal_y_height = _figsize_for_slice(ct_arr[:, :, min(ct_arr.shape[2] // 2, ct_arr.shape[2] - 1)])[1]
-    img_store = _SliceImageStore(
-        assets_dir=assets_dir,
-        assets_rel=assets_rel,
-        prefix=f"ct_{_safe_stem(subject)}",
-    )
+    """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*."""
+    sagittal_y_height = _figsize_for_slice(
+        vol_arr[:, :, min(vol_arr.shape[2] // 2, vol_arr.shape[2] - 1)]
+    )[1]
 
     cache: dict[str, Image] = {}
     roi_names: list[str] = []
@@ -511,15 +506,14 @@ def build_ctpet_slice_viewer_html(
                 cache[mask_file] = _load_mask(stage2, mask_file)
             label_img = cache[mask_file]
             bin_mask = _build_binary_mask(label_img, label_ids)
-            if ct.data.shape != bin_mask.data.shape:
-                # masks are on CT grid for stage2, but keep this robust
-                bin_mask = resample_mask_to_pet(bin_mask, ct)
+            if target_img.data.shape != bin_mask.data.shape:
+                bin_mask = resample_mask_to_pet(bin_mask, target_img)
             m = to_numpy(bin_mask.data) > 0
         except Exception:
             continue
         try:
             pp_names = _pp_label_names(mask_file, label_ids, pipeline="ctpet")
-            raw_m = _load_raw_ts_mask_ctpet(lay, subject, pp_names, target=ct)
+            raw_m = _load_raw_ts_mask_ctpet(lay, subject, pp_names, target=target_img)
         except Exception:
             raw_m = None
         if not np.any(m):
@@ -527,18 +521,16 @@ def build_ctpet_slice_viewer_html(
 
         coords = np.argwhere(m)
         z0, z1 = int(coords[:, 2].min()), int(coords[:, 2].max())
-        # Only crop in Z (show full XY with neighbors)
         z0 = max(0, z0 - margin_vox)
-        z1 = min(ct_arr.shape[2] - 1, z1 + margin_vox)
-        vmin, vmax = _display_range_block(ct_arr, m, z0, z1)
+        z1 = min(vol_arr.shape[2] - 1, z1 + margin_vox)
+        vmin, vmax = _display_range_block(vol_arr, m, z0, z1)
 
-        # axial slices over z
         z_indices = [z for z in range(z0, z1 + 1) if np.any(m[:, :, z])]
         if not z_indices:
             continue
         ax_uris: list[str] = []
         for z in z_indices:
-            sl = ct_arr[:, :, z]
+            sl = vol_arr[:, :, z]
             sl_m = m[:, :, z]
             sl_raw = raw_m[:, :, z] if raw_m is not None else None
             ax_uris.append(
@@ -559,13 +551,12 @@ def build_ctpet_slice_viewer_html(
         roi_to_ax[disp] = ax_uris
         roi_ax_mid[disp] = len(ax_uris) // 2
 
-        # coronal slices over y (X x Z plane)
-        y_indices = [y for y in range(0, ct_arr.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]
+        y_indices = [y for y in range(0, vol_arr.shape[1]) if np.any(m[:, y, z0 : z1 + 1])]
         if not y_indices:
-            y_indices = [ct_arr.shape[1] // 2]
+            y_indices = [vol_arr.shape[1] // 2]
         co_uris: list[str] = []
         for y in y_indices:
-            sl = ct_arr[:, y, z0 : z1 + 1]
+            sl = vol_arr[:, y, z0 : z1 + 1]
             sl_m = m[:, y, z0 : z1 + 1]
             sl_raw = raw_m[:, y, z0 : z1 + 1] if raw_m is not None else None
             co_uris.append(
@@ -586,11 +577,10 @@ def build_ctpet_slice_viewer_html(
         roi_to_co[disp] = co_uris
         roi_co_mid[disp] = len(co_uris) // 2
 
-        # sagittal slices over x
-        x_indices = [x for x in range(0, ct_arr.shape[0]) if np.any(m[x, :, z0 : z1 + 1])]
+        x_indices = [x for x in range(0, vol_arr.shape[0]) if np.any(m[x, :, z0 : z1 + 1])]
         sg_uris: list[str] = []
         for x in x_indices:
-            sl = ct_arr[x, :, z0 : z1 + 1]
+            sl = vol_arr[x, :, z0 : z1 + 1]
             sl_m = m[x, :, z0 : z1 + 1]
             sl_raw = raw_m[x, :, z0 : z1 + 1] if raw_m is not None else None
             sg_uris.append(
@@ -618,8 +608,8 @@ def build_ctpet_slice_viewer_html(
         return f"<p><em>{_safe_stem(subject)}: no CT-PET slice ROIs.</em></p>"
 
     return _viewer_html(
-        dom_id=f"ct_sv_{_safe_stem(subject)}",
-        title="CT-PET slices (CT underlay; red=post-processed, blue=raw TotalSegmentator)",
+        dom_id=dom_id,
+        title=title,
         roi_names=roi_names,
         roi_to_axial=roi_to_ax,
         roi_to_cor=roi_to_co,
@@ -627,8 +617,86 @@ def build_ctpet_slice_viewer_html(
         roi_to_ax_mid=roi_ax_mid,
         roi_to_cor_mid=roi_co_mid,
         roi_to_sag_mid=roi_sg_mid,
+        default_roi=default_roi,
+        review_ctx=review_ctx,
+    )
+
+
+def build_ctpet_slice_viewer_html(
+    lay: BatchLayout,
+    subject: str,
+    *,
+    margin_vox: int = 3,
+    assets_dir: Path | None = None,
+    assets_rel: str | None = None,
+    review_ctx: dict | None = None,
+) -> str:
+    """Compact axial+sagittal viewer on CT (with mask contours)."""
+    nifti_dir = lay.subject_nifti_dir(subject)
+    stage2 = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
+    if not stage2.exists():
+        return f"<p><em>{_safe_stem(subject)}: no CT-PET stage-2 directory.</em></p>"
+
+    ct = imread(str(resolve_nii(nifti_dir, ct_cfg.INPUT_STEM)), axes="XYZ")
+    ct_arr = to_numpy(ct.data)
+    img_store = _SliceImageStore(
+        assets_dir=assets_dir,
+        assets_rel=assets_rel,
+        prefix=f"ct_{_safe_stem(subject)}",
+    )
+    return _build_ctpet_slice_viewer_core(
+        lay,
+        subject,
+        vol_arr=ct_arr,
+        target_img=ct,
+        stage2=stage2,
+        margin_vox=margin_vox,
+        img_store=img_store,
+        dom_id=f"ct_sv_{_safe_stem(subject)}",
+        title="CT-PET slices (CT underlay; red=post-processed, blue=raw TotalSegmentator)",
         default_roi="HIGADO",
         review_ctx=review_ctx,
+    )
+
+
+def build_ctpet_pet_slice_viewer_html(
+    lay: BatchLayout,
+    subject: str,
+    *,
+    margin_vox: int = 3,
+    assets_dir: Path | None = None,
+    assets_rel: str | None = None,
+) -> str:
+    """Axial/coronal/sagittal viewer on PET SUV with masks resampled to the PET grid."""
+    nifti_dir = lay.subject_nifti_dir(subject)
+    stage2 = lay.results_dir / ct_cfg.STAGE2_DIR / subject / "CT"
+    if not stage2.exists():
+        return f"<p><em>{_safe_stem(subject)}: no CT-PET stage-2 directory.</em></p>"
+
+    pet_path = resolve_nii_optional(nifti_dir, ct_cfg.PET_STEM)
+    if pet_path is None:
+        return f"<p><em>{_safe_stem(subject)}: PET volume ({ct_cfg.PET_STEM}) not found.</em></p>"
+
+    pet = imread(str(pet_path), axes="XYZ")
+    suv = suv_image(pet, pet.metadata)
+    suv_arr = to_numpy(suv.data)
+    img_store = _SliceImageStore(
+        assets_dir=assets_dir,
+        assets_rel=assets_rel,
+        prefix=f"pet_{_safe_stem(subject)}",
+    )
+    return _build_ctpet_slice_viewer_core(
+        lay,
+        subject,
+        vol_arr=suv_arr,
+        target_img=pet,
+        stage2=stage2,
+        margin_vox=margin_vox,
+        img_store=img_store,
+        dom_id=f"ctpet_pet_sv_{_safe_stem(subject)}",
+        title="CT-PET slices (PET SUV underlay; red=post-processed, blue=raw TotalSegmentator)",
+        default_roi="HIGADO",
+        review_ctx=None,
     )
 
 
@@ -825,5 +893,6 @@ def build_dixon_slice_viewer_html(
 
 __all__ = [
     "build_ctpet_slice_viewer_html",
+    "build_ctpet_pet_slice_viewer_html",
     "build_dixon_slice_viewer_html",
 ]

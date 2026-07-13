@@ -315,11 +315,56 @@ def stream_subjects_xnat_to_cluster(
     return results
 
 
+def remote_subject_results_dir(remote_results_root: Path | str, subject: str) -> str:
+    """POSIX path ``<remote_results_root>/<subject>`` on the cluster."""
+    return f"{str(remote_results_root).rstrip('/')}/{subject}"
+
+
+def fetch_subject_results_sftp(
+    sftp: Any,
+    *,
+    remote_results_root: Path | str,
+    local_subject_root: Path,
+    subject: str,
+) -> dict[str, int]:
+    """Download remote ``eicab/`` and ``qvtpy/`` into *local_subject_root*.
+
+    Returns ``{resource_label: n_files_downloaded}``.
+    """
+    from nvitk.cluster.remote_transfer import download_directory_sftp, remote_path_exists
+    from nvitk.pipes.qvtpy import config as qcfg
+
+    remote_subj = remote_subject_results_dir(remote_results_root, subject)
+    local_subject_root.mkdir(parents=True, exist_ok=True)
+    counts: dict[str, int] = {}
+    for label in (qcfg.STAGE1_EICAB_DIR, qcfg.QVT_SUBDIR):
+        remote_dir = f"{remote_subj}/{label}"
+        local_dir = local_subject_root / label
+        if not remote_path_exists(sftp, remote_dir):
+            counts[label] = 0
+            continue
+        log.info(f"[{subject}] SFTP fetch {remote_dir} -> {local_dir}")
+        counts[label] = download_directory_sftp(sftp, remote_dir, local_dir)
+    return counts
+
+
+def remove_local_subject_results(local_subject_root: Path) -> None:
+    """Delete a staged subject results tree from local storage."""
+    local_subject_root = Path(local_subject_root)
+    if not local_subject_root.exists():
+        return
+    log.info(f"Removing local results staging: {local_subject_root}")
+    shutil.rmtree(local_subject_root)
+
+
 __all__ = [
+    "fetch_subject_results_sftp",
     "local_subject_has_dicoms",
     "prompt_ssh_credentials",
     "remote_subject_dicom_dir",
+    "remote_subject_results_dir",
     "remove_local_subject_dicoms",
+    "remove_local_subject_results",
     "stream_subjects_xnat_to_cluster",
     "upload_subject_dicoms",
     "upload_subjects_dicoms",

@@ -15,6 +15,7 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
 - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
 - ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
+- ``stage8_xnat_upload`` — upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
 
 SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
 :func:`nvitk.cluster.sge.submit_stage`).
@@ -48,7 +49,21 @@ from nvitk.cluster.sge import (
 )
 from nvitk.core.click_backend import backend_click_option, sge_backend_env
 from nvitk.pipes.qvtpy.util.sge_backend import sge_qvtpy_stage_resources, sge_stage_use_nv
-from nvitk.pipes.qvtpy.util.sge_chunk import count_sge_stages_per_subject
+from nvitk.pipes.qvtpy.util.sge_chunk import (
+    STAGE_CENTERLINE,
+    STAGE_CONVERT,
+    STAGE_EICAB,
+    STAGE_LOC,
+    STAGE_MEASURE,
+    STAGE_MORPHOMETRICS,
+    STAGE_REG,
+    STAGE_SEG,
+    STAGE_SEG_T,
+    count_sge_stages_for_subject,
+    count_sge_stages_per_subject,
+    pending_sge_stage_ids,
+    stage_runs_from_emit_kwargs,
+)
 from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.segmentation.eicab import config as eicab_cfg
 
@@ -83,6 +98,7 @@ STAGE_SEG_T = "stage4t"
 STAGE_LOC = "stage5"
 STAGE_MEASURE = "stage6"
 STAGE_MORPHOMETRICS = "stage7"
+STAGE_XNAT_UPLOAD = "stage8_xnat_upload"
 
 _STAGE_ALIASES: dict[str, str] = {
     "stage0_d": STAGE_DOWNLOAD,
@@ -120,6 +136,10 @@ _STAGE_ALIASES: dict[str, str] = {
     "stage7_morphometrics": STAGE_MORPHOMETRICS,
     "morphometrics": STAGE_MORPHOMETRICS,
     "morpho": STAGE_MORPHOMETRICS,
+    "stage8": STAGE_XNAT_UPLOAD,
+    "stage8_xnat_upload": STAGE_XNAT_UPLOAD,
+    "xnat_upload": STAGE_XNAT_UPLOAD,
+    "upload_xnat": STAGE_XNAT_UPLOAD,
 }
 
 _STAGES_ORDERED: tuple[str, ...] = (
@@ -133,6 +153,7 @@ _STAGES_ORDERED: tuple[str, ...] = (
     STAGE_LOC,
     STAGE_MEASURE,
     STAGE_MORPHOMETRICS,
+    STAGE_XNAT_UPLOAD,
 )
 
 _ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
@@ -149,6 +170,7 @@ _STAGE_LABELS: dict[str, str] = {
     STAGE_LOC: "LOC generation",
     STAGE_MEASURE: "flow measurement",
     STAGE_MORPHOMETRICS: "TOF morphometrics",
+    STAGE_XNAT_UPLOAD: "XNAT results upload",
 }
 
 
@@ -362,234 +384,307 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     cross_section_plane_interp: int,
     cs_supersampling: bool,
     save_plots: bool,
-) -> None:
-    """Append SGE ``qsub`` blocks for *chunk_subjects* to an open script handle."""
+    skip_processed: bool = False,
+) -> int:
+    """Append SGE ``qsub`` blocks for *chunk_subjects*; return jobs emitted."""
+    stage_runs = {
+        "run_conv": run_conv,
+        "run_eicab": run_eicab,
+        "run_s2": run_s2,
+        "run_s3": run_s3,
+        "run_s4": run_s4,
+        "run_s4t": run_s4t,
+        "run_s5": run_s5,
+        "run_s6": run_s6,
+        "run_s7": run_s7,
+    }
+    jobs_emitted = 0
     for subj in chunk_subjects:
+        pending = (
+            set(
+                pending_sge_stage_ids(
+                    subj,
+                    stage_runs=stage_runs,
+                    skip_processed=True,
+                    results_root=output_root_eff,
+                    nifti_root=nifti_root_eff,
+                )
+            )
+            if skip_processed
+            else None
+        )
+
+        def _should_emit(stage_id: str) -> bool:
+            return pending is None or stage_id in pending
+
+        def _on_skip(stage_id: str) -> None:
+            nonlocal prev_jid
+            prev_jid = None
+            log.info(f"[{subj}] skip-processed: {stage_id} (outputs present)")
+
         prev_jid: str | None = None
         if run_conv:
-            try:
-                prev_jid = _emit_stage0_convert(
-                    fh,
-                    subj,
-                    dicom_root=dicom_root_eff,
-                    nifti_root=nifti_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    compute_phase_derived=compute_phase_derived,
-                    skip_existing=skip_existing,
-                    phase_background_correction=phase_background_correction,
-                    phase_bg_poly_order=phase_bg_poly_order,
-                    phase_bg_static_percentile=phase_bg_static_percentile,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_CONVERT):
+                try:
+                    prev_jid = _emit_stage0_convert(
+                        fh,
+                        subj,
+                        dicom_root=dicom_root_eff,
+                        nifti_root=nifti_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        compute_phase_derived=compute_phase_derived,
+                        skip_existing=skip_existing,
+                        phase_background_correction=phase_background_correction,
+                        phase_bg_poly_order=phase_bg_poly_order,
+                        phase_bg_static_percentile=phase_bg_static_percentile,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage0_c emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage0_c emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_CONVERT)
 
         if run_eicab:
-            try:
-                jid = stage1_eicab.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    skip_existing=skip_existing,
-                    resolution=eicab_resolution,
-                    device=eicab_device,
-                    eicab_container=eicab_container,
-                    pipeline_container=container,
-                    src_dir=src_p,
-                    vasculature_dir=vasculature_dir,
-                    post_process_eicab=post_process_eicab,
-                    hold_jid=prev_jid,
-                    backend=backend,
-                    dry_run=False,
-                    emit=fh,
-                    only_pp=only_pp,
-                )
-                prev_jid = jid or prev_jid
-            except (FileNotFoundError, OSError) as exc:
-                import traceback
+            if _should_emit(STAGE_EICAB):
+                try:
+                    jid = stage1_eicab.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        skip_existing=skip_existing,
+                        resolution=eicab_resolution,
+                        device=eicab_device,
+                        eicab_container=eicab_container,
+                        pipeline_container=container,
+                        src_dir=src_p,
+                        vasculature_dir=vasculature_dir,
+                        post_process_eicab=post_process_eicab,
+                        hold_jid=prev_jid,
+                        backend=backend,
+                        dry_run=False,
+                        emit=fh,
+                        only_pp=only_pp,
+                    )
+                    prev_jid = jid or prev_jid
+                    jobs_emitted += 1
+                except (FileNotFoundError, OSError) as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_EICAB)
 
         if run_s2:
-            try:
-                prev_jid = stage2_registration.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    reference=stage2_reference,
-                    dof=stage2_dof,
-                    cost=stage2_cost,
-                    hold_jid=prev_jid,
-                    backend=backend,
-                    emit=fh,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_REG):
+                try:
+                    prev_jid = stage2_registration.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        reference=stage2_reference,
+                        dof=stage2_dof,
+                        cost=stage2_cost,
+                        hold_jid=prev_jid,
+                        backend=backend,
+                        emit=fh,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage2 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage2 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_REG)
 
         if run_s3:
-            try:
-                prev_jid = stage3_centerline.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    eicab_mask=eicab_mask,
-                    eicab_prefer_pp=eicab_prefer_pp,
-                    cd_up_thresh=cd_up_thresh,
-                    cd_shift_hm=cd_shift_hm,
-                    venous_min_component_frac=venous_min_component_frac,
-                    eicab_min_island_fraction=eicab_min_island_fraction,
-                    eicab_bridge_open_radius=eicab_bridge_open_radius,
-                    venous_min_branch_points=venous_min_branch_points,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_CENTERLINE):
+                try:
+                    prev_jid = stage3_centerline.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        eicab_mask=eicab_mask,
+                        eicab_prefer_pp=eicab_prefer_pp,
+                        cd_up_thresh=cd_up_thresh,
+                        cd_shift_hm=cd_shift_hm,
+                        venous_min_component_frac=venous_min_component_frac,
+                        eicab_min_island_fraction=eicab_min_island_fraction,
+                        eicab_bridge_open_radius=eicab_bridge_open_radius,
+                        venous_min_branch_points=venous_min_branch_points,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage3 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage3 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_CENTERLINE)
 
         if run_s4:
-            try:
-                prev_jid = stage4_4dflow_segmentation.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    crop_padding_bbox=crop_padding_bbox,
-                    thr_algorithm=thr_algorithm_4dflow,
-                    region_growing=region_growing,
-                    rg_intensity_frac=rg_intensity_frac,
-                    rg_intensity_frac_explore=rg_intensity_frac_explore,
-                    rg_intensity_frac_aca=rg_intensity_frac_aca,
-                    cl_barrier_radius=cl_barrier_radius,
-                    rg_barrier_radius=rg_barrier_radius,
-                    aca_sequential_grow=aca_sequential_grow,
-                    aca_overlap_min_voxels=aca_overlap_min_voxels,
-                    acomm_junction_radius=acomm_junction_radius,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_SEG):
+                try:
+                    prev_jid = stage4_4dflow_segmentation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow,
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
+                        rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        rg_intensity_frac_aca=rg_intensity_frac_aca,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage4 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_SEG)
 
         if run_s4t:
-            try:
-                prev_jid = stage4t_4dflow_t_segmentation.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    crop_padding_bbox=crop_padding_bbox,
-                    thr_algorithm=thr_algorithm_4dflow,
-                    region_growing=region_growing,
-                    rg_intensity_frac=rg_intensity_frac,
-                    rg_intensity_frac_explore=rg_intensity_frac_explore,
-                    rg_intensity_frac_aca=rg_intensity_frac_aca,
-                    cl_barrier_radius=cl_barrier_radius,
-                    rg_barrier_radius=rg_barrier_radius,
-                    aca_sequential_grow=aca_sequential_grow,
-                    aca_overlap_min_voxels=aca_overlap_min_voxels,
-                    acomm_junction_radius=acomm_junction_radius,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_SEG_T):
+                try:
+                    prev_jid = stage4t_4dflow_t_segmentation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        crop_padding_bbox=crop_padding_bbox,
+                        thr_algorithm=thr_algorithm_4dflow,
+                        region_growing=region_growing,
+                        rg_intensity_frac=rg_intensity_frac,
+                        rg_intensity_frac_explore=rg_intensity_frac_explore,
+                        rg_intensity_frac_aca=rg_intensity_frac_aca,
+                        cl_barrier_radius=cl_barrier_radius,
+                        rg_barrier_radius=rg_barrier_radius,
+                        aca_sequential_grow=aca_sequential_grow,
+                        aca_overlap_min_voxels=aca_overlap_min_voxels,
+                        acomm_junction_radius=acomm_junction_radius,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage4t emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage4t emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_SEG_T)
 
         if run_s5:
-            try:
-                prev_jid = stage5_loc_generation.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    loc_arterial_strategy=loc_arterial_strategy,
-                    cross_section_radius_vox=cross_section_radius_vox,
-                    venous_min_component_frac=venous_min_component_frac,
-                    loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_LOC):
+                try:
+                    prev_jid = stage5_loc_generation.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        loc_arterial_strategy=loc_arterial_strategy,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        venous_min_component_frac=venous_min_component_frac,
+                        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage5 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage5 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_LOC)
 
         if run_s6:
-            try:
-                prev_jid = stage6_measure.submit_subject_sge(
-                    subj,
-                    nifti_root=nifti_root_eff,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    cross_section_radius_vox=cross_section_radius_vox,
-                    measure_resegment=measure_resegment,
-                    measure_thr_algorithm=measure_thr_algorithm,
-                    cross_section_res=cross_section_res,
-                    cross_section_plane_interp=cross_section_plane_interp,
-                    cs_supersampling=cs_supersampling,
-                    save_plots=save_plots,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_MEASURE):
+                try:
+                    prev_jid = stage6_measure.submit_subject_sge(
+                        subj,
+                        nifti_root=nifti_root_eff,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        cross_section_radius_vox=cross_section_radius_vox,
+                        measure_resegment=measure_resegment,
+                        measure_thr_algorithm=measure_thr_algorithm,
+                        cross_section_res=cross_section_res,
+                        cross_section_plane_interp=cross_section_plane_interp,
+                        cs_supersampling=cs_supersampling,
+                        save_plots=save_plots,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage6 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage6 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_MEASURE)
 
         if run_s7:
-            try:
-                stage7_morphometrics.submit_subject_sge(
-                    subj,
-                    output_root=output_root_eff,
-                    container=container,
-                    src_dir=src_p,
-                    skip_existing=skip_existing,
-                    hold_jid=prev_jid,
-                    emit=fh,
-                    backend=backend,
-                )
-            except Exception as exc:
-                import traceback
+            if _should_emit(STAGE_MORPHOMETRICS):
+                try:
+                    stage7_morphometrics.submit_subject_sge(
+                        subj,
+                        output_root=output_root_eff,
+                        container=container,
+                        src_dir=src_p,
+                        skip_existing=skip_existing,
+                        hold_jid=prev_jid,
+                        emit=fh,
+                        backend=backend,
+                    )
+                    jobs_emitted += 1
+                except Exception as exc:
+                    import traceback
 
-                log.exception(traceback.format_exc())
-                log.exception(f"[{subj}] stage7 emit skipped: {exc}")
+                    log.exception(traceback.format_exc())
+                    log.exception(f"[{subj}] stage7 emit skipped: {exc}")
+            elif skip_processed:
+                _on_skip(STAGE_MORPHOMETRICS)
+
+    return jobs_emitted
 
 
 _SGE_SCRIPT_SUBJECT_TOKEN = re.compile(r"[^\w.-]+")
@@ -598,6 +693,30 @@ _SGE_SCRIPT_SUBJECT_TOKEN = re.compile(r"[^\w.-]+")
 def _sge_script_subject_token(subj: str) -> str:
     tok = _SGE_SCRIPT_SUBJECT_TOKEN.sub("_", subj).strip("._-")
     return tok or "subject"
+
+
+def _local_stage_pending(
+    subj: str,
+    stage_id: str,
+    *,
+    skip_processed: bool,
+    output_root: Path,
+    nifti_root: Path,
+) -> bool:
+    if not skip_processed:
+        return True
+    from nvitk.pipes.qvtpy.util.qc_report import check_subject_stages
+
+    checks = check_subject_stages(
+        subj,
+        [stage_id],
+        results_root=output_root,
+        nifti_root=nifti_root,
+    )
+    if checks and checks[0].complete:
+        log.info(f"[{subj}] skip-processed: {stage_id} (outputs present)")
+        return False
+    return True
 
 
 def _submit_qvtpy_sge_subjects_remote(
@@ -701,6 +820,15 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--skip-existing", is_flag=True, default=False)
 @click.option(
+    "--skip-processed",
+    is_flag=True,
+    default=False,
+    help=(
+        "Skip stages whose completion markers already exist on disk "
+        "(per subject, per stage; uses the same checks as the QC report)."
+    ),
+)
+@click.option(
     "--skip-existing-downloads",
     is_flag=True,
     default=False,
@@ -741,6 +869,13 @@ def _submit_qvtpy_sge_subjects_remote(
     type=float,
     default=None,
     help="(sge) Max seconds for the drip-feed loop (default: unlimited).",
+)
+@click.option(
+    "--sge-job-margin",
+    type=int,
+    default=10,
+    show_default=True,
+    help="(sge) Reserve this many job slots below the per-user cap when drip-feeding.",
 )
 # --- stage 0 ---
 @click.option(
@@ -926,6 +1061,22 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="Stage6: render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
 )
+# --- stage 8 (XNAT upload) ---
+@click.option(
+    "--xnat-upload-require-stages",
+    default="stage2,stage3,stage4,stage5,stage6,stage7",
+    show_default=True,
+    help="(stage8) QVTpy stages required before uploading the qvtpy resource.",
+)
+@click.option("--xnat-upload-eicab/--no-xnat-upload-eicab", default=True, show_default=True)
+@click.option("--xnat-upload-qvtpy/--no-xnat-upload-qvtpy", default=True, show_default=True)
+@click.option(
+    "--xnat-upload-skip-existing/--xnat-upload-overwrite-existing",
+    default=True,
+    show_default=True,
+    help="(stage8) Skip or overwrite existing XNAT session resources.",
+)
+@click.option("--xnat-upload-dry-run", is_flag=True, default=False)
 def main(
     dicom_root: Path | None,
     nifti_root: Path | None,
@@ -936,6 +1087,7 @@ def main(
     container: Path,
     src_dir: Path | None,
     skip_existing: bool,
+    skip_processed: bool,
     skip_existing_downloads: bool,
     output_root: Path | None,
     emit_script: Path | None,
@@ -994,6 +1146,12 @@ def main(
     sge_subject_chunk_size: int,
     sge_chunk_poll_interval: float,
     sge_chunk_wait_timeout: float | None,
+    sge_job_margin: int,
+    xnat_upload_require_stages: str,
+    xnat_upload_eicab: bool,
+    xnat_upload_qvtpy: bool,
+    xnat_upload_skip_existing: bool,
+    xnat_upload_dry_run: bool,
 ) -> None:
     Logger()
 
@@ -1038,6 +1196,7 @@ def main(
     run_s5 = STAGE_LOC in stages
     run_s6 = STAGE_MEASURE in stages
     run_s7 = STAGE_MORPHOMETRICS in stages
+    run_s8 = STAGE_XNAT_UPLOAD in stages
 
     use_xnat = from_source.lower() == "xnat"
     # if use_xnat and run_conv and submit == "sge":
@@ -1053,16 +1212,23 @@ def main(
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
     xnat_conn = None
-    if use_xnat:
+    if use_xnat or run_s8:
         from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 
         profile = load_xnat_profile(xnat_config_path)
         xnat_conn = resolve_xnat_connection(profile)
 
     if subjects or subjects_file:
-        if use_xnat:
+        from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
+
+        cohort_alias = (
+            resolve_xnat_project_cohort_token(subjects)
+            if subjects and not subjects_file
+            else None
+        )
+        if use_xnat or (run_s8 and cohort_alias):
             if xnat_conn is None:
-                raise click.ClickException("XNAT connection required for --from-source xnat.")
+                raise click.ClickException("XNAT connection required for subject resolution.")
             subject_list, xnat_conn = stage0_download.resolve_subjects_for_xnat_pipeline(
                 subjects=subjects,
                 subjects_file=subjects_file,
@@ -1070,8 +1236,6 @@ def main(
                 database_root=database_root,
             )
         else:
-            from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
-
             if subjects and not subjects_file and resolve_xnat_project_cohort_token(subjects):
                 raise click.ClickException(
                     f"--subjects {subjects!r} is an XNAT cohort alias; "
@@ -1191,8 +1355,13 @@ def main(
             )
 
         if submit == "local":
+            _local_skip = dict(
+                skip_processed=skip_processed,
+                output_root=output_root_eff,
+                nifti_root=nifti_root_eff,
+            )
             for subj in subject_list:
-                if run_conv:
+                if run_conv and _local_stage_pending(subj, STAGE_CONVERT, **_local_skip):
                     convert_kwargs = dict(
                         compute_phase_derived=compute_phase_derived,
                         skip_existing=skip_existing,
@@ -1226,7 +1395,7 @@ def main(
                                 **kw,
                             ),
                         )
-                if run_eicab:
+                if run_eicab and _local_stage_pending(subj, STAGE_EICAB, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_EICAB,
@@ -1243,7 +1412,7 @@ def main(
                             only_pp=only_pp,
                         ),
                     )
-                if run_s2:
+                if run_s2 and _local_stage_pending(subj, STAGE_REG, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_REG,
@@ -1257,7 +1426,7 @@ def main(
                             cost=stage2_cost,
                         ),
                     )
-                if run_s3:
+                if run_s3 and _local_stage_pending(subj, STAGE_CENTERLINE, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_CENTERLINE,
@@ -1276,7 +1445,7 @@ def main(
                             venous_min_branch_points=venous_min_branch_points,
                         ),
                     )
-                if run_s4:
+                if run_s4 and _local_stage_pending(subj, STAGE_SEG, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_SEG,
@@ -1298,7 +1467,7 @@ def main(
                             acomm_junction_radius=acomm_junction_radius,
                         ),
                     )
-                if run_s4t:
+                if run_s4t and _local_stage_pending(subj, STAGE_SEG_T, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_SEG_T,
@@ -1320,7 +1489,7 @@ def main(
                             acomm_junction_radius=acomm_junction_radius,
                         ),
                     )
-                if run_s5:
+                if run_s5 and _local_stage_pending(subj, STAGE_LOC, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_LOC,
@@ -1335,7 +1504,7 @@ def main(
                             loc_endpoint_inset_frac=loc_endpoint_inset_frac,
                         ),
                     )
-                if run_s6:
+                if run_s6 and _local_stage_pending(subj, STAGE_MEASURE, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_MEASURE,
@@ -1353,7 +1522,7 @@ def main(
                             save_plots=save_plots,
                         ),
                     )
-                if run_s7:
+                if run_s7 and _local_stage_pending(subj, STAGE_MORPHOMETRICS, **_local_skip):
                     run.run_stage(
                         subj,
                         STAGE_MORPHOMETRICS,
@@ -1363,6 +1532,46 @@ def main(
                             skip_existing=skip_existing,
                         ),
                     )
+
+    if run_s8:
+        from nvitk.pipes.qvtpy.util.xnat_upload import parse_require_stages, run_xnat_upload
+
+        if xnat_conn is None:
+            raise click.ClickException("stage8_xnat_upload requires XNAT credentials.")
+        try:
+            required_xnat_stages = parse_require_stages(xnat_upload_require_stages)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        results_source: str = "local" if submit == "local" else "cluster"
+        remote_results: Path | None = None
+        if results_source == "cluster":
+            remote_results = cluster_paths.results_root
+            if not (ssh_host_resolved and ssh_user and ssh_password):
+                from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+
+                ssh_host_resolved, ssh_user, ssh_password = prompt_ssh_credentials(
+                    remote_host=remote_host,
+                    remote_user=remote_user,
+                    host_aliases=cfg.CLUSTER_HOST_ALIASES,
+                )
+
+        run_xnat_upload(
+            subject_list,
+            output_root=output_root_eff,
+            xnat_config=xnat_conn,
+            required_stages=required_xnat_stages,
+            upload_eicab=xnat_upload_eicab,
+            upload_qvtpy=xnat_upload_qvtpy,
+            overwrite=not xnat_upload_skip_existing,
+            skip_existing=xnat_upload_skip_existing,
+            dry_run=xnat_upload_dry_run,
+            results_source=results_source,
+            ssh_host=ssh_host_resolved,
+            ssh_user=ssh_user,
+            ssh_password=ssh_password,
+            remote_results_root=remote_results,
+        )
 
     if submit == "local":
         if run_conv and report:
@@ -1392,7 +1601,9 @@ def main(
         run_s7=run_s7,
     )
     chunk_size = max(1, int(sge_subject_chunk_size))
-    warn_if_chunk_exceeds_sge_limit(chunk_size, stages_per_subject)
+    warn_if_chunk_exceeds_sge_limit(
+        chunk_size, stages_per_subject, margin=int(sge_job_margin)
+    )
     initial_subjects = subject_list[:chunk_size]
     remaining_subjects = subject_list[chunk_size:]
     log.info(
@@ -1459,6 +1670,7 @@ def main(
         cross_section_plane_interp=cross_section_plane_interp,
         cs_supersampling=cs_supersampling,
         save_plots=save_plots,
+        skip_processed=skip_processed,
     )
 
     if run_conv and report:
@@ -1564,15 +1776,27 @@ def main(
         log.info(f"Drip {subj}: parsed {len(drip_ids)} SGE job id(s).")
         return code == 0
 
+    def _jobs_for_subject(subj: str) -> int:
+        if not skip_processed:
+            return stages_per_subject
+        return count_sge_stages_for_subject(
+            subj,
+            stage_runs=stage_runs_from_emit_kwargs(emit_kwargs),
+            skip_processed=True,
+            results_root=output_root_eff,
+            nifti_root=nifti_root_eff,
+        )
+
     ok = drip_submit_subjects(
         remaining_subjects,
         _submit_drip_subject,
         host=ssh_host_resolved,
         user=ssh_user,
         password=ssh_password,
-        jobs_per_subject=stages_per_subject,
+        jobs_per_subject=_jobs_for_subject,
         poll_interval=float(sge_chunk_poll_interval),
         loop_timeout=sge_chunk_wait_timeout,
+        margin=int(sge_job_margin),
     )
     if not ok:
         log.error("SGE drip submission stopped before all subjects were queued.")
@@ -1591,6 +1815,7 @@ __all__ = [
     "STAGE_LOC",
     "STAGE_MEASURE",
     "STAGE_MORPHOMETRICS",
+    "STAGE_XNAT_UPLOAD",
 ]
 
 

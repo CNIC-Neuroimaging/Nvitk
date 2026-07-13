@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -106,6 +107,73 @@ def upload_file(
 def download_remote_file(sftp: Any, remote_path: str, local_path: Path) -> None:
     local_path.parent.mkdir(parents=True, exist_ok=True)
     sftp.get(remote_path, str(local_path))
+
+
+def download_directory_sftp(sftp: Any, remote_root: str, local_root: Path) -> int:
+    """Recursively download *remote_root* into *local_root*. Returns file count."""
+    remote_root = remote_root.rstrip("/")
+    if not remote_path_exists(sftp, remote_root):
+        return 0
+    local_root = local_root.resolve()
+    local_root.mkdir(parents=True, exist_ok=True)
+    n_files = 0
+    for dirpath, _dirnames, filenames in _walk_remote(sftp, remote_root):
+        rel = (
+            Path(".")
+            if dirpath.rstrip("/") == remote_root
+            else Path(dirpath).relative_to(remote_root)
+        )
+        for name in filenames:
+            remote_path = f"{dirpath.rstrip('/')}/{name}"
+            local_path = local_root / rel / name
+            download_remote_file(sftp, remote_path, local_path)
+            n_files += 1
+    return n_files
+
+
+def _walk_remote(sftp: Any, remote_root: str) -> Iterator[tuple[str, list[str], list[str]]]:
+    """Yield ``(dirpath, dirnames, filenames)`` tuples like :func:`os.walk`."""
+    pending: list[str] = [remote_root.rstrip("/")]
+    while pending:
+        current = pending.pop()
+        try:
+            entries = sftp.listdir_attr(current)
+        except OSError:
+            continue
+        dirnames: list[str] = []
+        filenames: list[str] = []
+        for entry in entries:
+            name = entry.filename
+            if name in (".", ".."):
+                continue
+            remote_path = f"{current.rstrip('/')}/{name}"
+            if stat.S_ISDIR(entry.st_mode):
+                dirnames.append(name)
+                pending.append(remote_path)
+            else:
+                filenames.append(name)
+        yield current, dirnames, filenames
+
+
+def download_directory(
+    *,
+    host: str,
+    user: str,
+    password: str,
+    remote_root: str,
+    local_root: Path,
+    port: int = 22,
+    timeout: float | None = None,
+) -> int:
+    """Recursively download *remote_root* to *local_root* via SFTP."""
+    with sftp_session(
+        host=host,
+        user=user,
+        password=password,
+        port=port,
+        timeout=timeout,
+    ) as (_client, sftp):
+        return download_directory_sftp(sftp, remote_root, local_root)
 
 
 def download_remote_files(
@@ -238,6 +306,8 @@ def remove_remote_job_tree(
 
 
 __all__ = [
+    "download_directory",
+    "download_directory_sftp",
     "download_remote_file",
     "download_remote_files",
     "ensure_remote_dir",

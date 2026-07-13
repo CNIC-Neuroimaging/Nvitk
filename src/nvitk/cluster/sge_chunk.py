@@ -33,7 +33,7 @@ def warn_if_chunk_exceeds_sge_limit(
     stages_per_subject: int,
     *,
     max_jobs: int = 1000,
-    margin: int = 50,
+    margin: int = 10,
 ) -> None:
     need = int(chunk_size) * int(stages_per_subject)
     cap = int(max_jobs) - int(margin)
@@ -110,14 +110,34 @@ def subjects_fit_in_sge_limit(
     jobs_per_subject: int,
     *,
     max_jobs: int = 1000,
+    margin: int = 10,
 ) -> int:
-    """How many whole subjects can be queued without exceeding *max_jobs*."""
+    """How many whole subjects can be queued without exceeding *max_jobs*.
+
+  *margin* reserves headroom below the cluster cap so a multi-stage driver
+  script does not fail on its last ``qsub`` when the queue is near full.
+    """
     if jobs_per_subject <= 0:
         return 0
-    free = int(max_jobs) - int(active_job_count)
+    cap = int(max_jobs) - int(margin)
+    free = cap - int(active_job_count)
     if free < jobs_per_subject:
         return 0
     return free // jobs_per_subject
+
+
+def subject_fits_in_sge_limit(
+    active_job_count: int,
+    jobs_for_subject: int,
+    *,
+    max_jobs: int = 1000,
+    margin: int = 10,
+) -> bool:
+    """Return whether *jobs_for_subject* can be queued given *active_job_count*."""
+    if jobs_for_subject <= 0:
+        return True
+    cap = int(max_jobs) - int(margin)
+    return int(active_job_count) + int(jobs_for_subject) <= cap
 
 
 def drip_submit_subjects(
@@ -127,9 +147,10 @@ def drip_submit_subjects(
     host: str,
     user: str,
     password: str,
-    jobs_per_subject: int,
+    jobs_per_subject: int | Callable[[str], int],
     poll_interval: float = 120.0,
     max_jobs: int = 1000,
+    margin: int = 10,
     loop_timeout: float | None = None,
     port: int = 22,
     connect_timeout: float | None = 30.0,
@@ -144,9 +165,18 @@ def drip_submit_subjects(
     if not queue:
         return True
 
+    jobs_resolver: Callable[[str], int]
+    if callable(jobs_per_subject):
+        jobs_resolver = jobs_per_subject
+        jobs_desc = "variable job(s)/subject"
+    else:
+        fixed = int(jobs_per_subject)
+        jobs_resolver = lambda _subj: fixed  # noqa: E731
+        jobs_desc = f"{fixed} job(s)/subject"
+
     log.info(
         f"SGE drip: {len(queue)} subject(s) queued after initial batch "
-        f"({jobs_per_subject} job(s)/subject, cap {max_jobs})"
+        f"({jobs_desc}, cap {max_jobs}, margin {margin})"
     )
     start = time.monotonic()
     poll_n = 0
@@ -155,23 +185,25 @@ def drip_submit_subjects(
         active = count_active_sge_jobs(
             host, user, password, port=port, connect_timeout=connect_timeout
         )
-        fit = subjects_fit_in_sge_limit(active, jobs_per_subject, max_jobs=max_jobs)
-        if fit >= 1:
-            n_submit = min(fit, len(queue))
-            for _ in range(n_submit):
-                subj = queue.pop(0)
-                log.info(
-                    f"SGE drip: submitting {subj!r} "
-                    f"({active}/{max_jobs} jobs active, {len(queue)} subject(s) left)"
-                )
-                if not submit_subject(subj):
-                    log.error(f"SGE drip: submission failed for {subj!r}; stopping.")
-                    return False
-                active = count_active_sge_jobs(
-                    host, user, password, port=port, connect_timeout=connect_timeout
-                )
-                if subjects_fit_in_sge_limit(active, jobs_per_subject, max_jobs=max_jobs) < 1:
-                    break
+        next_jobs = jobs_resolver(queue[0])
+        if next_jobs <= 0:
+            subj = queue.pop(0)
+            log.info(
+                f"SGE drip: {subj!r} has no pending stages (--skip-processed); skipping."
+            )
+            continue
+
+        if subject_fits_in_sge_limit(
+            active, next_jobs, max_jobs=max_jobs, margin=margin
+        ):
+            subj = queue.pop(0)
+            log.info(
+                f"SGE drip: submitting {subj!r} ({next_jobs} job(s), "
+                f"{active}/{max_jobs} active, {len(queue)} subject(s) left)"
+            )
+            if not submit_subject(subj):
+                log.error(f"SGE drip: submission failed for {subj!r}; stopping.")
+                return False
             continue
 
         elapsed = time.monotonic() - start
@@ -249,6 +281,7 @@ __all__ = [
     "drip_submit_subjects",
     "parse_sge_submission_job_ids",
     "query_active_sge_job_ids",
+    "subject_fits_in_sge_limit",
     "subjects_fit_in_sge_limit",
     "wait_for_sge_job_ids",
     "warn_if_chunk_exceeds_sge_limit",

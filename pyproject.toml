@@ -205,6 +205,7 @@ nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
+nvitk-qvtpy-xnat-upload = "nvitk.pipes.qvtpy.xnat_upload:main"
 
 # -----------------------------------------------------------------------------
 # GUI scripts

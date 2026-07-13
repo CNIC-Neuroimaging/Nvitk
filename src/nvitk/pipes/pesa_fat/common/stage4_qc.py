@@ -33,6 +33,7 @@ from nvitk.pipes.pesa_fat.qc.measurements_table import (
     measurements_download_button_html,
 )
 from nvitk.pipes.pesa_fat.qc.pet_axial import (
+    build_ctpet_pet_slice_viewer_html,
     build_ctpet_slice_viewer_html,
     build_dixon_slice_viewer_html,
 )
@@ -116,6 +117,7 @@ def run_qc_subject(
     ctpet_masks: list[str] = []
     dixon_masks: list[str] = []
     ctpet_axial_parts: list[str] = []
+    ctpet_pet_axial_parts: list[str] = []
     dixon_axial_parts: list[str] = []
 
     if "ct-pet-v5" in pipelines:
@@ -134,6 +136,15 @@ def run_qc_subject(
                 assets_dir=assets / "slices" / "ctpet",
                 assets_rel=f"{rel_assets}/slices/ctpet",
                 review_ctx=review_ctx_ct,
+            )
+        )
+        ctpet_pet_axial_parts.append(
+            build_ctpet_pet_slice_viewer_html(
+                lay,
+                subject,
+                margin_vox=margin_vox,
+                assets_dir=assets / "slices" / "ctpet_pet",
+                assets_rel=f"{rel_assets}/slices/ctpet_pet",
             )
         )
 
@@ -248,6 +259,7 @@ def run_qc_subject(
             masks_html=ctpet_masks,
             hotspot_gallery=ct_hot,
             axial_html=ctpet_axial_parts,
+            pet_axial_html=ctpet_pet_axial_parts,
             measurements_table=ct_table,
             measurements_download=ct_download,
         )
