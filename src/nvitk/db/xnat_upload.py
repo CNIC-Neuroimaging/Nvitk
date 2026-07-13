@@ -124,31 +124,103 @@ def iter_upload_files(local_dir: Path) -> list[Path]:
     return files
 
 
-def xnat_resource_has_files(experiment: Any, resource_label: str) -> bool:
-    """Return True when *resource_label* exists on *experiment* and has files."""
-    resources = getattr(experiment, "resources", None)
-    if resources is None:
-        return False
-    try:
-        resource = resources[resource_label]
-    except (KeyError, TypeError, AttributeError):
-        try:
-            keys = list(resources.keys())
-        except Exception:
-            return False
-        if resource_label not in keys:
-            return False
-        resource = resources[resource_label]
+def _resource_has_files(resource: Any) -> bool:
+    """Return True when an xnatpy resource listing contains at least one file."""
     try:
         if hasattr(resource, "exists") and not resource.exists():
             return False
     except Exception:
         pass
-    try:
-        files = resource.files()
-    except Exception:
+    files = getattr(resource, "files", None)
+    if files is None:
         return False
-    return bool(files)
+    if callable(files):
+        try:
+            files = files()
+        except Exception:
+            return False
+    try:
+        return bool(len(files))
+    except TypeError:
+        try:
+            return bool(list(files))
+        except Exception:
+            return False
+
+
+def _experiment_session(experiment: Any) -> Any:
+    session = getattr(experiment, "xnat_session", None)
+    if session is None:
+        raise RuntimeError(
+            f"Experiment {_experiment_label(experiment)!r} has no xnat_session"
+        )
+    return session
+
+
+def _experiment_base_uri(experiment: Any) -> str:
+    for attr in ("fulluri", "uri"):
+        value = getattr(experiment, attr, None)
+        if value:
+            return str(value).rstrip("/")
+    exp_id = str(_coalesce_attr(experiment, "id", "label") or "").strip()
+    if exp_id:
+        return f"/data/experiments/{exp_id}"
+    raise RuntimeError(
+        f"Cannot determine REST URI for experiment {_experiment_label(experiment)!r}"
+    )
+
+
+def _clear_experiment_resource_cache(experiment: Any) -> None:
+    for obj in (experiment, getattr(experiment, "resources", None)):
+        if obj is None:
+            continue
+        clearcache = getattr(obj, "clearcache", None)
+        if callable(clearcache):
+            clearcache()
+
+
+def _create_xnat_resource(experiment: Any, resource_label: str) -> Any:
+    """Create an experiment resource via xnatpy REST (same as mixin create_resource)."""
+    session = _experiment_session(experiment)
+    uri = f"{_experiment_base_uri(experiment)}/resources/{resource_label}"
+    log.info(f"Creating XNAT resource {resource_label!r}")
+    session.put(uri)
+    _clear_experiment_resource_cache(experiment)
+    resource = session.create_object(uri)
+    resources = getattr(experiment, "resources", None)
+    if resources is not None and resource_label in resources:
+        return resources[resource_label]
+    return resource
+
+
+def _get_or_create_resource(experiment: Any, resource_label: str) -> Any:
+    """Return an experiment resource, creating it on xnatpy when missing."""
+    resources = getattr(experiment, "resources", None)
+    if resources is None:
+        raise RuntimeError("Experiment has no resources collection")
+    if resource_label in resources:
+        return resources[resource_label]
+
+    create_resource = getattr(experiment, "create_resource", None)
+    if callable(create_resource):
+        log.info(f"Creating XNAT resource {resource_label!r}")
+        return create_resource(resource_label)
+
+    return _create_xnat_resource(experiment, resource_label)
+
+
+def xnat_resource_has_files(experiment: Any, resource_label: str) -> bool:
+    """Return True when *resource_label* exists on *experiment* and has files."""
+    resources = getattr(experiment, "resources", None)
+    if resources is None:
+        return False
+    if resource_label not in resources:
+        return False
+    try:
+        resource = resources[resource_label]
+    except (KeyError, TypeError, AttributeError):
+        return False
+    return _resource_has_files(resource)
 
 
 def upload_directory_to_xnat_resource(
@@ -159,7 +231,7 @@ def upload_directory_to_xnat_resource(
     overwrite: bool = False,
     dry_run: bool = False,
 ) -> int:
-    """Upload *local_dir* to an experiment resource via pyxnat ``put_dir``.
+    """Upload *local_dir* to an experiment resource via xnatpy ``upload_dir``.
 
     Returns the number of files that would be / were uploaded.
     """
@@ -200,15 +272,18 @@ def upload_directory_to_xnat_resource(
             upload_root = staging_dest
             files = iter_upload_files(upload_root)
 
-        resources = getattr(experiment, "resources", None)
-        if resources is None:
-            raise RuntimeError("Experiment has no resources collection")
-        resource = resources[resource_label]
+        resource = _get_or_create_resource(experiment, resource_label)
         log.info(
             f"POST resource {resource_label!r} <- {root} "
             f"({len(files)} file(s), overwrite={overwrite})"
         )
-        resource.put_dir(str(upload_root), overwrite=overwrite, extract=True)
+        upload_dir = getattr(resource, "upload_dir", None)
+        if not callable(upload_dir):
+            raise RuntimeError(
+                f"XNAT resource {resource_label!r} does not support upload_dir "
+                f"(got {type(resource).__name__})"
+            )
+        upload_dir(str(upload_root), overwrite=overwrite)
         return len(files)
     finally:
         if staging_root is not None and staging_root.is_dir():

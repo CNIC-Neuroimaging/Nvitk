@@ -1,9 +1,9 @@
 {
-    "server" : "https://http://10.149.82.76/",
-    "project" : "",
-    "user" : "imarcoss",
+    "server" : "http://10.149.82.76/",
+    "project" : "IA",
+    "user" : "admin",
     "password" : null,
-    "netrc_file" : null,
+    "netrc_file" : "~/.netrc-dev",
     "verify" : false,
     "default_timeout" : 600
 }
