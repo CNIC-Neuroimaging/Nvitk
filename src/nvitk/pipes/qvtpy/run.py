@@ -22,8 +22,8 @@ SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
 
 from __future__ import annotations
 
+import re
 import shlex
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -33,9 +33,8 @@ import click
 import nvitk
 from nvitk.cluster.remote_submit import run_sge_script_ssh_capture
 from nvitk.cluster.sge_chunk import (
-    chunk_sequence,
+    drip_submit_subjects,
     parse_sge_submission_job_ids,
-    wait_for_sge_job_ids,
     warn_if_chunk_exceeds_sge_limit,
 )
 from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
@@ -593,6 +592,60 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                 log.exception(f"[{subj}] stage7 emit skipped: {exc}")
 
 
+_SGE_SCRIPT_SUBJECT_TOKEN = re.compile(r"[^\w.-]+")
+
+
+def _sge_script_subject_token(subj: str) -> str:
+    tok = _SGE_SCRIPT_SUBJECT_TOKEN.sub("_", subj).strip("._-")
+    return tok or "subject"
+
+
+def _submit_qvtpy_sge_subjects_remote(
+    subjects: list[str],
+    *,
+    script_basename: str,
+    title: str,
+    emit_kwargs: dict,
+    ssh_host: str,
+    ssh_user: str,
+    ssh_password: str,
+) -> tuple[int, list[str]]:
+    """Write, upload, and run an SGE driver for *subjects*; return ``(exit_code, job_ids)``."""
+    local_script_path, remote_script_path = resolve_sge_script_paths(
+        None,
+        remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+        default_basename=script_basename,
+    )
+    with open(local_script_path, "w", encoding="utf-8") as fh:
+        write_script_header(
+            fh,
+            log_dir=cfg.SGE_LOG_DIR,
+            err_dir=cfg.SGE_ERR_DIR,
+            title=title,
+        )
+        _emit_qvtpy_sge_subjects_for_chunk(fh, subjects, **emit_kwargs)
+
+    log.info(f"  local script : {local_script_path}")
+    log.info(f"  cluster path : {remote_script_path}")
+
+    cluster_exec_path = publish_sge_driver_script(
+        local_script_path,
+        remote_script_path,
+        host=ssh_host,
+        user=ssh_user,
+        password=ssh_password,
+    )
+    exit_code, stdout, stderr = run_sge_script_ssh_capture(
+        ssh_host,
+        ssh_user,
+        ssh_password,
+        cluster_exec_path,
+        local_script_path=local_script_path,
+    )
+    job_ids = parse_sge_submission_job_ids(stdout, stderr)
+    return exit_code, job_ids
+
+
 # ---------------------------------------------------------------------------
 # Master CLI (local + SGE)
 # ---------------------------------------------------------------------------
@@ -672,8 +725,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     default=100,
     show_default=True,
     help=(
-        "(sge) Max subjects per submission wave (cluster limit ~1000 jobs/user). "
-        "Waits for each wave to finish before submitting the next."
+        "(sge) Subjects in the first submission batch (must fit ~1000 jobs/user). "
+        "Remaining subjects are queued one-by-one as slots free up."
     ),
 )
 @click.option(
@@ -681,13 +734,13 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     type=float,
     default=120.0,
     show_default=True,
-    help="(sge) Seconds between SSH qstat polls while waiting for a wave to finish.",
+    help="(sge) Seconds between SSH qstat polls while drip-feeding subjects.",
 )
 @click.option(
     "--sge-chunk-wait-timeout",
     type=float,
     default=None,
-    help="(sge) Max seconds to wait per wave (default: unlimited).",
+    help="(sge) Max seconds for the drip-feed loop (default: unlimited).",
 )
 # --- stage 0 ---
 @click.option(
@@ -1340,11 +1393,12 @@ def main(
     )
     chunk_size = max(1, int(sge_subject_chunk_size))
     warn_if_chunk_exceeds_sge_limit(chunk_size, stages_per_subject)
-    subject_chunks = chunk_sequence(subject_list, chunk_size)
-    n_waves = len(subject_chunks)
+    initial_subjects = subject_list[:chunk_size]
+    remaining_subjects = subject_list[chunk_size:]
     log.info(
-        f"SGE waves: {n_waves} chunk(s) × up to {chunk_size} subjects "
-        f"({stages_per_subject} stage job(s) per subject)"
+        f"SGE submit: initial batch {len(initial_subjects)} subject(s), "
+        f"drip {len(remaining_subjects)} more at {stages_per_subject} job(s)/subject "
+        f"(cluster cap 1000)"
     )
 
     emit_kwargs = dict(
@@ -1411,35 +1465,54 @@ def main(
         log.info("NIfTI report skipped: conversion is queued on the cluster.")
 
     if no_remote:
-        for wave_i, chunk_subjects in enumerate(subject_chunks, start=1):
-            wave_tag = f"_wave{wave_i:02d}of{n_waves:02d}" if n_waves > 1 else ""
-            base_name = (
-                Path(emit_script).name
-                if emit_script is not None
-                else f"submit_qvtpy_{ts}{wave_tag}.sh"
+        initial_base = (
+            Path(emit_script).name
+            if emit_script is not None
+            else f"submit_qvtpy_{ts}_initial.sh"
+        )
+        local_script_path, remote_script_path = resolve_sge_script_paths(
+            None,
+            remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+            default_basename=initial_base,
+        )
+        with open(local_script_path, "w", encoding="utf-8") as fh:
+            write_script_header(
+                fh,
+                log_dir=cfg.SGE_LOG_DIR,
+                err_dir=cfg.SGE_ERR_DIR,
+                title=(
+                    f"qvtpy stages={','.join(stages)} initial "
+                    f"n_subjects={len(initial_subjects)}"
+                ),
             )
-            if n_waves > 1 and emit_script is not None:
-                p = Path(emit_script)
-                base_name = f"{p.stem}{wave_tag}{p.suffix or '.sh'}"
-            local_script_path, remote_script_path = resolve_sge_script_paths(
-                None,
-                remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
-                default_basename=base_name,
-            )
-            with open(local_script_path, "w", encoding="utf-8") as fh:
-                write_script_header(
-                    fh,
-                    log_dir=cfg.SGE_LOG_DIR,
-                    err_dir=cfg.SGE_ERR_DIR,
-                    title=(
-                        f"qvtpy stages={','.join(stages)} wave {wave_i}/{n_waves} "
-                        f"n_subjects={len(chunk_subjects)}"
-                    ),
+            _emit_qvtpy_sge_subjects_for_chunk(fh, initial_subjects, **emit_kwargs)
+        log.info(f"Initial batch script: {local_script_path}")
+        log.info(f"Cluster path: {remote_script_path}")
+
+        if remaining_subjects:
+            drip_dir = local_script_path.parent / f"{ts}_drip"
+            drip_dir.mkdir(parents=True, exist_ok=True)
+            for subj in remaining_subjects:
+                token = _sge_script_subject_token(subj)
+                drip_local, drip_remote = resolve_sge_script_paths(
+                    None,
+                    remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+                    default_basename=f"submit_qvtpy_{ts}_subj_{token}.sh",
                 )
-                _emit_qvtpy_sge_subjects_for_chunk(fh, chunk_subjects, **emit_kwargs)
-            log.info(f"Wave {wave_i}/{n_waves}: local script {local_script_path}")
-            log.info(f"Wave {wave_i}/{n_waves}: cluster path {remote_script_path}")
-        log.info("Skipping remote SSH (--no-remote). Upload and run each wave on the cluster.")
+                drip_local = drip_dir / drip_local.name
+                with open(drip_local, "w", encoding="utf-8") as fh:
+                    write_script_header(
+                        fh,
+                        log_dir=cfg.SGE_LOG_DIR,
+                        err_dir=cfg.SGE_ERR_DIR,
+                        title=f"qvtpy stages={','.join(stages)} subject={subj}",
+                    )
+                    _emit_qvtpy_sge_subjects_for_chunk(fh, [subj], **emit_kwargs)
+            log.info(
+                f"Drip scripts for {len(remaining_subjects)} subject(s) in {drip_dir} "
+                "(submit manually when queue capacity allows)."
+            )
+        log.info("Skipping remote SSH (--no-remote). Upload and run scripts on the cluster.")
         return
 
     log.reset(restart_progress=False)
@@ -1452,85 +1525,57 @@ def main(
             host_aliases=cfg.CLUSTER_HOST_ALIASES,
         )
 
-    for wave_i, chunk_subjects in enumerate(subject_chunks, start=1):
-        wave_tag = f"_wave{wave_i:02d}of{n_waves:02d}" if n_waves > 1 else ""
-        base_name = (
-            Path(emit_script).name if emit_script is not None else f"submit_qvtpy_{ts}{wave_tag}.sh"
-        )
-        if n_waves > 1 and emit_script is not None:
-            p = Path(emit_script)
-            base_name = f"{p.stem}{wave_tag}{p.suffix or '.sh'}"
-        local_script_path, remote_script_path = resolve_sge_script_paths(
-            None,
-            remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
-            default_basename=base_name,
-        )
-        with open(local_script_path, "w", encoding="utf-8") as fh:
-            write_script_header(
-                fh,
-                log_dir=cfg.SGE_LOG_DIR,
-                err_dir=cfg.SGE_ERR_DIR,
-                title=(
-                    f"qvtpy stages={','.join(stages)} wave {wave_i}/{n_waves} "
-                    f"n_subjects={len(chunk_subjects)}"
-                ),
-            )
-            _emit_qvtpy_sge_subjects_for_chunk(fh, chunk_subjects, **emit_kwargs)
+    initial_base = (
+        Path(emit_script).name if emit_script is not None else f"submit_qvtpy_{ts}_initial.sh"
+    )
+    log.info("=" * 78)
+    log.info(f"SGE initial batch: {len(initial_subjects)} subject(s)")
+    log.info("=" * 78)
+    exit_code, job_ids = _submit_qvtpy_sge_subjects_remote(
+        initial_subjects,
+        script_basename=initial_base,
+        title=(
+            f"qvtpy stages={','.join(stages)} initial n_subjects={len(initial_subjects)}"
+        ),
+        emit_kwargs=emit_kwargs,
+        ssh_host=ssh_host_resolved,
+        ssh_user=ssh_user,
+        ssh_password=ssh_password,
+    )
+    log.info(f"Initial batch: parsed {len(job_ids)} SGE job id(s) from submission output.")
+    if exit_code != 0:
+        log.error(f"Initial batch submission exited {exit_code}; stopping.")
+        return
 
-        log.info("=" * 78)
-        log.info(f"SGE wave {wave_i}/{n_waves}: {len(chunk_subjects)} subject(s)")
-        log.info(f"  local script : {local_script_path}")
-        log.info(f"  cluster path : {remote_script_path}")
-        log.info("=" * 78)
+    if not remaining_subjects:
+        return
 
-        cluster_exec_path = publish_sge_driver_script(
-            local_script_path,
-            remote_script_path,
-            host=ssh_host_resolved,
-            user=ssh_user,
-            password=ssh_password,
+    def _submit_drip_subject(subj: str) -> bool:
+        token = _sge_script_subject_token(subj)
+        code, drip_ids = _submit_qvtpy_sge_subjects_remote(
+            [subj],
+            script_basename=f"submit_qvtpy_{ts}_subj_{token}.sh",
+            title=f"qvtpy stages={','.join(stages)} subject={subj}",
+            emit_kwargs=emit_kwargs,
+            ssh_host=ssh_host_resolved,
+            ssh_user=ssh_user,
+            ssh_password=ssh_password,
         )
-        exit_code, stdout, stderr = run_sge_script_ssh_capture(
-            ssh_host_resolved,
-            ssh_user,
-            ssh_password,
-            cluster_exec_path,
-            local_script_path=local_script_path,
-        )
-        job_ids = parse_sge_submission_job_ids(stdout, stderr)
-        log.info(f"Wave {wave_i}/{n_waves}: parsed {len(job_ids)} SGE job id(s) from submission output.")
+        log.info(f"Drip {subj}: parsed {len(drip_ids)} SGE job id(s).")
+        return code == 0
 
-        if exit_code != 0:
-            log.error(
-                f"Wave {wave_i}/{n_waves}: submission script exited {exit_code}; "
-                "stopping remaining waves."
-            )
-            break
-
-        if wave_i < n_waves:
-            if not job_ids:
-                log.warning(
-                    f"Wave {wave_i}/{n_waves}: no job ids captured; "
-                    "waiting 60s before next wave (cannot confirm completion)."
-                )
-                time.sleep(60)
-            else:
-                ok = wait_for_sge_job_ids(
-                    ssh_host_resolved,
-                    ssh_user,
-                    ssh_password,
-                    job_ids,
-                    poll_interval=float(sge_chunk_poll_interval),
-                    wait_timeout=sge_chunk_wait_timeout,
-                )
-                if not ok:
-                    log.error(f"Wave {wave_i}/{n_waves}: wait failed; stopping remaining waves.")
-                    break
-        elif job_ids:
-            log.info(
-                f"Final wave {wave_i}/{n_waves} submitted ({len(job_ids)} jobs); "
-                "not waiting (use qstat on the cluster to monitor)."
-            )
+    ok = drip_submit_subjects(
+        remaining_subjects,
+        _submit_drip_subject,
+        host=ssh_host_resolved,
+        user=ssh_user,
+        password=ssh_password,
+        jobs_per_subject=stages_per_subject,
+        poll_interval=float(sge_chunk_poll_interval),
+        loop_timeout=sge_chunk_wait_timeout,
+    )
+    if not ok:
+        log.error("SGE drip submission stopped before all subjects were queued.")
 
 
 __all__ = [

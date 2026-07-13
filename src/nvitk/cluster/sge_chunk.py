@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import shlex
 import time
+from collections.abc import Callable
 from typing import Iterable, Sequence
 
 from nvitk.core.logger import Logger
@@ -88,6 +89,109 @@ def query_active_sge_job_ids(
     return active
 
 
+def count_active_sge_jobs(
+    host: str,
+    user: str,
+    password: str,
+    *,
+    port: int = 22,
+    connect_timeout: float | None = 30.0,
+) -> int:
+    """Return how many jobs *user* currently has in ``qstat``."""
+    return len(
+        query_active_sge_job_ids(
+            host, user, password, port=port, connect_timeout=connect_timeout
+        )
+    )
+
+
+def subjects_fit_in_sge_limit(
+    active_job_count: int,
+    jobs_per_subject: int,
+    *,
+    max_jobs: int = 1000,
+) -> int:
+    """How many whole subjects can be queued without exceeding *max_jobs*."""
+    if jobs_per_subject <= 0:
+        return 0
+    free = int(max_jobs) - int(active_job_count)
+    if free < jobs_per_subject:
+        return 0
+    return free // jobs_per_subject
+
+
+def drip_submit_subjects(
+    pending_subjects: Sequence[str],
+    submit_subject: Callable[[str], bool],
+    *,
+    host: str,
+    user: str,
+    password: str,
+    jobs_per_subject: int,
+    poll_interval: float = 120.0,
+    max_jobs: int = 1000,
+    loop_timeout: float | None = None,
+    port: int = 22,
+    connect_timeout: float | None = 30.0,
+) -> bool:
+    """Submit subjects when the user's queue has enough free slots.
+
+    *submit_subject(subject) -> bool* runs the remote driver for one subject
+    and must return ``False`` on a fatal submission error. Each call queues all
+    jobs for that subject before the next capacity check.
+    """
+    queue = list(pending_subjects)
+    if not queue:
+        return True
+
+    log.info(
+        f"SGE drip: {len(queue)} subject(s) queued after initial batch "
+        f"({jobs_per_subject} job(s)/subject, cap {max_jobs})"
+    )
+    start = time.monotonic()
+    poll_n = 0
+    while queue:
+        poll_n += 1
+        active = count_active_sge_jobs(
+            host, user, password, port=port, connect_timeout=connect_timeout
+        )
+        fit = subjects_fit_in_sge_limit(active, jobs_per_subject, max_jobs=max_jobs)
+        if fit >= 1:
+            n_submit = min(fit, len(queue))
+            for _ in range(n_submit):
+                subj = queue.pop(0)
+                log.info(
+                    f"SGE drip: submitting {subj!r} "
+                    f"({active}/{max_jobs} jobs active, {len(queue)} subject(s) left)"
+                )
+                if not submit_subject(subj):
+                    log.error(f"SGE drip: submission failed for {subj!r}; stopping.")
+                    return False
+                active = count_active_sge_jobs(
+                    host, user, password, port=port, connect_timeout=connect_timeout
+                )
+                if subjects_fit_in_sge_limit(active, jobs_per_subject, max_jobs=max_jobs) < 1:
+                    break
+            continue
+
+        elapsed = time.monotonic() - start
+        if loop_timeout is not None and elapsed >= float(loop_timeout):
+            log.warning(
+                f"SGE drip timeout ({loop_timeout}s): "
+                f"{len(queue)} subject(s) still pending ({active}/{max_jobs} jobs active)."
+            )
+            return False
+
+        log.info(
+            f"SGE drip: {len(queue)} subject(s) pending, {active}/{max_jobs} jobs active "
+            f"(poll {poll_n}, elapsed {int(elapsed)}s); sleeping {int(poll_interval)}s …"
+        )
+        time.sleep(float(poll_interval))
+
+    log.info("SGE drip: all subjects submitted.")
+    return True
+
+
 def wait_for_sge_job_ids(
     host: str,
     user: str,
@@ -141,8 +245,11 @@ def wait_for_sge_job_ids(
 
 __all__ = [
     "chunk_sequence",
+    "count_active_sge_jobs",
+    "drip_submit_subjects",
     "parse_sge_submission_job_ids",
     "query_active_sge_job_ids",
+    "subjects_fit_in_sge_limit",
     "wait_for_sge_job_ids",
     "warn_if_chunk_exceeds_sge_limit",
 ]
