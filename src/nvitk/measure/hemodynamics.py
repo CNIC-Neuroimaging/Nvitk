@@ -24,8 +24,33 @@ QUALITY_SCALE_MAX: float = 4.0
 QUALITY_THRESH_DEFAULT: float = 2.5
 
 
+def flow_pulsatile_ml_s(velocity_ts_mm_s, area_mm2: float) -> np.ndarray:
+    """Time-resolved flow Q(t) in ml/s (``paramMap_params_threshS``: v_mean * area)."""
+    v = to_numpy(as_backend_array(velocity_ts_mm_s)).astype(np.float64).reshape(-1)
+    return v * (float(area_mm2) / 1000.0)
+
+
+def flow_per_heart_cycle_ml_s(flow_pulsatile: np.ndarray) -> float:
+    """Cardiac time-averaged flow (ml/s)."""
+    x = to_numpy(as_backend_array(flow_pulsatile)).astype(np.float64).reshape(-1)
+    if x.size == 0:
+        return 0.0
+    return float(np.mean(x))
+
+
+def pulsatility_index_qvt(flow_pulsatile, *, eps: float = 1e-9):
+    """PI per ``paramMap_params_threshS``: ``abs(max-min) / mean(Q)`` on signed flow."""
+    x = to_numpy(as_backend_array(flow_pulsatile)).astype(np.float64).reshape(-1)
+    if x.size == 0:
+        return float("nan")
+    den = float(np.mean(x))
+    if abs(den) <= eps:
+        return float("nan")
+    return float(abs(float(np.max(x)) - float(np.min(x))) / den)
+
+
 def pulsatility_index(flow_t, *, eps: float = 1e-9):
-    """PI = (max_t - min_t) / mean(|flow|) per row (QVTplus-style on flow)."""
+    """PI = (max_t - min_t) / mean(|flow|) per row (legacy signed-flow variant)."""
     x = as_backend_array(flow_t).astype(np.float64)
     if x.ndim == 1:
         x = x.reshape(1, -1)
@@ -114,6 +139,97 @@ def waveform_quality_score(flow_t, *, eps: float = 1e-9) -> float:
     roughness = float(np.std(np.diff(np.diff(x))))
     roughness_ratio = roughness / (amp + eps)
     return float(QUALITY_SCALE_MAX / (1.0 + roughness_ratio))
+
+
+def branch_window_slices(length: int) -> list[slice]:
+    """0-based half-open slices per station (MATLAB ``paramMap_params_threshS``)."""
+    l_id = np.ones(length, dtype=int)
+    if length >= 4:
+        rhs = np.arange(1, length - 1, dtype=int)
+        lhs = l_id[3:]
+        l_id[3:] = lhs + rhs[: lhs.size]
+    r_id = np.arange(3, length + 3, dtype=int)
+    if length >= 3:
+        r_id[-3:] = length
+    return [slice(int(l_id[m]) - 1, int(r_id[m])) for m in range(length)]
+
+
+def stdv_from_mean_station(
+    flow_per_cycle: np.ndarray,
+    area: np.ndarray,
+    diam: np.ndarray,
+    flow_pulsatile: np.ndarray,
+    *,
+    eps: float = 1e-9,
+) -> float:
+    """QVTplus ``StdvFromMean`` for one station given its local window arrays."""
+    fpc = to_numpy(as_backend_array(flow_per_cycle)).astype(np.float64).reshape(-1)
+    ar = to_numpy(as_backend_array(area)).astype(np.float64).reshape(-1)
+    di = to_numpy(as_backend_array(diam)).astype(np.float64).reshape(-1)
+    fp = to_numpy(as_backend_array(flow_pulsatile)).astype(np.float64)
+    if fp.ndim == 1:
+        fp = fp.reshape(1, -1)
+    if fpc.size == 0:
+        return 0.0
+    mu_f = float(np.mean(fpc))
+    mu_a = float(np.mean(ar))
+    qv_meanflow = 1.0 - float(np.std(fpc)) / max(abs(mu_f), eps)
+    qv_area = 1.0 - float(np.std(ar)) / max(abs(mu_a), eps)
+    qv_circ = float(np.mean(di)) if di.size else 0.0
+    minmax_phase = np.max(fp, axis=0) - np.min(fp, axis=0)
+    qv_tight = 1.0 - float(np.mean(minmax_phase)) / max(abs(mu_f), eps)
+    return float(qv_meanflow + qv_area + qv_circ + qv_tight)
+
+
+def stdv_from_mean_branch(
+    flow_per_cycle: np.ndarray,
+    area: np.ndarray,
+    diam: np.ndarray,
+    flow_pulsatile: np.ndarray,
+    *,
+    eps: float = 1e-9,
+) -> np.ndarray:
+    """``StdvFromMean`` along one ordered branch (``paramMap_params_threshS``)."""
+    fpc = to_numpy(as_backend_array(flow_per_cycle)).astype(np.float64).reshape(-1)
+    ar = to_numpy(as_backend_array(area)).astype(np.float64).reshape(-1)
+    di = to_numpy(as_backend_array(diam)).astype(np.float64).reshape(-1)
+    fp = to_numpy(as_backend_array(flow_pulsatile)).astype(np.float64)
+    if fp.ndim == 1:
+        fp = fp.reshape(1, -1)
+    n = int(fpc.size)
+    out = np.empty(n, dtype=np.float64)
+    for m, sl in enumerate(branch_window_slices(n)):
+        out[m] = stdv_from_mean_station(
+            fpc[sl], ar[sl], di[sl], fp[sl, :], eps=eps
+        )
+    return out
+
+
+PitcQualityMetric = str  # "stdv_from_mean" | "waveform"
+
+
+def station_quality_scores(
+    flow_pulsatile_rows: np.ndarray,
+    *,
+    metric: str = "stdv_from_mean",
+    flow_per_cycle: np.ndarray | None = None,
+    area: np.ndarray | None = None,
+    diam: np.ndarray | None = None,
+) -> np.ndarray:
+    """Per-station quality on one vessel branch."""
+    fp = to_numpy(as_backend_array(flow_pulsatile_rows)).astype(np.float64)
+    if fp.ndim == 1:
+        fp = fp.reshape(1, -1)
+    n = fp.shape[0]
+    if metric == "waveform":
+        return np.array([waveform_quality_score(fp[i]) for i in range(n)], dtype=np.float64)
+    if flow_per_cycle is None:
+        flow_per_cycle = fp.mean(axis=1)
+    if area is None:
+        area = np.ones(n, dtype=np.float64)
+    if diam is None:
+        diam = np.ones(n, dtype=np.float64)
+    return stdv_from_mean_branch(flow_per_cycle, area, diam, fp)
 
 
 # ---------------------------------------------------------------------------
@@ -384,14 +500,21 @@ __all__ = [
     "mean_flow_ml_s",
     "mean_velocity_mm_s",
     "normalize_waveform",
+    "branch_window_slices",
+    "flow_per_heart_cycle_ml_s",
+    "flow_pulsatile_ml_s",
     "pitc_fit",
     "pulsatility_index",
+    "pulsatility_index_qvt",
     "pwv_bjornfoot_optimize",
     "pwv_fielding_xcor",
     "quality_weights",
     "resistivity_index",
     "through_plane_velocity_series",
     "velocity_mm_s_from_phases",
+    "station_quality_scores",
+    "stdv_from_mean_branch",
+    "stdv_from_mean_station",
     "waveform_quality_score",
     "weighted_linear_fit",
 ]

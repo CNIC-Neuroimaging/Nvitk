@@ -48,6 +48,7 @@ from nvitk.cluster.sge import (
     write_script_header,
 )
 from nvitk.core.click_backend import backend_click_option, sge_backend_env
+from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
 from nvitk.pipes.qvtpy.util.sge_backend import sge_qvtpy_stage_resources, sge_stage_use_nv
 from nvitk.pipes.qvtpy.util.sge_chunk import (
     STAGE_CENTERLINE,
@@ -385,6 +386,11 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     cs_supersampling: bool,
     save_plots: bool,
     skip_processed: bool = False,
+    pitc_stride: int = 1,
+    pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    pitc_quality_metric: str = "stdv_from_mean",
+    pitc_measure_resegment: bool = True,
+    pitc_label_constrain: bool = True,
 ) -> int:
     """Append SGE ``qsub`` blocks for *chunk_subjects*; return jobs emitted."""
     stage_runs = {
@@ -650,6 +656,11 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         cross_section_res=cross_section_res,
                         cross_section_plane_interp=cross_section_plane_interp,
                         cs_supersampling=cs_supersampling,
+                        pitc_stride=pitc_stride,
+                        pitc_quality_thresh=pitc_quality_thresh,
+                        pitc_quality_metric=pitc_quality_metric,
+                        pitc_measure_resegment=pitc_measure_resegment,
+                        pitc_label_constrain=pitc_label_constrain,
                         save_plots=save_plots,
                         backend=backend,
                     )
@@ -1061,6 +1072,29 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="Stage6: render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
 )
+@click.option("--pitc-stride", type=int, default=1, show_default=True)
+@click.option(
+    "--pitc-quality-thresh",
+    type=float,
+    default=QUALITY_THRESH_DEFAULT,
+    show_default=True,
+)
+@click.option(
+    "--pitc-quality-metric",
+    type=click.Choice(["stdv_from_mean", "waveform"], case_sensitive=False),
+    default="stdv_from_mean",
+    show_default=True,
+)
+@click.option(
+    "--pitc-measure-resegment/--no-pitc-measure-resegment",
+    default=True,
+    show_default=True,
+)
+@click.option(
+    "--pitc-label-constrain/--no-pitc-label-constrain",
+    default=True,
+    show_default=True,
+)
 # --- stage 8 (XNAT upload) ---
 @click.option(
     "--xnat-upload-require-stages",
@@ -1143,6 +1177,11 @@ def main(
     cs_supersampling: bool,
     save_plots: bool,
     backend: str,
+    pitc_stride: int,
+    pitc_quality_thresh: float,
+    pitc_quality_metric: str,
+    pitc_measure_resegment: bool,
+    pitc_label_constrain: bool,
     sge_subject_chunk_size: int,
     sge_chunk_poll_interval: float,
     sge_chunk_wait_timeout: float | None,
@@ -1519,6 +1558,11 @@ def main(
                             cross_section_res=cross_section_res,
                             cross_section_plane_interp=cross_section_plane_interp,
                             cs_supersampling=cs_supersampling,
+                            pitc_stride=pitc_stride,
+                            pitc_quality_thresh=pitc_quality_thresh,
+                            pitc_quality_metric=pitc_quality_metric.lower(),
+                            pitc_measure_resegment=pitc_measure_resegment,
+                            pitc_label_constrain=pitc_label_constrain,
                             save_plots=save_plots,
                         ),
                     )
@@ -1671,6 +1715,11 @@ def main(
         cs_supersampling=cs_supersampling,
         save_plots=save_plots,
         skip_processed=skip_processed,
+        pitc_stride=pitc_stride,
+        pitc_quality_thresh=pitc_quality_thresh,
+        pitc_quality_metric=pitc_quality_metric,
+        pitc_measure_resegment=pitc_measure_resegment,
+        pitc_label_constrain=pitc_label_constrain,
     )
 
     if run_conv and report:

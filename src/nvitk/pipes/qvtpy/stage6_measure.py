@@ -186,7 +186,10 @@ _PITC_PROFILE_FIELDS = [
     "distance_mm",
     "pi",
     "quality",
+    "quality_metric",
     "area_mm2",
+    "circularity",
+    "flow_mean_ml_s",
 ]
 
 _VESSEL_HEMO_FIELDS = [
@@ -223,6 +226,13 @@ def _run_vessel_hemodynamics(
     radius_vox: float,
     pitc_stride: int,
     pitc_quality_thresh: float,
+    pitc_quality_metric: str,
+    pitc_measure_resegment: bool,
+    pitc_label_constrain: bool,
+    measure_thr_algorithm: ThrAlgorithm,
+    cross_section_res: int,
+    cross_section_plane_interp: int,
+    cs_supersampling: bool,
     summary: dict[str, int],
     save_plots: bool = False,
     seg_metadata: dict | None = None,
@@ -258,6 +268,13 @@ def _run_vessel_hemodynamics(
         stride=int(pitc_stride),
         radius_vox=float(radius_vox),
         quality_thresh=float(pitc_quality_thresh),
+        quality_metric=str(pitc_quality_metric),
+        measure_resegment=bool(pitc_measure_resegment),
+        label_constrain=bool(pitc_label_constrain),
+        thr_algorithm=measure_thr_algorithm,
+        cross_section_res=int(cross_section_res),
+        plane_interp_order=int(cross_section_plane_interp),
+        cs_supersampling=bool(cs_supersampling),
         collect_plot_data=bool(save_plots),
     )
 
@@ -348,8 +365,11 @@ def run_subject(
     cs_supersampling: bool = False,
     write_cross_section_qc: bool = True,
     skip_pitc: bool = False,
-    pitc_stride: int = 3,
+    pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    pitc_quality_metric: str = "stdv_from_mean",
+    pitc_measure_resegment: bool = True,
+    pitc_label_constrain: bool = True,
     save_plots: bool = False,
 ) -> Path:
     """Measure flow metrics at each LOC; return stage-6 output directory."""
@@ -505,6 +525,13 @@ def run_subject(
                 radius_vox=cross_section_radius_vox,
                 pitc_stride=pitc_stride,
                 pitc_quality_thresh=pitc_quality_thresh,
+                pitc_quality_metric=pitc_quality_metric,
+                pitc_measure_resegment=pitc_measure_resegment,
+                pitc_label_constrain=pitc_label_constrain,
+                measure_thr_algorithm=measure_thr_algorithm,
+                cross_section_res=cross_section_res,
+                cross_section_plane_interp=cross_section_plane_interp,
+                cs_supersampling=cs_supersampling,
                 summary=pitc_summary,
                 save_plots=save_plots,
                 seg_metadata=seg_metadata,
@@ -521,6 +548,9 @@ def run_subject(
                 "pitc_enabled": (not skip_pitc),
                 "pitc_stride": int(pitc_stride),
                 "pitc_quality_thresh": float(pitc_quality_thresh),
+                "pitc_quality_metric": str(pitc_quality_metric),
+                "pitc_measure_resegment": bool(pitc_measure_resegment),
+                "pitc_label_constrain": bool(pitc_label_constrain),
                 "pitc_n_profile_stations": pitc_summary["n_profile_stations"],
                 "pitc_n_regions": pitc_summary["n_regions"],
                 "save_plots": bool(save_plots),
@@ -571,8 +601,11 @@ def submit_subject_sge(
     cross_section_plane_interp: int = 1,
     cs_supersampling: bool = False,
     skip_pitc: bool = False,
-    pitc_stride: int = 3,
+    pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    pitc_quality_metric: str = "stdv_from_mean",
+    pitc_measure_resegment: bool = True,
+    pitc_label_constrain: bool = True,
     save_plots: bool = False,
     backend: str = "gpu",
 ) -> str:
@@ -600,6 +633,8 @@ def submit_subject_sge(
         str(int(pitc_stride)),
         "--pitc-quality-thresh",
         str(float(pitc_quality_thresh)),
+        "--pitc-quality-metric",
+        shlex.quote(str(pitc_quality_metric)),
     ]
     if cs_supersampling:
         parts.append("--cs-supersampling")
@@ -611,6 +646,10 @@ def submit_subject_sge(
         parts.append("--skip-existing")
     if not measure_resegment:
         parts.append("--no-measure-resegment")
+    if not pitc_measure_resegment:
+        parts.append("--no-pitc-measure-resegment")
+    if not pitc_label_constrain:
+        parts.append("--no-pitc-label-constrain")
     python_cmd = " ".join(parts)
     paths = ClusterPaths(
         src=src_p,
@@ -666,7 +705,7 @@ def submit_subject_sge(
     show_default=True,
     help="Skip dense PITC/PWV vessel hemodynamics (default: run).",
 )
-@click.option("--pitc-stride", type=int, default=3, show_default=True,
+@click.option("--pitc-stride", type=int, default=1, show_default=True,
               help="Centerline sampling stride (voxels) for the dense PITC profile.")
 @click.option(
     "--pitc-quality-thresh",
@@ -674,6 +713,25 @@ def submit_subject_sge(
     default=QUALITY_THRESH_DEFAULT,
     show_default=True,
     help="Cross-section quality threshold (0-4) for PITC/PWV inclusion.",
+)
+@click.option(
+    "--pitc-quality-metric",
+    type=click.Choice(["stdv_from_mean", "waveform"], case_sensitive=False),
+    default="stdv_from_mean",
+    show_default=True,
+    help="Per-station Q metric for PITC/PWV weighting.",
+)
+@click.option(
+    "--pitc-measure-resegment/--no-pitc-measure-resegment",
+    default=True,
+    show_default=True,
+    help="In-plane MAG+CD+VEL resegmentation at each PITC station (QVTplus-style).",
+)
+@click.option(
+    "--pitc-label-constrain/--no-pitc-label-constrain",
+    default=True,
+    show_default=True,
+    help="Intersect in-plane mask with seg_4dflow vessel label.",
 )
 @click.option(
     "--save-plots/--no-save-plots",
@@ -695,6 +753,9 @@ def main(
     skip_pitc: bool,
     pitc_stride: int,
     pitc_quality_thresh: float,
+    pitc_quality_metric: str,
+    pitc_measure_resegment: bool,
+    pitc_label_constrain: bool,
     save_plots: bool,
 ) -> None:
     Logger()
@@ -712,6 +773,9 @@ def main(
         skip_pitc=skip_pitc,
         pitc_stride=pitc_stride,
         pitc_quality_thresh=pitc_quality_thresh,
+        pitc_quality_metric=pitc_quality_metric.lower(),
+        pitc_measure_resegment=pitc_measure_resegment,
+        pitc_label_constrain=pitc_label_constrain,
         save_plots=save_plots,
     )
 

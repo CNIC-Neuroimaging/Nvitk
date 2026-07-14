@@ -276,6 +276,48 @@ def segment_in_plane(
     return best_mask.astype(bool, copy=False), float(circularity)
 
 
+def segment_in_plane_label_constrained(
+    mag_sl: np.ndarray,
+    cd_sl: np.ndarray,
+    vel_sl: np.ndarray,
+    label_mask_sl: np.ndarray,
+    *,
+    min_component_fraction: float = 0.05,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+) -> tuple[np.ndarray, float, bool]:
+    """In-plane QVT fusion mask intersected with a multilabel plane slice.
+
+    Returns ``(mask, circularity, used_label_fallback)``.
+    """
+    from nvitk.morphology.components import (
+        keep_component_closest_to_center,
+        label_connected,
+    )
+
+    mask, _ = segment_in_plane(
+        mag_sl,
+        cd_sl,
+        vel_sl,
+        min_component_fraction=min_component_fraction,
+        thr_algorithm=thr_algorithm,
+    )
+    label_bool = as_backend_array(label_mask_sl).astype(bool, copy=False)
+    if not np.any(label_bool):
+        return mask, _circularity_proxy(mask), False
+    merged = mask & label_bool
+    if np.any(merged):
+        labeled, _ = label_connected(merged, connectivity=1)
+        best_mask = as_backend_array(
+            keep_component_closest_to_center(labeled)
+        ).astype(bool, copy=False)
+        return best_mask, _circularity_proxy(best_mask), False
+    labeled, _ = label_connected(label_bool, connectivity=1)
+    best_mask = as_backend_array(
+        keep_component_closest_to_center(labeled)
+    ).astype(bool, copy=False)
+    return best_mask, _circularity_proxy(best_mask), True
+
+
 def _circularity_proxy(mask: np.ndarray) -> float:
     """R_in^2 / R_out^2 style proxy from distance transform (MATLAB diam_val intent)."""
     m = as_backend_array(mask.astype(bool, copy=False))
@@ -375,6 +417,7 @@ def cross_section_at_loc(
     thr_algorithm: ThrAlgorithm = "lsthr",
     volume_seg: np.ndarray | None = None,
     volume_label_id: int = 0,
+    label_constrain: bool = False,
 ) -> CrossSectionResult:
     """Oblique cross-section at a LOC; resegment in-plane or sample stage-4 mask."""
     u, v = plane_basis_from_tangent(tangent)
@@ -417,12 +460,31 @@ def cross_section_at_loc(
             res=res,
             order=order,
         )
-        mask, circ = segment_in_plane(
-            mag_sl,
-            cd_sl,
-            vel_sl,
-            thr_algorithm=thr_algorithm,
-        )
+        if label_constrain and volume_seg is not None:
+            seg_sl = oblique_slice(
+                volume_seg.astype(np.float32),
+                center_xyz=center,
+                u_xyz=u,
+                v_xyz=v,
+                radius_vox=radius_vox,
+                res=res,
+                order=0,
+            )
+            label_mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
+            mask, circ, _fallback = segment_in_plane_label_constrained(
+                mag_sl,
+                cd_sl,
+                vel_sl,
+                label_mask,
+                thr_algorithm=thr_algorithm,
+            )
+        else:
+            mask, circ = segment_in_plane(
+                mag_sl,
+                cd_sl,
+                vel_sl,
+                thr_algorithm=thr_algorithm,
+            )
     else:
         if volume_seg is None:
             raise ValueError("volume_seg is required when measure_resegment is False")
@@ -593,6 +655,7 @@ __all__ = [
     "segment_along_polyline",
     "segment_at_point",
     "segment_in_plane",
+    "segment_in_plane_label_constrained",
     "segment_in_plane_cd_only",
     "tilt_corrected_spacing_mm",
 ]

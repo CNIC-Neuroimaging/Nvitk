@@ -7,6 +7,7 @@ Each stage is considered complete when the same output artifacts that
 from __future__ import annotations
 
 import json
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -35,6 +36,19 @@ from nvitk.pipes.qvtpy.stage0_download import (
 )
 from nvitk.pipes.qvtpy.stage1_eicab import _output_has_segmentation
 from nvitk.pipes.qvtpy.util.morpho_paths import STAGE7_SKIP_MARKER
+
+_DEFAULT_SUBJECT_PREVIEW = 3
+
+
+@dataclass(frozen=True)
+class ReportSubjects:
+    """Resolved subject list plus optional XNAT cohort metadata."""
+
+    subjects: list[str]
+    cohort_label: str | None = None
+    cohort_total: int | None = None
+    excluded_no_sequences: int = 0
+    sequence_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +89,52 @@ def _eicab_dir(results_root: Path, subject: str) -> Path:
 
 def _qvt_stage_dir(results_root: Path, subject: str, stage_dir: str) -> Path:
     return results_root / subject / cfg.QVT_SUBDIR / stage_dir
+
+
+def _nifti_convert_complete(nifti_root: Path, subject: str) -> bool:
+    return _check_stage0_c(nifti_root, subject).complete
+
+
+def filter_subjects_with_required_sequences(
+    subjects: Iterable[str],
+    *,
+    sequences: Iterable[str],
+    dicom_root: Path | None = None,
+    nifti_root: Path | None = None,
+    database_root: Path | None = None,
+    project_id: str | None = None,
+) -> tuple[list[str], str]:
+    """Keep subjects with all requested qvtpy input sequences on disk or in the catalog."""
+    seq_list = list(sequences)
+    subject_list = sorted({s for s in subjects if s})
+
+    if database_root is not None and project_id is not None:
+        from nvitk.pipes.qvtpy.util.db_subject_filter import (
+            filter_subjects_by_qvtpy_scan_availability,
+        )
+
+        filtered = filter_subjects_by_qvtpy_scan_availability(
+            subject_list,
+            database_root=database_root,
+            project_id=project_id,
+        )
+        return filtered, "indexed scans (database)"
+
+    if dicom_root is not None:
+        filtered = [
+            subj
+            for subj in subject_list
+            if local_subject_dicoms_complete(dicom_root, subj, seq_list)
+        ]
+        return filtered, "local DICOM"
+
+    if nifti_root is not None:
+        filtered = [
+            subj for subj in subject_list if _nifti_convert_complete(nifti_root, subj)
+        ]
+        return filtered, "local NIfTI"
+
+    return subject_list, "none"
 
 
 def _check_stage0_d(
@@ -253,6 +313,143 @@ def _stage_short_label(stage: str) -> str:
     return stage.replace("stage", "s")
 
 
+def _compact_subject_list(subjects: Iterable[str], *, max_show: int = _DEFAULT_SUBJECT_PREVIEW) -> str:
+    names = sorted(subjects)
+    if not names:
+        return "(none)"
+    if len(names) <= max_show:
+        return ", ".join(names)
+    shown = ", ".join(names[:max_show])
+    return f"{shown} (+{len(names) - max_show} more)"
+
+
+def _pct(numerator: int, denominator: int) -> str:
+    if denominator == 0:
+        return "n/a"
+    return f"{100 * numerator / denominator:5.1f}%"
+
+
+def _print_stage_summary(
+    stage_list: list[str],
+    per_subject: dict[str, list[StageCheck]],
+    total: int,
+) -> dict[str, dict[str, int]]:
+    """Print per-stage ok/fail counts; return numeric summary."""
+    stage_stats: dict[str, dict[str, int]] = {}
+    print("-- Stage completion --")
+    print(f"  {'stage':<12} {'ok':>4} {'fail':>5} {'pct':>7}")
+    for stage in stage_list:
+        ok = sum(
+            1
+            for checks in per_subject.values()
+            for c in checks
+            if c.stage == stage and c.complete
+        )
+        fail = total - ok
+        stage_stats[stage] = {"ok": ok, "fail": fail, "total": total}
+        print(f"  {stage:<12} {ok:4d} {fail:5d} {_pct(ok, total):>7}")
+    print()
+    return stage_stats
+
+
+def _print_failure_summary(
+    stage_list: list[str],
+    per_subject: dict[str, list[StageCheck]],
+) -> None:
+    """Aggregate failure reasons per stage (no per-subject listing)."""
+    reasons_by_stage: dict[str, Counter[str]] = {stage: Counter() for stage in stage_list}
+    for checks in per_subject.values():
+        for check in checks:
+            if not check.complete:
+                reasons_by_stage[check.stage][check.detail] += 1
+
+    failing_stages = [stage for stage in stage_list if reasons_by_stage[stage]]
+    if not failing_stages:
+        return
+
+    print("-- Failures by stage --")
+    for stage in failing_stages:
+        counter = reasons_by_stage[stage]
+        n_fail = sum(counter.values())
+        print(f"  {stage} ({n_fail} subject(s)):")
+        for detail, count in counter.most_common():
+            print(f"    {detail} — {count}")
+    print()
+
+
+def _print_incomplete_cohorts(
+    stage_list: list[str],
+    per_subject: dict[str, list[StageCheck]],
+    *,
+    max_show: int = _DEFAULT_SUBJECT_PREVIEW,
+) -> None:
+    """Group incomplete subjects by which stages failed."""
+    cohorts: dict[tuple[str, ...], list[str]] = defaultdict(list)
+    for subj, checks in per_subject.items():
+        failed = _failed_stages_for_subject(checks, stage_list)
+        if failed:
+            cohorts[failed].append(subj)
+
+    if not cohorts:
+        return
+
+    print("-- Incomplete cohorts --")
+    for failed_stages, subjects in sorted(cohorts.items(), key=lambda item: (-len(item[1]), item[0])):
+        label = ", ".join(failed_stages)
+        preview = _compact_subject_list(subjects, max_show=max_show)
+        print(f"  failed [{label}] ({len(subjects)}): {preview}")
+    print()
+
+
+def _failed_stages_for_subject(
+    checks: list[StageCheck],
+    stage_list: list[str],
+) -> tuple[str, ...]:
+    by_stage = {c.stage: c for c in checks}
+    return tuple(stage for stage in stage_list if not by_stage[stage].complete)
+
+
+def _print_verbose_details(
+    stage_list: list[str],
+    per_subject: dict[str, list[StageCheck]],
+    *,
+    complete: list[str],
+    incomplete: dict[str, list[str]],
+) -> None:
+    """Per-subject matrix and failure lines (opt-in)."""
+    if incomplete:
+        print("-- Per-subject status (verbose) --")
+        subj_width = max(len(s) for s in incomplete)
+        stage_width = max(len(_stage_short_label(s)) for s in stage_list)
+        header = f"{'subject':<{subj_width}}  " + "  ".join(
+            f"{_stage_short_label(s):>{stage_width}}" for s in stage_list
+        )
+        print(header)
+        print("-" * len(header))
+        for subj in sorted(incomplete):
+            checks = {c.stage: c for c in per_subject[subj]}
+            cells = [
+                "ok" if checks[stage].complete else "FAIL"
+                for stage in stage_list
+            ]
+            line = f"{subj:<{subj_width}}  " + "  ".join(
+                f"{cell:>{stage_width}}" for cell in cells
+            )
+            print(line)
+        print()
+
+        print("-- Failure details (verbose) --")
+        for subj in sorted(incomplete):
+            for item in incomplete[subj]:
+                print(f"  {subj}: {item}")
+        print()
+
+    if complete:
+        print(f"-- Fully complete ({len(complete)}) --")
+        print(f"  {_compact_subject_list(complete, max_show=8)}")
+        print()
+
+
 def print_qc_report(
     subjects: Iterable[str],
     stages: Iterable[str],
@@ -261,10 +458,18 @@ def print_qc_report(
     nifti_root: Path | None = None,
     dicom_root: Path | None = None,
     dicom_sequences: Iterable[str] | None = None,
+    verbose: bool = False,
+    max_subject_preview: int = _DEFAULT_SUBJECT_PREVIEW,
+    cohort_label: str | None = None,
+    cohort_total: int | None = None,
+    excluded_no_sequences: int = 0,
+    sequence_source: str | None = None,
 ) -> dict[str, Any]:
-    """Print a per-subject stage completion report and return a summary dict."""
+    """Print a summarized stage completion report and return a summary dict."""
     stage_list = list(stages)
     subj_list = sorted({s for s in subjects if s})
+    total = len(subj_list)
+    seq_list = list(dicom_sequences or DEFAULT_SEQUENCES)
 
     per_subject: dict[str, list[StageCheck]] = {}
     complete: list[str] = []
@@ -296,41 +501,46 @@ def print_qc_report(
         print(f"  dicom_root   : {dicom_root}")
     print(f"  stages       : {', '.join(stage_list)}")
     print(bar)
-    print(f"Subjects scanned : {len(subj_list)}")
-    print(f"Fully complete   : {len(complete)}")
-    print(f"Incomplete       : {len(incomplete)}")
+    n_complete = len(complete)
+    n_incomplete = len(incomplete)
+    seq_label = ", ".join(seq_list)
+    if cohort_label is not None and cohort_total is not None:
+        source = sequence_source or "required sequences"
+        print(f"Cohort {cohort_label} : {cohort_total} in project")
+        print(
+            f"  scored {total} with all required sequences ({source}; {seq_label})"
+        )
+        if excluded_no_sequences:
+            print(f"  excluded {excluded_no_sequences} without required sequences")
+        print(
+            f"  pipeline : {n_complete} complete ({_pct(n_complete, total).strip()}) | "
+            f"{n_incomplete} incomplete ({_pct(n_incomplete, total).strip()})"
+        )
+    else:
+        print(
+            f"Subjects : {total} total | "
+            f"{n_complete} complete ({_pct(n_complete, total).strip()}) | "
+            f"{n_incomplete} incomplete ({_pct(n_incomplete, total).strip()})"
+        )
     print()
 
-    if incomplete:
-        print("-- Incomplete subjects (failed stages) --")
-        subj_width = max(len(s) for s in incomplete)
-        stage_width = max(len(_stage_short_label(s)) for s in stage_list)
-        header = f"{'subject':<{subj_width}}  " + "  ".join(
-            f"{_stage_short_label(s):>{stage_width}}" for s in stage_list
-        )
-        print(header)
-        print("-" * len(header))
-        for subj in sorted(incomplete):
-            checks = {c.stage: c for c in per_subject[subj]}
-            cells: list[str] = []
-            for stage in stage_list:
-                check = checks[stage]
-                cells.append("ok" if check.complete else "FAIL")
-            line = f"{subj:<{subj_width}}  " + "  ".join(
-                f"{cell:>{stage_width}}" for cell in cells
-            )
-            print(line)
-        print()
-        print("-- Failure details --")
-        for subj in sorted(incomplete):
-            for item in incomplete[subj]:
-                print(f"  {subj}: {item}")
-        print()
+    stage_stats = _print_stage_summary(stage_list, per_subject, total)
+    _print_failure_summary(stage_list, per_subject)
+    _print_incomplete_cohorts(
+        stage_list,
+        per_subject,
+        max_show=max_subject_preview,
+    )
 
-    if complete:
-        print("-- Fully complete subjects --")
-        for subj in complete:
-            print(f"  {subj}")
+    if verbose:
+        _print_verbose_details(
+            stage_list,
+            per_subject,
+            complete=complete,
+            incomplete=incomplete,
+        )
+    elif incomplete:
+        print("Use --verbose for per-subject status and full subject lists.")
         print()
 
     return {
@@ -338,18 +548,25 @@ def print_qc_report(
         "stages": stage_list,
         "complete": complete,
         "incomplete": incomplete,
+        "stage_stats": stage_stats,
+        "cohort_label": cohort_label,
+        "cohort_total": cohort_total,
+        "excluded_no_sequences": excluded_no_sequences,
+        "sequence_source": sequence_source,
         "per_subject": {
             subj: [{"stage": c.stage, "complete": c.complete, "detail": c.detail} for c in checks]
             for subj, checks in per_subject.items()
         },
-        "total": len(subj_list),
+        "total": total,
     }
 
 
 __all__ = [
     "DEFAULT_STAGES",
+    "ReportSubjects",
     "StageCheck",
     "check_subject_stages",
+    "filter_subjects_with_required_sequences",
     "parse_stages",
     "print_qc_report",
 ]

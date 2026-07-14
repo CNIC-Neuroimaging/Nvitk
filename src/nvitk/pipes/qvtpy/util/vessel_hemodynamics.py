@@ -33,8 +33,7 @@ from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.logger import Logger
 from nvitk.measure.cross_section import (
     ThrAlgorithm,
-    cross_section_at_point,
-    flow_series_ml_s,
+    cross_section_at_loc,
     masked_plane_velocity_series,
 )
 from nvitk.measure.hemodynamics import (
@@ -42,12 +41,15 @@ from nvitk.measure.hemodynamics import (
     accept_pwv,
     circular_cross_correlation_lag,
     damping_index,
+    flow_pulsatile_ml_s,
+    flow_per_heart_cycle_ml_s,
     pitc_fit,
-    pulsatility_index,
+    pulsatility_index_qvt,
     pwv_bjornfoot_optimize,
     pwv_fielding_xcor,
     quality_weights,
-    waveform_quality_score,
+    station_quality_scores,
+    stdv_from_mean_branch,
 )
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy.labels import (
@@ -68,7 +70,7 @@ from nvitk.pipes.qvtpy.labels import (
 
 log = Logger()
 
-_DEFAULT_STRIDE = 3
+_DEFAULT_STRIDE = 1
 _DEFAULT_RADIUS_VOX = 10.0
 
 
@@ -154,6 +156,27 @@ def _root_proximal_anchor(points_xyz: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+def _assign_branch_qualities(
+    rows: list[dict[str, Any]],
+    *,
+    quality_metric: str,
+) -> None:
+    """Attach per-station Q scores along one vessel branch."""
+    if not rows:
+        return
+    flow_matrix = np.vstack([np.asarray(r["flow_ts"], dtype=np.float64) for r in rows])
+    areas = np.array([float(r["area_mm2"]) for r in rows], dtype=np.float64)
+    circs = np.array([float(r["circularity"]) for r in rows], dtype=np.float64)
+    fpc = flow_matrix.mean(axis=1)
+    if quality_metric == "stdv_from_mean":
+        quals = stdv_from_mean_branch(fpc, areas, circs, flow_matrix)
+    else:
+        quals = station_quality_scores(flow_matrix, metric="waveform")
+    for row, q in zip(rows, quals):
+        row["quality"] = float(q)
+        row["quality_metric"] = quality_metric
+
+
 def _sample_vessel_stations(
     points_xyz: np.ndarray,
     label_id: int,
@@ -169,6 +192,13 @@ def _sample_vessel_stations(
     voxel_spacing: tuple[float, float, float],
     stride: int,
     radius_vox: float,
+    measure_resegment: bool = True,
+    label_constrain: bool = True,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+    cross_section_res: int = 0,
+    plane_interp_order: int = 1,
+    cs_supersampling: bool = False,
+    quality_metric: str = "stdv_from_mean",
 ) -> list[dict[str, Any]]:
     """Sample cross-sections along one vessel; return per-station metric dicts."""
     pts = to_numpy(as_backend_array(points_xyz)).astype("float64")
@@ -180,37 +210,51 @@ def _sample_vessel_stations(
     rows: list[dict[str, Any]] = []
     for idx in range(0, pts.shape[0], step):
         try:
-            cs = cross_section_at_point(
+            cs = cross_section_at_loc(
                 pts[idx],
                 tangents[idx],
+                mag=mag,
                 cd=cd,
+                vel_mag=vel_mag,
                 voxel_spacing=voxel_spacing,
                 radius_vox=radius_vox,
-                measure_resegment=False,
+                cross_section_res=cross_section_res,
+                plane_interp_order=plane_interp_order,
+                cs_supersampling=cs_supersampling,
+                measure_resegment=measure_resegment,
+                thr_algorithm=thr_algorithm,
                 volume_seg=volume_seg,
                 volume_label_id=int(label_id),
+                label_constrain=label_constrain,
             )
         except Exception as exc:  # noqa: BLE001 - keep profiling other stations
             log.warning(f"label {label_id}: cross-section failed at station {idx}: {exc}")
             continue
         if cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
             continue
-        vel_ts = masked_plane_velocity_series(vx, vy, vz, cs)
-        flow_ts = to_numpy(flow_series_ml_s(vel_ts, cs.area_mm2)).astype("float64")
-        pi = float(pulsatility_index(flow_ts)[0])
-        quality = waveform_quality_score(flow_ts)
+        vel_ts = masked_plane_velocity_series(
+            vx, vy, vz, cs, plane_interp_order=plane_interp_order
+        )
+        flow_ts = flow_pulsatile_ml_s(vel_ts, cs.area_mm2)
+        pi = pulsatility_index_qvt(flow_ts)
+        if not np.isfinite(pi):
+            continue
         rows.append(
             {
                 "vessel_id": int(label_id),
                 "vessel_name": qvtpy_vessel_name(int(label_id)),
                 "station_index": int(idx),
                 "distance_mm": float(distance_offset_mm + arc[idx]),
-                "pi": pi,
-                "quality": float(quality),
+                "pi": float(pi),
+                "quality": 0.0,
+                "quality_metric": quality_metric,
                 "area_mm2": float(cs.area_mm2),
+                "circularity": float(cs.circularity),
+                "flow_mean_ml_s": flow_per_heart_cycle_ml_s(flow_ts),
                 "flow_ts": flow_ts,
             }
         )
+    _assign_branch_qualities(rows, quality_metric=quality_metric)
     return rows
 
 
@@ -246,17 +290,18 @@ def build_all_label_waveforms(
         cs = None
         for use_resegment in ((False, True) if is_venous else (False,)):
             try:
-                cs = cross_section_at_point(
+                cs = cross_section_at_loc(
                     pts[idx],
                     tangents[idx],
-                    cd=cd,
                     mag=mag,
+                    cd=cd,
                     vel_mag=vel_mag,
                     voxel_spacing=voxel_spacing,
                     radius_vox=radius_vox,
                     measure_resegment=use_resegment,
                     volume_seg=volume_seg,
                     volume_label_id=lid,
+                    label_constrain=not use_resegment,
                 )
             except Exception:
                 cs = None
@@ -266,7 +311,7 @@ def build_all_label_waveforms(
         if cs is None or cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
             continue
         vel_ts = masked_plane_velocity_series(vx, vy, vz, cs)
-        flow_ts = to_numpy(flow_series_ml_s(vel_ts, cs.area_mm2)).astype("float64")
+        flow_ts = flow_pulsatile_ml_s(vel_ts, cs.area_mm2)
         out[lid] = {
             "vessel_name": qvtpy_vessel_name(lid),
             "mean": flow_ts,
@@ -314,11 +359,38 @@ def compute_vessel_hemodynamics(
     stride: int = _DEFAULT_STRIDE,
     radius_vox: float = _DEFAULT_RADIUS_VOX,
     quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    quality_metric: str = "stdv_from_mean",
+    measure_resegment: bool = True,
+    label_constrain: bool = True,
+    thr_algorithm: ThrAlgorithm = "lsthr",
+    cross_section_res: int = 0,
+    plane_interp_order: int = 1,
+    cs_supersampling: bool = False,
     collect_plot_data: bool = False,
 ) -> VesselHemodynamicsResult:
     """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling."""
     result = VesselHemodynamicsResult()
     cls = {int(k): to_numpy(as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
+
+    sample_kw = dict(
+        cd=cd,
+        mag=mag,
+        vel_mag=vel_mag,
+        vx=vx,
+        vy=vy,
+        vz=vz,
+        volume_seg=volume_seg,
+        voxel_spacing=voxel_spacing,
+        stride=stride,
+        radius_vox=radius_vox,
+        measure_resegment=measure_resegment,
+        label_constrain=label_constrain,
+        thr_algorithm=thr_algorithm,
+        cross_section_res=cross_section_res,
+        plane_interp_order=plane_interp_order,
+        cs_supersampling=cs_supersampling,
+        quality_metric=quality_metric,
+    )
 
     for group in ROOT_GROUPS:
         if group.root_label not in cls:
@@ -333,16 +405,7 @@ def compute_vessel_hemodynamics(
             root_pts,
             group.root_label,
             distance_offset_mm=0.0,
-            cd=cd,
-            mag=mag,
-            vel_mag=vel_mag,
-            vx=vx,
-            vy=vy,
-            vz=vz,
-            volume_seg=volume_seg,
-            voxel_spacing=voxel_spacing,
-            stride=stride,
-            radius_vox=radius_vox,
+            **sample_kw,
         )
         for r in root_rows:
             r["root_region_id"] = group.region_id
@@ -359,16 +422,7 @@ def compute_vessel_hemodynamics(
                 branch_pts,
                 blabel,
                 distance_offset_mm=offset,
-                cd=cd,
-                mag=mag,
-                vel_mag=vel_mag,
-                vx=vx,
-                vy=vy,
-                vz=vz,
-                volume_seg=volume_seg,
-                voxel_spacing=voxel_spacing,
-                stride=stride,
-                radius_vox=radius_vox,
+                **sample_kw,
             )
             for r in brows:
                 r["root_region_id"] = group.region_id

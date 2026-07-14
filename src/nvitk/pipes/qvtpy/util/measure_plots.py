@@ -110,7 +110,7 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
         ax_q.scatter(dist[low], quality[low], s=14, c="0.6", label=f"Q<{thresh:g}")
         ax_q.scatter(dist[~low], quality[~low], s=14, c="royalblue", label=f"Q>{thresh:g}")
         ax_q.set_title(_REGION_TITLES.get(region, region), fontsize=13, fontweight="bold")
-        ax_q.set_ylabel("Q (max 4)")
+        ax_q.set_ylabel("Q (StdvFromMean)")
         ax_q.set_xlabel("d (mm)")
         ax_q.legend(loc="lower left", fontsize=8, framealpha=0.9)
 

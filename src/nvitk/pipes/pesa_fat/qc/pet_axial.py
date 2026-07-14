@@ -364,6 +364,7 @@ def _viewer_html(
     roi_to_sag_mid: dict[str, int],
     default_roi: str | None = None,
     review_ctx: dict | None = None,
+    sync_peer_dom_ids: list[str] | None = None,
 ) -> str:
     from nvitk.pipes.pesa_fat.qc.slice_review import embedded_review_panel_html, embedded_review_panel_js
 
@@ -373,6 +374,12 @@ def _viewer_html(
     roi_opts = "".join(f"<option value='{_safe_stem(r)}'>{r}</option>" for r in roi_names)
     key_map = {_safe_stem(r): r for r in roi_names}
     key_js = json.dumps(key_map)
+    sync_peers_js = json.dumps(sync_peer_dom_ids or [])
+    sync_note = ""
+    if sync_peer_dom_ids:
+        sync_note = (
+            '<span class="muted" style="font-size:11px">synced across CT / PET views</span>'
+        )
     review_panel = embedded_review_panel_html(dom_id) if review_ctx else ""
     review_js = embedded_review_panel_js(dom_id, review_ctx) if review_ctx else ""
     fn_open = "(async function() {" if review_ctx else "(function() {"
@@ -383,6 +390,7 @@ def _viewer_html(
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
     <strong>{title}</strong>
     <label>ROI <select id="{dom_id}_roi">{roi_opts}</select></label>
+    {sync_note}
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:12px;margin-top:10px;align-items:start">
     <div style="grid-column:1;grid-row:1">
@@ -412,6 +420,8 @@ def _viewer_html(
   var axMid = {roi_to_ax_mid!r};
   var coMid = {roi_to_cor_mid!r};
   var sgMid = {roi_to_sag_mid!r};
+  var syncPeers = {sync_peers_js};
+  var syncing = false;
   var sel = document.getElementById("{dom_id}_roi");
   var axImg = document.getElementById("{dom_id}_ax_img");
   var coImg = document.getElementById("{dom_id}_co_img");
@@ -420,45 +430,96 @@ def _viewer_html(
   var coR = document.getElementById("{dom_id}_co_r");
   var sgR = document.getElementById("{dom_id}_sg_r");
   {review_js}
-  function emitAxial() {{
-    var roi = keyToRoi[sel.value];
-    document.dispatchEvent(new CustomEvent('qcSliceViewerAxial', {{
-      detail: {{domId: '{dom_id}', roi: roi, sliceIdx: parseInt(axR.value, 10)}}
-    }}));
+
+  function mapIdx(srcIdx, srcMax, tgtMax) {{
+    srcMax = parseInt(srcMax, 10) || 0;
+    tgtMax = parseInt(tgtMax, 10) || 0;
+    if (tgtMax <= 0) return 0;
+    if (srcMax <= 0) return Math.min(parseInt(srcIdx, 10) || 0, tgtMax);
+    return Math.round((parseInt(srcIdx, 10) / srcMax) * tgtMax);
   }}
-  function updRoi() {{
-    var key = sel.value;
-    var roi = keyToRoi[key];
+
+  function showSlices(roi, axI, coI, sgI) {{
     var ax = axial[roi] || [];
     var co = cor[roi] || [];
     var sg = sag[roi] || [];
     axR.max = Math.max(0, ax.length - 1);
     coR.max = Math.max(0, co.length - 1);
     sgR.max = Math.max(0, sg.length - 1);
-    axR.value = Math.min(axR.max, (axMid[roi] || 0));
-    coR.value = Math.min(coR.max, (coMid[roi] || 0));
-    sgR.value = Math.min(sgR.max, (sgMid[roi] || 0));
-    axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
-    coImg.src = co.length ? co[parseInt(coR.value,10)] : "";
-    sgImg.src = sg.length ? sg[parseInt(sgR.value,10)] : "";
+    axR.value = Math.min(axI, axR.max);
+    coR.value = Math.min(coI, coR.max);
+    sgR.value = Math.min(sgI, sgR.max);
+    axImg.src = ax.length ? ax[parseInt(axR.value, 10)] : "";
+    coImg.src = co.length ? co[parseInt(coR.value, 10)] : "";
+    sgImg.src = sg.length ? sg[parseInt(sgR.value, 10)] : "";
+  }}
+
+  function emitState() {{
+    if (syncing) return;
+    var roi = keyToRoi[sel.value];
+    var detail = {{
+      domId: '{dom_id}',
+      roi: roi,
+      axIdx: parseInt(axR.value, 10),
+      coIdx: parseInt(coR.value, 10),
+      sgIdx: parseInt(sgR.value, 10),
+      axMax: parseInt(axR.max, 10),
+      coMax: parseInt(coR.max, 10),
+      sgMax: parseInt(sgR.max, 10)
+    }};
+    if (syncPeers.length) {{
+      document.dispatchEvent(new CustomEvent('qcSliceViewerState', {{ detail: detail }}));
+    }}
+    document.dispatchEvent(new CustomEvent('qcSliceViewerAxial', {{
+      detail: {{ domId: '{dom_id}', roi: roi, sliceIdx: detail.axIdx }}
+    }}));
+  }}
+
+  function applyPeerState(d) {{
+    if (!d || !d.roi || d.domId === '{dom_id}') return;
+    if (!syncPeers.length) return;
+    if (syncPeers.indexOf(d.domId) < 0) return;
+    syncing = true;
+    for (var k in keyToRoi) {{
+      if (keyToRoi[k] === d.roi) {{ sel.value = k; break; }}
+    }}
+    var roi = d.roi;
+    var axI = mapIdx(d.axIdx, d.axMax, Math.max(0, (axial[roi] || []).length - 1));
+    var coI = mapIdx(d.coIdx, d.coMax, Math.max(0, (cor[roi] || []).length - 1));
+    var sgI = mapIdx(d.sgIdx, d.sgMax, Math.max(0, (sag[roi] || []).length - 1));
+    showSlices(roi, axI, coI, sgI);
     if (typeof showReviewForRoi === 'function') showReviewForRoi(roi);
-    emitAxial();
+    syncing = false;
+  }}
+
+  document.addEventListener('qcSliceViewerState', function(ev) {{
+    applyPeerState(ev.detail);
+  }});
+
+  function updRoi() {{
+    var key = sel.value;
+    var roi = keyToRoi[key];
+    showSlices(roi, axMid[roi] || 0, coMid[roi] || 0, sgMid[roi] || 0);
+    if (typeof showReviewForRoi === 'function') showReviewForRoi(roi);
+    emitState();
   }}
   axR.oninput = function() {{
     var roi = keyToRoi[sel.value];
     var ax = axial[roi] || [];
-    axImg.src = ax.length ? ax[parseInt(axR.value,10)] : "";
-    emitAxial();
+    axImg.src = ax.length ? ax[parseInt(axR.value, 10)] : "";
+    emitState();
   }};
   coR.oninput = function() {{
     var roi = keyToRoi[sel.value];
     var co = cor[roi] || [];
-    coImg.src = co.length ? co[parseInt(coR.value,10)] : "";
+    coImg.src = co.length ? co[parseInt(coR.value, 10)] : "";
+    emitState();
   }};
   sgR.oninput = function() {{
     var roi = keyToRoi[sel.value];
     var sg = sag[roi] || [];
-    sgImg.src = sg.length ? sg[parseInt(sgR.value,10)] : "";
+    sgImg.src = sg.length ? sg[parseInt(sgR.value, 10)] : "";
+    emitState();
   }};
   sel.onchange = updRoi;
   var preferred = {default_roi!r};
@@ -484,6 +545,7 @@ def _build_ctpet_slice_viewer_core(
     title: str,
     default_roi: str = "HIGADO",
     review_ctx: dict | None = None,
+    sync_peer_dom_ids: list[str] | None = None,
 ) -> str:
     """Render CT-PET slice stacks for *vol_arr* with masks resampled to *target_img*."""
     sagittal_y_height = _figsize_for_slice(
@@ -619,6 +681,7 @@ def _build_ctpet_slice_viewer_core(
         roi_to_sag_mid=roi_sg_mid,
         default_roi=default_roi,
         review_ctx=review_ctx,
+        sync_peer_dom_ids=sync_peer_dom_ids,
     )
 
 
@@ -639,10 +702,13 @@ def build_ctpet_slice_viewer_html(
 
     ct = imread(str(resolve_nii(nifti_dir, ct_cfg.INPUT_STEM)), axes="XYZ")
     ct_arr = to_numpy(ct.data)
+    subj_key = _safe_stem(subject)
+    ct_dom = f"ct_sv_{subj_key}"
+    pet_dom = f"ctpet_pet_sv_{subj_key}"
     img_store = _SliceImageStore(
         assets_dir=assets_dir,
         assets_rel=assets_rel,
-        prefix=f"ct_{_safe_stem(subject)}",
+        prefix=f"ct_{subj_key}",
     )
     return _build_ctpet_slice_viewer_core(
         lay,
@@ -652,10 +718,11 @@ def build_ctpet_slice_viewer_html(
         stage2=stage2,
         margin_vox=margin_vox,
         img_store=img_store,
-        dom_id=f"ct_sv_{_safe_stem(subject)}",
+        dom_id=ct_dom,
         title="CT-PET slices (CT underlay; red=post-processed, blue=raw TotalSegmentator)",
         default_roi="HIGADO",
         review_ctx=review_ctx,
+        sync_peer_dom_ids=[pet_dom],
     )
 
 
@@ -680,10 +747,13 @@ def build_ctpet_pet_slice_viewer_html(
     pet = imread(str(pet_path), axes="XYZ")
     suv = suv_image(pet, pet.metadata)
     suv_arr = to_numpy(suv.data)
+    subj_key = _safe_stem(subject)
+    ct_dom = f"ct_sv_{subj_key}"
+    pet_dom = f"ctpet_pet_sv_{subj_key}"
     img_store = _SliceImageStore(
         assets_dir=assets_dir,
         assets_rel=assets_rel,
-        prefix=f"pet_{_safe_stem(subject)}",
+        prefix=f"pet_{subj_key}",
     )
     return _build_ctpet_slice_viewer_core(
         lay,
@@ -693,10 +763,11 @@ def build_ctpet_pet_slice_viewer_html(
         stage2=stage2,
         margin_vox=margin_vox,
         img_store=img_store,
-        dom_id=f"ctpet_pet_sv_{_safe_stem(subject)}",
+        dom_id=pet_dom,
         title="CT-PET slices (PET SUV underlay; red=post-processed, blue=raw TotalSegmentator)",
         default_roi="HIGADO",
         review_ctx=None,
+        sync_peer_dom_ids=[ct_dom],
     )
 
 
