@@ -33,9 +33,11 @@ from nvitk.db.importers import (
 )
 from nvitk.db.local_dicom_assets import upsert_dicom_assets
 from nvitk.db.local_nifti_assets import upsert_nifti_assets
+from nvitk.db.pipeline_assets import upsert_local_pipeline_assets
 from nvitk.db.repo import DataRepo
 from nvitk.db.xnat import sync_xnat_project
 from nvitk.db.xnat_config import finalize_xnat_connection, load_xnat_profile, resolve_xnat_connection
+from nvitk.db.xnat_pipeline_resources import sync_xnat_pipeline_resources
 from nvitk.db.xnat_projects import (
     build_default_xnat_sequences_csv,
     default_sequences_for_project,
@@ -221,6 +223,11 @@ def build_database(
     index_local_dicom: bool,
     dicom_root: Path | None,
     index_local_nifti: bool,
+    with_pipeline_xnat: bool,
+    pipeline_download_root: Path | None,
+    pipeline_download: bool,
+    index_local_pipeline: bool,
+    pipeline_results_root: Path | None,
     build_sqlite_index: bool,
     reset_catalog: bool,
     log: Any = print,
@@ -298,6 +305,31 @@ def build_database(
                 build_sqlite_index=False,
                 source_batch_id=import_run_id,
             )
+            if with_pipeline_xnat:
+                log(
+                    f"Indexing qvtpy/eICAB experiment resources for {project_id} "
+                    f"(download={pipeline_download})"
+                )
+                sync_xnat_pipeline_resources(
+                    repo,
+                    config,
+                    download_root=pipeline_download_root,
+                    download_resources=pipeline_download,
+                    build_sqlite_index=False,
+                    source_batch_id=import_run_id,
+                )
+
+    if index_local_pipeline:
+        if pipeline_results_root is None:
+            raise ValueError(
+                "--pipeline-results-root is required when --index-local-pipeline is set"
+            )
+        log(f"Indexing local pipeline assets from {pipeline_results_root}")
+        upsert_local_pipeline_assets(
+            repo,
+            pipeline_results_root,
+            build_sqlite_index=False,
+        )
 
     pruned = prune_redundant_local_sessions(repo)
     log(f"Pruned redundant local_db sessions; remaining sessions: {len(pruned)}")
@@ -389,6 +421,33 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("--index-local-dicom", action="store_true")
     parser.add_argument("--dicom-root", type=Path, default=None)
     parser.add_argument("--index-local-nifti", action="store_true")
+    parser.add_argument(
+        "--with-pipeline-xnat",
+        action="store_true",
+        help="Index qvtpy/eICAB XNAT experiment resources into assets (requires --with-xnat)",
+    )
+    parser.add_argument(
+        "--pipeline-download-root",
+        type=Path,
+        default=None,
+        help="Local root for pipeline resource downloads during build",
+    )
+    parser.add_argument(
+        "--pipeline-download",
+        action="store_true",
+        help="Download eicab/qvtpy experiment resources while indexing (requires --pipeline-download-root)",
+    )
+    parser.add_argument(
+        "--index-local-pipeline",
+        action="store_true",
+        help="Index local <results>/<subject>/eicab and .../qvtpy trees into assets",
+    )
+    parser.add_argument(
+        "--pipeline-results-root",
+        type=Path,
+        default=None,
+        help="QVTPy results root for --index-local-pipeline",
+    )
     parser.add_argument("--build-sqlite-index", action="store_true")
     parser.add_argument(
         "--no-reset-catalog",
@@ -409,6 +468,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"  xnat-projects: {', '.join(projects)}")
             print(f"  xnat-sequences: {args.xnat_sequences or '(per-project defaults)'}")
             print(f"  default sequence union: {DEFAULT_XNAT_SEQUENCES}")
+        print(f"  with-pipeline-xnat: {args.with_pipeline_xnat}")
+        print(f"  index-local-pipeline: {args.index_local_pipeline}")
         print(f"  pesabrain steps: {len(PESABRAIN_BUILD_STEPS)}")
         return
 
@@ -430,6 +491,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         index_local_dicom=args.index_local_dicom,
         dicom_root=args.dicom_root,
         index_local_nifti=args.index_local_nifti,
+        with_pipeline_xnat=args.with_pipeline_xnat,
+        pipeline_download_root=args.pipeline_download_root,
+        pipeline_download=args.pipeline_download,
+        index_local_pipeline=args.index_local_pipeline,
+        pipeline_results_root=args.pipeline_results_root,
         build_sqlite_index=args.build_sqlite_index,
         reset_catalog=not args.no_reset_catalog,
     )

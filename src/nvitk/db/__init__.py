@@ -31,6 +31,13 @@ from .repo import DEFAULT_COHORT_ID, DataRepo, get_repo_from_settings
 from .sqlite_index import SQLiteIndex
 from .local_dicom_assets import register_dicom_tree, upsert_dicom_assets
 from .local_nifti_assets import register_nifti_tree, upsert_nifti_assets
+from .pipeline_assets import (
+    QVTPY_PIPELINE_RESOURCES,
+    XNAT_RESOURCE_EICAB,
+    XNAT_RESOURCE_QVTPY,
+    register_local_pipeline_tree,
+    upsert_local_pipeline_assets,
+)
 from .xnat import (
     classify_scan,
     connect_xnat,
@@ -39,6 +46,12 @@ from .xnat import (
     resolve_xnat_scan_from_scan_row,
     sync_xnat_project,
     xnat_sequence_to_asset_slot,
+)
+from .xnat_pipeline_resources import (
+    download_experiment_resource,
+    inspect_xnat_pipeline_resource,
+    list_pipeline_assets_for_subject,
+    sync_xnat_pipeline_resources,
 )
 from .xnat_upload import (
     resolve_subject_experiment,
@@ -97,4 +110,13 @@ __all__ = [
     "register_nifti_tree",
     "upsert_dicom_assets",
     "upsert_nifti_assets",
+    "QVTPY_PIPELINE_RESOURCES",
+    "XNAT_RESOURCE_EICAB",
+    "XNAT_RESOURCE_QVTPY",
+    "register_local_pipeline_tree",
+    "upsert_local_pipeline_assets",
+    "download_experiment_resource",
+    "inspect_xnat_pipeline_resource",
+    "list_pipeline_assets_for_subject",
+    "sync_xnat_pipeline_resources",
 ]

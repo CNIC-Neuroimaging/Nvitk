@@ -42,7 +42,12 @@ from nvitk.db.xnat import (
     resolve_xnat_scan_from_scan_row,
     xnat_sequence_to_asset_slot,
 )
+from nvitk.db.xnat_pipeline_resources import (
+    download_experiment_resource,
+    list_pipeline_assets_for_subject,
+)
 from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
+from nvitk.db.xnat_upload import resolve_subject_experiment
 from nvitk.db.xnat_projects import (
     default_sequences_for_project,
     get_xnat_project,
@@ -97,7 +102,7 @@ class _XnatDownloadWorker(QThread):
         self._config_path = config_path
         self._project_id = project_id
         self._password = password
-        self._scan_rows = scan_rows
+        self._items = scan_rows
         self._download_root = download_root
         self._temp_parent = temp_parent
 
@@ -111,11 +116,55 @@ class _XnatDownloadWorker(QThread):
             )
             opened_dirs = []
             with connect_xnat(conn) as session:
-                for row in self._scan_rows:
+                project = session.projects[self._project_id]
+                for row in self._items:
                     subject_uid = str(row.get("subject_uid") or "")
+                    kind = str(row.get("kind") or "scan").strip().lower()
+                    if kind == "pipeline":
+                        resource_label = str(
+                            row.get("resource_label")
+                            or row.get("asset_slot")
+                            or "pipeline"
+                        ).strip()
+                        if resource_label.startswith("pipeline_"):
+                            resource_label = resource_label.removeprefix("pipeline_")
+                        self.progress.emit(
+                            f"Downloading {subject_uid} / {resource_label}…"
+                        )
+                        local_path = str(row.get("asset_path") or "").strip()
+                        if local_path and Path(local_path).is_dir() and any(
+                            Path(local_path).rglob("*")
+                        ):
+                            opened_dirs.append(Path(local_path))
+                            continue
+                        experiment, _ = resolve_subject_experiment(
+                            project, subject_uid
+                        )
+                        if self._download_root is not None:
+                            target = (
+                                self._download_root
+                                / subject_uid
+                                / resource_label
+                            )
+                        else:
+                            parent = self._temp_parent or Path(
+                                tempfile.gettempdir()
+                            )
+                            target = parent / subject_uid / resource_label
+                        target.mkdir(parents=True, exist_ok=True)
+                        download_experiment_resource(
+                            experiment, resource_label, target
+                        )
+                        opened_dirs.append(target)
+                        continue
+
                     scan_id = str(row.get("scan_id") or "")
-                    sequence = str(row.get("asset_slot") or row.get("scan_id") or "scan")
-                    self.progress.emit(f"Downloading {subject_uid} / {scan_id}…")
+                    sequence = str(
+                        row.get("asset_slot") or row.get("scan_id") or "scan"
+                    )
+                    self.progress.emit(
+                        f"Downloading {subject_uid} / {scan_id}…"
+                    )
                     scan_obj = resolve_xnat_scan_from_scan_row(session, row)
                     if self._download_root is not None:
                         target = self._download_root / subject_uid / sequence
@@ -244,7 +293,7 @@ class DataBrowserPanel(QWidget):
         return page
 
     def _build_xnat_scan_filter_group(self) -> QGroupBox:
-        group = QGroupBox("Filter subjects by indexed scans")
+        group = QGroupBox("Filter subjects by indexed assets")
         self._xnat_filter_count_label = QLabel("Select scan types to filter the subject list.")
         self._xnat_filter_count_label.setWordWrap(True)
 
@@ -361,8 +410,8 @@ class DataBrowserPanel(QWidget):
         self._xnat_scan_filter_group.setVisible(is_xnat)
         if is_xnat:
             self._header_label.setText(f"Dataset catalog: {self._repo_root}")
-            self._resource_label.setText("Scans (check to download)")
-            self._action_btn.setText("Download selected scans")
+            self._resource_label.setText("Scans & pipeline results (check to download)")
+            self._action_btn.setText("Download selected resources")
             self._reload_xnat_catalog()
         else:
             self._header_label.setText("Browse pipeline directories on disk.")
@@ -543,7 +592,10 @@ class DataBrowserPanel(QWidget):
         self._xnat_scan_filter_checks.clear()
 
         if not slots:
-            hint = QLabel("(No indexed scans — run nvitk-xnat-sync for this project.)")
+            hint = QLabel(
+                "(No indexed assets — run nvitk-xnat-sync and/or "
+                "nvitk-xnat-pipeline-sync for this project.)"
+            )
             hint.setWordWrap(True)
             self._xnat_scan_filters_layout.addWidget(hint, 0, 0)
             return
@@ -639,25 +691,63 @@ class DataBrowserPanel(QWidget):
 
     def _populate_xnat_resources(self, subject_uid: str) -> None:
         project_id = self._current_project_id()
+        n_items = 0
         try:
             df = list_scans_for_subject(self._repo, project_id, subject_uid)
         except Exception as exc:
             self._status.setText(f"Could not load scans: {exc}")
+            df = None
+
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                scan_id = str(row.get("scan_id") or "")
+                desc = str(row.get("series_description") or "")
+                exp = str(row.get("experiment_label") or "")
+                label = f"[scan] {scan_id} — {desc} ({exp})"
+                item = QListWidgetItem(label)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                payload = row.to_dict()
+                payload["kind"] = "scan"
+                payload["subject_uid"] = subject_uid
+                item.setData(_ITEM_ROLE, payload)
+                self._resource_list.addItem(item)
+                n_items += 1
+
+        try:
+            pipeline_df = list_pipeline_assets_for_subject(
+                self._repo, project_id, subject_uid
+            )
+        except Exception as exc:
+            self._status.setText(f"Could not load pipeline assets: {exc}")
+            pipeline_df = None
+
+        if pipeline_df is not None and not pipeline_df.empty:
+            for _, row in pipeline_df.iterrows():
+                slot = str(row.get("asset_slot") or "")
+                resource = str(row.get("resource_label") or slot)
+                label = asset_slot_display_label(slot or resource)
+                exists = bool(row.get("exists_locally"))
+                hint = " (local cache)" if exists else " (XNAT)"
+                item = QListWidgetItem(f"[pipeline] {label}{hint}")
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                payload = row.to_dict()
+                payload["kind"] = "pipeline"
+                payload["subject_uid"] = subject_uid
+                if resource and not payload.get("resource_label"):
+                    payload["resource_label"] = resource
+                item.setData(_ITEM_ROLE, payload)
+                self._resource_list.addItem(item)
+                n_items += 1
+
+        if n_items == 0:
+            self._status.setText(
+                f"No scans or pipeline resources indexed for {subject_uid}. "
+                "Run nvitk-xnat-sync / nvitk-xnat-pipeline-sync first."
+            )
             return
-        if df.empty:
-            self._status.setText(f"No scans indexed for {subject_uid}. Run nvitk-xnat-sync first.")
-            return
-        for _, row in df.iterrows():
-            scan_id = str(row.get("scan_id") or "")
-            desc = str(row.get("series_description") or "")
-            exp = str(row.get("experiment_label") or "")
-            label = f"{scan_id} — {desc} ({exp})"
-            item = QListWidgetItem(label)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
-            item.setData(_ITEM_ROLE, row.to_dict())
-            self._resource_list.addItem(item)
-        self._status.setText(f"{len(df)} scan(s) for {subject_uid}.")
+        self._status.setText(f"{n_items} resource(s) for {subject_uid}.")
 
     def _populate_local_resources(self, subject: str) -> None:
         if self._local_roots is None:
@@ -756,9 +846,9 @@ class DataBrowserPanel(QWidget):
             notify(f"Config not found: {config_path}", error=True)
             return
 
-        scan_rows = self._selected_xnat_rows()
-        if not scan_rows:
-            notify("Check at least one scan to download.", error=True)
+        items = self._selected_xnat_rows()
+        if not items:
+            notify("Check at least one resource to download.", error=True)
             return
 
         password, ok = QInputDialog.getText(
@@ -791,7 +881,7 @@ class DataBrowserPanel(QWidget):
             config_path=config_path,
             project_id=self._current_project_id(),
             password=str(password),
-            scan_rows=scan_rows,
+            scan_rows=items,
             download_root=download_root,
             temp_parent=temp_parent,
         )
@@ -828,7 +918,7 @@ class DataBrowserPanel(QWidget):
             except Exception as exc:
                 log.warning(f"Could not open {path}: {exc}")
         self._record_opened(paths)
-        notify(f"Downloaded and opened {opened} DICOM series in Napari.")
+        notify(f"Downloaded and opened {opened} resource(s) in Napari.")
 
     def _on_download_failed(self, message: str) -> None:
         self._status.setText(message)

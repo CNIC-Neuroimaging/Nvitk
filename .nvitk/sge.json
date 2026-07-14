@@ -58,7 +58,8 @@
       "sge_project": "MCC_GPU",
       "sge_account": "MCC_GPU",
       "sge_ngpu": 1,
-      "sge_h_vmem": "30G"
+      "sge_h_vmem": "30G",
+      "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"
     },
     "qvtpy_paths": {
       "local_dicom_root": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/DICOM",
@@ -66,7 +67,9 @@
       "local_results_root": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy",
       "cluster_dicom_root": "/data_lab_MCC/imarcoss/LabMCC/DATA/DICOM",
       "cluster_nifti_root": "/data_lab_MCC/imarcoss/LabMCC/DATA/NIFTI",
-      "cluster_results_root": "/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy"
+      "cluster_results_root": "/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy",
+      "local_model_root": "/home/imarcoss/ai_models/TotalSegmentator/v2.0.0",
+      "cluster_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"
     },
     "image_tools": {
       "log_subdir": "image_tools",

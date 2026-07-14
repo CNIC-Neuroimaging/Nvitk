@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 NIFTI_SUFFIXES = (".nii.gz", ".nii")
+QVTPY_PIPELINE_BUNDLE_DIRS: tuple[str, ...] = ("eicab", "qvtpy")
 
 # PESA-Fat on disk:  NIFTI_ROOT / <cohort> / PESA* / *.nii.gz
 #                    RESULTS_ROOT / <cohort> / res_* / PESA* / ...
@@ -385,14 +386,27 @@ def _discover_results_assets(roots: PipelineRoots, subject: str) -> list[LocalAs
     else:
         subj_dir = base / subject
         if subj_dir.is_dir():
+            bundle_dirs: set[str] = set()
+            for bundle_name in QVTPY_PIPELINE_BUNDLE_DIRS:
+                bundle = subj_dir / bundle_name
+                if bundle.is_dir():
+                    assets.append(LocalAsset("pipeline", bundle_name, bundle))
+                    bundle_dirs.add(bundle_name)
             for path in sorted(subj_dir.rglob("*")):
-                if path.is_file() and _is_nifti_file(path):
-                    try:
-                        rel = path.relative_to(subj_dir)
-                        label = str(rel)
-                    except ValueError:
-                        label = path.name
-                    assets.append(LocalAsset("results", label, path))
+                if not path.is_file() or not _is_nifti_file(path):
+                    continue
+                try:
+                    top = path.relative_to(subj_dir).parts[0]
+                except ValueError:
+                    top = ""
+                if top in bundle_dirs:
+                    continue
+                try:
+                    rel = path.relative_to(subj_dir)
+                    label = str(rel)
+                except ValueError:
+                    label = path.name
+                assets.append(LocalAsset("results", label, path))
 
     return assets
 

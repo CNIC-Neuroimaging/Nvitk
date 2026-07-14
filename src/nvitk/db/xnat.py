@@ -417,6 +417,8 @@ _ASSET_SLOT_LABELS: dict[str, str] = {
     "dixon_legs": "DIXON LEGS",
     "ct": "CT",
     "pet": "PET",
+    "pipeline_eicab": "eICAB results",
+    "pipeline_qvtpy": "QVTPy results",
 }
 
 
@@ -886,8 +888,8 @@ def list_scans_for_subject(repo: Any, project_id: str, subject_uid: str) -> pd.D
     return merged[present].sort_values(["experiment_label", "scan_id"], na_position="last").reset_index(drop=True)
 
 
-def project_subject_asset_slots(repo: Any, project_id: str) -> dict[str, set[str]]:
-    """Map each ``subject_uid`` in *project_id* to indexed ``asset_slot`` values."""
+def _project_subject_scan_asset_slots(repo: Any, project_id: str) -> dict[str, set[str]]:
+    """Map each ``subject_uid`` in *project_id* to indexed scan ``asset_slot`` values."""
     if not repo.catalog.table_exists("scans") or not repo.catalog.table_exists("sessions"):
         return {}
 
@@ -928,6 +930,58 @@ def project_subject_asset_slots(repo: Any, project_id: str) -> dict[str, set[str
         if slots:
             out[subj] = slots
     return out
+
+
+def _project_subject_pipeline_asset_slots(repo: Any, project_id: str) -> dict[str, set[str]]:
+    """Pipeline ``asset_slot`` values from indexed ``assets`` rows."""
+    if not repo.catalog.table_exists("assets") or not repo.catalog.table_exists("sessions"):
+        return {}
+
+    sessions = repo._load_table_frame(
+        "sessions",
+        filters={"project_id": str(project_id)},
+        use_sqlite=True,
+    )
+    if sessions.empty:
+        return {}
+
+    subject_uids = {str(x) for x in sessions["subject_uid"].dropna().unique()}
+    assets = repo._load_table_frame("assets", use_sqlite=True)
+    if assets.empty or "subject_uid" not in assets.columns:
+        return {}
+
+    assets = assets[assets["subject_uid"].astype(str).isin(subject_uids)]
+    if assets.empty or "asset_slot" not in assets.columns:
+        return {}
+
+    pipeline_slots = {"pipeline_eicab", "pipeline_qvtpy"}
+    assets = assets[assets["asset_slot"].astype(str).isin(pipeline_slots)]
+    if assets.empty:
+        return {}
+
+    out: dict[str, set[str]] = {}
+    for subject_uid, group in assets.groupby("subject_uid", sort=False):
+        subj = str(subject_uid).strip()
+        if not subj:
+            continue
+        slots = {
+            str(s).strip()
+            for s in group["asset_slot"].dropna().unique()
+            if str(s).strip()
+        }
+        if slots:
+            out[subj] = slots
+    return out
+
+
+def project_subject_asset_slots(repo: Any, project_id: str) -> dict[str, set[str]]:
+    """Map each ``subject_uid`` in *project_id* to indexed scan + pipeline ``asset_slot`` values."""
+    scan_slots = _project_subject_scan_asset_slots(repo, project_id)
+    pipeline_slots = _project_subject_pipeline_asset_slots(repo, project_id)
+    merged: dict[str, set[str]] = {k: set(v) for k, v in scan_slots.items()}
+    for subj, slots in pipeline_slots.items():
+        merged.setdefault(subj, set()).update(slots)
+    return merged
 
 
 def list_asset_slots_for_project(repo: Any, project_id: str) -> list[str]:

@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Literal
 
 ThrAlgorithm = Literal["lsthr", "lthr", "otsu"]
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import map_in_thread_pool, setup
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_2d
 from nvitk.morphology.centerline import centerline_tangents
-from nvitk.transform.oblique import oblique_slice
+from nvitk.transform.oblique import (
+    ObliquePlaneCoords,
+    oblique_plane_coords,
+    oblique_slice,
+    oblique_slice_with_coords,
+)
 
 setup(globals())
 
@@ -37,6 +43,7 @@ class CrossSectionResult:
     v: np.ndarray
     pixel_spacing_mm: tuple[float, float]
     plane_res: int
+    radius_vox: float = _DEFAULT_RADIUS_VOX
     intensity_2d: np.ndarray | None = None
 
 
@@ -160,39 +167,23 @@ def cross_section_at_point(
     center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
     tang = as_backend_array(tangent).astype(np.float64).reshape(3)
 
-    cd_sl_display = oblique_slice(
-        cd,
-        center_xyz=center,
-        u_xyz=u,
-        v_xyz=v,
-        radius_vox=radius_vox,
-        res=res_display,
-        order=0,
+    plane_display = oblique_plane_coords(
+        center, u, v, radius_vox=radius_vox, res=res_display
     )
+    plane_meas = oblique_plane_coords(
+        center, u, v, radius_vox=radius_vox, res=res_meas
+    )
+    cd_sl_display = oblique_slice_with_coords(cd, plane_display, order=0)
 
     if measure_resegment:
         order_meas = int(plane_interp_order)
-        cd_sl = oblique_slice(
-            cd,
-            center_xyz=center,
-            u_xyz=u,
-            v_xyz=v,
-            radius_vox=radius_vox,
-            res=res_meas,
-            order=order_meas,
-        )
+        cd_sl = oblique_slice_with_coords(cd, plane_meas, order=order_meas)
         mask, circ = segment_in_plane_cd_only(cd_sl, thr_algorithm=thr_algorithm)
     else:
         if volume_seg is None:
             raise ValueError("volume_seg is required when measure_resegment is False")
-        seg_sl = oblique_slice(
-            volume_seg.astype(np.float32),
-            center_xyz=center,
-            u_xyz=u,
-            v_xyz=v,
-            radius_vox=radius_vox,
-            res=res_meas,
-            order=0,
+        seg_sl = oblique_slice_with_coords(
+            volume_seg.astype(np.float32), plane_meas, order=0
         )
         mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
         circ = _circularity_proxy(mask)
@@ -214,6 +205,7 @@ def cross_section_at_point(
         v=v,
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
         plane_res=res_meas,
+        radius_vox=float(radius_vox),
         intensity_2d=to_numpy(cd_sl_display),
     )
 
@@ -431,44 +423,17 @@ def cross_section_at_loc(
     center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
     tang = as_backend_array(tangent).astype(np.float64).reshape(3)
 
-    cd_sl = oblique_slice(
-        cd,
-        center_xyz=center,
-        u_xyz=u,
-        v_xyz=v,
-        radius_vox=radius_vox,
-        res=res,
-        order=order,
+    plane_meas = oblique_plane_coords(
+        center, u, v, radius_vox=radius_vox, res=res
     )
+    cd_sl = oblique_slice_with_coords(cd, plane_meas, order=order)
 
     if measure_resegment:
-        mag_sl = oblique_slice(
-            mag,
-            center_xyz=center,
-            u_xyz=u,
-            v_xyz=v,
-            radius_vox=radius_vox,
-            res=res,
-            order=order,
-        )
-        vel_sl = oblique_slice(
-            vel_mag,
-            center_xyz=center,
-            u_xyz=u,
-            v_xyz=v,
-            radius_vox=radius_vox,
-            res=res,
-            order=order,
-        )
+        mag_sl = oblique_slice_with_coords(mag, plane_meas, order=order)
+        vel_sl = oblique_slice_with_coords(vel_mag, plane_meas, order=order)
         if label_constrain and volume_seg is not None:
-            seg_sl = oblique_slice(
-                volume_seg.astype(np.float32),
-                center_xyz=center,
-                u_xyz=u,
-                v_xyz=v,
-                radius_vox=radius_vox,
-                res=res,
-                order=0,
+            seg_sl = oblique_slice_with_coords(
+                volume_seg.astype(np.float32), plane_meas, order=0
             )
             label_mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
             mask, circ, _fallback = segment_in_plane_label_constrained(
@@ -488,14 +453,8 @@ def cross_section_at_loc(
     else:
         if volume_seg is None:
             raise ValueError("volume_seg is required when measure_resegment is False")
-        seg_sl = oblique_slice(
-            volume_seg.astype(np.float32),
-            center_xyz=center,
-            u_xyz=u,
-            v_xyz=v,
-            radius_vox=radius_vox,
-            res=res,
-            order=0,
+        seg_sl = oblique_slice_with_coords(
+            volume_seg.astype(np.float32), plane_meas, order=0
         )
         mask = _mask_from_volume_seg_slice(seg_sl, volume_label_id)
         circ = _circularity_proxy(mask)
@@ -517,6 +476,7 @@ def cross_section_at_loc(
         v=v,
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
         plane_res=res,
+        radius_vox=float(radius_vox),
     )
 
 
@@ -584,6 +544,39 @@ def segment_along_polyline(
     return out
 
 
+def _velocity_frame_workers(nt: int) -> int:
+    """Thread count for per-frame velocity reslicing (0/1 = sequential)."""
+    if nt < 6:
+        return 1
+    env = os.environ.get("NVITK_CROSS_SECTION_FRAME_WORKERS", "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    cpu = os.cpu_count() or 4
+    return max(1, min(8, cpu, nt))
+
+
+def _through_plane_frame_mean(
+    ti: int,
+    *,
+    vx: Any,
+    vy: Any,
+    vz: Any,
+    plane: ObliquePlaneCoords,
+    order: int,
+    t_hat: np.ndarray,
+    mask: np.ndarray,
+) -> float:
+    vxsl = oblique_slice_with_coords(vx[..., ti], plane, order=order)
+    vysl = oblique_slice_with_coords(vy[..., ti], plane, order=order)
+    vzsl = oblique_slice_with_coords(vz[..., ti], plane, order=order)
+    v_through = vxsl * t_hat[0] + vysl * t_hat[1] + vzsl * t_hat[2]
+    vals = to_numpy(as_backend_array(v_through))[mask]
+    return float(np.mean(vals)) if vals.size else 0.0
+
+
 def masked_plane_velocity_series(
     vx: np.ndarray,
     vy: np.ndarray,
@@ -599,44 +592,50 @@ def masked_plane_velocity_series(
     if vx.ndim != 4:
         raise ValueError("Expected 4D velocity components (x,y,z,t).")
     nt = int(vx.shape[3])
-    t_hat = result.tangent / (float(np.linalg.norm(result.tangent)) + 1e-12)
-    mask = result.mask_2d.astype(bool, copy=False)
+    t_hat = (as_backend_array(result.tangent)).astype(np.float64)
+    t_hat = t_hat / (float(np.linalg.norm(t_hat)) + 1e-12)
+    mask = (as_backend_array(result.mask_2d)).astype(bool, copy=False)
     if not np.any(mask):
         return np.zeros(nt, dtype=np.float64)
 
-    out = np.empty(nt, dtype=np.float64)
-    for ti in range(nt):
-        vxsl = oblique_slice(
-            vx[..., ti],
-            center_xyz=result.center_xyz,
-            u_xyz=result.u,
-            v_xyz=result.v,
-            radius_vox=_DEFAULT_RADIUS_VOX,
-            res=result.plane_res,
-            order=int(plane_interp_order),
+    plane = oblique_plane_coords(
+        result.center_xyz,
+        result.u,
+        result.v,
+        radius_vox=float(result.radius_vox),
+        res=int(result.plane_res),
+    )
+    order = int(plane_interp_order)
+    workers = _velocity_frame_workers(nt)
+    if workers <= 1:
+        out = np.empty(nt, dtype=np.float64)
+        for ti in range(nt):
+            out[ti] = _through_plane_frame_mean(
+                ti,
+                vx=vx,
+                vy=vy,
+                vz=vz,
+                plane=plane,
+                order=order,
+                t_hat=t_hat,
+                mask=mask,
+            )
+        return out
+
+    def _frame_task(ti: int) -> float:
+        return _through_plane_frame_mean(
+            ti,
+            vx=vx,
+            vy=vy,
+            vz=vz,
+            plane=plane,
+            order=order,
+            t_hat=t_hat,
+            mask=mask,
         )
-        vysl = oblique_slice(
-            vy[..., ti],
-            center_xyz=result.center_xyz,
-            u_xyz=result.u,
-            v_xyz=result.v,
-            radius_vox=_DEFAULT_RADIUS_VOX,
-            res=result.plane_res,
-            order=int(plane_interp_order),
-        )
-        vzsl = oblique_slice(
-            vz[..., ti],
-            center_xyz=result.center_xyz,
-            u_xyz=result.u,
-            v_xyz=result.v,
-            radius_vox=_DEFAULT_RADIUS_VOX,
-            res=result.plane_res,
-            order=int(plane_interp_order),
-        )
-        v_through = vxsl * t_hat[0] + vysl * t_hat[1] + vzsl * t_hat[2]
-        vals = v_through[mask]
-        out[ti] = float(np.mean(vals)) if vals.size else 0.0
-    return out
+
+    vals = map_in_thread_pool(_frame_task, range(nt), max_workers=workers)
+    return np.asarray(vals, dtype=np.float64)
 
 
 def flow_series_ml_s(velocity_ts: np.ndarray, area_mm2: float) -> np.ndarray:

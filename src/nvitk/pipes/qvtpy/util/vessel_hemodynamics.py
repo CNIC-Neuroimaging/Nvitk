@@ -24,12 +24,14 @@ feed:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
 from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import map_in_thread_pool
 from nvitk.core.logger import Logger
 from nvitk.measure.cross_section import (
     ThrAlgorithm,
@@ -72,6 +74,19 @@ log = Logger()
 
 _DEFAULT_STRIDE = 1
 _DEFAULT_RADIUS_VOX = 10.0
+_DEFAULT_BRANCH_WORKERS = max(1, min(4, os.cpu_count() or 4))
+
+
+def _branch_sample_workers(n_branches: int) -> int:
+    if n_branches <= 1:
+        return 1
+    env = os.environ.get("NVITK_PITC_BRANCH_WORKERS", "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    return max(1, min(_DEFAULT_BRANCH_WORKERS, n_branches))
 
 
 @dataclass(frozen=True)
@@ -412,12 +427,16 @@ def compute_vessel_hemodynamics(
         group_stations.extend(root_rows)
 
         branch_rows_by_label: dict[int, list[dict[str, Any]]] = {}
-        for blabel in group.branch_labels:
-            if int(blabel) in QVTPY_COMM_IDS:
-                continue
-            if blabel not in cls:
-                continue
-            branch_pts, offset = _distance_offset_for_branch(root_pts, cls[blabel], voxel_spacing)
+        eligible_branches = [
+            int(blabel)
+            for blabel in group.branch_labels
+            if int(blabel) not in QVTPY_COMM_IDS and blabel in cls
+        ]
+
+        def _sample_branch(blabel: int) -> tuple[int, list[dict[str, Any]]]:
+            branch_pts, offset = _distance_offset_for_branch(
+                root_pts, cls[blabel], voxel_spacing
+            )
             brows = _sample_vessel_stations(
                 branch_pts,
                 blabel,
@@ -426,8 +445,20 @@ def compute_vessel_hemodynamics(
             )
             for r in brows:
                 r["root_region_id"] = group.region_id
-            branch_rows_by_label[blabel] = brows
-            group_stations.extend(brows)
+            return blabel, brows
+
+        workers = _branch_sample_workers(len(eligible_branches))
+        if workers <= 1:
+            for blabel in eligible_branches:
+                _, brows = _sample_branch(blabel)
+                branch_rows_by_label[blabel] = brows
+                group_stations.extend(brows)
+        else:
+            for blabel, brows in map_in_thread_pool(
+                _sample_branch, eligible_branches, max_workers=workers
+            ):
+                branch_rows_by_label[blabel] = brows
+                group_stations.extend(brows)
 
         allowed = PITC_GROUP_ALLOWED_IDS[group.region_id]
         group_stations = [

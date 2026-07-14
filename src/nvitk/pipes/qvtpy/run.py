@@ -365,6 +365,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    venous_brain_mask: bool,
+    totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
     region_growing: bool,
@@ -532,6 +534,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         eicab_min_island_fraction=eicab_min_island_fraction,
                         eicab_bridge_open_radius=eicab_bridge_open_radius,
                         venous_min_branch_points=venous_min_branch_points,
+                        venous_brain_mask=venous_brain_mask,
+                        totalseg_model_dir=totalseg_model_dir,
                         backend=backend,
                     )
                     jobs_emitted += 1
@@ -995,6 +999,18 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
 @click.option("--venous-min-branch-points", type=int, default=30, show_default=True)
+@click.option(
+    "--venous-brain-mask/--no-venous-brain-mask",
+    default=True,
+    show_default=True,
+    help="Stage3: restrict venous candidates to TotalSegmentator brain on Angiography_3D.",
+)
+@click.option(
+    "--totalseg-model-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Stage3: TotalSegmentator weights (default: qvtpy config model_root).",
+)
 # --- stage 4 ---
 @click.option("--crop-padding-bbox", type=int, default=3, show_default=True, help="Stage4: bbox padding (vox).")
 @click.option(
@@ -1048,7 +1064,7 @@ def _submit_qvtpy_sge_subjects_remote(
 # --- stage 6 ---
 @click.option(
     "--measure-resegment/--no-measure-resegment",
-    default=False,
+    default=True,
     show_default=True,
 )
 @click.option(
@@ -1059,7 +1075,7 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage6: in-plane threshold when --measure-resegment.",
 )
 @click.option("--cross-section-res", type=int, default=0, show_default=True)
-@click.option("--cross-section-plane-interp", type=int, default=2, show_default=True)
+@click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 @click.option(
     "--cs-supersampling/--no-cs-supersampling",
     default=True,
@@ -1156,6 +1172,8 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    venous_brain_mask: bool,
+    totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
     thr_algorithm_4dflow: str,
     region_growing: bool,
@@ -1194,7 +1212,7 @@ def main(
 ) -> None:
     Logger()
 
-    from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local
+    from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local, resolve_totalseg_model_dir
 
     local_paths = layout_local(
         dicom_root=cfg.LOCAL_DEFAULT_DICOM_ROOT if dicom_root is None else dicom_root,
@@ -1221,6 +1239,14 @@ def main(
     log.info(f"  local   dicom={local_paths.dicom_root} nifti={local_paths.nifti_root}")
     log.info(f"  cluster dicom={cluster_paths.dicom_root} nifti={cluster_paths.nifti_root}")
     log.info(f"  active  dicom={dicom_root_eff} nifti={nifti_root_eff} results={output_root_eff}")
+
+    totalseg_model_dir_eff = (
+        Path(totalseg_model_dir)
+        if totalseg_model_dir is not None
+        else resolve_totalseg_model_dir(prefer_cluster=(submit == "sge"))
+    )
+    log.info(f"  totalseg models={totalseg_model_dir_eff} ({'cluster' if submit == 'sge' else 'local'})")
+
     if submit == "sge" and from_source.lower() == "xnat":
         log.info(f"  XNAT download target (local): {dicom_download_root}")
 
@@ -1482,6 +1508,9 @@ def main(
                             eicab_min_island_fraction=eicab_min_island_fraction,
                             eicab_bridge_open_radius=eicab_bridge_open_radius,
                             venous_min_branch_points=venous_min_branch_points,
+                            venous_brain_mask=venous_brain_mask,
+                            totalseg_model_dir=totalseg_model_dir_eff,
+                            totalseg_device=backend,
                         ),
                     )
                 if run_s4 and _local_stage_pending(subj, STAGE_SEG, **_local_skip):
@@ -1694,6 +1723,8 @@ def main(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        venous_brain_mask=venous_brain_mask,
+        totalseg_model_dir=totalseg_model_dir_eff,
         crop_padding_bbox=crop_padding_bbox,
         thr_algorithm_4dflow=thr_algorithm_4dflow,
         region_growing=region_growing,

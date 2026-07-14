@@ -39,9 +39,12 @@ from nvitk.pipes.qvtpy.util.paths import (  # noqa: E402
     DEFAULT_DICOM_ROOT,
     DEFAULT_NIFTI_ROOT,
     DEFAULT_RESULTS_ROOT,
+    DEFAULT_TOTALSEG_MODEL_ROOT,
     LOCAL_DEFAULT_DICOM_ROOT,
     LOCAL_DEFAULT_NIFTI_ROOT,
     LOCAL_DEFAULT_RESULTS_ROOT,
+    LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT,
+    resolve_totalseg_model_dir,
 )
 
 
@@ -106,6 +109,9 @@ if (v := _pipe.get("default_sge_scripts_dir")):
     SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
 CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe, fallback=CONTAINER_PATH)
 
+if (v := _pipe.get("default_sge_model_root") or _pipe.get("totalseg_model_root")):
+    DEFAULT_TOTALSEG_MODEL_ROOT = Path(os.path.expanduser(str(v)))
+
 
 __all__ = [
     "PIPELINE_NAME",
@@ -114,9 +120,12 @@ __all__ = [
     "DEFAULT_DICOM_ROOT",
     "DEFAULT_NIFTI_ROOT",
     "DEFAULT_RESULTS_ROOT",
+    "DEFAULT_TOTALSEG_MODEL_ROOT",
     "LOCAL_DEFAULT_DICOM_ROOT",
     "LOCAL_DEFAULT_NIFTI_ROOT",
     "LOCAL_DEFAULT_RESULTS_ROOT",
+    "LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT",
+    "resolve_totalseg_model_dir",
     "STAGE0_DIR",
     "STAGE1_EICAB_DIR",
     "QVT_SUBDIR",

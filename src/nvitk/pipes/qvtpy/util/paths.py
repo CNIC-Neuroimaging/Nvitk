@@ -12,11 +12,13 @@ from nvitk.cluster import sge_json as _sj
 DEFAULT_DICOM_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/DICOM")
 DEFAULT_NIFTI_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/NIFTI")
 DEFAULT_RESULTS_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy")
+DEFAULT_TOTALSEG_MODEL_ROOT = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
 # Workstation defaults (local machine).
 LOCAL_DEFAULT_DICOM_ROOT = Path("/home/imarcoss/DATA/LabVF/PESA-Brain/DATA/DICOM")
 LOCAL_DEFAULT_NIFTI_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
 LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
+LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/ai_models/imaging/TotalSegmentator/v2.0.0")
 
 _ppaths = _sj.paths_section()
 _ppipe_paths = _sj.pipeline_section("qvtpy_paths")
@@ -53,6 +55,7 @@ def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
         "dicom_root": LOCAL_DEFAULT_DICOM_ROOT,
         "nifti_root": LOCAL_DEFAULT_NIFTI_ROOT,
         "results_root": LOCAL_DEFAULT_RESULTS_ROOT,
+        "model_root": LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT,
     }[key]
 
 
@@ -67,7 +70,38 @@ def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
         "cluster_dicom_root": DEFAULT_DICOM_ROOT,
         "cluster_nifti_root": DEFAULT_NIFTI_ROOT,
         "cluster_results_root": DEFAULT_RESULTS_ROOT,
+        "model_root": DEFAULT_TOTALSEG_MODEL_ROOT,
     }[key]
+
+
+def _local_totalseg_model_from_config(*, fallback: Path | None) -> Path:
+    return _local_path_from_config("model_root", fallback=fallback)
+
+
+def _cluster_totalseg_model_from_config(*, fallback: Path | None) -> Path:
+    return _cluster_path_from_config("model_root", fallback=fallback)
+
+
+def resolve_totalseg_model_dir(
+    *,
+    model_dir: Path | None = None,
+    prefer_cluster: bool | None = None,
+) -> Path:
+    """Return TotalSegmentator weights root (qvtpy cluster/local layout)."""
+    if model_dir is not None:
+        return Path(model_dir).expanduser().resolve()
+    env_home = os.environ.get("TOTALSEG_HOME_DIR", "").strip()
+    if env_home:
+        return Path(env_home).expanduser().resolve()
+    if prefer_cluster is None:
+        prefer_cluster = os.environ.get("NVITK_CLUSTER", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+    if prefer_cluster:
+        return _cluster_totalseg_model_from_config(fallback=None)
+    return _local_totalseg_model_from_config(fallback=None)
 
 
 def layout_local(
@@ -115,10 +149,13 @@ __all__ = [
     "DEFAULT_DICOM_ROOT",
     "DEFAULT_NIFTI_ROOT",
     "DEFAULT_RESULTS_ROOT",
+    "DEFAULT_TOTALSEG_MODEL_ROOT",
     "LOCAL_DEFAULT_DICOM_ROOT",
     "LOCAL_DEFAULT_NIFTI_ROOT",
     "LOCAL_DEFAULT_RESULTS_ROOT",
+    "LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT",
     "QvtpyPaths",
     "layout_cluster",
     "layout_local",
+    "resolve_totalseg_model_dir",
 ]

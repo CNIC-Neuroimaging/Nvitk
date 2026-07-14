@@ -385,3 +385,32 @@ def to_cupy(arr: Any, copy: bool = False, strict: bool = False):
         return arr.copy() if copy else arr
     out = _cp.asarray(arr)
     return out.copy() if copy else out
+
+
+def set_thread_backend(name: str, allow_fallback: bool = True) -> BackendName:
+    """Set the active backend for the current thread only (no global proxy refresh)."""
+    resolved = _resolve_backend(name, allow_fallback=allow_fallback)
+    _backend_context.set(resolved)
+    return resolved
+
+
+def map_in_thread_pool(func, iterable, *, max_workers: int):
+    """Run *func* over *iterable* in a thread pool with the caller's backend on each worker.
+
+    ThreadPoolExecutor workers do not inherit :func:`get_current_backend` from the
+    parent thread; without per-thread setup they fall back to the import-time default
+    (often ``cupy``) while module ``ndi`` globals still reflect the parent backend.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list(iterable)
+    if max_workers <= 1 or len(items) <= 1:
+        return [func(item) for item in items]
+
+    backend = get_current_backend()
+
+    def _worker_init() -> None:
+        set_thread_backend(backend, allow_fallback=True)
+
+    with ThreadPoolExecutor(max_workers=max_workers, initializer=_worker_init) as pool:
+        return list(pool.map(func, items))

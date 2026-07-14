@@ -41,6 +41,8 @@ from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL, relabel_eicab_mask_to_qvtpy
+from nvitk.pipes.qvtpy.util.brain_mask import brain_mask_for_reference
+from nvitk.pipes.qvtpy.util.paths import resolve_totalseg_model_dir
 from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskKind, resolve_eicab_mask
 from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
 from nvitk.pipes.qvtpy.util.mask_cleaning import (
@@ -145,6 +147,9 @@ def run_subject(
     eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
     eicab_prefer_pp: bool = True,
+    venous_brain_mask: bool = True,
+    totalseg_device: str = "gpu",
+    totalseg_model_dir: Path | None = None,
 ) -> Path:
     """Warp eICAB, extract arterial/venous centerlines; return stage-3 output directory."""
     # ---- Inputs: stage2 registration + eICAB mask resolution -----------------
@@ -221,9 +226,29 @@ def run_subject(
     arterial = compute_centerlines(arterial_vol, min_points=5)
     log.step(f"arterial centerlines: {len(arterial)} label(s)")
 
-    # ---- Venous: CD ∧ slab → clean → junction-split skeleton → name/label ----
+    # ---- Venous: CD ∧ slab [∧ brain] → clean → junction-split skeleton → name/label
     log.step("venous branch detection from CD + slab region")
+    brain_region: np.ndarray | None = None
+    if venous_brain_mask:
+        log.step("TotalSegmentator brain mask (total_mr / brain on Angiography_3D)")
+        brain_region = brain_mask_for_reference(
+            nifti_root,
+            subject,
+            out_dir,
+            cd_img,
+            device=totalseg_device,
+            model_dir=totalseg_model_dir,
+            overwrite=not skip_existing,
+        )
+        imsave(
+            out_dir / "brain_mask_on_cd.nii.gz",
+            brain_region.astype(np.uint8),
+            metadata=dict(cd_img.metadata or {}),
+        )
+
     venous_mask = vessel_bin.astype(bool) & venous_region
+    if brain_region is not None:
+        venous_mask = venous_mask & brain_region
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
     )
@@ -282,6 +307,13 @@ def run_subject(
         "venous_region_axis1_third": int(max(1, round(shape3[1] / 3.0))),
         "min_points_per_vessel": 5,
         "venous_min_branch_points": int(venous_min_branch_points),
+        "venous_brain_mask": bool(venous_brain_mask),
+        "totalseg_task": "total_mr",
+        "totalseg_roi_subset": ["brain"],
+        "totalseg_input": "Angiography_3D",
+        "totalseg_model_dir": str(resolve_totalseg_model_dir(model_dir=totalseg_model_dir)),
+        "brain_mask_on_cd": str(out_dir / "brain_mask_on_cd.nii.gz") if brain_region is not None else None,
+        "venous_voxels_after_brain_mask": int(np.count_nonzero(venous_mask)),
     }
     done.write_text(json.dumps(meta_out, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage3 centerline -> {out_dir}")
@@ -320,6 +352,25 @@ def _stage3_cli_options(func):
         show_default=True,
         help="Prefer stage1 *_pp eICAB mask when present.",
     )(func)
+    func = click.option(
+        "--venous-brain-mask/--no-venous-brain-mask",
+        default=True,
+        show_default=True,
+        help="Restrict venous candidates to TotalSegmentator brain on Angiography_3D.",
+    )(func)
+    func = click.option(
+        "--totalseg-device",
+        type=click.Choice(["gpu", "cpu"], case_sensitive=False),
+        default="gpu",
+        show_default=True,
+        help="Device for TotalSegmentator brain segmentation.",
+    )(func)
+    func = click.option(
+        "--totalseg-model-dir",
+        type=click.Path(path_type=Path),
+        default=None,
+        help="TotalSegmentator weights (default: qvtpy config cluster/local model_root).",
+    )(func)
     return func
 
 
@@ -341,6 +392,9 @@ def submit_subject_sge(
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
     eicab_prefer_pp: bool = True,
+    venous_brain_mask: bool = True,
+    totalseg_device: str | None = None,
+    totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-3 SGE job. Returns qsub job id."""
@@ -374,11 +428,24 @@ def submit_subject_sge(
         parts.extend(["--cd-up-thresh", str(float(cd_up_thresh))])
     if cd_shift_hm is not None:
         parts.append("--cd-shift-hm" if cd_shift_hm else "--no-cd-shift-hm")
+    if not venous_brain_mask:
+        parts.append("--no-venous-brain-mask")
+    ts_dev = totalseg_device or backend
+    parts.extend(["--totalseg-device", shlex.quote(str(ts_dev).strip().lower())])
+    if totalseg_model_dir is not None:
+        parts.extend(["--totalseg-model-dir", shlex.quote(str(totalseg_model_dir))])
     python_cmd = " ".join(parts)
+
+    model_root = resolve_totalseg_model_dir(model_dir=totalseg_model_dir) if venous_brain_mask else None
+    extra_env = dict(sge_stage_extra_env(binds.src, backend))
+    use_nv = sge_stage_use_nv(backend)
+    if venous_brain_mask and model_root is not None:
+        extra_env["TOTALSEG_HOME_DIR"] = str(binds.models)
+        use_nv = use_nv or str(ts_dev).strip().lower() == "gpu"
     paths = ClusterPaths(
         src=src_p,
         container=container,
-        models=None,
+        models=model_root,
         data_root=nifti_root,
         output_root=output_root,
         log_dir=cfg.SGE_LOG_DIR,
@@ -389,8 +456,8 @@ def submit_subject_sge(
         python_cmd=python_cmd,
         resources=sge_qvtpy_stage_resources(backend),
         binds=binds,
-        use_nv=sge_stage_use_nv(backend),
-        extra_env=sge_stage_extra_env(binds.src, backend),
+        use_nv=use_nv,
+        extra_env=extra_env,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
@@ -411,6 +478,9 @@ def main(
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
     eicab_prefer_pp: bool,
+    venous_brain_mask: bool,
+    totalseg_device: str,
+    totalseg_model_dir: Path | None,
 ) -> None:
     Logger()
     run_subject(
@@ -426,6 +496,9 @@ def main(
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
         eicab_prefer_pp=eicab_prefer_pp,
+        venous_brain_mask=venous_brain_mask,
+        totalseg_device=totalseg_device,
+        totalseg_model_dir=totalseg_model_dir,
     )
 
 
