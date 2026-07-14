@@ -36,6 +36,7 @@ from nvitk.cluster.remote_submit import run_sge_script_ssh_capture
 from nvitk.cluster.sge_chunk import (
     drip_submit_subjects,
     parse_sge_submission_job_ids,
+    wait_for_sge_job_ids,
     warn_if_chunk_exceeds_sge_limit,
 )
 from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
@@ -869,7 +870,16 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help=(
         "(sge) Subjects in the first submission batch (must fit ~1000 jobs/user). "
-        "Remaining subjects are queued one-by-one as slots free up."
+        "Remaining subjects are drip-fed when queue capacity allows. "
+        "Value 1 runs one subject at a time (waits for each job to finish)."
+    ),
+)
+@click.option(
+    "--sge-serial-subjects",
+    is_flag=True,
+    help=(
+        "(sge) Wait for each subject's jobs to finish before submitting the next "
+        "(default when --sge-subject-chunk-size=1)."
     ),
 )
 @click.option(
@@ -1201,6 +1211,7 @@ def main(
     pitc_measure_resegment: bool,
     pitc_label_constrain: bool,
     sge_subject_chunk_size: int,
+    sge_serial_subjects: bool,
     sge_chunk_poll_interval: float,
     sge_chunk_wait_timeout: float | None,
     sge_job_margin: int,
@@ -1674,15 +1685,17 @@ def main(
         run_s7=run_s7,
     )
     chunk_size = max(1, int(sge_subject_chunk_size))
+    serial_subjects = bool(sge_serial_subjects) or chunk_size == 1
     warn_if_chunk_exceeds_sge_limit(
         chunk_size, stages_per_subject, margin=int(sge_job_margin)
     )
     initial_subjects = subject_list[:chunk_size]
     remaining_subjects = subject_list[chunk_size:]
+    drip_mode = "serial (one subject at a time)" if serial_subjects else "capacity-based"
     log.info(
         f"SGE submit: initial batch {len(initial_subjects)} subject(s), "
         f"drip {len(remaining_subjects)} more at {stages_per_subject} job(s)/subject "
-        f"(cluster cap 1000)"
+        f"({drip_mode})"
     )
 
     emit_kwargs = dict(
@@ -1839,10 +1852,26 @@ def main(
         log.error(f"Initial batch submission exited {exit_code}; stopping.")
         return
 
+    if serial_subjects and job_ids and remaining_subjects:
+        log.info(
+            f"SGE serial: waiting for initial batch ({len(job_ids)} job(s)) "
+            "before drip-feeding remaining subjects."
+        )
+        if not wait_for_sge_job_ids(
+            ssh_host_resolved,
+            ssh_user,
+            ssh_password,
+            job_ids,
+            poll_interval=float(sge_chunk_poll_interval),
+            wait_timeout=sge_chunk_wait_timeout,
+        ):
+            log.error("SGE serial: initial batch wait timed out; stopping.")
+            return
+
     if not remaining_subjects:
         return
 
-    def _submit_drip_subject(subj: str) -> bool:
+    def _submit_drip_subject(subj: str) -> tuple[bool, list[str]]:
         token = _sge_script_subject_token(subj)
         code, drip_ids = _submit_qvtpy_sge_subjects_remote(
             [subj],
@@ -1854,7 +1883,7 @@ def main(
             ssh_password=ssh_password,
         )
         log.info(f"Drip {subj}: parsed {len(drip_ids)} SGE job id(s).")
-        return code == 0
+        return code == 0, drip_ids
 
     def _jobs_for_subject(subj: str) -> int:
         if not skip_processed:
@@ -1877,6 +1906,8 @@ def main(
         poll_interval=float(sge_chunk_poll_interval),
         loop_timeout=sge_chunk_wait_timeout,
         margin=int(sge_job_margin),
+        serial=serial_subjects,
+        wait_timeout=sge_chunk_wait_timeout,
     )
     if not ok:
         log.error("SGE drip submission stopped before all subjects were queued.")

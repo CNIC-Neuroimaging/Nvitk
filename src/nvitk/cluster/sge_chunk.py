@@ -142,7 +142,7 @@ def subject_fits_in_sge_limit(
 
 def drip_submit_subjects(
     pending_subjects: Sequence[str],
-    submit_subject: Callable[[str], bool],
+    submit_subject: Callable[[str], tuple[bool, list[str]]],
     *,
     host: str,
     user: str,
@@ -152,14 +152,19 @@ def drip_submit_subjects(
     max_jobs: int = 1000,
     margin: int = 10,
     loop_timeout: float | None = None,
+    serial: bool = False,
+    wait_timeout: float | None = None,
     port: int = 22,
     connect_timeout: float | None = 30.0,
 ) -> bool:
     """Submit subjects when the user's queue has enough free slots.
 
-    *submit_subject(subject) -> bool* runs the remote driver for one subject
-    and must return ``False`` on a fatal submission error. Each call queues all
-    jobs for that subject before the next capacity check.
+    *submit_subject(subject) -> (ok, job_ids)* runs the remote driver for one
+    subject and must return ``(False, [])`` on a fatal submission error. Each
+    call queues all jobs for that subject before the next capacity check.
+
+    When *serial* is true, each subject is submitted only after the previous
+    subject's *job_ids* have left ``qstat`` (one subject in flight at a time).
     """
     queue = list(pending_subjects)
     if not queue:
@@ -174,10 +179,59 @@ def drip_submit_subjects(
         jobs_resolver = lambda _subj: fixed  # noqa: E731
         jobs_desc = f"{fixed} job(s)/subject"
 
+    mode = "serial" if serial else f"cap {max_jobs}, margin {margin}"
     log.info(
-        f"SGE drip: {len(queue)} subject(s) queued after initial batch "
-        f"({jobs_desc}, cap {max_jobs}, margin {margin})"
+        f"SGE drip ({mode}): {len(queue)} subject(s) queued after initial batch "
+        f"({jobs_desc})"
     )
+
+    if serial:
+        start = time.monotonic()
+        while queue:
+            subj = queue[0]
+            next_jobs = jobs_resolver(subj)
+            if next_jobs <= 0:
+                queue.pop(0)
+                log.info(
+                    f"SGE drip: {subj!r} has no pending stages (--skip-processed); skipping."
+                )
+                continue
+
+            elapsed = time.monotonic() - start
+            if loop_timeout is not None and elapsed >= float(loop_timeout):
+                log.warning(
+                    f"SGE drip timeout ({loop_timeout}s): "
+                    f"{len(queue)} subject(s) still pending."
+                )
+                return False
+
+            log.info(
+                f"SGE drip (serial): submitting {subj!r} "
+                f"({next_jobs} job(s), {len(queue) - 1} subject(s) left after this)"
+            )
+            queue.pop(0)
+            ok, job_ids = submit_subject(subj)
+            if not ok:
+                log.error(f"SGE drip: submission failed for {subj!r}; stopping.")
+                return False
+            if job_ids and not wait_for_sge_job_ids(
+                host,
+                user,
+                password,
+                job_ids,
+                poll_interval=poll_interval,
+                wait_timeout=wait_timeout,
+                port=port,
+                connect_timeout=connect_timeout,
+            ):
+                log.error(
+                    f"SGE drip: timed out waiting for {subj!r} job(s); stopping."
+                )
+                return False
+
+        log.info("SGE drip: all subjects submitted.")
+        return True
+
     start = time.monotonic()
     poll_n = 0
     while queue:
@@ -201,7 +255,8 @@ def drip_submit_subjects(
                 f"SGE drip: submitting {subj!r} ({next_jobs} job(s), "
                 f"{active}/{max_jobs} active, {len(queue)} subject(s) left)"
             )
-            if not submit_subject(subj):
+            ok, _job_ids = submit_subject(subj)
+            if not ok:
                 log.error(f"SGE drip: submission failed for {subj!r}; stopping.")
                 return False
             continue
