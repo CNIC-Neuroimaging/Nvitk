@@ -339,7 +339,10 @@ def submit_subject_sge(
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
     if thread_limit:
-        log.info(f"  thread limit  : {thread_limit} (OMP/BLAS env in container)")
+        log.info(
+            f"  thread limit  : {thread_limit} "
+            "(OMP/BLAS + VED via cpu_limit_runner / NVITK_CPU_LIMIT)"
+        )
     if sge_pe_smp:
         log.info(f"  sge pe smp    : {sge_pe_smp} (qsub -pe smp {sge_pe_smp})")
     log.info(f"  outer container (run_job): {pipeline_c}")

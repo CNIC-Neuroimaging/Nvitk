@@ -22,6 +22,14 @@ _THREAD_LIMIT_VARS = (
     "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS",
 )
 
+_CONTAINER_PATH_ENV = (
+    "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
+)
+_NVITK_SRC_BIND = "/nvitk/src"
+_CPU_LIMIT_RUNNER = (
+    f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_runner.py"
+)
+
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
 # Whole-brain style outputs (heuristic; extend if your build uses other stems).
@@ -131,15 +139,12 @@ def build_eicab_singularity_argv(
     else:
         raise ValueError(f"Unsupported NIfTI path: {input_p}")
 
-    container_path_env = (
-        "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
-    )
     cmd: list[str] = [
         "singularity",
         "run",
         "--cleanenv",
         "--env",
-        f"PATH={container_path_env}",
+        f"PATH={_CONTAINER_PATH_ENV}",
     ]
     dev_l = device.lower()
     if dev_l in ("cuda", "gpu"):
@@ -185,6 +190,49 @@ def build_eicab_singularity_argv(
     return cmd
 
 
+def _eicab_container_input_path(input_p: Path) -> str:
+    if input_p.name.endswith(".nii.gz") or input_p.suffix == ".gz":
+        return "/TOF.nii.gz"
+    if input_p.suffix == ".nii":
+        return "/TOF.nii"
+    raise ValueError(f"Unsupported NIfTI path: {input_p}")
+
+
+def _eicab_device_arg(device: str) -> tuple[str, bool]:
+    dev_l = device.lower()
+    if dev_l in ("cuda", "gpu"):
+        return "cuda", True
+    if dev_l == "cpu":
+        return "cpu", False
+    raise ValueError("device must be 'cpu', 'cuda', or 'gpu' (alias for cuda).")
+
+
+def _eicab_cli_args(
+    container_input: str,
+    resolution: float,
+    device_arg: str,
+    *,
+    simple_segmentation: bool,
+    attention: bool,
+) -> list[str]:
+    args = [
+        "-t",
+        container_input,
+        "-o",
+        "/output",
+        "-r",
+        str(resolution),
+        "-d",
+        device_arg,
+        "-f",
+    ]
+    if simple_segmentation:
+        args.append("-s")
+    if attention:
+        args.append("-a")
+    return args
+
+
 def build_eicab_singularity_shell_cmd(
     input_nii: str | Path,
     output_dir: str | Path,
@@ -197,12 +245,13 @@ def build_eicab_singularity_shell_cmd(
     device: str = "cpu",
     vasculature_host_path: str | Path | None = None,
     cpu_limit_shell_expr: str | None = None,
+    nvitk_src_dir: str | Path | None = None,
 ) -> str:
-    """Shell command string for eICAB ``singularity run``.
+    """Shell command string for eICAB ``singularity run`` or ``exec``.
 
-    *cpu_limit_shell_expr* sets OMP/BLAS thread env vars inside the container.
-    Use a numeric string (e.g. ``"8"``) or a shell expression (e.g.
-    ``"${NSLOTS:-8}"``) when ``qsub -pe smp`` is also requested.
+    When *cpu_limit_shell_expr* is set and *nvitk_src_dir* is provided, uses
+    ``singularity exec`` with :mod:`cpu_limit_runner` so VED respects
+    ``NVITK_CPU_LIMIT`` (``multiprocessing.cpu_count``), not only OMP threads.
     """
     if not cpu_limit_shell_expr:
         return shlex.join(
@@ -223,27 +272,22 @@ def build_eicab_singularity_shell_cmd(
     output_p = Path(output_dir).resolve()
     tmp_p = Path(tmp_dir).resolve()
     container_p = Path(container).resolve()
-    if input_p.name.endswith(".nii.gz") or input_p.suffix == ".gz":
-        container_input = "/TOF.nii.gz"
-    elif input_p.suffix == ".nii":
-        container_input = "/TOF.nii"
-    else:
-        raise ValueError(f"Unsupported NIfTI path: {input_p}")
+    container_input = _eicab_container_input_path(input_p)
+    device_arg, use_nv = _eicab_device_arg(device)
 
-    container_path_env = (
-        "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
-    )
-    parts: list[str] = ["singularity", "run", "--cleanenv"]
-    parts.extend(["--env", shlex.quote(f"PATH={container_path_env}")])
-    if cpu_limit_shell_expr:
-        for var in _THREAD_LIMIT_VARS:
-            parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
-    dev_l = device.lower()
-    if dev_l in ("cuda", "gpu"):
+    use_cpu_runner = nvitk_src_dir is not None
+    parts: list[str] = [
+        "singularity",
+        "exec" if use_cpu_runner else "run",
+        "--cleanenv",
+    ]
+    parts.extend(["--env", shlex.quote(f"PATH={_CONTAINER_PATH_ENV}")])
+    for var in _THREAD_LIMIT_VARS:
+        parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
+    if use_cpu_runner:
+        parts.extend(["--env", f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}"])
+    if use_nv:
         parts.append("--nv")
-        device_arg = "cuda"
-    else:
-        device_arg = "cpu"
     parts.extend(
         [
             "--bind",
@@ -257,24 +301,23 @@ def build_eicab_singularity_shell_cmd(
     vhp = Path(vasculature_host_path) if vasculature_host_path else None
     if vhp and vhp.is_dir():
         parts.extend(["--bind", shlex.quote(f"{vhp}:/programs/Neuro/vasculature2")])
+    if use_cpu_runner:
+        src_p = Path(nvitk_src_dir).resolve()
+        parts.extend(
+            ["--bind", shlex.quote(f"{src_p}:{_NVITK_SRC_BIND}")]
+        )
+    parts.append(shlex.quote(str(container_p)))
+    if use_cpu_runner:
+        parts.extend(["python", shlex.quote(_CPU_LIMIT_RUNNER)])
     parts.extend(
-        [
-            shlex.quote(str(container_p)),
-            "-t",
+        _eicab_cli_args(
             container_input,
-            "-o",
-            "/output",
-            "-r",
-            str(resolution),
-            "-d",
+            resolution,
             device_arg,
-            "-f",
-        ]
+            simple_segmentation=simple_segmentation,
+            attention=attention,
+        )
     )
-    if simple_segmentation:
-        parts.append("-s")
-    if attention:
-        parts.append("-a")
     return " ".join(parts)
 
 

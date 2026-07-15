@@ -218,6 +218,7 @@ def build_eicab_host_shell_cmd(
             device=dev,
             vasculature_host_path=vasculature_host,
             cpu_limit_shell_expr=cpu_expr,
+            nvitk_src_dir=src_dir,
         )
     ]
     if not keep_aux_outputs:
