@@ -201,7 +201,12 @@ def build_eicab_host_shell_cmd(
         cpu_expr = str(thread_limit)
     else:
         cpu_expr = None
+    prep = (
+        f"mkdir -p {shlex.quote(str(output_dir.resolve()))} "
+        f"&& mkdir -p {shlex.quote(str(tmp_dir.resolve()))}"
+    )
     steps: list[str] = [
+        prep,
         build_eicab_singularity_shell_cmd(
             input_nifti,
             output_dir,
