@@ -19,7 +19,7 @@ import sys
 _EXPRESS_CW = "/vessel_segmentation_snaillab/scripts/express_cw.py"
 
 
-def _apply_cpu_limit() -> None:
+def _apply_cpu_limit():
     raw = os.environ.get("NVITK_CPU_LIMIT", "").strip()
     if not raw:
         return
@@ -32,7 +32,7 @@ def _apply_cpu_limit() -> None:
     mp.cpu_count = _limited  # type: ignore[assignment]
 
 
-def main() -> None:
+def main():
     _apply_cpu_limit()
     script = os.environ.get("NVITK_EICAB_EXPRESS_CW", _EXPRESS_CW)
     sys.argv = [script, *sys.argv[1:]]
