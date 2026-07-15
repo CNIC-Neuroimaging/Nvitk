@@ -21,21 +21,25 @@ flowchart LR
   S4 --> S6
 ```
 
+
+
 ---
 
 ## Backend (GPU vs CPU)
 
-nvitk selects the array stack via `NVITK_BACKEND` / `nvitk.using("cupy")` (see [`src/nvitk/core/backend.py`](../../src/nvitk/core/backend.py)). Modules that touch large volumes call `setup(globals())` and coerce data with `as_backend_array`.
+nvitk selects the array stack via `NVITK_BACKEND` / `nvitk.using("cupy")` (see `[src/nvitk/core/backend.py](../../src/nvitk/core/backend.py)`). Modules that touch large volumes call `setup(globals())` and coerce data with `as_backend_array`.
 
-| Stage / component | GPU-friendly (CuPy when backend=cupy) | CPU-only or host-bound |
-|-------------------|----------------------------------------|-------------------------|
-| Stage 0 convert + `phase2volume` | CD/MAG/velocity math, polynomial BG fit | NIfTI I/O; writers materialize NumPy |
-| Stage 1 eICAB | — | External Singularity container |
-| Stage 2 FLIRT | — | FSL `flirt` binary |
-| Stage 3 centerlines | Partial: multilabel/array ops on GPU where applicable | `ndi` filters; venous **skeletonize** via scikit-image (CPU) |
-| Stage 4 segmentation | Partial: CD volume ops on GPU where applicable | Local threshold (`ndi` median on crop); Otsu needs scikit-image |
-| Stage 5 LOC | Light | CSV / Excel I/O |
-| Stage 6 measure | Phase volumes, reductions | Per-LOC loop (small arrays) |
+
+| Stage / component                | GPU-friendly (CuPy when backend=cupy)                 | CPU-only or host-bound                                          |
+| -------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------- |
+| Stage 0 convert + `phase2volume` | CD/MAG/velocity math, polynomial BG fit               | NIfTI I/O; writers materialize NumPy                            |
+| Stage 1 eICAB                    | —                                                     | External Singularity container                                  |
+| Stage 2 FLIRT                    | —                                                     | FSL `flirt` binary                                              |
+| Stage 3 centerlines              | Partial: multilabel/array ops on GPU where applicable | `ndi` filters; venous **skeletonize** via scikit-image (CPU)    |
+| Stage 4 segmentation             | Partial: CD volume ops on GPU where applicable        | Local threshold (`ndi` median on crop); Otsu needs scikit-image |
+| Stage 5 LOC                      | Light                                                 | CSV / Excel I/O                                                 |
+| Stage 6 measure                  | Phase volumes, reductions                             | Per-LOC loop (small arrays)                                     |
+
 
 Any library that cannot accept CuPy arrays (notably **scikit-image** for skeletonization) uses `to_numpy(...)` before the call.
 
@@ -45,34 +49,36 @@ Any library that cannot accept CuPy arrays (notably **scikit-image** for skeleto
 
 Per subject under `--nifti-root`:
 
-| Path | Content |
-|------|---------|
-| `TOF/TOF.nii.gz` | TOF magnitude |
-| `4DFlow/{AP,RL,FH}/` | `*_m.nii.gz`, `*_ph.nii.gz`, JSON sidecars |
-| `4DFlow/Angiography_3D.nii.gz` | Time-mean angiography (optional, from `phase2volume`) |
-| `4DFlow/ComplexDifference_3D.nii.gz` | Complex-difference angiogram (CD) |
-| `4DFlow/VelocityMagnitude_3D.nii.gz` | \|V\| (optional) |
-| `4DFlow/VelocityMeanComponents.nii.gz` | Mean velocity components (optional) |
+
+| Path                                   | Content                                               |
+| -------------------------------------- | ----------------------------------------------------- |
+| `TOF/TOF.nii.gz`                       | TOF magnitude                                         |
+| `4DFlow/{AP,RL,FH}/`                   | `*_m.nii.gz`, `*_ph.nii.gz`, JSON sidecars            |
+| `4DFlow/Angiography_3D.nii.gz`         | Time-mean angiography (optional, from `phase2volume`) |
+| `4DFlow/ComplexDifference_3D.nii.gz`   | Complex-difference angiogram (CD)                     |
+| `4DFlow/VelocityMagnitude_3D.nii.gz`   | |V| (optional)                                        |
+| `4DFlow/VelocityMeanComponents.nii.gz` | Mean velocity components (optional)                   |
+
 
 ### PC phase → velocity (mm/s)
 
-Consistent with stage 6 and [`hemodynamics.py`](../../src/nvitk/measure/hemodynamics.py):
+Consistent with stage 6 and `[hemodynamics.py](../../src/nvitk/measure/hemodynamics.py)`:
 
-- \(v_x = -\mathrm{RL}_{\mathrm{phase}} \times 10\)
-- \(v_y = -\mathrm{AP}_{\mathrm{phase}} \times 10\)
-- \(v_z = +\mathrm{FH}_{\mathrm{phase}} \times 10\)
+- v_x = -\mathrm{RL}_{\mathrm{phase}} \times 10
+- v_y = -\mathrm{AP}_{\mathrm{phase}} \times 10
+- v_z = +\mathrm{FH}_{\mathrm{phase}} \times 10
 
 ### Complex difference (CD)
 
-\[
-\mathrm{CD} = \mathrm{MAG} \cdot \sin\left(\frac{\pi}{2}\cdot\frac{\min(|V|, \mathrm{VENC})}{\mathrm{VENC}}\right)
-\]
 
-Implementation: `_calc_angio` in [`phase2volume.py`](../../src/nvitk/io/conversors/phase2volume.py).
+\mathrm{CD} = \mathrm{MAG} \cdot \sin\left(\frac{\pi}{2}\cdot\frac{\min(|V|, \mathrm{VENC})}{\mathrm{VENC}}\right)
+
+
+Implementation: `_calc_angio` in `[phase2volume.py](../../src/nvitk/io/conversors/phase2volume.py)`.
 
 ### Background phase correction
 
-[`_phase2volume_bg.py`](../../src/nvitk/io/conversors/_phase2volume_bg.py): temporal mean velocity → speed percentile mask → spatial polynomial (default order **2**) in normalized coordinates \([-1,1]^3\) → subtract from mean and each frame → recompute \|V\| and CD. Fit uses `static_percentile` (default **25**) and at most **12000** voxels.
+`[_phase2volume_bg.py](../../src/nvitk/io/conversors/_phase2volume_bg.py)`: temporal mean velocity → speed percentile mask → spatial polynomial (default order **2**) in normalized coordinates [-1,1]^3 → subtract from mean and each frame → recompute V and CD. Fit uses `static_percentile` (default **25**) and at most **12000** voxels.
 
 ### VENC resolution
 
@@ -84,14 +90,16 @@ Order: JSON in `4DFlow/AP/*.json` → NIfTI metadata → optional DICOM tags →
 
 Under `--output-root/<subject>/`:
 
-| Directory | Main outputs |
-|-----------|----------------|
-| `eicab/` | eICAB multilabel NIfTI, `TOF_resampled.nii.gz` (FLIRT moving image) |
-| `qvtpy/stage2_registration/` | `tof_to_4dflow.mat`, `registration_meta.json` |
-| `qvtpy/stage3_centerline/` | `eicab_in_4dflow.nii.gz`, `centerlines_mask.nii.gz`, `cd_vessel_binary_qc.nii.gz`, `centerline_meta.json` |
-| `qvtpy/stage4_4dflow_segmentation/` | `seg_4dflow.nii.gz`, `segmentation_meta.json` |
-| `qvtpy/stage5_loc_generation/` | `locs.csv`, `locs.xlsx`, `loc_meta.json` |
-| `qvtpy/stage6_measure/` | `loc_measurements.csv`, `measure_meta.json` |
+
+| Directory                           | Main outputs                                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `eicab/`                            | eICAB multilabel NIfTI, `TOF_resampled.nii.gz` (FLIRT moving image)                                       |
+| `qvtpy/stage2_registration/`        | `tof_to_4dflow.mat`, `registration_meta.json`                                                             |
+| `qvtpy/stage3_centerline/`          | `eicab_in_4dflow.nii.gz`, `centerlines_mask.nii.gz`, `cd_vessel_binary_qc.nii.gz`, `centerline_meta.json` |
+| `qvtpy/stage4_4dflow_segmentation/` | `seg_4dflow.nii.gz`, `segmentation_meta.json`                                                             |
+| `qvtpy/stage5_loc_generation/`      | `locs.csv`, `locs.xlsx`, `loc_meta.json`                                                                  |
+| `qvtpy/stage6_measure/`             | `loc_measurements.csv`, `measure_meta.json`                                                               |
+
 
 ### Label IDs
 
@@ -99,14 +107,16 @@ Under `--output-root/<subject>/`:
 
 **qvtpy extensions:**
 
-| ID | Meaning |
-|----|---------|
-| 30 | `QVTPY_VENOUS_UNKNOWN` (reserved; not used for stage-3 venous centerlines) |
-| **31** | **SSSV** (superior sagittal sinus) |
-| **32** | **STRV** (straight sinus) |
-| **33** | **LTSV** (left transverse sinus) |
-| **34** | **RTSV** (right transverse sinus) |
-| 35 | `QVTPY_UNKNOWN` |
+
+| ID     | Meaning                                                                    |
+| ------ | -------------------------------------------------------------------------- |
+| 30     | `QVTPY_VENOUS_UNKNOWN` (reserved; not used for stage-3 venous centerlines) |
+| **31** | **SSSV** (superior sagittal sinus)                                         |
+| **32** | **STRV** (straight sinus)                                                  |
+| **33** | **LTSV** (left transverse sinus)                                           |
+| **34** | **RTSV** (right transverse sinus)                                          |
+| 35     | `QVTPY_UNKNOWN`                                                            |
+
 
 Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on detection order.
 
@@ -114,32 +124,34 @@ Venous IDs are **fixed by name** (`VENOUS_LABEL_BY_NAME`); they do not depend on
 
 ## CLI flags (stages 3–6, `nvitk-qvtpy`)
 
-| Flag | Stage | Default |
-|------|-------|---------|
-| `--eicab-mask {cw,wb}` | 3 | `cw` (warn + fallback if missing) |
-| `--cd-up-thresh` | 3 | search cap 0.8×max CD |
-| `--cd-shift-hm` / `--no-cd-shift-hm` | 3 | FWHM shift **on** |
-| `--venous-min-component-frac` | 3 | 0.005 |
-| `--eicab-min-island-fraction` | 3 | 0.005 |
-| `--eicab-bridge-open-radius` | 3 | 1 |
-| `--venous-min-branch-points` | 3 | 12 |
-| `--crop-padding-bbox` | 4 | 3 |
-| `--4dflow-thr-algorithm {lsthr,lthr,otsu}` | 4 | `lsthr` |
-| `--region-growing` / `--no-region-growing` | 4 | growing **on** |
-| `--rg-intensity-frac` | 4 | 0.45 |
-| `--rg-intensity-frac-explore` | 4 | 0.35 (ACA/MCA/PCA) |
-| `--cl-barrier-radius` | 4 | 2 |
-| `--rg-barrier-radius` | 4 | 3 |
-| `--aca-sequential-grow` / `--no-aca-sequential-grow` | 4 | grow on |
-| `--aca-overlap-min-voxels` | 4 | 5 |
-| `--rg-intensity-frac-sssv` | 4 | 0.40 |
-| `--rg-intensity-frac-ltsv` | 4 | 0.38 |
-| `--rg-intensity-frac-rtsv` | 4 | 0.38 |
-| `--cross-section-res`, `--cross-section-plane-interp` | 6 | 0 / 1 |
-| `--loc-arterial-strategy {qvtpy,midpoint}` | 5 | `qvtpy` |
-| `--loc-endpoint-inset-frac` | 5 | `0.08` |
-| `--cross-section-radius-vox` | 5, 6 | 10 |
-| `--measure-resegment` / `--no-measure-resegment` | 6 | resegment on |
+
+| Flag                                                  | Stage | Default                           |
+| ----------------------------------------------------- | ----- | --------------------------------- |
+| `--eicab-mask {cw,wb}`                                | 3     | `cw` (warn + fallback if missing) |
+| `--cd-up-thresh`                                      | 3     | search cap 0.8×max CD             |
+| `--cd-shift-hm` / `--no-cd-shift-hm`                  | 3     | FWHM shift **on**                 |
+| `--venous-min-component-frac`                         | 3     | 0.005                             |
+| `--eicab-min-island-fraction`                         | 3     | 0.005                             |
+| `--eicab-bridge-open-radius`                          | 3     | 1                                 |
+| `--venous-min-branch-points`                          | 3     | 12                                |
+| `--crop-padding-bbox`                                 | 4     | 3                                 |
+| `--4dflow-thr-algorithm {lsthr,lthr,otsu}`            | 4     | `lsthr`                           |
+| `--region-growing` / `--no-region-growing`            | 4     | growing **on**                    |
+| `--rg-intensity-frac`                                 | 4     | 0.45                              |
+| `--rg-intensity-frac-explore`                         | 4     | 0.35 (ACA/MCA/PCA)                |
+| `--cl-barrier-radius`                                 | 4     | 2                                 |
+| `--rg-barrier-radius`                                 | 4     | 3                                 |
+| `--aca-sequential-grow` / `--no-aca-sequential-grow`  | 4     | grow on                           |
+| `--aca-overlap-min-voxels`                            | 4     | 5                                 |
+| `--rg-intensity-frac-sssv`                            | 4     | 0.40                              |
+| `--rg-intensity-frac-ltsv`                            | 4     | 0.38                              |
+| `--rg-intensity-frac-rtsv`                            | 4     | 0.38                              |
+| `--cross-section-res`, `--cross-section-plane-interp` | 6     | 0 / 1                             |
+| `--loc-arterial-strategy {qvtpy,midpoint}`            | 5     | `qvtpy`                           |
+| `--loc-endpoint-inset-frac`                           | 5     | `0.08`                            |
+| `--cross-section-radius-vox`                          | 5, 6  | 10                                |
+| `--measure-resegment` / `--no-measure-resegment`      | 6     | resegment on                      |
+
 
 ---
 
@@ -205,13 +217,10 @@ Tuning: `--cd-up-thresh`, `--no-cd-shift-hm` for a more inclusive mask.
 **Goal:** centerlines for each eICAB label present outside the venous search region.
 
 1. **Venous search slab** (`venous_search_region`): boolean mask covering the first `round(ny/3)` planes along **array axis 1** (superior portion of the volume in the stored `(nx, ny, nz)` layout).
-
 2. **eICAB cleaning** (`clean_multilabel_islands`):
-   - Per label, remove islands &lt; `eicab_min_island_fraction` (default **0.5%**) of that label’s foreground.
-   - Optional per-label binary opening with ball radius `eicab_bridge_open_radius` (default **1**) to suppress thin bridges between labels.
-
+  - Per label, remove islands < `eicab_min_island_fraction` (default **0.5%**) of that label’s foreground.
+  - Optional per-label binary opening with ball radius `eicab_bridge_open_radius` (default **1**) to suppress thin bridges between labels.
 3. **Arterial volume:** zero all voxels inside the venous slab; apply a global foreground island filter on the combined arterial mask (same 0.5% rule); write cleaned labels back to `eicab_in_4dflow.nii.gz`.
-
 4. **Centerlines:** `compute_centerlines(arterial_vol, min_points=5)` — one ordered polyline per eICAB label id (skeleton + longest-path ordering per label).
 
 ### 3.5 Venous path (CD-driven, geometry-based)
@@ -252,12 +261,14 @@ If the skeleton has no junctions (simple tube), one chain per component is retur
 
 **Scoring** (`_score_branch`; higher is better). All scores include a length factor: `n_points / max(nx, ny, nz)`.
 
-| Vessel | Anatomical intent | Score components |
-|--------|-------------------|------------------|
-| **SSSV** | Midline sagittal, runs superior–inferior (along **z**) | `length × (0.5 × sagittal + 0.5 × \|dir_z\|)` where sagittal favors `cx` near volume midline in **x** |
-| **STRV** | Oblique in **y–z**, reference direction `[0, 1, 1]` | `length × alignment(principal_dir, [0,1,1])` |
-| **LTSV** | Left of midline (`cx < mid_x`), somewhat along **x** | `length × lateral_weight × (0.5 + 0.5×\|dir_x\|)`; wrong side gets lateral weight **0.2** |
-| **RTSV** | Right of midline (`cx > mid_x`), somewhat along **x** | Same as LTSV with `cx > mid_x` |
+
+| Vessel   | Anatomical intent                                      | Score components                                                                                    |
+| -------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| **SSSV** | Midline sagittal, runs superior–inferior (along **z**) | `length × (0.5 × sagittal + 0.5 × |dir_z|)` where sagittal favors `cx` near volume midline in **x** |
+| **STRV** | Oblique in **y–z**, reference direction `[0, 1, 1]`    | `length × alignment(principal_dir, [0,1,1])`                                                        |
+| **LTSV** | Left of midline (`cx < mid_x`), somewhat along **x**   | `length × lateral_weight × (0.5 + 0.5×|dir_x|)`; wrong side gets lateral weight **0.2**             |
+| **RTSV** | Right of midline (`cx > mid_x`), somewhat along **x**  | Same as LTSV with `cx > mid_x`                                                                      |
+
 
 **Assignment rule:** assign the highest-scoring unused candidate to the name only if `score > 0.05`; otherwise that name is **omitted**.
 
@@ -273,23 +284,25 @@ This is expected, not an error.
 
 #### 3.5.6 Fixed label IDs
 
+
 | Name | Label ID |
-|------|----------|
-| SSSV | 31 |
-| STRV | 32 |
-| LTSV | 33 |
-| RTSV | 34 |
+| ---- | -------- |
+| SSSV | 31       |
+| STRV | 32       |
+| LTSV | 33       |
+| RTSV | 34       |
+
 
 Mapped via `VENOUS_LABEL_BY_NAME` / `venous_name_to_label_id` (independent of how many vessels were detected).
 
 ### 3.6 Rasterized centerline mask and metadata
 
-**`centerlines_mask.nii.gz`:** sparse multilabel volume:
+`**centerlines_mask.nii.gz`:** sparse multilabel volume:
 
 - Arterial: eICAB label id on each arterial polyline voxel.
 - Venous: fixed id **31–34** on each venous polyline voxel (venous overwrites only where arterial is 0).
 
-**`centerline_meta.json`:** subject paths, eICAB mask resolution, `arterial_labels`, `venous_vessels`, `venous_label_by_name`, CD threshold parameters, `sliding_threshold_opt_absolute`, component-fraction settings, paths to QC and mask NIfTIs.
+`**centerline_meta.json`:** subject paths, eICAB mask resolution, `arterial_labels`, `venous_vessels`, `venous_label_by_name`, CD threshold parameters, `sliding_threshold_opt_absolute`, component-fraction settings, paths to QC and mask NIfTIs.
 
 Stages 4–5 reload polylines via `util/centerline_io.load_centerlines` (NIfTI mask + JSON meta; **no NPZ**).
 
@@ -316,6 +329,8 @@ flowchart TB
   GlobBin --> QC[cd_vessel_binary_qc.nii.gz]
 ```
 
+
+
 ---
 
 ## Stage 4 — segmentation (`seg_4dflow`)
@@ -327,11 +342,13 @@ Stage 4 builds a multilabel `seg_4dflow.nii.gz` from the full-volume **ComplexDi
 
 ### 4.1 Inputs
 
-| Input | Role |
-|-------|------|
-| `4DFlow/ComplexDifference_3D.nii.gz` | Intensity volume for thresholding and region growing |
-| `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Defines which labels exist and the spatial extent (bbox) of each vessel |
-| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz` | Warped qvtpy arterial mask (incl. **AComm** id 12) for ACA region-growing barriers |
+
+| Input                                             | Role                                                                               |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `4DFlow/ComplexDifference_3D.nii.gz`              | Intensity volume for thresholding and region growing                               |
+| `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Defines which labels exist and the spatial extent (bbox) of each vessel            |
+| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz`  | Warped qvtpy arterial mask (incl. **AComm** id 12) for ACA region-growing barriers |
+
 
 Every integer label `> 0` in the centerline mask is processed (qvtpy arterial ids **1–12** and venous ids **31–34**; see `labels.py`). Labels with no mask voxels are skipped.
 
@@ -342,25 +359,29 @@ Array indices `(i, j, k)` are **(X, Y, Z)**. For each label `L` (ascending order
 1. **ROI** = voxels where `centerlines_mask == L`.
 2. **Bounding box** = ROI min/max on each axis, expanded per face by vessel-specific padding (base `--crop-padding-bbox`, default **3** voxels) and clamped to the volume. Effective per-face values are stored in `segmentation_meta.json` under `face_padding`.
 
-| Vessel group | Label ids | Padding policy |
-|--------------|-----------|----------------|
-| ICA + Basilar | 1, 2, 3 | default on all faces except **Z+** (`pad_k_max = 0`) |
-| LMCA | 6 | **X−** restricted (`pad_i_min = 0`); **X+** extra **10** vox |
-| RMCA | 7 | **X+** restricted; **X−** extra **10** vox |
-| ACA | 4, 5 | symmetric default padding on all faces (thin centerlines along i or j) |
-| PCA, PComm, AComm, venous | 8–12, 31–34 | symmetric default padding |
 
-3. **CD crop** = `CD[i0:i1+1, j0:j1+1, k0:k1+1]`.
+| Vessel group              | Label ids   | Padding policy                                                         |
+| ------------------------- | ----------- | ---------------------------------------------------------------------- |
+| ICA + Basilar             | 1, 2, 3     | default on all faces except **Z+** (`pad_k_max = 0`)                   |
+| LMCA                      | 6           | **X−** restricted (`pad_i_min = 0`); **X+** extra **10** vox           |
+| RMCA                      | 7           | **X+** restricted; **X−** extra **10** vox                             |
+| ACA                       | 4, 5        | symmetric default padding on all faces (thin centerlines along i or j) |
+| PCA, PComm, AComm, venous | 8–12, 31–34 | symmetric default padding                                              |
+
+
+1. **CD crop** = `CD[i0:i1+1, j0:j1+1, k0:k1+1]`.
 
 ### 4.3 Local thresholding (`--4dflow-thr-algorithm`)
 
 Thresholding runs **inside the crop only**. For PCA/PComm/AComm labels, crop area-opening is **disabled** (min fraction **0**) so small comms are not erased before paste; other vessels still drop components below **0.5%** of crop foreground.
 
-| Algorithm | Description |
-|-----------|-------------|
-| **`lsthr`** (default) | 3D sliding threshold on the crop (median 3³, occupancy curve), **without** FWHM shift. |
-| **`lthr`** | Same with FWHM shift (more conservative). |
-| **`otsu`** | Otsu on positive crop voxels (`skimage`). |
+
+| Algorithm             | Description                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `**lsthr`** (default) | 3D sliding threshold on the crop (median 3³, occupancy curve), **without** FWHM shift. |
+| `**lthr`**            | Same with FWHM shift (more conservative).                                              |
+| `**otsu**`            | Otsu on positive crop voxels (`skimage`).                                              |
+
 
 **Centerline barrier (paste):** before writing, voxels inside a **dilated** mask of *other* vessels’ centerlines (`--cl-barrier-radius`, default **2**) are forbidden even if `seg == 0`. This reduces threshold footprints crossing neighbouring skeleton corridors.
 
@@ -383,11 +404,11 @@ Per-sinus `--rg-intensity-frac-*` CLI flags are **deprecated no-ops**.
 - **Lower `frac`** → lower threshold → **more** growth (explore further into dimmer CD).
 - **Higher `frac`** → stricter growth.
 
-Defaults: **`--rg-intensity-frac` 0.45** (most vessels); **`--rg-intensity-frac-explore` 0.35** for **ACA, MCA, PCA** (ids 4–9).
+Defaults: `**--rg-intensity-frac` 0.45** (most vessels); `**--rg-intensity-frac-explore` 0.35** for **ACA, MCA, PCA** (ids 4–9).
 
 **Spatial gates (6-connected BFS):** a neighbour is accepted only if `seg[neighbour] == 0`, not inside `dilate(other_seg)` (`--rg-barrier-radius`, default **3**), and intensity-eligible.
 
-**ACA close approach at AComm:** when both LACA and RACA are present, **`--aca-sequential-grow`** (default **on**) runs region growing in order: **LACA first**, then **RACA** without treating the LACA mask as an RG barrier (other vessels still block). Near AComm the two arteries often come within a few voxels (X-like on the slice) without swapping hemispheres. If the grown masks intersect in at least **`--aca-overlap-min-voxels`** (default **5**) voxels, voxels within **`--acomm-junction-radius`** (default **10** vox) of the junction are plane-split on the merged **LACA∪RACA** blob (`<` / `>` on **X** or **Y**); voxels farther out keep the label from a single grow pass. Then each ACA mask is cleaned by **connected components**: only components that touch that vessel's centerline seeds are kept; stray **RACA** islands (no RACA seeds) are reassigned to **LACA**, and stray **LACA** islands to **RACA**. Junction from eICAB **AComm** when present, else ACA midpoint. Smaller total overlap only strips RACA from dual-claim voxels. A single ACA uses the standard per-vessel RG path unchanged.
+**ACA close approach at AComm:** when both LACA and RACA are present, `**--aca-sequential-grow`** (default **on**) runs region growing in order: **LACA first**, then **RACA** without treating the LACA mask as an RG barrier (other vessels still block). Near AComm the two arteries often come within a few voxels (X-like on the slice) without swapping hemispheres. If the grown masks intersect in at least `**--aca-overlap-min-voxels`** (default **5**) voxels, voxels within `**--acomm-junction-radius`** (default **10** vox) of the junction are plane-split on the merged **LACA∪RACA** blob (`<` / `>` on **X** or **Y**); voxels farther out keep the label from a single grow pass. Then each ACA mask is cleaned by **connected components**: only components that touch that vessel's centerline seeds are kept; stray **RACA** islands (no RACA seeds) are reassigned to **LACA**, and stray **LACA** islands to **RACA**. Junction from eICAB **AComm** when present, else ACA midpoint. Smaller total overlap only strips RACA from dual-claim voxels. A single ACA uses the standard per-vessel RG path unchanged.
 
 Growing never overwrites another label id. Disable with `--no-region-growing`.
 
@@ -397,11 +418,13 @@ Growing never overwrites another label id. Disable with `--no-region-growing`.
 
 ### 4.6 Outputs
 
-| File | Content |
-|------|---------|
-| `seg_4dflow.nii.gz` | Multilabel 3D segmentation in 4D-flow grid |
+
+| File                     | Content                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `seg_4dflow.nii.gz`      | Multilabel 3D segmentation in 4D-flow grid                                                                                    |
 | `segmentation_meta.json` | Global stage-4 flags + per-vessel `bbox`, `face_padding`, `opt_thresh`, voxel counts after threshold / island clean / growing |
-| `vertebral_split.json` | Optional LVA/RVA bifurcation metadata and centerline polylines for stage 5 |
+| `vertebral_split.json`   | Optional LVA/RVA bifurcation metadata and centerline polylines for stage 5                                                    |
+
 
 ### 4.7 Stage 4 flow (diagram)
 
@@ -422,6 +445,8 @@ flowchart TB
   Grow --> Out
 ```
 
+
+
 ### 4.8 Practical notes
 
 - **Sparse centerline bbox:** per-vessel face padding limits crops extending into neighbouring territories (especially ICA/Basilar superior, MCA/ACA lateral).
@@ -437,21 +462,25 @@ flowchart TB
 
 ### 4t.1 Inputs
 
-| Input | Role |
-|-------|------|
-| `4DFlow/ComplexDifference_4D.nii.gz` | Per-cardiac-phase CD (from stage 0 `phase2volume`) |
-| `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Same time-invariant backbone as stage 4 |
-| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz` | Optional ACA/AComm context for region growing |
+
+| Input                                             | Role                                               |
+| ------------------------------------------------- | -------------------------------------------------- |
+| `4DFlow/ComplexDifference_4D.nii.gz`              | Per-cardiac-phase CD (from stage 0 `phase2volume`) |
+| `qvtpy/stage3_centerline/centerlines_mask.nii.gz` | Same time-invariant backbone as stage 4            |
+| `qvtpy/stage3_centerline/eicab_in_4dflow.nii.gz`  | Optional ACA/AComm context for region growing      |
+
 
 Thresholds and region growing are **recomputed per timepoint** (not shared with stage 4 or across frames). This is intentional for assessing whether temporal resolution changes segmentation masks.
 
 ### 4t.2 Outputs
 
-| File | Content |
-|------|---------|
-| `seg_4dflow_4d.nii.gz` | Multilabel 4D segmentation `(X,Y,Z,T)` |
-| `segmentation_meta_t{00..}.json` | Per-frame stage-4-style metadata |
-| `temporal_seg_summary.json` | Per-label voxel counts over T, Dice vs t=0, mean pairwise Dice; multilabel Dice vs t=0 |
+
+| File                             | Content                                                                                |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| `seg_4dflow_4d.nii.gz`           | Multilabel 4D segmentation `(X,Y,Z,T)`                                                 |
+| `segmentation_meta_t{00..}.json` | Per-frame stage-4-style metadata                                                       |
+| `temporal_seg_summary.json`      | Per-label voxel counts over T, Dice vs t=0, mean pairwise Dice; multilabel Dice vs t=0 |
+
 
 ### 4t.3 Pipeline usage
 
@@ -485,7 +514,7 @@ Per row in `locs.csv`:
 
 1. Optional **resegment** at the LOC (`segment_at_point`) for **per-vessel** `loc_cross_section_area_mm2`.
 2. Masked mean **through-plane velocity** on the oblique plane for each cardiac frame (`masked_plane_velocity_series`).
-3. Flow \(Q(t) = \bar{v}_\mathrm{plane}(t) \cdot A / 1000\) ml/s; time-averaged flow and velocity; **PI** and **RI** on the flow series.
+3. Flow Q(t) = \bar{v}_\mathrm{plane}(t) \cdot A / 1000 ml/s; time-averaged flow and velocity; **PI** and **RI** on the flow series.
 
 `--no-measure-resegment` can reuse area from stage 5 when present.
 
@@ -502,3 +531,4 @@ Per row in `locs.csv`:
 - **FSL** (`flirt`) for stage 2: `pip install "nvitk[fsl]"` provides NiPype bindings; FSL must be on `PATH` in the runtime environment.
 - **scikit-image** for stage 3 venous (and arterial) skeletonization.
 - Gated FLIRT integration tests: `NVITK_FSL_TESTS=1` and `flirt` on `PATH`.
+

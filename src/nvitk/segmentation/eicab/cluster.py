@@ -19,6 +19,9 @@ from nvitk.cluster.sge import (
 
 from .runner import build_eicab_singularity_argv
 
+# In-container mount for eICAB work dirs outside the standard /nvitk/output/ tree.
+EICAB_WORK_MOUNT = "/eicab_work"
+
 
 def _require_under(child: Path, root: Path, label: str) -> Path:
     c = child.resolve()
@@ -115,9 +118,39 @@ def build_nvitk_exec_shell_cmd(
     return build_singularity_command(spec, paths)
 
 
+def build_nvitk_exec_on_work_dir(
+    *,
+    work_dir: Path,
+    pipeline_container: Path,
+    src_dir: Path,
+    python_cmd: str,
+    use_nv: bool = False,
+) -> str:
+    """``singularity exec`` nvitk with *work_dir* bound at :data:`EICAB_WORK_MOUNT`."""
+    binds = SingularityBinds()
+    inner = f"export PYTHONPATH={binds.src} && {python_cmd}".strip()
+    nv = "--nv " if use_nv else ""
+    wd = work_dir.resolve()
+    parts: list[str] = [
+        f"singularity exec {nv}",
+        f"-B {shlex.quote(str(src_dir.resolve()))}:{shlex.quote(binds.src)} ",
+        f"-B {shlex.quote(str(wd))}:{shlex.quote(EICAB_WORK_MOUNT)} ",
+        f"{shlex.quote(str(pipeline_container.resolve()))} bash -c ",
+        shlex.quote(inner),
+    ]
+    return "".join(parts)
+
+
+def build_eicab_sync_shell_cmd(*, scratch_dir: Path, final_dir: Path) -> str:
+    """Copy finished eICAB outputs from cluster scratch to the NFS results tree."""
+    scratch = shlex.quote(str(scratch_dir.resolve()))
+    final = shlex.quote(str(final_dir.resolve()))
+    return f"mkdir -p {final} && rsync -a {scratch}/ {final}/"
+
+
 def build_eicab_prune_shell_cmd(
     *,
-    output_dir: Path,
+    work_dir: Path,
     output_root: Path,
     pipeline_container: Path,
     src_dir: Path,
@@ -125,29 +158,39 @@ def build_eicab_prune_shell_cmd(
 ) -> str:
     """Prune auxiliary eICAB outputs inside the nvitk container."""
     binds = SingularityBinds()
-    rel_out = _require_under(output_dir, output_root, "output")
-    c_out = f"{binds.output}{rel_out.as_posix()}"
-    py_cmd = (
+    py_tpl = (
         "from pathlib import Path; "
         "from nvitk.segmentation.eicab.runner import segmentation_outputs_to_keep, "
         "prune_eicab_outputs; "
-        f"p=Path({json.dumps(c_out)}); "
+        f"p=Path({{c_out}}); "
         "k=segmentation_outputs_to_keep(p); "
         "prune_eicab_outputs(p, keep_aux_outputs=False, keep_paths=k)"
     )
-    inner = f"export PYTHONPATH={binds.src} && python -c {shlex.quote(py_cmd)}"
-    return build_nvitk_exec_shell_cmd(
+    if _is_under(work_dir, output_root):
+        rel_out = _require_under(work_dir, output_root, "output")
+        c_out = json.dumps(f"{binds.output}{rel_out.as_posix()}")
+        py_cmd = py_tpl.format(c_out=c_out)
+        inner = f"export PYTHONPATH={binds.src} && python -c {shlex.quote(py_cmd)}"
+        return build_nvitk_exec_shell_cmd(
+            pipeline_container=pipeline_container,
+            src_dir=src_dir,
+            data_root=data_root,
+            output_root=output_root,
+            python_cmd=inner,
+        )
+    c_out = json.dumps(EICAB_WORK_MOUNT)
+    py_cmd = py_tpl.format(c_out=c_out)
+    return build_nvitk_exec_on_work_dir(
+        work_dir=work_dir,
         pipeline_container=pipeline_container,
         src_dir=src_dir,
-        data_root=data_root,
-        output_root=output_root,
-        python_cmd=inner,
+        python_cmd=f"python -c {shlex.quote(py_cmd)}",
     )
 
 
 def build_eicab_postprocess_shell_cmd(
     *,
-    output_dir: Path,
+    work_dir: Path,
     output_root: Path,
     pipeline_container: Path,
     src_dir: Path,
@@ -156,23 +199,40 @@ def build_eicab_postprocess_shell_cmd(
 ) -> str:
     """ICA post-process step inside the nvitk container."""
     binds = SingularityBinds()
-    rel_out = _require_under(output_dir, output_root, "output")
-    c_out = f"{binds.output}{rel_out.as_posix()}"
+    if _is_under(work_dir, output_root):
+        rel_out = _require_under(work_dir, output_root, "output")
+        c_out = json.dumps(f"{binds.output}{rel_out.as_posix()}")
+        py_cmd = (
+            "from pathlib import Path; "
+            "from nvitk.pipes.qvtpy.util.eicab_postprocess import postprocess_eicab_directory; "
+            f"postprocess_eicab_directory(Path({c_out}))"
+        )
+        inner = (
+            f"export PYTHONPATH={binds.src} && "
+            f"export NVITK_BACKEND={shlex.quote(str(backend).strip().lower())} && "
+            f"python -c {shlex.quote(py_cmd)}"
+        )
+        return build_nvitk_exec_shell_cmd(
+            pipeline_container=pipeline_container,
+            src_dir=src_dir,
+            data_root=data_root,
+            output_root=output_root,
+            python_cmd=inner,
+        )
+    c_out = json.dumps(EICAB_WORK_MOUNT)
     py_cmd = (
         "from pathlib import Path; "
         "from nvitk.pipes.qvtpy.util.eicab_postprocess import postprocess_eicab_directory; "
-        f"postprocess_eicab_directory(Path({json.dumps(c_out)}))"
+        f"postprocess_eicab_directory(Path({c_out}))"
     )
     inner = (
-        f"export PYTHONPATH={binds.src} && "
         f"export NVITK_BACKEND={shlex.quote(str(backend).strip().lower())} && "
         f"python -c {shlex.quote(py_cmd)}"
     )
-    return build_nvitk_exec_shell_cmd(
+    return build_nvitk_exec_on_work_dir(
+        work_dir=work_dir,
         pipeline_container=pipeline_container,
         src_dir=src_dir,
-        data_root=data_root,
-        output_root=output_root,
         python_cmd=inner,
     )
 
@@ -195,19 +255,34 @@ def build_eicab_host_shell_cmd(
     keep_aux_outputs: bool,
     post_process_eicab: bool,
     backend: str,
+    scratch_output_dir: Path | None = None,
 ) -> str:
-    """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups."""
+    """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups.
+
+    When *scratch_output_dir* is set, eICAB inference and follow-up steps run on
+    cluster-local scratch; finished outputs are rsynced to *output_dir* (NFS) at
+    the end. The job must execute entirely on one compute node (normal SGE behaviour).
+    """
     dev = device.lower()
     if dev == "gpu":
         dev = "cuda"
-    use_nv = dev == "cuda"
 
+    final_dir = output_dir.resolve()
+    work_dir = scratch_output_dir.resolve() if scratch_output_dir is not None else final_dir
+    work_tmp = tmp_dir.resolve()
+
+    prep = (
+        f"mkdir -p {shlex.quote(str(work_dir))} "
+        f"&& mkdir -p {shlex.quote(str(work_tmp))} "
+        f"&& mkdir -p {shlex.quote(str(final_dir))}"
+    )
     steps: list[str] = [
+        prep,
         shlex.join(
             build_eicab_singularity_argv(
                 input_nifti,
-                output_dir,
-                tmp_dir=tmp_dir,
+                work_dir,
+                tmp_dir=work_tmp,
                 container=eicab_container,
                 resolution=resolution,
                 simple_segmentation=simple_segmentation,
@@ -215,12 +290,12 @@ def build_eicab_host_shell_cmd(
                 device=dev,
                 vasculature_host_path=vasculature_host,
             )
-        )
+        ),
     ]
     if not keep_aux_outputs:
         steps.append(
             build_eicab_prune_shell_cmd(
-                output_dir=output_dir,
+                work_dir=work_dir,
                 output_root=output_root,
                 pipeline_container=pipeline_container,
                 src_dir=src_dir,
@@ -230,7 +305,7 @@ def build_eicab_host_shell_cmd(
     if post_process_eicab:
         steps.append(
             build_eicab_postprocess_shell_cmd(
-                output_dir=output_dir,
+                work_dir=work_dir,
                 output_root=output_root,
                 pipeline_container=pipeline_container,
                 src_dir=src_dir,
@@ -238,6 +313,11 @@ def build_eicab_host_shell_cmd(
                 backend=backend,
             )
         )
+    if scratch_output_dir is not None:
+        steps.append(
+            build_eicab_sync_shell_cmd(scratch_dir=work_dir, final_dir=final_dir)
+        )
+        steps.append(f"rm -rf {shlex.quote(str(work_dir))}")
     return " && ".join(steps)
 
 
@@ -284,6 +364,7 @@ def submit_eicab_job(
     post_process_eicab: bool = True,
     backend: str = "gpu",
     resources: SgeResources,
+    scratch_output_dir: Path | None = None,
     hold_jid: str | None = None,
     dry_run: bool = False,
     emit: TextIO | None = None,
@@ -311,6 +392,7 @@ def submit_eicab_job(
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
         backend=backend,
+        scratch_output_dir=scratch_output_dir,
     )
 
     paths = cluster_paths(
@@ -339,7 +421,9 @@ def submit_eicab_job(
 
 
 __all__ = [
+    "EICAB_WORK_MOUNT",
     "build_eicab_host_shell_cmd",
+    "build_eicab_sync_shell_cmd",
     "build_run_job_python_cmd",
     "cluster_paths",
     "submit_eicab_job",

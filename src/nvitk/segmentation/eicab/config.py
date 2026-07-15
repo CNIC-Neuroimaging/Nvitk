@@ -23,6 +23,8 @@ from nvitk.cluster import sge_json as _sj
 # eICAB Singularity image (override with --container).
 CONTAINER_PATH = Path("/images/eicab3.sif")
 DEFAULT_TMP_DIR = Path("~/local_tmp")
+# Cluster node scratch parent for parallel eICAB (see --eicab-scratch-output-root).
+DEFAULT_SCRATCH_OUTPUT_ROOT: Path | None = None
 
 PIPELINE_CONTAINER_PATH = CONTAINER_PATH
 SGE_PROJECT = "MCC"
@@ -69,6 +71,8 @@ elif "default_sge_container_root" not in _pipe and "pipeline_container_path" not
     PIPELINE_CONTAINER_PATH = CONTAINER_PATH
 if (v := _pipe.get("default_tmp_dir")):
     DEFAULT_TMP_DIR = Path(os.path.expanduser(str(v)))
+if (v := _pipe.get("default_scratch_output_root")):
+    DEFAULT_SCRATCH_OUTPUT_ROOT = Path(os.path.expanduser(str(v)))
 if (v := _pipe.get("default_vasculature_host_dir")):
     DEFAULT_VASCULATURE_HOST_DIR = Path(os.path.expanduser(str(v)))
 CLUSTER_HOST_ALIASES = _sj.merge_cluster_host_aliases(
@@ -79,6 +83,7 @@ __all__ = [
     "CLUSTER_HOST_ALIASES",
     "CONTAINER_PATH",
     "DEFAULT_SGE_SCRIPTS_DIR",
+    "DEFAULT_SCRATCH_OUTPUT_ROOT",
     "DEFAULT_TMP_DIR",
     "DEFAULT_VASCULATURE_HOST_DIR",
     "PIPELINE_CONTAINER_PATH",

@@ -20,15 +20,16 @@
   },
   "pipelines": {
     "eicab": {
-      "sge_project": "MCC_GPU",
-      "sge_account": "MCC_GPU",
+      "sge_project": "MCC",
+      "sge_account": "MCC",
       "sge_ngpu": 0,
       "sge_h_vmem": "35G",
       "log_subdir": "eICAB",
       "err_subdir": "eICAB",
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
       "default_sge_container_root": "/images/eicab3.sif",
-      "default_vasculature_host_dir": "/programs/Neuro/vasculature2"
+      "default_vasculature_host_dir": "/programs/Neuro/vasculature2",
+      "default_scratch_output_root": "/data_tmp/nvitk-eicab"
     },
     "totalsegmentator": {
       "sge_project": "GPU",
