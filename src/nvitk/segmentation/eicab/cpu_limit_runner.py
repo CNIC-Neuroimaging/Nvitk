@@ -5,11 +5,9 @@ does not spawn one worker per host logical CPU (e.g. 48) during parallel batches
 
 Invoked as::
 
-    python /nvitk/src/nvitk/segmentation/eicab/cpu_limit_runner.py \\
+    python3 /nvitk/src/nvitk/segmentation/eicab/cpu_limit_runner.py \\
         -t /TOF.nii.gz -o /output -r 0.5 -d cpu -f
 """
-
-from __future__ import annotations
 
 import multiprocessing as mp
 import os
@@ -28,14 +26,15 @@ def _apply_cpu_limit():
     def _limited():
         return limit
 
-    os.cpu_count = _limited  # type: ignore[method-assign]
-    mp.cpu_count = _limited  # type: ignore[assignment]
+    if hasattr(os, "cpu_count"):
+        os.cpu_count = _limited
+    mp.cpu_count = _limited
 
 
 def main():
     _apply_cpu_limit()
     script = os.environ.get("NVITK_EICAB_EXPRESS_CW", _EXPRESS_CW)
-    sys.argv = [script, *sys.argv[1:]]
+    sys.argv = [script] + sys.argv[1:]
     runpy.run_path(script, run_name="__main__")
 
 

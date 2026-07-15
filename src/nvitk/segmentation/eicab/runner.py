@@ -308,7 +308,7 @@ def build_eicab_singularity_shell_cmd(
         )
     parts.append(shlex.quote(str(container_p)))
     if use_cpu_runner:
-        parts.extend(["python", shlex.quote(_CPU_LIMIT_RUNNER)])
+        parts.extend(["python3", shlex.quote(_CPU_LIMIT_RUNNER)])
     parts.extend(
         _eicab_cli_args(
             container_input,
