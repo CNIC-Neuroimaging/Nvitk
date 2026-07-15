@@ -25,7 +25,7 @@ def _apply_cpu_limit():
         return
     limit = max(1, int(raw))
 
-    def _limited() -> int:
+    def _limited():
         return limit
 
     os.cpu_count = _limited  # type: ignore[method-assign]
