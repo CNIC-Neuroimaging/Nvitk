@@ -190,7 +190,7 @@ if [ ! -d "$path_sge_err" ]; then mkdir -p "$path_sge_err"; fi
 
 path_container="/images/eicab3.sif"
 path_vasculature="/programs/Neuro/vasculature2"
-path_tmp_base="/data_tmp"
+path_tmp="/data_tmp"
 
 ########################################################################################################################
 # Execution: Loop through all input files and submit jobs
@@ -252,10 +252,6 @@ for idx in "${!input_files[@]}"; do
   if [ -f "$path_sge_err/${task}_${dataset}.err" ]; then
     rm "$path_sge_err/${task}_${dataset}.err"
   fi
-  
-  # Per-subject temp on node-local scratch (bind-mounted to /tmp in the eICAB container).
-  path_tmp="${path_tmp_base%/}/${dataset}/.eicab_tmp"
-  mkdir -p "$path_tmp"
   
   # Build optional eICAB flags
   eicab_flags=""

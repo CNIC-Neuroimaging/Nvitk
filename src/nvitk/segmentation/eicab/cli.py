@@ -18,7 +18,7 @@ from nvitk.cluster.sge import SgeResources, write_script_header
 
 from . import config as cfg
 from .cluster import submit_eicab_job
-from .runner import resolve_eicab_tmp_dir, run_eicab
+from .runner import eicab_tmp_dir, run_eicab
 
 
 log = Logger()
@@ -85,8 +85,9 @@ def _default_emit_script(input_path: Path) -> Path:
     "--tmp-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Host temp directory base bind-mounted to /tmp in the eICAB container "
-    "(default: /data_tmp/<subject>/.eicab_tmp when available, else <output>/.eicab_tmp).",
+    help="Host temp directory bind-mounted to /tmp in the eICAB container "
+    "(local default: ~/local_tmp; sge default: <output>/.eicab_tmp). "
+    "Shared bases (e.g. /data_tmp) are namespaced per subject.",
 )
 @click.option(
     "--keep-aux-outputs",
@@ -124,7 +125,7 @@ def _default_emit_script(input_path: Path) -> Path:
     type=click.Path(path_type=Path),
     default=None,
     help="(sge) Host root mounted at /nvitk/output/ (default: parent of --output). "
-    "Default tmp is /data_tmp/<subject>/.eicab_tmp when available.",
+    "Default tmp is under --output; use --tmp-dir for a separate host path (e.g. /data_tmp).",
 )
 @click.option(
     "--vasculature-dir",
@@ -219,6 +220,14 @@ def main(
                 f"eICAB container not found: {ec}. Pass --container or fix "
                 "`nvitk.segmentation.eicab.config.CONTAINER_PATH`."
             )
+        if tmp_dir is None:
+            tmp = cfg.DEFAULT_TMP_DIR
+        else:
+            tmp = eicab_tmp_dir(
+                output_path,
+                tmp_dir=tmp_dir,
+                subject_key=_input_subject_key(input_path),
+            )
         output_path.mkdir(parents=True, exist_ok=True)
         run_eicab(
             input_path,
@@ -228,8 +237,7 @@ def main(
             attention=attention,
             device=device,
             container=ec,
-            tmp_dir=tmp_dir,
-            subject_key=_input_subject_key(input_path),
+            tmp_dir=tmp,
             keep_aux_outputs=keep_aux_outputs,
             vasculature_host_path=vas_host,
             capture_output=not display_progress,
@@ -245,7 +253,7 @@ def main(
     )
     out_root = Path(output_root) if output_root is not None else output_path.parent
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
-    tmp = resolve_eicab_tmp_dir(
+    tmp = eicab_tmp_dir(
         output_path,
         tmp_dir=tmp_dir,
         subject_key=_input_subject_key(input_path),

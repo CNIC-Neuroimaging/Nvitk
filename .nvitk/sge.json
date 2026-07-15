@@ -28,8 +28,7 @@
       "err_subdir": "eICAB",
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
       "default_sge_container_root": "/images/eicab3.sif",
-      "default_vasculature_host_dir": "/programs/Neuro/vasculature2",
-      "default_tmp_dir": "/data_tmp"
+      "default_vasculature_host_dir": "/programs/Neuro/vasculature2"
     },
     "totalsegmentator": {
       "sge_project": "GPU",

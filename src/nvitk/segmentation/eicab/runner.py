@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -10,8 +9,6 @@ from pathlib import Path
 from typing import Iterable
 
 from nvitk.core.logger import Logger
-
-from . import config as _eicab_cfg
 
 log = Logger()
 
@@ -27,66 +24,35 @@ _NIFTI_SUFFIXES = (".nii.gz", ".nii")
 _EICAB_TMP_BASENAME = ".eicab_tmp"
 
 
-def _infer_eicab_subject_key(output_dir: Path) -> str:
-    """Best-effort subject id for tmp namespacing (qvtpy: ``.../<subject>/eicab``)."""
-    if output_dir.name.lower() in {"eicab", _EICAB_TMP_BASENAME}:
-        return output_dir.parent.name
-    return output_dir.name
-
-
-def _scratch_base_ready(base: Path) -> bool:
-    """True when *base* exists (or can be created) and is writable."""
-    try:
-        base.mkdir(parents=True, exist_ok=True)
-        return base.is_dir() and os.access(base, os.W_OK | os.X_OK)
-    except OSError:
-        return False
-
-
-def _scoped_scratch(base: Path, subject_key: str) -> Path:
-    return base.expanduser() / subject_key / _EICAB_TMP_BASENAME
-
-
-def resolve_eicab_tmp_dir(
+def eicab_tmp_dir(
     output_dir: str | Path,
     *,
     tmp_dir: str | Path | None = None,
     subject_key: str | None = None,
 ) -> Path:
-    """Return an isolated eICAB temp directory for one subject/run.
+    """Resolve the host directory bind-mounted to ``/tmp`` in the eICAB container.
 
-    Prefer fast host scratch: ``<DEFAULT_TMP_DIR>/<subject>/.eicab_tmp`` (e.g.
-    ``/data_tmp/PESA123/.eicab_tmp``). When scratch is unavailable, fall back to
-    ``<output_dir>/.eicab_tmp``. An explicit *tmp_dir* shared base (e.g.
-    ``/data_tmp``) is namespaced the same way; a path ending in ``.eicab_tmp`` is
-    used as-is.
+    Default (unchanged): ``<output_dir>/.eicab_tmp``.
+
+    When *tmp_dir* is an explicit **shared** scratch base (e.g. ``/data_tmp``),
+    return ``<base>/<subject_key>/.eicab_tmp`` so parallel jobs do not collide.
+    A path already ending in ``.eicab_tmp`` is returned as-is.
     """
-    output_p = Path(output_dir).expanduser()
+    output_p = Path(output_dir)
     per_output = output_p / _EICAB_TMP_BASENAME
-    key = subject_key or _infer_eicab_subject_key(output_p)
-
-    if tmp_dir is not None:
-        base = Path(tmp_dir).expanduser()
-        if base.name == _EICAB_TMP_BASENAME:
-            return base
-        if base == output_p:
-            return _resolve_default_tmp(output_p, key, per_output)
-        return _scoped_scratch(base, key)
-
-    return _resolve_default_tmp(output_p, key, per_output)
-
-
-def _resolve_default_tmp(output_p: Path, subject_key: str, per_output: Path) -> Path:
-    scratch = _eicab_cfg.DEFAULT_TMP_DIR
-    scoped = _scoped_scratch(scratch, subject_key)
-    if _scratch_base_ready(scratch):
-        return scoped
-    log.info(
-        "eICAB tmp: scratch base %s unavailable; using output-local %s",
-        scratch,
-        per_output,
+    if tmp_dir is None:
+        return per_output
+    base = Path(tmp_dir)
+    if base.name == _EICAB_TMP_BASENAME:
+        return base
+    if base == output_p:
+        return per_output
+    key = subject_key or (
+        output_p.parent.name
+        if output_p.name.lower() in {"eicab", _EICAB_TMP_BASENAME}
+        else output_p.name
     )
-    return per_output
+    return base / key / _EICAB_TMP_BASENAME
 
 
 def _is_nifti(p: Path) -> bool:
@@ -250,8 +216,7 @@ def run_eicab(
     attention: bool = False,
     device: str = "cpu",
     container: str | Path,
-    tmp_dir: str | Path | None = None,
-    subject_key: str | None = None,
+    tmp_dir: str | Path,
     keep_aux_outputs: bool = False,
     vasculature_host_path: str | Path | None = None,
     check: bool = True,
@@ -266,11 +231,7 @@ def run_eicab(
     """
     input_p = Path(input_nii).resolve()
     output_p = Path(output_dir).resolve()
-    tmp_p = resolve_eicab_tmp_dir(
-        output_p,
-        tmp_dir=tmp_dir,
-        subject_key=subject_key,
-    ).resolve()
+    tmp_p = Path(tmp_dir).resolve()
     container_p = Path(container).resolve()
 
     if not container_p.is_file():
@@ -283,7 +244,6 @@ def run_eicab(
         raise FileNotFoundError(f"Input NIfTI not found: {input_p}")
     output_p.mkdir(parents=True, exist_ok=True)
     tmp_p.mkdir(parents=True, exist_ok=True)
-    log.info("eICAB tmp bind: %s -> /tmp in container", tmp_p)
 
     cmd = build_eicab_singularity_argv(
         input_p,
@@ -325,8 +285,8 @@ def run_eicab(
 
 __all__ = [
     "build_eicab_singularity_argv",
+    "eicab_tmp_dir",
     "prune_eicab_outputs",
-    "resolve_eicab_tmp_dir",
     "run_eicab",
     "segmentation_outputs_to_keep",
 ]

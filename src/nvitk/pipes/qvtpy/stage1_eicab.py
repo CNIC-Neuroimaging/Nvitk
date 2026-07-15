@@ -43,7 +43,7 @@ from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
 from nvitk.segmentation.eicab.cluster import submit_eicab_job
-from nvitk.segmentation.eicab.runner import resolve_eicab_tmp_dir, run_eicab
+from nvitk.segmentation.eicab.runner import eicab_tmp_dir, run_eicab
 
 from . import config as cfg
 from .util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
@@ -209,7 +209,7 @@ def run_subject(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return out_dir
 
-    tmp = resolve_eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
+    tmp = eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
     log.info(f"qvtpy stage1 eICAB (local) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
@@ -224,8 +224,7 @@ def run_subject(
         attention=attention,
         device=device,
         container=container,
-        tmp_dir=tmp_dir,
-        subject_key=subject,
+        tmp_dir=tmp,
         keep_aux_outputs=keep_aux_outputs,
         vasculature_host_path=vas_host,
         capture_output=False,
@@ -311,7 +310,7 @@ def submit_subject_sge(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return ""
 
-    tmp = resolve_eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
+    tmp = eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
     tmp.mkdir(parents=True, exist_ok=True)
 
     eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
@@ -502,8 +501,9 @@ def _submit_postprocess_only_sge(
     "--tmp-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Temp directory base for eICAB (default: /data_tmp/<subject>/.eicab_tmp on cluster, "
-    "else <output>/<subject>/eicab/.eicab_tmp). Shared bases are namespaced per subject.",
+    help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp). "
+    "When set to a shared scratch base (e.g. /data_tmp), uses <base>/<subject>/.eicab_tmp "
+    "for parallel safety.",
 )
 @click.option(
     "--vasculature-dir",
