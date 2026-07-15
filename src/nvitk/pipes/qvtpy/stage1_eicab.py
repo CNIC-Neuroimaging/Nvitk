@@ -260,6 +260,7 @@ def submit_subject_sge(
     tmp_dir: Path | None = None,
     thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
+    local_metric_scratch: bool | None = None,
     vasculature_dir: Path | None = None,
     log_dir: Path | None = None,
     err_dir: Path | None = None,
@@ -345,6 +346,16 @@ def submit_subject_sge(
         )
     if sge_pe_smp:
         log.info(f"  sge pe smp    : {sge_pe_smp} (qsub -pe smp {sge_pe_smp})")
+    metric_scratch = (
+        eicab_cfg.EICAB_LOCAL_METRIC_SCRATCH
+        if local_metric_scratch is None
+        else local_metric_scratch
+    )
+    if metric_scratch:
+        log.info(
+            "  metric scratch: $TMPDIR/nvitk_eicab_metric_$JOB_ID "
+            "(node-local VED scale NIfTIs)"
+        )
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
 
@@ -371,6 +382,7 @@ def submit_subject_sge(
         resources=res,
         thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
+        local_metric_scratch=metric_scratch,
         hold_jid=hold_jid,
         dry_run=dry_run,
         emit=emit,

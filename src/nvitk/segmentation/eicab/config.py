@@ -25,6 +25,8 @@ CONTAINER_PATH = Path("/images/eicab3.sif")
 DEFAULT_TMP_DIR = Path("~/local_tmp")
 # OMP/BLAS thread cap inside the eICAB container (no qsub -pe required).
 EICAB_THREAD_LIMIT: int | None = None
+# Bind VED multiscale NIfTIs to node-local $TMPDIR during SGE runs (NFS-safe).
+EICAB_LOCAL_METRIC_SCRATCH = True
 # Optional qsub -pe smp N (cluster-specific; omit unless your queue supports it).
 SGE_PE_SMP: int | None = None
 
@@ -75,6 +77,8 @@ if (v := _pipe.get("default_tmp_dir")):
     DEFAULT_TMP_DIR = Path(os.path.expanduser(str(v)))
 if (v := _pipe.get("eicab_thread_limit")) is not None:
     EICAB_THREAD_LIMIT = int(v)
+if (v := _pipe.get("eicab_local_metric_scratch")) is not None:
+    EICAB_LOCAL_METRIC_SCRATCH = bool(v)
 if (v := _pipe.get("sge_pe_smp")) is not None:
     SGE_PE_SMP = int(v)
 if (v := _pipe.get("default_vasculature_host_dir")):
@@ -89,6 +93,7 @@ __all__ = [
     "DEFAULT_SGE_SCRIPTS_DIR",
     "DEFAULT_TMP_DIR",
     "DEFAULT_VASCULATURE_HOST_DIR",
+    "EICAB_LOCAL_METRIC_SCRATCH",
     "EICAB_THREAD_LIMIT",
     "PIPELINE_CONTAINER_PATH",
     "SGE_ACCOUNT",

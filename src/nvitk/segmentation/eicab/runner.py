@@ -32,6 +32,11 @@ _CPU_LIMIT_SITE = (
     f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_site"
 )
 _EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
+_METRIC_SCRATCH_PREP = (
+    'METRIC_SCRATCH="${TMPDIR:-/tmp}/nvitk_eicab_metric_${JOB_ID:-$$}" && '
+    'rm -rf "$METRIC_SCRATCH" && mkdir -p "$METRIC_SCRATCH"'
+)
+_METRIC_SCRATCH_BIND = "$METRIC_SCRATCH:/output/metric_space"
 
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
@@ -249,6 +254,7 @@ def build_eicab_singularity_shell_cmd(
     vasculature_host_path: str | Path | None = None,
     cpu_limit_shell_expr: str | None = None,
     nvitk_src_dir: str | Path | None = None,
+    local_metric_scratch: bool = False,
 ) -> str:
     """Shell command string for eICAB ``singularity run`` or ``exec``.
 
@@ -313,6 +319,8 @@ def build_eicab_singularity_shell_cmd(
     vhp = Path(vasculature_host_path) if vasculature_host_path else None
     if vhp and vhp.is_dir():
         parts.extend(["--bind", shlex.quote(f"{vhp}:/programs/Neuro/vasculature2")])
+    if local_metric_scratch:
+        parts.extend(["--bind", _METRIC_SCRATCH_BIND])
     if use_cpu_runner:
         src_p = Path(nvitk_src_dir).resolve()
         parts.extend(
@@ -409,8 +417,14 @@ def run_eicab(
     return proc
 
 
+def metric_scratch_prep_shell() -> str:
+    """Shell snippet: node-local dir for VED ``metric_space`` scale NIfTIs."""
+    return _METRIC_SCRATCH_PREP
+
+
 __all__ = [
     "build_eicab_singularity_argv",
+    "metric_scratch_prep_shell",
     "prune_eicab_outputs",
     "run_eicab",
     "segmentation_outputs_to_keep",

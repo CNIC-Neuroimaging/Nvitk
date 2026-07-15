@@ -17,7 +17,7 @@ from nvitk.cluster.sge import (
     submit_host_stage,
 )
 
-from .runner import build_eicab_singularity_shell_cmd
+from .runner import build_eicab_singularity_shell_cmd, metric_scratch_prep_shell
 
 
 def _require_under(child: Path, root: Path, label: str) -> Path:
@@ -189,6 +189,7 @@ def build_eicab_host_shell_cmd(
     backend: str,
     thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
+    local_metric_scratch: bool = False,
 ) -> str:
     """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups."""
     dev = device.lower()
@@ -205,6 +206,8 @@ def build_eicab_host_shell_cmd(
         f"mkdir -p {shlex.quote(str(output_dir.resolve()))} "
         f"&& mkdir -p {shlex.quote(str(tmp_dir.resolve()))}"
     )
+    if local_metric_scratch:
+        prep = f"{prep} && {metric_scratch_prep_shell()}"
     steps: list[str] = [
         prep,
         build_eicab_singularity_shell_cmd(
@@ -219,6 +222,7 @@ def build_eicab_host_shell_cmd(
             vasculature_host_path=vasculature_host,
             cpu_limit_shell_expr=cpu_expr,
             nvitk_src_dir=src_dir,
+            local_metric_scratch=local_metric_scratch,
         )
     ]
     if not keep_aux_outputs:
@@ -290,6 +294,7 @@ def submit_eicab_job(
     resources: SgeResources,
     thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
+    local_metric_scratch: bool = False,
     hold_jid: str | None = None,
     dry_run: bool = False,
     emit: TextIO | None = None,
@@ -330,6 +335,7 @@ def submit_eicab_job(
         backend=backend,
         thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
+        local_metric_scratch=local_metric_scratch,
     )
 
     paths = cluster_paths(

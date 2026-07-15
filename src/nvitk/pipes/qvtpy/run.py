@@ -353,6 +353,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     eicab_device: str,
     eicab_thread_limit: int | None,
     eicab_sge_pe_smp: int | None,
+    eicab_local_metric_scratch: bool | None,
     eicab_container: Path | None,
     vasculature_dir: Path | None,
     post_process_eicab: bool,
@@ -475,6 +476,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         src_dir=src_p,
                         sge_pe_smp=eicab_sge_pe_smp,
                         thread_limit=eicab_thread_limit,
+                        local_metric_scratch=eicab_local_metric_scratch,
                         vasculature_dir=vasculature_dir,
                         post_process_eicab=post_process_eicab,
                         hold_jid=prev_jid,
@@ -986,6 +988,14 @@ def _submit_qvtpy_sge_subjects_remote(
     ),
 )
 @click.option(
+    "--eicab-local-metric-scratch/--no-eicab-local-metric-scratch",
+    default=None,
+    help=(
+        "(sge, stage1) Write VED multiscale NIfTIs to node-local $TMPDIR "
+        "(bind over /output/metric_space). Default from .nvitk/sge.json."
+    ),
+)
+@click.option(
     "--post-process-eicab/--no-post-process-eicab",
     default=False,
     show_default=True,
@@ -1193,6 +1203,7 @@ def main(
     eicab_resolution: float,
     eicab_thread_limit: int | None,
     eicab_sge_pe_smp: int | None,
+    eicab_local_metric_scratch: bool | None,
     post_process_eicab: bool,
     only_pp: bool,
     stage2_reference: str,
@@ -1288,6 +1299,11 @@ def main(
         else eicab_cfg.EICAB_THREAD_LIMIT
     )
     eicab_pe_smp_eff = eicab_sge_pe_smp
+    eicab_metric_scratch_eff = (
+        eicab_local_metric_scratch
+        if eicab_local_metric_scratch is not None
+        else eicab_cfg.EICAB_LOCAL_METRIC_SCRATCH
+    )
 
     if submit == "sge" and from_source.lower() == "xnat":
         log.info(f"  XNAT download target (local): {dicom_download_root}")
@@ -1301,6 +1317,10 @@ def main(
             log.info(f"  eicab thread limit (container): {eicab_thread_eff}")
         if eicab_pe_smp_eff is not None:
             log.info(f"  eicab sge pe smp (qsub -pe): {eicab_pe_smp_eff}")
+        if eicab_metric_scratch_eff:
+            log.info(
+                "  eicab metric scratch: node-local $TMPDIR for VED scale NIfTIs"
+            )
     run_s2 = STAGE_REG in stages
     run_s3 = STAGE_CENTERLINE in stages
     run_s4 = STAGE_SEG in stages
@@ -1759,6 +1779,7 @@ def main(
         eicab_device=eicab_device,
         eicab_thread_limit=eicab_thread_eff,
         eicab_sge_pe_smp=eicab_pe_smp_eff,
+        eicab_local_metric_scratch=eicab_metric_scratch_eff,
         eicab_container=eicab_container,
         vasculature_dir=vasculature_dir,
         post_process_eicab=post_process_eicab,
