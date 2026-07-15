@@ -73,6 +73,33 @@ def metric_scratch_prep_shell(root: str | None = None) -> str:
         'echo "eICAB node-local scratch: $METRIC_SCRATCH"'
     )
 
+
+def metric_scratch_cleanup_shell(root: str | None = None) -> str:
+    """Shell snippet: remove **only** this job's ``nvitk_eicab_<JOB_ID>`` dir.
+
+    Guards:
+    - rebuilds the path from scratch root + ``JOB_ID`` (no glob);
+    - requires basename prefix ``nvitk_eicab_``;
+    - refuses to delete the scratch root itself.
+    """
+    preferred = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
+    root_q = shlex.quote(preferred)
+    return (
+        f'_NVITK_SCRATCH_ROOT={root_q} ; '
+        '_NVITK_SCRATCH="$_NVITK_SCRATCH_ROOT/nvitk_eicab_${JOB_ID:-$$}" ; '
+        'case "$_NVITK_SCRATCH" in '
+        '"$_NVITK_SCRATCH_ROOT"/nvitk_eicab_*) '
+        'if [ -n "$_NVITK_SCRATCH" ] '
+        '&& [ "$_NVITK_SCRATCH" != "$_NVITK_SCRATCH_ROOT" ] '
+        '&& [ "$_NVITK_SCRATCH" != "$_NVITK_SCRATCH_ROOT/" ] '
+        '&& [ -d "$_NVITK_SCRATCH" ]; then '
+        'rm -rf -- "$_NVITK_SCRATCH" && '
+        'echo "cleaned eICAB node-local scratch: $_NVITK_SCRATCH" ; '
+        'fi ;; '
+        '*) echo "skip scratch cleanup (unexpected path): $_NVITK_SCRATCH" >&2 ;; '
+        'esac'
+    )
+
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
 # Whole-brain style outputs (heuristic; extend if your build uses other stems).
@@ -475,6 +502,7 @@ def run_eicab(
 __all__ = [
     "build_eicab_singularity_argv",
     "metric_scratch_bind_args",
+    "metric_scratch_cleanup_shell",
     "metric_scratch_prep_shell",
     "prune_eicab_outputs",
     "run_eicab",

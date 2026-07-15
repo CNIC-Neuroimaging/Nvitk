@@ -17,7 +17,11 @@ from nvitk.cluster.sge import (
     submit_host_stage,
 )
 
-from .runner import build_eicab_singularity_shell_cmd, metric_scratch_prep_shell
+from .runner import (
+    build_eicab_singularity_shell_cmd,
+    metric_scratch_cleanup_shell,
+    metric_scratch_prep_shell,
+)
 
 
 def _require_under(child: Path, root: Path, label: str) -> Path:
@@ -257,7 +261,19 @@ def build_eicab_host_shell_cmd(
                 backend=backend,
             )
         )
-    return " && ".join(steps)
+    body = " && ".join(steps)
+    if not local_metric_scratch or scratch_root is None:
+        return body
+    # Always remove only this job's nvitk_eicab_<JOB_ID> dir (success or failure).
+    cleanup = metric_scratch_cleanup_shell(scratch_root)
+    return (
+        "{ "
+        f"{body} ; "
+        "_nvitk_eicab_rc=$? ; "
+        f"{cleanup} ; "
+        "exit $_nvitk_eicab_rc ; "
+        "}"
+    )
 
 
 def cluster_paths(
