@@ -21,38 +21,6 @@ _WB_RE = re.compile(
 )
 _RESAMPLED_RE = re.compile(r"resampled", re.IGNORECASE)
 _NIFTI_SUFFIXES = (".nii.gz", ".nii")
-_EICAB_TMP_BASENAME = ".eicab_tmp"
-
-
-def eicab_tmp_dir(
-    output_dir: str | Path,
-    *,
-    tmp_dir: str | Path | None = None,
-    subject_key: str | None = None,
-) -> Path:
-    """Resolve the host directory bind-mounted to ``/tmp`` in the eICAB container.
-
-    Default (unchanged): ``<output_dir>/.eicab_tmp``.
-
-    When *tmp_dir* is an explicit **shared** scratch base (e.g. ``/data_tmp``),
-    return ``<base>/<subject_key>/.eicab_tmp`` so parallel jobs do not collide.
-    A path already ending in ``.eicab_tmp`` is returned as-is.
-    """
-    output_p = Path(output_dir)
-    per_output = output_p / _EICAB_TMP_BASENAME
-    if tmp_dir is None:
-        return per_output
-    base = Path(tmp_dir)
-    if base.name == _EICAB_TMP_BASENAME:
-        return base
-    if base == output_p:
-        return per_output
-    key = subject_key or (
-        output_p.parent.name
-        if output_p.name.lower() in {"eicab", _EICAB_TMP_BASENAME}
-        else output_p.name
-    )
-    return base / key / _EICAB_TMP_BASENAME
 
 
 def _is_nifti(p: Path) -> bool:
@@ -285,7 +253,6 @@ def run_eicab(
 
 __all__ = [
     "build_eicab_singularity_argv",
-    "eicab_tmp_dir",
     "prune_eicab_outputs",
     "run_eicab",
     "segmentation_outputs_to_keep",

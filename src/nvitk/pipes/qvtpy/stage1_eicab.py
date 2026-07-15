@@ -43,7 +43,7 @@ from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
 from nvitk.segmentation.eicab.cluster import submit_eicab_job
-from nvitk.segmentation.eicab.runner import eicab_tmp_dir, run_eicab
+from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
 from .util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
@@ -198,6 +198,7 @@ def run_subject(
             f"No TOF NIfTI under {subj_nifti / 'TOF'} (expected TOF/TOF.nii.gz from stage0)."
         )
 
+    tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
     container = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
     vas_host = (
         Path(vasculature_dir).expanduser()
@@ -209,11 +210,9 @@ def run_subject(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return out_dir
 
-    tmp = eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
     log.info(f"qvtpy stage1 eICAB (local) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
-    log.info(f"  tmp   : {tmp}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     run_eicab(
@@ -310,7 +309,7 @@ def submit_subject_sge(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return ""
 
-    tmp = eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
+    tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
     tmp.mkdir(parents=True, exist_ok=True)
 
     eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
@@ -336,7 +335,6 @@ def submit_subject_sge(
     log.info(f"qvtpy stage1 eICAB (sge) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
-    log.info(f"  tmp   : {tmp}")
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
 
@@ -501,9 +499,7 @@ def _submit_postprocess_only_sge(
     "--tmp-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp). "
-    "When set to a shared scratch base (e.g. /data_tmp), uses <base>/<subject>/.eicab_tmp "
-    "for parallel safety.",
+    help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp).",
 )
 @click.option(
     "--vasculature-dir",
