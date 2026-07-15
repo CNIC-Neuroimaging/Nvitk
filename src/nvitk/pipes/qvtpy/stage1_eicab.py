@@ -323,9 +323,12 @@ def submit_subject_sge(
     if scratch_output_root is not None:
         scratch_dir = resolve_eicab_scratch_dir(scratch_output_root, subject, eicab_subdir)
         tmp = scratch_dir / ".eicab_tmp"
+        # Scratch lives on the cluster compute node (/data_tmp); mkdir happens in
+        # the emitted SGE shell command, not on the submission workstation.
     else:
         tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
-    tmp.mkdir(parents=True, exist_ok=True)
+        if emit is None:
+            tmp.mkdir(parents=True, exist_ok=True)
 
     eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
     pipeline_c = _resolve_pipeline_container(pipeline_container)

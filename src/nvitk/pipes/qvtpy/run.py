@@ -979,6 +979,7 @@ def _submit_qvtpy_sge_subjects_remote(
     "--eicab-scratch-output/--no-eicab-scratch-output",
     is_flag=True,
     default=True,
+    show_default=True,
     help=(
         "(sge, stage1) Use pipelines.eicab.default_scratch_output_root from "
         ".nvitk/sge.json for cluster scratch (same rsync behaviour as "
