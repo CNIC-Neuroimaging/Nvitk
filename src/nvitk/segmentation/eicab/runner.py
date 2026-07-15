@@ -25,11 +25,13 @@ _THREAD_LIMIT_VARS = (
 _CONTAINER_PATH_ENV = (
     "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
 )
+_EICAB_EXPRESS_HOME = "/vessel_segmentation_snaillab"
 _NVITK_SRC_BIND = "/nvitk/src"
-_EICAB_SH = "/vessel_segmentation_snaillab/eICAB.sh"
+_EICAB_SH = f"{_EICAB_EXPRESS_HOME}/eICAB.sh"
 _CPU_LIMIT_SITE = (
     f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_site"
 )
+_EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
 
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
@@ -289,10 +291,13 @@ def build_eicab_singularity_shell_cmd(
         parts.extend(
             [
                 "--env",
-                f"PYTHONPATH={_CPU_LIMIT_SITE}",
+                f"EXPRESS_HOME={_EICAB_EXPRESS_HOME}",
+                "--env",
+                f"PYTHONPATH={_EICAB_PYTHONPATH}",
+                "--env",
+                f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}",
             ]
         )
-        parts.extend(["--env", f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}"])
     if use_nv:
         parts.append("--nv")
     parts.extend(
