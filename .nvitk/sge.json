@@ -30,7 +30,8 @@
       "default_sge_container_root": "/images/eicab3.sif",
       "default_vasculature_host_dir": "/programs/Neuro/vasculature2",
       "eicab_thread_limit": 8,
-      "eicab_local_metric_scratch": true
+      "eicab_local_metric_scratch": true,
+      "eicab_metric_scratch_root": "/data_tmp"
     },
     "totalsegmentator": {
       "sge_project": "GPU",

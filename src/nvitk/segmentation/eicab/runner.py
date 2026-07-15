@@ -32,11 +32,13 @@ _CPU_LIMIT_SITE = (
     f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_site"
 )
 _EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
-_METRIC_SCRATCH_PREP = (
-    'METRIC_SCRATCH="${TMPDIR:-/tmp}/nvitk_eicab_metric_${JOB_ID:-$$}" && '
-    'rm -rf "$METRIC_SCRATCH" && mkdir -p "$METRIC_SCRATCH"'
-)
+# ComputeVED writes Scale_*/Ved_* into process CWD, then moves them. Parallel SGE
+# jobs must not share a CWD (home / SGE_O_WORKDIR) or they steal each other's files.
+# Cluster node-local scratch defaults to /data_tmp (no $TMPDIR on this site).
+_DEFAULT_METRIC_SCRATCH_ROOT = "/data_tmp"
 _METRIC_SCRATCH_BIND = "$METRIC_SCRATCH:/output/metric_space"
+# Force container CWD onto the per-subject /tmp bind (ComputeVED Scale_* globs).
+_EICAB_CONTAINER_PWD = "/tmp/ved_cwd"
 
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
@@ -165,6 +167,8 @@ def build_eicab_singularity_argv(
 
     cmd.extend(
         [
+            "--pwd",
+            _EICAB_CONTAINER_PWD,
             "--bind",
             f"{input_p}:{container_input}:ro",
             "--bind",
@@ -261,8 +265,15 @@ def build_eicab_singularity_shell_cmd(
     When *cpu_limit_shell_expr* is set and *nvitk_src_dir* is provided, uses
     ``singularity exec`` with ``eICAB.sh`` and a ``sitecustomize`` hook on
     ``PYTHONPATH`` so VED respects ``NVITK_CPU_LIMIT`` (``multiprocessing.cpu_count``).
+
+    Always passes ``--pwd /tmp/ved_cwd`` so ComputeVED's CWD-relative Scale_*
+    globs stay isolated under the per-subject ``/tmp`` bind.
     """
-    if not cpu_limit_shell_expr:
+    needs_custom = bool(cpu_limit_shell_expr) or local_metric_scratch or (
+        nvitk_src_dir is not None
+    )
+    if not needs_custom and not cpu_limit_shell_expr:
+        # Local / simple path: still use argv with --pwd.
         return shlex.join(
             build_eicab_singularity_argv(
                 input_nii,
@@ -284,15 +295,16 @@ def build_eicab_singularity_shell_cmd(
     container_input = _eicab_container_input_path(input_p)
     device_arg, use_nv = _eicab_device_arg(device)
 
-    use_cpu_runner = nvitk_src_dir is not None
+    use_cpu_runner = bool(cpu_limit_shell_expr) and nvitk_src_dir is not None
     parts: list[str] = [
         "singularity",
         "exec" if use_cpu_runner else "run",
         "--cleanenv",
     ]
     parts.extend(["--env", shlex.quote(f"PATH={_CONTAINER_PATH_ENV}")])
-    for var in _THREAD_LIMIT_VARS:
-        parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
+    if cpu_limit_shell_expr:
+        for var in _THREAD_LIMIT_VARS:
+            parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
     if use_cpu_runner:
         parts.extend(
             [
@@ -308,6 +320,8 @@ def build_eicab_singularity_shell_cmd(
         parts.append("--nv")
     parts.extend(
         [
+            "--pwd",
+            _EICAB_CONTAINER_PWD,
             "--bind",
             shlex.quote(f"{input_p}:{container_input}:ro"),
             "--bind",
@@ -378,6 +392,11 @@ def run_eicab(
         raise FileNotFoundError(f"Input NIfTI not found: {input_p}")
     output_p.mkdir(parents=True, exist_ok=True)
     tmp_p.mkdir(parents=True, exist_ok=True)
+    (tmp_p / "ved_cwd").mkdir(parents=True, exist_ok=True)
+    metric = output_p / "metric_space"
+    if metric.exists():
+        shutil.rmtree(metric, ignore_errors=True)
+    metric.mkdir(parents=True, exist_ok=True)
 
     cmd = build_eicab_singularity_argv(
         input_p,
@@ -417,9 +436,21 @@ def run_eicab(
     return proc
 
 
-def metric_scratch_prep_shell() -> str:
-    """Shell snippet: node-local dir for VED ``metric_space`` scale NIfTIs."""
-    return _METRIC_SCRATCH_PREP
+def metric_scratch_prep_shell(root: str | None = None) -> str:
+    """Shell snippet: node-local dir for VED ``metric_space`` scale NIfTIs.
+
+    Defaults to ``/data_tmp`` on this cluster (``$TMPDIR`` is unset).
+    """
+    preferred = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
+    return (
+        f'METRIC_ROOT={shlex.quote(preferred)} ; '
+        'if [ ! -d "$METRIC_ROOT" ] || [ ! -w "$METRIC_ROOT" ]; then '
+        'if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]; then METRIC_ROOT="$TMPDIR"; '
+        'elif [ -d /scratch ] && [ -w /scratch ]; then METRIC_ROOT=/scratch; '
+        'else METRIC_ROOT=/tmp; fi; fi ; '
+        'METRIC_SCRATCH="$METRIC_ROOT/nvitk_eicab_metric_${JOB_ID:-$$}_${SGE_TASK_ID:-0}" && '
+        'rm -rf "$METRIC_SCRATCH" && mkdir -p "$METRIC_SCRATCH"'
+    )
 
 
 __all__ = [

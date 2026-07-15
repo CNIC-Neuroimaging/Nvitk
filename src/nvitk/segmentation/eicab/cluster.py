@@ -202,12 +202,21 @@ def build_eicab_host_shell_cmd(
         cpu_expr = str(thread_limit)
     else:
         cpu_expr = None
+    out_q = shlex.quote(str(output_dir.resolve()))
+    tmp_q = shlex.quote(str(tmp_dir.resolve()))
+    # Wipe stale VED scale files from prior failed runs (shape-mismatch source).
+    # Isolate CWD under the per-subject /tmp bind so ComputeVED Scale_* globs
+    # cannot collide across parallel jobs sharing SGE_O_WORKDIR/home.
     prep = (
-        f"mkdir -p {shlex.quote(str(output_dir.resolve()))} "
-        f"&& mkdir -p {shlex.quote(str(tmp_dir.resolve()))}"
+        f"mkdir -p {out_q} && mkdir -p {tmp_q} "
+        f"&& rm -rf {out_q}/metric_space "
+        f"&& mkdir -p {out_q}/metric_space "
+        f"&& rm -rf {tmp_q}/ved_cwd && mkdir -p {tmp_q}/ved_cwd"
     )
     if local_metric_scratch:
-        prep = f"{prep} && {metric_scratch_prep_shell()}"
+        from .config import EICAB_METRIC_SCRATCH_ROOT
+
+        prep = f"{prep} && {metric_scratch_prep_shell(EICAB_METRIC_SCRATCH_ROOT)}"
     steps: list[str] = [
         prep,
         build_eicab_singularity_shell_cmd(

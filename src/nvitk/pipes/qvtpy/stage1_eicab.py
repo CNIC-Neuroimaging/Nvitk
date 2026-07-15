@@ -351,9 +351,14 @@ def submit_subject_sge(
         if local_metric_scratch is None
         else local_metric_scratch
     )
+    log.info(
+        "  metric/cwd : wipe metric_space + --pwd /tmp/ved_cwd "
+        "(isolate ComputeVED Scale_* from parallel jobs)"
+    )
     if metric_scratch:
         log.info(
-            "  metric scratch: $TMPDIR/nvitk_eicab_metric_$JOB_ID "
+            "  metric scratch: "
+            f"{eicab_cfg.EICAB_METRIC_SCRATCH_ROOT}/nvitk_eicab_metric_$JOB_ID "
             "(node-local VED scale NIfTIs)"
         )
     log.info(f"  outer container (run_job): {pipeline_c}")

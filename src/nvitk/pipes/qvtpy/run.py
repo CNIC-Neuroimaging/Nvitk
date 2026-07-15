@@ -991,7 +991,7 @@ def _submit_qvtpy_sge_subjects_remote(
     "--eicab-local-metric-scratch/--no-eicab-local-metric-scratch",
     default=None,
     help=(
-        "(sge, stage1) Write VED multiscale NIfTIs to node-local $TMPDIR "
+        "(sge, stage1) Write VED multiscale NIfTIs to node-local /data_tmp "
         "(bind over /output/metric_space). Default from .nvitk/sge.json."
     ),
 )
@@ -1319,7 +1319,8 @@ def main(
             log.info(f"  eicab sge pe smp (qsub -pe): {eicab_pe_smp_eff}")
         if eicab_metric_scratch_eff:
             log.info(
-                "  eicab metric scratch: node-local $TMPDIR for VED scale NIfTIs"
+                "  eicab metric scratch: "
+                f"{eicab_cfg.EICAB_METRIC_SCRATCH_ROOT} (node-local VED scale NIfTIs)"
             )
     run_s2 = STAGE_REG in stages
     run_s3 = STAGE_CENTERLINE in stages
