@@ -205,18 +205,19 @@ def build_eicab_host_shell_cmd(
     out_q = shlex.quote(str(output_dir.resolve()))
     tmp_q = shlex.quote(str(tmp_dir.resolve()))
     # Wipe stale VED scale files from prior failed runs (shape-mismatch source).
-    # Isolate CWD under the per-subject /tmp bind so ComputeVED Scale_* globs
-    # cannot collide across parallel jobs sharing SGE_O_WORKDIR/home.
+    # ved_cwd on NFS is only a fallback; with local scratch, CWD is rebound from /data_tmp.
     prep = (
         f"mkdir -p {out_q} && mkdir -p {tmp_q} "
         f"&& rm -rf {out_q}/metric_space "
         f"&& mkdir -p {out_q}/metric_space "
         f"&& rm -rf {tmp_q}/ved_cwd && mkdir -p {tmp_q}/ved_cwd"
     )
+    scratch_root: str | None = None
     if local_metric_scratch:
         from .config import EICAB_METRIC_SCRATCH_ROOT
 
-        prep = f"{prep} && {metric_scratch_prep_shell(EICAB_METRIC_SCRATCH_ROOT)}"
+        scratch_root = EICAB_METRIC_SCRATCH_ROOT
+        prep = f"{prep} && {metric_scratch_prep_shell(scratch_root)}"
     steps: list[str] = [
         prep,
         build_eicab_singularity_shell_cmd(
@@ -232,6 +233,7 @@ def build_eicab_host_shell_cmd(
             cpu_limit_shell_expr=cpu_expr,
             nvitk_src_dir=src_dir,
             local_metric_scratch=local_metric_scratch,
+            metric_scratch_root=scratch_root,
         )
     ]
     if not keep_aux_outputs:

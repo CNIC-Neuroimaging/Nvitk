@@ -34,11 +34,44 @@ _CPU_LIMIT_SITE = (
 _EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
 # ComputeVED writes Scale_*/Ved_* into process CWD, then moves them. Parallel SGE
 # jobs must not share a CWD (home / SGE_O_WORKDIR) or they steal each other's files.
-# Cluster node-local scratch defaults to /data_tmp (no $TMPDIR on this site).
+# Cluster node-local scratch is /data_tmp (no $TMPDIR on this site).
 _DEFAULT_METRIC_SCRATCH_ROOT = "/data_tmp"
-_METRIC_SCRATCH_BIND = "$METRIC_SCRATCH:/output/metric_space"
-# Force container CWD onto the per-subject /tmp bind (ComputeVED Scale_* globs).
+# Force container CWD onto a path we also bind from node-local scratch.
 _EICAB_CONTAINER_PWD = "/tmp/ved_cwd"
+
+
+def _metric_scratch_job_dir_expr(root: str) -> str:
+    """Shell path expression for this job's node-local scratch (expands at job runtime)."""
+    r = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
+    # Only JOB_ID — SGE_TASK_ID is unset/“undefined” on non-array jobs here.
+    return f"{r}/nvitk_eicab_${{JOB_ID:-$$}}"
+
+
+def metric_scratch_bind_args(root: str | None = None) -> list[str]:
+    """Singularity ``--bind`` args for VED metric_space + CWD on node-local scratch."""
+    job_dir = _metric_scratch_job_dir_expr(root or _DEFAULT_METRIC_SCRATCH_ROOT)
+    # Double-quoted so $JOB_ID expands at job runtime; not shlex.quote (would freeze it).
+    return [
+        "--bind",
+        f'"{job_dir}/metric_space:/output/metric_space"',
+        "--bind",
+        f'"{job_dir}/cwd:{_EICAB_CONTAINER_PWD}"',
+    ]
+
+
+def metric_scratch_prep_shell(root: str | None = None) -> str:
+    """Shell snippet: create node-local dirs for VED ``metric_space`` and CWD."""
+    preferred = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
+    job_dir = _metric_scratch_job_dir_expr(preferred)
+    return (
+        f"METRIC_SCRATCH_ROOT={shlex.quote(preferred)} ; "
+        'if [ ! -d "$METRIC_SCRATCH_ROOT" ] || [ ! -w "$METRIC_SCRATCH_ROOT" ]; then '
+        'echo "ERROR: eICAB metric scratch root not writable: $METRIC_SCRATCH_ROOT" >&2; exit 1; fi ; '
+        f'METRIC_SCRATCH="{job_dir}" && '
+        'rm -rf "$METRIC_SCRATCH" && '
+        'mkdir -p "$METRIC_SCRATCH/metric_space" "$METRIC_SCRATCH/cwd" && '
+        'echo "eICAB node-local scratch: $METRIC_SCRATCH"'
+    )
 
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
@@ -259,6 +292,7 @@ def build_eicab_singularity_shell_cmd(
     cpu_limit_shell_expr: str | None = None,
     nvitk_src_dir: str | Path | None = None,
     local_metric_scratch: bool = False,
+    metric_scratch_root: str | None = None,
 ) -> str:
     """Shell command string for eICAB ``singularity run`` or ``exec``.
 
@@ -334,7 +368,9 @@ def build_eicab_singularity_shell_cmd(
     if vhp and vhp.is_dir():
         parts.extend(["--bind", shlex.quote(f"{vhp}:/programs/Neuro/vasculature2")])
     if local_metric_scratch:
-        parts.extend(["--bind", _METRIC_SCRATCH_BIND])
+        # After /output bind so this overlays NFS metric_space; explicit ${JOB_ID}
+        # path (not $METRIC_SCRATCH) so the bind cannot silently fall back to NFS.
+        parts.extend(metric_scratch_bind_args(metric_scratch_root))
     if use_cpu_runner:
         src_p = Path(nvitk_src_dir).resolve()
         parts.extend(
@@ -436,25 +472,9 @@ def run_eicab(
     return proc
 
 
-def metric_scratch_prep_shell(root: str | None = None) -> str:
-    """Shell snippet: node-local dir for VED ``metric_space`` scale NIfTIs.
-
-    Defaults to ``/data_tmp`` on this cluster (``$TMPDIR`` is unset).
-    """
-    preferred = (root or _DEFAULT_METRIC_SCRATCH_ROOT).rstrip("/") or _DEFAULT_METRIC_SCRATCH_ROOT
-    return (
-        f'METRIC_ROOT={shlex.quote(preferred)} ; '
-        'if [ ! -d "$METRIC_ROOT" ] || [ ! -w "$METRIC_ROOT" ]; then '
-        'if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]; then METRIC_ROOT="$TMPDIR"; '
-        'elif [ -d /scratch ] && [ -w /scratch ]; then METRIC_ROOT=/scratch; '
-        'else METRIC_ROOT=/tmp; fi; fi ; '
-        'METRIC_SCRATCH="$METRIC_ROOT/nvitk_eicab_metric_${JOB_ID:-$$}_${SGE_TASK_ID:-0}" && '
-        'rm -rf "$METRIC_SCRATCH" && mkdir -p "$METRIC_SCRATCH"'
-    )
-
-
 __all__ = [
     "build_eicab_singularity_argv",
+    "metric_scratch_bind_args",
     "metric_scratch_prep_shell",
     "prune_eicab_outputs",
     "run_eicab",

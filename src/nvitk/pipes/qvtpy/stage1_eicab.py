@@ -357,9 +357,8 @@ def submit_subject_sge(
     )
     if metric_scratch:
         log.info(
-            "  metric scratch: "
-            f"{eicab_cfg.EICAB_METRIC_SCRATCH_ROOT}/nvitk_eicab_metric_$JOB_ID "
-            "(node-local VED scale NIfTIs)"
+            f"  metric scratch: {eicab_cfg.EICAB_METRIC_SCRATCH_ROOT}/nvitk_eicab_$JOB_ID/"
+            "{{metric_space,cwd}} (bind over /output/metric_space + /tmp/ved_cwd)"
         )
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
