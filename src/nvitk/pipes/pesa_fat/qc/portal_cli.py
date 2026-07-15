@@ -11,7 +11,7 @@ from nvitk.pipes.pesa_fat.common.paths import DEFAULT_RESULTS_ROOT, layout
 from nvitk.pipes.pesa_fat.common.stage4_qc import RES_QC_DIR
 from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
 
-DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
+DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/PESA-Fat/Visit-5-DIXON_PET-CT/VALIDATION/")
 DEFAULT_HOST = "10.149.82.75"
 DEFAULT_PORT = 8008
 
