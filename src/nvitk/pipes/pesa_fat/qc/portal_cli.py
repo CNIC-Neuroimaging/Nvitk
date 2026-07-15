@@ -11,12 +11,15 @@ from nvitk.pipes.pesa_fat.common.paths import DEFAULT_RESULTS_ROOT, layout
 from nvitk.pipes.pesa_fat.common.stage4_qc import RES_QC_DIR
 from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
 
+DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
+DEFAULT_HOST = "10.149.82.75"
+DEFAULT_PORT = 8008
 
 @click.command("nvitk-pesa-fat-qc-portal")
 @click.option("--batch", required=False, default=None, help="Optional batch name (e.g. '202602_Week4').")
-@click.option("--results-root", type=click.Path(path_type=Path), default=None)
-@click.option("--host", default="0.0.0.0", show_default=True)
-@click.option("--port", type=int, default=8008, show_default=True)
+@click.option("--results-root", type=click.Path(path_type=Path), default=DEFAULT_RESULTS_ROOT)
+@click.option("--host", default=DEFAULT_HOST, show_default=True)
+@click.option("--port", type=int, default=DEFAULT_PORT, show_default=True)
 @click.option(
     "--reviews-xlsx",
     type=click.Path(path_type=Path),

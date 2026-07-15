@@ -533,7 +533,7 @@ def _discover_batches(results_root: Path) -> list[str]:
         return []
     batches: list[str] = []
     for p in sorted(root.iterdir()):
-        if not p.is_dir():
+        if not p.is_dir() or p.name.startswith("_"):
             continue
         if (p / "res_qc" / "index.html").is_file():
             batches.append(p.name)
