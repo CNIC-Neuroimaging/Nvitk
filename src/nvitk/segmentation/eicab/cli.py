@@ -18,12 +18,22 @@ from nvitk.cluster.sge import SgeResources, write_script_header
 
 from . import config as cfg
 from .cluster import submit_eicab_job
-from .runner import run_eicab
+from .runner import resolve_eicab_tmp_dir, run_eicab
 
 
 log = Logger()
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _input_subject_key(input_path: Path) -> str:
+    """Subject-like token from a TOF NIfTI filename."""
+    stem = input_path.name
+    if stem.lower().endswith(".nii.gz"):
+        stem = stem[: -len(".nii.gz")]
+    elif stem.lower().endswith(".nii"):
+        stem = stem[: -len(".nii")]
+    return stem or input_path.parent.name
 
 
 def _default_nvitk_src_dir() -> Path:
@@ -76,7 +86,7 @@ def _default_emit_script(input_path: Path) -> Path:
     type=click.Path(path_type=Path),
     default=None,
     help="Host temp directory bind-mounted to /tmp in the eICAB container "
-    "(sge default: a ``.eicab_tmp`` folder under --output).",
+    "(default: ``<output>/.eicab_tmp``; shared bases are namespaced per subject).",
 )
 @click.option(
     "--keep-aux-outputs",
@@ -114,7 +124,7 @@ def _default_emit_script(input_path: Path) -> Path:
     type=click.Path(path_type=Path),
     default=None,
     help="(sge) Host root mounted at /nvitk/output/ (default: parent of --output). "
-    "Default tmp is under --output; use --tmp-dir for a separate host path (e.g. /data_tmp).",
+    "Default tmp is ``<output>/.eicab_tmp``; shared bases are namespaced per subject.",
 )
 @click.option(
     "--vasculature-dir",
@@ -204,7 +214,11 @@ def main(
                 "run_eicab_inference.sh). Pass --vasculature-dir or set "
                 "pipelines.eicab.default_vasculature_host_dir in .nvitk/sge.json."
             )
-        tmp = Path(tmp_dir) if tmp_dir is not None else cfg.DEFAULT_TMP_DIR
+        tmp = resolve_eicab_tmp_dir(
+            output_path,
+            tmp_dir=tmp_dir,
+            subject_key=_input_subject_key(input_path),
+        )
         if not ec.is_file():
             raise click.ClickException(
                 f"eICAB container not found: {ec}. Pass --container or fix "
@@ -235,7 +249,11 @@ def main(
     )
     out_root = Path(output_root) if output_root is not None else output_path.parent
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
-    tmp = Path(tmp_dir) if tmp_dir is not None else (output_path / ".eicab_tmp")
+    tmp = resolve_eicab_tmp_dir(
+        output_path,
+        tmp_dir=tmp_dir,
+        subject_key=_input_subject_key(input_path),
+    )
 
     pc = Path(pipeline_container) if pipeline_container is not None else cfg.PIPELINE_CONTAINER_PATH
     ld = Path(log_dir) if log_dir is not None else cfg.SGE_LOG_DIR

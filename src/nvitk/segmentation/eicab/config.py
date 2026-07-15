@@ -22,6 +22,9 @@ from nvitk.cluster import sge_json as _sj
 
 # eICAB Singularity image (override with --container).
 CONTAINER_PATH = Path("/images/eicab3.sif")
+# Override via ``pipelines.eicab.default_tmp_dir`` in ``.nvitk/sge.json`` only when
+# callers pass an explicit shared base; :func:`resolve_eicab_tmp_dir` namespaces it
+# per subject. Prefer ``<output>/.eicab_tmp`` (the default when *tmp_dir* is omitted).
 DEFAULT_TMP_DIR = Path("~/local_tmp")
 
 PIPELINE_CONTAINER_PATH = CONTAINER_PATH

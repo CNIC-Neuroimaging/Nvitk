@@ -21,6 +21,39 @@ _WB_RE = re.compile(
 )
 _RESAMPLED_RE = re.compile(r"resampled", re.IGNORECASE)
 _NIFTI_SUFFIXES = (".nii.gz", ".nii")
+_EICAB_TMP_BASENAME = ".eicab_tmp"
+
+
+def _infer_eicab_subject_key(output_dir: Path) -> str:
+    """Best-effort subject id for tmp namespacing (qvtpy: ``.../<subject>/eicab``)."""
+    if output_dir.name.lower() in {"eicab", _EICAB_TMP_BASENAME}:
+        return output_dir.parent.name
+    return output_dir.name
+
+
+def resolve_eicab_tmp_dir(
+    output_dir: str | Path,
+    *,
+    tmp_dir: str | Path | None = None,
+    subject_key: str | None = None,
+) -> Path:
+    """Return an isolated eICAB temp directory for one subject/run.
+
+    Defaults to ``<output_dir>/.eicab_tmp``. When *tmp_dir* is a shared host
+    base (e.g. ``/data_tmp``), namespaces with *subject_key* so parallel jobs
+    do not clobber each other's scratch files during whole-brain mask steps.
+    """
+    output_p = Path(output_dir).expanduser()
+    per_output = output_p / _EICAB_TMP_BASENAME
+    if tmp_dir is None:
+        return per_output
+    base = Path(tmp_dir).expanduser()
+    if base.name == _EICAB_TMP_BASENAME:
+        return base
+    if base == output_p:
+        return per_output
+    key = subject_key or _infer_eicab_subject_key(output_p)
+    return base / key / _EICAB_TMP_BASENAME
 
 
 def _is_nifti(p: Path) -> bool:
@@ -184,7 +217,8 @@ def run_eicab(
     attention: bool = False,
     device: str = "cpu",
     container: str | Path,
-    tmp_dir: str | Path,
+    tmp_dir: str | Path | None = None,
+    subject_key: str | None = None,
     keep_aux_outputs: bool = False,
     vasculature_host_path: str | Path | None = None,
     check: bool = True,
@@ -199,7 +233,11 @@ def run_eicab(
     """
     input_p = Path(input_nii).resolve()
     output_p = Path(output_dir).resolve()
-    tmp_p = Path(tmp_dir).resolve()
+    tmp_p = resolve_eicab_tmp_dir(
+        output_p,
+        tmp_dir=tmp_dir,
+        subject_key=subject_key,
+    ).resolve()
     container_p = Path(container).resolve()
 
     if not container_p.is_file():
@@ -254,6 +292,7 @@ def run_eicab(
 __all__ = [
     "build_eicab_singularity_argv",
     "prune_eicab_outputs",
+    "resolve_eicab_tmp_dir",
     "run_eicab",
     "segmentation_outputs_to_keep",
 ]
