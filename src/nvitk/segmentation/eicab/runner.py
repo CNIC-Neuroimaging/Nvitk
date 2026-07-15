@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Iterable
 
 from nvitk.core.logger import Logger
+
+from . import config as _eicab_cfg
 
 log = Logger()
 
@@ -31,6 +34,19 @@ def _infer_eicab_subject_key(output_dir: Path) -> str:
     return output_dir.name
 
 
+def _scratch_base_ready(base: Path) -> bool:
+    """True when *base* exists (or can be created) and is writable."""
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        return base.is_dir() and os.access(base, os.W_OK | os.X_OK)
+    except OSError:
+        return False
+
+
+def _scoped_scratch(base: Path, subject_key: str) -> Path:
+    return base.expanduser() / subject_key / _EICAB_TMP_BASENAME
+
+
 def resolve_eicab_tmp_dir(
     output_dir: str | Path,
     *,
@@ -39,21 +55,38 @@ def resolve_eicab_tmp_dir(
 ) -> Path:
     """Return an isolated eICAB temp directory for one subject/run.
 
-    Defaults to ``<output_dir>/.eicab_tmp``. When *tmp_dir* is a shared host
-    base (e.g. ``/data_tmp``), namespaces with *subject_key* so parallel jobs
-    do not clobber each other's scratch files during whole-brain mask steps.
+    Prefer fast host scratch: ``<DEFAULT_TMP_DIR>/<subject>/.eicab_tmp`` (e.g.
+    ``/data_tmp/PESA123/.eicab_tmp``). When scratch is unavailable, fall back to
+    ``<output_dir>/.eicab_tmp``. An explicit *tmp_dir* shared base (e.g.
+    ``/data_tmp``) is namespaced the same way; a path ending in ``.eicab_tmp`` is
+    used as-is.
     """
     output_p = Path(output_dir).expanduser()
     per_output = output_p / _EICAB_TMP_BASENAME
-    if tmp_dir is None:
-        return per_output
-    base = Path(tmp_dir).expanduser()
-    if base.name == _EICAB_TMP_BASENAME:
-        return base
-    if base == output_p:
-        return per_output
     key = subject_key or _infer_eicab_subject_key(output_p)
-    return base / key / _EICAB_TMP_BASENAME
+
+    if tmp_dir is not None:
+        base = Path(tmp_dir).expanduser()
+        if base.name == _EICAB_TMP_BASENAME:
+            return base
+        if base == output_p:
+            return _resolve_default_tmp(output_p, key, per_output)
+        return _scoped_scratch(base, key)
+
+    return _resolve_default_tmp(output_p, key, per_output)
+
+
+def _resolve_default_tmp(output_p: Path, subject_key: str, per_output: Path) -> Path:
+    scratch = _eicab_cfg.DEFAULT_TMP_DIR
+    scoped = _scoped_scratch(scratch, subject_key)
+    if _scratch_base_ready(scratch):
+        return scoped
+    log.info(
+        "eICAB tmp: scratch base %s unavailable; using output-local %s",
+        scratch,
+        per_output,
+    )
+    return per_output
 
 
 def _is_nifti(p: Path) -> bool:
@@ -250,6 +283,7 @@ def run_eicab(
         raise FileNotFoundError(f"Input NIfTI not found: {input_p}")
     output_p.mkdir(parents=True, exist_ok=True)
     tmp_p.mkdir(parents=True, exist_ok=True)
+    log.info("eICAB tmp bind: %s -> /tmp in container", tmp_p)
 
     cmd = build_eicab_singularity_argv(
         input_p,

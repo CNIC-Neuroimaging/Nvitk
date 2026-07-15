@@ -198,7 +198,6 @@ def run_subject(
             f"No TOF NIfTI under {subj_nifti / 'TOF'} (expected TOF/TOF.nii.gz from stage0)."
         )
 
-    tmp = resolve_eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
     container = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
     vas_host = (
         Path(vasculature_dir).expanduser()
@@ -210,9 +209,11 @@ def run_subject(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return out_dir
 
+    tmp = resolve_eicab_tmp_dir(out_dir, tmp_dir=tmp_dir, subject_key=subject)
     log.info(f"qvtpy stage1 eICAB (local) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
+    log.info(f"  tmp   : {tmp}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     run_eicab(
@@ -223,7 +224,8 @@ def run_subject(
         attention=attention,
         device=device,
         container=container,
-        tmp_dir=tmp,
+        tmp_dir=tmp_dir,
+        subject_key=subject,
         keep_aux_outputs=keep_aux_outputs,
         vasculature_host_path=vas_host,
         capture_output=False,
@@ -335,6 +337,7 @@ def submit_subject_sge(
     log.info(f"qvtpy stage1 eICAB (sge) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
+    log.info(f"  tmp   : {tmp}")
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
 
@@ -499,8 +502,8 @@ def _submit_postprocess_only_sge(
     "--tmp-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp). "
-    "When set to a shared base path (e.g. /data_tmp), a per-subject subfolder is created automatically.",
+    help="Temp directory base for eICAB (default: /data_tmp/<subject>/.eicab_tmp on cluster, "
+    "else <output>/<subject>/eicab/.eicab_tmp). Shared bases are namespaced per subject.",
 )
 @click.option(
     "--vasculature-dir",

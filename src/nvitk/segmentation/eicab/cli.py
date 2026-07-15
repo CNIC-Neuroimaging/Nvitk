@@ -85,8 +85,8 @@ def _default_emit_script(input_path: Path) -> Path:
     "--tmp-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Host temp directory bind-mounted to /tmp in the eICAB container "
-    "(default: ``<output>/.eicab_tmp``; shared bases are namespaced per subject).",
+    help="Host temp directory base bind-mounted to /tmp in the eICAB container "
+    "(default: /data_tmp/<subject>/.eicab_tmp when available, else <output>/.eicab_tmp).",
 )
 @click.option(
     "--keep-aux-outputs",
@@ -124,7 +124,7 @@ def _default_emit_script(input_path: Path) -> Path:
     type=click.Path(path_type=Path),
     default=None,
     help="(sge) Host root mounted at /nvitk/output/ (default: parent of --output). "
-    "Default tmp is ``<output>/.eicab_tmp``; shared bases are namespaced per subject.",
+    "Default tmp is /data_tmp/<subject>/.eicab_tmp when available.",
 )
 @click.option(
     "--vasculature-dir",
@@ -214,11 +214,6 @@ def main(
                 "run_eicab_inference.sh). Pass --vasculature-dir or set "
                 "pipelines.eicab.default_vasculature_host_dir in .nvitk/sge.json."
             )
-        tmp = resolve_eicab_tmp_dir(
-            output_path,
-            tmp_dir=tmp_dir,
-            subject_key=_input_subject_key(input_path),
-        )
         if not ec.is_file():
             raise click.ClickException(
                 f"eICAB container not found: {ec}. Pass --container or fix "
@@ -233,7 +228,8 @@ def main(
             attention=attention,
             device=device,
             container=ec,
-            tmp_dir=tmp,
+            tmp_dir=tmp_dir,
+            subject_key=_input_subject_key(input_path),
             keep_aux_outputs=keep_aux_outputs,
             vasculature_host_path=vas_host,
             capture_output=not display_progress,
