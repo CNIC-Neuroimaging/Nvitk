@@ -341,7 +341,7 @@ def submit_subject_sge(
     if thread_limit:
         log.info(
             f"  thread limit  : {thread_limit} "
-            "(OMP/BLAS + VED via cpu_limit_runner / NVITK_CPU_LIMIT)"
+            "(OMP/BLAS + VED via sitecustomize / NVITK_CPU_LIMIT)"
         )
     if sge_pe_smp:
         log.info(f"  sge pe smp    : {sge_pe_smp} (qsub -pe smp {sge_pe_smp})")

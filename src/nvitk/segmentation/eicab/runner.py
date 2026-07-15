@@ -26,8 +26,9 @@ _CONTAINER_PATH_ENV = (
     "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
 )
 _NVITK_SRC_BIND = "/nvitk/src"
-_CPU_LIMIT_RUNNER = (
-    f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_runner.py"
+_EICAB_SH = "/vessel_segmentation_snaillab/eICAB.sh"
+_CPU_LIMIT_SITE = (
+    f"{_NVITK_SRC_BIND}/nvitk/segmentation/eicab/cpu_limit_site"
 )
 
 # Circle-of-Willis multilabel (legacy naming).
@@ -250,8 +251,8 @@ def build_eicab_singularity_shell_cmd(
     """Shell command string for eICAB ``singularity run`` or ``exec``.
 
     When *cpu_limit_shell_expr* is set and *nvitk_src_dir* is provided, uses
-    ``singularity exec`` with :mod:`cpu_limit_runner` so VED respects
-    ``NVITK_CPU_LIMIT`` (``multiprocessing.cpu_count``), not only OMP threads.
+    ``singularity exec`` with ``eICAB.sh`` and a ``sitecustomize`` hook on
+    ``PYTHONPATH`` so VED respects ``NVITK_CPU_LIMIT`` (``multiprocessing.cpu_count``).
     """
     if not cpu_limit_shell_expr:
         return shlex.join(
@@ -285,6 +286,12 @@ def build_eicab_singularity_shell_cmd(
     for var in _THREAD_LIMIT_VARS:
         parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
     if use_cpu_runner:
+        parts.extend(
+            [
+                "--env",
+                f"PYTHONPATH={_CPU_LIMIT_SITE}",
+            ]
+        )
         parts.extend(["--env", f"NVITK_CPU_LIMIT={cpu_limit_shell_expr}"])
     if use_nv:
         parts.append("--nv")
@@ -308,7 +315,7 @@ def build_eicab_singularity_shell_cmd(
         )
     parts.append(shlex.quote(str(container_p)))
     if use_cpu_runner:
-        parts.extend(["python3", shlex.quote(_CPU_LIMIT_RUNNER)])
+        parts.append(shlex.quote(_EICAB_SH))
     parts.extend(
         _eicab_cli_args(
             container_input,
