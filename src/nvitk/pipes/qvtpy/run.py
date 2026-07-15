@@ -351,7 +351,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     phase_bg_static_percentile: float,
     eicab_resolution: float,
     eicab_device: str,
-    eicab_scratch_output_root: Path | None,
+    eicab_sge_pe_smp: int | None,
     eicab_container: Path | None,
     vasculature_dir: Path | None,
     post_process_eicab: bool,
@@ -472,7 +472,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         eicab_container=eicab_container,
                         pipeline_container=container,
                         src_dir=src_p,
-                        scratch_output_root=eicab_scratch_output_root,
+                        sge_pe_smp=eicab_sge_pe_smp,
                         vasculature_dir=vasculature_dir,
                         post_process_eicab=post_process_eicab,
                         hold_jid=prev_jid,
@@ -966,24 +966,12 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
 @click.option(
-    "--eicab-scratch-output-root",
-    type=click.Path(path_type=Path),
+    "--eicab-sge-pe-smp",
+    type=int,
     default=None,
     help=(
-        "(sge, stage1) Cluster node scratch parent for parallel eICAB "
-        "(e.g. /data_tmp/nvitk-eicab). Work dirs are per-subject; "
-        "finished outputs rsync to --output-root on success."
-    ),
-)
-@click.option(
-    "--eicab-scratch-output/--no-eicab-scratch-output",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help=(
-        "(sge, stage1) Use pipelines.eicab.default_scratch_output_root from "
-        ".nvitk/sge.json for cluster scratch (same rsync behaviour as "
-        "--eicab-scratch-output-root)."
+        "(sge, stage1) qsub -pe smp N per eICAB job and cap OMP thread env inside "
+        "the container. Default: pipelines.eicab.sge_pe_smp from .nvitk/sge.json."
     ),
 )
 @click.option(
@@ -1192,8 +1180,7 @@ def main(
     vasculature_dir: Path | None,
     eicab_device: str,
     eicab_resolution: float,
-    eicab_scratch_output_root: Path | None,
-    eicab_scratch_output: bool,
+    eicab_sge_pe_smp: int | None,
     post_process_eicab: bool,
     only_pp: bool,
     stage2_reference: str,
@@ -1283,18 +1270,9 @@ def main(
     )
     log.info(f"  totalseg models={totalseg_model_dir_eff} ({'cluster' if submit == 'sge' else 'local'})")
 
-    eicab_scratch_eff: Path | None = None
-    if eicab_scratch_output_root is not None:
-        eicab_scratch_eff = Path(eicab_scratch_output_root)
-    elif eicab_scratch_output:
-        if eicab_cfg.DEFAULT_SCRATCH_OUTPUT_ROOT is None:
-            raise click.ClickException(
-                "--eicab-scratch-output requires pipelines.eicab.default_scratch_output_root "
-                "in .nvitk/sge.json, or pass --eicab-scratch-output-root explicitly."
-            )
-        eicab_scratch_eff = Path(eicab_cfg.DEFAULT_SCRATCH_OUTPUT_ROOT)
-    if eicab_scratch_eff is not None:
-        log.info(f"  eicab scratch output root (cluster): {eicab_scratch_eff}")
+    eicab_pe_smp_eff = (
+        eicab_sge_pe_smp if eicab_sge_pe_smp is not None else eicab_cfg.SGE_PE_SMP
+    )
 
     if submit == "sge" and from_source.lower() == "xnat":
         log.info(f"  XNAT download target (local): {dicom_download_root}")
@@ -1303,6 +1281,8 @@ def main(
     run_dl = STAGE_DOWNLOAD in stages
     run_conv = STAGE_CONVERT in stages
     run_eicab = STAGE_EICAB in stages
+    if submit == "sge" and run_eicab and eicab_pe_smp_eff is not None:
+        log.info(f"  eicab sge pe smp (cluster): {eicab_pe_smp_eff}")
     run_s2 = STAGE_REG in stages
     run_s3 = STAGE_CENTERLINE in stages
     run_s4 = STAGE_SEG in stages
@@ -1759,7 +1739,7 @@ def main(
         phase_bg_static_percentile=phase_bg_static_percentile,
         eicab_resolution=eicab_resolution,
         eicab_device=eicab_device,
-        eicab_scratch_output_root=eicab_scratch_eff,
+        eicab_sge_pe_smp=eicab_pe_smp_eff,
         eicab_container=eicab_container,
         vasculature_dir=vasculature_dir,
         post_process_eicab=post_process_eicab,

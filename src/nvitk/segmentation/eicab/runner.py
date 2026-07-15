@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,6 +12,15 @@ from typing import Iterable
 from nvitk.core.logger import Logger
 
 log = Logger()
+
+_THREAD_LIMIT_VARS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS",
+)
 
 # Circle-of-Willis multilabel (legacy naming).
 _COW_RE = re.compile(r"eICAB_CW", re.IGNORECASE)
@@ -173,6 +183,98 @@ def build_eicab_singularity_argv(
     if attention:
         cmd.append("-a")
     return cmd
+
+
+def build_eicab_singularity_shell_cmd(
+    input_nii: str | Path,
+    output_dir: str | Path,
+    *,
+    tmp_dir: str | Path,
+    container: str | Path,
+    resolution: float = 0.625,
+    simple_segmentation: bool = False,
+    attention: bool = False,
+    device: str = "cpu",
+    vasculature_host_path: str | Path | None = None,
+    cpu_limit_shell_expr: str | None = None,
+) -> str:
+    """Shell command string for eICAB ``singularity run`` (supports ``$NSLOTS`` expansion).
+
+    *cpu_limit_shell_expr* is injected unquoted (e.g. ``${NSLOTS:-8}``) into thread
+    env vars so SGE parallel environments can cap VED worker counts per job.
+    """
+    if not cpu_limit_shell_expr:
+        return shlex.join(
+            build_eicab_singularity_argv(
+                input_nii,
+                output_dir,
+                tmp_dir=tmp_dir,
+                container=container,
+                resolution=resolution,
+                simple_segmentation=simple_segmentation,
+                attention=attention,
+                device=device,
+                vasculature_host_path=vasculature_host_path,
+            )
+        )
+
+    input_p = Path(input_nii).resolve()
+    output_p = Path(output_dir).resolve()
+    tmp_p = Path(tmp_dir).resolve()
+    container_p = Path(container).resolve()
+    if input_p.name.endswith(".nii.gz") or input_p.suffix == ".gz":
+        container_input = "/TOF.nii.gz"
+    elif input_p.suffix == ".nii":
+        container_input = "/TOF.nii"
+    else:
+        raise ValueError(f"Unsupported NIfTI path: {input_p}")
+
+    container_path_env = (
+        "/vessel_segmentation_snaillab:/programs/Neuro/vasculature2:$PATH"
+    )
+    parts: list[str] = ["singularity", "run", "--cleanenv"]
+    parts.extend(["--env", shlex.quote(f"PATH={container_path_env}")])
+    if cpu_limit_shell_expr:
+        for var in _THREAD_LIMIT_VARS:
+            parts.extend(["--env", f"{var}={cpu_limit_shell_expr}"])
+    dev_l = device.lower()
+    if dev_l in ("cuda", "gpu"):
+        parts.append("--nv")
+        device_arg = "cuda"
+    else:
+        device_arg = "cpu"
+    parts.extend(
+        [
+            "--bind",
+            shlex.quote(f"{input_p}:{container_input}:ro"),
+            "--bind",
+            shlex.quote(f"{output_p}:/output"),
+            "--bind",
+            shlex.quote(f"{tmp_p}:/tmp"),
+        ]
+    )
+    vhp = Path(vasculature_host_path) if vasculature_host_path else None
+    if vhp and vhp.is_dir():
+        parts.extend(["--bind", shlex.quote(f"{vhp}:/programs/Neuro/vasculature2")])
+    parts.extend(
+        [
+            shlex.quote(str(container_p)),
+            "-t",
+            container_input,
+            "-o",
+            "/output",
+            "-r",
+            str(resolution),
+            "-d",
+            device_arg,
+            "-f",
+        ]
+    )
+    if simple_segmentation:
+        parts.append("-s")
+    if attention:
+        parts.append("-a")
+    return " ".join(parts)
 
 
 def run_eicab(

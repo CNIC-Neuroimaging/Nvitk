@@ -118,15 +118,6 @@ def _eicab_out_dir(
     return output_root / subject / subdir
 
 
-def resolve_eicab_scratch_dir(
-    scratch_root: Path,
-    subject: str,
-    eicab_subdir: str | None = None,
-) -> Path:
-    """Per-subject eICAB work directory on cluster node scratch."""
-    return _eicab_out_dir(scratch_root, subject, eicab_subdir)
-
-
 def _resolve_pipeline_container(pipeline_container: Path | None) -> Path:
     """Outer SGE image (Python 3 + singularity client); inner eICAB stays in eicab .sif."""
     if pipeline_container is not None:
@@ -267,7 +258,7 @@ def submit_subject_sge(
     pipeline_container: Path | None = None,
     src_dir: Path | None = None,
     tmp_dir: Path | None = None,
-    scratch_output_root: Path | None = None,
+    sge_pe_smp: int | None = None,
     vasculature_dir: Path | None = None,
     log_dir: Path | None = None,
     err_dir: Path | None = None,
@@ -319,16 +310,9 @@ def submit_subject_sge(
         log.info(f"[{subject}] stage1 eICAB: skipping existing output -> {out_dir}")
         return ""
 
-    scratch_dir: Path | None = None
-    if scratch_output_root is not None:
-        scratch_dir = resolve_eicab_scratch_dir(scratch_output_root, subject, eicab_subdir)
-        tmp = scratch_dir / ".eicab_tmp"
-        # Scratch lives on the cluster compute node (/data_tmp); mkdir happens in
-        # the emitted SGE shell command, not on the submission workstation.
-    else:
-        tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
-        if emit is None:
-            tmp.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
+    if emit is None:
+        tmp.mkdir(parents=True, exist_ok=True)
 
     eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
     pipeline_c = _resolve_pipeline_container(pipeline_container)
@@ -353,9 +337,8 @@ def submit_subject_sge(
     log.info(f"qvtpy stage1 eICAB (sge) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
-    if scratch_dir is not None:
-        log.info(f"  scratch output: {scratch_dir} (rsync -> {out_dir} on success)")
-        log.info(f"  scratch tmp   : {tmp}")
+    if sge_pe_smp:
+        log.info(f"  sge pe smp    : {sge_pe_smp} (qsub -pe smp {sge_pe_smp})")
     log.info(f"  outer container (run_job): {pipeline_c}")
     log.info(f"  inner container (eICAB):   {eicab_c}")
 
@@ -380,7 +363,7 @@ def submit_subject_sge(
         post_process_eicab=post_process_eicab,
         backend=backend,
         resources=res,
-        scratch_output_dir=scratch_dir.resolve() if scratch_dir is not None else None,
+        sge_pe_smp=sge_pe_smp,
         hold_jid=hold_jid,
         dry_run=dry_run,
         emit=emit,
@@ -524,15 +507,10 @@ def _submit_postprocess_only_sge(
     help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp).",
 )
 @click.option(
-    "--scratch-output-root",
-    type=click.Path(path_type=Path),
+    "--sge-pe-smp",
+    type=int,
     default=None,
-    help=(
-        "(sge) Cluster node scratch parent for eICAB work dirs "
-        "(e.g. /data_tmp/nvitk-eicab). Per-subject scratch is "
-        "<root>/<subject>/<eicab-subdir>; finished outputs are rsynced to "
-        "--output-root on success. Enables safe parallel stage1 batches."
-    ),
+    help="(sge) qsub -pe smp N slots per eICAB job (caps VED parallelism for batch runs).",
 )
 @click.option(
     "--vasculature-dir",
@@ -589,7 +567,7 @@ def main(
     pipeline_container: Path | None,
     src_dir: Path | None,
     tmp_dir: Path | None,
-    scratch_output_root: Path | None,
+    sge_pe_smp: int | None,
     vasculature_dir: Path | None,
     log_dir: Path | None,
     err_dir: Path | None,
@@ -668,7 +646,7 @@ def main(
                     pipeline_container=pipeline_container,
                     src_dir=src_dir,
                     tmp_dir=tmp_dir,
-                    scratch_output_root=scratch_output_root,
+                    sge_pe_smp=sge_pe_smp,
                     vasculature_dir=vasculature_dir,
                     log_dir=log_dir,
                     err_dir=err_dir,
@@ -728,7 +706,6 @@ def main(
 __all__ = [
     "find_tof_resampled_volume",
     "find_tof_volume",
-    "resolve_eicab_scratch_dir",
     "run_postprocess_only",
     "run_subject",
     "submit_subject_sge",

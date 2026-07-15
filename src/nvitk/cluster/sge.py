@@ -86,6 +86,7 @@ class SgeResources:
     ngpu: int = 1
     h_vmem: str = "50G"
     queue: str | None = None
+    pe_smp: int | None = None
 
 
 @dataclass
@@ -216,6 +217,8 @@ def build_qsub_command(
     ]
     if spec.resources.queue:
         argv.extend(["-q", spec.resources.queue])
+    if spec.resources.pe_smp:
+        argv.extend(["-pe", "smp", str(spec.resources.pe_smp)])
 
     if hold_jid:
         if isinstance(hold_jid, str):
@@ -266,6 +269,7 @@ def format_sge_submission_summary(
         _sge_gpu_resource_log_line(r),
         f"  sge_h_vmem (-l):  {r.h_vmem}",
         f"  sge_queue (-q):   {r.queue if r.queue else '(default)'}",
+        f"  sge_pe_smp (-pe): {r.pe_smp if r.pe_smp else '(omitted)'}",
         f"  use_nv (outer):   {spec.use_nv}",
         "  bind mounts (host -> container):",
         f"    src:          {paths.src} -> {spec.binds.src}",

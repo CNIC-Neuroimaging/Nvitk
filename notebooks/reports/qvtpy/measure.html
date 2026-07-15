@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qvtpy Measurements — Technical Review</title>
+<script>
+MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)'], ['$', '$']],
+    displayMath: [['\\[', '\\]'], ['$$', '$$']],
+    processEscapes: true
+  }
+};
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<style>
+body{font-family:system-ui,sans-serif;line-height:1.65;max-width:52rem;margin:2rem auto;padding:0 1.5rem;color:#1a1a1a}
+h1{border-bottom:1px solid #ddd;padding-bottom:.3rem}
+h2{margin-top:2rem} h3{margin-top:1.25rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem}
+th,td{border:1px solid #ddd;padding:.45rem .6rem;vertical-align:top}
+th{background:#f4f4f4}
+code{background:#f6f8fa;padding:.12em .35em;border-radius:4px;font-size:.9em}
+pre{background:#f6f8fa;padding:1rem;border:1px solid #ddd;border-radius:6px;overflow-x:auto}
+blockquote{border-left:4px solid #ccc;margin:1rem 0;padding:.2rem 1rem;color:#555}
+hr{border:none;border-top:1px solid #ddd;margin:2rem 0}
+footer{margin-top:3rem;font-size:.85rem;color:#666;font-style:italic}
+.note{background:#f0f7ff;border:1px solid #c8dff7;padding:.75rem 1rem;border-radius:6px;margin:1rem 0}
+</style>
+</head>
+<body>
+<p class="note"><strong>Viewing:</strong> Open this file in a <strong>web browser</strong> for rendered equations (MathJax). Cursor markdown preview does not typeset LaTeX.</p>
+<h1>qvtpy Measurements — Technical Review</h1>
+<p><strong>Document type:</strong> Internal technical reference  </p>
+<p><strong>Subject:</strong> Mathematical definitions and code mapping for qvtpy stage 6 (hemodynamics) and stage 7 (TOF morphometrics), plus venous region labeling  </p>
+<p><strong>Date:</strong> 15 July 2026  </p>
+<p><strong>Status:</strong> Reflects current <code>nvitk.pipes.qvtpy</code> implementation</p>
+<hr>
+<h2>1. Scope</h2>
+<p>This document covers three measurement areas in the qvtpy pipeline:</p>
+<table>
+<thead><tr><th>Area</th><th>Stage</th><th>Legacy reference</th></tr></thead><tbody>
+<tr><td>PITC / PWV / damping index</td><td>stage 6</td><td>QVTplus <code>paramMap_params_threshS</code>, <code>enc_PWV</code>, <code>slidingxCor</code></td></tr>
+<tr><td>TOF morphometrics (tortuosity, stenosis, enlargement, …)</td><td>stage 7</td><td><code>cow_morpho</code> (not MATLAB QVTPlus)</td></tr>
+<tr><td>Venous sinus labeling</td><td>stages 3–5</td><td>QVTplus manual <code>LabelsQVT.csv</code> → automated geometry heuristics</td></tr>
+</tbody></table>
+<p>Stage 6 also runs a <strong>separate LOC track</strong> (<code>locs.csv</code> → <code>loc_measurements.csv</code>) for discrete operator-defined locations. PITC/PWV is the <strong>dense vessel-level</strong> track described in Part A.</p>
+<hr>
+<h2>2. Architecture overview</h2>
+<pre><code>
+flowchart TD
+  subgraph stage6 [Stage 6 — 4D-flow hemodynamics]
+    A[4DFlow AP/RL/FH phases] --&gt; B[velocity_mm_s_from_phases]
+    C[CD / MAG / vel_mag + seg_4dflow] --&gt; D[cross_section_at_loc]
+    E[stage3 centerlines] --&gt; D
+    D --&gt; F[masked_plane_velocity_series]
+    F --&gt; G["Q(t) = v × area / 1000"]
+    G --&gt; H[PI + StdvFromMean quality]
+    H --&gt; I[PITC fit per root]
+    G --&gt; J[PWV Bjornfoot + Fielding]
+    I --&gt; K[pitc_profile.csv]
+    I --&gt; L[vessel_hemodynamics.csv]
+    J --&gt; L
+  end
+
+  subgraph stage7 [Stage 7 — TOF morphometrics]
+    M[eICAB WB/CW multilabel] --&gt; N[Taubin smooth]
+    N --&gt; O[skeleton + VMTK centerlines]
+    O --&gt; P[analyze_centerline_poly]
+    P --&gt; Q[case_metrics_donut_tree.xlsx]
+  end
+
+  subgraph venous [Venous labeling — stages 3–5]
+    R[CD superior slab] --&gt; S[skeleton branches]
+    S --&gt; T[geometry scoring → labels 31–34]
+    T --&gt; U[seg_4dflow + LOCs]
+  end
+</code></pre>
+<hr>
+<h1>Part A — 4D-flow hemodynamics (PITC / PWV, stage 6)</h1>
+<h2>A.1 Velocity from PC-MRI phases</h2>
+<p>Phase images (AP, RL, FH) are converted to velocity components (mm/s):</p>
+\[
+v_x = -10 \cdot \text{RL},\quad v_y = -10 \cdot \text{AP},\quad v_z = 10 \cdot \text{FH}
+\]
+<p><strong>Code:</strong> <code>velocity_mm_s_from_phases()</code> — <code>src/nvitk/measure/hemodynamics.py</code></p>
+<hr>
+<h2>A.2 Cross-section at a centerline station</h2>
+<p>At station \(\mathbf{p}\) with unit tangent \(\hat{\mathbf{t}}\):</p>
+<ol>
+<li>1. Build an oblique plane (default radius \(R = 10\) vox).</li>
+<li>2. Reslice MAG, CD, VEL (and optionally <code>seg_4dflow</code> label).</li>
+<li>3. <strong>Resegmentation</strong> (PITC default on): fuse channels with weights \((0.2, 0.8, 0.2)\), apply sliding threshold (<code>lsthr</code>), keep the connected component nearest the plane center; optionally intersect with the vessel label mask (<code>--pitc-label-constrain</code>, default on).</li>
+<li>4. <strong>Area</strong> (mm²): pixel count × tilt-corrected pixel area on the plane grid.</li>
+<li>5. <strong>Circularity proxy</strong> (used in quality):</li>
+</ol>
+\[
+C = \left(\frac{R_{\text{in}}}{R_{\text{out}}}\right)^2
+\]
+<p>where \(R_{\text{in}} = \max\) EDT inside mask, \(R_{\text{out}} = \max\) distance from mask centroid to boundary.</p>
+<ol>
+<li>6. <strong>Through-plane velocity</strong> at frame \(t\):</li>
+</ol>
+\[
+v_{\perp}(t) = \frac{1}{|\mathcal{M}|}\sum_{(i,j)\in\mathcal{M}} \mathbf{v}(i,j,t)\cdot\hat{\mathbf{t}}
+\]
+<ol>
+<li>7. <strong>Flow time series</strong> (ml/s):</li>
+</ol>
+\[
+Q(t) = v_{\perp}(t)\cdot\frac{A_{\text{mm}^2}}{1000}
+\]
+<p><strong>Code:</strong></p>
+<table>
+<thead><tr><th>Function</th><th>Module</th></tr></thead><tbody>
+<tr><td><code>cross_section_at_loc()</code></td><td><code>src/nvitk/measure/cross_section.py</code></td></tr>
+<tr><td><code>masked_plane_velocity_series()</code></td><td><code>src/nvitk/measure/cross_section.py</code></td></tr>
+<tr><td><code>flow_pulsatile_ml_s()</code></td><td><code>src/nvitk/measure/hemodynamics.py</code></td></tr>
+<tr><td><code>_sample_vessel_stations()</code></td><td><code>src/nvitk/pipes/qvtpy/util/vessel_hemodynamics.py</code></td></tr>
+</tbody></table>
+<hr>
+<h2>A.3 Pulsatility index (PI)</h2>
+<p>For PITC stations, on <strong>signed</strong> flow:</p>
+\[
+\text{PI} = \frac{|\max_t Q(t) - \min_t Q(t)|}{\overline{Q}}
+\]
+<p>where \(\overline{Q} = \text{mean}(Q(t))\) (signed mean, not \(|\cdot|\)).</p>
+<p><strong>Code:</strong> <code>pulsatility_index_qvt()</code> → <code>pitc_profile.csv</code> column <code>pi</code>.</p>
+<blockquote><p><strong>Note:</strong> The LOC track uses <code>pulsatility_index()</code> with \(\text{mean}(|Q|)\) in the denominator — different from PITC PI.</p></blockquote>
+<hr>
+<h2>A.4 StdvFromMean quality (default, 0–4 scale)</h2>
+<p>For station \(m\) along a branch, define a <strong>local window</strong> of neighboring stations (MATLAB <code>paramMap_params_threshS</code> windowing via <code>branch_window_slices()</code>).</p>
+<p>Over window \(\mathcal{W}_m\), with per-cycle mean flows \(Q^{\text{cycle}}\), areas \(A\), circularities \(D\), and full pulsatile matrix \(Q(t)\):</p>
+\[
+\begin{aligned}
+qv_{\text{meanflow}} &= 1 - \frac{\text{std}(Q^{\text{cycle}})}{|\text{mean}(Q^{\text{cycle}})|} \\
+qv_{\text{area}}     &= 1 - \frac{\text{std}(A)}{|\text{mean}(A)|} \\
+qv_{\text{circ}}     &= \text{mean}(D) \\
+qv_{\text{tight}}    &= 1 - \frac{\text{mean}_t(\max_s Q - \min_s Q)}{|\text{mean}(Q^{\text{cycle}})|}
+\end{aligned}
+\]
+\[
+Q_{\text{quality},m} = qv_{\text{meanflow}} + qv_{\text{area}} + qv_{\text{circ}} + qv_{\text{tight}}
+\]
+<p><strong>Alternative</strong> (<code>waveform</code> metric): roughness of second temporal difference relative to amplitude, mapped to 0–4.</p>
+<p><strong>Code:</strong> <code>stdv_from_mean_branch()</code> / <code>stdv_from_mean_station()</code> in <code>hemodynamics.py</code>; assigned in <code>_assign_branch_qualities()</code>.</p>
+<hr>
+<h2>A.5 Distance along the arterial tree</h2>
+<p>Three root regions (label-aware tree):</p>
+<table>
+<thead><tr><th>Root</th><th>Vessels</th></tr></thead><tbody>
+<tr><td><strong>L_ICA</strong></td><td>LICA, LACA, LMCA</td></tr>
+<tr><td><strong>R_ICA</strong></td><td>RICA, RACA, RMCA</td></tr>
+<tr><td><strong>Basilar</strong></td><td>Basilar, LPCA, RPCA, LVA, RVA</td></tr>
+</tbody></table>
+<p>Communicating arteries are excluded. PCAs belong under Basilar only.</p>
+<p><strong>Arc length</strong> along polyline \(\{\mathbf{p}_k\}\) with anisotropic spacing \(\mathbf{s}\):</p>
+\[
+d_k = \sum_{j=1}^{k} \|\,(\mathbf{p}_j-\mathbf{p}_{j-1})\odot\mathbf{s}\,\|_2
+\]
+<p>Branch stations add root arc length at the junction plus Euclidean gap between root distal and branch proximal endpoints. Proximal = inferior (min-\(z\)) endpoint.</p>
+<p><strong>Code:</strong> <code>_arc_length_mm()</code>, <code>_orient_polyline()</code>, <code>_root_proximal_anchor()</code> in <code>vessel_hemodynamics.py</code>.</p>
+<hr>
+<h2>A.6 PITC (Pulsatility Index Transmission Coefficient)</h2>
+<p>For root region \(r\), collect stations \(\{(\text{PI}_i, d_i, Q_i)\}_{i\in\mathcal{S}}\).</p>
+<p><strong>Inclusion weights</strong> (Dempsey-style, threshold \(\tau=2.5\)):</p>
+\[
+w_i = \max\left(0,\ \frac{Q_i - \tau}{4 - \tau}\right)
+\]
+<p>Keep stations with \(w_i > 0\); require ≥2 points.</p>
+<p><strong>Weighted linear regression</strong>:</p>
+\[
+\text{PI}(d) = p_{\text{tc}}\,d + \beta
+\]
+<p>Outputs: <code>pitc_slope</code> (\(p_{\text{tc}}\), 1/mm), <code>pitc_intercept</code> (\(\beta\)), <code>r2</code>, <code>global_pi</code>.</p>
+<p><strong>Code:</strong> <code>quality_weights()</code>, <code>weighted_linear_fit()</code>, <code>pitc_fit()</code> in <code>hemodynamics.py</code>; per <code>ROOT_GROUPS</code> in <code>compute_vessel_hemodynamics()</code>.</p>
+<hr>
+<h2>A.7 Damping index (per branch)</h2>
+\[
+p_d = \frac{\text{PI}_{\text{prox}} - \text{PI}_{\text{dist}}}{\text{PI}_{\text{prox}}}
+\]
+<p><strong>Code:</strong> <code>damping_index()</code> in <code>hemodynamics.py</code>.</p>
+<hr>
+<h2>A.8 PWV — Fielding cross-correlation</h2>
+<p>For \(n\) stations with distances \(d_i\) (meters) and flow matrix \(Q_{i,t}\):</p>
+<ol>
+<li>1. Reference station = most proximal (index 0).</li>
+<li>2. Normalize waveforms (zero-mean, unit-std).</li>
+<li>3. Integer lag \(\ell_i\) maximizing circular cross-correlation with reference.</li>
+<li>4. \(\tau_i = \ell_i \cdot \Delta t\) where \(\Delta t\) = <code>temporal_resolution_s</code>.</li>
+<li>5. Weighted fit: \(\tau = \text{slope}\cdot d\) → \(\text{PWV} = 1/\text{slope}\) (m/s).</li>
+</ol>
+<p><strong>Acceptance:</strong> \(0 < \text{PWV} < 30\) m/s. Minimum ≥3 stations with \(Q_i > \tau\).</p>
+<p><strong>Code:</strong> <code>circular_cross_correlation_lag()</code>, <code>pwv_fielding_xcor()</code> in <code>hemodynamics.py</code>.</p>
+<hr>
+<h2>A.9 PWV — Bjornfoot optimizer</h2>
+<ol>
+<li>1. Normalize each station waveform.</li>
+<li>2. For candidate PWV, delay \(\delta_i = (d_i/\text{PWV})/\Delta t\).</li>
+<li>3. Circular fractional shift aligns waveforms to shared template.</li>
+<li>4. Minimize weighted residual over PWV ∈ [0.5, 30] m/s (<code>scipy.optimize.minimize_scalar</code>).</li>
+</ol>
+<p><strong>Code:</strong> <code>normalize_waveform()</code>, <code>_circular_fractional_shift()</code>, <code>pwv_bjornfoot_optimize()</code>, <code>accept_pwv()</code>.</p>
+<hr>
+<h2>A.10 Stage 6 outputs and CLI</h2>
+<p><strong>Outputs</strong> (under <code>qvtpy/stage6_measure/</code>):</p>
+<table>
+<thead><tr><th>File</th><th>Content</th></tr></thead><tbody>
+<tr><td><code>pitc_profile.csv</code></td><td>One row per station: <code>pi</code>, <code>quality</code>, <code>distance_mm</code>, <code>area_mm2</code>, …</td></tr>
+<tr><td><code>vessel_hemodynamics.csv</code></td><td>Per root + per branch: <code>pitc_slope</code>, <code>pwv_bjornfoot_m_s</code>, <code>damping_index</code>, …</td></tr>
+<tr><td><code>loc_measurements.csv</code></td><td>Separate LOC track (stage 5 LOCs)</td></tr>
+<tr><td><code>measure_meta.json</code></td><td>Run parameters</td></tr>
+</tbody></table>
+<p><strong>Key CLI defaults</strong> (<code>nvitk-qvtpy</code> / <code>stage6_measure</code>):</p>
+<table>
+<thead><tr><th>Flag</th><th>Default</th></tr></thead><tbody>
+<tr><td><code>--pitc-stride</code></td><td>1</td></tr>
+<tr><td><code>--pitc-quality-thresh</code></td><td>2.5</td></tr>
+<tr><td><code>--pitc-quality-metric</code></td><td><code>stdv_from_mean</code></td></tr>
+<tr><td><code>--pitc-measure-resegment</code></td><td>on</td></tr>
+<tr><td><code>--pitc-label-constrain</code></td><td>on</td></tr>
+<tr><td><code>--cross-section-radius-vox</code></td><td>10</td></tr>
+<tr><td><code>--measure-thr-algorithm</code></td><td><code>lsthr</code></td></tr>
+</tbody></table>
+<p><strong>Code pipeline:</strong></p>
+<pre><code>
+stage6_measure.py
+  └─ velocity_mm_s_from_phases
+  └─ compute_vessel_hemodynamics()  [vessel_hemodynamics.py]
+       └─ _sample_vessel_stations() per vessel
+       └─ pitc_fit, pwv_bjornfoot_optimize, pwv_fielding_xcor
+  └─ write CSVs
+</code></pre>
+<hr>
+<h2>A.11 Parity vs QVTplus (PITC/PWV)</h2>
+<table>
+<thead><tr><th>Aspect</th><th>QVTplus</th><th>qvtpy</th><th>Match?</th></tr></thead><tbody>
+<tr><td>PI formula (PITC)</td><td><code>abs(max-min)/mean(Q)</code> signed</td><td><code>pulsatility_index_qvt</code></td><td>Yes (same formula)</td></tr>
+<tr><td>StdvFromMean</td><td><code>paramMap_params_threshS</code></td><td><code>stdv_from_mean_branch</code></td><td>Yes (ported)</td></tr>
+<tr><td>PITC / PWV fit</td><td>Weighted regression / Bjornfoot / Fielding</td><td>Same</td><td>Yes (ported)</td></tr>
+<tr><td>Connectivity</td><td>CD skeleton + manual labels</td><td>Label-aware <code>seg_4dflow</code> tree</td><td>No</td></tr>
+<tr><td>Cross-section masks</td><td><code>segment_cross_section_thresh</code></td><td>MAG+CD+VEL fusion + label constrain</td><td>No</td></tr>
+<tr><td>Centerlines</td><td>CD skeleton + spline</td><td>Stage-3 eICAB multilabel</td><td>No</td></tr>
+</tbody></table>
+<p><strong>Validation:</strong> <code>scripts/compare_pitc_profiles.py</code> (station-level summary vs legacy CSV). Golden fixtures: <code>scripts/export_pitc_golden_synthetic.py</code> (not committed by default).</p>
+<hr>
+<h1>Part B — TOF morphometrics (stage 7)</h1>
+<p>Stage 7 operates on <strong>eICAB multilabel TOF masks</strong>, not 4D-flow. Centerlines are generated internally (skeleton → VMTK), independent of stage 3.</p>
+<h2>B.1 Basic geometry</h2>
+<table>
+<thead><tr><th>Metric</th><th>Formula</th></tr></thead><tbody>
+<tr><td>Arc length \(L\)</td><td>\(L = \sum_i \lVert\mathbf{p}_{i+1}-\mathbf{p}_i\rVert\)</td></tr>
+<tr><td>Chord length \(C\)</td><td>\(C = \lVert\mathbf{p}_N - \mathbf{p}_0\rVert\)</td></tr>
+<tr><td>Tortuosity \(T_{dm}\)</td><td>\(T_{dm} = L / C\)</td></tr>
+</tbody></table>
+<p><strong>Code:</strong> <code>tortuosity_dm()</code> in <code>src/nvitk/measure/morpho/metrics.py</code>; <code>analyze_centerline_poly()</code> in <code>centerlines.py</code>.</p>
+<hr>
+<h2>B.2 Curvature and torsion</h2>
+<p><strong>Discrete curvature</strong> at interior point \(i\):</p>
+\[
+\kappa_i = \frac{\|(\mathbf{p}_i-\mathbf{p}_{i-1}) \times (\mathbf{p}_{i+1}-\mathbf{p}_{i-1})\|}{\|\mathbf{p}_i-\mathbf{p}_{i-1}\|\,\|\mathbf{p}_{i+1}-\mathbf{p}_{i-1}\|\,\|\mathbf{p}_{i+1}-\mathbf{p}_i\|}
+\]
+<p><strong>Code:</strong> <code>discrete_curvature()</code>, <code>discrete_torsion()</code> in <code>metrics.py</code>.</p>
+<hr>
+<h2>B.3 Radius and taper reference</h2>
+<p>Radius \(r(s)\) from cross-section or <strong>maximum inscribed sphere (MIS)</strong> EDT (default for stenosis/enlargement: <code>RADIUS_SOURCE_FOR_CALIBER_DETECTION = "maximum_inscribed_sphere"</code>).</p>
+<p><strong>Taper reference</strong> \(r_{\text{ref}}(s)\):</p>
+<ol>
+<li>1. Exclude siphon regions (\(\kappa \geq 0.10\) mm⁻¹, dilated 5 mm).</li>
+<li>2. Exclude vessel ends (2 mm stenosis / 3 mm enlargement).</li>
+<li>3. Sliding window (20 mm) <strong>85th percentile</strong>, smoothed (4 mm).</li>
+<li>4. Optional two-pass iterative refit excluding detected lesions.</li>
+<li>5. Enforce non-increasing reference (PAVA).</li>
+</ol>
+<p><strong>Code:</strong> <code>caliber.py</code> — <code>_compute_vessel_taper()</code>, <code>compute_siphon_mask()</code>.</p>
+<hr>
+<h2>B.4 Stenosis and enlargement</h2>
+<p><strong>Stenosis percent:</strong></p>
+\[
+\text{Stenosis\%}(s) = \left(1 - \frac{r(s)}{r_{\text{ref}}(s)}\right)\times 100
+\]
+<p>Default threshold <strong>10%</strong>, min segment 3 mm, end exclusion 2 mm.</p>
+<p><strong>Enlargement percent:</strong></p>
+\[
+\text{Enlargement\%}(s) = \left(\frac{r(s)}{r_{\text{ref}}(s)} - 1\right)\times 100
+\]
+<p>Default threshold <strong>10%</strong>, min segment 5 mm, end exclusion 3 mm.</p>
+<p><strong>Code:</strong> <code>stenosis_raw_percent()</code>, <code>detect_stenosis_segments()</code>, <code>enlargement_pointwise()</code> in <code>caliber.py</code>.</p>
+<hr>
+<h2>B.5 Stage 7 outputs</h2>
+<table>
+<thead><tr><th>Output</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>case_metrics_donut_tree.xlsx</code></td><td><code>00_Path_Summary</code>, <code>01_Tree_Summary</code>, <code>02_Branchpoints</code>, <code>03_LR_Asymmetry</code>, <code>05_Hemisphere</code>, per-vessel sheets</td></tr>
+<tr><td><code>centerlines/*.vtp</code></td><td>Pointwise metrics on centerline polylines</td></tr>
+<tr><td><code>centerlines/tortuosity_metrics.xlsx</code></td><td>Literature tortuosity (secondary export)</td></tr>
+<tr><td><code>radius_histograms/</code></td><td>Optional radius histograms</td></tr>
+</tbody></table>
+<p><strong>Defaults</strong> (<code>morphometrics_config.py</code>):</p>
+<table>
+<thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>
+<tr><td>Taubin iters / λ / μ</td><td>20 / 0.65 / −0.65</td></tr>
+<tr><td>Centerline resample step</td><td>0.10 mm</td></tr>
+<tr><td>Stenosis / enlargement threshold</td><td>10%</td></tr>
+<tr><td>Taper reference percentile / window</td><td>85% / 20 mm</td></tr>
+<tr><td>Min centerline path length</td><td>7.5 mm</td></tr>
+</tbody></table>
+<p><strong>Stage 7 CLI defaults:</strong> <code>eicab_mask_preference=wb</code>, <code>use_postprocessed_mask=True</code>.</p>
+<p><strong>Code pipeline:</strong></p>
+<pre><code>
+stage7_morphometrics.py
+  └─ resolve_stage7_seg_mask()  [morpho_paths.py]
+  └─ run_morphometrics_case()   [morphometrics.py]
+       └─ Taubin smooth
+       └─ run_case.py → orchestration.py → analyze_centerline_poly()
+       └─ compute_tortuosity_metrics.py
+</code></pre>
+<hr>
+<h2>B.6 Parity vs cow_morpho (original code)</h2>
+<p>The stage 7 implementation is a <strong>direct port of <code>cow_morpho</code></strong>, not MATLAB QVTPlus. Algorithm constants live in <code>src/nvitk/measure/morphometrics_config.py</code>.</p>
+<table>
+<thead><tr><th>Scenario</th><th>Same output?</th></tr></thead><tbody>
+<tr><td>Same eICAB NIfTI + same topology + same config + same Taubin + same library versions</td><td>Should match (float tolerance)</td></tr>
+<tr><td>qvtpy defaults (WB <code>_pp</code> from stage-1 eICAB) vs old cow_morpho on CW/raw masks</td><td>Unlikely</td></tr>
+<tr><td>Different <code>topology_eICAB.json</code> vs built-in <code>morpho_topology.py</code></td><td>May differ</td></tr>
+<tr><td>No side-by-side validation run</td><td>Not proven</td></tr>
+</tbody></table>
+<p><strong>Main divergence risks:</strong></p>
+<ol>
+<li>1. <strong>Input mask:</strong> stage 7 defaults to WB + postprocessed (<code>*_eICAB_WB_pp.nii.gz</code>).</li>
+<li>2. <strong>Topology:</strong> external <code>topology_eICAB.json</code> replaced by <code>build_eicab_topology_mapping()</code> in <code>morpho_topology.py</code> (stage 7 CLI does not expose <code>--mapping-json</code>).</li>
+<li>3. <strong><code>MorphometricsConfig</code> dataclass</strong> only wires Taubin/tortuosity/histograms; stenosis thresholds read from module-level constants.</li>
+<li>4. <strong>No automated parity tests</strong> in the repository.</li>
+</ol>
+<p><strong>Recommended validation:</strong> diff <code>00_Path_Summary</code> columns (<code>length_mm</code>, <code>tortuosity_dm</code>, <code>stenosis_percent_max</code>, <code>enlargement_percent_max</code>) on 2–3 subjects with <strong>identical input NIfTI</strong> and archived cow_morpho outputs.</p>
+<hr>
+<h1>Part C — Venous region labeling (stages 3–5)</h1>
+<p>Venous labeling is <strong>geometric classification</strong>, not a hemodynamic metric. Fixed label IDs 31–34 in <code>src/nvitk/pipes/qvtpy/labels.py</code>.</p>
+<table>
+<thead><tr><th>ID</th><th>Name</th></tr></thead><tbody>
+<tr><td>31</td><td>SSSV</td></tr>
+<tr><td>32</td><td>STRV</td></tr>
+<tr><td>33</td><td>LTSV</td></tr>
+<tr><td>34</td><td>RTSV</td></tr>
+</tbody></table>
+<h2>C.1 Venous foreground (stage 3)</h2>
+<ol>
+<li>1. CD segmentation: sliding threshold on <code>ComplexDifference_3D</code> (<code>up_thresh=0.8</code>, <code>shift_hm=True</code>).</li>
+<li>2. Spatial mask: superior Y-third of volume.</li>
+<li>3. Optional brain mask from TotalSegmentator on <code>Angiography_3D</code>.</li>
+<li>4. Area-opening cleanup (<code>min_fraction=0.005</code>).</li>
+</ol>
+<p><strong>Code:</strong> <code>binary_vessel_segment_cd()</code> in <code>flow_volume_masks.py</code>; <code>stage3_centerline.py</code>.</p>
+<hr>
+<h2>C.2 Skeleton and assignment</h2>
+<ol>
+<li>1. Skeletonize each connected component.</li>
+<li>2. Split at <strong>all junction voxels</strong>.</li>
+<li>3. Keep polylines with ≥ <code>min_branch_points</code> (12 default).</li>
+<li>4. <strong>Greedy assignment</strong> in order SSSV → STRV → LTSV → RTSV; score ≥ 0.05.</li>
+</ol>
+<p><strong>Confluence center</strong> (weighted centroid, RAS coordinates):</p>
+\[
+w_k = \exp(0.15\,(si_k - \text{median}(si))) \cdot \exp(-0.1\,(ap_k - \min(ap)))
+\]
+<p><strong>Branch score</strong> (example SSSV):</p>
+\[
+S = L_{\text{score}}\left(0.35\cdot\text{midline} + 0.25\cdot\text{superior} + 0.2\cdot|\hat{d}_{SI}| + 0.2\cdot\text{toward\_conf}\right)
+\]
+<p>RAS score and legacy voxel-index score are both computed; <strong><code>max(RAS, legacy)</code></strong> wins.</p>
+<p><strong>Code:</strong> <code>venous_heuristics.py</code> — <code>assign_venous_branches()</code>, <code>_score_branch_ras()</code>.</p>
+<hr>
+<h2>C.3 Downstream (stages 4–5)</h2>
+<p><strong>Stage 4:</strong> Local <code>lsthr</code> threshold per venous label; largest CC kept. <strong>Region growing skipped</strong> for labels 31–34 (<code>QVTPY_RG_SKIP_LABEL_IDS</code>). Venous centerlines re-imported from stage 3.</p>
+<p><strong>Stage 5:</strong> One LOC per sinus at arc-length midpoint; SSSV/STRV swap validation via direction alignment to \([0,1,1]\).</p>
+<p><strong>Code:</strong> <code>stage4_4dflow_segmentation.py</code>, <code>loc_selection.py</code> (<code>select_venous_locs</code>).</p>
+<hr>
+<h2>C.4 Parity vs QVTplus (venous)</h2>
+<table>
+<thead><tr><th>Aspect</th><th>QVTplus</th><th>qvtpy</th></tr></thead><tbody>
+<tr><td>Vessel identity</td><td>Manual <code>LabelsQVT.csv</code></td><td>Automated geometry heuristics</td></tr>
+<tr><td>Label names / order</td><td>SSSV, STRV, LTSV, RTSV</td><td>Same</td></tr>
+<tr><td>Segmentation</td><td>Manual curation</td><td>Threshold-only (no venous RG active)</td></tr>
+</tbody></table>
+<p>Outputs are <strong>not expected to match</strong> legacy subject-by-subject without manual review.</p>
+<hr>
+<h1>Part D — Quick reference: math → code → output</h1>
+<table>
+<thead><tr><th>Metric</th><th>Math (short)</th><th>Primary code</th><th>Output</th></tr></thead><tbody>
+<tr><td>Flow \(Q(t)\)</td><td>\(v_\perp \cdot A/1000\)</td><td><code>flow_pulsatile_ml_s</code></td><td><code>pitc_profile.csv</code></td></tr>
+<tr><td>PI (PITC)</td><td>\(\lVert max-min\rVert/\overline{Q}\)</td><td><code>pulsatility_index_qvt</code></td><td><code>pi</code></td></tr>
+<tr><td>Quality</td><td>StdvFromMean (4 terms)</td><td><code>stdv_from_mean_branch</code></td><td><code>quality</code></td></tr>
+<tr><td>PITC slope</td><td>WLS: PI vs \(d\)</td><td><code>pitc_fit</code></td><td><code>vessel_hemodynamics.csv</code></td></tr>
+<tr><td>PWV Bjornfoot</td><td>Minimize shift residual</td><td><code>pwv_bjornfoot_optimize</code></td><td><code>pwv_bjornfoot_m_s</code></td></tr>
+<tr><td>PWV Fielding</td><td>xcor lag vs distance</td><td><code>pwv_fielding_xcor</code></td><td><code>pwv_fielding_m_s</code></td></tr>
+<tr><td>Tortuosity</td><td>\(L/C\)</td><td><code>tortuosity_dm</code></td><td>Excel <code>00_Path_Summary</code></td></tr>
+<tr><td>Stenosis%</td><td>\((1-r/r_{ref})\times100\)</td><td><code>stenosis_raw_percent</code></td><td>VTP + Excel</td></tr>
+<tr><td>Enlargement%</td><td>\((r/r_{ref}-1)\times100\)</td><td><code>enlargement_pointwise</code></td><td>VTP + Excel</td></tr>
+<tr><td>Venous label</td><td>Geometry score × length</td><td><code>_score_branch_ras</code></td><td><code>centerlines_mask</code> 31–34</td></tr>
+</tbody></table>
+<hr>
+<h1>Part E — Key source files</h1>
+<table>
+<thead><tr><th>Area</th><th>Path</th></tr></thead><tbody>
+<tr><td>Core hemodynamics</td><td><code>src/nvitk/measure/hemodynamics.py</code></td></tr>
+<tr><td>Cross-sections</td><td><code>src/nvitk/measure/cross_section.py</code></td></tr>
+<tr><td>Vessel PITC/PWV</td><td><code>src/nvitk/pipes/qvtpy/util/vessel_hemodynamics.py</code></td></tr>
+<tr><td>Stage 6</td><td><code>src/nvitk/pipes/qvtpy/stage6_measure.py</code></td></tr>
+<tr><td>Morphometrics API</td><td><code>src/nvitk/measure/morphometrics.py</code></td></tr>
+<tr><td>Morpho algorithms</td><td><code>src/nvitk/measure/morpho/</code></td></tr>
+<tr><td>Morpho config</td><td><code>src/nvitk/measure/morphometrics_config.py</code></td></tr>
+<tr><td>Stage 7</td><td><code>src/nvitk/pipes/qvtpy/stage7_morphometrics.py</code></td></tr>
+<tr><td>Venous heuristics</td><td><code>src/nvitk/pipes/qvtpy/util/venous_heuristics.py</code></td></tr>
+<tr><td>Labels</td><td><code>src/nvitk/pipes/qvtpy/labels.py</code></td></tr>
+<tr><td>PITC compare script</td><td><code>scripts/compare_pitc_profiles.py</code></td></tr>
+</tbody></table>
+<hr>
+<p>*Prepared as an internal technical reference. Grounded in read-only review of qvtpy measurement sources (July 2026).*</p>
+<footer><p><em>Prepared as an internal technical reference. qvtpy measurement sources (July 2026).</em></p></footer>
+</body></html>
