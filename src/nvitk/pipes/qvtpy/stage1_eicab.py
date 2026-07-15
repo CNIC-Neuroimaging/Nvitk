@@ -258,6 +258,7 @@ def submit_subject_sge(
     pipeline_container: Path | None = None,
     src_dir: Path | None = None,
     tmp_dir: Path | None = None,
+    thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
     vasculature_dir: Path | None = None,
     log_dir: Path | None = None,
@@ -337,6 +338,8 @@ def submit_subject_sge(
     log.info(f"qvtpy stage1 eICAB (sge) | subject={subject}")
     log.info(f"  input : {tof}")
     log.info(f"  output: {out_dir}")
+    if thread_limit:
+        log.info(f"  thread limit  : {thread_limit} (OMP/BLAS env in container)")
     if sge_pe_smp:
         log.info(f"  sge pe smp    : {sge_pe_smp} (qsub -pe smp {sge_pe_smp})")
     log.info(f"  outer container (run_job): {pipeline_c}")
@@ -363,6 +366,7 @@ def submit_subject_sge(
         post_process_eicab=post_process_eicab,
         backend=backend,
         resources=res,
+        thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
         hold_jid=hold_jid,
         dry_run=dry_run,
@@ -507,10 +511,22 @@ def _submit_postprocess_only_sge(
     help="Temp directory for eICAB (default: <output>/<subject>/<eicab-subdir>/.eicab_tmp).",
 )
 @click.option(
+    "--eicab-thread-limit",
+    type=int,
+    default=None,
+    help=(
+        "(sge) Cap OMP/BLAS threads inside the eICAB container. "
+        "Default: pipelines.eicab.eicab_thread_limit in .nvitk/sge.json."
+    ),
+)
+@click.option(
     "--sge-pe-smp",
     type=int,
     default=None,
-    help="(sge) qsub -pe smp N slots per eICAB job (caps VED parallelism for batch runs).",
+    help=(
+        "(sge) Optional qsub -pe smp N (cluster-specific parallel environment). "
+        "Omit unless your queue supports it; use --eicab-thread-limit instead."
+    ),
 )
 @click.option(
     "--vasculature-dir",
@@ -567,6 +583,7 @@ def main(
     pipeline_container: Path | None,
     src_dir: Path | None,
     tmp_dir: Path | None,
+    eicab_thread_limit: int | None,
     sge_pe_smp: int | None,
     vasculature_dir: Path | None,
     log_dir: Path | None,
@@ -646,6 +663,7 @@ def main(
                     pipeline_container=pipeline_container,
                     src_dir=src_dir,
                     tmp_dir=tmp_dir,
+                    thread_limit=eicab_thread_limit,
                     sge_pe_smp=sge_pe_smp,
                     vasculature_dir=vasculature_dir,
                     log_dir=log_dir,

@@ -198,10 +198,11 @@ def build_eicab_singularity_shell_cmd(
     vasculature_host_path: str | Path | None = None,
     cpu_limit_shell_expr: str | None = None,
 ) -> str:
-    """Shell command string for eICAB ``singularity run`` (supports ``$NSLOTS`` expansion).
+    """Shell command string for eICAB ``singularity run``.
 
-    *cpu_limit_shell_expr* is injected unquoted (e.g. ``${NSLOTS:-8}``) into thread
-    env vars so SGE parallel environments can cap VED worker counts per job.
+    *cpu_limit_shell_expr* sets OMP/BLAS thread env vars inside the container.
+    Use a numeric string (e.g. ``"8"``) or a shell expression (e.g.
+    ``"${NSLOTS:-8}"``) when ``qsub -pe smp`` is also requested.
     """
     if not cpu_limit_shell_expr:
         return shlex.join(

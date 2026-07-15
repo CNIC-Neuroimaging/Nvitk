@@ -351,6 +351,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     phase_bg_static_percentile: float,
     eicab_resolution: float,
     eicab_device: str,
+    eicab_thread_limit: int | None,
     eicab_sge_pe_smp: int | None,
     eicab_container: Path | None,
     vasculature_dir: Path | None,
@@ -473,6 +474,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         pipeline_container=container,
                         src_dir=src_p,
                         sge_pe_smp=eicab_sge_pe_smp,
+                        thread_limit=eicab_thread_limit,
                         vasculature_dir=vasculature_dir,
                         post_process_eicab=post_process_eicab,
                         hold_jid=prev_jid,
@@ -966,12 +968,21 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--eicab-resolution", type=float, default=0.5, show_default=True)
 @click.option(
+    "--eicab-thread-limit",
+    type=int,
+    default=None,
+    help=(
+        "(sge, stage1) Cap OMP/BLAS threads inside the eICAB container. "
+        "Default: pipelines.eicab.eicab_thread_limit in .nvitk/sge.json."
+    ),
+)
+@click.option(
     "--eicab-sge-pe-smp",
     type=int,
     default=None,
     help=(
-        "(sge, stage1) qsub -pe smp N per eICAB job and cap OMP thread env inside "
-        "the container. Default: pipelines.eicab.sge_pe_smp from .nvitk/sge.json."
+        "(sge, stage1) Optional qsub -pe smp N (cluster-specific). "
+        "Leave unset unless your queue supports the smp parallel environment."
     ),
 )
 @click.option(
@@ -1180,6 +1191,7 @@ def main(
     vasculature_dir: Path | None,
     eicab_device: str,
     eicab_resolution: float,
+    eicab_thread_limit: int | None,
     eicab_sge_pe_smp: int | None,
     post_process_eicab: bool,
     only_pp: bool,
@@ -1270,9 +1282,12 @@ def main(
     )
     log.info(f"  totalseg models={totalseg_model_dir_eff} ({'cluster' if submit == 'sge' else 'local'})")
 
-    eicab_pe_smp_eff = (
-        eicab_sge_pe_smp if eicab_sge_pe_smp is not None else eicab_cfg.SGE_PE_SMP
+    eicab_thread_eff = (
+        eicab_thread_limit
+        if eicab_thread_limit is not None
+        else eicab_cfg.EICAB_THREAD_LIMIT
     )
+    eicab_pe_smp_eff = eicab_sge_pe_smp
 
     if submit == "sge" and from_source.lower() == "xnat":
         log.info(f"  XNAT download target (local): {dicom_download_root}")
@@ -1281,8 +1296,11 @@ def main(
     run_dl = STAGE_DOWNLOAD in stages
     run_conv = STAGE_CONVERT in stages
     run_eicab = STAGE_EICAB in stages
-    if submit == "sge" and run_eicab and eicab_pe_smp_eff is not None:
-        log.info(f"  eicab sge pe smp (cluster): {eicab_pe_smp_eff}")
+    if submit == "sge" and run_eicab:
+        if eicab_thread_eff is not None:
+            log.info(f"  eicab thread limit (container): {eicab_thread_eff}")
+        if eicab_pe_smp_eff is not None:
+            log.info(f"  eicab sge pe smp (qsub -pe): {eicab_pe_smp_eff}")
     run_s2 = STAGE_REG in stages
     run_s3 = STAGE_CENTERLINE in stages
     run_s4 = STAGE_SEG in stages
@@ -1739,6 +1757,7 @@ def main(
         phase_bg_static_percentile=phase_bg_static_percentile,
         eicab_resolution=eicab_resolution,
         eicab_device=eicab_device,
+        eicab_thread_limit=eicab_thread_eff,
         eicab_sge_pe_smp=eicab_pe_smp_eff,
         eicab_container=eicab_container,
         vasculature_dir=vasculature_dir,

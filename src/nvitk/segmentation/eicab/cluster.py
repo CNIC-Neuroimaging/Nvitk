@@ -187,6 +187,7 @@ def build_eicab_host_shell_cmd(
     keep_aux_outputs: bool,
     post_process_eicab: bool,
     backend: str,
+    thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
 ) -> str:
     """Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups."""
@@ -194,7 +195,12 @@ def build_eicab_host_shell_cmd(
     if dev == "gpu":
         dev = "cuda"
 
-    cpu_expr = f"${{NSLOTS:-{sge_pe_smp}}}" if sge_pe_smp else None
+    if sge_pe_smp:
+        cpu_expr = f"${{NSLOTS:-{sge_pe_smp}}}"
+    elif thread_limit:
+        cpu_expr = str(thread_limit)
+    else:
+        cpu_expr = None
     steps: list[str] = [
         build_eicab_singularity_shell_cmd(
             input_nifti,
@@ -276,6 +282,7 @@ def submit_eicab_job(
     post_process_eicab: bool = True,
     backend: str = "gpu",
     resources: SgeResources,
+    thread_limit: int | None = None,
     sge_pe_smp: int | None = None,
     hold_jid: str | None = None,
     dry_run: bool = False,
@@ -315,6 +322,7 @@ def submit_eicab_job(
         keep_aux_outputs=keep_aux_outputs,
         post_process_eicab=post_process_eicab,
         backend=backend,
+        thread_limit=thread_limit,
         sge_pe_smp=sge_pe_smp,
     )
 
