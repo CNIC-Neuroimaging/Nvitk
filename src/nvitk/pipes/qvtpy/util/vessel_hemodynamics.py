@@ -42,7 +42,7 @@ from nvitk.measure.cross_section import (
 from nvitk.measure.hemodynamics import (
     QUALITY_THRESH_DEFAULT,
     accept_pwv,
-    circular_cross_correlation_lag,
+    cross_correlation_delay_seconds,
     damping_index,
     flow_pulsatile_ml_s,
     flow_per_heart_cycle_ml_s,
@@ -53,6 +53,7 @@ from nvitk.measure.hemodynamics import (
     quality_weights,
     station_quality_scores,
     stdv_from_mean_branch,
+    time_to_upstroke_seconds,
 )
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.pipes.qvtpy.labels import (
@@ -599,11 +600,20 @@ def _root_pwv(
     if len(good) < 3:
         return empty
     dist_m = np.array([r["distance_mm"] for r in good], dtype="float64") / 1000.0
-    weights = np.array([r["quality"] for r in good], dtype="float64")
+    quals = np.array([r["quality"] for r in good], dtype="float64")
+    weights = as_backend_array(
+        quality_weights(quals, thresh=quality_thresh)
+    ).astype("float64")
+    if not np.any(weights > 0):
+        return empty
     flow_matrix = np.vstack([r["flow_ts"] for r in good]).astype("float64")
 
-    bj = pwv_bjornfoot_optimize(dist_m, flow_matrix, float(temporal_resolution_s), weights=weights)
-    fi = pwv_fielding_xcor(dist_m, flow_matrix, float(temporal_resolution_s), weights=weights)
+    bj = pwv_bjornfoot_optimize(
+        dist_m, flow_matrix, float(temporal_resolution_s), weights=weights
+    )
+    fi = pwv_fielding_xcor(
+        dist_m, flow_matrix, float(temporal_resolution_s), weights=weights
+    )
     bj_val = bj["pwv_m_s"] if accept_pwv(bj["pwv_m_s"]) else ""
     fi_val = fi["pwv_m_s"] if accept_pwv(fi["pwv_m_s"]) else ""
     return {
@@ -612,15 +622,6 @@ def _root_pwv(
         "pwv_r_fielding": fi["r"],
         "pwv_n_stations": int(len(good)),
     }
-
-
-def _time_to_upstroke_s(flow_ts: np.ndarray, tr: float) -> float:
-    """Time (s) of maximal systolic upslope in a periodic flow waveform."""
-    x = as_backend_array(flow_ts).astype("float64").reshape(-1)
-    if x.size < 3:
-        return float("nan")
-    d = np.diff(x)
-    return float(int(np.argmax(d)) * float(tr))
 
 
 def _collect_region_plot_data(
@@ -652,17 +653,25 @@ def _collect_region_plot_data(
     if good and tr > 0:
         ref = as_backend_array(good[0]["flow_ts"]).astype("float64")
         quals = np.array([r["quality"] for r in good], dtype="float64")
-        w1 = as_backend_array(quality_weights(quals, thresh=quality_thresh)).astype("float64")
+        w1 = as_backend_array(quality_weights(quals, thresh=quality_thresh)).astype(
+            "float64"
+        )
         for i, r in enumerate(good):
-            lag_frames, corr = circular_cross_correlation_lag(ref, r["flow_ts"])
-            xcor_time_s[i] = lag_frames * tr
-            upstroke_s[i] = _time_to_upstroke_s(as_backend_array(r["flow_ts"]).astype("float64"), tr)
+            delay_s, corr = cross_correlation_delay_seconds(ref, r["flow_ts"], tr)
+            xcor_time_s[i] = delay_s
+            upstroke_s[i] = time_to_upstroke_seconds(
+                as_backend_array(r["flow_ts"]).astype("float64"), tr
+            )
             w2[i] = abs(corr)
 
     # Per-vessel flow waveforms (mean +/- std across the vessel's own stations).
     vessel_waveforms: dict[int, dict[str, Any]] = {}
     for label, rows in [(group.root_label, root_rows), *branch_rows_by_label.items()]:
-        flows = [as_backend_array(r["flow_ts"]).astype("float64") for r in rows if r.get("flow_ts") is not None]
+        flows = [
+            as_backend_array(r["flow_ts"]).astype("float64")
+            for r in rows
+            if r.get("flow_ts") is not None
+        ]
         if not flows:
             continue
         nt = min(f.size for f in flows)

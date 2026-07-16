@@ -183,6 +183,8 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
 
 def _draw_pwv_fits(ax, dist: np.ndarray, time_s: np.ndarray, w1: np.ndarray, w2: np.ndarray) -> None:
     """Overlay the quality- and correlation-weighted delay-vs-distance fits."""
+    from nvitk.measure.hemodynamics import accept_pwv
+
     xline = np.array([float(np.min(dist)), float(np.max(dist))], dtype="float64")
     for weights, style, tag in ((w1, "-.", "W_1"), (w2, "--", "W_2")):
         if weights.size != dist.size or not np.any(weights > 0):
@@ -192,7 +194,12 @@ def _draw_pwv_fits(ax, dist: np.ndarray, time_s: np.ndarray, w1: np.ndarray, w2:
             continue
         slope, intercept, pwv = res
         yline = slope * xline + intercept
-        label = rf"${tag}$: {pwv:.1f} m/s" if np.isfinite(pwv) else rf"${tag}$"
+        if accept_pwv(pwv):
+            label = rf"${tag}$: {pwv:.1f} m/s"
+        elif np.isfinite(pwv):
+            label = rf"${tag}$: n/a ({pwv:.1f})"
+        else:
+            label = rf"${tag}$: n/a"
         ax.plot(xline, yline, style, color="black", lw=1.4, label=label)
 
 

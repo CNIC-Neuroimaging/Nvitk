@@ -170,7 +170,11 @@ def stdv_from_mean_station(
     *,
     eps: float = 1e-9,
 ) -> float:
-    """QVTplus ``StdvFromMean`` for one station given its local window arrays."""
+    """QVTplus ``StdvFromMean`` for one station given its local window arrays.
+
+    Each term is clipped before summing so near-zero mean flow cannot explode the
+    score; the result is clamped to ``[0, QUALITY_SCALE_MAX]`` for Dempsey weights.
+    """
     fpc = as_backend_array(flow_per_cycle).astype(np.float64).reshape(-1)
     ar = as_backend_array(area).astype(np.float64).reshape(-1)
     di = as_backend_array(diam).astype(np.float64).reshape(-1)
@@ -181,12 +185,23 @@ def stdv_from_mean_station(
         return 0.0
     mu_f = float(np.mean(fpc))
     mu_a = float(np.mean(ar))
-    qv_meanflow = 1.0 - float(np.std(fpc)) / max(abs(mu_f), eps)
-    qv_area = 1.0 - float(np.std(ar)) / max(abs(mu_a), eps)
-    qv_circ = float(np.mean(di)) if di.size else 0.0
+    # Robust floors: avoid 1/eps blow-ups when mean flow/area ≈ 0.
+    floor_f = max(abs(mu_f), float(np.max(np.abs(fpc))) * 0.05, eps)
+    floor_a = max(abs(mu_a), float(np.max(np.abs(ar))) * 0.05 if ar.size else eps, eps)
+    qv_meanflow = float(np.clip(1.0 - float(np.std(fpc)) / floor_f, -1.0, 1.0))
+    qv_area = float(np.clip(1.0 - float(np.std(ar)) / floor_a, -1.0, 1.0))
+    qv_circ = float(np.clip(float(np.mean(di)) if di.size else 0.0, 0.0, 1.0))
     minmax_phase = np.max(fp, axis=0) - np.min(fp, axis=0)
-    qv_tight = 1.0 - float(np.mean(minmax_phase)) / max(abs(mu_f), eps)
-    return float(qv_meanflow + qv_area + qv_circ + qv_tight)
+    qv_tight = float(
+        np.clip(1.0 - float(np.mean(minmax_phase)) / floor_f, -1.0, 1.0)
+    )
+    return float(
+        np.clip(
+            qv_meanflow + qv_area + qv_circ + qv_tight,
+            0.0,
+            float(QUALITY_SCALE_MAX),
+        )
+    )
 
 
 def stdv_from_mean_branch(
@@ -284,10 +299,10 @@ def _np_ones_like(a):
 
 
 def quality_weights(quality, *, thresh: float = QUALITY_THRESH_DEFAULT):
-    """Dempsey-style weights ``(Q - thresh) / (scale_max - thresh)`` clipped to >= 0."""
+    """Dempsey-style weights ``(Q - thresh) / (scale_max - thresh)`` clipped to ``[0, 1]``."""
     q = (as_backend_array(quality)).astype("float64").reshape(-1)
     denom = max(QUALITY_SCALE_MAX - float(thresh), 1e-9)
-    return np.clip((q - float(thresh)) / denom, 0.0, None)
+    return np.clip((q - float(thresh)) / denom, 0.0, 1.0)
 
 
 def pitc_fit(
@@ -345,6 +360,11 @@ def damping_index(pi_proximal: float, pi_distal: float, *, eps: float = 1e-9) ->
 # Pulse wave velocity (Bjornfoot optimizer + Fielding cross-correlation)
 # ---------------------------------------------------------------------------
 
+# QVTplus ``enc_PWV_XCor`` / Rivera-style upsample of one cardiac cycle.
+_XCOR_UPSAMPLE: int = 500
+# Bjornfoot fmincon upper bound in QVTplus ``enc_PWVBjornfoot`` is 20 m/s.
+_BJORNFOOT_PWV_BOUNDS: tuple[float, float] = (0.5, 20.0)
+
 
 def normalize_waveform(flow_t, *, eps: float = 1e-9):
     """Zero-mean, unit-std normalization along the last axis (per row)."""
@@ -369,11 +389,37 @@ def _circular_fractional_shift(x, shift_frames: float):
     return xv[lo] * (1.0 - frac) + xv[hi] * frac
 
 
-def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
-    """Integer lag (frames) maximizing circular cross-correlation and its correlation.
+def upsample_periodic_cycle(
+    flow_t,
+    *,
+    n_up: int = _XCOR_UPSAMPLE,
+) -> tuple[np.ndarray, float]:
+    """Spline-upsample one periodic cardiac cycle (QVTplus Rivera / enc_PWV_XCor).
 
-    Ported from QVTplus ``slidingxCor``: both waveforms are normalized, then the
-    circular shift of *signal* that best matches *reference* is returned.
+    Triples the waveform for periodic boundaries, then interpolates onto ``n_up``
+    samples spanning one cycle. Returns ``(upsampled, samples_per_frame)``.
+    """
+    x = to_numpy(as_backend_array(flow_t)).astype(np.float64).reshape(-1)
+    nt = int(x.size)
+    n_up = max(int(n_up), max(nt * 2, 8))
+    if nt < 2:
+        return x.copy(), 1.0
+    x3 = np.concatenate([x, x, x])
+    t3 = np.arange(-nt, 2 * nt, dtype=np.float64)
+    t_up = np.linspace(0.0, float(nt), num=n_up, endpoint=False)
+    # Cubic spline on the tripled trace (matches MATLAB interp1(...,'spline')).
+    from scipy.interpolate import CubicSpline
+
+    cs = CubicSpline(t3, x3, bc_type="not-a-knot")
+    return cs(t_up).astype(np.float64), float(n_up) / float(nt)
+
+
+def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
+    """Integer lag (samples) maximizing circular cross-correlation and its correlation.
+
+    Returns ``(lag_samples, corr)`` where *lag_samples* is how far to roll *signal*
+    to match *reference* (wrapped to ``(-n/2, n/2]``). Prefer
+    :func:`cross_correlation_delay_seconds` for PWV (sign + sub-frame upsample).
     """
     ref = (as_backend_array(reference)).astype("float64").reshape(-1)
     sig = (as_backend_array(signal)).astype("float64").reshape(-1)
@@ -397,6 +443,62 @@ def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
     return float(best_lag), float(best_corr)
 
 
+def cross_correlation_delay_seconds(
+    reference,
+    signal,
+    temporal_resolution_s: float,
+    *,
+    n_up: int = _XCOR_UPSAMPLE,
+) -> tuple[float, float]:
+    """Transit delay (s) of *signal* relative to *reference* via upsampled XCor.
+
+    Positive delay means *signal* arrives later than *reference* (distal later than
+    proximal). Uses QVTplus-style spline upsampling of one cardiac cycle.
+    """
+    tr = float(temporal_resolution_s)
+    if tr <= 0:
+        return float("nan"), 0.0
+    ref_u, spp = upsample_periodic_cycle(reference, n_up=n_up)
+    sig_u, _ = upsample_periodic_cycle(signal, n_up=n_up)
+    lag_samples, corr = circular_cross_correlation_lag(ref_u, sig_u)
+    # lag_samples = roll(signal) to match ref. Delayed distal → negative roll →
+    # arrival delay = -lag (in original frames).
+    delay_frames = -float(lag_samples) / float(spp)
+    return delay_frames * tr, float(corr)
+
+
+def time_to_upstroke_seconds(
+    flow_ts,
+    temporal_resolution_s: float,
+    *,
+    n_up: int = _XCOR_UPSAMPLE,
+) -> float:
+    """Time (s) of maximal systolic upslope on an upsampled periodic waveform."""
+    tr = float(temporal_resolution_s)
+    if tr <= 0:
+        return float("nan")
+    up, spp = upsample_periodic_cycle(flow_ts, n_up=n_up)
+    if up.size < 3:
+        return float("nan")
+    d = np.diff(up)
+    i = int(np.argmax(d))
+    return float(i / spp) * tr
+
+
+def _mad_outlier_mask(y: np.ndarray, *, z_thresh: float = 3.5) -> np.ndarray:
+    """True for inliers under a robust MAD z-score (QVTplus ``isoutlier`` analogue)."""
+    yv = np.asarray(y, dtype=np.float64).reshape(-1)
+    keep = np.isfinite(yv)
+    if int(keep.sum()) < 4:
+        return keep
+    med = float(np.median(yv[keep]))
+    mad = float(np.median(np.abs(yv[keep] - med)))
+    if mad < 1e-12:
+        return keep
+    z = 0.6745 * (yv - med) / mad
+    return keep & (np.abs(z) <= float(z_thresh))
+
+
 def pwv_fielding_xcor(
     distances_m,
     flow_matrix,
@@ -404,29 +506,57 @@ def pwv_fielding_xcor(
     *,
     weights=None,
     reference_index: int = 0,
+    n_up: int = _XCOR_UPSAMPLE,
+    reject_outliers: bool = True,
 ) -> dict[str, float]:
-    """Fielding-style PWV: cross-correlation lag vs distance, weighted linear fit.
+    """Fielding-style PWV: upsampled cross-correlation delay vs distance.
 
-    *flow_matrix* is ``(n_stations, n_frames)`` ordered along the vessel. Lags are
+    *flow_matrix* is ``(n_stations, n_frames)`` ordered along the vessel. Delays are
     measured relative to *reference_index*; ``tau = distance / PWV`` is fit so
     ``PWV = 1 / slope``. Returns ``pwv_m_s``, ``r`` (mean |correlation|), and ``n``.
     """
     dist = (as_backend_array(distances_m)).astype("float64").reshape(-1)
     flows = (as_backend_array(flow_matrix)).astype("float64")
     if flows.ndim != 2 or flows.shape[0] < 2:
-        return {"pwv_m_s": float("nan"), "r": float("nan"), "n": int(flows.shape[0] if flows.ndim else 0)}
+        return {
+            "pwv_m_s": float("nan"),
+            "r": float("nan"),
+            "n": int(flows.shape[0] if flows.ndim else 0),
+        }
     tr = float(temporal_resolution_s)
-    ref = flows[int(reference_index)]
-    lags_s = np.zeros(flows.shape[0], dtype="float64")
-    corrs = np.zeros(flows.shape[0], dtype="float64")
-    for i in range(flows.shape[0]):
-        lag_frames, corr = circular_cross_correlation_lag(ref, flows[i])
-        lags_s[i] = lag_frames * tr
+    n = int(flows.shape[0])
+    ref_i = int(np.clip(reference_index, 0, n - 1))
+    ref = flows[ref_i]
+    lags_s = np.zeros(n, dtype="float64")
+    corrs = np.zeros(n, dtype="float64")
+    for i in range(n):
+        delay_s, corr = cross_correlation_delay_seconds(
+            ref, flows[i], tr, n_up=n_up
+        )
+        lags_s[i] = delay_s
         corrs[i] = abs(corr)
-    fit = weighted_linear_fit(dist, lags_s, weights)
+    if weights is None:
+        wv = np.ones(n, dtype="float64")
+    else:
+        wv = (as_backend_array(weights)).astype("float64").reshape(-1)[:n]
+        wv = np.clip(wv, 0.0, None)
+    keep = np.isfinite(lags_s) & np.isfinite(dist) & (wv > 0)
+    if reject_outliers and int(keep.sum()) >= 4:
+        keep &= _mad_outlier_mask(lags_s)
+    if int(keep.sum()) < 2:
+        return {"pwv_m_s": float("nan"), "r": float(np.mean(corrs)), "n": int(keep.sum())}
+    fit = weighted_linear_fit(dist[keep], lags_s[keep], wv[keep])
     slope = fit["slope"]
-    pwv = 1.0 / slope if slope and np.isfinite(slope) and abs(slope) > 1e-12 else float("nan")
-    return {"pwv_m_s": float(pwv), "r": float(np.mean(corrs)), "n": int(flows.shape[0])}
+    pwv = (
+        1.0 / slope
+        if slope and np.isfinite(slope) and abs(slope) > 1e-12
+        else float("nan")
+    )
+    return {
+        "pwv_m_s": float(pwv),
+        "r": float(np.mean(corrs[keep])),
+        "n": int(keep.sum()),
+    }
 
 
 def pwv_bjornfoot_optimize(
@@ -435,7 +565,7 @@ def pwv_bjornfoot_optimize(
     temporal_resolution_s: float,
     *,
     weights=None,
-    pwv_bounds: tuple[float, float] = (0.5, 30.0),
+    pwv_bounds: tuple[float, float] = _BJORNFOOT_PWV_BOUNDS,
 ) -> dict[str, float]:
     """Bjornfoot waveform-shift PWV estimate (J Cereb Blood Flow Metab 2021).
 
@@ -446,14 +576,20 @@ def pwv_bjornfoot_optimize(
     dist = (as_backend_array(distances_m)).astype("float64").reshape(-1)
     flows = (as_backend_array(normalize_waveform(flow_matrix)))
     if flows.ndim != 2 or flows.shape[0] < 2:
-        return {"pwv_m_s": float("nan"), "cost": float("nan"), "n": int(flows.shape[0] if flows.ndim else 0)}
+        return {
+            "pwv_m_s": float("nan"),
+            "cost": float("nan"),
+            "n": int(flows.shape[0] if flows.ndim else 0),
+        }
     tr = float(temporal_resolution_s)
     n_stations = flows.shape[0]
     if weights is None:
         wv = np.ones(n_stations, dtype="float64")
     else:
         wv = (as_backend_array(weights)).astype("float64").reshape(-1)[:n_stations]
+        wv = np.clip(wv, 0.0, None)
     wsum = float(wv.sum()) or 1.0
+    lo, hi = float(pwv_bounds[0]), float(pwv_bounds[1])
 
     def cost(pwv: float) -> float:
         if pwv <= 0:
@@ -470,18 +606,18 @@ def pwv_bjornfoot_optimize(
         return total
 
     from scipy.optimize import minimize_scalar
+
     with using("numpy"):
         flows = to_numpy(flows)
         dist = to_numpy(dist)
-        pwv_bounds = to_numpy(pwv_bounds)
         wv = to_numpy(wv)
-        res = minimize_scalar(
-            cost, 
-            bounds=tuple(pwv_bounds), 
-            method="bounded"
-        )
-    
-    return {"pwv_m_s": float(res.x), "cost": float(res.fun), "n": int(n_stations)}
+        res = minimize_scalar(cost, bounds=(lo, hi), method="bounded")
+
+    pwv = float(res.x)
+    # Stuck at the upper bound ⇒ no resolvable delay (QVTplus rejects these).
+    if pwv >= hi - 1e-3:
+        pwv = float("nan")
+    return {"pwv_m_s": pwv, "cost": float(res.fun), "n": int(n_stations)}
 
 
 def accept_pwv(pwv_m_s: float) -> bool:
@@ -489,6 +625,8 @@ def accept_pwv(pwv_m_s: float) -> bool:
     try:
         v = float(pwv_m_s)
     except (TypeError, ValueError):
+        return False
+    if not np.isfinite(v):
         return False
     return PWV_MIN_M_S < v < PWV_MAX_M_S
 
@@ -500,6 +638,7 @@ __all__ = [
     "QUALITY_THRESH_DEFAULT",
     "accept_pwv",
     "circular_cross_correlation_lag",
+    "cross_correlation_delay_seconds",
     "damping_index",
     "mean_flow_ml_s",
     "mean_velocity_mm_s",
@@ -515,6 +654,8 @@ __all__ = [
     "quality_weights",
     "resistivity_index",
     "through_plane_velocity_series",
+    "time_to_upstroke_seconds",
+    "upsample_periodic_cycle",
     "velocity_mm_s_from_phases",
     "station_quality_scores",
     "stdv_from_mean_branch",
