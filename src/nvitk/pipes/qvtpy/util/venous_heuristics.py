@@ -1,8 +1,9 @@
 """Geometry-based identification of venous sinuses (SSSV, STRV, LTSV, RTSV).
 
 Uses RAS orientation from the image affine (when available), splits skeleton
-branches preferring significant multi-way junctions (after pruning tiny loops /
-short spurs), and assigns vessels greedily with RAS direction *and location*
+branches preferring significant multi-way junctions, then classic degree-3
+Y/T junctions when no bifurcation is found (after pruning tiny loops / short
+spurs), and assigns vessels greedily with RAS direction *and location*
 priors (L/R X-hemisphere, midline SSSV/STRV, SSSV posterior to STRV) plus light
 conflict guards.
 """
@@ -19,9 +20,11 @@ from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected
 from nvitk.morphology.polyline_graph import (
     branch_polylines_from_skeleton,
+    degree3_junction_nodes,
     prune_skeleton_coords_short_spurs,
     prune_skeleton_coords_tiny_loops,
     significant_bifurcation_nodes,
+    three_arm_junction_nodes,
 )
 from nvitk.pipes.qvtpy.labels import (
     NAME_LTSV,
@@ -274,6 +277,10 @@ def extract_branch_polylines(
         n_after_loop = n_skel
         n_after_spur = n_skel
         work = coords
+        # Only strip tiny noise spurs before split. Aggressive spur prune
+        # (min_points//2) deletes real transverse arms and collapses SSSV↔LTSV
+        # trees into a single chain (see PESA10758400).
+        spur_min = max(2, min(4, int(min_points) // 8))
         if prune_tiny_loops:
             work = prune_skeleton_coords_tiny_loops(
                 work, max_cycle_len=int(max_tiny_loop_len)
@@ -281,24 +288,38 @@ def extract_branch_polylines(
             n_after_loop = int(work.shape[0])
         if prune_short_spurs:
             work = prune_skeleton_coords_short_spurs(
-                work, min_spur_points=max(2, int(min_points) // 2)
+                work, min_spur_points=spur_min
             )
             n_after_spur = int(work.shape[0])
 
         n_bif = 0
-        if prefer_bifurcations and work.shape[0] >= int(min_points):
-            n_bif = len(
-                significant_bifurcation_nodes(work, min_arm_points=min_arm)
-            )
+        n_deg3 = 0
+        n_three = 0
+        if work.shape[0] >= int(min_points):
+            if prefer_bifurcations:
+                n_bif = len(
+                    significant_bifurcation_nodes(work, min_arm_points=min_arm)
+                )
+            if n_bif == 0:
+                n_deg3 = len(degree3_junction_nodes(work))
+            if n_bif == 0 and n_deg3 == 0:
+                n_three = len(
+                    three_arm_junction_nodes(
+                        work, min_arm_points=max(2, min_arm // 2)
+                    )
+                )
         if prefer_bifurcations and n_bif > 0:
             mode = f"multiway-split ({n_bif} junction(s))"
-        elif prefer_bifurcations:
-            mode = "all-junctions fallback (no significant multiway)"
+        elif n_deg3 > 0:
+            mode = f"degree-3 junction fallback ({n_deg3} node(s))"
+        elif n_three > 0:
+            mode = f"3-arm junction fallback ({n_three} node(s))"
         else:
-            mode = "all-junctions"
+            mode = "longest-path (no bif / no Y junction)"
         log.info(
             f"venous extract CC{comp_id}: voxels={n_vox}, skel={n_skel} → "
-            f"loop-prune={n_after_loop} → spur-prune={n_after_spur}; {mode}"
+            f"loop-prune={n_after_loop} → spur-prune={n_after_spur} "
+            f"(spur_min={spur_min}); {mode}"
         )
 
         cc_polys = branch_polylines_from_skeleton(

@@ -303,7 +303,12 @@ def prune_skeleton_coords_short_spurs(
     node_set = {tuple(int(v) for v in row) for row in coords_xyz}
     min_len = max(1, int(min_spur_points))
     changed = True
-    while changed and len(node_set) >= 2:
+    # Cap iterations: cycle+spur graphs can otherwise walk forever if a deg-2
+    # entry into a loop is mistaken for an open chain.
+    max_iters = max(8, len(node_set))
+    n_iter = 0
+    while changed and len(node_set) >= 2 and n_iter < max_iters:
+        n_iter += 1
         changed = False
         endpoints = [
             n
@@ -316,6 +321,7 @@ def prune_skeleton_coords_short_spurs(
             path = [ep]
             prev = None
             cur = ep
+            seen_walk = {ep}
             while True:
                 nbrs = [m for m in _neighbors26(cur) if m in node_set and m != prev]
                 d = sum(1 for m in _neighbors26(cur) if m in node_set)
@@ -324,7 +330,11 @@ def prune_skeleton_coords_short_spurs(
                 if not nbrs:
                     break
                 nxt = nbrs[0]
+                if nxt in seen_walk:
+                    # Entered a loop along a deg-2 chain; not a finite spur.
+                    break
                 path.append(nxt)
+                seen_walk.add(nxt)
                 prev, cur = cur, nxt
                 if sum(1 for m in _neighbors26(cur) if m in node_set) != 2:
                     break
@@ -390,6 +400,52 @@ def _chains_from_specials(
     return polylines
 
 
+def degree3_junction_nodes(
+    coords_xyz: np.ndarray,
+) -> list[tuple[int, int, int]]:
+    """Classic Y/T junction voxels: skeleton degree *exactly* 3.
+
+    Degree >3 is intentionally ignored here (matches the original junction
+    detector). Prefer :func:`three_arm_junction_nodes` when 26-connectivity
+    inflates local degree but the cluster still has exactly three arms.
+    """
+    if coords_xyz.shape[0] == 0:
+        return []
+    _nodes, _adj, deg = skeleton_graph(coords_xyz)
+    return [n for n, d in deg.items() if int(d) == 3]
+
+
+def three_arm_junction_nodes(
+    coords_xyz: np.ndarray,
+    *,
+    min_arm_points: int = 2,
+    min_degree: int = 3,
+) -> list[tuple[int, int, int]]:
+    """Junction-cluster reps with *exactly* three arms (classic Y/T).
+
+    Unlike :func:`significant_bifurcation_nodes` (needs ≥3 *long* arms, allows
+    4+), this is the no-bifurcation fallback for SSSV↔one-transverse joins even
+    when local skeleton degree is >3 under 26-connectivity.
+    """
+    if coords_xyz.shape[0] == 0:
+        return []
+    nodes, _adj, deg = skeleton_graph(coords_xyz)
+    node_set = set(nodes)
+    min_arm = max(1, int(min_arm_points))
+    out: list[tuple[int, int, int]] = []
+    for cluster_list in junction_clusters(nodes, deg, min_degree=int(min_degree)):
+        cluster = set(cluster_list)
+        arms = _arm_components_from_cluster(cluster, node_set)
+        if len(arms) != 3:
+            continue
+        if sum(1 for arm in arms if len(arm) >= min_arm) < 2:
+            # Need at least two real branches (e.g. SSSV + LTSV); ignore
+            # deg-3 noise with only one long arm + two stubs.
+            continue
+        out.append(max(cluster_list, key=lambda n: (deg[n], n)))
+    return out
+
+
 def branch_polylines_from_skeleton(
     coords_xyz: np.ndarray,
     *,
@@ -402,10 +458,10 @@ def branch_polylines_from_skeleton(
 ) -> list[np.ndarray]:
     """One polyline per chain between skeleton endpoints and junctions.
 
-    When *prefer_bifurcations* is True, significant multi-way junctions
-    (clusters with ≥3 long arms — classic Y or torcular degree ≥4) are used as
-    split points. The full junction *cluster* is marked special so walks cannot
-    merge through fat deg>3 blobs. Tiny loops / short spurs can be pruned first.
+    When *prefer_bifurcations* is True:
+    1. Significant multi-way junctions (≥3 long arms, including torcular deg≥4)
+    2. Else classic 3-arm Y/T (exact deg-3 *or* 3-arm clusters if deg>3)
+    3. Else a single longest-path chain (no split points)
     """
     if coords_xyz.shape[0] == 0:
         return []
@@ -433,27 +489,36 @@ def branch_polylines_from_skeleton(
         else max(3, int(min_points) // 2)
     )
 
+    def _split_at(reps: list[tuple[int, int, int]], *, expand: bool) -> list[np.ndarray]:
+        if expand:
+            specials = _expand_reps_to_clusters(nodes, deg, reps, min_degree=3)
+        else:
+            specials = reps
+        special = list(dict.fromkeys([*endpoints, *specials]))
+        return _chains_from_specials(coords, special, min_points=min_points)
+
     if prefer_bifurcations:
         bif = significant_bifurcation_nodes(coords, min_arm_points=min_arm)
         if bif:
-            # Mark every voxel in significant clusters so walks stop at the
-            # torcular shell instead of traversing deg>3 interior and merging arms.
-            cluster_specials = _expand_reps_to_clusters(nodes, deg, bif, min_degree=3)
-            special = list(dict.fromkeys([*endpoints, *cluster_specials]))
-            return _chains_from_specials(coords, special, min_points=min_points)
-        # No significant multi-way junction: still expand every junction cluster
-        # so deg>3 blobs cannot merge arms into a single diameter walk.
-        all_reps = collapse_junction_clusters(nodes, deg, min_degree=3)
-        cluster_specials = _expand_reps_to_clusters(
-            nodes, deg, all_reps, min_degree=3
-        )
-        special = list(dict.fromkeys([*endpoints, *cluster_specials]))
-        return _chains_from_specials(coords, special, min_points=min_points)
+            return _split_at(bif, expand=True)
+        # Classic Y/T: prefer exact deg-3; also accept 3-arm clusters (deg may be >3).
+        deg3 = degree3_junction_nodes(coords)
+        if deg3:
+            return _split_at(deg3, expand=False)
+        three = three_arm_junction_nodes(coords, min_arm_points=max(2, min_arm // 2))
+        if three:
+            return _split_at(three, expand=True)
+        poly = _centerline_longest_path(coords)
+        return [poly] if poly.shape[0] >= int(min_points) else []
 
-    all_reps = collapse_junction_clusters(nodes, deg, min_degree=3)
-    cluster_specials = _expand_reps_to_clusters(nodes, deg, all_reps, min_degree=3)
-    special = list(dict.fromkeys([*endpoints, *cluster_specials]))
-    return _chains_from_specials(coords, special, min_points=min_points)
+    deg3 = degree3_junction_nodes(coords)
+    if deg3:
+        return _split_at(deg3, expand=False)
+    three = three_arm_junction_nodes(coords, min_arm_points=max(2, min_arm // 2))
+    if three:
+        return _split_at(three, expand=True)
+    poly = _centerline_longest_path(coords)
+    return [poly] if poly.shape[0] >= int(min_points) else []
 
 
 def junction_nodes_from_skeleton(
@@ -570,6 +635,7 @@ __all__ = [
     "collapse_junction_clusters",
     "ExtractionMode",
     "branch_polylines_from_skeleton",
+    "degree3_junction_nodes",
     "detect_junctions_from_centerline",
     "extract_polylines_from_centerline",
     "junction_clusters",
@@ -578,4 +644,5 @@ __all__ = [
     "prune_skeleton_coords_tiny_loops",
     "significant_bifurcation_nodes",
     "skeleton_graph",
+    "three_arm_junction_nodes",
 ]
