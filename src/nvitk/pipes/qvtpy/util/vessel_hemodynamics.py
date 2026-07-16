@@ -498,8 +498,20 @@ def compute_vessel_hemodynamics(
         dists = np.array([r["distance_mm"] for r in group_stations], dtype="float64")
         quals = np.array([r["quality"] for r in group_stations], dtype="float64")
         fit = pitc_fit(pis, dists, quals, thresh=quality_thresh)
+        n_used = int(fit.get("n") or 0)
+        log.info(
+            f"PITC {group.region_id}: slope={fit['pitc_slope']:.6g} "
+            f"intercept={fit['pitc_intercept']:.6g} r2={fit['r2']:.4f} "
+            f"global_pi={fit['global_pi']:.4f} "
+            f"n_fit={n_used}/{len(group_stations)} (Q>{quality_thresh:g})"
+        )
 
-        pwv_result = _root_pwv(group_stations, temporal_resolution_s, quality_thresh=quality_thresh)
+        pwv_result = _root_pwv(
+            group_stations,
+            temporal_resolution_s,
+            quality_thresh=quality_thresh,
+            region_id=group.region_id,
+        )
 
         if collect_plot_data:
             result.region_plot_data[group.region_id] = _collect_region_plot_data(
@@ -585,8 +597,10 @@ def _root_pwv(
     temporal_resolution_s: float | None,
     *,
     quality_thresh: float,
+    region_id: str = "",
 ) -> dict[str, Any]:
     """Bjornfoot + Fielding PWV over high-quality stations ordered by distance."""
+    tag = region_id or "root"
     empty = {
         "pwv_bjornfoot_m_s": "",
         "pwv_fielding_m_s": "",
@@ -594,10 +608,14 @@ def _root_pwv(
         "pwv_n_stations": 0,
     }
     if temporal_resolution_s is None or float(temporal_resolution_s) <= 0:
+        log.warning(f"PWV {tag}: skipped (missing/invalid temporal_resolution_s)")
         return empty
     good = [r for r in stations if r["quality"] > float(quality_thresh)]
     good.sort(key=lambda r: r["distance_mm"])
     if len(good) < 3:
+        log.warning(
+            f"PWV {tag}: skipped (only {len(good)} stations with Q>{quality_thresh:g})"
+        )
         return empty
     dist_m = np.array([r["distance_mm"] for r in good], dtype="float64") / 1000.0
     quals = np.array([r["quality"] for r in good], dtype="float64")
@@ -605,17 +623,26 @@ def _root_pwv(
         quality_weights(quals, thresh=quality_thresh)
     ).astype("float64")
     if not np.any(weights > 0):
+        log.warning(f"PWV {tag}: skipped (all quality weights are zero)")
         return empty
     flow_matrix = np.vstack([r["flow_ts"] for r in good]).astype("float64")
+    tr = float(temporal_resolution_s)
 
-    bj = pwv_bjornfoot_optimize(
-        dist_m, flow_matrix, float(temporal_resolution_s), weights=weights
+    bj = pwv_bjornfoot_optimize(dist_m, flow_matrix, tr, weights=weights)
+    fi = pwv_fielding_xcor(dist_m, flow_matrix, tr, weights=weights)
+    bj_ok = accept_pwv(bj["pwv_m_s"])
+    fi_ok = accept_pwv(fi["pwv_m_s"])
+    bj_val = bj["pwv_m_s"] if bj_ok else ""
+    fi_val = fi["pwv_m_s"] if fi_ok else ""
+    d_span_mm = float(dist_m[-1] - dist_m[0]) * 1000.0 if dist_m.size else 0.0
+    log.info(
+        f"PWV {tag}: n={len(good)} d_span={d_span_mm:.1f} mm tr={tr * 1e3:.3f} ms | "
+        f"Fielding raw={fi['pwv_m_s']:.4g} m/s "
+        f"(accept={fi_ok}, r={fi['r']:.4f}, n_fit={fi['n']}) | "
+        f"Bjornfoot raw={bj['pwv_m_s']:.4g} m/s (accept={bj_ok}) | "
+        f"CSV fielding={fi_val if fi_val != '' else 'empty'} "
+        f"bjornfoot={bj_val if bj_val != '' else 'empty'}"
     )
-    fi = pwv_fielding_xcor(
-        dist_m, flow_matrix, float(temporal_resolution_s), weights=weights
-    )
-    bj_val = bj["pwv_m_s"] if accept_pwv(bj["pwv_m_s"]) else ""
-    fi_val = fi["pwv_m_s"] if accept_pwv(fi["pwv_m_s"]) else ""
     return {
         "pwv_bjornfoot_m_s": bj_val,
         "pwv_fielding_m_s": fi_val,

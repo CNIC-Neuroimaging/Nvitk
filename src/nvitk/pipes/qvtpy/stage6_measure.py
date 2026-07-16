@@ -16,7 +16,7 @@ import csv
 import json
 import shlex
 from pathlib import Path
-from typing import Literal, TextIO
+from typing import Any, Literal, TextIO
 
 import click
 import numpy as np
@@ -110,54 +110,130 @@ def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
     return (1.0, 1.0, 1.0)
 
 
-def _phase_temporal_resolution_s(ap_phase_path: Path) -> float | None:
-    """Cardiac-frame temporal resolution (s) from the phase NIfTI JSON sidecar.
+# Cardiac phase spacing is typically tens of ms. Used only to sanity-check
+# RR / n_phases (or NominalInterval) estimates — never to validate NIfTI t_res.
+_CARDIAC_FRAME_MIN_S = 0.015
+_CARDIAC_FRAME_MAX_S = 0.25
 
-    dcm2niix / :mod:`nvitk.io.conversors` propagates ``t_res`` (seconds) and
-    ``FrameTime`` (ms) into the sidecar metadata. Returns ``None`` when no usable
-    timing field is present, so PWV can fail loudly rather than assume a value.
+
+def _plausible_cardiac_frame_s(tr: float) -> bool:
+    return _CARDIAC_FRAME_MIN_S <= float(tr) <= _CARDIAC_FRAME_MAX_S
+
+
+def _n_cardiac_phases(meta: dict[str, Any], n_timepoints: int | None) -> int | None:
+    """Number of RR-normalized cardiac bins (prefer volume shape over DICOM tags)."""
+    if n_timepoints is not None and int(n_timepoints) > 1:
+        return int(n_timepoints)
+    for key in ("CardiacNumberOfImages", "NumberOfTemporalPositions"):
+        val = meta.get(key)
+        if val is None:
+            continue
+        try:
+            n = int(round(float(val)))
+        except (TypeError, ValueError):
+            continue
+        if n > 1:
+            return n
+    return None
+
+
+def _cardiac_frame_duration_s(
+    meta: dict[str, Any],
+    *,
+    n_timepoints: int | None = None,
+) -> tuple[float | None, str]:
+    """Resolve cardiac-frame duration (s) for RR-normalized phase bins.
+
+    PESA / Q-flow volumes store a fixed number of frames (e.g. 15) that always
+    span one cardiac cycle, so ``Δt = RR / n_phases``. NIfTI ``t_res`` /
+    ``pixdim[4]`` and DICOM ``RepetitionTime`` are MRI RF timing and must not
+    be used. ``FrameTime`` is also unreliable when bins are RR-normalized.
+
+    Priority: ``HeartRate`` → ``NominalInterval`` → (last resort) ``FrameTime``.
+
+    Returns ``(duration_s, source)``; ``duration_s`` is ``None`` when unresolved.
+    """
+    def _pos(key: str, *, scale: float = 1.0) -> float | None:
+        val = meta.get(key)
+        if val is None:
+            return None
+        try:
+            out = float(val) * float(scale)
+        except (TypeError, ValueError):
+            return None
+        return out if out > 0 else None
+
+    n_t = _n_cardiac_phases(meta, n_timepoints)
+
+    # 1) RR / n_phases from HeartRate (correct for normalized cardiac bins).
+    hr = _pos("HeartRate")
+    if hr is not None and hr > 10.0 and n_t is not None:
+        tr = (60.0 / hr) / float(n_t)
+        if _plausible_cardiac_frame_s(tr):
+            return tr, f"HeartRate/{n_t}"
+
+    # 2) Nominal RR interval (ms) / n_phases when HeartRate is missing.
+    nominal = _pos("NominalInterval", scale=1e-3)
+    if nominal is not None and n_t is not None:
+        tr = nominal / float(n_t)
+        if _plausible_cardiac_frame_s(tr):
+            return tr, f"NominalInterval/{n_t}"
+
+    # 3) FrameTime only if no RR-based estimate is available.
+    frame_time = _pos("FrameTime", scale=1e-3)
+    if frame_time is not None and _plausible_cardiac_frame_s(frame_time):
+        log.warning(
+            "Using FrameTime as cardiac Δt; prefer HeartRate/n_phases for "
+            "RR-normalized bins"
+        )
+        return frame_time, "FrameTime"
+
+    # Explicitly ignore t_res / TemporalResolution / RepetitionTime.
+    for key in ("temporal_resolution", "t_res", "TemporalResolution", "RepetitionTime"):
+        if meta.get(key) is not None:
+            log.warning(
+                f"Ignoring {key}={meta.get(key)!r} for cardiac frame duration "
+                "(RR-normalized bins: use HeartRate/n_phases, not MRI t_res/TR)"
+            )
+            break
+
+    return None, "none"
+
+
+def _phase_temporal_resolution_s(ap_phase_path: Path) -> float | None:
+    """Cardiac-frame duration (s) = RR / n_phases from phase metadata / sidecars.
+
+    Does not use NIfTI ``t_res`` (often MRI ``RepetitionTime``). Returns ``None``
+    when HeartRate / NominalInterval / FrameTime cannot resolve Δt, so PWV is
+    skipped rather than using a wrong clock.
     """
     ap_img = imread(ap_phase_path)
     meta = dict(ap_img.metadata or {})
-    for key in ("temporal_resolution", "t_res", "TemporalResolution"):
-        val = meta.get(key)
-        if val is not None:
-            try:
-                out = float(val)
-                if out > 0:
-                    return out
-            except (TypeError, ValueError):
-                pass
-    for key, scale in (("FrameTime", 1e-3), ("RepetitionTime", 1.0)):
-        val = meta.get(key)
-        if val is not None:
-            try:
-                out = float(val) * scale
-                if out > 0:
-                    return out
-            except (TypeError, ValueError):
-                pass
-    sidecars = sorted(ap_phase_path.parent.glob("*.json"))
-    for js in sidecars:
+    data = ap_img.data
+    n_t = int(data.shape[3]) if getattr(data, "ndim", 0) >= 4 else None
+    tr, source = _cardiac_frame_duration_s(meta, n_timepoints=n_t)
+    if tr is not None:
+        log.info(
+            f"stage6 cardiac frame duration: {tr * 1e3:.3f} ms "
+            f"(source={source}, n_t={n_t})"
+        )
+        return tr
+
+    # Sidecars often carry HeartRate when the NIfTI header only has MRI TR.
+    for js in sorted(ap_phase_path.parent.glob("*.json")):
         try:
-            data = json.loads(js.read_text(encoding="utf-8"))
+            data_js = json.loads(js.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        for key, scale in (
-            ("temporal_resolution", 1.0),
-            ("t_res", 1.0),
-            ("TemporalResolution", 1.0),
-            ("FrameTime", 1e-3),
-            ("RepetitionTime", 1.0),
-        ):
-            val = data.get(key)
-            if val is not None:
-                try:
-                    out = float(val) * scale
-                    if out > 0:
-                        return out
-                except (TypeError, ValueError):
-                    pass
+        if not isinstance(data_js, dict):
+            continue
+        tr, source = _cardiac_frame_duration_s(data_js, n_timepoints=n_t)
+        if tr is not None:
+            log.info(
+                f"stage6 cardiac frame duration: {tr * 1e3:.3f} ms "
+                f"(source={source} via {js.name}, n_t={n_t})"
+            )
+            return tr
     return None
 
 

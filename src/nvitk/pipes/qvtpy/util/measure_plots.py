@@ -114,16 +114,43 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
         ax_q.set_xlabel("d (mm)")
         ax_q.legend(loc="lower left", fontsize=8, framealpha=0.9)
 
-        # Row 2: p_pi vs distance with the PITC fit, mean line, and x_p / x_d markers.
+        # Row 2: p_pi vs distance — grey = unused in fit (Q≤thresh), blue = used.
+        # Green markers are the proximal/distal *used* stations (QVTplus x_p / x_d
+        # analogue), not the fit-line endpoints.
         ax_p = axes[1][col]
-        ax_p.scatter(dist, pi, s=12, c="royalblue", alpha=0.7, label="Data")
+        used = quality > thresh
+        ax_p.scatter(
+            dist[~used], pi[~used], s=12, c="0.6", alpha=0.7, label=f"Q<{thresh:g}"
+        )
+        ax_p.scatter(
+            dist[used], pi[used], s=12, c="royalblue", alpha=0.7, label=f"Q>{thresh:g}"
+        )
         slope = d.get("pitc_slope")
         intercept = d.get("pitc_intercept")
-        if slope is not None and intercept is not None and np.isfinite(slope) and np.isfinite(intercept) and dist.size:
-            xline = np.array([float(np.min(dist)), float(np.max(dist))], dtype="float64")
+        if (
+            slope is not None
+            and intercept is not None
+            and np.isfinite(slope)
+            and np.isfinite(intercept)
+            and dist.size
+        ):
+            xline = np.array(
+                [float(np.min(dist)), float(np.max(dist))], dtype="float64"
+            )
             yline = slope * xline + intercept
             ax_p.plot(xline, yline, "k-", lw=1.6, label=r"$p_{tf}(d)=p_{tc}d+\beta$")
-            ax_p.scatter(xline, yline, s=60, c="limegreen", zorder=5, label=r"$x_p$ and $x_d$")
+        if int(used.sum()) >= 2:
+            iu = np.where(used)[0]
+            order = np.argsort(dist[iu])
+            i0, i1 = int(iu[order[0]]), int(iu[order[-1]])
+            ax_p.scatter(
+                [dist[i0], dist[i1]],
+                [pi[i0], pi[i1]],
+                s=60,
+                c="limegreen",
+                zorder=5,
+                label=r"$x_p$ and $x_d$",
+            )
         gpi = d.get("global_pi")
         if gpi is not None and np.isfinite(gpi):
             ax_p.axhline(float(gpi), color="firebrick", lw=1.2, label=r"$\mu(p_{pi})$")
