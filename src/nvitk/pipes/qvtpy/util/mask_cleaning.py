@@ -111,6 +111,30 @@ def keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray:
     return as_backend_array(out.astype(np.int32, copy=False))
 
 
+def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int:
+    """In-place: keep only the largest CC of *label_id* in *seg*; clear stray islands.
+
+    Returns the remaining voxel count for *label_id*.
+    """
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
+    lid = int(label_id)
+    roi = seg_np == lid
+    n_fg = int(np.count_nonzero(roi))
+    if n_fg == 0:
+        return 0
+    labeled, num = label_connected(roi, connectivity=1)
+    labeled_np = as_backend_array(labeled)
+    if int(num) <= 1:
+        return n_fg
+    counts = np.bincount(labeled_np.ravel())
+    if counts.size <= 1:
+        return n_fg
+    largest_comp = int(1 + np.argmax(counts[1:]))
+    keep = labeled_np == largest_comp
+    seg_np[roi & ~keep] = 0
+    return int(np.count_nonzero(seg_np == lid))
+
+
 def clean_volume_seg_for_pitc(
     volume_seg: np.ndarray,
     centerlines: dict[int, np.ndarray] | None = None,
@@ -215,5 +239,6 @@ __all__ = [
     "clean_venous_slab_mask",
     "clean_volume_seg_for_pitc",
     "keep_largest_component_per_label",
+    "keep_largest_component_label_inplace",
     "keep_seed_connected_per_label",
 ]

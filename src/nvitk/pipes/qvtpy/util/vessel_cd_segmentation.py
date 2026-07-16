@@ -53,10 +53,11 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_RMCA,
     QVTPY_SMALL_ARTERIAL_IDS,
     QVTPY_VENOUS_LABEL_IDS,
+    QVTPY_VERTEBRAL_IDS,
 )
 from nvitk.pipes.qvtpy.util.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
-from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
+from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_label_inplace
 from nvitk.segmentation.region_growing import merge_forbidden, region_grow_into_label_volume
 
 setup(globals())
@@ -139,13 +140,14 @@ class AcaSequentialGrowInfo:
     """Metadata for sequential ACA grow + optional AComm convergence correction."""
 
     strategy: str
-    grow_order: tuple[int, int]
+    grow_order: tuple[int, ...]
     n_overlap_voxels: int
     overlap_correction_applied: bool
     acomm_junction_ijk: tuple[int, int, int] | None = None
     acomm_junction_radius_vox: int = 0
     n_convergence_voxels_corrected: int = 0
     n_stray_islands_reassigned: int = 0
+    n_voronoi_voxels_reassigned: int = 0
     junction_source: str | None = None
     split_axis: str | None = None
     split_coord: int | None = None
@@ -154,7 +156,7 @@ class AcaSequentialGrowInfo:
     def as_dict(self) -> dict[str, Any]:
         return {
             "strategy": self.strategy,
-            "grow_order": [int(self.grow_order[0]), int(self.grow_order[1])],
+            "grow_order": [int(x) for x in self.grow_order],
             "n_overlap_voxels": int(self.n_overlap_voxels),
             "overlap_correction_applied": bool(self.overlap_correction_applied),
             "acomm_junction_ijk": (
@@ -165,6 +167,7 @@ class AcaSequentialGrowInfo:
             "acomm_junction_radius_vox": int(self.acomm_junction_radius_vox),
             "n_convergence_voxels_corrected": int(self.n_convergence_voxels_corrected),
             "n_stray_islands_reassigned": int(self.n_stray_islands_reassigned),
+            "n_voronoi_voxels_reassigned": int(self.n_voronoi_voxels_reassigned),
             "junction_source": self.junction_source,
             "split_axis": self.split_axis,
             "split_coord": self.split_coord,
@@ -205,10 +208,12 @@ def rg_abs_floor_for_label(
     label_id: int,
     opt_thresh: float | None,
 ) -> float | None:
-    """Intensity floor for RG; MCA/PCA use fraction-only gate (no local threshold floor)."""
+    """Intensity floor for RG; MCA/PCA use fraction-only gate (no local threshold floor).
+
+    ACA uses the local CD threshold as a hard floor so dim parenchyma / venous
+    spill cannot fill when A1 seed mean alone would admit a huge bright blob.
+    """
     if int(label_id) in QVTPY_RG_MCA_PCA_EXPLORE_IDS:
-        return None
-    if int(label_id) in QVTPY_ACA_IDS:
         return None
     return opt_thresh
 
@@ -696,11 +701,39 @@ def _segment_communicating_rg_only(
             st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
             if reason is not None:
                 st.warning = reason
+        _finalize_vessel_largest_cc(
+            seg, lid, stats_by_id=stats_by_id, log_name=f"comm-{lid}"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Build seg_4dflow (per-label local threshold + region growing)
 # ---------------------------------------------------------------------------
+
+
+def _finalize_vessel_largest_cc(
+    seg: np.ndarray,
+    label_id: int,
+    *,
+    stats_by_id: dict[int, VesselSegStats] | None = None,
+    log_name: str | None = None,
+) -> int:
+    """Keep largest CC for one label; optionally refresh stats and log drops."""
+    lid = int(label_id)
+    n_before = int(np.count_nonzero(seg == lid))
+    n_after = keep_largest_component_label_inplace(seg, lid)
+    dropped = n_before - n_after
+    if dropped > 0 and log_name is not None:
+        log.info(
+            f"largest-CC {log_name} (label {lid}): {n_before} → {n_after} "
+            f"(dropped {dropped} island voxel(s))"
+        )
+    if stats_by_id is not None:
+        st = stats_by_id.get(lid)
+        if st is not None:
+            st.n_voxels_after_region_growing = int(n_after)
+            st.n_voxels_after_island_clean = int(n_after)
+    return n_after
 
 
 def build_seg_4dflow_local(
@@ -832,33 +865,29 @@ def build_seg_4dflow_local(
             )
         )
 
-    # ACAs are grown sequentially below; only non-ACA labels get largest-CC cleanup here.
+    # Largest-CC after local threshold (before RG); ACAs included so stub islands go.
     for lid in sorted(int(v) for v in np.unique(seg) if int(v) != 0):
-        if int(lid) in QVTPY_ACA_IDS:
-            continue
-        tmp = np.zeros_like(seg)
-        tmp[seg == lid] = lid
-        cleaned = keep_largest_component_per_label(tmp)
-        seg[seg == lid] = 0
-        seg[cleaned == lid] = lid
+        keep_largest_component_label_inplace(seg, int(lid))
     for st in stats:
         st.n_voxels_after_island_clean = int(np.count_nonzero(seg == st.label_id))
 
     aca_sequential_info: AcaSequentialGrowInfo | None = None
     stats_by_id = {st.label_id: st for st in stats}
-    use_aca_sequential = (
-        bool(aca_sequential_grow)
-        and int(QVTPY_LACA) in stats_by_id
-        and int(QVTPY_RACA) in stats_by_id
-        and region_growing_enabled_for_label(QVTPY_LACA)
-        and region_growing_enabled_for_label(QVTPY_RACA)
-    )
+    aca_present = [
+        int(lid)
+        for lid in (int(QVTPY_LACA), int(QVTPY_RACA))
+        if int(lid) in stats_by_id and region_growing_enabled_for_label(int(lid))
+    ]
+    use_aca_sequential = bool(aca_sequential_grow) and len(aca_present) > 0
 
     if region_growing:
         if use_aca_sequential:
             from nvitk.pipes.qvtpy.util.aca_sequential_grow import _region_grow_acas_sequential
 
-            log.step("region growing: ACA sequential path enabled")
+            log.step(
+                "region growing: ACA sequential path enabled "
+                f"(present={aca_present})"
+            )
             aca_sequential_info = _region_grow_acas_sequential(
                 seg,
                 cd,
@@ -876,7 +905,7 @@ def build_seg_4dflow_local(
                 max_grow_frac=rg_max_grow_frac,
                 max_image_frac=rg_max_image_frac,
             )
-            for lid in (int(QVTPY_LACA), int(QVTPY_RACA)):
+            for lid in aca_present:
                 st = stats_by_id.get(lid)
                 if st is None:
                     continue
@@ -886,6 +915,12 @@ def build_seg_4dflow_local(
                     f"island={st.n_voxels_after_island_clean}, "
                     f"rg={st.n_voxels_after_region_growing}, "
                     f"frac={st.rg_intensity_frac_used}, warn={st.warning}"
+                )
+            for lid in (int(QVTPY_LACA), int(QVTPY_RACA)):
+                if int(np.count_nonzero(seg == lid)) == 0:
+                    continue
+                _finalize_vessel_largest_cc(
+                    seg, lid, stats_by_id=stats_by_id, log_name=f"ACA-{lid}"
                 )
 
         for st in stats:
@@ -984,6 +1019,9 @@ def build_seg_4dflow_local(
             st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
             if reason is not None:
                 st.warning = reason
+            _finalize_vessel_largest_cc(
+                seg, lid, stats_by_id=stats_by_id, log_name=f"vessel-{lid}"
+            )
 
     vertebral_info: VertebralSplitResult | None = None
     if (
@@ -992,11 +1030,12 @@ def build_seg_4dflow_local(
         and np.any(seg == int(QVTPY_BASILAR))
     ):
         seg, vertebral_info = split_vertebral_from_basilar(seg)
-        for lid in (QVTPY_BASILAR,):
-            st = stats_by_id.get(int(lid))
-            if st is not None:
-                st.n_voxels_after_region_growing = int(np.count_nonzero(seg == lid))
-                st.n_voxels_after_island_clean = st.n_voxels_after_region_growing
+        for lid in (int(QVTPY_BASILAR), *sorted(int(x) for x in QVTPY_VERTEBRAL_IDS)):
+            if int(np.count_nonzero(seg == lid)) == 0:
+                continue
+            _finalize_vessel_largest_cc(
+                seg, lid, stats_by_id=stats_by_id, log_name=f"vertebral-{lid}"
+            )
 
     if region_growing and comm_ids:
         for lid in comm_ids:
@@ -1028,6 +1067,16 @@ def build_seg_4dflow_local(
             thr_algorithm=thr_algorithm,
             max_grow_frac=rg_max_grow_frac,
             max_image_frac=_RG_MAX_IMAGE_FRAC_COMM,
+        )
+
+    # Final per-label largest-CC: drop isolated voxels left on other vessel regions.
+    log.step("final per-vessel largest connected component")
+    for lid in sorted(int(v) for v in np.unique(seg) if int(v) != 0):
+        _finalize_vessel_largest_cc(
+            seg,
+            lid,
+            stats_by_id=stats_by_id,
+            log_name=f"final-{lid}",
         )
 
     return LocalSegResult(

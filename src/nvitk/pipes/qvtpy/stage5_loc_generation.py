@@ -48,6 +48,7 @@ from nvitk.pipes.qvtpy.util.loc_selection import (
 )
 from nvitk.pipes.qvtpy.util.centerline_io import load_centerline_meta, load_centerlines
 from nvitk.pipes.qvtpy.util.mask_cleaning import clean_venous_slab_mask
+from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
 
 setup(globals())
 
@@ -145,6 +146,16 @@ def run_subject(
     if seg_path.is_file():
         arterial_seg = as_backend_array(imread(seg_path).data).astype(np.int32, copy=False)
 
+    eicab_qvtpy = None
+    eicab_path = s3 / EICAB_IN_4DFLOW_NIFTI
+    if eicab_path.is_file():
+        eicab_qvtpy = as_backend_array(imread(eicab_path).data).astype(np.int32, copy=False)
+    else:
+        log.warning(
+            f"[{subject}] stage5: missing {eicab_path}; "
+            "ACA LOCs fall back to tertiles without AComm/CW midpoints"
+        )
+
     mag, cd, vel_mag, voxel_spacing = _load_contrast_volumes(nifti_root, subject)
 
     # ---- Venous mask for LOC heuristics (CD binary ∧ superior slab) ----------
@@ -173,6 +184,7 @@ def run_subject(
         strategy=loc_arterial_strategy,
         endpoint_inset_frac=loc_endpoint_inset_frac,
         arterial_seg=arterial_seg,
+        eicab_qvtpy=eicab_qvtpy,
     )
     for rec in arterial_recs:
         rows.append(loc_record_to_dict(rec))

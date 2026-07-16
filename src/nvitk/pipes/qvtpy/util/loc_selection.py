@@ -20,11 +20,15 @@ from nvitk.core.array import to_numpy
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.measure.cross_section import CrossSectionResult, segment_at_point
 from nvitk.pipes.qvtpy.labels import (
+    QVTPY_ACA_IDS,
+    QVTPY_ACOMM,
     QVTPY_BASILAR,
     QVTPY_ICA_BASILAR_IDS,
+    QVTPY_LACA,
     QVTPY_LICA,
     QVTPY_MCA_IDS,
     QVTPY_PCA_IDS,
+    QVTPY_RACA,
     QVTPY_RICA,
     NAME_LTSV,
     NAME_RTSV,
@@ -38,16 +42,22 @@ from nvitk.pipes.qvtpy.labels import (
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
-# Dual init/fin LOCs at ⅓ and ⅔ arc length (empty: ACAs use a single mid-arc LOC).
+# Dual init/fin LOCs at ⅓ and ⅔ arc length (empty: ACAs use junction/CW stations).
 QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset()
 # MCA / PCA: dual init/fin LOCs at bifurcation-based stations (see pick_mca_pca_loc_indices).
 QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
     QVTPY_MCA_IDS | QVTPY_PCA_IDS
 )
+# ACA: init proximal to AComm (or CW eICAB mid), fin distal of junction / CW.
+QVTPY_ACA_JUNCTION_LOC_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
 # L/R ICA + basilar: one LOC each, ideally on a common axial (z) plane at max axial alignment.
 QVTPY_ICA_BASILAR_SINGLE_LOC_IDS: frozenset[int] = frozenset(
     {QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR}
 )
+_ACA_PARENT_ICA: dict[int, int] = {
+    int(QVTPY_LACA): int(QVTPY_LICA),
+    int(QVTPY_RACA): int(QVTPY_RICA),
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -310,6 +320,155 @@ def pick_mca_pca_loc_indices(
     if fin_idx <= init_idx:
         fin_idx = int(np.clip(j1_idx + 1, 0, n - 1))
     return init_idx, fin_idx
+
+
+def _nearest_polyline_index_unbounded(
+    points: np.ndarray,
+    target: np.ndarray,
+) -> int:
+    pts = to_numpy(points).astype(np.float64)
+    t = np.asarray(target, dtype=np.float64).reshape(3)
+    d2 = np.sum((pts - t) ** 2, axis=1)
+    return int(np.argmin(d2))
+
+
+def _aca_polyline_proximal_is_low_index(
+    points: np.ndarray,
+    *,
+    eicab_qvtpy: np.ndarray | None,
+    label_id: int,
+) -> bool:
+    """True when polyline index 0 is closer to the parent ICA than the distal end."""
+    pts = to_numpy(points).astype(np.float64)
+    if pts.shape[0] < 2:
+        return True
+    parent = _ACA_PARENT_ICA.get(int(label_id))
+    if parent is None or eicab_qvtpy is None:
+        return True
+    eq = to_numpy(eicab_qvtpy).astype(np.int32, copy=False)
+    ica = np.argwhere(eq == int(parent))
+    if ica.size == 0:
+        return True
+    com = ica.astype(np.float64).mean(axis=0)
+    d0 = float(np.linalg.norm(pts[0] - com))
+    d1 = float(np.linalg.norm(pts[-1] - com))
+    return d0 <= d1
+
+
+def _aca_cw_mask_indices(
+    points: np.ndarray,
+    eicab_qvtpy: np.ndarray,
+    label_id: int,
+) -> list[int]:
+    """Polyline indices whose rounded voxel lies in the CW eICAB ACA label."""
+    pts = to_numpy(points).astype(np.float64)
+    eq = to_numpy(eicab_qvtpy).astype(np.int32, copy=False)
+    out: list[int] = []
+    for i in range(pts.shape[0]):
+        ii, jj, kk = (
+            int(round(float(pts[i, 0]))),
+            int(round(float(pts[i, 1]))),
+            int(round(float(pts[i, 2]))),
+        )
+        if (
+            0 <= ii < eq.shape[0]
+            and 0 <= jj < eq.shape[1]
+            and 0 <= kk < eq.shape[2]
+            and int(eq[ii, jj, kk]) == int(label_id)
+        ):
+            out.append(i)
+    return out
+
+
+def pick_aca_loc_indices(
+    points: np.ndarray,
+    *,
+    label_id: int,
+    eicab_qvtpy: np.ndarray | None = None,
+    junction_ijk: tuple[int, int, int] | None = None,
+    junction_max_dist_vox: float = 8.0,
+) -> tuple[int, int | None, str]:
+    """Init/fin LOCs for ACA relative to AComm junction or CW eICAB coverage.
+
+    Indices are returned in the original polyline order. Init is the proximal
+    station (A1 / CW mid); fin is distal of the junction / CW section.
+
+    * Junction present — init = arc midpoint proximal→junction; fin = junction→distal.
+    * No junction — init = arc midpoint of CW eICAB ACA section; fin = mid of distal
+      remainder. Falls back to tertiles / single mid.
+    """
+    pts_orig = to_numpy(points).astype(np.float64)
+    n = pts_orig.shape[0]
+    if n < 1:
+        return 0, None, "empty"
+    if n < 3:
+        return 0, None, "too_short"
+
+    proximal_low = _aca_polyline_proximal_is_low_index(
+        pts_orig, eicab_qvtpy=eicab_qvtpy, label_id=int(label_id)
+    )
+    # Work in proximal-first index space, then map back.
+    pts = pts_orig if proximal_low else pts_orig[::-1].copy()
+
+    def _to_orig(i: int) -> int:
+        return int(i) if proximal_low else int(n - 1 - i)
+
+    j_work: int | None = None
+    method = "fallback_tertiles"
+
+    if junction_ijk is not None:
+        ji = _nearest_polyline_index(
+            pts,
+            np.asarray(junction_ijk, dtype=np.float64),
+            max_dist_vox=float(junction_max_dist_vox),
+        )
+        if ji is None:
+            ji = _nearest_polyline_index_unbounded(
+                pts, np.asarray(junction_ijk, dtype=np.float64)
+            )
+        if 0 < int(ji) < n - 1:
+            j_work = int(ji)
+            method = "acomm_junction"
+
+    if j_work is not None:
+        init_w = pick_index_arc_midpoint_between(pts, 0, j_work)
+        fin_w = pick_index_arc_midpoint_between(pts, j_work, n - 1)
+        if fin_w <= init_w:
+            fin_w = int(np.clip(j_work + 1, 0, n - 1))
+        return _to_orig(init_w), _to_orig(fin_w), method
+
+    if eicab_qvtpy is not None:
+        cw_idx = _aca_cw_mask_indices(pts, eicab_qvtpy, int(label_id))
+        if len(cw_idx) >= 1:
+            prox_lo, prox_hi = int(cw_idx[0]), int(cw_idx[-1])
+            init_w = pick_index_arc_midpoint_between(pts, prox_lo, prox_hi)
+            if prox_hi < n - 2:
+                fin_w = pick_index_arc_midpoint_between(pts, prox_hi, n - 1)
+                if fin_w != init_w:
+                    return _to_orig(init_w), _to_orig(fin_w), "cw_eicab_mid"
+            return _to_orig(init_w), None, "cw_eicab_mid_only"
+
+    dual = pick_dual_loc_indices(n, pts)
+    if dual is None:
+        return _to_orig(pick_mid_loc_index(n, pts)), None, "mid_fallback"
+    return _to_orig(dual[0]), _to_orig(dual[1]), method
+
+
+def _infer_aca_junction_ijk(
+    eicab_qvtpy: np.ndarray | None,
+) -> tuple[int, int, int] | None:
+    """AComm COM snapped to nearest eICAB AComm voxel (qvtpy label space)."""
+    if eicab_qvtpy is None:
+        return None
+    eq = to_numpy(eicab_qvtpy).astype(np.int32, copy=False)
+    coords = np.argwhere(eq == int(QVTPY_ACOMM))
+    if coords.size == 0:
+        return None
+    coords_f = coords.astype(np.float64)
+    com = coords_f.mean(axis=0)
+    d2 = np.sum((coords_f - com) ** 2, axis=1)
+    best = coords[int(np.argmin(d2))]
+    return (int(best[0]), int(best[1]), int(best[2]))
 
 
 def pick_axial_alignment_index(
@@ -767,20 +926,27 @@ def select_arterial_locs(
     strategy: str = "qvtpy",
     endpoint_inset_frac: float = 0.08,
     arterial_seg: np.ndarray | None = None,
+    eicab_qvtpy: np.ndarray | None = None,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
     """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json."""
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
+    _ = (venous_mask, endpoint_inset_frac)  # API-stable; unused by current strategies
     meta_extra: dict[str, Any] = {
         "dual_loc_fallback_vessels": [],
         "loc_boundary_method_dual": "arc_length_tertiles",
         "loc_boundary_method_mca_pca": "bifurcation_arc_midpoints",
+        "loc_boundary_method_aca": "junction_or_cw_eicab_midpoints",
         "loc_boundary_method_mid": "arc_length_midpoint",
         "arterial_centerline_source": "stage4_seg",
         "arterial_seg_for_bifurcations": arterial_seg is not None,
+        "aca_loc_methods": {},
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
+    aca_junction = _infer_aca_junction_ijk(eicab_qvtpy) if use_dual else None
+    if aca_junction is not None:
+        meta_extra["aca_junction_ijk"] = [int(x) for x in aca_junction]
     ica_basilar_idx = (
         select_ica_basilar_aligned_loc_indices(arterial_polylines)
         if use_dual
@@ -823,6 +989,47 @@ def select_arterial_locs(
                 seg=arterial_seg,
                 label_id=int(vid),
             )
+            out.append(
+                _arterial_loc_at_index(
+                    pts_np,
+                    init_idx,
+                    vessel_id=vid,
+                    vessel_name=vname,
+                    segment_id=0,
+                    loc_role="init",
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
+                )
+            )
+            if fin_idx is not None:
+                out.append(
+                    _arterial_loc_at_index(
+                        pts_np,
+                        fin_idx,
+                        vessel_id=vid,
+                        vessel_name=vname,
+                        segment_id=1,
+                        loc_role="fin",
+                        mag=mag,
+                        cd=cd,
+                        vel_mag=vel_mag,
+                        voxel_spacing=voxel_spacing,
+                        radius_vox=radius_vox,
+                    )
+                )
+            continue
+
+        if use_dual and int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
+            init_idx, fin_idx, aca_method = pick_aca_loc_indices(
+                pts_np,
+                label_id=int(vid),
+                eicab_qvtpy=eicab_qvtpy,
+                junction_ijk=aca_junction,
+            )
+            meta_extra["aca_loc_methods"][vname] = aca_method
             out.append(
                 _arterial_loc_at_index(
                     pts_np,
@@ -947,6 +1154,7 @@ def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:
 __all__ = [
     "LocRecord",
     "loc_record_to_dict",
+    "pick_aca_loc_indices",
     "pick_dual_loc_indices",
     "pick_mca_pca_loc_indices",
     "pick_index_arc_midpoint_between",
