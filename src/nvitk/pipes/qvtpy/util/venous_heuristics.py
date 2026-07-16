@@ -1,13 +1,12 @@
 """Geometry-based identification of venous sinuses (SSSV, STRV, LTSV, RTSV).
 
 Uses RAS orientation from the image affine (when available), splits skeleton
-branches at all junctions, and assigns vessels greedily with blended RAS +
-legacy voxel-index geometry scores.
+branches at all junctions, and assigns vessels greedily with RAS direction
+priors (preferred when an affine is provided) plus a light STRV conflict guard.
 """
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -31,6 +30,15 @@ from nvitk.pipes.qvtpy.labels import (
 
 _MIN_BRANCH_POINTS = 12
 _MIN_ASSIGN_SCORE = 0.05
+
+# Anatomical RAS direction priors (LR, AP, SI).
+_RAS_DIR_PRIORS: dict[str, np.ndarray] = {
+    NAME_SSSV: np.array([0.0, 0.0, 1.0], dtype=np.float64),  # SI
+    NAME_STRV: np.array([0.0, 1.0, 1.0], dtype=np.float64),  # AP + SI
+    NAME_LTSV: np.array([-1.0, 1.0, 0.0], dtype=np.float64),  # Left + Anterior
+    NAME_RTSV: np.array([1.0, 1.0, 0.0], dtype=np.float64),  # Right + Anterior
+}
+# Legacy voxel-index STRV reference (used only in legacy scorer).
 _STRV_REF_VOX = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
 
@@ -145,6 +153,12 @@ def _direction_anatomical(
     return ana / n if n > 1e-9 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
 
 
+def _unit(v: np.ndarray) -> np.ndarray:
+    x = to_numpy(v).astype(np.float64).ravel()[:3]
+    n = float(np.linalg.norm(x))
+    return x / n if n > 1e-9 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
@@ -162,9 +176,36 @@ def _principal_direction(points: np.ndarray) -> np.ndarray:
 
 
 def _alignment_score(direction: np.ndarray, reference: np.ndarray) -> float:
-    d = direction / (float(np.linalg.norm(direction)) + 1e-12)
-    r = reference / (float(np.linalg.norm(reference)) + 1e-12)
+    d = _unit(direction)
+    r = _unit(reference)
     return float(abs(np.dot(d, r)))
+
+
+def _oriented_direction_ana(
+    points: np.ndarray,
+    axes: RasAxes,
+    confluence_lr: float,
+    confluence_ap: float,
+    confluence_si: float,
+) -> np.ndarray:
+    """Principal direction in RAS, oriented away from the confluence."""
+    pts = to_numpy(points).astype(np.float64)
+    d = _direction_anatomical(_principal_direction(pts), axes)
+    lr, ap, si = _anatomical_coords(pts, axes)
+    conf = np.array(
+        [float(confluence_lr), float(confluence_ap), float(confluence_si)],
+        dtype=np.float64,
+    )
+    e0 = np.array([lr[0], ap[0], si[0]], dtype=np.float64)
+    e1 = np.array([lr[-1], ap[-1], si[-1]], dtype=np.float64)
+    if float(np.linalg.norm(e1 - conf)) >= float(np.linalg.norm(e0 - conf)):
+        sense = e1 - e0
+    else:
+        sense = e0 - e1
+    sense = _unit(sense)
+    if float(np.dot(d, sense)) < 0.0:
+        d = -d
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -212,17 +253,19 @@ def _score_branch_ras(
     confluence_ap: float,
     confluence_si: float,
 ) -> float:
-    """Higher is better match for *vessel_name* using anatomical coordinates."""
+    """Higher is better match for *vessel_name* using anatomical RAS priors."""
     pts = to_numpy(points).astype(np.float64)
     if pts.shape[0] < 3:
         return 0.0
 
     lr, ap, si = _anatomical_coords(pts, axes)
     cx_lr, cx_ap, cx_si = float(np.mean(lr)), float(np.mean(ap)), float(np.mean(si))
-    direction_ana = _direction_anatomical(_principal_direction(pts), axes)
+    direction_ana = _oriented_direction_ana(
+        pts, axes, confluence_lr, confluence_ap, confluence_si
+    )
     length_score = float(pts.shape[0]) / max(shape)
+    mid_scale = max(abs(confluence_lr) + 1.0, 1.0)
 
-    # Distance from branch centroid to global confluence (superior slab center).
     conf_dist = np.sqrt(
         (cx_lr - confluence_lr) ** 2
         + (cx_ap - confluence_ap) ** 2
@@ -230,33 +273,55 @@ def _score_branch_ras(
     )
     conf_prox = 1.0 / (1.0 + conf_dist / max(shape))
 
+    strv_ref_up = _unit(_RAS_DIR_PRIORS[NAME_STRV])
+    strv_ref_dn = _unit(np.array([0.0, 1.0, -1.0], dtype=np.float64))
+
     if vessel_name == NAME_SSSV:
-        # Midline sagittal, superior, runs inferiorly toward confluence.
-        midline = 1.0 - abs(cx_lr) / max(abs(confluence_lr) + 1.0, 1.0)
+        # Midline sagittal, superior; must prefer SI over AP+SI.
+        midline = 1.0 - abs(cx_lr) / mid_scale
         superior = max(0.0, cx_si) / max(shape[int(axes.si_axis)], 1)
-        vertical = abs(direction_ana[2])
+        si = float(abs(direction_ana[2]))
+        ap = float(abs(direction_ana[1]))
+        lr_comp = float(abs(direction_ana[0]))
+        # Strong SI preference; penalize AP / LR so diagonals cannot win SSSV.
+        dir_score = max(0.0, si - 0.85 * ap - 0.5 * lr_comp)
         toward_conf = max(0.0, -direction_ana[2]) if cx_si > confluence_si else 0.5
-        return length_score * (0.35 * midline + 0.25 * superior + 0.2 * vertical + 0.2 * toward_conf)
+        return length_score * (
+            0.2 * midline + 0.2 * superior + 0.45 * dir_score + 0.15 * toward_conf
+        )
 
     if vessel_name == NAME_STRV:
-        # Midline; align with legacy AP+SI reference (validated downstream in LOC stage).
-        midline = 1.0 - abs(cx_lr) / max(abs(confluence_lr) + 1.0, 1.0)
-        ref_ana = _direction_anatomical(_STRV_REF_VOX, axes)
-        align = _alignment_score(direction_ana, ref_ana)
-        near_conf = conf_prox
-        return length_score * (0.4 * midline + 0.4 * align + 0.2 * near_conf)
+        # Midline; AP+SI prior (either SI sense); penalize pure SI and LR-dominant.
+        midline = 1.0 - abs(cx_lr) / mid_scale
+        align_strv = max(
+            float(abs(np.dot(direction_ana, strv_ref_up))),
+            float(abs(np.dot(direction_ana, strv_ref_dn))),
+        )
+        si = float(abs(direction_ana[2]))
+        ap = float(abs(direction_ana[1]))
+        lr_comp = float(abs(direction_ana[0]))
+        # Geometric AP∧SI reward; penalize SI-only and transverse-like branches.
+        balance = float(np.sqrt(max(ap, 1e-9) * max(si, 1e-9)))
+        dir_score = max(
+            0.0,
+            0.55 * align_strv + 0.45 * balance - 0.55 * max(0.0, si - ap) - 0.55 * lr_comp,
+        )
+        return length_score * (0.25 * midline + 0.55 * dir_score + 0.2 * conf_prox)
 
     if vessel_name == NAME_LTSV:
-        lateral = 1.0 if cx_lr < confluence_lr else 0.15
-        transverse = abs(direction_ana[0])
-        away_conf = max(0.0, -direction_ana[0]) if cx_lr < confluence_lr else max(0.0, direction_ana[0])
-        return length_score * lateral * (0.45 + 0.35 * transverse + 0.2 * away_conf)
+        ref = _unit(_RAS_DIR_PRIORS[NAME_LTSV])
+        lateral = 1.0 if cx_lr < confluence_lr else 0.12
+        # Signed sense: Left + Anterior (principal oriented away from confluence).
+        signed = float(np.dot(direction_ana, ref))
+        sense = max(0.0, signed)
+        return length_score * lateral * (0.35 + 0.5 * sense + 0.15 * max(0.0, -direction_ana[0]))
 
     if vessel_name == NAME_RTSV:
-        lateral = 1.0 if cx_lr > confluence_lr else 0.15
-        transverse = abs(direction_ana[0])
-        away_conf = max(0.0, direction_ana[0]) if cx_lr > confluence_lr else max(0.0, -direction_ana[0])
-        return length_score * lateral * (0.45 + 0.35 * transverse + 0.2 * away_conf)
+        ref = _unit(_RAS_DIR_PRIORS[NAME_RTSV])
+        lateral = 1.0 if cx_lr > confluence_lr else 0.12
+        signed = float(np.dot(direction_ana, ref))
+        sense = max(0.0, signed)
+        return length_score * lateral * (0.35 + 0.5 * sense + 0.15 * max(0.0, direction_ana[0]))
 
     return length_score
 
@@ -321,8 +386,10 @@ def _score_branch(
     confluence_lr: float,
     confluence_ap: float,
     confluence_si: float,
+    *,
+    prefer_ras: bool,
 ) -> float:
-    """Blend RAS-aware and legacy scores (best of both)."""
+    """Prefer RAS priors when affine is available; otherwise best of RAS/legacy."""
     legacy = _score_branch_legacy(points, vessel_name, shape)
     ras = _score_branch_ras(
         points,
@@ -333,29 +400,102 @@ def _score_branch(
         confluence_ap,
         confluence_si,
     )
+    if prefer_ras:
+        # Affine-backed RAS must outweigh voxel-index legacy geometry.
+        return float(0.9 * ras + 0.1 * legacy)
     return max(legacy, ras)
 
 
-def assign_venous_branches(
-    venous_binary: np.ndarray,
-    *,
-    min_points: int = _MIN_BRANCH_POINTS,
-    min_assign_score: float = _MIN_ASSIGN_SCORE,
-    affine: np.ndarray | None = None,
-) -> dict[str, np.ndarray]:
-    """Assign junction-split skeleton chains to SSSV/STRV/LTSV/RTSV (0–4 vessels).
+def _strv_geometry_ok(points: np.ndarray, axes: RasAxes) -> bool:
+    """Reject STRV winners that are pure-SI or strongly LR (transverse-like)."""
+    d = _direction_anatomical(_principal_direction(points), axes)
+    si = float(abs(d[2]))
+    ap = float(abs(d[1]))
+    lr = float(abs(d[0]))
+    if si > ap + 0.15:
+        return False
+    if lr > 0.55 and lr > ap:
+        return False
+    if ap < 0.25:
+        return False
+    return True
 
-    Splits at all skeleton forks (not only the torcular confluence), then assigns
-    branches greedily in vessel order using blended RAS + legacy geometry scores.
-    """
-    shape = tuple(int(s) for s in venous_binary.shape)
-    axes = resolve_ras_axes(affine)
-    candidates = extract_branch_polylines(venous_binary, min_points=min_points)
+
+def _resolve_strv_conflict(
+    assigned: dict[str, np.ndarray],
+    assigned_idx: dict[str, int],
+    candidates: list[np.ndarray],
+    used: set[int],
+    shape: tuple[int, int, int],
+    axes: RasAxes,
+    confluence_lr: float,
+    confluence_ap: float,
+    confluence_si: float,
+    *,
+    prefer_ras: bool,
+    min_assign_score: float,
+) -> None:
+    """If STRV winner is SI- or LR-dominant, swap to a better unused candidate."""
+    if NAME_STRV not in assigned:
+        return
+    cur_idx = int(assigned_idx[NAME_STRV])
+    cur = candidates[cur_idx]
+    if _strv_geometry_ok(cur, axes):
+        return
+
+    best_idx = -1
+    best_score = -1.0
+    for idx, poly in enumerate(candidates):
+        if idx in used and idx != cur_idx:
+            continue
+        if not _strv_geometry_ok(poly, axes):
+            continue
+        sc = _score_branch(
+            poly,
+            NAME_STRV,
+            shape,
+            axes,
+            confluence_lr,
+            confluence_ap,
+            confluence_si,
+            prefer_ras=prefer_ras,
+        )
+        if sc > best_score:
+            best_score = sc
+            best_idx = idx
+    if best_idx < 0 or best_score <= float(min_assign_score):
+        return
+    if best_idx == cur_idx:
+        return
+    used.discard(cur_idx)
+    used.add(best_idx)
+    assigned[NAME_STRV] = candidates[best_idx]
+    assigned_idx[NAME_STRV] = best_idx
+
+
+def assign_venous_polylines(
+    candidates: list[np.ndarray],
+    shape: tuple[int, int, int],
+    *,
+    axes: RasAxes | None = None,
+    confluence: tuple[float, float, float] | None = None,
+    affine: np.ndarray | None = None,
+    min_assign_score: float = _MIN_ASSIGN_SCORE,
+    prefer_ras: bool | None = None,
+) -> dict[str, np.ndarray]:
+    """Greedy SSSV→STRV→LTSV→RTSV assignment from junction-split polylines."""
     if not candidates:
         return {}
+    axes = axes if axes is not None else resolve_ras_axes(affine)
+    if prefer_ras is None:
+        prefer_ras = affine is not None
+    if confluence is None:
+        conf_lr, conf_ap, conf_si = 0.0, float(shape[1]) * 0.4, float(shape[2]) * 0.7
+    else:
+        conf_lr, conf_ap, conf_si = confluence
 
-    conf_lr, conf_ap, conf_si = _estimate_confluence_center(venous_binary, axes)
     assigned: dict[str, np.ndarray] = {}
+    assigned_idx: dict[str, int] = {}
     used: set[int] = set()
     for name in MATLAB_QVT_VENOUS_VESSEL_NAMES:
         best_idx = -1
@@ -371,14 +511,61 @@ def assign_venous_branches(
                 conf_lr,
                 conf_ap,
                 conf_si,
+                prefer_ras=prefer_ras,
             )
             if sc > best_score:
                 best_score = sc
                 best_idx = idx
         if best_idx >= 0 and best_score > float(min_assign_score):
             assigned[name] = candidates[best_idx]
+            assigned_idx[name] = best_idx
             used.add(best_idx)
+
+    _resolve_strv_conflict(
+        assigned,
+        assigned_idx,
+        candidates,
+        used,
+        shape,
+        axes,
+        conf_lr,
+        conf_ap,
+        conf_si,
+        prefer_ras=prefer_ras,
+        min_assign_score=min_assign_score,
+    )
     return assigned
+
+
+def assign_venous_branches(
+    venous_binary: np.ndarray,
+    *,
+    min_points: int = _MIN_BRANCH_POINTS,
+    min_assign_score: float = _MIN_ASSIGN_SCORE,
+    affine: np.ndarray | None = None,
+) -> dict[str, np.ndarray]:
+    """Assign junction-split skeleton chains to SSSV/STRV/LTSV/RTSV (0–4 vessels).
+
+    Splits at all skeleton forks (not only the torcular confluence), then assigns
+    branches greedily in vessel order using RAS direction priors (preferred when
+    *affine* is set) with a light STRV conflict guard.
+    """
+    shape = tuple(int(s) for s in venous_binary.shape)
+    axes = resolve_ras_axes(affine)
+    candidates = extract_branch_polylines(venous_binary, min_points=min_points)
+    if not candidates:
+        return {}
+
+    conf_lr, conf_ap, conf_si = _estimate_confluence_center(venous_binary, axes)
+    return assign_venous_polylines(
+        candidates,
+        shape,
+        axes=axes,
+        confluence=(conf_lr, conf_ap, conf_si),
+        affine=affine,
+        min_assign_score=min_assign_score,
+        prefer_ras=affine is not None,
+    )
 
 
 # ---- Label id mapping --------------------------------------------------------
@@ -401,6 +588,7 @@ __all__ = [
     "RasAxes",
     "VenousBranch",
     "assign_venous_branches",
+    "assign_venous_polylines",
     "extract_branch_polylines",
     "resolve_ras_axes",
     "venous_name_to_label_id",

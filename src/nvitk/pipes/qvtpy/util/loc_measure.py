@@ -81,7 +81,9 @@ def measure_loc_row(
         xs,
         plane_interp_order=int(cross_section_plane_interp),
     )
-    flow_ts = flow_series_ml_s(vel_ts, area_mm2)
+    # Magnitude reporting: tangent polarity must not flip flow / PI signs.
+    vel_ts = np.abs(np.asarray(vel_ts, dtype=np.float64).reshape(-1))
+    flow_ts = np.abs(flow_series_ml_s(vel_ts, area_mm2))
     flow_2d = flow_ts.reshape(1, -1)
     nt = int(vx.shape[3])
 
@@ -90,14 +92,14 @@ def measure_loc_row(
         "vessel_name": vname,
         "loc_cross_section_radius_vox": float(cross_section_radius_vox),
         "loc_cross_section_area_mm2": float(area_mm2),
-        "loc_mean_velocity_mm_s": float(abs(mean_velocity_mm_s(vel_ts))),
-        "loc_mean_flow_ml_s": float(abs(np.mean(flow_ts))),
+        "loc_mean_velocity_mm_s": float(mean_velocity_mm_s(vel_ts)),
+        "loc_mean_flow_ml_s": float(np.mean(flow_ts)),
         "loc_pi": float(pulsatility_index(flow_2d)[0]),
         "loc_ri": float(resistivity_index(flow_2d)[0]),
     }
     for t in range(nt):
-        rec[f"loc_velocity_mm_s_t{t}"] = float(abs(vel_ts[t]))
-        rec[f"loc_flow_ml_s_t{t}"] = float(abs(flow_ts[t]))
+        rec[f"loc_velocity_mm_s_t{t}"] = float(vel_ts[t])
+        rec[f"loc_flow_ml_s_t{t}"] = float(flow_ts[t])
     return rec
 
 

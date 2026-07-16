@@ -334,6 +334,8 @@ def _save_measurement_plots(
             all_label_waveforms=hemo.all_label_waveforms,
         )
     except Exception as exc:  # noqa: BLE001 - plotting must not fail the stage
+        import traceback
+        log.warning(traceback.format_exc())
         log.warning(f"[{subject}] stage6 measurement plots failed: {exc}")
     try:
         masks = save_pitc_region_masks(
@@ -537,6 +539,8 @@ def run_subject(
                 seg_metadata=seg_metadata,
             )
         except Exception as exc:
+            import traceback
+            log.warning(traceback.format_exc())
             log.warning(f"[{subject}] stage6 PITC/PWV failed: {exc}")
 
     (out_dir / "measure_meta.json").write_text(

@@ -17,7 +17,8 @@ DEFAULT_TOTALSEG_MODEL_ROOT = Path("/data3/BIOIT_IMAGE/References/TotalSegmentat
 # Workstation defaults (local machine).
 LOCAL_DEFAULT_DICOM_ROOT = Path("/home/imarcoss/DATA/LabVF/PESA-Brain/DATA/DICOM")
 LOCAL_DEFAULT_NIFTI_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
-LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
+# LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
+LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/LabVF/res_QVTPy")
 LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/ai_models/imaging/TotalSegmentator/v2.0.0")
 
 _ppaths = _sj.paths_section()

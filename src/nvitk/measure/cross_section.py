@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 ThrAlgorithm = Literal["lsthr", "lthr", "otsu"]
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import map_in_thread_pool, setup
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_2d
 from nvitk.morphology.centerline import centerline_tangents
@@ -22,7 +22,7 @@ from nvitk.transform.oblique import (
 setup(globals())
 
 # ---------------------------------------------------------------------------
-# Defaults (MATLAB segment_cross_section_thresh fusion weights)
+# Defaults (MATLAB segment_cross_section_thresh)
 # ---------------------------------------------------------------------------
 
 _FUSE_WEIGHTS = (0.2, 0.8, 0.2)
@@ -206,7 +206,7 @@ def cross_section_at_point(
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
         plane_res=res_meas,
         radius_vox=float(radius_vox),
-        intensity_2d=to_numpy(cd_sl_display),
+        intensity_2d=as_backend_array(cd_sl_display),
     )
 
 
@@ -573,7 +573,7 @@ def _through_plane_frame_mean(
     vysl = oblique_slice_with_coords(vy[..., ti], plane, order=order)
     vzsl = oblique_slice_with_coords(vz[..., ti], plane, order=order)
     v_through = vxsl * t_hat[0] + vysl * t_hat[1] + vzsl * t_hat[2]
-    vals = to_numpy(as_backend_array(v_through))[mask]
+    vals = as_backend_array(v_through)[mask]
     return float(np.mean(vals)) if vals.size else 0.0
 
 

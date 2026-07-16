@@ -29,8 +29,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import scipy.optimize
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import map_in_thread_pool
 from nvitk.core.logger import Logger
 from nvitk.measure.cross_section import (
@@ -137,21 +138,21 @@ class VesselHemodynamicsResult:
 
 def _arc_length_mm(points_xyz: np.ndarray, voxel_spacing: tuple[float, float, float]) -> np.ndarray:
     """Cumulative arc length in mm along an ordered polyline (anisotropic spacing)."""
-    pts = to_numpy(as_backend_array(points_xyz)).astype("float64")
+    pts = (as_backend_array(points_xyz)).astype("float64")
     if pts.shape[0] < 2:
         return np.zeros(pts.shape[0], dtype="float64")
-    sp = np.asarray(voxel_spacing, dtype="float64").reshape(3)
+    sp = as_backend_array(voxel_spacing).astype("float64").reshape(3)
     diffs = np.diff(pts, axis=0) * sp[None, :]
     seg = np.linalg.norm(diffs, axis=1)
-    return np.concatenate([[0.0], np.cumsum(seg)])
+    return np.concatenate([as_backend_array([0.0]), np.cumsum(as_backend_array(seg))])
 
 
 def _orient_polyline(points_xyz: np.ndarray, anchor_xyz: np.ndarray) -> np.ndarray:
     """Return *points_xyz* ordered so index 0 is the endpoint nearest *anchor_xyz*."""
-    pts = to_numpy(as_backend_array(points_xyz)).astype("float64")
+    pts = (as_backend_array(points_xyz)).astype("float64")
     if pts.shape[0] < 2:
         return pts
-    anchor = np.asarray(anchor_xyz, dtype="float64").reshape(3)
+    anchor = as_backend_array(anchor_xyz).astype("float64").reshape(3)
     d_first = float(np.linalg.norm(pts[0] - anchor))
     d_last = float(np.linalg.norm(pts[-1] - anchor))
     return pts if d_first <= d_last else pts[::-1].copy()
@@ -159,7 +160,7 @@ def _orient_polyline(points_xyz: np.ndarray, anchor_xyz: np.ndarray) -> np.ndarr
 
 def _root_proximal_anchor(points_xyz: np.ndarray) -> np.ndarray:
     """Proximal (inferior, min-Z) endpoint of a root vessel polyline."""
-    pts = to_numpy(as_backend_array(points_xyz)).astype("float64")
+    pts = (as_backend_array(points_xyz)).astype("float64")
     if pts.shape[0] == 0:
         return np.zeros(3, dtype="float64")
     endpoints = np.vstack([pts[0], pts[-1]])
@@ -179,7 +180,7 @@ def _assign_branch_qualities(
     """Attach per-station Q scores along one vessel branch."""
     if not rows:
         return
-    flow_matrix = np.vstack([np.asarray(r["flow_ts"], dtype=np.float64) for r in rows])
+    flow_matrix = np.vstack([as_backend_array(r["flow_ts"]).astype("float64") for r in rows])
     areas = np.array([float(r["area_mm2"]) for r in rows], dtype=np.float64)
     circs = np.array([float(r["circularity"]) for r in rows], dtype=np.float64)
     fpc = flow_matrix.mean(axis=1)
@@ -216,10 +217,10 @@ def _sample_vessel_stations(
     quality_metric: str = "stdv_from_mean",
 ) -> list[dict[str, Any]]:
     """Sample cross-sections along one vessel; return per-station metric dicts."""
-    pts = to_numpy(as_backend_array(points_xyz)).astype("float64")
+    pts = (as_backend_array(points_xyz)).astype("float64")
     if pts.shape[0] < 2:
         return []
-    tangents = to_numpy(centerline_tangents(pts, k_half=2))
+    tangents = (centerline_tangents(pts, k_half=2))
     arc = _arc_length_mm(pts, voxel_spacing)
     step = max(1, int(stride))
     rows: list[dict[str, Any]] = []
@@ -250,7 +251,8 @@ def _sample_vessel_stations(
         vel_ts = masked_plane_velocity_series(
             vx, vy, vz, cs, plane_interp_order=plane_interp_order
         )
-        flow_ts = flow_pulsatile_ml_s(vel_ts, cs.area_mm2)
+        # Magnitude flow: tangent polarity must not flip PI / mean flow sign.
+        flow_ts = np.abs(flow_pulsatile_ml_s(vel_ts, cs.area_mm2))
         pi = pulsatility_index_qvt(flow_ts)
         if not np.isfinite(pi):
             continue
@@ -296,11 +298,11 @@ def build_all_label_waveforms(
         lid = int(label_id)
         if lid in out:
             continue
-        pts = to_numpy(as_backend_array(centerlines[lid])).astype("float64")
+        pts = (as_backend_array(centerlines[lid])).astype("float64")
         if pts.shape[0] < 2:
             continue
         idx = pick_mid_loc_index(pts.shape[0], pts)
-        tangents = to_numpy(centerline_tangents(pts, k_half=2))
+        tangents = (centerline_tangents(pts, k_half=2))
         is_venous = lid in QVTPY_VENOUS_LABEL_IDS
         cs = None
         for use_resegment in ((False, True) if is_venous else (False,)):
@@ -326,7 +328,7 @@ def build_all_label_waveforms(
         if cs is None or cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
             continue
         vel_ts = masked_plane_velocity_series(vx, vy, vz, cs)
-        flow_ts = flow_pulsatile_ml_s(vel_ts, cs.area_mm2)
+        flow_ts = np.abs(flow_pulsatile_ml_s(vel_ts, cs.area_mm2))
         out[lid] = {
             "vessel_name": qvtpy_vessel_name(lid),
             "mean": flow_ts,
@@ -347,9 +349,9 @@ def _distance_offset_for_branch(
     endpoint and the branch proximal endpoint (in mm).
     """
     root_arc = _arc_length_mm(root_pts, voxel_spacing)
-    root_distal = to_numpy(as_backend_array(root_pts)).astype("float64")[-1]
+    root_distal = (as_backend_array(root_pts)).astype("float64")[-1]
     branch_oriented = _orient_polyline(branch_pts, root_distal)
-    sp = np.asarray(voxel_spacing, dtype="float64").reshape(3)
+    sp = as_backend_array(voxel_spacing).astype("float64").reshape(3)
     gap = float(np.linalg.norm((branch_oriented[0] - root_distal) * sp))
     return branch_oriented, float(root_arc[-1] + gap)
 
@@ -385,7 +387,7 @@ def compute_vessel_hemodynamics(
 ) -> VesselHemodynamicsResult:
     """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling."""
     result = VesselHemodynamicsResult()
-    cls = {int(k): to_numpy(as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
+    cls = {int(k): (as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
 
     sample_kw = dict(
         cd=cd,
@@ -604,7 +606,7 @@ def _root_pwv(
 
 def _time_to_upstroke_s(flow_ts: np.ndarray, tr: float) -> float:
     """Time (s) of maximal systolic upslope in a periodic flow waveform."""
-    x = np.asarray(flow_ts, dtype="float64").reshape(-1)
+    x = as_backend_array(flow_ts).astype("float64").reshape(-1)
     if x.size < 3:
         return float("nan")
     d = np.diff(x)
@@ -638,19 +640,19 @@ def _collect_region_plot_data(
     w2 = np.zeros(len(good), dtype="float64")
     tr = float(temporal_resolution_s) if temporal_resolution_s else 0.0
     if good and tr > 0:
-        ref = np.asarray(good[0]["flow_ts"], dtype="float64")
+        ref = as_backend_array(good[0]["flow_ts"]).astype("float64")
         quals = np.array([r["quality"] for r in good], dtype="float64")
-        w1 = np.asarray(quality_weights(quals, thresh=quality_thresh), dtype="float64")
+        w1 = as_backend_array(quality_weights(quals, thresh=quality_thresh)).astype("float64")
         for i, r in enumerate(good):
             lag_frames, corr = circular_cross_correlation_lag(ref, r["flow_ts"])
             xcor_time_s[i] = lag_frames * tr
-            upstroke_s[i] = _time_to_upstroke_s(np.asarray(r["flow_ts"], dtype="float64"), tr)
+            upstroke_s[i] = _time_to_upstroke_s(as_backend_array(r["flow_ts"]).astype("float64"), tr)
             w2[i] = abs(corr)
 
     # Per-vessel flow waveforms (mean +/- std across the vessel's own stations).
     vessel_waveforms: dict[int, dict[str, Any]] = {}
     for label, rows in [(group.root_label, root_rows), *branch_rows_by_label.items()]:
-        flows = [np.asarray(r["flow_ts"], dtype="float64") for r in rows if r.get("flow_ts") is not None]
+        flows = [as_backend_array(r["flow_ts"]).astype("float64") for r in rows if r.get("flow_ts") is not None]
         if not flows:
             continue
         nt = min(f.size for f in flows)

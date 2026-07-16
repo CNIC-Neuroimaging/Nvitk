@@ -20,7 +20,6 @@ from nvitk.core.array import to_numpy
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.measure.cross_section import CrossSectionResult, segment_at_point
 from nvitk.pipes.qvtpy.labels import (
-    QVTPY_ACA_IDS,
     QVTPY_BASILAR,
     QVTPY_ICA_BASILAR_IDS,
     QVTPY_LICA,
@@ -39,8 +38,8 @@ from nvitk.pipes.qvtpy.labels import (
 
 _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
-# ACA: dual init/fin LOCs at ⅓ and ⅔ arc length.
-QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
+# Dual init/fin LOCs at ⅓ and ⅔ arc length (empty: ACAs use a single mid-arc LOC).
+QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset()
 # MCA / PCA: dual init/fin LOCs at bifurcation-based stations (see pick_mca_pca_loc_indices).
 QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
     QVTPY_MCA_IDS | QVTPY_PCA_IDS

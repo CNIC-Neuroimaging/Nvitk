@@ -99,9 +99,9 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
     fig, axes = plt.subplots(2, len(regions), figsize=(4.2 * len(regions), 6.4), squeeze=False)
     for col, region in enumerate(regions):
         d = region_plot_data[region]
-        dist = np.asarray(d["distance_mm"], dtype="float64")
-        pi = np.asarray(d["pi"], dtype="float64")
-        quality = np.asarray(d["quality"], dtype="float64")
+        dist = to_numpy(d["distance_mm"]).astype("float64")
+        pi = to_numpy(d["pi"]).astype("float64")
+        quality = to_numpy(d["quality"]).astype("float64")
         thresh = float(d.get("quality_thresh", 2.5))
 
         # Row 1: quality vs distance, split about the inclusion threshold.
@@ -150,11 +150,11 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
     fig, axes = plt.subplots(3, len(regions), figsize=(4.2 * len(regions), 9.0), squeeze=False)
     for col, region in enumerate(regions):
         d = region_plot_data[region]
-        dist = np.asarray(d.get("pwv_distance_mm", []), dtype="float64")
-        xcor = np.asarray(d.get("pwv_xcor_time_s", []), dtype="float64")
-        upstroke = np.asarray(d.get("pwv_time_to_upstroke_s", []), dtype="float64")
-        w1 = np.asarray(d.get("pwv_weight_quality", []), dtype="float64")
-        w2 = np.asarray(d.get("pwv_weight_correlation", []), dtype="float64")
+        dist = to_numpy(d.get("pwv_distance_mm", [])).astype("float64")
+        xcor = to_numpy(d.get("pwv_xcor_time_s", [])).astype("float64")
+        upstroke = to_numpy(d.get("pwv_time_to_upstroke_s", [])).astype("float64")
+        w1 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
+        w2 = to_numpy(d.get("pwv_weight_correlation", [])).astype("float64")
 
         ax_x = axes[0][col]
         ax_u = axes[1][col]
@@ -241,8 +241,8 @@ def plot_flow_waveforms(
         if wf is None:
             ax.text(0.5, 0.5, "n/a", ha="center", va="center", transform=ax.transAxes, color="0.6")
             continue
-        mean = np.asarray(wf["mean"], dtype="float64")
-        std = np.asarray(wf.get("std", np.zeros_like(mean)), dtype="float64")
+        mean = to_numpy(wf["mean"]).astype("float64")
+        std = to_numpy(wf.get("std", np.zeros_like(mean))).astype("float64")
         nt = mean.size
         t = np.arange(nt, dtype="float64") * (tr if tr else 1.0)
         if std.size == nt and np.any(std > 0):

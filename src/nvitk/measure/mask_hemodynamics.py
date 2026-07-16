@@ -76,13 +76,14 @@ def mask_voxel_averaged_hemodynamics(
     for t in range(nt):
         vox = np.stack([vx[..., t][roi], vy[..., t][roi], vz[..., t][roi]], axis=1)
         series[t] = float(np.mean(vox @ axis))
+    series = np.abs(series)
     flow_2d = series.reshape(1, -1)
     return MaskHemodynamicsResult(
         method="voxel_avg",
         label_id=int(label_id),
         pi=float(pulsatility_index(flow_2d)[0]),
         ri=float(resistivity_index(flow_2d)[0]),
-        mean_velocity_mm_s=float(np.mean(np.abs(series))),
+        mean_velocity_mm_s=float(np.mean(series)),
         note="Velocity-only PI/RI (no cross-sectional area).",
     )
 
@@ -134,15 +135,16 @@ def mask_pseudo_loc_hemodynamics(
         vx, vy, vz, xs, plane_interp_order=int(plane_interp_order)
     )
     area_mm2 = float(xs.area_mm2)
-    flow_ts = flow_series_ml_s(vel_ts, area_mm2)
+    vel_ts = np.abs(np.asarray(vel_ts, dtype=np.float64).reshape(-1))
+    flow_ts = np.abs(flow_series_ml_s(vel_ts, area_mm2))
     flow_2d = flow_ts.reshape(1, -1)
     return MaskHemodynamicsResult(
         method="pseudo_loc",
         label_id=int(label_id),
         pi=float(pulsatility_index(flow_2d)[0]),
         ri=float(resistivity_index(flow_2d)[0]),
-        mean_velocity_mm_s=float(np.mean(np.abs(vel_ts))),
-        mean_flow_ml_s=float(np.mean(np.abs(flow_ts))),
+        mean_velocity_mm_s=float(np.mean(vel_ts)),
+        mean_flow_ml_s=float(np.mean(flow_ts)),
         cross_section_area_mm2=area_mm2,
         note="Mid-centerline pseudo-LOC with oblique cross-section.",
     )

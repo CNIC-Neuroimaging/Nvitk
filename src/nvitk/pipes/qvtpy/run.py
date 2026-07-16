@@ -1263,12 +1263,12 @@ def main(
     local_paths = layout_local(
         dicom_root=cfg.LOCAL_DEFAULT_DICOM_ROOT if dicom_root is None else dicom_root,
         nifti_root=cfg.LOCAL_DEFAULT_NIFTI_ROOT if nifti_root is None else nifti_root,
-        results_root=output_root,
+        results_root=cfg.LOCAL_DEFAULT_RESULTS_ROOT if output_root is None else output_root,
     )
     cluster_paths = layout_cluster(
         dicom_root=dicom_root,
         nifti_root=nifti_root,
-        results_root=output_root,
+        results_root=cfg.DEFAULT_RESULTS_ROOT if output_root is None else output_root,
     )
     if submit == "sge":
         dicom_root_eff = cluster_paths.dicom_root

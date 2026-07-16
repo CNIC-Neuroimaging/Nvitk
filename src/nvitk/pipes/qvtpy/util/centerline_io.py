@@ -114,7 +114,7 @@ def export_centerlines_from_segmentation(
     out_dir: Path,
     *,
     metadata: dict[str, Any] | None = None,
-    min_points: int = 5,
+    min_points: int = 3,
     venous_polylines: dict[str, Any] | None = None,
     venous_label_by_name: dict[str, int] | None = None,
 ) -> tuple[Path, Path]:
@@ -185,7 +185,7 @@ def _polyline_for_label(
 def load_arterial_centerlines(
     stage_dir: Path,
     *,
-    min_points: int = 5,
+    min_points: int = 3,
     meta: dict[str, Any] | None = None,
     from_segmentation: bool = False,
 ) -> dict[int, Any]:
@@ -208,7 +208,7 @@ def load_arterial_centerlines(
 def load_venous_centerlines(
     stage_dir: Path,
     *,
-    min_points: int = 5,
+    min_points: int = 3,
     meta: dict[str, Any] | None = None,
     from_segmentation: bool = False,
 ) -> dict[str, Any]:
@@ -234,13 +234,14 @@ def load_venous_centerlines(
 def load_centerlines(
     stage3_dir: Path,
     *,
-    min_points: int = 5,
+    min_points: int = 3,
     stage4_dir: Path | None = None,
 ) -> tuple[dict[int, Any], dict[str, Any], dict[str, Any]]:
     """Return ``(arterial, venous, meta)``.
 
     Arterial polylines prefer stage-4 segmentation centerlines when available; venous
-    still come from stage-3 (not present in ``seg_4dflow``).
+    still come from stage-3 (not present in ``seg_4dflow``). Missing stage-4 arterial
+    labels fall back to stage-3 polylines when they have at least ``min_points``.
     """
     stage3_dir = Path(stage3_dir)
     meta3 = load_centerline_meta(stage3_dir)
@@ -252,6 +253,18 @@ def load_centerlines(
         arterial = load_arterial_centerlines(
             s4_cl, min_points=min_points, meta=meta_cl, from_segmentation=True
         )
+        # Recover short / missing arterial CLs from stage-3 when stage-4 lacks them.
+        s3_arterial = load_arterial_centerlines(
+            stage3_dir, min_points=min_points, meta=meta3
+        )
+        for lid, pts in s3_arterial.items():
+            if int(lid) in arterial:
+                continue
+            if pts is None:
+                continue
+            n = int(np.asarray(pts).shape[0])
+            if n >= int(min_points):
+                arterial[int(lid)] = pts
         return arterial, venous, meta_cl
 
     arterial = load_arterial_centerlines(stage3_dir, min_points=min_points, meta=meta3)

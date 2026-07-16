@@ -137,7 +137,7 @@ def run_subject(
         return out_dir
 
     s4 = output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
-    arterial, venous, cl_meta = load_centerlines(s3, min_points=5, stage4_dir=s4)
+    arterial, venous, cl_meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
     meta = load_centerline_meta(s3)
 
     arterial_seg = None
