@@ -92,15 +92,13 @@ def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
     return out
 
 
-def _centerline_longest_path(coords_xyz: np.ndarray) -> np.ndarray:
-    """Order skeleton voxels into an approximate centerline using the graph diameter.
-
-    Input coords are (N,3) voxel indices in (x,y,z) order (as returned by np.argwhere).
-    Output is a (M,3) polyline in voxel coordinates (float32).
-    """
-    if coords_xyz.shape[0] <= 2:
-        return coords_xyz.astype(np.float32, copy=False)
-
+def _skeleton_graph(
+    coords_xyz: np.ndarray,
+) -> tuple[
+    list[tuple[int, int, int]],
+    dict[tuple[int, int, int], list[tuple[int, int, int]]],
+    dict[tuple[int, int, int], int],
+]:
     nodes = [tuple(int(v) for v in row) for row in coords_xyz]
     node_set = set(nodes)
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
@@ -109,44 +107,190 @@ def _centerline_longest_path(coords_xyz: np.ndarray) -> np.ndarray:
         nbrs = [m for m in _neighbors26(n) if m in node_set]
         adj[n] = nbrs
         deg[n] = len(nbrs)
+    return nodes, adj, deg
 
-    endpoints = [n for n, d in deg.items() if d <= 1]
-    start = endpoints[0] if endpoints else nodes[0]
 
-    def _bfs(
-        src: tuple[int, int, int],
-    ) -> tuple[
-        dict[tuple[int, int, int], int],
-        dict[tuple[int, int, int], tuple[int, int, int] | None],
-    ]:
-        from collections import deque
+def _largest_skeleton_component(coords_xyz: np.ndarray) -> np.ndarray:
+    """Keep the largest 26-connected skeleton component (drops speck CCs)."""
+    if coords_xyz.shape[0] <= 2:
+        return coords_xyz.astype(np.float32, copy=False)
 
-        dist: dict[tuple[int, int, int], int] = {src: 0}
-        parent: dict[tuple[int, int, int], tuple[int, int, int] | None] = {src: None}
-        q = deque([src])
+    from collections import deque
+
+    nodes, adj, _deg = _skeleton_graph(coords_xyz)
+    visited: set[tuple[int, int, int]] = set()
+    best: list[tuple[int, int, int]] = []
+    for start in nodes:
+        if start in visited:
+            continue
+        comp: list[tuple[int, int, int]] = []
+        q: deque[tuple[int, int, int]] = deque([start])
+        visited.add(start)
         while q:
             u = q.popleft()
+            comp.append(u)
             for v in adj.get(u, []):
-                if v in dist:
-                    continue
-                dist[v] = dist[u] + 1
-                parent[v] = u
-                q.append(v)
-        return dist, parent
+                if v not in visited:
+                    visited.add(v)
+                    q.append(v)
+        if len(comp) > len(best):
+            best = comp
+    if not best:
+        return coords_xyz.astype(np.float32, copy=False)
+    return to_numpy(best).astype(np.float32)
 
-    d1, _ = _bfs(start)
-    a = max(d1, key=d1.get)
-    d2, parent = _bfs(a)
-    b = max(d2, key=d2.get)
 
-    # Reconstruct path b -> a
+def _bfs_from(
+    src: tuple[int, int, int],
+    adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+) -> tuple[
+    dict[tuple[int, int, int], int],
+    dict[tuple[int, int, int], tuple[int, int, int] | None],
+]:
+    from collections import deque
+
+    dist: dict[tuple[int, int, int], int] = {src: 0}
+    parent: dict[tuple[int, int, int], tuple[int, int, int] | None] = {src: None}
+    q: deque[tuple[int, int, int]] = deque([src])
+    while q:
+        u = q.popleft()
+        for v in adj.get(u, []):
+            if v in dist:
+                continue
+            dist[v] = dist[u] + 1
+            parent[v] = u
+            q.append(v)
+    return dist, parent
+
+
+def _reconstruct_path(
+    end: tuple[int, int, int],
+    parent: dict[tuple[int, int, int], tuple[int, int, int] | None],
+) -> list[tuple[int, int, int]]:
     path: list[tuple[int, int, int]] = []
-    cur: tuple[int, int, int] | None = b
+    cur: tuple[int, int, int] | None = end
     while cur is not None:
         path.append(cur)
-        cur = parent.get(cur, None)
+        cur = parent.get(cur)
     path.reverse()
-    return to_numpy(path).astype(np.float32)
+    return path
+
+
+def _nearest_node(
+    nodes: list[tuple[int, int, int]],
+    point_xyz: np.ndarray,
+) -> tuple[int, int, int]:
+    p = to_numpy(point_xyz).astype(np.float64).ravel()[:3]
+    best = nodes[0]
+    best_d = float("inf")
+    for n in nodes:
+        d = (n[0] - p[0]) ** 2 + (n[1] - p[1]) ** 2 + (n[2] - p[2]) ** 2
+        if d < best_d:
+            best_d = float(d)
+            best = n
+    return best
+
+
+def _path_from_node_to_farthest(
+    start: tuple[int, int, int],
+    adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+) -> list[tuple[int, int, int]]:
+    dist, parent = _bfs_from(start, adj)
+    if not dist:
+        return [start]
+    far = max(dist, key=dist.get)
+    return _reconstruct_path(far, parent)
+
+
+def _classical_diameter_path(
+    nodes: list[tuple[int, int, int]],
+    adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+    endpoints: list[tuple[int, int, int]],
+) -> list[tuple[int, int, int]]:
+    start = endpoints[0] if endpoints else nodes[0]
+    d1, _ = _bfs_from(start, adj)
+    a = max(d1, key=d1.get)
+    d2, parent = _bfs_from(a, adj)
+    b = max(d2, key=d2.get)
+    return _reconstruct_path(b, parent)
+
+
+def _prefer_coverage_cost(
+    path: list[tuple[int, int, int]],
+    prefer_points: np.ndarray,
+) -> float:
+    """Mean squared distance from each prefer point to the nearest path voxel."""
+    if not path or prefer_points.size == 0:
+        return float("inf")
+    path_arr = to_numpy(path).astype(np.float64)
+    prefs = to_numpy(prefer_points).astype(np.float64).reshape(-1, 3)
+    total = 0.0
+    for p in prefs:
+        d2 = np.sum((path_arr - p.reshape(1, 3)) ** 2, axis=1)
+        total += float(np.min(d2))
+    return total / float(prefs.shape[0])
+
+
+def _centerline_longest_path(
+    coords_xyz: np.ndarray,
+    *,
+    prefer_points: np.ndarray | None = None,
+) -> np.ndarray:
+    """Order skeleton voxels into a main centerline polyline.
+
+    Uses the largest 26-connected skeleton component, then the graph diameter.
+    When *prefer_points* are given (e.g. a prior stage-3 polyline), prefers a
+    root→farthest path that stays close to those points so proximal trunks on
+    branched vessels (MCA M1) are not dropped by a distal-only diameter.
+    """
+    if coords_xyz.shape[0] <= 2:
+        return coords_xyz.astype(np.float32, copy=False)
+
+    coords = _largest_skeleton_component(coords_xyz)
+    if coords.shape[0] <= 2:
+        return coords.astype(np.float32, copy=False)
+
+    nodes, adj, deg = _skeleton_graph(coords)
+    endpoints = [n for n, d in deg.items() if d <= 1]
+    if not endpoints:
+        endpoints = [nodes[0]]
+
+    diameter = _classical_diameter_path(nodes, adj, endpoints)
+    prefs = None
+    if prefer_points is not None:
+        prefs = to_numpy(prefer_points).astype(np.float64).reshape(-1, 3)
+        if prefs.shape[0] == 0:
+            prefs = None
+
+    if prefs is None:
+        return to_numpy(diameter).astype(np.float32)
+
+    # Candidate roots: prior polyline ends/mid + prior-nearest skeleton endpoints.
+    seed_xyzs = [prefs[0], prefs[-1], prefs[prefs.shape[0] // 2]]
+    candidates: list[list[tuple[int, int, int]]] = [diameter]
+    for seed in seed_xyzs:
+        root = _nearest_node(nodes, seed)
+        # Prefer starting at an endpoint near the seed when available.
+        near_ep = min(
+            endpoints,
+            key=lambda e: (e[0] - root[0]) ** 2
+            + (e[1] - root[1]) ** 2
+            + (e[2] - root[2]) ** 2,
+        )
+        for start in dict.fromkeys((near_ep, root)):
+            path = _path_from_node_to_farthest(start, adj)
+            if len(path) >= 2:
+                candidates.append(path)
+
+    best_path = diameter
+    best_key: tuple[float, int] | None = None
+    for path in candidates:
+        cost = _prefer_coverage_cost(path, prefs)
+        key = (cost, -len(path))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_path = path
+    return to_numpy(best_path).astype(np.float32)
 
 
 def compute_centerlines(
@@ -155,6 +299,7 @@ def compute_centerlines(
     centerline_mask: np.ndarray | None = None,
     labels: Sequence[int] | None = None,
     min_points: int = 20,
+    prefer_points_by_label: dict[int, np.ndarray] | None = None,
 ) -> dict[int, np.ndarray]:
     """Return per-label ordered centerline points in voxel coordinates.
 
@@ -169,12 +314,16 @@ def compute_centerlines(
         Optional explicit label list. Default: all non-zero labels in `vessel_mask`.
     min_points
         Skip labels whose centerline has fewer than this many voxels.
+    prefer_points_by_label
+        Optional prior polylines (e.g. stage-3) used to keep proximal trunks on
+        branched skeletons instead of a distal-only graph diameter.
     """
     arr = as_backend_array(vessel_mask)
     if arr.ndim != 3:
         raise ValidationError("vessel_mask must be 3D for centerline computation.")
     labs = labels or sorted(int(v) for v in np.unique(arr) if int(v) != 0)
     out: dict[int, np.ndarray] = {}
+    prefs = prefer_points_by_label or {}
 
     if centerline_mask is not None:
         cl = as_backend_array(centerline_mask)
@@ -185,7 +334,9 @@ def compute_centerlines(
             coords = np.argwhere(cl_bin & (arr == int(lbl)))
             if coords.shape[0] < int(min_points):
                 continue
-            out[int(lbl)] = _centerline_longest_path(coords)
+            out[int(lbl)] = _centerline_longest_path(
+                coords, prefer_points=prefs.get(int(lbl))
+            )
         return out
 
     skeletonize = _require_skeletonize()
@@ -197,7 +348,9 @@ def compute_centerlines(
         coords = np.argwhere(as_backend_array(sk) > 0)
         if coords.shape[0] < int(min_points):
             continue
-        out[int(lbl)] = _centerline_longest_path(coords)
+        out[int(lbl)] = _centerline_longest_path(
+            coords, prefer_points=prefs.get(int(lbl))
+        )
     return out
 
 

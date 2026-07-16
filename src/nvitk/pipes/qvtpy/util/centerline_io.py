@@ -21,10 +21,31 @@ from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
-from nvitk.pipes.qvtpy.labels import QVTPY_ARTERIAL_LABEL_IDS
+from nvitk.pipes.qvtpy.labels import (
+    QVTPY_ARTERIAL_LABEL_IDS,
+    QVTPY_BASILAR,
+    QVTPY_LACA,
+    QVTPY_LICA,
+    QVTPY_LMCA,
+    QVTPY_LPCA,
+    QVTPY_RACA,
+    QVTPY_RICA,
+    QVTPY_RMCA,
+    QVTPY_RPCA,
+)
 from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
 
 setup(globals())
+
+# Child → parent label for proximal seed when regenerating CLs from seg_4dflow.
+_ARTERIAL_PARENT_LABEL: dict[int, int] = {
+    QVTPY_LMCA: QVTPY_LICA,
+    QVTPY_RMCA: QVTPY_RICA,
+    QVTPY_LACA: QVTPY_LICA,
+    QVTPY_RACA: QVTPY_RICA,
+    QVTPY_LPCA: QVTPY_BASILAR,
+    QVTPY_RPCA: QVTPY_BASILAR,
+}
 
 # ---------------------------------------------------------------------------
 # Artifact names
@@ -109,6 +130,32 @@ def rasterize_centerlines_mask(
     return mask
 
 
+def _parent_contact_seed(
+    seg: np.ndarray,
+    child_id: int,
+    parent_id: int,
+) -> np.ndarray | None:
+    """Voxel near the child/parent interface (proximal trunk seed)."""
+    seg_np = to_numpy(seg).astype(np.int32, copy=False)
+    child = seg_np == int(child_id)
+    parent = seg_np == int(parent_id)
+    if not np.any(child) or not np.any(parent):
+        return None
+    try:
+        from scipy import ndimage
+
+        parent_d = ndimage.binary_dilation(parent, iterations=2)
+        contact = child & parent_d
+    except Exception:
+        contact = child & parent
+    if np.any(contact):
+        return np.mean(np.argwhere(contact).astype(np.float64), axis=0)
+    child_coords = np.argwhere(child).astype(np.float64)
+    parent_centroid = np.mean(np.argwhere(parent).astype(np.float64), axis=0)
+    d2 = np.sum((child_coords - parent_centroid.reshape(1, 3)) ** 2, axis=1)
+    return child_coords[int(np.argmin(d2))]
+
+
 def export_centerlines_from_segmentation(
     seg: np.ndarray,
     out_dir: Path,
@@ -117,19 +164,38 @@ def export_centerlines_from_segmentation(
     min_points: int = 3,
     venous_polylines: dict[str, Any] | None = None,
     venous_label_by_name: dict[str, int] | None = None,
+    prefer_polylines: dict[int, Any] | None = None,
 ) -> tuple[Path, Path]:
-    """Build centerlines from ``seg_4dflow`` and write mask + meta under *out_dir*."""
+    """Build centerlines from ``seg_4dflow`` and write mask + meta under *out_dir*.
+
+    *prefer_polylines* (typically stage-3 arterial CLs) bias branched vessels so
+    proximal trunks are not dropped by a distal-only graph diameter. When absent,
+    MCA/ACA/PCA use a parent-contact seed from the segmentation.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     shape = tuple(int(s) for s in seg_np.shape[:3])
+    prefer = {int(k): v for k, v in (prefer_polylines or {}).items() if v is not None}
 
     label_ids = sorted(int(v) for v in np.unique(seg_np) if int(v) > 0)
     arterial_polylines: dict[int, Any] = {}
     for lid in label_ids:
         if int(lid) not in QVTPY_ARTERIAL_LABEL_IDS:
             continue
-        cl = compute_centerlines(seg_np, labels=[int(lid)], min_points=int(min_points))
+        prefs = prefer.get(int(lid))
+        if prefs is None:
+            parent = _ARTERIAL_PARENT_LABEL.get(int(lid))
+            if parent is not None:
+                seed = _parent_contact_seed(seg_np, int(lid), int(parent))
+                if seed is not None:
+                    prefs = seed.reshape(1, 3)
+        cl = compute_centerlines(
+            seg_np,
+            labels=[int(lid)],
+            min_points=int(min_points),
+            prefer_points_by_label={int(lid): prefs} if prefs is not None else None,
+        )
         pts = cl.get(int(lid))
         if pts is not None:
             arterial_polylines[int(lid)] = pts
@@ -152,6 +218,7 @@ def export_centerlines_from_segmentation(
         "n_arterial_points": int(sum(p.shape[0] for p in arterial_polylines.values())),
         "n_venous_points": int(sum(p.shape[0] for p in venous_out.values())),
         "centerlines_mask_nifti": str(mask_path),
+        "prefer_polylines_labels": sorted(prefer.keys()),
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return mask_path, meta_path
@@ -236,12 +303,14 @@ def load_centerlines(
     *,
     min_points: int = 3,
     stage4_dir: Path | None = None,
+    truncate_length_ratio: float = 0.6,
 ) -> tuple[dict[int, Any], dict[str, Any], dict[str, Any]]:
     """Return ``(arterial, venous, meta)``.
 
     Arterial polylines prefer stage-4 segmentation centerlines when available; venous
-    still come from stage-3 (not present in ``seg_4dflow``). Missing stage-4 arterial
-    labels fall back to stage-3 polylines when they have at least ``min_points``.
+    still come from stage-3 (not present in ``seg_4dflow``). Stage-3 is used when a
+    stage-4 label is missing, or when the stage-4 polyline is much shorter than
+    stage-3 (truncated diameter path), controlled by *truncate_length_ratio*.
     """
     stage3_dir = Path(stage3_dir)
     meta3 = load_centerline_meta(stage3_dir)
@@ -253,18 +322,24 @@ def load_centerlines(
         arterial = load_arterial_centerlines(
             s4_cl, min_points=min_points, meta=meta_cl, from_segmentation=True
         )
-        # Recover short / missing arterial CLs from stage-3 when stage-4 lacks them.
+        # Recover missing / truncated arterial CLs from stage-3.
         s3_arterial = load_arterial_centerlines(
             stage3_dir, min_points=min_points, meta=meta3
         )
-        for lid, pts in s3_arterial.items():
-            if int(lid) in arterial:
+        ratio = float(truncate_length_ratio)
+        for lid, pts3 in s3_arterial.items():
+            if pts3 is None:
                 continue
-            if pts is None:
+            n3 = int(np.asarray(pts3).shape[0])
+            if n3 < int(min_points):
                 continue
-            n = int(np.asarray(pts).shape[0])
-            if n >= int(min_points):
-                arterial[int(lid)] = pts
+            pts4 = arterial.get(int(lid))
+            if pts4 is None:
+                arterial[int(lid)] = pts3
+                continue
+            n4 = int(np.asarray(pts4).shape[0])
+            if n4 < int(min_points) or (ratio > 0.0 and n4 < ratio * n3):
+                arterial[int(lid)] = pts3
         return arterial, venous, meta_cl
 
     arterial = load_arterial_centerlines(stage3_dir, min_points=min_points, meta=meta3)

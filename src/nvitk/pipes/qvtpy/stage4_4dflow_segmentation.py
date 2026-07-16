@@ -42,6 +42,7 @@ from nvitk.pipes.qvtpy.util.centerline_io import (
     centerline_meta_path,
     centerlines_mask_path,
     export_centerlines_from_segmentation,
+    load_arterial_centerlines,
     load_venous_centerlines,
 )
 from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
@@ -254,18 +255,22 @@ def run_subject(
 
     venous_polylines: dict[str, Any] = {}
     venous_label_by_name: dict[str, int] = {}
+    prefer_arterial: dict[int, Any] = {}
     if centerline_meta_path(s3).is_file():
         meta3 = json.loads(centerline_meta_path(s3).read_text(encoding="utf-8"))
         venous_label_by_name = {
             str(k): int(v) for k, v in (meta3.get("venous_label_by_name") or {}).items()
         }
         venous_polylines = load_venous_centerlines(s3, min_points=3, meta=meta3)
+        if centerlines_mask_path(s3).is_file():
+            prefer_arterial = load_arterial_centerlines(s3, min_points=3, meta=meta3)
     export_centerlines_from_segmentation(
         result.segmentation,
         out_dir,
         metadata=ref_meta,
         venous_polylines=venous_polylines,
         venous_label_by_name=venous_label_by_name,
+        prefer_polylines=prefer_arterial,
     )
 
     meta_path.write_text(

@@ -123,12 +123,16 @@ class VesselHemodynamicsResult:
     ``region_plot_data`` is populated only when ``collect_plot_data=True`` and holds
     the per-station arrays (PI, quality, flow waveforms, PWV cross-correlation
     diagnostics) needed to render the paper-style measurement figures.
+
+    ``volume_seg`` is the island-cleaned multilabel mask used for sampling (and
+    for PITC branch mask export).
     """
 
     profile_rows: list[dict[str, Any]] = field(default_factory=list)
     summary_rows: list[dict[str, Any]] = field(default_factory=list)
     region_plot_data: dict[str, dict[str, Any]] = field(default_factory=dict)
     all_label_waveforms: dict[int, dict[str, Any]] = field(default_factory=dict)
+    volume_seg: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -386,8 +390,14 @@ def compute_vessel_hemodynamics(
     collect_plot_data: bool = False,
 ) -> VesselHemodynamicsResult:
     """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling."""
+    from nvitk.core.array import to_numpy
+    from nvitk.pipes.qvtpy.util.mask_cleaning import clean_volume_seg_for_pitc
+
     result = VesselHemodynamicsResult()
     cls = {int(k): (as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
+    # Drop isolated label islands before station sampling / label-constrained CS.
+    volume_seg = clean_volume_seg_for_pitc(volume_seg, cls)
+    result.volume_seg = to_numpy(volume_seg).astype(np.int32, copy=False)
 
     sample_kw = dict(
         cd=cd,

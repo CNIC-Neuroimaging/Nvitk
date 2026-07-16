@@ -8,13 +8,15 @@
 
 - Boolean foreground mask after sliding threshold + area opening.
 - :func:`venous_search_region` — superior Y-slab mask restricting venous geometry heuristics.
+- :func:`arterial_exclusion_mask` — eICAB arterial voxels to subtract from venous CD ROI.
 """
 
 from __future__ import annotations
 
-from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.array import as_backend_array
+from nvitk.core.backend import setup, get_current_backend
 from nvitk.morphology.components import remove_small_components_by_fraction
+from nvitk.pipes.qvtpy.labels import QVTPY_ARTERIAL_LABEL_IDS
 
 setup(globals())
 
@@ -31,6 +33,29 @@ def venous_search_region(shape: tuple[int, int, int]) -> np.ndarray:
     ven = np.zeros(shape, dtype=bool)
     ven[:, :third_y, :] = True
     return ven
+
+
+def arterial_exclusion_mask(
+    labels: np.ndarray,
+    *,
+    arterial_ids: frozenset[int] | set[int] | None = None,
+    dilate_vox: int = 1,
+) -> np.ndarray:
+    """Boolean mask of arterial voxels (optionally dilated) to exclude from venous CD.
+
+    eICAB arteries that enter the superior venous slab otherwise remain in the
+    global CD vessel binary and can be skeletonized / labeled as sinuses.
+    Prefer a whole-brain (WB) eICAB mask here: CW often omits distal territory.
+    """
+    arr = as_backend_array(labels).astype(np.int32, copy=False)
+    ids = arterial_ids if arterial_ids is not None else QVTPY_ARTERIAL_LABEL_IDS
+    art = np.zeros(arr.shape, dtype=bool)
+    for lid in ids:
+        art |= arr == int(lid)
+    dilate = max(0, int(dilate_vox))
+    if dilate > 0 and bool(np.any(art)):
+        art = ndi.binary_dilation(art, iterations=dilate, brute_force=get_current_backend() == "cupy")
+    return as_backend_array(art.astype(bool, copy=False))
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +89,11 @@ def binary_vessel_segment_cd(
         min_fraction=float(min_component_fraction),
         connectivity=1,
     )
-    return as_backend_array(to_numpy(segment).astype(bool, copy=False)), float(opt_thresh)
+    return as_backend_array((segment).astype(bool, copy=False)), float(opt_thresh)
 
 
 __all__ = [
+    "arterial_exclusion_mask",
     "binary_vessel_segment_cd",
     "venous_search_region",
 ]

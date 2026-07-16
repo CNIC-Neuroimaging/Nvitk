@@ -302,7 +302,7 @@ def _run_vessel_hemodynamics(
             subject,
             out_dir=out_dir,
             hemo=hemo,
-            volume_seg=volume_seg,
+            volume_seg=hemo.volume_seg if hemo.volume_seg is not None else volume_seg,
             seg_metadata=seg_metadata,
         )
 

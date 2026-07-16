@@ -40,11 +40,19 @@ from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.labels import VENOUS_UNKNOWN_LABEL, relabel_eicab_mask_to_qvtpy
+from nvitk.pipes.qvtpy.labels import (
+    QVTPY_ARTERIAL_LABEL_IDS,
+    VENOUS_UNKNOWN_LABEL,
+    relabel_eicab_mask_to_qvtpy,
+)
 from nvitk.pipes.qvtpy.util.brain_mask import brain_mask_for_reference
 from nvitk.pipes.qvtpy.util.paths import resolve_totalseg_model_dir
 from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskKind, resolve_eicab_mask
-from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
+from nvitk.pipes.qvtpy.util.flow_volume_masks import (
+    arterial_exclusion_mask,
+    binary_vessel_segment_cd,
+    venous_search_region,
+)
 from nvitk.pipes.qvtpy.util.mask_cleaning import (
     clean_multilabel_islands,
     clean_venous_slab_mask,
@@ -55,6 +63,53 @@ from nvitk.registration.fsl.flirt import flirt_apply_rigid
 setup(globals())
 
 log = Logger()
+
+
+def _load_wb_arterial_labels_for_venous_exclusion(
+    *,
+    eicab_dir: Path,
+    fixed: Path,
+    mat: Path,
+    out_dir: Path,
+    eicab_prefer_pp: bool,
+    cw_labels_fallback: np.ndarray,
+) -> tuple[np.ndarray, str]:
+    """Warp WB eICAB (preferred) for venous arterial exclusion; else use CW labels.
+
+    CW Circle-of-Willis masks omit distal MCA/ACA/PCA territory that often enters
+    the superior venous slab on CD; WB covers those for exclusion only.
+    """
+    wb_res = resolve_eicab_mask(
+        eicab_dir,
+        preference="wb",
+        prefer_postprocessed=bool(eicab_prefer_pp),
+    )
+    if wb_res.used != "wb":
+        log.info(
+            "venous arterial exclusion: WB eICAB not available "
+            f"({wb_res.fallback_reason or 'fallback'}); using CW labels"
+        )
+        return np.asarray(cw_labels_fallback, dtype=np.int32), "cw_fallback"
+
+    warped_wb = out_dir / "eicab_wb_in_4dflow_venous_excl.nii.gz"
+    log.step(f"warp eICAB WB ({wb_res.path.name}) for venous arterial exclusion")
+    flirt_apply_rigid(
+        wb_res.path,
+        fixed,
+        mat,
+        warped_wb,
+        interp="nearestneighbour",
+    )
+    wb_img = imread(warped_wb)
+    wb_lab = as_backend_array(wb_img.data).astype(np.int32, copy=False)
+    wb_lab = relabel_eicab_mask_to_qvtpy(wb_lab)
+    wb_lab = clean_multilabel_islands(wb_lab, min_fraction=0.005, bridge_open_radius=0)
+    n_art = sum(int(np.count_nonzero(wb_lab == lid)) for lid in QVTPY_ARTERIAL_LABEL_IDS)
+    log.info(
+        f"venous arterial exclusion: WB in 4D-flow arterial voxels={n_art} "
+        f"(pp={bool(wb_res.postprocessed)})"
+    )
+    return np.asarray(wb_lab, dtype=np.int32), "wb"
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +268,8 @@ def run_subject(
         min_fraction=eicab_min_island_fraction,
         bridge_open_radius=eicab_bridge_open_radius,
     )
+    # Keep CW labels as fallback; prefer WB for venous arterial exclusion.
+    arterial_labels_full = np.asarray(labels_np, dtype=np.int32).copy()
 
     arterial_vol = np.where(venous_region, 0, labels_np)
     art_bin = arterial_vol > 0
@@ -226,7 +283,7 @@ def run_subject(
     arterial = compute_centerlines(arterial_vol, min_points=5)
     log.step(f"arterial centerlines: {len(arterial)} label(s)")
 
-    # ---- Venous: CD ∧ slab [∧ brain] → clean → junction-split skeleton → name/label
+    # ---- Venous: CD ∧ slab [∧ brain] → clean → bifurcate/split skeleton → name/label
     log.step("venous branch detection from CD + slab region")
     brain_region: np.ndarray | None = None
     if venous_brain_mask:
@@ -245,12 +302,47 @@ def run_subject(
             brain_region.astype(np.uint8),
             metadata=dict(cd_img.metadata or {}),
         )
+        log.info(
+            f"[{subject}] venous: brain mask voxels={int(np.count_nonzero(brain_region))}"
+        )
 
+    n_vessel = int(np.count_nonzero(vessel_bin))
+    n_slab = int(np.count_nonzero(venous_region))
     venous_mask = vessel_bin.astype(bool) & venous_region
+    n_after_slab = int(np.count_nonzero(venous_mask))
+    log.info(
+        f"[{subject}] venous: CD vessel={n_vessel}, slab={n_slab}, "
+        f"CD∧slab={n_after_slab}"
+    )
+    # Subtract distal arteries via WB eICAB (CW often misses territory in the slab).
+    excl_labels, excl_src = _load_wb_arterial_labels_for_venous_exclusion(
+        eicab_dir=eicab_dir,
+        fixed=fixed,
+        mat=mat,
+        out_dir=out_dir,
+        eicab_prefer_pp=bool(eicab_prefer_pp),
+        cw_labels_fallback=arterial_labels_full,
+    )
+    art_excl = arterial_exclusion_mask(excl_labels, dilate_vox=2)
+    n_art_hit = int(np.count_nonzero(venous_mask & art_excl))
+    venous_mask = venous_mask & ~art_excl
+    log.info(
+        f"[{subject}] venous: excluded arterial overlap "
+        f"(source={excl_src}, dilate=2) removed={n_art_hit}, "
+        f"remaining={int(np.count_nonzero(venous_mask))}"
+    )
     if brain_region is not None:
         venous_mask = venous_mask & brain_region
+        log.info(
+            f"[{subject}] venous: after brain mask voxels={int(np.count_nonzero(venous_mask))}"
+        )
     venous_clean = as_backend_array(
         clean_venous_slab_mask(venous_mask, min_fraction=venous_min_component_frac)
+    )
+    log.info(
+        f"[{subject}] venous: after area-open "
+        f"(min_frac={float(venous_min_component_frac)}) "
+        f"voxels={int(np.count_nonzero(venous_clean))}"
     )
     venous_branches = assign_venous_branches(
         venous_clean,
@@ -260,6 +352,16 @@ def run_subject(
     venous_label_by_name = {
         name: venous_name_to_label_id(name) for name in venous_branches
     }
+    log.info(
+        f"[{subject}] venous labeled: "
+        + (
+            ", ".join(
+                f"{n}=id{venous_label_by_name[n]}(n={int(venous_branches[n].shape[0])})"
+                for n in venous_branches
+            )
+            or "none"
+        )
+    )
 
     # ---- Outputs: centerlines mask, CD QC NIfTI, centerline_meta.json --------
     cl_mask = _rasterize_centerlines_mask(
@@ -314,6 +416,8 @@ def run_subject(
         "totalseg_model_dir": str(resolve_totalseg_model_dir(model_dir=totalseg_model_dir)),
         "brain_mask_on_cd": str(out_dir / "brain_mask_on_cd.nii.gz") if brain_region is not None else None,
         "venous_voxels_after_brain_mask": int(np.count_nonzero(venous_mask)),
+        "venous_arterial_exclusion_source": excl_src,
+        "venous_arterial_exclusion_dilate_vox": 2,
     }
     done.write_text(json.dumps(meta_out, indent=2), encoding="utf-8")
     log.info(f"[{subject}] stage3 centerline -> {out_dir}")
