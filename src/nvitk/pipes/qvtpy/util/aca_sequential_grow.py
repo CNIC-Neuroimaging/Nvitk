@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
+from nvitk.core.logger import Logger
 from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected
 from nvitk.pipes.qvtpy.labels import (
@@ -48,11 +49,18 @@ from nvitk.segmentation.region_growing import region_grow_binary_mask
 
 setup(globals())
 
+log = Logger()
+
 _ACA_SEED_DILATE_RADIUS: int = 1
 _ACA_PRUNE_MIN_RETAIN_FRAC: float = 0.55
 _ACOMM_JUNCTION_RADIUS_DEFAULT: int = 10
-_ACOMM_BRIDGE_DILATE_RADIUS: int = 1
+_ACOMM_BRIDGE_DILATE_RADIUS: int = 1  # kept for ipsilateral launch dilation
 _ACA_SPLIT_AXIS_NAMES: tuple[str, str] = ("x", "y")
+# Proximal A1-only seeds: grow into distal ACA with ipsilateral half-space.
+_ACA_LR_AXIS: int = 0  # array axis treated as L↔R (matches typical RAS lr=0)
+_ACA_LR_HALFSPACE_SLACK: int = 2  # voxels of midline tolerance
+_ACA_MAX_GROW_FRAC: float | None = None  # disable seed-multiple rollback for distal ACA
+_ACA_ICA_TAKEOFF_CLEAR_RADIUS: int = 4  # clear parent-ICA wall near A1 / junction
 
 
 def _dilate_seed_mask(seed_mask: np.ndarray, *, radius: int) -> np.ndarray:
@@ -73,6 +81,7 @@ def _region_grow_binary_capped(
     forbidden: np.ndarray | None,
     max_grow_frac: float | None,
     max_image_frac: float | None,
+    seed_intensity_mask: np.ndarray | None = None,
 ) -> str | None:
     """Grow a boolean *mask* in place; roll back added voxels if a cap is breached."""
     pre = as_backend_array(mask).astype(bool, copy=True)
@@ -83,6 +92,7 @@ def _region_grow_binary_capped(
         intensity_frac=float(intensity_frac),
         abs_floor=abs_floor,
         forbidden=forbidden,
+        seed_intensity_mask=seed_intensity_mask,
     )
     post = as_backend_array(mask).astype(bool)
     n_post = int(np.count_nonzero(post))
@@ -98,6 +108,33 @@ def _region_grow_binary_capped(
         mask[added] = False
         return reason
     return None
+
+
+def _log_aca_forbidden_diagnostics(
+    name: str,
+    seed_mask: np.ndarray,
+    forbidden: np.ndarray,
+) -> None:
+    """Log how much of the ACA seed is walled in by the forbidden mask (diagnostics only)."""
+    seeds = as_backend_array(seed_mask).astype(bool)
+    forb = as_backend_array(forbidden).astype(bool)
+    n_seed = int(np.count_nonzero(seeds))
+    n_forb = int(np.count_nonzero(forb))
+    n_seed_in_forb = int(np.count_nonzero(seeds & forb))
+    # 6-neighbors of seeds that are free to claim (not seed, not forbidden).
+    dilated = _dilate_bool_mask(seeds, radius=1)
+    ring = dilated & ~seeds
+    n_ring = int(np.count_nonzero(ring))
+    n_ring_free = int(np.count_nonzero(ring & ~forb))
+    n_ring_blocked = n_ring - n_ring_free
+    frac_blocked = (float(n_ring_blocked) / float(n_ring)) if n_ring > 0 else 0.0
+    log.info(
+        f"ACA {name} forbidden: total={n_forb}, seed={n_seed}, "
+        f"seed∩forbidden={n_seed_in_forb}, "
+        f"seed-ring={n_ring} (free={n_ring_free}, blocked={n_ring_blocked}, "
+        f"blocked_frac={frac_blocked:.2f})"
+    )
+
 
 def _aca_seed_mask(
     centerlines_mask: np.ndarray,
@@ -137,23 +174,64 @@ def _aca_seed_mask(
     return merged, "none"
 
 
-def _acomm_bridge_seeds(
+def _ipsilateral_junction_launch_seeds(
     eicab_qvtpy: np.ndarray | None,
     laca_seeds: np.ndarray,
     raca_seeds: np.ndarray,
+    junction: tuple[int, int, int] | None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Thin eICAB AComm voxels added to both ACA seeds (no junction ball)."""
-    if eicab_qvtpy is None:
+    """Add thin ipsilateral AComm-side launches at the junction (not a shared fat bridge).
+
+    LACA gets AComm voxels on the left of the junction LR plane; RACA on the right.
+    This opens A2 takeoff without raising both sides' seed mean with the full bridge.
+    """
+    if eicab_qvtpy is None or junction is None:
         return laca_seeds, raca_seeds
     eq = as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
     acomm = as_backend_array(eq == int(QVTPY_ACOMM)).astype(bool)
     if not np.any(acomm):
         return laca_seeds, raca_seeds
     bridge = _dilate_seed_mask(acomm, radius=_ACOMM_BRIDGE_DILATE_RADIUS)
+    ji = int(junction[int(_ACA_LR_AXIS)])
+    coords = np.indices(bridge.shape, dtype=np.int32)
+    lr = coords[int(_ACA_LR_AXIS)]
+    left = bridge & (lr <= ji + int(_ACA_LR_HALFSPACE_SLACK))
+    right = bridge & (lr >= ji - int(_ACA_LR_HALFSPACE_SLACK))
     return (
-        as_backend_array(laca_seeds | bridge).astype(bool),
-        as_backend_array(raca_seeds | bridge).astype(bool),
+        as_backend_array(laca_seeds | left).astype(bool),
+        as_backend_array(raca_seeds | right).astype(bool),
     )
+
+
+def _lr_halfspace_forbidden(
+    shape: tuple[int, int, int],
+    junction: tuple[int, int, int] | None,
+    label_id: int,
+    *,
+    slack: int = _ACA_LR_HALFSPACE_SLACK,
+) -> np.ndarray:
+    """Forbid contralateral LR half-space (LACA cannot cross right of junction, etc.)."""
+    forb = np.zeros(shape, dtype=bool)
+    if junction is None:
+        return forb
+    axis = int(_ACA_LR_AXIS)
+    ji = int(junction[axis])
+    sl = int(slack)
+    if int(label_id) == int(QVTPY_LACA):
+        if axis == 0:
+            forb[(ji + sl + 1) :, :, :] = True
+        elif axis == 1:
+            forb[:, (ji + sl + 1) :, :] = True
+        else:
+            forb[:, :, (ji + sl + 1) :] = True
+    else:
+        if axis == 0:
+            forb[: max(0, ji - sl), :, :] = True
+        elif axis == 1:
+            forb[:, : max(0, ji - sl), :] = True
+        else:
+            forb[:, :, : max(0, ji - sl)] = True
+    return forb
 
 
 def _junction_proximity_mask(
@@ -178,16 +256,16 @@ def _mask_outside_proximity(mask: np.ndarray, proximity: np.ndarray | None) -> n
 
 
 def _aca_neighbour_label_ids(label_id: int) -> frozenset[int]:
-    """Segmented neighbours that most often steal ACA RG (MCA, parent ICA, PComms)."""
+    """MCA + PComms as neighbour walls; parent ICA omitted (cleared at A1 takeoff)."""
     lid = int(label_id)
-    parent_ica = int(QVTPY_LICA) if lid == int(QVTPY_LACA) else int(QVTPY_RICA)
-    # AComm (QVTPY_ACOMM) is intentionally omitted — it must not wall ACA growth.
+    # AComm and parent ICA intentionally omitted — ICA is cleared near takeoff;
+    # AComm must not wall ACA growth.
     pcomms = frozenset({int(QVTPY_LPCOMM), int(QVTPY_RPCOMM)})
-    return frozenset(
-        int(x)
-        for x in (QVTPY_MCA_IDS | pcomms | frozenset({parent_ica}))
-        if int(x) != lid
-    )
+    return frozenset(int(x) for x in (QVTPY_MCA_IDS | pcomms) if int(x) != lid)
+
+
+def _parent_ica_id(label_id: int) -> int:
+    return int(QVTPY_LICA) if int(label_id) == int(QVTPY_LACA) else int(QVTPY_RICA)
 
 
 def _acomm_non_barrier_voxels(
@@ -211,6 +289,21 @@ def _acomm_non_barrier_voxels(
     return _dilate_bool_mask(mask, radius=1)
 
 
+def _ica_takeoff_clear_mask(
+    shape: tuple[int, int, int],
+    a1_seeds: np.ndarray,
+    junction: tuple[int, int, int] | None,
+    *,
+    radius: int = _ACA_ICA_TAKEOFF_CLEAR_RADIUS,
+) -> np.ndarray:
+    """Region around A1 seeds / junction where parent-ICA walls are cleared."""
+    clear = _dilate_bool_mask(as_backend_array(a1_seeds).astype(bool), radius=int(radius))
+    prox = _junction_proximity_mask(shape, junction, radius_vox=int(radius))
+    if prox is not None:
+        clear = clear | as_backend_array(prox).astype(bool)
+    return clear
+
+
 def _aca_region_grow_forbidden(
     seg: np.ndarray,
     centerlines_mask: np.ndarray,
@@ -220,13 +313,17 @@ def _aca_region_grow_forbidden(
     junction: tuple[int, int, int] | None,
     junction_radius: int,
     rg_barrier_radius: int,
+    a1_seeds: np.ndarray,
     eicab_qvtpy: np.ndarray | None = None,
     eicab_native: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Explore-style RG barriers for one ACA; opposite ACA blocked outside junction proximity."""
+    """Explore-style RG barriers for one ACA with ipsilateral half-space + ICA takeoff clear."""
     lid = int(label_id)
     opp_id = int(QVTPY_RACA) if lid == int(QVTPY_LACA) else int(QVTPY_LACA)
-    exclude = frozenset({opp_id, int(QVTPY_ACOMM)})
+    parent_ica = _parent_ica_id(lid)
+    # Exclude opposite ACA, AComm, and parent ICA from generic other-label walls;
+    # ICA is re-added then cleared only near A1 takeoff.
+    exclude = frozenset({opp_id, int(QVTPY_ACOMM), parent_ica})
     rg_rad = max(0, int(rg_barrier_radius))
 
     forb = explore_region_grow_forbidden(
@@ -251,7 +348,24 @@ def _aca_region_grow_forbidden(
             radius=_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS,
         ),
     )
+    # Mild parent-ICA wall, then punch a hole at A1 / junction takeoff.
+    ica_wall = _dilated_labels_barrier(
+        seg, frozenset({parent_ica}), radius=max(1, rg_rad - 1)
+    )
+    ica_cl = as_backend_array(centerlines_mask).astype(np.int32, copy=False) == parent_ica
+    ica_wall = merge_forbidden(ica_wall, _dilate_bool_mask(ica_cl, radius=1))
+    takeoff_clear = _ica_takeoff_clear_mask(seg.shape, a1_seeds, junction)
+    if ica_wall is not None and np.any(ica_wall):
+        ica_wall = as_backend_array(ica_wall).astype(bool)
+        ica_wall[takeoff_clear] = False
+        forb = merge_forbidden(forb, ica_wall)
+
     proximity = _junction_proximity_mask(seg.shape, junction, radius_vox=junction_radius)
+    # Contralateral half-space (cleared inside AComm proximity).
+    half = _lr_halfspace_forbidden(seg.shape, junction, lid)
+    half = _mask_outside_proximity(half, proximity)
+    forb = merge_forbidden(forb, half)
+
     opp_bar = _dilate_bool_mask(opposite_mask, radius=rg_rad)
     opp_bar = _mask_outside_proximity(opp_bar, proximity)
     if np.any(opp_bar):
@@ -265,6 +379,9 @@ def _aca_region_grow_forbidden(
     if np.any(acomm_clear):
         forb = as_backend_array(forb).astype(bool)
         forb[acomm_clear] = False
+    # Never forbid current A1 seeds themselves.
+    forb = as_backend_array(forb).astype(bool)
+    forb[as_backend_array(a1_seeds).astype(bool)] = False
     assert forb is not None
     return forb
 
@@ -653,13 +770,42 @@ def _region_grow_acas_sequential(
     junc_rad = max(0, int(acomm_junction_radius))
     rg_rad = max(0, int(rg_barrier_radius))
 
-    laca_seeds, _ = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_LACA)
-    raca_seeds, _ = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_RACA)
-    laca_seeds, raca_seeds = _acomm_bridge_seeds(eicab_qvtpy, laca_seeds, raca_seeds)
-    junction, _junction_src = _infer_aca_junction(laca_seeds, raca_seeds, eicab_qvtpy)
+    log.step("ACA sequential region growing (LACA → RACA)")
+    # A1-only seeds for intensity mean (before ipsilateral launch).
+    laca_a1, laca_src = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_LACA)
+    raca_a1, raca_src = _aca_seed_mask(centerlines_mask, eicab_qvtpy, QVTPY_RACA)
+    n_laca_a1 = int(np.count_nonzero(laca_a1))
+    n_raca_a1 = int(np.count_nonzero(raca_a1))
+    junction, junction_src = _infer_aca_junction(laca_a1, raca_a1, eicab_qvtpy)
+    laca_seeds, raca_seeds = _ipsilateral_junction_launch_seeds(
+        eicab_qvtpy, laca_a1, raca_a1, junction
+    )
+    n_laca_seed = int(np.count_nonzero(laca_seeds))
+    n_raca_seed = int(np.count_nonzero(raca_seeds))
+    # Distal ACA: disable seed-multiple volume rollback (A1 stubs are tiny).
+    grow_cap = _ACA_MAX_GROW_FRAC
+    log.info(
+        f"ACA seeds: LACA src={laca_src} A1={n_laca_a1}→launch={n_laca_seed}, "
+        f"RACA src={raca_src} A1={n_raca_a1}→launch={n_raca_seed}; "
+        f"junction={junction} src={junction_src}, "
+        f"acomm_radius={junc_rad}, rg_barrier_radius={rg_rad}, "
+        f"lr_halfspace_slack={_ACA_LR_HALFSPACE_SLACK}, "
+        f"explore_seg_r={_RG_EXPLORE_SEG_BARRIER_RADIUS}, "
+        f"explore_cl_r={_RG_EXPLORE_CL_BARRIER_RADIUS}, "
+        f"neighbour_r={_RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS}, "
+        f"grow_cap={grow_cap}"
+    )
 
+    n_seg_laca0 = int(np.count_nonzero(seg == int(QVTPY_LACA)))
+    n_seg_raca0 = int(np.count_nonzero(seg == int(QVTPY_RACA)))
     laca_mask = as_backend_array(seg == int(QVTPY_LACA)).astype(bool) | laca_seeds
     raca_mask = as_backend_array(seg == int(QVTPY_RACA)).astype(bool) | raca_seeds
+    n_laca_pre = int(np.count_nonzero(laca_mask))
+    n_raca_pre = int(np.count_nonzero(raca_mask))
+    log.info(
+        f"ACA pre-grow: seg LACA={n_seg_laca0} RACA={n_seg_raca0}; "
+        f"mask∪seeds LACA={n_laca_pre} RACA={n_raca_pre}"
+    )
 
     frac_l = rg_intensity_frac_for_label(
         QVTPY_LACA,
@@ -673,8 +819,14 @@ def _region_grow_acas_sequential(
         aca_frac=rg_intensity_frac_aca,
         venous_fracs=venous_fracs,
     )
+    floor_l = rg_abs_floor_for_label(QVTPY_LACA, opt_thresh_by_label.get(QVTPY_LACA))
+    floor_r = rg_abs_floor_for_label(QVTPY_RACA, opt_thresh_by_label.get(QVTPY_RACA))
+    log.info(
+        f"ACA RG gates: LACA frac={frac_l:.3f} floor={floor_l} (mean from A1), "
+        f"RACA frac={frac_r:.3f} floor={floor_r} (mean from A1), "
+        f"max_grow_frac={grow_cap}, max_image_frac={max_image_frac}"
+    )
 
-    grow_cap = max_grow_frac if max_grow_frac is not None else _RG_MAX_GROW_FRAC_DEFAULT
     forb_laca = _aca_region_grow_forbidden(
         seg,
         centerlines_mask,
@@ -683,18 +835,28 @@ def _region_grow_acas_sequential(
         junction=junction,
         junction_radius=junc_rad,
         rg_barrier_radius=rg_rad,
+        a1_seeds=laca_a1,
         eicab_qvtpy=eicab_qvtpy,
         eicab_native=eicab_native,
     )
+    _log_aca_forbidden_diagnostics("LACA", laca_mask, forb_laca)
     reason_l = _region_grow_binary_capped(
         laca_mask,
         cd,
         intensity_frac=frac_l,
-        abs_floor=rg_abs_floor_for_label(QVTPY_LACA, opt_thresh_by_label.get(QVTPY_LACA)),
+        abs_floor=floor_l,
         forbidden=forb_laca,
         max_grow_frac=grow_cap,
         max_image_frac=max_image_frac,
+        seed_intensity_mask=laca_a1,
     )
+    n_laca_post = int(np.count_nonzero(laca_mask))
+    log.info(
+        f"ACA LACA grow: {n_laca_pre} → {n_laca_post} "
+        f"(Δ={n_laca_post - n_laca_pre})"
+        + (f"; ROLLBACK: {reason_l}" if reason_l else "; kept")
+    )
+
     forb_raca = _aca_region_grow_forbidden(
         seg,
         centerlines_mask,
@@ -703,6 +865,7 @@ def _region_grow_acas_sequential(
         junction=junction,
         junction_radius=junc_rad,
         rg_barrier_radius=rg_rad,
+        a1_seeds=raca_a1,
         eicab_qvtpy=eicab_qvtpy,
         eicab_native=eicab_native,
     )
@@ -712,14 +875,24 @@ def _region_grow_acas_sequential(
         _mask_outside_proximity(as_backend_array(laca_mask).astype(bool), proximity),
     )
     assert forb_raca is not None
+    n_prox = int(np.count_nonzero(proximity)) if proximity is not None else 0
+    log.info(f"ACA RACA opposite-LACA barrier: junction proximity voxels={n_prox}")
+    _log_aca_forbidden_diagnostics("RACA", raca_mask, forb_raca)
     reason_r = _region_grow_binary_capped(
         raca_mask,
         cd,
         intensity_frac=frac_r,
-        abs_floor=rg_abs_floor_for_label(QVTPY_RACA, opt_thresh_by_label.get(QVTPY_RACA)),
+        abs_floor=floor_r,
         forbidden=forb_raca,
         max_grow_frac=grow_cap,
         max_image_frac=max_image_frac,
+        seed_intensity_mask=raca_a1,
+    )
+    n_raca_post = int(np.count_nonzero(raca_mask))
+    log.info(
+        f"ACA RACA grow: {n_raca_pre} → {n_raca_post} "
+        f"(Δ={n_raca_post - n_raca_pre})"
+        + (f"; ROLLBACK: {reason_r}" if reason_r else "; kept")
     )
 
     overlap = laca_mask & raca_mask
@@ -729,6 +902,9 @@ def _region_grow_acas_sequential(
 
     if n_overlap > 0:
         if n_overlap >= min_ov:
+            log.info(
+                f"ACA overlap={n_overlap} ≥ min={min_ov}: plane-split at AComm junction"
+            )
             split_info = _split_aca_merged_by_junction_plane(
                 laca_mask,
                 raca_mask,
@@ -739,10 +915,29 @@ def _region_grow_acas_sequential(
             laca_mask = split_info.laca_mask
             raca_mask = split_info.raca_mask
             corrected = True
+            log.info(
+                f"ACA plane-split: axis={split_info.split_axis} "
+                f"coord={split_info.split_coord}, "
+                f"split_vox={split_info.n_voxels_split}, "
+                f"stray_islands={split_info.n_stray_islands_reassigned}, "
+                f"junction_src={split_info.junction_source}; "
+                f"LACA={int(np.count_nonzero(laca_mask))} "
+                f"RACA={int(np.count_nonzero(raca_mask))}"
+            )
         else:
+            log.info(
+                f"ACA overlap={n_overlap} < min={min_ov}: "
+                "clear overlap from RACA only (no plane-split)"
+            )
             raca_mask = as_backend_array(raca_mask & ~overlap).astype(bool)
+    else:
+        log.info("ACA overlap=0: no L/R correction")
 
     _write_aca_masks_to_seg(seg, laca_mask, raca_mask)
+    log.info(
+        f"ACA written to seg: LACA={int(np.count_nonzero(seg == int(QVTPY_LACA)))}, "
+        f"RACA={int(np.count_nonzero(seg == int(QVTPY_RACA)))}"
+    )
 
     for lid, frac, reason in (
         (QVTPY_LACA, frac_l, reason_l),

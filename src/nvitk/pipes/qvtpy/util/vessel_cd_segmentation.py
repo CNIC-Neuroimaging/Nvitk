@@ -73,7 +73,7 @@ _CROP_MIN_COMPONENT_FRAC_SMALL = 0.0
 VESSEL_EXTRA_PADDING: int = 10
 _DEFAULT_RG_INTENSITY_FRAC: float = 0.45
 _RG_INTENSITY_FRAC_EXPLORE: float = 0.25
-_RG_INTENSITY_FRAC_ACA: float = 0.40
+_RG_INTENSITY_FRAC_ACA: float = 0.25
 # Communicating arteries: stricter (higher) gate + volume caps to curb the
 # persistent "grow into almost the whole image" failure.
 _RG_INTENSITY_FRAC_COMM: float = 0.60
@@ -784,6 +784,14 @@ def build_seg_4dflow_local(
 
         bbox, face_pad = bbox_out
         i0, i1, j0, j1, k0, k1 = bbox
+        if lid in QVTPY_ACA_IDS:
+            n_cl = int(np.count_nonzero(roi))
+            log.info(
+                f"ACA label {lid} threshold crop: cl_vox={n_cl}, "
+                f"bbox=({i0}:{i1}, {j0}:{j1}, {k0}:{k1}) "
+                f"size=({i1 - i0 + 1}x{j1 - j0 + 1}x{k1 - k0 + 1}), "
+                f"face_pad={face_pad.as_dict()}"
+            )
         cd_crop = cd[i0 : i1 + 1, j0 : j1 + 1, k0 : k1 + 1]
         crop_mask, opt_t, warn = _threshold_crop(
             cd_crop,
@@ -800,6 +808,14 @@ def build_seg_4dflow_local(
             clm, lid, bbox, radius=paste_cl_rad
         )
         n_thr = _paste_crop_mask(seg, crop_mask, lid, bbox, forbidden=cl_barrier)
+        if lid in QVTPY_ACA_IDS:
+            n_crop = int(np.count_nonzero(crop_mask))
+            n_bar = int(np.count_nonzero(cl_barrier))
+            log.info(
+                f"ACA label {lid} after threshold paste: "
+                f"crop_fg={n_crop}, pasted={n_thr}, "
+                f"cl_barrier_in_bbox={n_bar}, opt_thresh={opt_t}, warn={warn}"
+            )
 
         stats.append(
             VesselSegStats(
@@ -842,6 +858,7 @@ def build_seg_4dflow_local(
         if use_aca_sequential:
             from nvitk.pipes.qvtpy.util.aca_sequential_grow import _region_grow_acas_sequential
 
+            log.step("region growing: ACA sequential path enabled")
             aca_sequential_info = _region_grow_acas_sequential(
                 seg,
                 cd,
@@ -859,6 +876,17 @@ def build_seg_4dflow_local(
                 max_grow_frac=rg_max_grow_frac,
                 max_image_frac=rg_max_image_frac,
             )
+            for lid in (int(QVTPY_LACA), int(QVTPY_RACA)):
+                st = stats_by_id.get(lid)
+                if st is None:
+                    continue
+                log.info(
+                    f"ACA label {lid} stats after sequential RG: "
+                    f"thr={st.n_voxels_after_threshold}, "
+                    f"island={st.n_voxels_after_island_clean}, "
+                    f"rg={st.n_voxels_after_region_growing}, "
+                    f"frac={st.rg_intensity_frac_used}, warn={st.warning}"
+                )
 
         for st in stats:
             lid = st.label_id

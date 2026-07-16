@@ -355,7 +355,7 @@ def _stage4_cli_options(func):
         type=float,
         default=_RG_INTENSITY_FRAC_ACA,
         show_default=True,
-        help="RG frac for ACA sequential grow (lower = explore more).",
+        help="RG frac for ACA sequential grow (lower = explore more; default 0.25).",
     )(func)
     func = click.option("--cl-barrier-radius", type=int, default=2, show_default=True)(func)
     func = click.option("--rg-barrier-radius", type=int, default=3, show_default=True)(func)

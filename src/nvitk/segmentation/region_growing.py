@@ -115,16 +115,32 @@ def region_grow_binary_mask(
     abs_floor: float | None = None,
     forbidden: np.ndarray | None = None,
     polarity: IntensityPolarity = "hyperintense",
+    seed_intensity_mask: np.ndarray | None = None,
 ) -> int:
-    """Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate."""
-    mask = as_backend_array(vessel_mask).astype(bool)
+    """Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate.
+
+    When *seed_intensity_mask* is set, the intensity mean (gate reference) is
+    computed only on ``vessel_mask & seed_intensity_mask`` so bright auxiliary
+    seeds (e.g. AComm) do not inflate the threshold.
+    """
+    # Mutate the caller array in place (avoid .astype copies that discard growth).
+    mask = as_backend_array(vessel_mask)
+    if mask.dtype != np.bool_:
+        raise TypeError("region_grow_binary_mask expects a boolean vessel_mask")
     int_np = as_backend_array(intensity).astype(np.float64)
     forb = None if forbidden is None else as_backend_array(forbidden).astype(bool)
     seeds = np.argwhere(mask)
     if seeds.size == 0:
         return 0
 
-    seed_vals = int_np[seeds[:, 0], seeds[:, 1], seeds[:, 2]]
+    if seed_intensity_mask is not None:
+        mean_m = mask & as_backend_array(seed_intensity_mask).astype(bool)
+        mean_coords = np.argwhere(mean_m)
+        if mean_coords.size == 0:
+            mean_coords = seeds
+    else:
+        mean_coords = seeds
+    seed_vals = int_np[mean_coords[:, 0], mean_coords[:, 1], mean_coords[:, 2]]
     grow_thresh = _grow_intensity_threshold(
         float(np.mean(seed_vals)),
         intensity_frac,
