@@ -65,33 +65,98 @@ def _nifti_stem(path: Path) -> str:
     return path.stem
 
 
-def _matching_json(path: Path) -> Path | None:
-    candidate = path.with_suffix(".json") if path.suffix == ".nii" else Path(str(path)[:-7] + ".json")
-    return candidate if candidate.is_file() else None
+def _matching_jsons_for_nifti(path: Path) -> list[Path]:
+    """Locate JSON sidecar(s) for a NIfTI (PESA-Brain naming conventions)."""
+    parent = path.parent
+    stem = _nifti_stem(path)
+    stem_lower = stem.lower()
+    candidates: list[Path] = []
+
+    if stem_lower.endswith("_ph"):
+        base = stem[: -len("_ph")]
+        candidates.extend(
+            (
+                parent / f"{base}_PHASE.json",
+                parent / f"{base}_phase.json",
+            )
+        )
+    elif stem_lower.endswith("_m"):
+        base = stem[: -len("_m")]
+        candidates.extend(
+            (
+                parent / f"{base}_M_FFE.json",
+                parent / f"{base}_m_ffe.json",
+            )
+        )
+    else:
+        if path.name.endswith(".nii.gz"):
+            candidates.append(Path(str(path)[:-7] + ".json"))
+        elif path.suffix == ".nii":
+            candidates.append(path.with_suffix(".json"))
+        else:
+            candidates.append(parent / f"{stem}.json")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return [candidate]
+    return []
 
 
-def _copy_into_stage(files: Iterable[Path], stage_dir: Path) -> int:
+def _json_files_in_dir(directory: Path, nifti_files: Iterable[Path] | None = None) -> list[Path]:
+    """Collect JSON sidecars for *directory* (matched + any extra ``*.json``)."""
+    if not directory.is_dir():
+        return []
+    niftis = list(nifti_files) if nifti_files is not None else _iter_existing_files(
+        directory, ("*.nii.gz", "*.nii")
+    )
+    found: list[Path] = []
+    seen: set[str] = set()
+    for nii in niftis:
+        for js in _matching_jsons_for_nifti(nii):
+            if js.name not in seen:
+                seen.add(js.name)
+                found.append(js)
+    for js in sorted(directory.glob("*.json")):
+        if js.is_file() and js.name not in seen:
+            seen.add(js.name)
+            found.append(js)
+    return found
+
+
+def _copy_files_into_stage(files: Iterable[Path], stage_dir: Path) -> int:
     stage_dir.mkdir(parents=True, exist_ok=True)
     copied = 0
+    seen: set[str] = set()
     for src in files:
-        dst = stage_dir / src.name
-        shutil.copy2(src, dst)
+        if src.name in seen:
+            continue
+        seen.add(src.name)
+        shutil.copy2(src, stage_dir / src.name)
         copied += 1
-        js = _matching_json(src)
-        if js is not None:
-            shutil.copy2(js, stage_dir / js.name)
-            copied += 1
     return copied
 
 
-def _find_tof_files(subject_dir: Path) -> list[Path]:
-    tof_dir = subject_dir / "TOF"
-    return _iter_existing_files(tof_dir, ("TOF.nii.gz", "TOF.nii"))
+def _copy_scan_dir_to_stage(
+    source_dir: Path,
+    stage_dir: Path,
+    nifti_patterns: Iterable[str],
+    *,
+    only_json: bool = False,
+) -> int:
+    """Stage scan files from *source_dir* (NIfTIs + JSON sidecars, or JSON only)."""
+    niftis = _iter_existing_files(source_dir, nifti_patterns)
+    if only_json:
+        return _copy_files_into_stage(_json_files_in_dir(source_dir, niftis), stage_dir)
 
-
-def _find_flow_direction_files(subject_dir: Path, direction: str) -> list[Path]:
-    flow_dir = subject_dir / "4DFlow" / direction
-    return _iter_existing_files(flow_dir, ("*_ph.nii.gz", "*_ph.nii", "*_m.nii.gz", "*_m.nii"))
+    to_copy: list[Path] = list(niftis)
+    for nii in niftis:
+        to_copy.extend(_matching_jsons_for_nifti(nii))
+    to_copy.extend(
+        js
+        for js in _json_files_in_dir(source_dir, niftis)
+        if js not in to_copy
+    )
+    return _copy_files_into_stage(to_copy, stage_dir)
 
 
 def _find_flow_derived_files(subject_dir: Path) -> list[Path]:
@@ -102,27 +167,52 @@ def _find_flow_derived_files(subject_dir: Path) -> list[Path]:
     return files
 
 
-def _build_upload_stage(subject_dir: Path, stage_root: Path) -> tuple[dict[str, Path], Path | None]:
+def _build_upload_stage(
+    subject_dir: Path,
+    stage_root: Path,
+    *,
+    only_json: bool = False,
+) -> tuple[dict[str, Path], Path | None]:
     uploads: dict[str, Path] = {}
 
-    tof_files = _find_tof_files(subject_dir)
-    if tof_files:
-        tof_stage = stage_root / "TOF"
-        _copy_into_stage(tof_files, tof_stage)
+    tof_dir = subject_dir / "TOF"
+    tof_stage = stage_root / "TOF"
+    tof_copied = _copy_scan_dir_to_stage(
+        tof_dir, tof_stage, ("TOF.nii.gz", "TOF.nii"), only_json=only_json
+    )
+    if tof_copied > 0:
         uploads["TOF"] = tof_stage
 
     for sequence in FLOW_SEQUENCES:
         direction = sequence.rsplit("_", 1)[-1]
         stage_dir = stage_root / sequence
-        copied = _copy_into_stage(_find_flow_direction_files(subject_dir, direction), stage_dir)
+        copied = _copy_scan_dir_to_stage(
+            subject_dir / "4DFlow" / direction,
+            stage_dir,
+            ("*_ph.nii.gz", "*_ph.nii", "*_m.nii.gz", "*_m.nii"),
+            only_json=only_json,
+        )
         if copied > 0:
             uploads[sequence] = stage_dir
 
-    derived_files = _find_flow_derived_files(subject_dir)
     derived_stage: Path | None = None
-    if derived_files:
-        derived_stage = stage_root / FOURDFLOWS_RESOURCE_LABEL
-        _copy_into_stage(derived_files, derived_stage)
+    flow_dir = subject_dir / "4DFlow"
+    if only_json:
+        derived_jsons = _json_files_in_dir(flow_dir)
+        if derived_jsons:
+            derived_stage = stage_root / FOURDFLOWS_RESOURCE_LABEL
+            _copy_files_into_stage(derived_jsons, derived_stage)
+    else:
+        derived_files = _find_flow_derived_files(subject_dir)
+        if derived_files:
+            derived_stage = stage_root / FOURDFLOWS_RESOURCE_LABEL
+            _copy_scan_dir_to_stage(
+                flow_dir,
+                derived_stage,
+                tuple(f"{stem}.nii.gz" for stem in FLOW_DERIVED_STEMS)
+                + tuple(f"{stem}.nii" for stem in FLOW_DERIVED_STEMS),
+                only_json=False,
+            )
 
     return uploads, derived_stage
 
@@ -285,6 +375,12 @@ def _iter_remote_subject_dirs(remote_nifti_root: Path, *, host: str, user: str, 
 @click.option("--from-sge", is_flag=True, default=True, help="Fetch the input subject tree from a remote SGE server before upload.")
 @click.option("--remote-host", type=str, default=None, help="SSH host or alias when --from-sge is used.")
 @click.option("--remote-user", type=str, default=None, help="SSH user when --from-sge is used.")
+@click.option(
+    "--only-json",
+    is_flag=True,
+    default=False,
+    help="Upload only JSON sidecars (merge into existing XNAT resources; do not delete NIfTIs).",
+)
 def main(
     config_path: Path | None,
     server: str | None,
@@ -301,6 +397,7 @@ def main(
     from_sge: bool,
     remote_host: str | None,
     remote_user: str | None,
+    only_json: bool,
 ) -> None:
     auto_discover_subjects = subjects is None and subjects_file is None and catalog_path is None
 
@@ -380,17 +477,26 @@ def main(
                             raise FileNotFoundError(f"Subject NIfTI directory missing: {subject_dir}")
 
                     stage_root = tmp_root / f"{subject}_upload"
-                    uploads, derived_stage = _build_upload_stage(subject_dir, stage_root)
+                    uploads, derived_stage = _build_upload_stage(
+                        subject_dir, stage_root, only_json=only_json
+                    )
                     if not uploads and derived_stage is None:
-                        log.warning(f"[{subject}] no NIfTI files found to upload")
+                        kind = "JSON" if only_json else "NIfTI"
+                        log.warning(f"[{subject}] no {kind} files found to upload")
                         continue
 
+                    overwrite = not only_json
                     for sequence, local_stage_dir in uploads.items():
                         scan = scans_by_sequence.get(sequence)
                         if scan is None:
                             log.warning(f"[{subject}] XNAT scan missing for sequence {sequence}; skipping upload")
                             continue
-                        _upload_stage_to_scan(scan, local_stage_dir, resource_label=resource_label, overwrite=True)
+                        _upload_stage_to_scan(
+                            scan,
+                            local_stage_dir,
+                            resource_label=resource_label,
+                            overwrite=overwrite,
+                        )
 
                     if derived_stage is not None:
                         log.info(
@@ -400,14 +506,15 @@ def main(
                             experiment,
                             FOURDFLOWS_RESOURCE_LABEL,
                             derived_stage,
-                            overwrite=True,
+                            overwrite=overwrite,
                         )
 
                 uploaded_subjects += 1
             except Exception as exc:
                 log.warning(f"[{subject}] upload failed: {exc}")
 
-    click.echo(f"Uploaded NIfTI resources for {uploaded_subjects} subject(s).")
+    kind = "JSON sidecar" if only_json else "NIfTI"
+    click.echo(f"Uploaded {kind} resources for {uploaded_subjects} subject(s).")
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ DEFAULT_SEQUENCES = "TOF,4DFLOW_AP,4DFLOW_RL,4DFLOW_FH"
 
 
 @click.command()
-@click.option("--dataset-root", type=click.Path(path_type=Path), default=Path("dataset"), show_default=True)
+@click.option("--dataset-root", type=click.Path(path_type=Path), default=Path("dataset/nvitk-dataset"), show_default=True)
 @click.option("--config", "config_path", type=click.Path(path_type=Path), default=None, help="XNAT config profile.")
 @click.option("--server", type=str, default=None, help="XNAT server URL.")
 @click.option("--project", type=str, default="PESA_Brain", show_default=True, help="XNAT project id.")
@@ -49,7 +49,7 @@ DEFAULT_SEQUENCES = "TOF,4DFLOW_AP,4DFLOW_RL,4DFLOW_FH"
 @click.option("--download-pipeline-resources", is_flag=True, help="Download experiment-level qvtpy/eICAB bundles while indexing.")
 @click.option("--pipeline-download-root", type=click.Path(path_type=Path), default=None, help="Local root for downloaded qvtpy/eICAB resources.")
 @click.option("--overwrite-downloads", is_flag=True, help="Replace existing local download directories.")
-@click.option("--build-sqlite-index", is_flag=True, help="Rebuild the SQLite cache after all sync steps.")
+@click.option("--build-sqlite-index", is_flag=True, default=True, help="Rebuild the SQLite cache after all sync steps.")
 def main(
     dataset_root: Path,
     config_path: Path | None,

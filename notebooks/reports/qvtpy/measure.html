@@ -34,7 +34,7 @@ footer{margin-top:3rem;font-size:.85rem;color:#666;font-style:italic}
 <h1>qvtpy Measurements — Technical Review</h1>
 <p><strong>Document type:</strong> Internal technical reference  </p>
 <p><strong>Subject:</strong> Mathematical definitions and code mapping for qvtpy stage 6 (hemodynamics) and stage 7 (TOF morphometrics), plus venous region labeling  </p>
-<p><strong>Date:</strong> 15 July 2026  </p>
+<p><strong>Date:</strong> 17 July 2026  </p>
 <p><strong>Status:</strong> Reflects current <code>nvitk.pipes.qvtpy</code> implementation</p>
 <hr>
 <h2>1. Scope</h2>
@@ -182,35 +182,80 @@ p_d = \frac{\text{PI}_{\text{prox}} - \text{PI}_{\text{dist}}}{\text{PI}_{\text{
 \]
 <p><strong>Code:</strong> <code>damping_index()</code> in <code>hemodynamics.py</code>.</p>
 <hr>
-<h2>A.8 PWV — Fielding cross-correlation</h2>
-<p>For \(n\) stations with distances \(d_i\) (meters) and flow matrix \(Q_{i,t}\):</p>
+<h2>A.8 PWV — cardiac frame duration, stations, and weights</h2>
+<p>PWV is computed <strong>per root region</strong> (L_ICA, R_ICA, Basilar) over dense cross-section stations ordered by arc length from the proximal root (see A.5). Both Fielding and Bjornfoot use the same station pool. Primary CSV outputs match QVTplus <code>enc_PWV.m</code> indices 1–2: Bjornfoot and Fielding with <strong>area/scaling² weights</strong> (tag=0). The PWV figure also shows a second Fielding fit with <strong>Dempsey quality weights</strong> \(W_2\) (tag=1), matching QVTplus dual-weight plots.</p>
+<p><strong>Cardiac frame duration \(\Delta t\).</strong> PESA / Q-flow volumes store a fixed number of frames (typically 15) that are <strong>RR-normalized</strong>: they always span one cardiac cycle, not a fixed MRI clock. Therefore</p>
+\[
+\Delta t = \frac{\mathrm{RR}}{n_{\mathrm{phases}}} = \frac{60/\mathrm{HR}}{n_{\mathrm{phases}}}
+\]
+<p>Stage 6 resolves \(\Delta t\) from DICOM <code>HeartRate</code> and the phase count in the volume (priority), or <code>NominalInterval / n_phases</code>, or <code>FrameTime</code> only as a last resort. NIfTI <code>t_res</code> / <code>pixdim[4]</code> and DICOM <code>RepetitionTime</code> are <strong>not</strong> used — they reflect MRI RF timing (~5 ms), not cardiac phase spacing (~50–100 ms).</p>
+<p><strong>Station inclusion.</strong> Only stations with quality \(Q_i > \tau\) (default \(\tau = 2.5\)) enter the PWV calculation; at least <strong>3</strong> such stations are required.</p>
+<p><strong>Two weight schemes</strong> (QVTplus <code>enc_PWV</code> / <code>enc_PWV_XCor</code> tags 0 and 1):</p>
 <ol>
-<li>1. Reference station = most proximal (index 0).</li>
-<li>2. Normalize waveforms (zero-mean, unit-std).</li>
-<li>3. Integer lag \(\ell_i\) maximizing circular cross-correlation with reference.</li>
-<li>4. \(\tau_i = \ell_i \cdot \Delta t\) where \(\Delta t\) = <code>temporal_resolution_s</code>.</li>
-<li>5. Weighted fit: \(\tau = \text{slope}\cdot d\) → \(\text{PWV} = 1/\text{slope}\) (m/s).</li>
+<li><strong>\(W_1\) — Bjornfoot area weights</strong> (<code>bjornfoot_prepare_waveforms</code>, tag=0): zero-mean / unit-std normalize each flow; \(A_i \leftarrow A_i / \mathrm{scaling}_i^2\); \(W_{1,i} = A_i / \max_j A_j\). Used for primary CSV Bjornfoot and Fielding (<code>pwv_bjornfoot_m_s</code>, <code>pwv_fielding_m_s</code>).</li>
+<li><strong>\(W_2\) — Dempsey quality weights</strong> (tag=1):
+\[
+W_{2,i} = \max\left(0,\ \frac{Q_i - \tau}{4 - \tau}\right)
+\]
+Used on the PWV diagnostic figure (second fit line) to match QVTplus dual-weight plots; not the primary CSV Fielding column.</li>
 </ol>
-<p><strong>Acceptance:</strong> \(0 < \text{PWV} < 30\) m/s. Minimum ≥3 stations with \(Q_i > \tau\).</p>
-<p><strong>Code:</strong> <code>circular_cross_correlation_lag()</code>, <code>pwv_fielding_xcor()</code> in <code>hemodynamics.py</code>.</p>
+<p><strong>Outputs.</strong> Values are written only if they pass <code>accept_pwv()</code>: \(0 &lt; \mathrm{PWV} &lt; 30\) m/s (MATLAB sets PWV = 0 if result \(\geq 30\)). Otherwise <code>pwv_fielding_m_s</code> / <code>pwv_bjornfoot_m_s</code> are left empty while diagnostics (e.g. <code>pwv_r_fielding</code>, <code>pwv_n_stations</code>) may still be populated. DB maps <code>pwv_bjornfoot_m_s</code> → variable <code>pwv</code>.</p>
+<p><strong>Code:</strong> <code>_cardiac_frame_duration_s()</code>, <code>_phase_temporal_resolution_s()</code> in <code>stage6_measure.py</code>; <code>_root_pwv()</code>, <code>bjornfoot_prepare_waveforms()</code>, <code>quality_weights()</code> in vessel / hemodynamics modules.</p>
 <hr>
-<h2>A.9 PWV — Bjornfoot optimizer</h2>
+<h2>A.9 PWV — Fielding cross-correlation</h2>
+<p>For \(n\) stations with distances \(d_i\) (meters) and flow matrix \(Q_{i,t}\) (ml/s over one cardiac cycle), Fielding estimates PWV from <strong>how arrival delay grows with distance</strong> along the vessel (QVTplus <code>enc_PWV_XCor</code> / Rivera-style).</p>
+<p><strong>Intuition.</strong> If a pulse propagates steadily from proximal to distal, waveforms at farther stations should arrive later. Plotting transit delay \(\tau_i\) vs distance \(d_i\) should be approximately linear; the slope gives \(1/\mathrm{PWV}\).</p>
 <ol>
-<li>1. Normalize each station waveform.</li>
-<li>2. For candidate PWV, delay \(\delta_i = (d_i/\text{PWV})/\Delta t\).</li>
-<li>3. Circular fractional shift aligns waveforms to shared template.</li>
-<li>4. Minimize weighted residual over PWV ∈ [0.5, 30] m/s (<code>scipy.optimize.minimize_scalar</code>).</li>
+<li><strong>Reference.</strong> The most proximal included station (index 0 after sorting by \(d_i\)) is the reference waveform \(Q_{\mathrm{ref}}(t)\).</li>
+<li><strong>Normalization.</strong> Each waveform is zero-mean, unit-standard-deviation before correlation, so delay depends on shape rather than absolute flow magnitude.</li>
+<li><strong>Spline upsampling.</strong> Each periodic cycle is upsampled with a cubic spline on a tripled trace (<code>upsample_periodic_cycle()</code>, default 500 samples per cycle).</li>
+<li><strong>Circular cross-correlation.</strong> On the upsampled traces, <code>circular_cross_correlation_lag()</code> finds the lag \(\ell_i\) (wrapped to \((-n/2, n/2]\)) that maximizes correlation with the reference. Delays are converted to seconds via <code>cross_correlation_delay_seconds()</code>:
+\[
+\tau_i = -\frac{\ell_i}{s_{\mathrm{pp}}}\,\Delta t
+\]
+where \(s_{\mathrm{pp}}\) is samples-per-original-frame after upsampling. <strong>Positive \(\tau_i\)</strong> means station \(i\) arrives <em>later</em> than the reference (distal later than proximal).</li>
+<li><strong>Weighted linear fit.</strong> Primary CSV Fielding fits \(\tau_i = a\,d_i + b\) with <strong>\(W_1\)</strong> area weights (QVTplus tag=0 / PWV index 2). The diagnostic figure also overlays a <strong>\(W_2\)</strong> Dempsey-quality-weighted fit (tag=1 / PWV index 4). Slope \(a\) has units s/m:
+\[
+\mathrm{PWV}_{\mathrm{Fielding}} = \frac{1}{a}\quad\text{(m/s)}.
+\]</li>
+<li><strong>Outlier rejection.</strong> When ≥4 stations remain, MAD-based robust outlier masking (<code>_mad_outlier_mask</code>, \(z \leq 3.5\)) is applied to \(\tau_i\) before the fit (QVTplus <code>isoutlier</code> analogue).</li>
 </ol>
-<p><strong>Code:</strong> <code>normalize_waveform()</code>, <code>_circular_fractional_shift()</code>, <code>pwv_bjornfoot_optimize()</code>, <code>accept_pwv()</code>.</p>
+<p><strong>Acceptance and diagnostics.</strong></p>
+<ul>
+<li>Requires ≥3 high-quality stations at the root level; the fit itself needs ≥2 valid points after masking.</li>
+<li>CSV value accepted only if \(0 &lt; \mathrm{PWV} &lt; 30\) m/s (<code>accept_pwv()</code>).</li>
+<li><code>pwv_r_fielding</code> stores the mean absolute cross-correlation over included stations (QC, not a velocity).</li>
+</ul>
+<p><strong>Code:</strong> <code>upsample_periodic_cycle()</code>, <code>circular_cross_correlation_lag()</code>, <code>cross_correlation_delay_seconds()</code>, <code>pwv_fielding_xcor()</code> in <code>hemodynamics.py</code>.</p>
 <hr>
-<h2>A.10 Stage 6 outputs and CLI</h2>
+<h2>A.10 PWV — Bjornfoot optimizer (QVTplus joint fit)</h2>
+<p>Bjornfoot (J Cereb Blood Flow Metab 2021) is ported from QVTplus <code>enc_PWVBjornfoot.m</code> + <code>PWVest3_share.m</code>. Unlike a scalar PWV-only search, it <strong>jointly optimizes</strong> a shared velocity template (one sample per cardiac frame) and PWV.</p>
+<p><strong>Intuition.</strong> There is one unknown “underlying” pulse shape. For a trial PWV, that template is time-shifted to each station by \(\Delta t_i = d_i / \mathrm{PWV}\) and compared to the observed (normalized) waveforms. The optimizer finds the template and PWV that minimize the weighted squared residual.</p>
+<p><strong>Preprocessing</strong> — see A.8 (<code>bjornfoot_prepare_waveforms</code>): normalized flows \(F\) and area weights \(W\).</p>
+<p><strong>Cost</strong> (<code>pwvest3_share_cost</code>, matching <code>PWVest3_share.m</code>):</p>
+<ol>
+<li>Let \(\mathbf{v}\) be the template (length \(m\) = number of cardiac frames) and \(\mathrm{PWV}\) the last parameter.</li>
+<li>Triple the template on the time axis: \(t_V = 0, \Delta t, \ldots, 3m\Delta t - \Delta t\).</li>
+<li>At each station \(i\), evaluate the template at \(t - d_i/\mathrm{PWV}\) by linear interpolation (<code>interp1</code> analogue), then keep the middle cycle (samples \(m+1 \ldots 2m\)).</li>
+<li>Cost \(= \sum_{i,t} W_i \bigl(v_{\mathrm{shift},i}(t) - F_i(t)\bigr)^2\).</li>
+</ol>
+<p><strong>Optimization.</strong> Bounded L-BFGS-B (MATLAB <code>fmincon</code> analogue):</p>
+<ul>
+<li>Initial guess: mean waveform across stations + PWV = 10 m/s.</li>
+<li>Bounds: each template sample \(\in [-5, 5]\); PWV \(\in [0, 20]\) m/s.</li>
+</ul>
+<p><strong>Acceptance.</strong> CSV written when <code>accept_pwv()</code> passes: \(0 &lt; \mathrm{PWV} &lt; 30\) m/s.</p>
+<p><strong>Fielding vs Bjornfoot.</strong> Fielding estimates pairwise delays then regresses; Bjornfoot fits one global template + PWV. Both share \(\Delta t\), distances, and area weights; they can disagree when delays are noisy or waveforms poorly aligned.</p>
+<p><strong>Code:</strong> <code>bjornfoot_prepare_waveforms()</code>, <code>pwvest3_share_cost()</code>, <code>pwv_bjornfoot_optimize()</code>, <code>accept_pwv()</code> in <code>hemodynamics.py</code>.</p>
+<hr>
+<h2>A.11 Stage 6 outputs and CLI</h2>
 <p><strong>Outputs</strong> (under <code>qvtpy/stage6_measure/</code>):</p>
 <table>
 <thead><tr><th>File</th><th>Content</th></tr></thead><tbody>
 <tr><td><code>pitc_profile.csv</code></td><td>One row per station: <code>pi</code>, <code>quality</code>, <code>distance_mm</code>, <code>area_mm2</code>, …</td></tr>
 <tr><td><code>vessel_hemodynamics.csv</code></td><td>Per root + per branch: <code>pitc_slope</code>, <code>pwv_bjornfoot_m_s</code>, <code>damping_index</code>, …</td></tr>
 <tr><td><code>loc_measurements.csv</code></td><td>Separate LOC track (stage 5 LOCs)</td></tr>
-<tr><td><code>measure_meta.json</code></td><td>Run parameters</td></tr>
+<tr><td><code>measure_meta.json</code></td><td>Run parameters (<code>temporal_resolution_s</code> = cardiac \(\Delta t\), PITC flags, …)</td></tr>
 </tbody></table>
 <p><strong>Key CLI defaults</strong> (<code>nvitk-qvtpy</code> / <code>stage6_measure</code>):</p>
 <table>
@@ -229,16 +274,23 @@ stage6_measure.py
   └─ velocity_mm_s_from_phases
   └─ compute_vessel_hemodynamics()  [vessel_hemodynamics.py]
        └─ _sample_vessel_stations() per vessel
-       └─ pitc_fit, pwv_bjornfoot_optimize, pwv_fielding_xcor
+       └─ pitc_fit
+       └─ _root_pwv()
+            └─ bjornfoot_prepare_waveforms (area weights)
+            └─ pwv_bjornfoot_optimize (joint template+PWV)
+            └─ pwv_fielding_xcor (same area weights)
   └─ write CSVs
 </code></pre>
 <hr>
-<h2>A.11 Parity vs QVTplus (PITC/PWV)</h2>
+<h2>A.12 Parity vs QVTplus (PITC/PWV)</h2>
 <table>
 <thead><tr><th>Aspect</th><th>QVTplus</th><th>qvtpy</th><th>Match?</th></tr></thead><tbody>
 <tr><td>PI formula (PITC)</td><td><code>abs(max-min)/mean(Q)</code> signed</td><td><code>pulsatility_index_qvt</code></td><td>Yes (same formula)</td></tr>
 <tr><td>StdvFromMean</td><td><code>paramMap_params_threshS</code></td><td><code>stdv_from_mean_branch</code></td><td>Yes (ported)</td></tr>
-<tr><td>PITC / PWV fit</td><td>Weighted regression / Bjornfoot / Fielding</td><td>Same</td><td>Yes (ported)</td></tr>
+<tr><td>PITC fit</td><td>Weighted PI vs \(d\)</td><td><code>pitc_fit</code> + Dempsey weights</td><td>Yes (ported)</td></tr>
+<tr><td>Cardiac \(\Delta t\)</td><td>Scanner / gating metadata</td><td><code>HeartRate / n_phases</code> (not NIfTI <code>t_res</code>)</td><td>Partial</td></tr>
+<tr><td>Bjornfoot PWV</td><td><code>enc_PWVBjornfoot</code> + <code>PWVest3_share</code> (fmincon, area weights)</td><td>Joint template+PWV L-BFGS-B; same cost / bounds / weights</td><td>Yes (ported)</td></tr>
+<tr><td>Fielding XCor</td><td>Spline upsample + xcor; \(W_1\) area / \(W_2\) Dempsey</td><td>Same; CSV uses \(W_1\); plot shows both</td><td>Yes (ported)</td></tr>
 <tr><td>Connectivity</td><td>CD skeleton + manual labels</td><td>Label-aware <code>seg_4dflow</code> tree</td><td>No</td></tr>
 <tr><td>Cross-section masks</td><td><code>segment_cross_section_thresh</code></td><td>MAG+CD+VEL fusion + label constrain</td><td>No</td></tr>
 <tr><td>Centerlines</td><td>CD skeleton + spline</td><td>Stage-3 eICAB multilabel</td><td>No</td></tr>
@@ -391,8 +443,9 @@ S = L_{\text{score}}\left(0.35\cdot\text{midline} + 0.25\cdot\text{superior} + 0
 <tr><td>PI (PITC)</td><td>\(\lVert max-min\rVert/\overline{Q}\)</td><td><code>pulsatility_index_qvt</code></td><td><code>pi</code></td></tr>
 <tr><td>Quality</td><td>StdvFromMean (4 terms)</td><td><code>stdv_from_mean_branch</code></td><td><code>quality</code></td></tr>
 <tr><td>PITC slope</td><td>WLS: PI vs \(d\)</td><td><code>pitc_fit</code></td><td><code>vessel_hemodynamics.csv</code></td></tr>
-<tr><td>PWV Bjornfoot</td><td>Minimize shift residual</td><td><code>pwv_bjornfoot_optimize</code></td><td><code>pwv_bjornfoot_m_s</code></td></tr>
-<tr><td>PWV Fielding</td><td>xcor lag vs distance</td><td><code>pwv_fielding_xcor</code></td><td><code>pwv_fielding_m_s</code></td></tr>
+<tr><td>PWV Bjornfoot</td><td>Joint template + PWV (<code>PWVest3_share</code>)</td><td><code>pwv_bjornfoot_optimize</code></td><td><code>pwv_bjornfoot_m_s</code> → DB <code>pwv</code></td></tr>
+<tr><td>Cardiac \(\Delta t\)</td><td>\(\mathrm{RR}/n_{\mathrm{phases}}\)</td><td><code>_cardiac_frame_duration_s</code></td><td><code>measure_meta.json</code></td></tr>
+<tr><td>PWV Fielding</td><td>Upsampled xcor lag vs \(d\) (\(W_1\) area)</td><td><code>pwv_fielding_xcor</code></td><td><code>pwv_fielding_m_s</code></td></tr>
 <tr><td>Tortuosity</td><td>\(L/C\)</td><td><code>tortuosity_dm</code></td><td>Excel <code>00_Path_Summary</code></td></tr>
 <tr><td>Stenosis%</td><td>\((1-r/r_{ref})\times100\)</td><td><code>stenosis_raw_percent</code></td><td>VTP + Excel</td></tr>
 <tr><td>Enlargement%</td><td>\((r/r_{ref}-1)\times100\)</td><td><code>enlargement_pointwise</code></td><td>VTP + Excel</td></tr>
@@ -415,6 +468,6 @@ S = L_{\text{score}}\left(0.35\cdot\text{midline} + 0.25\cdot\text{superior} + 0
 <tr><td>PITC compare script</td><td><code>scripts/compare_pitc_profiles.py</code></td></tr>
 </tbody></table>
 <hr>
-<p>*Prepared as an internal technical reference. Grounded in read-only review of qvtpy measurement sources (July 2026).*</p>
+<p>*Prepared as an internal technical reference. Grounded in qvtpy measurement sources (July 2026). PWV sections aligned to QVTplus <code>enc_PWVBjornfoot</code> / <code>PWVest3_share</code> (17 July 2026).*</p>
 <footer><p><em>Prepared as an internal technical reference. qvtpy measurement sources (July 2026).</em></p></footer>
 </body></html>

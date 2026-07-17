@@ -24,6 +24,8 @@ feed:
 
 from __future__ import annotations
 
+from numpy import dtype, ndarray
+from numpy._typing._shape import _AnyShape
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,6 +48,7 @@ from nvitk.measure.hemodynamics import (
     damping_index,
     flow_pulsatile_ml_s,
     flow_per_heart_cycle_ml_s,
+    bjornfoot_prepare_waveforms,
     pitc_fit,
     pulsatility_index_qvt,
     pwv_bjornfoot_optimize,
@@ -400,7 +403,7 @@ def compute_vessel_hemodynamics(
     volume_seg = clean_volume_seg_for_pitc(volume_seg, cls)
     result.volume_seg = to_numpy(volume_seg).astype(np.int32, copy=False)
 
-    sample_kw = dict(
+    sample_kw = dict[str, ndarray[_AnyShape, dtype[Any]] | tuple[float, float, float] | int | float | str](
         cd=cd,
         mag=mag,
         vel_mag=vel_mag,
@@ -619,17 +622,32 @@ def _root_pwv(
         return empty
     dist_m = np.array([r["distance_mm"] for r in good], dtype="float64") / 1000.0
     quals = np.array([r["quality"] for r in good], dtype="float64")
-    weights = as_backend_array(
-        quality_weights(quals, thresh=quality_thresh)
-    ).astype("float64")
-    if not np.any(weights > 0):
-        log.warning(f"PWV {tag}: skipped (all quality weights are zero)")
-        return empty
+    areas = np.array([r["area_mm2"] for r in good], dtype="float64")
     flow_matrix = np.vstack([r["flow_ts"] for r in good]).astype("float64")
     tr = float(temporal_resolution_s)
 
-    bj = pwv_bjornfoot_optimize(dist_m, flow_matrix, tr, weights=weights)
-    fi = pwv_fielding_xcor(dist_m, flow_matrix, tr, weights=weights)
+    # QVTplus PWV(1): Bjornfoot tag=0 (area/scaling² weights); PWV(2): Fielding XCor
+    # with the same Bjornfoot weights (enc_PWV.m).
+    _, fielding_weights, _ = bjornfoot_prepare_waveforms(
+        flow_matrix,
+        areas,
+        qualities=quals,
+        thresh=quality_thresh,
+        weight_mode="area",
+    )
+
+    bj = pwv_bjornfoot_optimize(
+        dist_m,
+        flow_matrix,
+        tr,
+        areas=areas,
+        qualities=quals,
+        quality_thresh=quality_thresh,
+        weight_mode="area",
+    )
+    fi = pwv_fielding_xcor(
+        dist_m, flow_matrix, tr, weights=fielding_weights
+    )
     bj_ok = accept_pwv(bj["pwv_m_s"])
     fi_ok = accept_pwv(fi["pwv_m_s"])
     bj_val = bj["pwv_m_s"] if bj_ok else ""
@@ -668,7 +686,8 @@ def _collect_region_plot_data(
     pi = np.array([r["pi"] for r in stations], dtype="float64")
     quality = np.array([r["quality"] for r in stations], dtype="float64")
 
-    # PWV cross-correlation diagnostics over high-quality stations (Fielding-style).
+    # PWV diagnostics over Q>thresh stations (QVTplus enc_PWV_XCor dual-weight figure).
+    # W1 = Bjornfoot area/scaling² (tag=0); W2 = Dempsey quality (tag=1).
     good = [r for r in stations if r["quality"] > float(quality_thresh)]
     good.sort(key=lambda r: r["distance_mm"])
     pwv_dist_mm = np.array([r["distance_mm"] for r in good], dtype="float64")
@@ -679,17 +698,28 @@ def _collect_region_plot_data(
     tr = float(temporal_resolution_s) if temporal_resolution_s else 0.0
     if good and tr > 0:
         ref = as_backend_array(good[0]["flow_ts"]).astype("float64")
-        quals = np.array([r["quality"] for r in good], dtype="float64")
-        w1 = as_backend_array(quality_weights(quals, thresh=quality_thresh)).astype(
-            "float64"
+        flow_stack = np.vstack(
+            [as_backend_array(r["flow_ts"]).astype("float64") for r in good]
         )
+        areas = np.array([r["area_mm2"] for r in good], dtype="float64")
+        quals = np.array([r["quality"] for r in good], dtype="float64")
+        _, w1_arr, _ = bjornfoot_prepare_waveforms(
+            flow_stack,
+            areas,
+            qualities=quals,
+            thresh=quality_thresh,
+            weight_mode="area",
+        )
+        w1 = as_backend_array(w1_arr).astype("float64")
+        w2 = as_backend_array(
+            quality_weights(quals, thresh=quality_thresh)
+        ).astype("float64")
         for i, r in enumerate(good):
-            delay_s, corr = cross_correlation_delay_seconds(ref, r["flow_ts"], tr)
+            delay_s, _corr = cross_correlation_delay_seconds(ref, r["flow_ts"], tr)
             xcor_time_s[i] = delay_s
             upstroke_s[i] = time_to_upstroke_seconds(
                 as_backend_array(r["flow_ts"]).astype("float64"), tr
             )
-            w2[i] = abs(corr)
 
     # Per-vessel flow waveforms (mean +/- std across the vessel's own stations).
     vessel_waveforms: dict[int, dict[str, Any]] = {}
@@ -722,8 +752,9 @@ def _collect_region_plot_data(
         "pwv_distance_mm": pwv_dist_mm,
         "pwv_xcor_time_s": xcor_time_s,
         "pwv_time_to_upstroke_s": upstroke_s,
-        "pwv_weight_quality": w1,
-        "pwv_weight_correlation": w2,
+        # W1 = Bjornfoot area weights; W2 = Dempsey quality (QVTplus enc_PWV_XCor).
+        "pwv_weight_area": w1,
+        "pwv_weight_quality": w2,
         "pwv_bjornfoot_m_s": pwv_result.get("pwv_bjornfoot_m_s"),
         "pwv_fielding_m_s": pwv_result.get("pwv_fielding_m_s"),
         "temporal_resolution_s": tr if tr > 0 else None,

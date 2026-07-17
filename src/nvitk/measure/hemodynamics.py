@@ -363,7 +363,185 @@ def damping_index(pi_proximal: float, pi_distal: float, *, eps: float = 1e-9) ->
 # QVTplus ``enc_PWV_XCor`` / Rivera-style upsample of one cardiac cycle.
 _XCOR_UPSAMPLE: int = 500
 # Bjornfoot fmincon upper bound in QVTplus ``enc_PWVBjornfoot`` is 20 m/s.
-_BJORNFOOT_PWV_BOUNDS: tuple[float, float] = (0.5, 20.0)
+_BJORNFOOT_PWV_BOUNDS: tuple[float, float] = (0.0, 20.0)
+_BJORNFOOT_VELOCITY_BOUNDS: tuple[float, float] = (-5.0, 5.0)
+_BJORNFOOT_PWV0: float = 10.0
+
+
+def bjornfoot_prepare_waveforms(
+    flow_matrix,
+    areas,
+    qualities=None,
+    *,
+    thresh: float = QUALITY_THRESH_DEFAULT,
+    weight_mode: str = "area",
+    eps: float = 1e-9,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """QVTplus ``enc_PWVBjornfoot`` normalization and station weights.
+
+    Per-station: zero-mean, unit-std normalize flows; scale area weights by
+    ``1/scaling²``; normalize weights by max. ``weight_mode='area'`` (tag=0) uses
+    area weights; ``'quality'`` (tag=1) filters ``Q < thresh`` and uses Dempsey
+    weights on the remaining rows.
+
+    Returns ``(F_norm, W, keep_mask)`` where *keep_mask* selects rows kept for
+    Bjornfoot (always all rows for ``area``; quality-filtered for ``quality``).
+    """
+    F = to_numpy(as_backend_array(flow_matrix)).astype(np.float64)
+    if F.ndim != 2:
+        F = F.reshape(1, -1)
+    n, _m = F.shape
+    A = to_numpy(as_backend_array(areas)).astype(np.float64).reshape(-1)[:n]
+    Q = (
+        to_numpy(as_backend_array(qualities)).astype(np.float64).reshape(-1)[:n]
+        if qualities is not None
+        else np.full(n, QUALITY_SCALE_MAX, dtype=np.float64)
+    )
+    keep = np.ones(n, dtype=bool)
+    if weight_mode == "quality":
+        keep = Q >= float(thresh)
+    F_out = F.copy()
+    A_out = A.copy()
+    for i in range(n):
+        if not keep[i]:
+            continue
+        ft = F_out[i] - float(np.mean(F_out[i]))
+        scaling = 1.0 / (float(np.std(ft)) + eps)
+        F_out[i] = ft * scaling
+        A_out[i] = A_out[i] / (scaling * scaling)
+    amax = float(np.max(A_out[keep])) if int(keep.sum()) else 0.0
+    if amax > eps:
+        A_out = A_out / amax
+    if weight_mode == "quality":
+        W = to_numpy(quality_weights(Q, thresh=thresh))
+    else:
+        W = A_out.copy()
+    W = np.clip(W, 0.0, None)
+    W[~keep] = 0.0
+    return F_out, W, keep
+
+
+def pwvest3_share_cost(
+    in_params: np.ndarray,
+    distances_m: np.ndarray,
+    flows_norm: np.ndarray,
+    temporal_resolution_s: float,
+    weights: np.ndarray,
+) -> float:
+    """Cost function from QVTplus ``PWVest3_share.m`` (joint template + PWV)."""
+    params = np.asarray(in_params, dtype=np.float64).reshape(-1)
+    m = int(params.size - 1)
+    if m < 2:
+        return 1e12
+    velocity = params[:m]
+    pwv = float(params[m])
+    if pwv <= 0.0 or not np.isfinite(pwv):
+        return 1e12
+    tr = float(temporal_resolution_s)
+    D = np.asarray(distances_m, dtype=np.float64).reshape(-1)
+    F = np.asarray(flows_norm, dtype=np.float64)
+    Qw = np.asarray(weights, dtype=np.float64).reshape(-1)
+    n = int(min(D.size, F.shape[0], Qw.size))
+    if n < 1:
+        return 1e12
+    D = D[:n]
+    F = F[:n, :m]
+    Qw = Qw[:n]
+    # tV = 0:tres:(tres*3*m - tres)  → 3*m samples (MATLAB 1-based region m+1:2m).
+    tV = np.arange(0.0, tr * 3.0 * m, tr, dtype=np.float64)
+    if tV.size != 3 * m:
+        tV = np.linspace(0.0, tr * (3 * m - 1), num=3 * m, dtype=np.float64)
+    vel3 = np.tile(velocity, 3)
+    region = np.arange(m, 2 * m)
+    delta_t = tV[np.newaxis, :] - D[:, np.newaxis] / pwv
+    from scipy.interpolate import interp1d
+
+    interp = interp1d(
+        tV,
+        vel3,
+        kind="linear",
+        bounds_error=False,
+        fill_value="extrapolate",
+        assume_sorted=True,
+    )
+    v_shift = interp(delta_t)[:, region]
+    weightm = np.repeat(Qw[:, np.newaxis], m, axis=1)
+    diff = v_shift - F
+    if not np.all(np.isfinite(diff)):
+        return 1e12
+    return float(np.sum(weightm * diff * diff))
+
+
+def pwv_bjornfoot_optimize(
+    distances_m,
+    flow_matrix,
+    temporal_resolution_s: float,
+    *,
+    areas=None,
+    qualities=None,
+    quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    weight_mode: str = "area",
+    pwv_bounds: tuple[float, float] = _BJORNFOOT_PWV_BOUNDS,
+) -> dict[str, float]:
+    """Bjornfoot PWV via QVTplus ``enc_PWVBjornfoot`` + ``PWVest3_share`` (fmincon).
+
+    Jointly optimizes the shared velocity template and PWV with bounds matching
+    MATLAB (velocity samples in [-5, 5], PWV in [0, 20] m/s). Returns ``pwv_m_s``
+    and the residual cost; ``0`` / non-finite PWV from MATLAB maps to ``nan``.
+    """
+    dist = to_numpy(as_backend_array(distances_m)).astype("float64").reshape(-1)
+    flows = to_numpy(as_backend_array(flow_matrix)).astype("float64")
+    if flows.ndim != 2 or flows.shape[0] < 2:
+        return {
+            "pwv_m_s": float("nan"),
+            "cost": float("nan"),
+            "n": int(flows.shape[0] if flows.ndim else 0),
+        }
+    if areas is None:
+        areas_arr = np.ones(flows.shape[0], dtype=np.float64)
+    else:
+        areas_arr = to_numpy(as_backend_array(areas)).astype("float64").reshape(-1)
+    F_norm, W, keep = bjornfoot_prepare_waveforms(
+        flows,
+        areas_arr,
+        qualities=qualities,
+        thresh=quality_thresh,
+        weight_mode=weight_mode,
+    )
+    dist_k = dist[keep]
+    F_k = F_norm[keep]
+    W_k = W[keep]
+    n_stations = int(F_k.shape[0])
+    if n_stations < 2:
+        return {"pwv_m_s": float("nan"), "cost": float("nan"), "n": n_stations}
+    tr = float(temporal_resolution_s)
+    if tr <= 0:
+        return {"pwv_m_s": float("nan"), "cost": float("nan"), "n": n_stations}
+    m = int(F_k.shape[1])
+    lo_v, hi_v = _BJORNFOOT_VELOCITY_BOUNDS
+    lo_p, hi_p = float(pwv_bounds[0]), float(pwv_bounds[1])
+    x0 = np.concatenate([np.mean(F_k, axis=0), np.array([_BJORNFOOT_PWV0])])
+    bounds = [(lo_v, hi_v)] * m + [(lo_p, hi_p)]
+
+    def objective(x: np.ndarray) -> float:
+        return pwvest3_share_cost(x, dist_k, F_k, tr, W_k)
+
+    from scipy.optimize import minimize
+
+    res = minimize(
+        objective,
+        x0,
+        method="L-BFGS-B",
+        bounds=bounds,
+        options={"ftol": 1e-7, "gtol": 1e-7},
+    )
+    pwv = float(res.x[-1])
+    cost = float(res.fun) if np.isfinite(res.fun) else float("nan")
+    if not np.isfinite(pwv):
+        pwv = float("nan")
+    elif pwv <= 0.0 or pwv >= PWV_MAX_M_S:
+        pwv = float("nan")
+    return {"pwv_m_s": pwv, "cost": cost, "n": n_stations, "weights": W_k}
 
 
 def normalize_waveform(flow_t, *, eps: float = 1e-9):
@@ -559,67 +737,6 @@ def pwv_fielding_xcor(
     }
 
 
-def pwv_bjornfoot_optimize(
-    distances_m,
-    flow_matrix,
-    temporal_resolution_s: float,
-    *,
-    weights=None,
-    pwv_bounds: tuple[float, float] = _BJORNFOOT_PWV_BOUNDS,
-) -> dict[str, float]:
-    """Bjornfoot waveform-shift PWV estimate (J Cereb Blood Flow Metab 2021).
-
-    Each waveform is normalized; for a candidate PWV the per-station delay
-    ``dt_i = d_i / PWV`` aligns the waveforms to a shared template, and the total
-    weighted residual is minimized over PWV. Returns ``pwv_m_s`` and the residual cost.
-    """
-    dist = (as_backend_array(distances_m)).astype("float64").reshape(-1)
-    flows = (as_backend_array(normalize_waveform(flow_matrix)))
-    if flows.ndim != 2 or flows.shape[0] < 2:
-        return {
-            "pwv_m_s": float("nan"),
-            "cost": float("nan"),
-            "n": int(flows.shape[0] if flows.ndim else 0),
-        }
-    tr = float(temporal_resolution_s)
-    n_stations = flows.shape[0]
-    if weights is None:
-        wv = np.ones(n_stations, dtype="float64")
-    else:
-        wv = (as_backend_array(weights)).astype("float64").reshape(-1)[:n_stations]
-        wv = np.clip(wv, 0.0, None)
-    wsum = float(wv.sum()) or 1.0
-    lo, hi = float(pwv_bounds[0]), float(pwv_bounds[1])
-
-    def cost(pwv: float) -> float:
-        if pwv <= 0:
-            return 1e12
-        shift_frames = (dist / pwv) / tr
-        aligned = np.vstack(
-            [_circular_fractional_shift(flows[i], shift_frames[i]) for i in range(n_stations)]
-        )
-        template = (wv[:, None] * aligned).sum(axis=0) / wsum
-        total = 0.0
-        for i in range(n_stations):
-            model = _circular_fractional_shift(template, -shift_frames[i])
-            total += wv[i] * float(np.sum((model - flows[i]) ** 2))
-        return total
-
-    from scipy.optimize import minimize_scalar
-
-    with using("numpy"):
-        flows = to_numpy(flows)
-        dist = to_numpy(dist)
-        wv = to_numpy(wv)
-        res = minimize_scalar(cost, bounds=(lo, hi), method="bounded")
-
-    pwv = float(res.x)
-    # Stuck at the upper bound ⇒ no resolvable delay (QVTplus rejects these).
-    if pwv >= hi - 1e-3:
-        pwv = float("nan")
-    return {"pwv_m_s": pwv, "cost": float(res.fun), "n": int(n_stations)}
-
-
 def accept_pwv(pwv_m_s: float) -> bool:
     """QVTplus acceptance gate: ``0 < PWV < 30`` m/s."""
     try:
@@ -637,6 +754,7 @@ __all__ = [
     "QUALITY_SCALE_MAX",
     "QUALITY_THRESH_DEFAULT",
     "accept_pwv",
+    "bjornfoot_prepare_waveforms",
     "circular_cross_correlation_lag",
     "cross_correlation_delay_seconds",
     "damping_index",
@@ -651,6 +769,7 @@ __all__ = [
     "pulsatility_index_qvt",
     "pwv_bjornfoot_optimize",
     "pwv_fielding_xcor",
+    "pwvest3_share_cost",
     "quality_weights",
     "resistivity_index",
     "through_plane_velocity_series",

@@ -5,7 +5,8 @@ Renders the three figures used to report vessel-level 4D-flow hemodynamics:
 - **PITC** — per-root pulsatility quality ``Q`` and pulsatility index ``p_pi`` vs
   distance-from-root with the transmission-coefficient fit line.
 - **PWV** — per-root cross-correlation ``XCor`` time and time-to-upstroke vs
-  distance with the quality- and correlation-weighted fits, plus the weights.
+  distance with Bjornfoot area-weighted (\(W_1\)) and Dempsey quality-weighted
+  (\(W_2\)) fits (QVTplus ``enc_PWV_XCor`` tag 0/1), plus the weights.
 - **Flow waveforms** — per-vessel mean +/- std flow over the cardiac cycle.
 
 Also writes, per root region, a NIfTI mask of the vessels (root + downstream
@@ -180,8 +181,14 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
         dist = to_numpy(d.get("pwv_distance_mm", [])).astype("float64")
         xcor = to_numpy(d.get("pwv_xcor_time_s", [])).astype("float64")
         upstroke = to_numpy(d.get("pwv_time_to_upstroke_s", [])).astype("float64")
-        w1 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
-        w2 = to_numpy(d.get("pwv_weight_correlation", [])).astype("float64")
+        # W1 = Bjornfoot area/scaling²; W2 = Dempsey quality (QVTplus tag 0/1).
+        if "pwv_weight_area" in d:
+            w1 = to_numpy(d["pwv_weight_area"]).astype("float64")
+            w2 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
+        else:
+            # Legacy plot-data keys (pre area/quality split).
+            w1 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
+            w2 = to_numpy(d.get("pwv_weight_correlation", [])).astype("float64")
 
         ax_x = axes[0][col]
         ax_u = axes[1][col]
@@ -193,8 +200,8 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
             _draw_pwv_fits(ax_x, dist, xcor, w1, w2)
             ax_u.scatter(dist, upstroke, s=16, c="teal", alpha=0.7, label="raw data")
             _draw_pwv_fits(ax_u, dist, upstroke, w1, w2)
-            ax_w.scatter(dist, w1, s=16, c="limegreen", alpha=0.7, label=r"$W_1$")
-            ax_w.scatter(dist, w2, s=16, c="royalblue", alpha=0.7, label=r"$W_2$")
+            ax_w.scatter(dist, w1, s=16, c="limegreen", alpha=0.7, label=r"$W_1$ (area)")
+            ax_w.scatter(dist, w2, s=16, c="royalblue", alpha=0.7, label=r"$W_2$ (quality)")
 
         ax_x.set_ylabel("maximised XCor time (s)")
         ax_u.set_ylabel("time-to-upstroke (s)")
@@ -209,7 +216,7 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
 
 
 def _draw_pwv_fits(ax, dist: np.ndarray, time_s: np.ndarray, w1: np.ndarray, w2: np.ndarray) -> None:
-    """Overlay the quality- and correlation-weighted delay-vs-distance fits."""
+    """Overlay area-weighted (\(W_1\)) and Dempsey quality-weighted (\(W_2\)) fits."""
     from nvitk.measure.hemodynamics import accept_pwv
 
     xline = np.array([float(np.min(dist)), float(np.max(dist))], dtype="float64")
