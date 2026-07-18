@@ -222,20 +222,30 @@ def _xnat_convert_subject(
     """
     import tempfile
 
+    # Download-only flags must not be forwarded to stage0_convert.run_subject.
+    conv_kw = {
+        k: v
+        for k, v in convert_kwargs.items()
+        if k != "skip_existing_downloads"
+    }
+    skip_existing_downloads = bool(
+        convert_kwargs.get("skip_existing_downloads", False)
+    )
+
     if save_dicoms:
         stage0_download.run_download(
             [subject],
             dicom_root=dicom_root,
             xnat_config=xnat_config,
             sequences=sequences,
-            skip_existing=convert_kwargs.get("skip_existing", False),
-            skip_existing_downloads=convert_kwargs.get("skip_existing_downloads", False),
+            skip_existing=conv_kw.get("skip_existing", False),
+            skip_existing_downloads=skip_existing_downloads,
         )
         return stage0_convert.run_subject(
             subject,
             dicom_root=dicom_root,
             nifti_root=nifti_root,
-            **convert_kwargs,
+            **conv_kw,
         )
 
     with tempfile.TemporaryDirectory(prefix=f"qvtpy_dicom_{subject}_") as tmp:
@@ -251,7 +261,7 @@ def _xnat_convert_subject(
             subject,
             dicom_root=tmp_root,
             nifti_root=nifti_root,
-            **convert_kwargs,
+            **conv_kw,
         )
 
 
@@ -1498,12 +1508,14 @@ def main(
                     convert_kwargs = dict(
                         compute_phase_derived=compute_phase_derived,
                         skip_existing=skip_existing,
-                        skip_existing_downloads=skip_existing_downloads,
                         phase_background_correction=phase_background_correction,
                         phase_bg_poly_order=phase_bg_poly_order,
                         phase_bg_static_percentile=phase_bg_static_percentile,
                     )
                     if use_xnat:
+                        convert_kwargs["skip_existing_downloads"] = (
+                            skip_existing_downloads
+                        )
                         run.run_stage(
                             subj,
                             STAGE_CONVERT,
