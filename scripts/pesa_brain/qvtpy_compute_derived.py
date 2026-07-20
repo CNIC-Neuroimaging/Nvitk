@@ -260,16 +260,16 @@ def _emit_subject_sge(
     if dicom_root is not None:
         cmd_parts.extend(["--dicom-root", "/nvitk/dicom"])
 
-    extra_binds: list[tuple[Path, str]] = [(repo_root.resolve(), repo_bind)]
+    extra_binds: list[tuple[Path, str]] = [(Path(repo_root), repo_bind)]
     if dicom_root is not None:
-        extra_binds.append((dicom_root.resolve(), "/nvitk/dicom"))
+        extra_binds.append((Path(dicom_root), "/nvitk/dicom"))
 
     paths = ClusterPaths(
-        src=src_dir.resolve(),
-        container=container.resolve(),
+        src=Path(src_dir),
+        container=Path(container),
         models=None,
-        data_root=nifti_root.resolve(),
-        output_root=nifti_root.resolve(),
+        data_root=Path(nifti_root),
+        output_root=Path(nifti_root),
         log_dir=cfg.SGE_LOG_DIR,
         err_dir=cfg.SGE_ERR_DIR,
     )
@@ -414,7 +414,17 @@ def submit_subjects_sge(
     default=None,
     help=(
         "Host path mounted at /nvitk/src/ for --submit sge "
-        f"(default: {cfg.NVITK_SRC_DIR}; local runs use <repo>/src)."
+        f"(default: {cfg.NVITK_SRC_DIR})."
+    ),
+)
+@click.option(
+    "--repo-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Host path mounted at /nvitk/repo for --submit sge "
+        f"(default: parent of --src-dir / {cfg.NVITK_SRC_DIR.parent}). "
+        "Must exist on the cluster (not a workstation home path)."
     ),
 )
 @click.option(
@@ -452,6 +462,7 @@ def main(
     submit: str,
     container: Path,
     src_dir: Path | None,
+    repo_root: Path | None,
     ssh_host: str | None,
     ssh_user: str | None,
     phase_background_correction: bool,
@@ -465,13 +476,30 @@ def main(
     if subject is not None and (subjects is not None or subjects_file is not None):
         raise click.ClickException("Use either --subject or --subjects/--subjects-file.")
 
-    repo_root = _repo_root()
-    if src_dir is not None:
-        src_p = Path(src_dir).expanduser().resolve()
-    elif submit == "sge":
-        src_p = Path(cfg.NVITK_SRC_DIR)
+    local_repo = _repo_root()
+    # SGE Singularity binds must use cluster-visible paths (not workstation home).
+    if submit == "sge":
+        src_p = (
+            Path(src_dir).expanduser()
+            if src_dir is not None
+            else Path(cfg.NVITK_SRC_DIR)
+        )
+        repo_p = (
+            Path(repo_root).expanduser()
+            if repo_root is not None
+            else src_p.parent
+        )
     else:
-        src_p = (repo_root / "src").resolve()
+        src_p = (
+            Path(src_dir).expanduser().resolve()
+            if src_dir is not None
+            else (local_repo / "src").resolve()
+        )
+        repo_p = (
+            Path(repo_root).expanduser().resolve()
+            if repo_root is not None
+            else local_repo
+        )
     cd_4d_bpc = False if no_cd_4d_background_correction else None
 
     if submit == "sge":
@@ -517,6 +545,8 @@ def main(
     )
 
     log.info(f"qvtpy derived | nifti={nifti_root_eff} | submit={submit}")
+    if submit == "sge":
+        log.info(f"  singularity binds: src={src_p}  repo={repo_p}")
     log.info(
         f"  subjects: {len(subject_list)} total, {len(to_run)} to run, "
         f"{len(skipped)} skipped (skip-existing={skip_existing})"
@@ -547,7 +577,7 @@ def main(
     exit_code, job_ids = submit_subjects_sge(
         to_run,
         nifti_root=nifti_root_eff,
-        repo_root=repo_root,
+        repo_root=repo_p,
         src_dir=src_p,
         container=container,
         dicom_root=dicom_root_eff,
