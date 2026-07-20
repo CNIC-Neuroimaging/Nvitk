@@ -28,7 +28,7 @@ from nvitk.pipes.qvtpy.run import (
     _STAGE_ALIASES,
     _STAGES_ORDERED,
 )
-from nvitk.pipes.qvtpy.stage0_convert import REQUIRED_FLOW_DIRS
+from nvitk.pipes.qvtpy.stage0_convert import REQUIRED_DERIVED_FILES, REQUIRED_FLOW_DIRS
 from nvitk.pipes.qvtpy.stage0_download import (
     DEFAULT_SEQUENCES,
     local_subject_dicoms_complete,
@@ -178,6 +178,13 @@ def _check_stage0_c(nifti_root: Path, subject: str) -> StageCheck:
         missing.append("TOF[missing dir]")
     elif _glob_first(tof_dir, "TOF.nii.gz", "TOF.nii") is None:
         missing.append("TOF[missing]")
+
+    for stem in REQUIRED_DERIVED_FILES:
+        if not (
+            (flow_root / f"{stem}.nii.gz").is_file()
+            or (flow_root / f"{stem}.nii").is_file()
+        ):
+            missing.append(f"{stem}[missing]")
 
     if not missing:
         return StageCheck(STAGE_CONVERT, True, "ok")

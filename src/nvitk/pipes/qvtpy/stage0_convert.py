@@ -34,6 +34,11 @@ log = Logger()
 # ---------------------------------------------------------------------------
 
 REQUIRED_FLOW_DIRS: tuple[str, ...] = ("AP", "RL", "FH")
+# Required when ``--compute-phase-derived`` is on (default in ``nvitk-qvtpy``).
+REQUIRED_DERIVED_FILES: tuple[str, ...] = (
+    "Angiography_3D",
+    "ComplexDifference_3D",
+)
 DERIVED_FILES: tuple[str, ...] = (
     "Angiography_3D",
     "Angiography_4D",
@@ -436,7 +441,7 @@ def print_nifti_qc_report(
     help="Single subject id. If omitted, all subfolders of --dicom-root are processed.",
 )
 @click.option("--skip-existing", is_flag=True, default=False)
-@click.option("--compute-phase-derived", is_flag=True, default=False)
+@click.option("--compute-phase-derived", is_flag=True, default=True)
 @click.option(
     "--phase-background-correction/--no-phase-background-correction",
     "phase_background_correction",
@@ -530,6 +535,7 @@ def main(
 
 __all__ = [
     "REQUIRED_FLOW_DIRS",
+    "REQUIRED_DERIVED_FILES",
     "DERIVED_FILES",
     "run_subject",
     "print_nifti_qc_report",

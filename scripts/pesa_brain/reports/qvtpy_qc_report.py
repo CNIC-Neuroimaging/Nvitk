@@ -4,23 +4,29 @@
 Checks that each subject has the expected on-disk artifacts for the requested
 pipeline stages (same markers used by ``skip_existing`` in the stage runners).
 
+For ``stage0_c`` under ``--nifti-root``, each subject must have:
+
+- ``4DFlow/{AP,RL,FH}/*_m.nii*`` and ``*_ph.nii*``
+- ``TOF/TOF.nii*``
+- ``4DFlow/Angiography_3D.nii*`` and ``4DFlow/ComplexDifference_3D.nii*``
+
 Examples::
 
     # All subject folders under the default local results root
-    python scripts/qvtpy_qc_report.py
+    python scripts/pesa_brain/reports/qvtpy_qc_report.py
 
     # Explicit roots and subject list
-    python scripts/qvtpy_qc_report.py \\
+    python scripts/pesa_brain/reports/qvtpy_qc_report.py \\
         --results-root /data/RESULTS/QVTPy \\
         --nifti-root /data/NIFTI \\
         --subjects PESA5745609,PESA123
 
     # Default stages through stage6; include optional stage4t and stage7
-    python scripts/qvtpy_qc_report.py --stages stage0_c,stage1,stage2,stage3,stage4,stage5,stage6,stage7
+    python scripts/pesa_brain/reports/qvtpy_qc_report.py --stages stage0_c,stage1,stage2,stage3,stage4,stage5,stage6,stage7
 
     # All subjects in the XNAT PESA-Brain project (needs XNAT config).
     # Percentages use only subjects with all 4 qvtpy sequences; full cohort size is shown.
-    python scripts/qvtpy_qc_report.py --subjects PESA-Brain --xnat-config .nvitk/xnat.json
+    python scripts/pesa_brain/reports/qvtpy_qc_report.py --subjects PESA-Brain --xnat-config .nvitk/xnat.json
 """
 
 from __future__ import annotations
@@ -130,7 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help=(
-            "NIfTI root for stage0_c checks "
+            "NIfTI root for stage0_c checks (AP/RL/FH m+ph, TOF, "
+            "Angiography_3D, ComplexDifference_3D) "
             f"(default: {LOCAL_DEFAULT_NIFTI_ROOT})."
         ),
     )

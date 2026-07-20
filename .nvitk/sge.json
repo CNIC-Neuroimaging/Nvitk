@@ -61,7 +61,7 @@
       "sge_project": "MCC_GPU",
       "sge_account": "MCC_GPU",
       "sge_ngpu": 1,
-      "sge_h_vmem": "30G",
+      "sge_h_vmem": "40G",
       "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"
     },
     "qvtpy_paths": {
