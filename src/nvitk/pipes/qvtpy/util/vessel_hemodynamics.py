@@ -626,8 +626,8 @@ def _root_pwv(
     flow_matrix = np.vstack([r["flow_ts"] for r in good]).astype("float64")
     tr = float(temporal_resolution_s)
 
-    # QVTplus PWV(1): Bjornfoot tag=0 (area/scaling² weights); PWV(2): Fielding XCor
-    # with the same Bjornfoot weights (enc_PWV.m).
+    # QVTplus PWV(1): Bjornfoot tag=0 (area/scaling² on velocity); PWV(2): Fielding XCor
+    # with the same Bjornfoot weights (enc_PWV.m / enc_PWV_WO).
     _, fielding_weights, _ = bjornfoot_prepare_waveforms(
         flow_matrix,
         areas,

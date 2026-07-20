@@ -412,7 +412,10 @@ def submit_subjects_sge(
     "--src-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Host path mounted at /nvitk/src/ (default: <repo>/src or qvtpy NVITK_SRC_DIR).",
+    help=(
+        "Host path mounted at /nvitk/src/ for --submit sge "
+        f"(default: {cfg.NVITK_SRC_DIR}; local runs use <repo>/src)."
+    ),
 )
 @click.option(
     "--ssh-host",
@@ -463,7 +466,12 @@ def main(
         raise click.ClickException("Use either --subject or --subjects/--subjects-file.")
 
     repo_root = _repo_root()
-    src_p = Path(src_dir).expanduser().resolve() if src_dir is not None else (repo_root / "src")
+    if src_dir is not None:
+        src_p = Path(src_dir).expanduser().resolve()
+    elif submit == "sge":
+        src_p = Path(cfg.NVITK_SRC_DIR)
+    else:
+        src_p = (repo_root / "src").resolve()
     cd_4d_bpc = False if no_cd_4d_background_correction else None
 
     if submit == "sge":

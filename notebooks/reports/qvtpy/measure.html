@@ -192,7 +192,7 @@ p_d = \frac{\text{PI}_{\text{prox}} - \text{PI}_{\text{dist}}}{\text{PI}_{\text{
 <p><strong>Station inclusion.</strong> Only stations with quality \(Q_i > \tau\) (default \(\tau = 2.5\)) enter the PWV calculation; at least <strong>3</strong> such stations are required.</p>
 <p><strong>Two weight schemes</strong> (QVTplus <code>enc_PWV</code> / <code>enc_PWV_XCor</code> tags 0 and 1):</p>
 <ol>
-<li><strong>\(W_1\) — Bjornfoot area weights</strong> (<code>bjornfoot_prepare_waveforms</code>, tag=0): zero-mean / unit-std normalize each flow; \(A_i \leftarrow A_i / \mathrm{scaling}_i^2\); \(W_{1,i} = A_i / \max_j A_j\). Used for primary CSV Bjornfoot and Fielding (<code>pwv_bjornfoot_m_s</code>, <code>pwv_fielding_m_s</code>).</li>
+<li><strong>\(W_1\) — Bjornfoot area weights</strong> (<code>bjornfoot_prepare_waveforms</code>, tag=0 / QVTplus <code>enc_PWV_WO</code>): convert flow→velocity \(v_i = Q_i/A_i\); zero-mean / unit-std normalize; \(A_i \leftarrow A_i / \mathrm{scaling}_i^2\) with \(\mathrm{scaling}=1/\mathrm{std}(v)\); \(W_{1,i} = A_i / \max_j A_j\). Used for primary CSV Bjornfoot and Fielding (<code>pwv_bjornfoot_m_s</code>, <code>pwv_fielding_m_s</code>).</li>
 <li><strong>\(W_2\) — Dempsey quality weights</strong> (tag=1):
 \[
 W_{2,i} = \max\left(0,\ \frac{Q_i - \tau}{4 - \tau}\right)
@@ -229,20 +229,20 @@ where \(s_{\mathrm{pp}}\) is samples-per-original-frame after upsampling. <stron
 <p><strong>Code:</strong> <code>upsample_periodic_cycle()</code>, <code>circular_cross_correlation_lag()</code>, <code>cross_correlation_delay_seconds()</code>, <code>pwv_fielding_xcor()</code> in <code>hemodynamics.py</code>.</p>
 <hr>
 <h2>A.10 PWV — Bjornfoot optimizer (QVTplus joint fit)</h2>
-<p>Bjornfoot (J Cereb Blood Flow Metab 2021) is ported from QVTplus <code>enc_PWVBjornfoot.m</code> + <code>PWVest3_share.m</code>. Unlike a scalar PWV-only search, it <strong>jointly optimizes</strong> a shared velocity template (one sample per cardiac frame) and PWV.</p>
+<p>Bjornfoot (J Cereb Blood Flow Metab 2021) is ported from QVTplus <code>enc_PWV_WO.m</code> + <code>PWVest3_share.m</code>. Unlike a scalar PWV-only search, it <strong>jointly fits</strong> a shared velocity template (one sample per cardiac frame) and PWV by weighted least squares.</p>
 <p><strong>Intuition.</strong> There is one unknown “underlying” pulse shape. For a trial PWV, that template is time-shifted to each station by \(\Delta t_i = d_i / \mathrm{PWV}\) and compared to the observed (normalized) waveforms. The optimizer finds the template and PWV that minimize the weighted squared residual.</p>
-<p><strong>Preprocessing</strong> — see A.8 (<code>bjornfoot_prepare_waveforms</code>): normalized flows \(F\) and area weights \(W\).</p>
-<p><strong>Cost</strong> (<code>pwvest3_share_cost</code>, matching <code>PWVest3_share.m</code>):</p>
+<p><strong>Preprocessing</strong> — see A.8 (<code>bjornfoot_prepare_waveforms</code>): velocity-normalized waveforms \(F\) and area weights \(W\).</p>
+<p><strong>Cost</strong> (<code>pwvest3_share_cost</code> / residuals, matching <code>PWVest3_share.m</code>):</p>
 <ol>
 <li>Let \(\mathbf{v}\) be the template (length \(m\) = number of cardiac frames) and \(\mathrm{PWV}\) the last parameter.</li>
 <li>Triple the template on the time axis: \(t_V = 0, \Delta t, \ldots, 3m\Delta t - \Delta t\).</li>
 <li>At each station \(i\), evaluate the template at \(t - d_i/\mathrm{PWV}\) by linear interpolation (<code>interp1</code> analogue), then keep the middle cycle (samples \(m+1 \ldots 2m\)).</li>
-<li>Cost \(= \sum_{i,t} W_i \bigl(v_{\mathrm{shift},i}(t) - F_i(t)\bigr)^2\).</li>
+<li>Cost \(= \sum_{i,t} W_i \bigl(v_{\mathrm{shift},i}(t) - F_i(t)\bigr)^2\) (paper ML / weighted least squares).</li>
 </ol>
-<p><strong>Optimization.</strong> Bounded L-BFGS-B (MATLAB <code>fmincon</code> analogue):</p>
+<p><strong>Optimization.</strong> Unbounded Levenberg–Marquardt least squares (<code>scipy.optimize.least_squares</code>, method <code>lm</code>) — analogue of QVTplus <code>fminunc</code> / the paper’s least-squares fit:</p>
 <ul>
 <li>Initial guess: mean waveform across stations + PWV = 10 m/s.</li>
-<li>Bounds: each template sample \(\in [-5, 5]\); PWV \(\in [0, 20]\) m/s.</li>
+<li>No parameter bounds during the fit; CSV acceptance still requires \(0 &lt; \mathrm{PWV} &lt; 30\) m/s.</li>
 </ul>
 <p><strong>Acceptance.</strong> CSV written when <code>accept_pwv()</code> passes: \(0 &lt; \mathrm{PWV} &lt; 30\) m/s.</p>
 <p><strong>Fielding vs Bjornfoot.</strong> Fielding estimates pairwise delays then regresses; Bjornfoot fits one global template + PWV. Both share \(\Delta t\), distances, and area weights; they can disagree when delays are noisy or waveforms poorly aligned.</p>
@@ -289,7 +289,7 @@ stage6_measure.py
 <tr><td>StdvFromMean</td><td><code>paramMap_params_threshS</code></td><td><code>stdv_from_mean_branch</code></td><td>Yes (ported)</td></tr>
 <tr><td>PITC fit</td><td>Weighted PI vs \(d\)</td><td><code>pitc_fit</code> + Dempsey weights</td><td>Yes (ported)</td></tr>
 <tr><td>Cardiac \(\Delta t\)</td><td>Scanner / gating metadata</td><td><code>HeartRate / n_phases</code> (not NIfTI <code>t_res</code>)</td><td>Partial</td></tr>
-<tr><td>Bjornfoot PWV</td><td><code>enc_PWVBjornfoot</code> + <code>PWVest3_share</code> (fmincon, area weights)</td><td>Joint template+PWV L-BFGS-B; same cost / bounds / weights</td><td>Yes (ported)</td></tr>
+<tr><td>Bjornfoot PWV</td><td><code>enc_PWV_WO</code> + <code>PWVest3_share</code> (fminunc, area/scaling² on velocity)</td><td>Joint template+PWV least_squares (lm); same cost / velocity-based weights</td><td>Yes (ported)</td></tr>
 <tr><td>Fielding XCor</td><td>Spline upsample + xcor; \(W_1\) area / \(W_2\) Dempsey</td><td>Same; CSV uses \(W_1\); plot shows both</td><td>Yes (ported)</td></tr>
 <tr><td>Connectivity</td><td>CD skeleton + manual labels</td><td>Label-aware <code>seg_4dflow</code> tree</td><td>No</td></tr>
 <tr><td>Cross-section masks</td><td><code>segment_cross_section_thresh</code></td><td>MAG+CD+VEL fusion + label constrain</td><td>No</td></tr>
@@ -468,6 +468,6 @@ S = L_{\text{score}}\left(0.35\cdot\text{midline} + 0.25\cdot\text{superior} + 0
 <tr><td>PITC compare script</td><td><code>scripts/compare_pitc_profiles.py</code></td></tr>
 </tbody></table>
 <hr>
-<p>*Prepared as an internal technical reference. Grounded in qvtpy measurement sources (July 2026). PWV sections aligned to QVTplus <code>enc_PWVBjornfoot</code> / <code>PWVest3_share</code> (17 July 2026).*</p>
+<p>*Prepared as an internal technical reference. Grounded in qvtpy measurement sources (July 2026). PWV sections aligned to QVTplus <code>enc_PWV_WO</code> / <code>PWVest3_share</code> (20 July 2026).*</p>
 <footer><p><em>Prepared as an internal technical reference. qvtpy measurement sources (July 2026).</em></p></footer>
 </body></html>
