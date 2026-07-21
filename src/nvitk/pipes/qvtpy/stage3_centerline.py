@@ -536,11 +536,12 @@ def submit_subject_sge(
         parts.append("--no-venous-brain-mask")
     ts_dev = totalseg_device or backend
     parts.extend(["--totalseg-device", shlex.quote(str(ts_dev).strip().lower())])
-    if totalseg_model_dir is not None:
-        parts.extend(["--totalseg-model-dir", shlex.quote(str(totalseg_model_dir))])
+    # Host weights path for Singularity -B; in-container CLI/env must use binds.models.
+    model_root = resolve_totalseg_model_dir(model_dir=totalseg_model_dir) if venous_brain_mask else None
+    if venous_brain_mask and model_root is not None:
+        parts.extend(["--totalseg-model-dir", shlex.quote(binds.models)])
     python_cmd = " ".join(parts)
 
-    model_root = resolve_totalseg_model_dir(model_dir=totalseg_model_dir) if venous_brain_mask else None
     extra_env = dict(sge_stage_extra_env(binds.src, backend))
     use_nv = sge_stage_use_nv(backend)
     if venous_brain_mask and model_root is not None:

@@ -66,6 +66,15 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Per-label paths from the mask; click in 3D for oblique cross-sections "
         "(plane normal sense follows the click)."
     ),
+    "viz_pitc": (
+        "Active layer = centerline mask. Recomputes PITC geometry and shows oriented root/branch "
+        "paths, the geometric root init point, and small sampled stations colored by a selected "
+        "feature. Opens the PITC diagnostic plot in a Napari dock."
+    ),
+    "viz_pwv": (
+        "Active layer = centerline mask. Recomputes PWV geometry and shows the geometric root init "
+        "point plus Q-filtered stations colored by a selected feature. Opens the PWV diagnostic plot."
+    ),
     "export_view_png": (
         "Save the Napari 3D render window as PNG (same camera and orientation as on screen)."
     ),

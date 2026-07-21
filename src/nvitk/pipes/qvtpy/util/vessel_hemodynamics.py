@@ -121,12 +121,70 @@ PITC_GROUP_ALLOWED_IDS: dict[str, frozenset[int]] = {
 
 
 @dataclass
+class StationGeometryViz:
+    """One sampled cross-section station for Napari overlays."""
+
+    vessel_id: int
+    vessel_name: str
+    station_index: int
+    centerline_x: float
+    centerline_y: float
+    centerline_z: float
+    distance_mm: float
+    pi: float
+    quality: float
+    area_mm2: float
+    used_for_pwv: bool = False
+    pwv_weight_area: float = float("nan")
+    pwv_weight_quality: float = float("nan")
+    pwv_xcor_time_s: float = float("nan")
+    pwv_time_to_upstroke_s: float = float("nan")
+
+
+@dataclass
+class VesselGeometryViz:
+    """Oriented centerline polyline and its stations for one vessel."""
+
+    vessel_id: int
+    vessel_name: str
+    polyline_oriented: np.ndarray
+    distance_offset_mm: float
+    stations: list[StationGeometryViz] = field(default_factory=list)
+
+
+@dataclass
+class RegionGeometryViz:
+    """Per-root geometry for PITC/PWV Napari visualization."""
+
+    region_id: str
+    root_label: int
+    root_polyline_oriented: np.ndarray
+    root_init_xyz: np.ndarray
+    root_fin_xyz: np.ndarray
+    pitc_slope: float
+    pitc_intercept: float
+    pitc_r2: float
+    pitc_n: int
+    global_pi: float
+    quality_thresh: float
+    pwv_bjornfoot_m_s: Any = ""
+    pwv_fielding_m_s: Any = ""
+    pwv_r_fielding: Any = ""
+    pwv_n_stations: int = 0
+    vessels: dict[int, VesselGeometryViz] = field(default_factory=dict)
+
+
+@dataclass
 class VesselHemodynamicsResult:
     """Station-level profile rows and per-region summary rows.
 
     ``region_plot_data`` is populated only when ``collect_plot_data=True`` and holds
     the per-station arrays (PI, quality, flow waveforms, PWV cross-correlation
     diagnostics) needed to render the paper-style measurement figures.
+
+    ``geometry_by_region`` is populated alongside ``region_plot_data`` and holds
+    oriented polylines, geometric root init/fin endpoints, and station XYZ for
+    Napari overlays.
 
     ``volume_seg`` is the island-cleaned multilabel mask used for sampling (and
     for PITC branch mask export).
@@ -135,6 +193,7 @@ class VesselHemodynamicsResult:
     profile_rows: list[dict[str, Any]] = field(default_factory=list)
     summary_rows: list[dict[str, Any]] = field(default_factory=list)
     region_plot_data: dict[str, dict[str, Any]] = field(default_factory=dict)
+    geometry_by_region: dict[str, RegionGeometryViz] = field(default_factory=dict)
     all_label_waveforms: dict[int, dict[str, Any]] = field(default_factory=dict)
     volume_seg: np.ndarray | None = None
 
@@ -432,6 +491,9 @@ def compute_vessel_hemodynamics(
         root_pts = _orient_polyline(root_pts, root_anchor)
 
         group_stations: list[dict[str, Any]] = []
+        vessel_polylines: dict[int, tuple[np.ndarray, float]] = {
+            int(group.root_label): (root_pts.copy(), 0.0),
+        }
         root_rows = _sample_vessel_stations(
             root_pts,
             group.root_label,
@@ -449,7 +511,7 @@ def compute_vessel_hemodynamics(
             if int(blabel) not in QVTPY_COMM_IDS and blabel in cls
         ]
 
-        def _sample_branch(blabel: int) -> tuple[int, list[dict[str, Any]]]:
+        def _sample_branch(blabel: int) -> tuple[int, list[dict[str, Any]], np.ndarray, float]:
             branch_pts, offset = _distance_offset_for_branch(
                 root_pts, cls[blabel], voxel_spacing
             )
@@ -461,18 +523,20 @@ def compute_vessel_hemodynamics(
             )
             for r in brows:
                 r["root_region_id"] = group.region_id
-            return blabel, brows
+            return blabel, brows, branch_pts, offset
 
         workers = _branch_sample_workers(len(eligible_branches))
         if workers <= 1:
             for blabel in eligible_branches:
-                _, brows = _sample_branch(blabel)
+                _, brows, branch_pts, offset = _sample_branch(blabel)
+                vessel_polylines[int(blabel)] = (branch_pts.copy(), float(offset))
                 branch_rows_by_label[blabel] = brows
                 group_stations.extend(brows)
         else:
-            for blabel, brows in map_in_thread_pool(
+            for blabel, brows, branch_pts, offset in map_in_thread_pool(
                 _sample_branch, eligible_branches, max_workers=workers
             ):
+                vessel_polylines[int(blabel)] = (branch_pts.copy(), float(offset))
                 branch_rows_by_label[blabel] = brows
                 group_stations.extend(brows)
 
@@ -517,7 +581,7 @@ def compute_vessel_hemodynamics(
         )
 
         if collect_plot_data:
-            result.region_plot_data[group.region_id] = _collect_region_plot_data(
+            plot_data = _collect_region_plot_data(
                 group,
                 group_stations,
                 root_rows,
@@ -525,6 +589,17 @@ def compute_vessel_hemodynamics(
                 fit,
                 pwv_result,
                 temporal_resolution_s,
+                quality_thresh=quality_thresh,
+            )
+            result.region_plot_data[group.region_id] = plot_data
+            result.geometry_by_region[group.region_id] = _build_region_geometry(
+                group,
+                group_stations,
+                vessel_polylines,
+                root_pts,
+                fit,
+                pwv_result,
+                plot_data,
                 quality_thresh=quality_thresh,
             )
 
@@ -762,10 +837,102 @@ def _collect_region_plot_data(
     }
 
 
+def _build_region_geometry(
+    group: RootGroup,
+    group_stations: list[dict[str, Any]],
+    vessel_polylines: dict[int, tuple[np.ndarray, float]],
+    root_pts: np.ndarray,
+    fit: dict[str, Any],
+    pwv_result: dict[str, Any],
+    plot_data: dict[str, Any],
+    *,
+    quality_thresh: float,
+) -> RegionGeometryViz:
+    """Build Napari-ready geometry: oriented polylines, init/fin, station XYZ."""
+    from nvitk.core.array import to_numpy
+
+    root_arr = to_numpy(root_pts).astype("float64", copy=False)
+    pwv_meta_by_key: dict[tuple[int, int, float], int] = {}
+    pwv_dist = to_numpy(plot_data.get("pwv_distance_mm", [])).astype("float64").reshape(-1)
+    pwv_w1 = to_numpy(plot_data.get("pwv_weight_area", [])).astype("float64").reshape(-1)
+    pwv_w2 = to_numpy(plot_data.get("pwv_weight_quality", [])).astype("float64").reshape(-1)
+    pwv_xcor = to_numpy(plot_data.get("pwv_xcor_time_s", [])).astype("float64").reshape(-1)
+    pwv_ttu = to_numpy(plot_data.get("pwv_time_to_upstroke_s", [])).astype("float64").reshape(-1)
+    good_rows = [r for r in group_stations if r["quality"] > float(quality_thresh)]
+    good_rows.sort(key=lambda r: r["distance_mm"])
+    for i, r in enumerate(good_rows):
+        pwv_meta_by_key[
+            (int(r["vessel_id"]), int(r["station_index"]), float(r["distance_mm"]))
+        ] = i
+
+    vessels: dict[int, VesselGeometryViz] = {}
+    for label_id, (poly, offset) in vessel_polylines.items():
+        poly_arr = to_numpy(poly).astype("float64", copy=False)
+        station_rows = [
+            r for r in group_stations if int(r["vessel_id"]) == int(label_id)
+        ]
+        stations: list[StationGeometryViz] = []
+        for r in station_rows:
+            idx = int(r["station_index"])
+            if idx < 0 or idx >= poly_arr.shape[0]:
+                continue
+            xyz = poly_arr[idx]
+            key = (int(label_id), idx, float(r["distance_mm"]))
+            pwv_i = pwv_meta_by_key.get(key)
+            stations.append(
+                StationGeometryViz(
+                    vessel_id=int(label_id),
+                    vessel_name=str(r.get("vessel_name") or qvtpy_vessel_name(int(label_id))),
+                    station_index=idx,
+                    centerline_x=float(xyz[0]),
+                    centerline_y=float(xyz[1]),
+                    centerline_z=float(xyz[2]),
+                    distance_mm=float(r["distance_mm"]),
+                    pi=float(r["pi"]),
+                    quality=float(r["quality"]),
+                    area_mm2=float(r["area_mm2"]),
+                    used_for_pwv=pwv_i is not None,
+                    pwv_weight_area=float(pwv_w1[pwv_i]) if pwv_i is not None and pwv_i < pwv_w1.size else float("nan"),
+                    pwv_weight_quality=float(pwv_w2[pwv_i]) if pwv_i is not None and pwv_i < pwv_w2.size else float("nan"),
+                    pwv_xcor_time_s=float(pwv_xcor[pwv_i]) if pwv_i is not None and pwv_i < pwv_xcor.size else float("nan"),
+                    pwv_time_to_upstroke_s=float(pwv_ttu[pwv_i]) if pwv_i is not None and pwv_i < pwv_ttu.size else float("nan"),
+                )
+            )
+        vessels[int(label_id)] = VesselGeometryViz(
+            vessel_id=int(label_id),
+            vessel_name=qvtpy_vessel_name(int(label_id)),
+            polyline_oriented=poly_arr,
+            distance_offset_mm=float(offset),
+            stations=stations,
+        )
+
+    return RegionGeometryViz(
+        region_id=group.region_id,
+        root_label=int(group.root_label),
+        root_polyline_oriented=root_arr,
+        root_init_xyz=root_arr[0].copy(),
+        root_fin_xyz=root_arr[-1].copy(),
+        pitc_slope=float(fit.get("pitc_slope", float("nan"))),
+        pitc_intercept=float(fit.get("pitc_intercept", float("nan"))),
+        pitc_r2=float(fit.get("r2", float("nan"))),
+        pitc_n=int(fit.get("n") or 0),
+        global_pi=float(fit.get("global_pi", float("nan"))),
+        quality_thresh=float(quality_thresh),
+        pwv_bjornfoot_m_s=pwv_result.get("pwv_bjornfoot_m_s", ""),
+        pwv_fielding_m_s=pwv_result.get("pwv_fielding_m_s", ""),
+        pwv_r_fielding=pwv_result.get("pwv_r_fielding", ""),
+        pwv_n_stations=int(pwv_result.get("pwv_n_stations") or 0),
+        vessels=vessels,
+    )
+
+
 __all__ = [
     "PITC_GROUP_ALLOWED_IDS",
     "ROOT_GROUPS",
+    "RegionGeometryViz",
     "RootGroup",
+    "StationGeometryViz",
+    "VesselGeometryViz",
     "VesselHemodynamicsResult",
     "build_all_label_waveforms",
     "compute_vessel_hemodynamics",
