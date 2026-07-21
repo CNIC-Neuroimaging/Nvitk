@@ -19,7 +19,7 @@ from nvitk.db.xnat_upload import (
     xnat_resource_has_files,
 )
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.run import (
+from nvitk.pipes.qvtpy.stages import (
     STAGE_CENTERLINE,
     STAGE_EICAB,
     STAGE_LOC,

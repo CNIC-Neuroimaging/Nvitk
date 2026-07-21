@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-# Canonical stage ids (match nvitk.pipes.qvtpy.run constants).
+# Canonical stage ids (match nvitk.pipes.qvtpy.stages constants).
 STAGE_CONVERT = "stage0_c"
 STAGE_EICAB = "stage1"
 STAGE_REG = "stage2"
@@ -123,6 +123,33 @@ def stage_runs_from_emit_kwargs(kwargs: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def filter_subjects_pending_work(
+    subjects: list[str],
+    *,
+    stage_runs: dict[str, bool],
+    skip_processed: bool,
+    results_root: Path,
+    nifti_root: Path,
+) -> tuple[list[str], list[str]]:
+    """Split *subjects* into those with pending work vs already complete."""
+    if not skip_processed:
+        return list(subjects), []
+    pending: list[str] = []
+    skipped: list[str] = []
+    for subj in subjects:
+        if pending_sge_stage_ids(
+            subj,
+            stage_runs=stage_runs,
+            skip_processed=True,
+            results_root=results_root,
+            nifti_root=nifti_root,
+        ):
+            pending.append(subj)
+        else:
+            skipped.append(subj)
+    return pending, skipped
+
+
 __all__ = [
     "STAGE_CENTERLINE",
     "STAGE_CONVERT",
@@ -135,6 +162,7 @@ __all__ = [
     "STAGE_SEG_T",
     "count_sge_stages_for_subject",
     "count_sge_stages_per_subject",
+    "filter_subjects_pending_work",
     "pending_sge_stage_ids",
     "stage_runs_from_emit_kwargs",
 ]

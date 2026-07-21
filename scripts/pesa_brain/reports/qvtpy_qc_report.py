@@ -38,7 +38,7 @@ from pathlib import Path
 from nvitk.db.xnat import requested_sequence_set
 from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
-from nvitk.pipes.qvtpy.run import STAGE_CONVERT, STAGE_DOWNLOAD
+from nvitk.pipes.qvtpy.stages import STAGE_CONVERT, STAGE_DOWNLOAD
 from nvitk.pipes.qvtpy.stage0_download import (
     DEFAULT_SEQUENCES,
     load_subjects,

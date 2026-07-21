@@ -68,18 +68,18 @@ def _exclude_setup_stages(
 
 
 def _qvtpy_stages() -> tuple[PipelineStageSpec, ...]:
-    from nvitk.pipes.qvtpy.run import DEFAULT_STAGES, _STAGE_LABELS, _STAGES_ORDERED
+    from nvitk.pipes.qvtpy.stages import DEFAULT_STAGES, STAGE_LABELS, STAGES_ORDERED
 
     return _exclude_setup_stages(
         tuple(
             PipelineStageSpec(
                 sid,
-                _STAGE_LABELS.get(sid, sid),
+                STAGE_LABELS.get(sid, sid),
                 _QVT_DESCRIPTIONS.get(sid, ""),
                 default_enabled=_default_enabled(sid, DEFAULT_STAGES),
                 inputs=_QVT_INPUTS.get(sid, ()),
             )
-            for sid in _STAGES_ORDERED
+            for sid in STAGES_ORDERED
         )
     )
 

@@ -12,8 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+import click
+
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.run import (
+from nvitk.pipes.qvtpy.stages import (
     DEFAULT_STAGES,
     STAGE_CENTERLINE,
     STAGE_CONVERT,
@@ -25,8 +27,7 @@ from nvitk.pipes.qvtpy.run import (
     STAGE_REG,
     STAGE_SEG,
     STAGE_SEG_T,
-    _STAGE_ALIASES,
-    _STAGES_ORDERED,
+    parse_stages as _parse_stages_spec,
 )
 from nvitk.pipes.qvtpy.stage0_convert import REQUIRED_DERIVED_FILES, REQUIRED_FLOW_DIRS
 from nvitk.pipes.qvtpy.stage0_download import (
@@ -62,17 +63,10 @@ class StageCheck:
 
 def parse_stages(spec: str) -> list[str]:
     """Parse a comma-separated stage list into canonical ids in pipeline order."""
-    tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]
-    if not tokens:
-        raise ValueError("--stages cannot be empty.")
-    canonical: set[str] = set()
-    for tok in tokens:
-        key = tok.replace("-", "_")
-        if key not in _STAGE_ALIASES:
-            valid = ", ".join(sorted(set(_STAGE_ALIASES.keys())))
-            raise ValueError(f"Unknown stage {tok!r}. Valid: {valid}.")
-        canonical.add(_STAGE_ALIASES[key])
-    return [s for s in _STAGES_ORDERED if s in canonical]
+    try:
+        return _parse_stages_spec(spec)
+    except click.ClickException as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _glob_first(directory: Path, *patterns: str) -> Path | None:

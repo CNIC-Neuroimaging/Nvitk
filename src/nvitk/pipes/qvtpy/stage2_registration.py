@@ -36,7 +36,7 @@ from nvitk.pipes.qvtpy.util.sge_backend import (
 )
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.stage1_eicab import find_tof_resampled_volume
+from nvitk.pipes.qvtpy.util.eicab_masks import find_tof_resampled_volume
 from nvitk.registration.fsl.flirt import flirt_register_rigid
 
 log = Logger()

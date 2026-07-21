@@ -52,17 +52,9 @@ from nvitk.core.click_backend import backend_click_option, sge_backend_env
 from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
 from nvitk.pipes.qvtpy.util.sge_backend import sge_qvtpy_stage_resources, sge_stage_use_nv
 from nvitk.pipes.qvtpy.util.sge_chunk import (
-    STAGE_CENTERLINE,
-    STAGE_CONVERT,
-    STAGE_EICAB,
-    STAGE_LOC,
-    STAGE_MEASURE,
-    STAGE_MORPHOMETRICS,
-    STAGE_REG,
-    STAGE_SEG,
-    STAGE_SEG_T,
     count_sge_stages_for_subject,
     count_sge_stages_per_subject,
+    filter_subjects_pending_work,
     pending_sge_stage_ids,
     stage_runs_from_emit_kwargs,
 )
@@ -70,131 +62,29 @@ from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.segmentation.eicab import config as eicab_cfg
 
 from . import config as cfg
-from . import (
-    stage0_convert,
-    stage0_download,
-    stage1_eicab,
-    stage2_registration,
-    stage3_centerline,
-    stage4_4dflow_segmentation,
-    stage4t_4dflow_t_segmentation,
-    stage5_loc_generation,
-    stage6_measure,
-    stage7_morphometrics,
+from . import stage0_download
+from .stages import (
+    DEFAULT_STAGES,
+    STAGE_CENTERLINE,
+    STAGE_CONVERT,
+    STAGE_DOWNLOAD,
+    STAGE_EICAB,
+    STAGE_LABELS as _STAGE_LABELS,
+    STAGE_LOC,
+    STAGE_MEASURE,
+    STAGE_MORPHOMETRICS,
+    STAGE_REG,
+    STAGE_SEG,
+    STAGE_SEG_T,
+    STAGE_XNAT_UPLOAD,
+    parse_stages as _parse_stages,
 )
 
 
 log = Logger()
-
-# ---------------------------------------------------------------------------
-# Stage identifiers and aliases
-# ---------------------------------------------------------------------------
-
-STAGE_DOWNLOAD = "stage0_d"
-STAGE_CONVERT = "stage0_c"
-STAGE_EICAB = "stage1"
-STAGE_REG = "stage2"
-STAGE_CENTERLINE = "stage3"
-STAGE_SEG = "stage4"
-STAGE_SEG_T = "stage4t"
-STAGE_LOC = "stage5"
-STAGE_MEASURE = "stage6"
-STAGE_MORPHOMETRICS = "stage7"
-STAGE_XNAT_UPLOAD = "stage8_xnat_upload"
-
-_STAGE_ALIASES: dict[str, str] = {
-    "stage0_d": STAGE_DOWNLOAD,
-    "stage0d": STAGE_DOWNLOAD,
-    "stage0_download": STAGE_DOWNLOAD,
-    "download": STAGE_DOWNLOAD,
-    "stage0_c": STAGE_CONVERT,
-    "stage0c": STAGE_CONVERT,
-    "stage0_convert": STAGE_CONVERT,
-    "stage0": STAGE_CONVERT,
-    "convert": STAGE_CONVERT,
-    "stage1": STAGE_EICAB,
-    "stage1_eicab": STAGE_EICAB,
-    "eicab": STAGE_EICAB,
-    "stage2": STAGE_REG,
-    "stage2_registration": STAGE_REG,
-    "registration": STAGE_REG,
-    "stage3": STAGE_CENTERLINE,
-    "stage3_centerline": STAGE_CENTERLINE,
-    "centerline": STAGE_CENTERLINE,
-    "stage4": STAGE_SEG,
-    "stage4_4dflow_segmentation": STAGE_SEG,
-    "segmentation": STAGE_SEG,
-    "stage4t": STAGE_SEG_T,
-    "stage4t_4dflow_t_segmentation": STAGE_SEG_T,
-    "segmentation_t": STAGE_SEG_T,
-    "seg_t": STAGE_SEG_T,
-    "stage5": STAGE_LOC,
-    "stage5_loc_generation": STAGE_LOC,
-    "loc": STAGE_LOC,
-    "stage6": STAGE_MEASURE,
-    "stage6_measure": STAGE_MEASURE,
-    "measure": STAGE_MEASURE,
-    "stage7": STAGE_MORPHOMETRICS,
-    "stage7_morphometrics": STAGE_MORPHOMETRICS,
-    "morphometrics": STAGE_MORPHOMETRICS,
-    "morpho": STAGE_MORPHOMETRICS,
-    "stage8": STAGE_XNAT_UPLOAD,
-    "stage8_xnat_upload": STAGE_XNAT_UPLOAD,
-    "xnat_upload": STAGE_XNAT_UPLOAD,
-    "upload_xnat": STAGE_XNAT_UPLOAD,
-}
-
-_STAGES_ORDERED: tuple[str, ...] = (
-    STAGE_DOWNLOAD,
-    STAGE_CONVERT,
-    STAGE_EICAB,
-    STAGE_REG,
-    STAGE_CENTERLINE,
-    STAGE_SEG,
-    STAGE_SEG_T,
-    STAGE_LOC,
-    STAGE_MEASURE,
-    STAGE_MORPHOMETRICS,
-    STAGE_XNAT_UPLOAD,
-)
-
-_ALL_STAGES: tuple[str, ...] = _STAGES_ORDERED
-DEFAULT_STAGES: str = f"{STAGE_CONVERT},{STAGE_EICAB},{STAGE_REG},{STAGE_CENTERLINE},{STAGE_SEG},{STAGE_LOC},{STAGE_MEASURE}"
-
-_STAGE_LABELS: dict[str, str] = {
-    STAGE_DOWNLOAD: "XNAT download",
-    STAGE_CONVERT: "DICOM → NIfTI",
-    STAGE_EICAB: "eICAB (TOF)",
-    STAGE_REG: "FLIRT TOF → 4D flow",
-    STAGE_CENTERLINE: "centerlines + venous",
-    STAGE_SEG: "CD segmentation (4D)",
-    STAGE_SEG_T: "CD segmentation (4D+t)",
-    STAGE_LOC: "LOC generation",
-    STAGE_MEASURE: "flow measurement",
-    STAGE_MORPHOMETRICS: "TOF morphometrics",
-    STAGE_XNAT_UPLOAD: "XNAT results upload",
-}
-
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_stages(spec: str) -> list[str]:
-    """Parse ``--stages`` comma list into canonical stage ids in pipeline order."""
-    tokens = [t.strip().lower() for t in spec.split(",") if t.strip()]
-    if not tokens:
-        raise click.ClickException("--stages cannot be empty.")
-    canonical: set[str] = set()
-    for tok in tokens:
-        key = tok.replace("-", "_")
-        if key not in _STAGE_ALIASES:
-            raise click.ClickException(
-                f"Unknown stage {tok!r}. Valid: {', '.join(sorted(set(_STAGE_ALIASES.keys())))}."
-            )
-        canonical.add(_STAGE_ALIASES[key])
-    return [s for s in _STAGES_ORDERED if s in canonical]
 
 
 def _iter_subjects(root: Path) -> list[str]:
@@ -231,6 +121,8 @@ def _xnat_convert_subject(
     skip_existing_downloads = bool(
         convert_kwargs.get("skip_existing_downloads", False)
     )
+
+    from . import stage0_convert
 
     if save_dicoms:
         stage0_download.run_download(
@@ -409,6 +301,17 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pitc_label_constrain: bool = True,
 ) -> int:
     """Append SGE ``qsub`` blocks for *chunk_subjects*; return jobs emitted."""
+    from . import (
+        stage1_eicab,
+        stage2_registration,
+        stage3_centerline,
+        stage4_4dflow_segmentation,
+        stage4t_4dflow_t_segmentation,
+        stage5_loc_generation,
+        stage6_measure,
+        stage7_morphometrics,
+    )
+
     stage_runs = {
         "run_conv": run_conv,
         "run_eicab": run_eicab,
@@ -422,19 +325,20 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     }
     jobs_emitted = 0
     for subj in chunk_subjects:
-        pending = (
-            set(
-                pending_sge_stage_ids(
-                    subj,
-                    stage_runs=stage_runs,
-                    skip_processed=True,
-                    results_root=output_root_eff,
-                    nifti_root=nifti_root_eff,
-                )
+        if skip_processed:
+            pending_list = pending_sge_stage_ids(
+                subj,
+                stage_runs=stage_runs,
+                skip_processed=True,
+                results_root=output_root_eff,
+                nifti_root=nifti_root_eff,
             )
-            if skip_processed
-            else None
-        )
+            if not pending_list:
+                log.info(f"[{subj}] skip-processed: all requested stages complete")
+                continue
+            pending = set(pending_list)
+        else:
+            pending = None
 
         def _should_emit(stage_id: str) -> bool:
             return pending is None or stage_id in pending
@@ -850,7 +754,10 @@ def _submit_qvtpy_sge_subjects_remote(
     default=None,
     help="(sge) Host tree mounted at /nvitk/src/.",
 )
-@click.option("--skip-existing", is_flag=True, default=False)
+@click.option("--skip-existing", is_flag=True, default=False, help=(
+    "Skip stages whose outputs already exist on disk. On SGE, subjects/stages with "
+    "complete outputs are not submitted (same completion checks as the QC report)."
+))
 @click.option(
     "--skip-processed",
     is_flag=True,
@@ -1354,6 +1261,13 @@ def main(
 
     log.info(f"qvtpy | stages={','.join(stages)} | submit={submit}")
 
+    if skip_existing and not skip_processed:
+        log.info(
+            "--skip-existing: checking completion markers per stage before scheduling "
+            "(same checks as QC report)."
+        )
+    skip_processed = skip_processed or skip_existing
+
     xnat_conn = None
     if use_xnat or run_s8:
         from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
@@ -1498,6 +1412,18 @@ def main(
             )
 
         if submit == "local":
+            from . import (
+                stage0_convert,
+                stage1_eicab,
+                stage2_registration,
+                stage3_centerline,
+                stage4_4dflow_segmentation,
+                stage4t_4dflow_t_segmentation,
+                stage5_loc_generation,
+                stage6_measure,
+                stage7_morphometrics,
+            )
+
             _local_skip = dict(
                 skip_processed=skip_processed,
                 output_root=output_root_eff,
@@ -1728,6 +1654,8 @@ def main(
 
     if submit == "local":
         if run_conv and report:
+            from . import stage0_convert
+
             stage0_convert.print_nifti_qc_report(
                 nifti_root_eff, subject_list, check_derived=report_derived
             )
@@ -1742,6 +1670,34 @@ def main(
 
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stage_runs_map = {
+        "run_conv": run_conv,
+        "run_eicab": run_eicab,
+        "run_s2": run_s2,
+        "run_s3": run_s3,
+        "run_s4": run_s4,
+        "run_s4t": run_s4t,
+        "run_s5": run_s5,
+        "run_s6": run_s6,
+        "run_s7": run_s7,
+    }
+    if skip_processed:
+        subject_list, skipped_complete = filter_subjects_pending_work(
+            subject_list,
+            stage_runs=stage_runs_map,
+            skip_processed=True,
+            results_root=output_root_eff,
+            nifti_root=nifti_root_eff,
+        )
+        if skipped_complete:
+            log.info(
+                f"  skipped {len(skipped_complete)} subject(s) with all requested "
+                "stages already complete"
+            )
+        if not subject_list:
+            log.info("All subjects already complete for requested stages; nothing to submit to SGE.")
+            return
+
     stages_per_subject = count_sge_stages_per_subject(
         run_conv=run_conv,
         run_eicab=run_eicab,
