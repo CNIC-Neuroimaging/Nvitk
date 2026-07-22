@@ -280,12 +280,15 @@ def _layer_from_list_event(event: Any) -> Any | None:
 
 
 def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
-    from nvitk.gui.core.orientation import configure_viewer_for_layer, ensure_4d_scale_only_layer
+    from nvitk.gui.core.orientation import configure_viewer_for_layer
+    from nvitk.gui.viz.layers import repair_time_dim_for_viewer
 
     layer = _layer_from_list_event(event)
     if layer is None:
         return
     if type(layer).__name__ in ("Vectors", "Points", "Shapes", "Surface"):
+        # Overlays right-align onto a 4D layer's time axis; restore the real count.
+        repair_time_dim_for_viewer(viewer)
         return
     data = getattr(layer, "data", None)
     ndim = int(getattr(data, "ndim", 0) or 0)
@@ -294,12 +297,15 @@ def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
         configure_viewer_for_layer(
             viewer, layer, radiological=False, configure_dims=configure_dims
         )
+        repair_time_dim_for_viewer(viewer)
         return
     if not _is_nvitk_layer(layer):
+        repair_time_dim_for_viewer(viewer)
         return
     configure_viewer_for_layer(
         viewer, layer, radiological=False, configure_dims=configure_dims
     )
+    repair_time_dim_for_viewer(viewer)
 
 
 def _on_active_layer_sync_dims(viewer: Any, _event: Any) -> None:

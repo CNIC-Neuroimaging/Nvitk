@@ -550,6 +550,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Vessel cross-sections",
         (
             ParamSpec("cd_layer", "Complex difference image layer", "layer", ""),
+            ParamSpec("ap_layer", "AP phase layer", "layer", ""),
+            ParamSpec("rl_layer", "RL phase layer", "layer", ""),
+            ParamSpec("fh_layer", "FH phase layer", "layer", ""),
             ParamSpec("segmentation_layer", "Segmentation mask (optional)", "layer", ""),
             ParamSpec("cross_section_radius_vox", "Plane half-size (vox)", "float", 12.0, min=1.0),
             ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
@@ -587,8 +590,13 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("ap_layer", "AP phase layer", "layer", ""),
             ParamSpec("rl_layer", "RL phase layer", "layer", ""),
             ParamSpec("fh_layer", "FH phase layer", "layer", ""),
-            ParamSpec("reference_layer", "Angio / CD layer (optional)", "layer", ""),
-            ParamSpec("segmentation_layer", "Segmentation mask (optional)", "layer", ""),
+            ParamSpec("reference_layer", "Angio / CD layer", "layer", ""),
+            ParamSpec(
+                "heart_rate_json",
+                "Cardiac metadata JSON (HeartRate)",
+                "str",
+                "",
+            ),
             ParamSpec(
                 "root_region",
                 "Root region",
@@ -601,30 +609,30 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("cross_section_radius_vox", "Cross-section radius (vox)", "float", 10.0, min=1.0),
             ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
             ParamSpec("station_point_size", "Station point size", "float", 2.5, min=0.1, max=100.0),
-            ParamSpec(
-                "station_color_feature",
-                "Color stations by",
-                "choice",
-                "quality",
-                choices=("distance_mm", "pi", "quality", "area_mm2"),
-            ),
-            ParamSpec("subject", "Subject id (disk phases)", "str", ""),
-            ParamSpec("nifti_root", "NIfTI root", "str", ""),
-            ParamSpec("output_root", "Pipeline output root", "str", ""),
         ),
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and "
+            "angio/CD layers. Optional JSON with HeartRate for cardiac Δt. Station "
+            "colors are switched in the Napari Points layer controls after run."
+        ),
     ),
     GuiToolSpec(
         "viz_pwv",
         "Visualization",
-        "PWV stations + weights / delays",
+        "PWV stations + timing / Bjornfoot QC",
         (
             ParamSpec("ap_layer", "AP phase layer", "layer", ""),
             ParamSpec("rl_layer", "RL phase layer", "layer", ""),
             ParamSpec("fh_layer", "FH phase layer", "layer", ""),
-            ParamSpec("reference_layer", "Angio / CD layer (optional)", "layer", ""),
-            ParamSpec("segmentation_layer", "Segmentation mask (optional)", "layer", ""),
+            ParamSpec("reference_layer", "Angio / CD layer", "layer", ""),
+            ParamSpec(
+                "heart_rate_json",
+                "Cardiac metadata JSON (HeartRate)",
+                "str",
+                "",
+            ),
             ParamSpec(
                 "root_region",
                 "Root region",
@@ -637,36 +645,14 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("cross_section_radius_vox", "Cross-section radius (vox)", "float", 10.0, min=1.0),
             ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
             ParamSpec("station_point_size", "Station point size", "float", 2.5, min=0.1, max=100.0),
-            ParamSpec(
-                "station_color_feature",
-                "Color stations by",
-                "choice",
-                "pwv_weight_area",
-                choices=(
-                    "distance_mm",
-                    "pi",
-                    "quality",
-                    "area_mm2",
-                    "pwv_weight_area",
-                    "pwv_weight_quality",
-                    "pwv_xcor_time_s",
-                    "pwv_time_to_upstroke_s",
-                ),
-            ),
-            ParamSpec("temporal_resolution_s", "Temporal resolution (s)", "float", 0.04, min=0.0001, max=10.0),
-            ParamSpec(
-                "pwv_method",
-                "PWV overlay mode",
-                "choice",
-                "both",
-                choices=("bjornfoot", "fielding", "both"),
-            ),
-            ParamSpec("subject", "Subject id (disk phases)", "str", ""),
-            ParamSpec("nifti_root", "NIfTI root", "str", ""),
-            ParamSpec("output_root", "Pipeline output root", "str", ""),
         ),
         needs_3d=True,
         run_mode="notify",
+        description=(
+            "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and "
+            "angio/CD layers. Prefer a DICOM/JSON sidecar with HeartRate for cardiac "
+            "frame duration. Color stations via Napari Points face-color feature after run."
+        ),
     ),
     GuiToolSpec(
         "export_view_png",

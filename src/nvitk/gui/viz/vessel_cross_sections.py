@@ -7,8 +7,10 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy
-from nvitk.measure.cross_section import cross_section_at_point
+from nvitk.measure.cross_section import cross_section_at_loc, cross_section_at_point, masked_plane_velocity_series
+from nvitk.measure.hemodynamics import flow_pulsatile_ml_s
 from nvitk.morphology import compute_centerlines
+from nvitk.morphology.centerline import centerline_tangents
 from nvitk.viz.centerline_pick import (
     CenterlinePick,
     choose_plane_normal_sense,
@@ -22,9 +24,9 @@ from nvitk.viz.centerline_pick import (
 )
 
 from nvitk.gui.core.spatial import (
+    layer_affine,
     layer_spatial_kwargs,
     layer_spacing,
-    view_direction_into_scene,
     world_to_data_coords,
 )
 from nvitk.gui.viz.layers import DEFAULT_FLOW_EDGE_WIDTH
@@ -132,6 +134,62 @@ def _disconnect_pick_callback(target: Any, callback: Any) -> None:
             target.mouse_drag_callbacks.remove(callback)
     except Exception:
         pass
+
+
+def _world_to_layer_data(layer: Any, position: Any) -> np.ndarray | None:
+    """Unclipped world→data coords for *layer*'s 3D spatial grid.
+
+    Uses ``layer.world_to_data`` (per-layer transform), which correctly handles a
+    3D layer embedded in a higher-dim viewer, then keeps the trailing 3 axes.
+    """
+    if position is None:
+        return None
+    try:
+        data_pos = layer.world_to_data(position)
+        pos = to_numpy(data_pos).astype(np.float64).ravel()
+    except Exception:
+        pos = to_numpy(position).astype(np.float64).ravel()
+        aff = layer_affine(layer)
+        if aff is not None and pos.size >= 3:
+            inv = np.linalg.inv(to_numpy(aff).astype(np.float64))
+            homog = np.array([pos[-3], pos[-2], pos[-1], 1.0], dtype=np.float64)
+            pos = (inv @ homog)[:3]
+    if pos.size < 3:
+        return None
+    return pos[-3:].astype(np.float64)
+
+
+def _view_ray_in_layer_data(
+    layer: Any,
+    position: Any,
+    view_direction: Any,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Ray (origin, into-scene unit direction) in *layer* data coords.
+
+    Mapping both the click point and a point one step along the view direction with
+    the layer's own ``world_to_data`` keeps origin and direction on the same axes,
+    even when a higher-dim (4D) layer shifts Napari's displayed world axes.
+    """
+    if position is None:
+        return None, None
+    origin = _world_to_layer_data(layer, position)
+    if origin is None:
+        return None, None
+    if view_direction is None:
+        return origin, None
+    pos_arr = to_numpy(position).astype(np.float64).ravel()
+    vd_arr = to_numpy(view_direction).astype(np.float64).ravel()
+    n = min(pos_arr.size, vd_arr.size)
+    if n == 0:
+        return origin, None
+    tip = _world_to_layer_data(layer, pos_arr[:n] + vd_arr[:n])
+    if tip is None:
+        return origin, None
+    direction = -(tip - origin)
+    norm = float(np.linalg.norm(direction))
+    if norm <= 1e-9:
+        return origin, None
+    return origin, (direction / norm).astype(np.float64)
 
 
 def _plane_square_corners(
@@ -446,6 +504,66 @@ def shutdown_vessel_cross_sections(app_state: dict[str, Any]) -> None:
             pass
 
 
+def _neighbor_flow_waveforms(
+    pick: CenterlinePick,
+    centerlines: dict[int, np.ndarray],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Flow Q(t) at the picked station and up to ±2 neighbors along the centerline."""
+    vx = state.get("vx")
+    vy = state.get("vy")
+    vz = state.get("vz")
+    if vx is None or vy is None or vz is None:
+        return []
+    pts = centerlines.get(int(pick.label))
+    if pts is None or pts.shape[0] < 1:
+        return []
+    p = state["params"]
+    tangents = centerline_tangents(pts, k_half=2)
+    out: list[dict[str, Any]] = []
+    for offset in (-2, -1, 0, 1, 2):
+        idx = int(pick.index) + int(offset)
+        if idx < 0 or idx >= pts.shape[0]:
+            continue
+        try:
+            cs = cross_section_at_loc(
+                pts[idx],
+                tangents[idx],
+                mag=state["cd"],
+                cd=state["cd"],
+                vel_mag=state["cd"],
+                voxel_spacing=state["voxel_spacing"],
+                radius_vox=p["radius_vox"],
+                cross_section_res=p["cross_section_res"],
+                plane_interp_order=p["plane_interp_order"],
+                measure_resegment=p["measure_resegment"],
+                thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
+                volume_seg=state.get("segmentation"),
+                volume_label_id=int(pick.label),
+                label_constrain=not p["measure_resegment"],
+            )
+        except Exception:
+            continue
+        if cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
+            continue
+        vel_ts = masked_plane_velocity_series(
+            vx,
+            vy,
+            vz,
+            cs,
+            plane_interp_order=p["plane_interp_order"],
+        )
+        flow_ts = np.abs(flow_pulsatile_ml_s(vel_ts, cs.area_mm2))
+        out.append(
+            {
+                "offset": int(offset),
+                "index": int(idx),
+                "flow_ml_s": flow_ts,
+            }
+        )
+    return out
+
+
 def install_vessel_cross_sections(
     viewer: Any,
     app_state: dict[str, Any],
@@ -454,6 +572,9 @@ def install_vessel_cross_sections(
     centerline_mask: np.ndarray,
     segmentation: np.ndarray | None,
     params: dict[str, Any],
+    vx: np.ndarray | None = None,
+    vy: np.ndarray | None = None,
+    vz: np.ndarray | None = None,
 ) -> None:
     """Register Napari layers, dock, and 3D click-to-inspect behavior."""
     shutdown_vessel_cross_sections(app_state)
@@ -501,6 +622,9 @@ def install_vessel_cross_sections(
 
     state: dict[str, Any] = {
         "cd": cd,
+        "vx": vx,
+        "vy": vy,
+        "vz": vz,
         "centerlines": centerlines,
         "segmentation": segmentation,
         "params": p,
@@ -652,7 +776,8 @@ def install_vessel_cross_sections(
             f"Label {pick.label}  index {pick.index}\n"
             f"area {result.area_mm2:.2f} mm²  circularity {result.circularity:.3f}"
         )
-        panel.show_slice(intensity_2d, result.mask_2d, title=title)
+        waveforms = _neighbor_flow_waveforms(pick, centerlines, state)
+        panel.show_slice(intensity_2d, result.mask_2d, title=title, waveforms=waveforms)
         if dock is not None:
             try:
                 dock.show()
@@ -661,18 +786,19 @@ def install_vessel_cross_sections(
                 pass
 
     def _pick_view_line_from_event(event: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
-        """View line in voxel space: through click, direction into the scene."""
+        """View line in voxel space: through click, direction into the scene.
+
+        Both the ray origin and direction are mapped with ``intensity_layer.world_to_data``
+        so the pick stays consistent even when extra 4D layers embed the intensity layer
+        on different world axes (Napari right-aligns dims, shifting ``dims_displayed``).
+        """
         pos = getattr(event, "position", None)
         if pos is None:
             pos = getattr(getattr(viewer, "cursor", None), "position", None)
-        origin = world_to_data_coords(intensity_layer, pos)
-        if origin is None:
-            return None, None
-        view_dir = getattr(getattr(viewer, "dims", None), "view_direction", None)
+        view_dir = getattr(event, "view_direction", None)
         if view_dir is None:
-            view_dir = getattr(event, "view_direction", None)
-        dir_data = view_direction_into_scene(intensity_layer, view_dir, event)
-        return origin, dir_data
+            view_dir = getattr(getattr(viewer, "dims", None), "view_direction", None)
+        return _view_ray_in_layer_data(intensity_layer, pos, view_dir)
 
     def _try_pick_from_event(event: Any, *, ndisplay: int) -> CenterlinePick | None:
         pos = getattr(event, "position", None)
@@ -705,6 +831,9 @@ def install_vessel_cross_sections(
         if not _is_left_mouse_button(event):
             return
         if int(getattr(viewer_obj.dims, "ndisplay", 2)) != 3:
+            return
+        panel_widget = state.get("panel")
+        if panel_widget is not None and not panel_widget.is_picking_enabled():
             return
         if not _centerlines_layer_visible(state.get("centerlines_layer")):
             return
@@ -754,6 +883,13 @@ def install_vessel_cross_sections(
                 _configure_overlay_points_layer(lyr)
             else:
                 _configure_overlay_shapes_layer(lyr)
+    except Exception:
+        pass
+
+    try:
+        from nvitk.gui.viz.layers import repair_time_dim_for_viewer
+
+        repair_time_dim_for_viewer(viewer)
     except Exception:
         pass
 

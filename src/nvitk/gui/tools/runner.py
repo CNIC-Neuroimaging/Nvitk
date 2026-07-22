@@ -1777,81 +1777,83 @@ def _prepare_vessel_hemo_for_viz(
     layer: Any,
     params: dict[str, Any],
 ):
-    from nvitk.gui.viz.vessel_cross_sections import build_centerlines_dict
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
+    from nvitk.pipes.qvtpy.stage6_measure import _cardiac_frame_duration_s
     from nvitk.pipes.qvtpy.util.vessel_hemodynamics import compute_vessel_hemodynamics
 
-    centerline_data = to_numpy(layer_to_image(layer).data)
-    seg_name = _layer_param(params, "segmentation_layer")
-    segmentation = None
-    seg_layer = None
-    if seg_name:
-        seg_layer = _resolve_layer(viewer, seg_name)
-        segmentation = to_numpy(layer_to_image(seg_layer).data)
-
     ap_name = _layer_param(params, "ap_layer")
-    ap_layer = _resolve_layer(viewer, ap_name) if ap_name else None
-    if ap_layer is not None:
-        _, centerline_img, resampled = align_mask_to_reference_layer(
-            layer, ap_layer, centerline_data, order=0
-        )
-        if resampled:
-            gui_log(
-                f"Resampled centerline '{getattr(layer, 'name', 'layer')}' onto "
-                f"phase grid '{ap_layer.name}' {tuple(centerline_img.data.shape)}."
-            )
-        centerline_data = to_numpy(centerline_img.data)
-        if seg_layer is not None and segmentation is not None:
-            _, seg_img, seg_resampled = align_mask_to_reference_layer(
-                seg_layer, ap_layer, segmentation, order=0
-            )
-            if seg_resampled:
-                gui_log(
-                    f"Resampled segmentation '{seg_layer.name}' onto phase grid "
-                    f"'{ap_layer.name}' {tuple(seg_img.data.shape)}."
-                )
-            segmentation = to_numpy(seg_img.data)
+    rl_name = _layer_param(params, "rl_layer")
+    fh_name = _layer_param(params, "fh_layer")
+    ref_name = _layer_param(params, "reference_layer")
+    if not ap_name or not rl_name or not fh_name:
+        raise ValueError("Select AP, RL, and FH phase layers.")
+    if not ref_name:
+        raise ValueError("Select an angio / complex-difference reference layer.")
 
-    if segmentation is None:
-        segmentation = np.asarray(centerline_data).astype(np.int32, copy=False)
+    ap_layer = _resolve_layer(viewer, ap_name)
+    segmentation = to_numpy(layer_to_image(layer).data)
+    if segmentation.ndim != 3:
+        raise ValueError("Active layer must be a 3D stage-4 multilabel segmentation.")
 
-    centerlines = build_centerlines_dict(
-        centerline_data,
-        segmentation=segmentation,
-        min_points=3,
+    _, seg_img, resampled = align_mask_to_reference_layer(
+        layer, ap_layer, segmentation, order=0
     )
-    if not centerlines:
-        raise ValueError("No labeled centerlines found on the active layer.")
+    if resampled:
+        gui_log(
+            f"Resampled segmentation '{getattr(layer, 'name', 'layer')}' onto "
+            f"phase grid '{ap_layer.name}' {tuple(seg_img.data.shape)}."
+        )
+    segmentation = to_numpy(seg_img.data).astype(np.int32, copy=False)
 
     ap, rl, fh, voxel_spacing = _phase_arrays_from_layers_or_disk(viewer, params)
     vx, vy, vz = velocity_mm_s_from_phases(ap, rl, fh)
 
-    subject = str(params.get("subject") or "").strip()
-    nifti_root = str(params.get("nifti_root") or "").strip()
-    ref_name = _layer_param(params, "reference_layer")
-    mag = cd = vel_mag = None
-    reference_layer = None
-    if ref_name:
-        reference_layer = _resolve_layer(viewer, ref_name)
-        if ap_layer is not None:
-            _, ref_on_ap, _ = align_mask_to_reference_layer(reference_layer, ap_layer, order=1)
-            mag = cd = vel_mag = as_backend_array(ref_on_ap.data).astype(np.float64)
-        else:
-            mag = cd = vel_mag = as_backend_array(reference_layer.data).astype(np.float64)
-    elif subject and nifti_root:
-        mag, cd, vel_mag = _load_contrast_volumes(Path(nifti_root), subject)
-    else:
-        mag = cd = vel_mag = np.abs(ap).astype(np.float64)
-        reference_layer = ap_layer or layer
+    reference_layer = _resolve_layer(viewer, ref_name)
+    _, ref_on_ap, _ = align_mask_to_reference_layer(reference_layer, ap_layer, order=1)
+    mag = cd = vel_mag = as_backend_array(ref_on_ap.data).astype(np.float64)
 
-    temporal_resolution_s = params.get("temporal_resolution_s", None)
-    if temporal_resolution_s in ("", None):
-        temporal_resolution = None
-    else:
-        temporal_resolution = float(temporal_resolution_s)
+    ap_data = to_numpy(ap_layer.data)
+    n_t = int(ap_data.shape[3]) if getattr(ap_data, "ndim", 0) >= 4 else None
+    temporal_resolution = None
+    tr_source = "none"
+    json_path = str(params.get("heart_rate_json") or "").strip()
+    if json_path:
+        from pathlib import Path
+        import json as _json
+
+        path = Path(json_path).expanduser()
+        if not path.is_file():
+            raise ValueError(f"Cardiac metadata JSON not found: {path}")
+        try:
+            data_js = _json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, _json.JSONDecodeError) as exc:
+            raise ValueError(f"Could not read cardiac metadata JSON {path}: {exc}") from exc
+        if not isinstance(data_js, dict):
+            raise ValueError(f"Cardiac metadata JSON must be an object: {path}")
+        temporal_resolution, tr_source = _cardiac_frame_duration_s(
+            data_js, n_timepoints=n_t
+        )
+        if temporal_resolution is not None:
+            gui_log(
+                f"Cardiac frame duration {temporal_resolution * 1e3:.3f} ms "
+                f"(source={tr_source} via {path.name}, n_t={n_t})"
+            )
+        else:
+            gui_log(
+                f"No usable HeartRate/NominalInterval/FrameTime in {path.name}; "
+                "falling back to phase-layer metadata."
+            )
+    if temporal_resolution is None:
+        meta = dict(getattr(ap_layer, "metadata", None) or {})
+        temporal_resolution, tr_source = _cardiac_frame_duration_s(meta, n_timepoints=n_t)
+        if temporal_resolution is not None:
+            gui_log(
+                f"Cardiac frame duration {temporal_resolution * 1e3:.3f} ms "
+                f"(source={tr_source} from AP layer metadata, n_t={n_t})"
+            )
+
     hemo = compute_vessel_hemodynamics(
-        centerlines,
-        volume_seg=np.asarray(segmentation).astype(np.int32, copy=False),
+        volume_seg=segmentation,
         cd=cd,
         mag=mag,
         vel_mag=vel_mag,
@@ -1872,7 +1874,7 @@ def _prepare_vessel_hemo_for_viz(
         regions = [r for r in regions if r.region_id == root_region]
     if not regions:
         raise ValueError(f"No hemodynamics geometry available for root region {root_region!r}.")
-    return hemo, regions, (reference_layer or ap_layer or layer)
+    return hemo, regions, reference_layer
 
 
 def _run_viz_pitc(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
@@ -1880,15 +1882,11 @@ def _run_viz_pitc(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     from nvitk.gui.viz.hemo_plot_panel import show_hemodynamics_plot
 
     hemo, regions, reference_layer = _prepare_vessel_hemo_for_viz(viewer, layer, params)
-    face_key = str(params.get("station_color_feature") or "quality")
-    if face_key not in {"distance_mm", "pi", "quality", "area_mm2"}:
-        face_key = "quality"
     add_hemo_geometry_layers(
         viewer,
         regions,
         reference_layer=reference_layer,
         mode="pitc",
-        face_key=face_key,
         point_size=float(params.get("station_point_size") or 2.5),
     )
     selected_ids = {region.region_id for region in regions}
@@ -1912,13 +1910,11 @@ def _run_viz_pwv(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
     from nvitk.gui.viz.hemo_plot_panel import show_hemodynamics_plot
 
     hemo, regions, reference_layer = _prepare_vessel_hemo_for_viz(viewer, layer, params)
-    face_key = str(params.get("station_color_feature") or "pwv_weight_area")
     add_hemo_geometry_layers(
         viewer,
         regions,
         reference_layer=reference_layer,
         mode="pwv",
-        face_key=face_key,
         point_size=float(params.get("station_point_size") or 2.5),
     )
     selected_ids = {region.region_id for region in regions}
@@ -2070,6 +2066,18 @@ def _run_viz_vessel_cross_sections(
             "Disable re-segmentation only when a segmentation layer is provided."
         )
 
+    ap_name = _layer_param(params, "ap_layer")
+    rl_name = _layer_param(params, "rl_layer")
+    fh_name = _layer_param(params, "fh_layer")
+    vx = vy = vz = None
+    if ap_name and rl_name and fh_name:
+        from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
+
+        ap, rl, fh, _ = _phase_arrays_from_layers_or_disk(viewer, params)
+        vx, vy, vz = velocity_mm_s_from_phases(ap, rl, fh)
+    elif ap_name or rl_name or fh_name:
+        raise ValueError("Select AP, RL, and FH phase layers together for flow waveforms.")
+
     app_state = getattr(viewer, "_nvitk_app_state", None)
     if not isinstance(app_state, dict):
         app_state = {}
@@ -2081,11 +2089,15 @@ def _run_viz_vessel_cross_sections(
         centerline_mask=centerline_mask,
         segmentation=seg_arr,
         params=params,
+        vx=vx,
+        vy=vy,
+        vz=vz,
     )
     notify(
         f"Vessel cross-sections active (centerline: {cl_layer.name}, CD: {intensity_layer.name}).\n"
-        "Hide 'Vessel centerlines (xs)' to disable picking. Left-click near a centerline "
-        "to inspect; click elsewhere to pan/zoom. Normal arrow follows centerline order."
+        "Uncheck 'Pick cross-section on click' in the dock (or hide 'Vessel centerlines (xs)') "
+        "to freely rotate/pan the 3D view. Left-click near a centerline to inspect. "
+        "Normal arrow follows centerline order."
     )
 
 

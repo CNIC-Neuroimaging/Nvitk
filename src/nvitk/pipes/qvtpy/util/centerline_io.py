@@ -156,6 +156,49 @@ def _parent_contact_seed(
     return child_coords[int(np.argmin(d2))]
 
 
+def centerlines_from_segmentation(
+    seg: np.ndarray,
+    *,
+    min_points: int = 3,
+    prefer_polylines: dict[int, Any] | None = None,
+    labels: list[int] | None = None,
+) -> dict[int, Any]:
+    """Ordered arterial polylines from ``seg_4dflow`` (same logic as stage-4 CL export).
+
+    *prefer_polylines* (typically stage-3 arterial CLs) bias branched vessels so
+    proximal trunks are not dropped by a distal-only graph diameter. When absent,
+    MCA/ACA/PCA use a parent-contact seed from the segmentation.
+    """
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
+    prefer = {int(k): v for k, v in (prefer_polylines or {}).items() if v is not None}
+    if labels is None:
+        label_ids = sorted(int(v) for v in np.unique(seg_np) if int(v) > 0)
+    else:
+        label_ids = sorted(int(v) for v in labels)
+
+    arterial_polylines: dict[int, Any] = {}
+    for lid in label_ids:
+        if int(lid) not in QVTPY_ARTERIAL_LABEL_IDS:
+            continue
+        prefs = prefer.get(int(lid))
+        if prefs is None:
+            parent = _ARTERIAL_PARENT_LABEL.get(int(lid))
+            if parent is not None:
+                seed = _parent_contact_seed(seg_np, int(lid), int(parent))
+                if seed is not None:
+                    prefs = seed.reshape(1, 3)
+        cl = compute_centerlines(
+            seg_np,
+            labels=[int(lid)],
+            min_points=int(min_points),
+            prefer_points_by_label={int(lid): prefs} if prefs is not None else None,
+        )
+        pts = cl.get(int(lid))
+        if pts is not None:
+            arterial_polylines[int(lid)] = pts
+    return arterial_polylines
+
+
 def export_centerlines_from_segmentation(
     seg: np.ndarray,
     out_dir: Path,
@@ -178,27 +221,11 @@ def export_centerlines_from_segmentation(
     shape = tuple(int(s) for s in seg_np.shape[:3])
     prefer = {int(k): v for k, v in (prefer_polylines or {}).items() if v is not None}
 
-    label_ids = sorted(int(v) for v in np.unique(seg_np) if int(v) > 0)
-    arterial_polylines: dict[int, Any] = {}
-    for lid in label_ids:
-        if int(lid) not in QVTPY_ARTERIAL_LABEL_IDS:
-            continue
-        prefs = prefer.get(int(lid))
-        if prefs is None:
-            parent = _ARTERIAL_PARENT_LABEL.get(int(lid))
-            if parent is not None:
-                seed = _parent_contact_seed(seg_np, int(lid), int(parent))
-                if seed is not None:
-                    prefs = seed.reshape(1, 3)
-        cl = compute_centerlines(
-            seg_np,
-            labels=[int(lid)],
-            min_points=int(min_points),
-            prefer_points_by_label={int(lid): prefs} if prefs is not None else None,
-        )
-        pts = cl.get(int(lid))
-        if pts is not None:
-            arterial_polylines[int(lid)] = pts
+    arterial_polylines = centerlines_from_segmentation(
+        seg_np,
+        min_points=int(min_points),
+        prefer_polylines=prefer_polylines,
+    )
 
     venous_out = venous_polylines or {}
     mask = rasterize_centerlines_mask(
@@ -352,6 +379,7 @@ __all__ = [
     "CENTERLINES_MASK_NIFTI",
     "CENTERLINES_MASK_SEG_NIFTI",
     "centerline_meta_path",
+    "centerlines_from_segmentation",
     "centerlines_mask_path",
     "export_centerlines_from_segmentation",
     "load_arterial_centerlines",

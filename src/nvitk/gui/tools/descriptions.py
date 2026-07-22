@@ -62,18 +62,21 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "integration time, or fixed; optional per-vertex gradient. Planar inlet seeding by default."
     ),
     "viz_vessel_cross_sections": (
-        "Active layer = centerline mask; choose CD and optional segmentation in parameters. "
-        "Per-label paths from the mask; click in 3D for oblique cross-sections "
-        "(plane normal sense follows the click)."
+        "Active layer = centerline mask; choose CD, AP/RL/FH phases, and optional segmentation. "
+        "Per-label paths from the mask; click in 3D for oblique cross-sections with "
+        "selected and ±2 neighboring flow waveforms when phase layers are provided. "
+        "Toggle 'Pick cross-section on click' in the dock to rotate/pan the 3D view freely."
     ),
     "viz_pitc": (
-        "Active layer = centerline mask. Recomputes PITC geometry and shows oriented root/branch "
-        "paths, the geometric root init point, and small sampled stations colored by a selected "
-        "feature. Opens the PITC diagnostic plot in a Napari dock."
+        "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and angio/CD layers. "
+        "Optional cardiac metadata JSON (HeartRate) sets cardiac Δt. After run, use "
+        "'Color stations by' in the PITC diagnostics dock to switch feature colormaps "
+        "(Napari layer controls only expose a solid face-color swatch)."
     ),
     "viz_pwv": (
-        "Active layer = centerline mask. Recomputes PWV geometry and shows the geometric root init "
-        "point plus Q-filtered stations colored by a selected feature. Opens the PWV diagnostic plot."
+        "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and angio/CD layers. "
+        "Prefer a JSON sidecar with HeartRate for cardiac frame duration. After run, use "
+        "'Color stations by' in the PWV diagnostics dock to switch feature colormaps."
     ),
     "export_view_png": (
         "Save the Napari 3D render window as PNG (same camera and orientation as on screen)."

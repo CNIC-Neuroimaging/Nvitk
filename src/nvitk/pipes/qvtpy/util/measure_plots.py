@@ -1,12 +1,14 @@
-"""Paper-style stage-6 measurement figures and PITC branch masks.
+r"""Paper-style stage-6 measurement figures and PITC branch masks.
 
-Renders the three figures used to report vessel-level 4D-flow hemodynamics:
+Renders the four figures used to report vessel-level 4D-flow hemodynamics:
 
 - **PITC** — per-root pulsatility quality ``Q`` and pulsatility index ``p_pi`` vs
   distance-from-root with the transmission-coefficient fit line.
 - **PWV** — per-root cross-correlation ``XCor`` time and time-to-upstroke vs
   distance with Bjornfoot area-weighted (\(W_1\)) and Dempsey quality-weighted
   (\(W_2\)) fits (QVTplus ``enc_PWV_XCor`` tag 0/1), plus the weights.
+- **Bjornfoot QC** — per-station weighted template residual, XCor-minus-model
+  delay residual, and observed-versus-fitted waveform correlation.
 - **Flow waveforms** — per-vessel mean +/- std flow over the cardiac cycle.
 
 Also writes, per root region, a NIfTI mask of the vessels (root + downstream
@@ -92,8 +94,12 @@ def _fit_pwv_line(distance_mm: np.ndarray, time_s: np.ndarray, weights: np.ndarr
 # ---------------------------------------------------------------------------
 
 
-def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path) -> Path | None:
-    """Two-row PITC figure: quality Q and pulsatility index vs distance per root."""
+def make_pitc_figure(
+    region_plot_data: dict[str, dict[str, Any]],
+    *,
+    show_legend: bool = True,
+):
+    """Build a live Matplotlib PITC diagnostics figure."""
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
@@ -105,7 +111,6 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
         quality = to_numpy(d["quality"]).astype("float64")
         thresh = float(d.get("quality_thresh", 2.5))
 
-        # Row 1: quality vs distance, split about the inclusion threshold.
         ax_q = axes[0][col]
         low = quality < thresh
         ax_q.scatter(dist[low], quality[low], s=14, c="0.6", label=f"Q<{thresh:g}")
@@ -113,11 +118,9 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
         ax_q.set_title(_REGION_TITLES.get(region, region), fontsize=13, fontweight="bold")
         ax_q.set_ylabel("Q (StdvFromMean)")
         ax_q.set_xlabel("d (mm)")
-        ax_q.legend(loc="lower left", fontsize=8, framealpha=0.9)
+        if show_legend:
+            ax_q.legend(loc="lower left", fontsize=8, framealpha=0.9)
 
-        # Row 2: p_pi vs distance — grey = unused in fit (Q≤thresh), blue = used.
-        # Green markers are the proximal/distal *used* stations (QVTplus x_p / x_d
-        # analogue), not the fit-line endpoints.
         ax_p = axes[1][col]
         used = quality > thresh
         ax_p.scatter(
@@ -157,9 +160,17 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
             ax_p.axhline(float(gpi), color="firebrick", lw=1.2, label=r"$\mu(p_{pi})$")
         ax_p.set_ylabel(r"$p_{pi}$")
         ax_p.set_xlabel("d (mm)")
-        if col == 0:
+        if show_legend and col == 0:
             ax_p.legend(loc="upper left", fontsize=8, framealpha=0.9)
     fig.tight_layout()
+    return fig
+
+
+def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path) -> Path | None:
+    """Two-row PITC figure: quality Q and pulsatility index vs distance per root."""
+    fig = make_pitc_figure(region_plot_data, show_legend=True)
+    if fig is None:
+        return None
     fig.savefig(out_path, dpi=130)
     plt.close(fig)
     return out_path
@@ -170,8 +181,12 @@ def plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path
 # ---------------------------------------------------------------------------
 
 
-def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path) -> Path | None:
-    """Three-row PWV figure: XCor time, time-to-upstroke, and per-station weights."""
+def make_pwv_figure(
+    region_plot_data: dict[str, dict[str, Any]],
+    *,
+    show_legend: bool = True,
+):
+    """Build a live Matplotlib PWV diagnostics figure."""
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
@@ -181,12 +196,10 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
         dist = to_numpy(d.get("pwv_distance_mm", [])).astype("float64")
         xcor = to_numpy(d.get("pwv_xcor_time_s", [])).astype("float64")
         upstroke = to_numpy(d.get("pwv_time_to_upstroke_s", [])).astype("float64")
-        # W1 = Bjornfoot area/scaling²; W2 = Dempsey quality (QVTplus tag 0/1).
         if "pwv_weight_area" in d:
             w1 = to_numpy(d["pwv_weight_area"]).astype("float64")
             w2 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
         else:
-            # Legacy plot-data keys (pre area/quality split).
             w1 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
             w2 = to_numpy(d.get("pwv_weight_correlation", [])).astype("float64")
 
@@ -207,16 +220,144 @@ def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path)
         ax_u.set_ylabel("time-to-upstroke (s)")
         ax_w.set_ylabel("Weight")
         ax_w.set_xlabel("d (mm)")
-        ax_x.legend(loc="upper left", fontsize=8, framealpha=0.9)
-        ax_w.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        if show_legend:
+            ax_x.legend(loc="upper left", fontsize=8, framealpha=0.9)
+            ax_w.legend(loc="upper right", fontsize=8, framealpha=0.9)
     fig.tight_layout()
+    return fig
+
+
+def plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: Path) -> Path | None:
+    """Three-row PWV figure: XCor time, time-to-upstroke, and per-station weights."""
+    fig = make_pwv_figure(region_plot_data, show_legend=True)
+    if fig is None:
+        return None
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
+    return out_path
+
+
+def make_bjornfoot_qc_figure(
+    region_plot_data: dict[str, dict[str, Any]],
+    *,
+    show_legend: bool = True,
+):
+    """Build a three-row Bjornfoot shared-template fit QC figure."""
+    regions = [r for r in _REGION_ORDER if r in region_plot_data]
+    if not regions:
+        return None
+    fig, axes = plt.subplots(
+        3, len(regions), figsize=(4.2 * len(regions), 9.0), squeeze=False
+    )
+    for col, region in enumerate(regions):
+        data = region_plot_data[region]
+        dist = to_numpy(data.get("pwv_distance_mm", [])).astype("float64").reshape(-1)
+        weighted_rms = to_numpy(
+            data.get("pwv_bjornfoot_weighted_rms", [])
+        ).astype("float64").reshape(-1)
+        delay_residual_ms = (
+            to_numpy(data.get("pwv_bjornfoot_delay_residual_s", []))
+            .astype("float64")
+            .reshape(-1)
+            * 1000.0
+        )
+        waveform_corr = to_numpy(
+            data.get("pwv_bjornfoot_waveform_corr", [])
+        ).astype("float64").reshape(-1)
+
+        ax_rms = axes[0][col]
+        ax_delay = axes[1][col]
+        ax_corr = axes[2][col]
+        raw_pwv = data.get("pwv_bjornfoot_raw_m_s")
+        cost = data.get("pwv_bjornfoot_cost")
+        pwv_text = (
+            f"{float(raw_pwv):.2f} m/s"
+            if raw_pwv is not None and np.isfinite(raw_pwv)
+            else "n/a"
+        )
+        cost_text = (
+            f"{float(cost):.3g}"
+            if cost is not None and np.isfinite(cost)
+            else "n/a"
+        )
+        ax_rms.set_title(
+            f"{_REGION_TITLES.get(region, region)}\n"
+            f"Bjornfoot={pwv_text}, cost={cost_text}",
+            fontsize=12,
+            fontweight="bold",
+        )
+
+        def _scatter_aligned(ax, values: np.ndarray, *, color: str, label: str) -> None:
+            n = min(dist.size, values.size)
+            if n < 1:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No Bjornfoot fit diagnostics",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    color="0.5",
+                )
+                return
+            finite = np.isfinite(dist[:n]) & np.isfinite(values[:n])
+            if np.any(finite):
+                ax.scatter(
+                    dist[:n][finite],
+                    values[:n][finite],
+                    s=18,
+                    c=color,
+                    alpha=0.75,
+                    label=label,
+                )
+
+        _scatter_aligned(
+            ax_rms,
+            weighted_rms,
+            color="coral",
+            label="weighted template residual",
+        )
+        _scatter_aligned(
+            ax_delay,
+            delay_residual_ms,
+            color="darkviolet",
+            label="XCor − Bjornfoot delay",
+        )
+        _scatter_aligned(
+            ax_corr,
+            waveform_corr,
+            color="seagreen",
+            label="observed vs fitted",
+        )
+        ax_delay.axhline(0.0, color="0.35", lw=1.0, ls=":")
+        ax_corr.axhline(0.0, color="0.65", lw=0.8, ls=":")
+        ax_corr.set_ylim(-1.05, 1.05)
+        ax_rms.set_ylabel("Weighted residual RMS\n(normalized velocity)")
+        ax_delay.set_ylabel("XCor − model delay (ms)")
+        ax_corr.set_ylabel("Waveform correlation")
+        ax_corr.set_xlabel("d (mm)")
+        if show_legend and col == 0:
+            ax_rms.legend(loc="upper right", fontsize=8, framealpha=0.9)
+            ax_delay.legend(loc="upper right", fontsize=8, framealpha=0.9)
+            ax_corr.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_bjornfoot_qc_figure(
+    region_plot_data: dict[str, dict[str, Any]], out_path: Path
+) -> Path | None:
+    """Save standalone Bjornfoot options A/B/C QC as one PNG."""
+    fig = make_bjornfoot_qc_figure(region_plot_data, show_legend=True)
+    if fig is None:
+        return None
     fig.savefig(out_path, dpi=130)
     plt.close(fig)
     return out_path
 
 
 def _draw_pwv_fits(ax, dist: np.ndarray, time_s: np.ndarray, w1: np.ndarray, w2: np.ndarray) -> None:
-    """Overlay area-weighted (\(W_1\)) and Dempsey quality-weighted (\(W_2\)) fits."""
+    r"""Overlay area-weighted (\(W_1\)) and Dempsey quality-weighted (\(W_2\)) fits."""
     from nvitk.measure.hemodynamics import accept_pwv
 
     xline = np.array([float(np.min(dist)), float(np.max(dist))], dtype="float64")
@@ -341,6 +482,10 @@ def save_pitc_region_masks(
 
 
 __all__ = [
+    "make_bjornfoot_qc_figure",
+    "make_pitc_figure",
+    "make_pwv_figure",
+    "plot_bjornfoot_qc_figure",
     "plot_flow_waveforms",
     "plot_pitc_figure",
     "plot_pwv_figure",

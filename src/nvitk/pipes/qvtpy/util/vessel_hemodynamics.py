@@ -33,7 +33,7 @@ from typing import Any
 import numpy as np
 import scipy.optimize
 
-from nvitk.core.array import as_backend_array
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import map_in_thread_pool
 from nvitk.core.logger import Logger
 from nvitk.measure.cross_section import (
@@ -139,6 +139,9 @@ class StationGeometryViz:
     pwv_weight_quality: float = float("nan")
     pwv_xcor_time_s: float = float("nan")
     pwv_time_to_upstroke_s: float = float("nan")
+    pwv_bjornfoot_weighted_rms: float = float("nan")
+    pwv_bjornfoot_delay_residual_s: float = float("nan")
+    pwv_bjornfoot_waveform_corr: float = float("nan")
 
 
 @dataclass
@@ -172,6 +175,7 @@ class RegionGeometryViz:
     pwv_r_fielding: Any = ""
     pwv_n_stations: int = 0
     vessels: dict[int, VesselGeometryViz] = field(default_factory=dict)
+    excluded_segments: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass
@@ -356,16 +360,37 @@ def build_all_label_waveforms(
     radius_vox: float,
     region_waveforms: dict[int, dict[str, Any]] | None = None,
 ) -> dict[int, dict[str, Any]]:
-    """Midpoint flow waveforms for every labeled centerline (arterial + venous)."""
+    """Midpoint flow waveforms for every labeled centerline (arterial + venous).
+
+    Venous labels present in *volume_seg* are included even when *centerlines*
+    only carries arterial tree polylines (PITC/PWV root groups).
+    """
+    from nvitk.morphology.centerline import compute_centerlines
     from nvitk.pipes.qvtpy.labels import QVTPY_VENOUS_LABEL_IDS
     from nvitk.pipes.qvtpy.util.loc_selection import pick_mid_loc_index
 
+    cls = {int(k): (as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
+    present_venous = {
+        int(v)
+        for v in np.unique(as_backend_array(volume_seg))
+        if int(v) in QVTPY_VENOUS_LABEL_IDS
+    }
+    missing_venous = sorted(lid for lid in present_venous if lid not in cls)
+    if missing_venous:
+        venous_cls = compute_centerlines(
+            volume_seg,
+            labels=missing_venous,
+            min_points=3,
+        )
+        for lid, pts in venous_cls.items():
+            cls[int(lid)] = (as_backend_array(pts)).astype("float64")
+
     out: dict[int, dict[str, Any]] = dict(region_waveforms or {})
-    for label_id in sorted(int(k) for k in centerlines.keys()):
+    for label_id in sorted(int(k) for k in cls.keys()):
         lid = int(label_id)
         if lid in out:
             continue
-        pts = (as_backend_array(centerlines[lid])).astype("float64")
+        pts = (as_backend_array(cls[lid])).astype("float64")
         if pts.shape[0] < 2:
             continue
         idx = pick_mid_loc_index(pts.shape[0], pts)
@@ -429,7 +454,7 @@ def _distance_offset_for_branch(
 
 
 def compute_vessel_hemodynamics(
-    centerlines: dict[int, np.ndarray],
+    centerlines: dict[int, np.ndarray] | None = None,
     *,
     volume_seg: np.ndarray,
     cd: np.ndarray,
@@ -451,25 +476,49 @@ def compute_vessel_hemodynamics(
     plane_interp_order: int = 1,
     cs_supersampling: bool = False,
     collect_plot_data: bool = False,
+    prefer_polylines: dict[int, np.ndarray] | None = None,
 ) -> VesselHemodynamicsResult:
-    """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling."""
+    """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling.
+
+    Arterial centerlines are regenerated from *volume_seg* with the same logic as
+    stage-4 ``centerlines_mask_4dflow`` (:func:`~nvitk.pipes.qvtpy.util.centerline_io.centerlines_from_segmentation`).
+    Optional *prefer_polylines* (stage-3 arterial CLs) match the stage-4 export bias.
+    Extra entries in *centerlines* (e.g. venous) are kept for waveform plots only.
+    """
     from nvitk.core.array import to_numpy
+    from nvitk.pipes.qvtpy.util.centerline_io import centerlines_from_segmentation
     from nvitk.pipes.qvtpy.util.mask_cleaning import clean_volume_seg_for_pitc
 
     result = VesselHemodynamicsResult()
-    cls = {int(k): (as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
-    # Drop isolated label islands before station sampling / label-constrained CS.
+    extras = {
+        int(k): (as_backend_array(v)).astype("float64")
+        for k, v in (centerlines or {}).items()
+    }
+    prefer = {
+        int(k): (as_backend_array(v)).astype("float64")
+        for k, v in (prefer_polylines or {}).items()
+        if v is not None
+    }
+    # Same regeneration as centerlines_mask_4dflow.nii.gz.
+    cls = {
+        int(k): (as_backend_array(v)).astype("float64")
+        for k, v in centerlines_from_segmentation(
+            volume_seg,
+            min_points=3,
+            prefer_polylines=prefer or None,
+        ).items()
+    }
     volume_seg = clean_volume_seg_for_pitc(volume_seg, cls)
     result.volume_seg = to_numpy(volume_seg).astype(np.int32, copy=False)
 
-    sample_kw = dict[str, ndarray[_AnyShape, dtype[Any]] | tuple[float, float, float] | int | float | str](
+    sample_kw = dict(
         cd=cd,
         mag=mag,
         vel_mag=vel_mag,
         vx=vx,
         vy=vy,
         vz=vz,
-        volume_seg=volume_seg,
+        volume_seg=result.volume_seg,
         voxel_spacing=voxel_spacing,
         stride=stride,
         radius_vox=radius_vox,
@@ -485,8 +534,9 @@ def compute_vessel_hemodynamics(
     for group in ROOT_GROUPS:
         if group.root_label not in cls:
             continue
-        root_pts = _orient_polyline(cls[group.root_label], _root_proximal_anchor(cls[group.root_label]))
-        # Re-anchor so index 0 is the proximal (inferior) end -> distance grows distally.
+        root_pts = _orient_polyline(
+            cls[group.root_label], _root_proximal_anchor(cls[group.root_label])
+        )
         root_anchor = _root_proximal_anchor(root_pts)
         root_pts = _orient_polyline(root_pts, root_anchor)
 
@@ -601,6 +651,8 @@ def compute_vessel_hemodynamics(
                 pwv_result,
                 plot_data,
                 quality_thresh=quality_thresh,
+                excluded_segments=[],
+                root_init_xyz=root_pts[0],
             )
 
         result.summary_rows.append(
@@ -653,9 +705,13 @@ def compute_vessel_hemodynamics(
                 prev = merged_region_wf.get(int(label))
                 if prev is None or int(wf["n_stations"]) > int(prev["n_stations"]):
                     merged_region_wf[int(label)] = wf
+        waveform_cls = dict(cls)
+        for lid, pts in extras.items():
+            if int(lid) not in waveform_cls:
+                waveform_cls[int(lid)] = pts
         result.all_label_waveforms = build_all_label_waveforms(
-            cls,
-            volume_seg=volume_seg,
+            waveform_cls,
+            volume_seg=result.volume_seg,
             cd=cd,
             mag=mag,
             vel_mag=vel_mag,
@@ -681,6 +737,11 @@ def _root_pwv(
     tag = region_id or "root"
     empty = {
         "pwv_bjornfoot_m_s": "",
+        "pwv_bjornfoot_raw_m_s": float("nan"),
+        "pwv_bjornfoot_cost": float("nan"),
+        "pwv_bjornfoot_weighted_rms": np.array([], dtype="float64"),
+        "pwv_bjornfoot_expected_delay_s": np.array([], dtype="float64"),
+        "pwv_bjornfoot_waveform_corr": np.array([], dtype="float64"),
         "pwv_fielding_m_s": "",
         "pwv_r_fielding": "",
         "pwv_n_stations": 0,
@@ -738,6 +799,17 @@ def _root_pwv(
     )
     return {
         "pwv_bjornfoot_m_s": bj_val,
+        "pwv_bjornfoot_raw_m_s": bj.get("pwv_raw_m_s", float("nan")),
+        "pwv_bjornfoot_cost": bj.get("cost", float("nan")),
+        "pwv_bjornfoot_weighted_rms": bj.get(
+            "weighted_residual_rms", np.array([], dtype="float64")
+        ),
+        "pwv_bjornfoot_expected_delay_s": bj.get(
+            "expected_delay_s", np.array([], dtype="float64")
+        ),
+        "pwv_bjornfoot_waveform_corr": bj.get(
+            "waveform_correlation", np.array([], dtype="float64")
+        ),
         "pwv_fielding_m_s": fi_val,
         "pwv_r_fielding": fi["r"],
         "pwv_n_stations": int(len(good)),
@@ -768,6 +840,15 @@ def _collect_region_plot_data(
     pwv_dist_mm = np.array([r["distance_mm"] for r in good], dtype="float64")
     xcor_time_s = np.full(len(good), np.nan, dtype="float64")
     upstroke_s = np.full(len(good), np.nan, dtype="float64")
+    bj_weighted_rms = to_numpy(
+        pwv_result.get("pwv_bjornfoot_weighted_rms", [])
+    ).astype("float64").reshape(-1)
+    bj_expected_delay_s = to_numpy(
+        pwv_result.get("pwv_bjornfoot_expected_delay_s", [])
+    ).astype("float64").reshape(-1)
+    bj_waveform_corr = to_numpy(
+        pwv_result.get("pwv_bjornfoot_waveform_corr", [])
+    ).astype("float64").reshape(-1)
     w1 = np.zeros(len(good), dtype="float64")
     w2 = np.zeros(len(good), dtype="float64")
     tr = float(temporal_resolution_s) if temporal_resolution_s else 0.0
@@ -795,6 +876,12 @@ def _collect_region_plot_data(
             upstroke_s[i] = time_to_upstroke_seconds(
                 as_backend_array(r["flow_ts"]).astype("float64"), tr
             )
+    bj_delay_residual_s = np.full(len(good), np.nan, dtype="float64")
+    n_delay = min(len(good), bj_expected_delay_s.size)
+    if n_delay:
+        bj_delay_residual_s[:n_delay] = (
+            xcor_time_s[:n_delay] - bj_expected_delay_s[:n_delay]
+        )
 
     # Per-vessel flow waveforms (mean +/- std across the vessel's own stations).
     vessel_waveforms: dict[int, dict[str, Any]] = {}
@@ -831,6 +918,11 @@ def _collect_region_plot_data(
         "pwv_weight_area": w1,
         "pwv_weight_quality": w2,
         "pwv_bjornfoot_m_s": pwv_result.get("pwv_bjornfoot_m_s"),
+        "pwv_bjornfoot_raw_m_s": pwv_result.get("pwv_bjornfoot_raw_m_s"),
+        "pwv_bjornfoot_cost": pwv_result.get("pwv_bjornfoot_cost"),
+        "pwv_bjornfoot_weighted_rms": bj_weighted_rms,
+        "pwv_bjornfoot_delay_residual_s": bj_delay_residual_s,
+        "pwv_bjornfoot_waveform_corr": bj_waveform_corr,
         "pwv_fielding_m_s": pwv_result.get("pwv_fielding_m_s"),
         "temporal_resolution_s": tr if tr > 0 else None,
         "vessel_waveforms": vessel_waveforms,
@@ -847,17 +939,33 @@ def _build_region_geometry(
     plot_data: dict[str, Any],
     *,
     quality_thresh: float,
+    excluded_segments: list[np.ndarray] | None = None,
+    root_init_xyz: np.ndarray | None = None,
 ) -> RegionGeometryViz:
     """Build Napari-ready geometry: oriented polylines, init/fin, station XYZ."""
     from nvitk.core.array import to_numpy
 
     root_arr = to_numpy(root_pts).astype("float64", copy=False)
+    init_xyz = (
+        to_numpy(root_init_xyz).astype("float64", copy=False).reshape(3)
+        if root_init_xyz is not None
+        else root_arr[0].copy()
+    )
     pwv_meta_by_key: dict[tuple[int, int, float], int] = {}
     pwv_dist = to_numpy(plot_data.get("pwv_distance_mm", [])).astype("float64").reshape(-1)
     pwv_w1 = to_numpy(plot_data.get("pwv_weight_area", [])).astype("float64").reshape(-1)
     pwv_w2 = to_numpy(plot_data.get("pwv_weight_quality", [])).astype("float64").reshape(-1)
     pwv_xcor = to_numpy(plot_data.get("pwv_xcor_time_s", [])).astype("float64").reshape(-1)
     pwv_ttu = to_numpy(plot_data.get("pwv_time_to_upstroke_s", [])).astype("float64").reshape(-1)
+    pwv_bj_rms = to_numpy(
+        plot_data.get("pwv_bjornfoot_weighted_rms", [])
+    ).astype("float64").reshape(-1)
+    pwv_bj_delay_resid = to_numpy(
+        plot_data.get("pwv_bjornfoot_delay_residual_s", [])
+    ).astype("float64").reshape(-1)
+    pwv_bj_corr = to_numpy(
+        plot_data.get("pwv_bjornfoot_waveform_corr", [])
+    ).astype("float64").reshape(-1)
     good_rows = [r for r in group_stations if r["quality"] > float(quality_thresh)]
     good_rows.sort(key=lambda r: r["distance_mm"])
     for i, r in enumerate(good_rows):
@@ -896,6 +1004,9 @@ def _build_region_geometry(
                     pwv_weight_quality=float(pwv_w2[pwv_i]) if pwv_i is not None and pwv_i < pwv_w2.size else float("nan"),
                     pwv_xcor_time_s=float(pwv_xcor[pwv_i]) if pwv_i is not None and pwv_i < pwv_xcor.size else float("nan"),
                     pwv_time_to_upstroke_s=float(pwv_ttu[pwv_i]) if pwv_i is not None and pwv_i < pwv_ttu.size else float("nan"),
+                    pwv_bjornfoot_weighted_rms=float(pwv_bj_rms[pwv_i]) if pwv_i is not None and pwv_i < pwv_bj_rms.size else float("nan"),
+                    pwv_bjornfoot_delay_residual_s=float(pwv_bj_delay_resid[pwv_i]) if pwv_i is not None and pwv_i < pwv_bj_delay_resid.size else float("nan"),
+                    pwv_bjornfoot_waveform_corr=float(pwv_bj_corr[pwv_i]) if pwv_i is not None and pwv_i < pwv_bj_corr.size else float("nan"),
                 )
             )
         vessels[int(label_id)] = VesselGeometryViz(
@@ -910,7 +1021,7 @@ def _build_region_geometry(
         region_id=group.region_id,
         root_label=int(group.root_label),
         root_polyline_oriented=root_arr,
-        root_init_xyz=root_arr[0].copy(),
+        root_init_xyz=init_xyz,
         root_fin_xyz=root_arr[-1].copy(),
         pitc_slope=float(fit.get("pitc_slope", float("nan"))),
         pitc_intercept=float(fit.get("pitc_intercept", float("nan"))),
@@ -923,6 +1034,11 @@ def _build_region_geometry(
         pwv_r_fielding=pwv_result.get("pwv_r_fielding", ""),
         pwv_n_stations=int(pwv_result.get("pwv_n_stations") or 0),
         vessels=vessels,
+        excluded_segments=[
+            to_numpy(seg).astype("float32", copy=False)
+            for seg in (excluded_segments or [])
+            if seg is not None and np.asarray(seg).shape[0] >= 2
+        ],
     )
 
 

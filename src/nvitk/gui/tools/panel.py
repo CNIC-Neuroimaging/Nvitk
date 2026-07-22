@@ -165,6 +165,7 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "root_region",
         "temporal_resolution_s",
         "pwv_method",
+        "heart_rate_json",
         "station_color_feature",
         "station_point_size",
     )
@@ -366,9 +367,16 @@ def build_tool_panel(
                 "pwv_weight_quality",
                 "pwv_xcor_time_s",
                 "pwv_time_to_upstroke_s",
+                "pwv_bjornfoot_weighted_rms",
+                "pwv_bjornfoot_delay_residual_s",
+                "pwv_bjornfoot_waveform_corr",
             ],
             "label": "Color stations by",
             "value": "quality",
+        },
+        heart_rate_json={
+            "label": "Cardiac metadata JSON (HeartRate)",
+            "value": "",
         },
         cmap={
             "label": "SUV colormap",
@@ -611,6 +619,7 @@ def build_tool_panel(
         pwv_method: str,
         station_color_feature: str,
         station_point_size: float,
+        heart_rate_json: str,
         hemo_method: str,
         min_turn_angle_deg: float,
         min_separation_points: int,

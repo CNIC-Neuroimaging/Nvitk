@@ -314,25 +314,33 @@ def _run_vessel_hemodynamics(
     seg_metadata: dict | None = None,
 ) -> None:
     """Sample dense PITC/PWV and write ``pitc_profile.csv`` + ``vessel_hemodynamics.csv``."""
+    if not bool(np.any(volume_seg)):
+        log.warning(f"[{subject}] stage6 PITC: empty stage-4 segmentation; skipping")
+        return
+    # Prefer stage-3 arterial polylines (same bias as stage-4 CL export) and load
+    # venous polylines for flow_waveforms.png.
+    waveform_centerlines: dict[int, np.ndarray] = {}
+    prefer_arterial: dict[int, np.ndarray] = {}
     s3 = _stage3_dir(output_root, subject)
     s4 = _stage4_dir(output_root, subject)
-    arterial, venous, _meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
-    centerlines = {int(k): to_numpy(v) for k, v in arterial.items()}
-    from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
+    try:
+        arterial, venous, meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
+        prefer_arterial = {int(k): to_numpy(v) for k, v in arterial.items()}
+        from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
 
-    venous_ids = {
-        k: int(v) for k, v in (_meta.get("venous_label_by_name") or {}).items()
-    }
-    for name, poly in venous.items():
-        lid = venous_name_to_label_id(str(name), venous_ids)
-        if lid is not None:
-            centerlines[int(lid)] = to_numpy(poly)
-    if not centerlines:
-        log.warning(f"[{subject}] stage6 PITC: no arterial centerlines; skipping")
-        return
+        venous_ids = {
+            k: int(v) for k, v in (meta.get("venous_label_by_name") or {}).items()
+        }
+        for name, poly in venous.items():
+            lid = venous_name_to_label_id(str(name), venous_ids)
+            if lid is not None:
+                waveform_centerlines[int(lid)] = to_numpy(poly)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"[{subject}] stage6: stage3/4 centerlines unavailable ({exc})")
     hemo = compute_vessel_hemodynamics(
-        centerlines,
+        waveform_centerlines or None,
         volume_seg=volume_seg,
+        prefer_polylines=prefer_arterial or None,
         cd=cd,
         mag=mag,
         vel_mag=vel_mag,
@@ -391,8 +399,9 @@ def _save_measurement_plots(
     volume_seg: np.ndarray,
     seg_metadata: dict | None,
 ) -> None:
-    """Render the PITC/PWV/flow figures and write per-region PITC branch masks."""
+    """Render PITC/PWV/Bjornfoot-QC/flow figures and per-region PITC masks."""
     from nvitk.pipes.qvtpy.util.measure_plots import (
+        plot_bjornfoot_qc_figure,
         plot_flow_waveforms,
         plot_pitc_figure,
         plot_pwv_figure,
@@ -404,6 +413,9 @@ def _save_measurement_plots(
     try:
         plot_pitc_figure(hemo.region_plot_data, plots_dir / "pitc.png")
         plot_pwv_figure(hemo.region_plot_data, plots_dir / "pwv.png")
+        plot_bjornfoot_qc_figure(
+            hemo.region_plot_data, plots_dir / "pwv_bjornfoot_qc.png"
+        )
         plot_flow_waveforms(
             hemo.region_plot_data,
             plots_dir / "flow_waveforms.png",

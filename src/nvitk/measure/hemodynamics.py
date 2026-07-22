@@ -10,6 +10,8 @@ backend; inputs are coerced with :func:`~nvitk.core.array.as_backend_array`.
 
 from __future__ import annotations
 
+from typing import Any
+
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
 
@@ -422,14 +424,14 @@ def bjornfoot_prepare_waveforms(
     return F_out, W, keep
 
 
-def _pwvest3_share_diff(
+def _pwvest3_share_components(
     in_params: np.ndarray,
     distances_m: np.ndarray,
     flows_norm: np.ndarray,
     temporal_resolution_s: float,
     weights: np.ndarray,
-) -> np.ndarray | None:
-    """Weighted residual matrix from QVTplus ``PWVest3_share.m`` (or None if invalid)."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Return fitted waveforms, observations, and weights for ``PWVest3_share``."""
     params = np.asarray(in_params, dtype=np.float64).reshape(-1)
     m = int(params.size - 1)
     if m < 2:
@@ -466,11 +468,65 @@ def _pwvest3_share_diff(
         assume_sorted=True,
     )
     v_shift = interp(delta_t)[:, region]
-    weightm = np.repeat(Qw[:, np.newaxis], m, axis=1)
-    diff = v_shift - F
-    if not np.all(np.isfinite(diff)):
+    if not np.all(np.isfinite(v_shift)) or not np.all(np.isfinite(F)):
         return None
-    return np.sqrt(np.clip(weightm, 0.0, None)) * diff
+    return v_shift, F, np.clip(Qw, 0.0, None)
+
+
+def _pwvest3_share_diff(
+    in_params: np.ndarray,
+    distances_m: np.ndarray,
+    flows_norm: np.ndarray,
+    temporal_resolution_s: float,
+    weights: np.ndarray,
+) -> np.ndarray | None:
+    """Weighted residual matrix from QVTplus ``PWVest3_share.m`` (or None if invalid)."""
+    components = _pwvest3_share_components(
+        in_params, distances_m, flows_norm, temporal_resolution_s, weights
+    )
+    if components is None:
+        return None
+    fitted, observed, station_weights = components
+    return np.sqrt(station_weights[:, np.newaxis]) * (fitted - observed)
+
+
+def _pwvest3_share_diagnostics(
+    in_params: np.ndarray,
+    distances_m: np.ndarray,
+    flows_norm: np.ndarray,
+    temporal_resolution_s: float,
+    weights: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Per-station diagnostics from the fitted Bjornfoot shared-template model."""
+    components = _pwvest3_share_components(
+        in_params, distances_m, flows_norm, temporal_resolution_s, weights
+    )
+    if components is None:
+        return {}
+    fitted, observed, station_weights = components
+    raw_diff = fitted - observed
+    weighted_rms = np.sqrt(
+        np.mean(station_weights[:, np.newaxis] * raw_diff * raw_diff, axis=1)
+    )
+    fitted_centered = fitted - np.mean(fitted, axis=1, keepdims=True)
+    observed_centered = observed - np.mean(observed, axis=1, keepdims=True)
+    denom = np.sqrt(
+        np.sum(fitted_centered * fitted_centered, axis=1)
+        * np.sum(observed_centered * observed_centered, axis=1)
+    )
+    correlations = np.divide(
+        np.sum(fitted_centered * observed_centered, axis=1),
+        denom,
+        out=np.full(fitted.shape[0], np.nan, dtype=np.float64),
+        where=denom > 1e-12,
+    )
+    return {
+        "template_norm": np.asarray(in_params[:-1], dtype=np.float64),
+        "fitted_waveforms_norm": fitted,
+        "observed_waveforms_norm": observed,
+        "weighted_residual_rms": weighted_rms,
+        "waveform_correlation": correlations,
+    }
 
 
 def pwvest3_share_cost(
@@ -518,7 +574,7 @@ def pwv_bjornfoot_optimize(
     qualities=None,
     quality_thresh: float = QUALITY_THRESH_DEFAULT,
     weight_mode: str = "area",
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Bjornfoot PWV via QVTplus ``enc_PWV_WO`` + ``PWVest3_share`` (unbounded LS).
 
     Jointly fits the shared velocity template and PWV by weighted least squares
@@ -569,14 +625,33 @@ def pwv_bjornfoot_optimize(
         xtol=1e-7,
         gtol=1e-7,
     )
-    pwv = float(res.x[-1])
+    pwv_raw = float(res.x[-1])
     cost = float(np.sum(res.fun * res.fun)) if res.fun is not None else float("nan")
+    diagnostics = (
+        _pwvest3_share_diagnostics(res.x, dist_k, F_k, tr, W_k)
+        if np.isfinite(pwv_raw) and pwv_raw > 0.0
+        else {}
+    )
+    expected_delay_s = (
+        (dist_k - dist_k[0]) / pwv_raw
+        if np.isfinite(pwv_raw) and pwv_raw > 0.0
+        else np.full(n_stations, np.nan, dtype=np.float64)
+    )
+    pwv = pwv_raw
     if not np.isfinite(pwv):
         pwv = float("nan")
     elif pwv <= 0.0 or pwv >= PWV_MAX_M_S:
         # QVTplus enc_PWV_WO: Results(end)<0 → PWV=-1 (rejected downstream).
         pwv = float("nan")
-    return {"pwv_m_s": pwv, "cost": cost, "n": n_stations, "weights": W_k}
+    return {
+        "pwv_m_s": pwv,
+        "pwv_raw_m_s": pwv_raw,
+        "cost": cost,
+        "n": n_stations,
+        "weights": W_k,
+        "expected_delay_s": expected_delay_s,
+        **diagnostics,
+    }
 
 
 def normalize_waveform(flow_t, *, eps: float = 1e-9):

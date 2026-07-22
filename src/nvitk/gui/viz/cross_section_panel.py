@@ -6,46 +6,73 @@ from typing import Any
 
 import numpy as np
 
-from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
+
+from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 
 LAYER_NAME = "Cross-section (2D dock)"
 DOCK_OBJECT_NAME = "nvitk_vessel_cross_section_dock"
 
 
 class CrossSectionPanel(QWidget):
-    """Dock widget showing intensity + mask overlay for one oblique plane."""
+    """Dock widget showing intensity + mask overlay and optional flow waveforms."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._title = QLabel("Click a centerline in 3D to view cross-section")
         self._title.setWordWrap(True)
         layout = QVBoxLayout()
+        self._pick_toggle = QCheckBox("Pick cross-section on click")
+        self._pick_toggle.setChecked(True)
+        self._pick_toggle.setToolTip(
+            "Uncheck to freely rotate / pan / zoom the 3D view without triggering "
+            "a cross-section pick on left-click."
+        )
+        layout.addWidget(self._pick_toggle)
         layout.addWidget(self._title)
-        self._canvas = None
-        self._fig = None
-        self._ax = None
+        self._slice_canvas = None
+        self._slice_fig = None
+        self._slice_ax = None
+        self._wave_canvas = None
+        self._wave_fig = None
+        self._wave_ax = None
         try:
             from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
             from matplotlib.figure import Figure
 
-            self._fig = Figure(figsize=(3.2, 3.2), dpi=96)
-            self._ax = self._fig.add_subplot(111)
-            self._canvas = FigureCanvasQTAgg(self._fig)
-            layout.addWidget(self._canvas, stretch=1)
+            self._slice_fig = Figure(figsize=(3.2, 3.0), dpi=96)
+            self._slice_ax = self._slice_fig.add_subplot(111)
+            self._slice_canvas = FigureCanvasQTAgg(self._slice_fig)
+            layout.addWidget(self._slice_canvas, stretch=2)
+
+            self._wave_fig = Figure(figsize=(3.2, 2.0), dpi=96)
+            self._wave_ax = self._wave_fig.add_subplot(111)
+            self._wave_canvas = FigureCanvasQTAgg(self._wave_fig)
+            layout.addWidget(self._wave_canvas, stretch=1)
         except Exception as exc:
             err = QLabel(f"Matplotlib unavailable: {exc}")
             err.setWordWrap(True)
             layout.addWidget(err)
         self.setLayout(layout)
 
+    def is_picking_enabled(self) -> bool:
+        """True when left-click should trigger a cross-section pick."""
+        return bool(self._pick_toggle.isChecked())
+
+    def set_picking_enabled(self, enabled: bool) -> None:
+        self._pick_toggle.setChecked(bool(enabled))
+
     def clear(self, message: str = "") -> None:
         if message:
             self._title.setText(message)
-        if self._ax is None or self._canvas is None:
-            return
-        self._ax.clear()
-        self._ax.set_axis_off()
-        self._canvas.draw_idle()
+        if self._slice_ax is not None and self._slice_canvas is not None:
+            self._slice_ax.clear()
+            self._slice_ax.set_axis_off()
+            self._slice_canvas.draw_idle()
+        if self._wave_ax is not None and self._wave_canvas is not None:
+            self._wave_ax.clear()
+            self._wave_ax.set_axis_off()
+            self._wave_canvas.draw_idle()
 
     def show_slice(
         self,
@@ -53,17 +80,18 @@ class CrossSectionPanel(QWidget):
         mask: np.ndarray | None,
         *,
         title: str,
+        waveforms: list[dict[str, Any]] | None = None,
     ) -> None:
         self._title.setText(title)
-        if self._ax is None or self._canvas is None:
+        if self._slice_ax is None or self._slice_canvas is None:
             return
-        self._ax.clear()
+        self._slice_ax.clear()
         sl = np.asarray(intensity, dtype=np.float64)
         vmin = float(np.min(sl))
         vmax = float(np.max(sl))
         if vmax <= vmin:
             vmax = vmin + 1.0
-        self._ax.imshow(
+        self._slice_ax.imshow(
             sl,
             cmap="gray",
             origin="lower",
@@ -77,69 +105,59 @@ class CrossSectionPanel(QWidget):
                 rgba = np.zeros((*m.shape, 4), dtype=np.float32)
                 rgba[m, 0] = 1.0
                 rgba[m, 3] = 0.35
-                self._ax.imshow(rgba, origin="lower", interpolation="nearest")
-        self._ax.set_axis_off()
-        self._fig.tight_layout(pad=0.2)
-        self._canvas.draw_idle()
+                self._slice_ax.imshow(rgba, origin="lower", interpolation="nearest")
+        self._slice_ax.set_axis_off()
+        self._slice_fig.tight_layout(pad=0.2)
+        self._slice_canvas.draw_idle()
+        self._draw_waveforms(waveforms)
 
-
-def _napari_left_layer_docks(viewer: Any) -> tuple[Any | None, Any | None]:
-    """Return (layer controls dock, layer list dock) on Napari's left edge."""
-    try:
-        qt_viewer = viewer.window._qt_viewer
-    except Exception:
-        return None, None
-    controls = getattr(qt_viewer, "dockLayerControls", None)
-    layer_list = getattr(qt_viewer, "dockLayerList", None)
-    return controls, layer_list
+    def _draw_waveforms(self, waveforms: list[dict[str, Any]] | None) -> None:
+        if self._wave_ax is None or self._wave_canvas is None:
+            return
+        self._wave_ax.clear()
+        if not waveforms:
+            self._wave_ax.set_axis_off()
+            self._wave_canvas.draw_idle()
+            return
+        phases = None
+        for item in waveforms:
+            flow = np.asarray(item.get("flow_ml_s", []), dtype=np.float64).reshape(-1)
+            if flow.size == 0:
+                continue
+            if phases is None:
+                phases = np.arange(flow.size, dtype=np.float64)
+            offset = int(item.get("offset", 0))
+            index = int(item.get("index", 0))
+            if offset == 0:
+                color = "#1f3b73"
+                label = f"selected (idx {index})"
+                lw = 2.2
+            elif offset < 0:
+                color = "#d62728"
+                label = f"{offset:+d} (idx {index})"
+                lw = 1.4
+            else:
+                color = "#2ca02c"
+                label = f"{offset:+d} (idx {index})"
+                lw = 1.4
+            self._wave_ax.plot(phases, flow, color=color, lw=lw, label=label)
+        self._wave_ax.set_xlabel("cardiac phase")
+        self._wave_ax.set_ylabel("Q (ml/s)")
+        self._wave_ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+        self._wave_ax.grid(True, alpha=0.25)
+        self._wave_fig.tight_layout(pad=0.3)
+        self._wave_canvas.draw_idle()
 
 
 def attach_cross_section_dock(viewer: Any, panel: CrossSectionPanel) -> Any:
-    """
-    Attach *panel* on the left: below Napari layer controls, above the layer list.
-    """
-    try:
-        win = viewer.window._qt_window
-    except Exception:
-        try:
-            win = viewer.window.qt_viewer.parent()
-        except Exception:
-            return None
-    try:
-        from qtpy.QtCore import Qt
-        from qtpy.QtWidgets import QDockWidget, QSizePolicy
-
-        for child in win.findChildren(QDockWidget):
-            if child.objectName() == DOCK_OBJECT_NAME:
-                child.setWidget(panel)
-                child.show()
-                child.raise_()
-                return child
-
-        dock = QDockWidget("Vessel cross-section", win)
-        dock.setObjectName(DOCK_OBJECT_NAME)
-        dock.setWidget(panel)
-        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        panel.setMinimumSize(240, 220)
-        dock.setMinimumWidth(240)
-        dock.setMaximumWidth(340)
-
-        controls, layer_list = _napari_left_layer_docks(viewer)
-        win.addDockWidget(Qt.LeftDockWidgetArea, dock)
-        if controls is not None and layer_list is not None:
-            win.splitDockWidget(controls, dock, Qt.Vertical)
-            win.splitDockWidget(dock, layer_list, Qt.Vertical)
-        elif layer_list is not None:
-            win.splitDockWidget(dock, layer_list, Qt.Vertical)
-        elif controls is not None:
-            win.splitDockWidget(controls, dock, Qt.Vertical)
-
-        dock.show()
-        dock.raise_()
-        return dock
-    except Exception:
-        return None
+    """Attach *panel* on Napari's left edge."""
+    return attach_left_inspection_dock(
+        viewer,
+        panel,
+        object_name=DOCK_OBJECT_NAME,
+        title="Vessel cross-section",
+        minimum_width=280,
+    )
 
 
 __all__ = [

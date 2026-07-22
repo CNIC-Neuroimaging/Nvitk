@@ -529,6 +529,33 @@ def _repair_time_dim_range(viewer: Any, phase_layer: Any) -> None:
     viewer.dims.range = tuple(full)
 
 
+def _topmost_phase_layer(viewer: Any) -> Any | None:
+    """Topmost 4D+ Image/Labels layer (cardiac-phase volume), if any."""
+    for lyr in reversed(list(getattr(viewer, "layers", []) or [])):
+        if type(lyr).__name__ not in ("Image", "Labels"):
+            continue
+        data = getattr(lyr, "data", None)
+        if int(getattr(data, "ndim", 0) or 0) > 3:
+            return lyr
+    return None
+
+
+def repair_time_dim_for_viewer(viewer: Any) -> None:
+    """Force the cardiac-phase slider to the true phase count.
+
+    Adding 3D overlays/volumes next to a 4D ``XYZT`` layer makes Napari right-align
+    their spatial axes onto the 4D time world-axis, inflating the slider to thousands
+    of steps. Re-applying the phase layer's own time extent restores the real count.
+    """
+    phase_layer = _topmost_phase_layer(viewer)
+    if phase_layer is None:
+        return
+    try:
+        _repair_time_dim_range(viewer, phase_layer)
+    except Exception:
+        pass
+
+
 def _global_speed_limits(cache: FlowVectorCache) -> tuple[float, float]:
     if cache.magnitudes.size == 0:
         return (0.0, 1.0)
