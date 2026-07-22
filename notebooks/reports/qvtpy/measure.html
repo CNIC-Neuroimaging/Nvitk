@@ -288,6 +288,7 @@ Q_{\text{quality},m} = qv_{\text{meanflow}} + qv_{\text{area}} + qv_{\text{circ}
 <tr><td><strong>Basilar</strong></td><td>Basilar, LPCA, RPCA, LVA, RVA</td></tr>
 </tbody></table>
 <p>Communicating arteries are excluded. PCAs belong under Basilar only.</p>
+<p>Centerlines match stage-4 bifurcation decomposition: for MCA/ACA/PCA, <strong>every named branch</strong> (trunk + side arms at junctions, e.g. <code>LMCA-M1</code>, <code>LMCA-M2a</code>) is densely sampled into that root’s PITC/PWV station pool. ICA/basilar/vertebral labels remain single-path. GUI PITC/PWV overlays use the same named-branch polylines and stations.</p>
 <p><strong>Arc length</strong> along polyline \(\{\mathbf{p}_k\}\) with anisotropic spacing \(\mathbf{s}\):</p>
 \[
 d_k = \sum_{j=1}^{k} \|\,(\mathbf{p}_j-\mathbf{p}_{j-1})\odot\mathbf{s}\,\|_2

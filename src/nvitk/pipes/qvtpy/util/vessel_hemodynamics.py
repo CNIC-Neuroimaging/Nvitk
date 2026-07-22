@@ -4,7 +4,8 @@ This is the mask-aware qvtpy analogue of the QVTplus post-processing PITC/PWV
 pipeline. Instead of the MATLAB geometric connectivity search over a single binary
 complex-difference (CD) skeleton, it walks a deterministic label-aware tree rooted
 at the left ICA, right ICA, and basilar artery, sampling oblique cross-sections
-along each vessel's own multilabel ``seg_4dflow`` mask.
+along each vessel's own multilabel ``seg_4dflow`` mask. Sampling uses the same
+named bifurcation branches as stage-4 centerline generation (trunk + side arms).
 
 For each station along a vessel it records distance from the root, pulsatility
 index (PI), waveform quality, cross-sectional area, and the flow time series. Those
@@ -174,7 +175,7 @@ class RegionGeometryViz:
     pwv_fielding_m_s: Any = ""
     pwv_r_fielding: Any = ""
     pwv_n_stations: int = 0
-    vessels: dict[int, VesselGeometryViz] = field(default_factory=dict)
+    vessels: dict[str, VesselGeometryViz] = field(default_factory=dict)
     excluded_segments: list[np.ndarray] = field(default_factory=list)
 
 
@@ -286,6 +287,7 @@ def _sample_vessel_stations(
     plane_interp_order: int = 1,
     cs_supersampling: bool = False,
     quality_metric: str = "stdv_from_mean",
+    branch_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Sample cross-sections along one vessel; return per-station metric dicts."""
     pts = (as_backend_array(points_xyz)).astype("float64")
@@ -294,6 +296,7 @@ def _sample_vessel_stations(
     tangents = (centerline_tangents(pts, k_half=2))
     arc = _arc_length_mm(pts, voxel_spacing)
     step = max(1, int(stride))
+    vname = str(branch_name) if branch_name else qvtpy_vessel_name(int(label_id))
     rows: list[dict[str, Any]] = []
     for idx in range(0, pts.shape[0], step):
         try:
@@ -330,7 +333,7 @@ def _sample_vessel_stations(
         rows.append(
             {
                 "vessel_id": int(label_id),
-                "vessel_name": qvtpy_vessel_name(int(label_id)),
+                "vessel_name": vname,
                 "station_index": int(idx),
                 "distance_mm": float(distance_offset_mm + arc[idx]),
                 "pi": float(pi),
@@ -481,14 +484,16 @@ def compute_vessel_hemodynamics(
     """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling.
 
     Arterial centerlines are regenerated from *volume_seg* with the same logic as
-    stage-4 ``centerlines_mask_4dflow`` (:func:`~nvitk.pipes.qvtpy.util.centerline_io.centerlines_from_segmentation`).
-    Optional *prefer_polylines* (stage-3 arterial CLs) match the stage-4 export bias.
-    Extra entries in *centerlines* (e.g. venous) are kept for waveform plots only.
+    stage-4 ``centerlines_mask_4dflow`` (:func:`~nvitk.pipes.qvtpy.util.centerline_io.centerlines_from_segmentation`),
+    including **all named bifurcation branches** (e.g. ``LMCA-M1``, ``LMCA-M2a``).
+    Every named branch is densely sampled into the root PITC/PWV station pool
+    (matching stage-4/5 branch coverage). Optional *prefer_polylines* (stage-3
+    arterial CLs) match the stage-4 export bias. Extra entries in *centerlines*
+    (e.g. venous) are kept for waveform plots only.
     """
     from nvitk.core.array import to_numpy
     from nvitk.pipes.qvtpy.util.centerline_io import (
         centerlines_from_segmentation,
-        main_path_of,
     )
     from nvitk.pipes.qvtpy.util.mask_cleaning import clean_volume_seg_for_pitc
 
@@ -508,7 +513,7 @@ def compute_vessel_hemodynamics(
         min_points=3,
         prefer_polylines=prefer or None,
     )
-    # Named sub-branches per parent label (for per-branch damping rows).
+    # Named sub-branches per parent label (stage-4 bifurcation decomposition).
     named_branches_by_label: dict[int, list[tuple[str, np.ndarray]]] = {
         int(k): [
             (str(n), (as_backend_array(p)).astype("float64")) for n, p in v
@@ -516,7 +521,7 @@ def compute_vessel_hemodynamics(
         for k, v in cls_branches_raw.items()
         if v
     }
-    # Trunk (main-path) view drives the existing root/branch PITC sampling.
+    # Trunk polyline per label (waveforms / presence checks).
     cls = {
         lid: named[0][1]
         for lid, named in named_branches_by_label.items()
@@ -552,63 +557,95 @@ def compute_vessel_hemodynamics(
     )
 
     for group in ROOT_GROUPS:
-        if group.root_label not in cls:
+        root_named = named_branches_by_label.get(int(group.root_label)) or []
+        if not root_named:
             continue
+        _root_trunk_name, root_trunk_pts = root_named[0]
         root_pts = _orient_polyline(
-            cls[group.root_label], _root_proximal_anchor(cls[group.root_label])
+            root_trunk_pts, _root_proximal_anchor(root_trunk_pts)
         )
         root_anchor = _root_proximal_anchor(root_pts)
         root_pts = _orient_polyline(root_pts, root_anchor)
 
         group_stations: list[dict[str, Any]] = []
-        vessel_polylines: dict[int, tuple[np.ndarray, float]] = {
-            int(group.root_label): (root_pts.copy(), 0.0),
-        }
-        root_rows = _sample_vessel_stations(
-            root_pts,
-            group.root_label,
-            distance_offset_mm=0.0,
-            **sample_kw,
-        )
-        for r in root_rows:
-            r["root_region_id"] = group.region_id
-        group_stations.extend(root_rows)
-
+        # branch_name -> (oriented polyline, distance offset mm, parent label id)
+        vessel_polylines: dict[str, tuple[np.ndarray, float, int]] = {}
+        branch_rows_by_name: dict[str, list[dict[str, Any]]] = {}
         branch_rows_by_label: dict[int, list[dict[str, Any]]] = {}
-        eligible_branches = [
+
+        # Sample every named root branch (ICA/basilar usually a single trunk).
+        root_rows: list[dict[str, Any]] = []
+        for bidx, (bname, bpts) in enumerate(root_named):
+            if bidx == 0:
+                pts_i, offset_i = root_pts, 0.0
+            else:
+                pts_i, offset_i = _distance_offset_for_branch(
+                    root_pts, bpts, voxel_spacing
+                )
+            rows_i = _sample_vessel_stations(
+                pts_i,
+                int(group.root_label),
+                distance_offset_mm=offset_i,
+                branch_name=str(bname),
+                **sample_kw,
+            )
+            for r in rows_i:
+                r["root_region_id"] = group.region_id
+            vessel_polylines[str(bname)] = (
+                pts_i.copy(),
+                float(offset_i),
+                int(group.root_label),
+            )
+            branch_rows_by_name[str(bname)] = rows_i
+            root_rows.extend(rows_i)
+            group_stations.extend(rows_i)
+
+        eligible_labels = [
             int(blabel)
             for blabel in group.branch_labels
-            if int(blabel) not in QVTPY_COMM_IDS and blabel in cls
+            if int(blabel) not in QVTPY_COMM_IDS
+            and named_branches_by_label.get(int(blabel))
         ]
+        # Flatten to (parent_label, branch_name, pts) — all bifurcation arms.
+        named_jobs: list[tuple[int, str, np.ndarray]] = []
+        for blabel in eligible_labels:
+            for bname, bpts in named_branches_by_label[int(blabel)]:
+                named_jobs.append((int(blabel), str(bname), bpts))
 
-        def _sample_branch(blabel: int) -> tuple[int, list[dict[str, Any]], np.ndarray, float]:
+        def _sample_named(
+            job: tuple[int, str, np.ndarray],
+        ) -> tuple[int, str, list[dict[str, Any]], np.ndarray, float]:
+            blabel, bname, bpts = job
             branch_pts, offset = _distance_offset_for_branch(
-                root_pts, cls[blabel], voxel_spacing
+                root_pts, bpts, voxel_spacing
             )
             brows = _sample_vessel_stations(
                 branch_pts,
                 blabel,
                 distance_offset_mm=offset,
+                branch_name=bname,
                 **sample_kw,
             )
             for r in brows:
                 r["root_region_id"] = group.region_id
-            return blabel, brows, branch_pts, offset
+            return blabel, bname, brows, branch_pts, offset
 
-        workers = _branch_sample_workers(len(eligible_branches))
+        workers = _branch_sample_workers(len(named_jobs))
         if workers <= 1:
-            for blabel in eligible_branches:
-                _, brows, branch_pts, offset = _sample_branch(blabel)
-                vessel_polylines[int(blabel)] = (branch_pts.copy(), float(offset))
-                branch_rows_by_label[blabel] = brows
-                group_stations.extend(brows)
+            named_results = [_sample_named(job) for job in named_jobs]
         else:
-            for blabel, brows, branch_pts, offset in map_in_thread_pool(
-                _sample_branch, eligible_branches, max_workers=workers
-            ):
-                vessel_polylines[int(blabel)] = (branch_pts.copy(), float(offset))
-                branch_rows_by_label[blabel] = brows
-                group_stations.extend(brows)
+            named_results = list(
+                map_in_thread_pool(_sample_named, named_jobs, max_workers=workers)
+            )
+        for blabel, bname, brows, branch_pts, offset in named_results:
+            vessel_polylines[str(bname)] = (
+                branch_pts.copy(),
+                float(offset),
+                int(blabel),
+            )
+            branch_rows_by_name[str(bname)] = brows
+            branch_rows_by_label.setdefault(int(blabel), []).extend(brows)
+            group_stations.extend(brows)
 
         allowed = PITC_GROUP_ALLOWED_IDS[group.region_id]
         group_stations = [
@@ -623,6 +660,11 @@ def compute_vessel_hemodynamics(
             for lid, rows in branch_rows_by_label.items()
             if int(lid) in allowed
         }
+        branch_rows_by_name = {
+            name: [r for r in rows if int(r["vessel_id"]) in allowed]
+            for name, rows in branch_rows_by_name.items()
+            if rows and int(rows[0]["vessel_id"]) in allowed
+        }
 
         # Profile rows (drop the heavy flow_ts before persisting).
         for r in group_stations:
@@ -636,11 +678,13 @@ def compute_vessel_hemodynamics(
         quals = np.array([r["quality"] for r in group_stations], dtype="float64")
         fit = pitc_fit(pis, dists, quals, thresh=quality_thresh)
         n_used = int(fit.get("n") or 0)
+        n_named = len(vessel_polylines)
         log.info(
             f"PITC {group.region_id}: slope={fit['pitc_slope']:.6g} "
             f"intercept={fit['pitc_intercept']:.6g} r2={fit['r2']:.4f} "
             f"global_pi={fit['global_pi']:.4f} "
-            f"n_fit={n_used}/{len(group_stations)} (Q>{quality_thresh:g})"
+            f"n_fit={n_used}/{len(group_stations)} (Q>{quality_thresh:g}) "
+            f"named_branches={n_named}"
         )
 
         pwv_result = _root_pwv(
@@ -693,26 +737,13 @@ def compute_vessel_hemodynamics(
             }
         )
 
-        # Per-branch damping index (root mean PI vs branch mean PI), emitted per
-        # named anatomical sub-branch (e.g. LMCA-M1, LMCA-M2a) rather than per label.
+        # Per-named-branch damping (reuse stations already in the PITC/PWV pool).
         root_pi = float(np.mean([r["pi"] for r in root_rows])) if root_rows else float("nan")
-        for blabel, brows in branch_rows_by_label.items():
-            named = named_branches_by_label.get(int(blabel)) or []
-            for bidx, (bname, bpts) in enumerate(named):
-                if bidx == 0:
-                    # Trunk sub-branch reuses the already-sampled branch stations.
-                    sub_rows = brows
-                else:
-                    branch_pts, offset = _distance_offset_for_branch(
-                        root_pts, np.asarray(bpts, dtype="float64"), voxel_spacing
-                    )
-                    sub_rows = _sample_vessel_stations(
-                        branch_pts,
-                        int(blabel),
-                        distance_offset_mm=offset,
-                        **sample_kw,
-                    )
-                    sub_rows = [r for r in sub_rows if int(r["vessel_id"]) in allowed]
+        for blabel in eligible_labels:
+            if int(blabel) not in allowed:
+                continue
+            for bname, _bpts in named_branches_by_label.get(int(blabel)) or []:
+                sub_rows = branch_rows_by_name.get(str(bname)) or []
                 if not sub_rows:
                     continue
                 branch_pi = float(np.mean([r["pi"] for r in sub_rows]))
@@ -969,7 +1000,7 @@ def _collect_region_plot_data(
 def _build_region_geometry(
     group: RootGroup,
     group_stations: list[dict[str, Any]],
-    vessel_polylines: dict[int, tuple[np.ndarray, float]],
+    vessel_polylines: dict[str, tuple[np.ndarray, float, int]],
     root_pts: np.ndarray,
     fit: dict[str, Any],
     pwv_result: dict[str, Any],
@@ -988,7 +1019,7 @@ def _build_region_geometry(
         if root_init_xyz is not None
         else root_arr[0].copy()
     )
-    pwv_meta_by_key: dict[tuple[int, int, float], int] = {}
+    pwv_meta_by_key: dict[tuple[str, int, float], int] = {}
     pwv_dist = to_numpy(plot_data.get("pwv_distance_mm", [])).astype("float64").reshape(-1)
     pwv_w1 = to_numpy(plot_data.get("pwv_weight_area", [])).astype("float64").reshape(-1)
     pwv_w2 = to_numpy(plot_data.get("pwv_weight_quality", [])).astype("float64").reshape(-1)
@@ -1007,14 +1038,14 @@ def _build_region_geometry(
     good_rows.sort(key=lambda r: r["distance_mm"])
     for i, r in enumerate(good_rows):
         pwv_meta_by_key[
-            (int(r["vessel_id"]), int(r["station_index"]), float(r["distance_mm"]))
+            (str(r.get("vessel_name") or ""), int(r["station_index"]), float(r["distance_mm"]))
         ] = i
 
-    vessels: dict[int, VesselGeometryViz] = {}
-    for label_id, (poly, offset) in vessel_polylines.items():
+    vessels: dict[str, VesselGeometryViz] = {}
+    for bname, (poly, offset, label_id) in vessel_polylines.items():
         poly_arr = to_numpy(poly).astype("float64", copy=False)
         station_rows = [
-            r for r in group_stations if int(r["vessel_id"]) == int(label_id)
+            r for r in group_stations if str(r.get("vessel_name") or "") == str(bname)
         ]
         stations: list[StationGeometryViz] = []
         for r in station_rows:
@@ -1022,12 +1053,12 @@ def _build_region_geometry(
             if idx < 0 or idx >= poly_arr.shape[0]:
                 continue
             xyz = poly_arr[idx]
-            key = (int(label_id), idx, float(r["distance_mm"]))
+            key = (str(bname), idx, float(r["distance_mm"]))
             pwv_i = pwv_meta_by_key.get(key)
             stations.append(
                 StationGeometryViz(
                     vessel_id=int(label_id),
-                    vessel_name=str(r.get("vessel_name") or qvtpy_vessel_name(int(label_id))),
+                    vessel_name=str(bname),
                     station_index=idx,
                     centerline_x=float(xyz[0]),
                     centerline_y=float(xyz[1]),
@@ -1046,9 +1077,9 @@ def _build_region_geometry(
                     pwv_bjornfoot_waveform_corr=float(pwv_bj_corr[pwv_i]) if pwv_i is not None and pwv_i < pwv_bj_corr.size else float("nan"),
                 )
             )
-        vessels[int(label_id)] = VesselGeometryViz(
+        vessels[str(bname)] = VesselGeometryViz(
             vessel_id=int(label_id),
-            vessel_name=qvtpy_vessel_name(int(label_id)),
+            vessel_name=str(bname),
             polyline_oriented=poly_arr,
             distance_offset_mm=float(offset),
             stations=stations,
