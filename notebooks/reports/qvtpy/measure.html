@@ -104,8 +104,9 @@ flowchart LR
   gmm --&gt; tree["Binary vessel tree"]
   seeds["MCA/ACA/PCA seg seeds"] --&gt; cc["Keep CCs touching seeds"]
   tree --&gt; cc
-  cc --&gt; thin["Keep vesselness ≥ p55 on tree"]
-  thin --&gt; mid["L/R midline (MCA/PCA only)"]
+  cc --&gt; aca["ACA distal corridor (CD+V gated)"]
+  aca --&gt; thin["Thin p55 (ACA-protected)"]
+  thin --&gt; mid["Scoped L/R punch (MCA/PCA only)"]
   mid --&gt; ws["watershed(-EDT)"]
   ws --&gt; claim["Claim seg==0 (+ MCA/PCA ipsilateral) + caps"]
 </code></pre>
@@ -150,25 +151,22 @@ T \leftarrow \bigl(T \cap \{V \ge \mathrm{percentile}_{55}(V|_{T})\}\bigr) \cup 
 
 <h2>A.7 Hard barriers and L/R midline</h2>
 <p>Non-target labels already in <code>seg</code> (ICA, basilar, PComms, veins, …) are punched out of the tree. Seed voxels are forced back into the mask so markers always lie inside.</p>
+<p>In addition, <strong>dilated ICA + basilar</strong> (radius 3) form a hard wall: those voxels are removed from the vessel tree and ACA corridor, and distal MCA/ACA/PCA claims are forbidden there. After claiming, any spill onto the wall is cleared and each label is reduced to its largest connected component.</p>
 
-<h3>A.7.1 MCA / PCA (strict)</h3>
+<h3>A.7.1 MCA / PCA (strict, scoped)</h3>
 <p>For LMCA/RMCA and LPCA/RPCA:</p>
 <ol>
 <li>Midline on array axis 0 from the two seed centroids.</li>
-<li>A thin sagittal slab is zeroed in the tree so watershed basins cannot cross.</li>
+<li>A thin sagittal slab is zeroed <strong>only inside a dilated band around that pair’s seeds</strong>, and never inside an ACA protect zone — so MCA/PCA punches cannot carve through A2 on the X midline.</li>
 <li>Claims on the contralateral half-space are rejected (± <code>--distal-lr-halfspace-slack</code>, default 2 vox).</li>
 </ol>
-<p>This stops e.g. LPCA from owning the contralateral PCA when the Frangi tree bridges the midline.</p>
+<p>This stops e.g. LPCA from owning the contralateral PCA when the Frangi tree bridges the midline, without deleting the ACA corridor.</p>
 
-<h3>A.7.2 ACA (no hemisphere gate)</h3>
-<p>ACAs track the exact X centre. Any sagittal punch or L/R claim half-space creates <strong>artificial midline cuts / “barrier bridges”</strong> on A2 and blocks growth into the true vessel lumen.</p>
-<p>For LACA/RACA therefore:</p>
-<ul>
-<li><strong>No</strong> sagittal slab in the tree.</li>
-<li><strong>No</strong> ipsilateral claim filter.</li>
-<li>L/R assignment is done only by competing watershed markers (EDT into the shared anterior tree).</li>
-</ul>
-<p><strong>Code:</strong> <code>_punch_lr_midline_barrier()</code> / <code>_lr_halfspace_ok_mask()</code> applied to MCA/PCA only</p>
+<h3>A.7.2 ACA (corridor + watershed L/R)</h3>
+<p>ACAs track the exact X centre. Hemisphere gates are disabled for LACA/RACA.</p>
+<p>In addition, an <strong>ACA distal corridor</strong> is grown from ACA seeds into vesselness-gated bright CD (bounded by distance from seeds). This reconnects A2 when Frangi connected components break at AComm. Corridor voxels are protected from global tree thinning.</p>
+<p>L/R assignment for ACA is done only by competing watershed markers.</p>
+<p><strong>Code:</strong> <code>_aca_distal_corridor()</code>, scoped <code>_punch_lr_midline_barrier(..., restrict_to=…)</code></p>
 
 <h2>A.8 Distance-transform watershed</h2>
 <p>With binary mask \(T\) and integer marker volume \(M\):</p>

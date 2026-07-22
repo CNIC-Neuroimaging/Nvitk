@@ -109,6 +109,16 @@ _DISTAL_LR_AXIS: int = 0  # array axis treated as L↔R (matches ACA / typical R
 _DISTAL_LR_HALFSPACE_SLACK_DEFAULT: int = 2
 # Drop the lowest vesselness voxels on the tree to keep growth tubular (anti-blob).
 _DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE: float = 55.0
+# MCA/PCA midline punch is restricted to a dilated band around that pair's
+# markers, and never clears voxels near ACA seeds (protects A2 on X-midline).
+_DISTAL_LR_PUNCH_PAIR_RADIUS: int = 18
+_DISTAL_ACA_PROTECT_RADIUS: int = 14
+# ACA distal corridor: propagate from ACA seeds into vesselness-gated CD so A2
+# can reconnect when Frangi CCs are broken at AComm.
+_DISTAL_ACA_CORRIDOR_MAX_DIST_VOX: float = 45.0
+_DISTAL_ACA_CORRIDOR_CD_PERCENTILE: float = 60.0
+# Dilated ICA + basilar: hard walls — distal MCA/ACA/PCA cannot claim these voxels.
+_DISTAL_ICA_BASILAR_BARRIER_RADIUS: int = 3
 _DISTAL_LR_PAIRS: tuple[tuple[int, int], ...] = (
     (QVTPY_LACA, QVTPY_RACA),
     (QVTPY_LMCA, QVTPY_RMCA),
@@ -788,20 +798,96 @@ def _punch_lr_midline_barrier(
     *,
     axis: int = _DISTAL_LR_AXIS,
     width: int = 1,
+    restrict_to: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Zero a thin sagittal slab so L/R watershed basins cannot cross the midline."""
+    """Zero a thin sagittal slab so L/R watershed basins cannot cross the midline.
+
+    If ``restrict_to`` is set, only voxels inside that mask are cleared (so an
+    MCA/PCA punch cannot carve through the ACA A2 corridor on the same X mid).
+    """
     out = as_backend_array(tree).astype(bool, copy=True)
     ax = int(axis)
     w = max(0, int(width))
     lo = max(0, int(mid) - w)
     hi = min(int(out.shape[ax]), int(mid) + w + 1)
+    slab = np.zeros(out.shape, dtype=bool)
     if ax == 0:
-        out[lo:hi, :, :] = False
+        slab[lo:hi, :, :] = True
     elif ax == 1:
-        out[:, lo:hi, :] = False
+        slab[:, lo:hi, :] = True
     else:
-        out[:, :, lo:hi] = False
+        slab[:, :, lo:hi] = True
+    if restrict_to is not None:
+        slab &= as_backend_array(restrict_to).astype(bool)
+    out[slab] = False
     return out
+
+
+def _dilate_bool(mask: np.ndarray, radius: int) -> np.ndarray:
+    from scipy import ndimage as ndi
+
+    m = as_backend_array(mask).astype(bool)
+    r = max(0, int(radius))
+    if r <= 0 or not np.any(m):
+        return m
+    return ndi.binary_dilation(m, iterations=r)
+
+
+def _aca_distal_corridor(
+    aca_seed_mask: np.ndarray,
+    cd: np.ndarray,
+    vesselness: np.ndarray,
+    *,
+    forbidden: np.ndarray,
+    vesselness_floor: float,
+    frangi_tree: np.ndarray | None = None,
+    cd_percentile: float = _DISTAL_ACA_CORRIDOR_CD_PERCENTILE,
+    max_dist_vox: float = _DISTAL_ACA_CORRIDOR_MAX_DIST_VOX,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Grow an ACA-only tree corridor from seeds into vesselness-gated CD.
+
+    Reconnects distal A2 when Frangi CCs are broken, without a global CD flood.
+    Also admits nearby pre-prune Frangi-tree voxels so orphaned A2 islands can
+    rejoin through a short CD bridge.
+    """
+    from scipy import ndimage as ndi
+
+    seeds = as_backend_array(aca_seed_mask).astype(bool)
+    if not np.any(seeds):
+        return seeds, {"n_seeds": 0, "n_corridor": 0}
+    cd_np = as_backend_array(cd).astype(np.float64)
+    v = as_backend_array(vesselness).astype(np.float64)
+    forb = as_backend_array(forbidden).astype(bool)
+    cd_pos = cd_np[cd_np > 0]
+    if cd_pos.size == 0:
+        return seeds, {"n_seeds": int(np.count_nonzero(seeds)), "n_corridor": int(np.count_nonzero(seeds))}
+    cd_thr = float(np.percentile(cd_pos, float(cd_percentile)))
+    dist = ndi.distance_transform_edt(~seeds)
+    near = dist <= float(max_dist_vox)
+    # Soft floor: allow slightly weaker vesselness than hysteresis lowt.
+    v_floor = float(vesselness_floor) * 0.5 if float(vesselness_floor) > 0 else 0.0
+    gate = (cd_np >= cd_thr) & (v >= v_floor) & near & ~forb
+    if frangi_tree is not None:
+        # Orphaned A2 Frangi islands near ACA seeds (dropped by marker-CC prune).
+        gate |= as_backend_array(frangi_tree).astype(bool) & near & ~forb
+    gate |= seeds
+    structure = np.ones((3, 3, 3), dtype=bool)
+    corridor = ndi.binary_propagation(seeds, structure=structure, mask=gate)
+    meta = {
+        "n_seeds": int(np.count_nonzero(seeds)),
+        "n_corridor": int(np.count_nonzero(corridor)),
+        "cd_threshold": cd_thr,
+        "vesselness_floor": float(v_floor),
+        "max_dist_vox": float(max_dist_vox),
+        "n_gate": int(np.count_nonzero(gate)),
+    }
+    log.info(
+        "distal expand: ACA corridor "
+        f"seeds={meta['n_seeds']} → corridor={meta['n_corridor']} "
+        f"(cd≥{cd_thr:.4g}, V≥{v_floor:.4g}, "
+        f"max_dist={max_dist_vox:g})"
+    )
+    return corridor.astype(bool), meta
 
 
 def _lr_halfspace_ok_mask(
@@ -856,12 +942,13 @@ def expand_distal_mca_aca_pca(
     2. GMM + hysteresis → binary vessel tree
     3. Watershed existing MCA/ACA/PCA seeds into that tree
 
-    Growth cannot leave the binary tree. MCA/PCA pairs get a hard midline punch
-    and claim half-space filter. ACA gets **neither** (no sagittal punch, no
-    half-space claim filter): A2 sits on the X centre, so hemisphere gates create
-    artificial midline cuts; LACA/RACA are separated only by watershed markers.
-    The tree is thinned to high vesselness cores to limit blob thickness.
-    Only previously empty voxels (``seg==0``) are claimed.
+    Growth cannot leave the binary tree. Dilated ICA + basilar voxels are hard
+    walls (no tree / no claims). MCA/PCA pairs get a **scoped** midline punch
+    (pair-local, ACA-protected) and claim half-space filters. ACA uses no
+    hemisphere gate; an ACA-only vesselness-gated CD corridor reconnects distal
+    A2 when Frangi CCs break. Global tree thinning preserves ACA corridor voxels.
+    Only previously empty voxels (``seg==0``) outside the ICA/basilar wall are
+    claimed; a final largest-CC pass cleans each label after barriers.
     ``centerlines_mask`` is accepted for API compatibility but unused.
     """
     _ = centerlines_mask
@@ -921,7 +1008,7 @@ def expand_distal_mca_aca_pca(
         fg_mask = np.ones(cd_np.shape, dtype=bool)
 
     vesselness, vmode = cd_vesselness(cd_np, sigmas=sigmas)
-    tree, tree_meta = hysteresis_vessel_tree(
+    tree_hyst, tree_meta = hysteresis_vessel_tree(
         vesselness,
         fg_mask,
         low_factor=float(hyst_low_factor),
@@ -931,11 +1018,27 @@ def expand_distal_mca_aca_pca(
     info["tree"] = tree_meta
 
     other = (seg_np != 0) & ~np.isin(seg_np, target_ids)
+    # Dilated ICA + basilar: nowhere in this band may receive a distal label.
+    ica_basilar = np.isin(seg_np, list(QVTPY_ICA_BASILAR_IDS))
+    ica_basilar_barrier = _dilate_bool(ica_basilar, _DISTAL_ICA_BASILAR_BARRIER_RADIUS)
+    hard_barrier = other | ica_basilar_barrier
+    info["ica_basilar_barrier"] = {
+        "radius": int(_DISTAL_ICA_BASILAR_BARRIER_RADIUS),
+        "n_core": int(np.count_nonzero(ica_basilar)),
+        "n_dilated": int(np.count_nonzero(ica_basilar_barrier)),
+    }
+    log.info(
+        "distal expand: ICA/basilar barrier "
+        f"core={info['ica_basilar_barrier']['n_core']} "
+        f"dilated(r={_DISTAL_ICA_BASILAR_BARRIER_RADIUS})="
+        f"{info['ica_basilar_barrier']['n_dilated']}"
+    )
+
     markers = np.zeros(seg_np.shape, dtype=np.int32)
     for lid in present:
         markers[seg_np == lid] = lid
     # Drop Frangi CCs that never touch MCA/ACA/PCA seeds (venous / noise forest).
-    tree, touch_meta = keep_tree_components_touching_markers(tree, markers)
+    tree, touch_meta = keep_tree_components_touching_markers(tree_hyst, markers)
     info["tree_marker_cc"] = touch_meta
     if thick_n > 0:
         tree, thick_meta = thicken_tree_in_cd(
@@ -943,9 +1046,33 @@ def expand_distal_mca_aca_pca(
         )
         info["tree_thicken"] = thick_meta
 
-    tree = (tree & ~other) | (markers != 0)
+    tree = (tree & ~hard_barrier) | (markers != 0)
 
-    # Thin Frangi shell: keep only higher vesselness on the tree (anti-blob).
+    # ACA distal corridor: reconnect A2 through vesselness-gated CD near ACA seeds.
+    aca_present = [lid for lid in present if lid in QVTPY_ACA_IDS]
+    aca_protect = np.zeros(seg_np.shape, dtype=bool)
+    aca_corridor = np.zeros(seg_np.shape, dtype=bool)
+    if aca_present:
+        aca_seed = np.isin(seg_np, list(QVTPY_ACA_IDS)) & ~ica_basilar_barrier
+        aca_protect = _dilate_bool(aca_seed, _DISTAL_ACA_PROTECT_RADIUS)
+        # Floor: hysteresis lowt if available, else a mild positive vesselness cut.
+        v_floor = float(tree_meta.get("lowt", 0.0) or 0.0)
+        if v_floor <= 0.0:
+            v_pos = vesselness[vesselness > 0]
+            v_floor = float(np.percentile(v_pos, 60.0)) if v_pos.size else 0.0
+        aca_corridor, aca_corr_meta = _aca_distal_corridor(
+            aca_seed,
+            cd_np,
+            vesselness,
+            forbidden=hard_barrier,
+            vesselness_floor=v_floor,
+            frangi_tree=tree_hyst,
+        )
+        info["aca_corridor"] = aca_corr_meta
+        tree = (tree | aca_corridor) & ~hard_barrier
+        tree = tree | (markers != 0)
+
+    # Thin Frangi shell (anti-blob), but never strip ACA corridor / protect zone.
     n_before_thin = int(np.count_nonzero(tree))
     if n_before_thin > 0:
         thr_thin = float(
@@ -954,18 +1081,20 @@ def expand_distal_mca_aca_pca(
                 float(_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE),
             )
         )
-        tree = (tree & (vesselness >= thr_thin)) | (markers != 0)
-        tree = tree & ~other
+        keep_thin = (vesselness >= thr_thin) | aca_corridor | aca_protect | (markers != 0)
+        tree = (tree & keep_thin) | (markers != 0) | aca_corridor
+        tree = (tree & ~hard_barrier) | (markers != 0)
         info["tree_thin"] = {
             "percentile": float(_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE),
             "threshold": thr_thin,
             "n_before": n_before_thin,
             "n_after": int(np.count_nonzero(tree)),
+            "aca_protected": True,
         }
         log.info(
             "distal expand: tree thin "
             f"vesselness≥p{_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE:g} "
-            f"({n_before_thin} → {info['tree_thin']['n_after']})"
+            f"({n_before_thin} → {info['tree_thin']['n_after']}, ACA-protected)"
         )
 
     claim_ok_by_id: dict[int, np.ndarray] = {}
@@ -981,16 +1110,24 @@ def expand_distal_mca_aca_pca(
         info["lr_midlines"][pair_name] = int(mid)
         is_aca_pair = left_id in QVTPY_ACA_IDS and right_id in QVTPY_ACA_IDS
         if is_aca_pair:
-            # No tree punch and no claim half-space: A2 hugs the X midline;
-            # hemisphere gates leave artificial gaps. Watershed markers alone
-            # assign LACA vs RACA.
             log.info(
                 f"distal expand: ACA L/R via watershed only (no midline gate) "
                 f"{pair_name} mid={mid}"
             )
         else:
-            tree = _punch_lr_midline_barrier(tree, mid, axis=_DISTAL_LR_AXIS, width=1)
-            tree = tree | (markers != 0)
+            pair_seed = (markers == left_id) | (markers == right_id)
+            punch_zone = _dilate_bool(pair_seed, _DISTAL_LR_PUNCH_PAIR_RADIUS)
+            punch_zone &= ~aca_protect
+            tree = _punch_lr_midline_barrier(
+                tree,
+                mid,
+                axis=_DISTAL_LR_AXIS,
+                width=1,
+                restrict_to=punch_zone,
+            )
+            tree = ((tree | (markers != 0) | aca_corridor) & ~hard_barrier) | (
+                markers != 0
+            )
             claim_ok_by_id[left_id] = _lr_halfspace_ok_mask(
                 seg_np.shape, mid, left_id, left_id, axis=_DISTAL_LR_AXIS, slack=lr_slack
             )
@@ -999,7 +1136,8 @@ def expand_distal_mca_aca_pca(
             )
             log.info(
                 f"distal expand: L/R midline barrier {pair_name} "
-                f"axis={_DISTAL_LR_AXIS} mid={mid} slack={lr_slack}"
+                f"axis={_DISTAL_LR_AXIS} mid={mid} slack={lr_slack} "
+                f"(scoped to pair, ACA-protected)"
             )
 
     n_tree = int(np.count_nonzero(tree))
@@ -1007,20 +1145,24 @@ def expand_distal_mca_aca_pca(
     if n_tree > max_tree:
         v_on = vesselness[tree]
         thr_safe = float(np.percentile(v_on, 75.0))
-        tree_tight = tree & (vesselness >= thr_safe)
-        tree_tight = tree_tight | (markers != 0)
-        tree_tight = tree_tight & ~other
+        tree_tight = tree & (
+            (vesselness >= thr_safe) | aca_corridor | aca_protect | (markers != 0)
+        )
+        tree_tight = tree_tight | (markers != 0) | aca_corridor
+        tree_tight = (tree_tight & ~hard_barrier) | (markers != 0)
         tree, touch_meta2 = keep_tree_components_touching_markers(tree_tight, markers)
+        tree = ((tree | aca_corridor) & ~hard_barrier) | (markers != 0)
         info["tree_safety"] = {
             "n_before": n_tree,
             "n_after": int(np.count_nonzero(tree)),
             "vesselness_p75": thr_safe,
             "max_tree_vox": max_tree,
+            "aca_protected": True,
         }
         log.warning(
             "distal expand: vessel tree oversized "
             f"({n_tree} > {max_tree}); kept vesselness≥p75 "
-            f"→ {info['tree_safety']['n_after']} voxels"
+            f"(ACA-protected) → {info['tree_safety']['n_after']} voxels"
         )
         n_tree = int(np.count_nonzero(tree))
         info["tree_marker_cc"] = touch_meta2
@@ -1028,7 +1170,9 @@ def expand_distal_mca_aca_pca(
     log.info(
         f"distal expand: vessel tree voxels={n_tree}, "
         f"marker voxels={int(np.count_nonzero(markers))}, "
-        f"barrier(other)={int(np.count_nonzero(other))}"
+        f"barrier(other)={int(np.count_nonzero(other))}, "
+        f"barrier(ICA/basilar dilated)="
+        f"{int(np.count_nonzero(ica_basilar_barrier))}"
     )
     if n_tree == 0:
         log.warning("distal expand: empty vessel tree; skipping watershed")
@@ -1044,7 +1188,8 @@ def expand_distal_mca_aca_pca(
     for lid in present:
         name = _distal_label_name(lid)
         before = before_by_id[lid]
-        claim = (labeled == lid) & (seg_np == 0)
+        # Never claim onto dilated ICA/basilar (or any non-empty voxel).
+        claim = (labeled == lid) & (seg_np == 0) & ~ica_basilar_barrier
         if lid in claim_ok_by_id:
             claim = claim & claim_ok_by_id[lid]
         n_claim = int(np.count_nonzero(claim))
@@ -1090,6 +1235,23 @@ def expand_distal_mca_aca_pca(
             f"{before} → {after} voxels (Δ={delta:+d}, claimed={n_claim}"
             f"{', capped' if capped else ''})"
         )
+
+    # Strip any distal spill that landed on the ICA/basilar wall, then CC again.
+    spill = np.isin(seg_np, target_ids) & ica_basilar_barrier & (markers == 0)
+    n_spill = int(np.count_nonzero(spill))
+    if n_spill > 0:
+        seg_np[spill] = 0
+        info["ica_basilar_barrier"]["n_spill_cleared"] = n_spill
+        log.info(f"distal expand: cleared {n_spill} voxels on ICA/basilar barrier")
+    for lid in present:
+        _finalize_vessel_largest_cc(
+            seg_np, lid, stats_by_id=None, log_name=f"distal-barrier-cc-{lid}"
+        )
+        after = int(np.count_nonzero(seg_np == lid))
+        before = before_by_id[lid]
+        st = info["labels"][str(lid)]
+        st["after"] = after
+        st["delta"] = int(after - before)
 
     total_before = sum(int(v.get("before", 0)) for v in info["labels"].values())
     total_after = sum(int(v.get("after", 0)) for v in info["labels"].values())

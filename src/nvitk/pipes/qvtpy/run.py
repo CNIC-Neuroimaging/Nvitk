@@ -1035,9 +1035,9 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option(
     "--distal-hyst-low-factor",
     type=float,
-    default=2,
+    default=3,
     show_default=True,
-    help="Stage4: distal GMM hysteresis low factor (higher → thinner tree; try 3.5–4.5).",
+    help="Stage4: distal GMM hysteresis low factor (higher → thinner tree; 3.5–4.5).",
 )
 @click.option(
     "--distal-hyst-high-factor",
@@ -1056,7 +1056,7 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option(
     "--distal-max-image-frac",
     type=float,
-    default=0.01,
+    default=0.08,
     show_default=True,
     help="Stage4: max voxels claimed by distal expand as fraction of image.",
 )
