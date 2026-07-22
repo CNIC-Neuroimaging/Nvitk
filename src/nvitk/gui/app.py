@@ -128,6 +128,26 @@ def run_app() -> None:
         xnat_panel.setWordWrap(True)
         data_tab_label = "Data"
 
+    try:
+        from nvitk.gui.panels.qc import QcPanel
+
+        qc_panel = QcPanel(
+            viewer,
+            app_state,
+            on_inputs_opened=_on_xnat_inputs_opened,
+        )
+    except Exception as exc:
+        qc_panel = QLabel(f"QC panel unavailable: {exc}")
+        qc_panel.setWordWrap(True)
+
+    try:
+        from nvitk.gui.panels.statmodels import StatmodelsPanel
+
+        statmodels_panel = StatmodelsPanel()
+    except Exception as exc:
+        statmodels_panel = QLabel(f"Statmodels unavailable: {exc}")
+        statmodels_panel.setWordWrap(True)
+
     from nvitk.gui.tools.gpu_toggle import backend_label
     from nvitk.gui.core.log_panel import gui_log
 
@@ -178,27 +198,6 @@ def run_app() -> None:
             )
         notify(f"Added {len(meshes)} surface layer(s).")
         _refresh_layer_list(layer_list, viewer, app_state)
-
-    @magicgui(
-        paths={"label": "Paths (one per line)"},
-        call_button="Run batch queue",
-    )
-    def batch_panel(paths: str = "") -> None:
-        opened = 0
-        for line in paths.strip().splitlines():
-            p = Path(line.strip())
-            if not p.exists():
-                notify(f"Skipping missing path: {p}", error=True)
-                continue
-            open_paths_with_nvitk(viewer, p)
-            app_state["inputs"].append({"path": str(p), "name": p.stem})
-            _record_step(app_state, {"type": "batch_open", "path": str(p)})
-            opened += 1
-        if opened:
-            notify(f"Opened {opened} file(s) from batch queue.")
-            _refresh_layer_list(layer_list, viewer, app_state)
-        else:
-            notify("No valid paths in the batch list.", error=True)
 
     @magicgui(
         record_steps={"label": "Record pipeline steps", "value": False},
@@ -256,11 +255,6 @@ def run_app() -> None:
         out = Path(path)
         out.write_text(json.dumps(doc, indent=2), encoding="utf-8")
         notify(f"Pipeline exported to {out}")
-
-    @magicgui(call_button="Clear recorded steps")
-    def pipeline_panel() -> None:
-        app_state["steps"].clear()
-        notify("Cleared recorded pipeline steps.")
 
     @magicgui(
         path={"label": "View PNG path", "value": "view.png"},
@@ -415,9 +409,10 @@ def run_app() -> None:
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     tabs.addTab(tools_widget, "Tools")
     tabs.addTab(xnat_panel, data_tab_label)
+    tabs.addTab(qc_panel, "QC")
+    tabs.addTab(statmodels_panel, "Statmodels")
     dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
     tabs.addTab(mesh_panel.native, "Mesh")
-    tabs.addTab(batch_panel.native, "Batch")
     tabs.addTab(layers_tab, "Layers")
     export_tab = QWidget()
     export_layout = QVBoxLayout()
@@ -430,7 +425,6 @@ def run_app() -> None:
     export_tab.setLayout(export_layout)
     tabs.addTab(export_tab, "Export")
     tabs.addTab(export_panel.native, "Pipeline")
-    tabs.addTab(pipeline_panel.native, "Pipeline log")
     layout.addWidget(tabs, stretch=1)
     dock.setLayout(layout)
     dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)

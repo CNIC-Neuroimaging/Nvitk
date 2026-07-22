@@ -8,6 +8,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -102,6 +103,11 @@ class DicomTagsPanel(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.setSortingEnabled(True)
 
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search tags…")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._apply_search_filter)
+
         btn_row = QHBoxLayout()
         self._btn_refresh = QPushButton("Refresh")
         btn_row.addWidget(self._btn_refresh)
@@ -110,12 +116,25 @@ class DicomTagsPanel(QWidget):
         root = QVBoxLayout()
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._status)
+        root.addWidget(self._search)
         root.addLayout(btn_row)
         root.addWidget(self._table, stretch=1)
         self.setLayout(root)
 
         self._btn_refresh.clicked.connect(self._refresh_last_layer)
         self._last_layer: Any | None = None
+
+    def _apply_search_filter(self, text: str = "") -> None:
+        query = (text or self._search.text() or "").strip().lower()
+        for row in range(self._table.rowCount()):
+            if not query:
+                self._table.setRowHidden(row, False)
+                continue
+            tag_item = self._table.item(row, 0)
+            val_item = self._table.item(row, 1)
+            tag = (tag_item.text() if tag_item is not None else "").lower()
+            val = (val_item.text() if val_item is not None else "").lower()
+            self._table.setRowHidden(row, query not in tag and query not in val)
 
     def _refresh_last_layer(self) -> None:
         self.refresh_from_layer(self._last_layer)
@@ -129,6 +148,7 @@ class DicomTagsPanel(QWidget):
         if layer is None:
             self._status.setText("No layer selected.")
             self._table.setSortingEnabled(True)
+            self._apply_search_filter()
             return
 
         if not tags:
@@ -138,6 +158,7 @@ class DicomTagsPanel(QWidget):
                 "(open a .dcm file or DICOM folder with nvitk I/O)."
             )
             self._table.setSortingEnabled(True)
+            self._apply_search_filter()
             return
 
         self._status.setText(f"{len(tags)} tag(s) from “{layer.name}”.")
@@ -151,3 +172,4 @@ class DicomTagsPanel(QWidget):
             self._table.setItem(row, 1, val_item)
         self._table.resizeColumnsToContents()
         self._table.setSortingEnabled(True)
+        self._apply_search_filter()

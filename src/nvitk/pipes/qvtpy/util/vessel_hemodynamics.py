@@ -486,7 +486,10 @@ def compute_vessel_hemodynamics(
     Extra entries in *centerlines* (e.g. venous) are kept for waveform plots only.
     """
     from nvitk.core.array import to_numpy
-    from nvitk.pipes.qvtpy.util.centerline_io import centerlines_from_segmentation
+    from nvitk.pipes.qvtpy.util.centerline_io import (
+        centerlines_from_segmentation,
+        main_path_of,
+    )
     from nvitk.pipes.qvtpy.util.mask_cleaning import clean_volume_seg_for_pitc
 
     result = VesselHemodynamicsResult()
@@ -499,16 +502,33 @@ def compute_vessel_hemodynamics(
         for k, v in (prefer_polylines or {}).items()
         if v is not None
     }
-    # Same regeneration as centerlines_mask_4dflow.nii.gz.
-    cls = {
-        int(k): (as_backend_array(v)).astype("float64")
-        for k, v in centerlines_from_segmentation(
-            volume_seg,
-            min_points=3,
-            prefer_polylines=prefer or None,
-        ).items()
+    # Same regeneration as centerlines_mask_4dflow.nii.gz (named branches).
+    cls_branches_raw = centerlines_from_segmentation(
+        volume_seg,
+        min_points=3,
+        prefer_polylines=prefer or None,
+    )
+    # Named sub-branches per parent label (for per-branch damping rows).
+    named_branches_by_label: dict[int, list[tuple[str, np.ndarray]]] = {
+        int(k): [
+            (str(n), (as_backend_array(p)).astype("float64")) for n, p in v
+        ]
+        for k, v in cls_branches_raw.items()
+        if v
     }
-    volume_seg = clean_volume_seg_for_pitc(volume_seg, cls)
+    # Trunk (main-path) view drives the existing root/branch PITC sampling.
+    cls = {
+        lid: named[0][1]
+        for lid, named in named_branches_by_label.items()
+        if named
+    }
+    # Seed island cleanup from *all* branch polylines so distal branches are kept.
+    cls_seed = {
+        lid: np.vstack([to_numpy(p) for _n, p in named])
+        for lid, named in named_branches_by_label.items()
+        if named
+    }
+    volume_seg = clean_volume_seg_for_pitc(volume_seg, cls_seed)
     result.volume_seg = to_numpy(volume_seg).astype(np.int32, copy=False)
 
     sample_kw = dict(
@@ -673,30 +693,47 @@ def compute_vessel_hemodynamics(
             }
         )
 
-        # Per-branch damping index (root mean PI vs branch mean PI).
+        # Per-branch damping index (root mean PI vs branch mean PI), emitted per
+        # named anatomical sub-branch (e.g. LMCA-M1, LMCA-M2a) rather than per label.
         root_pi = float(np.mean([r["pi"] for r in root_rows])) if root_rows else float("nan")
         for blabel, brows in branch_rows_by_label.items():
-            if not brows:
-                continue
-            branch_pi = float(np.mean([r["pi"] for r in brows]))
-            di = damping_index(root_pi, branch_pi)
-            result.summary_rows.append(
-                {
-                    "region_id": qvtpy_vessel_name(int(blabel)),
-                    "region_label": qvtpy_vessel_name(int(blabel)),
-                    "row_kind": "branch",
-                    "pitc_slope": "",
-                    "pitc_intercept": "",
-                    "pitc_r2": "",
-                    "pitc_n": "",
-                    "global_pi": "",
-                    "pwv_bjornfoot_m_s": "",
-                    "pwv_fielding_m_s": "",
-                    "pwv_r_fielding": "",
-                    "pwv_n_stations": "",
-                    "damping_index": di,
-                }
-            )
+            named = named_branches_by_label.get(int(blabel)) or []
+            for bidx, (bname, bpts) in enumerate(named):
+                if bidx == 0:
+                    # Trunk sub-branch reuses the already-sampled branch stations.
+                    sub_rows = brows
+                else:
+                    branch_pts, offset = _distance_offset_for_branch(
+                        root_pts, np.asarray(bpts, dtype="float64"), voxel_spacing
+                    )
+                    sub_rows = _sample_vessel_stations(
+                        branch_pts,
+                        int(blabel),
+                        distance_offset_mm=offset,
+                        **sample_kw,
+                    )
+                    sub_rows = [r for r in sub_rows if int(r["vessel_id"]) in allowed]
+                if not sub_rows:
+                    continue
+                branch_pi = float(np.mean([r["pi"] for r in sub_rows]))
+                di = damping_index(root_pi, branch_pi)
+                result.summary_rows.append(
+                    {
+                        "region_id": str(bname),
+                        "region_label": str(bname),
+                        "row_kind": "branch",
+                        "pitc_slope": "",
+                        "pitc_intercept": "",
+                        "pitc_r2": "",
+                        "pitc_n": "",
+                        "global_pi": "",
+                        "pwv_bjornfoot_m_s": "",
+                        "pwv_fielding_m_s": "",
+                        "pwv_r_fielding": "",
+                        "pwv_n_stations": "",
+                        "damping_index": di,
+                    }
+                )
 
     if collect_plot_data and cls:
         merged_region_wf: dict[int, dict[str, Any]] = {}

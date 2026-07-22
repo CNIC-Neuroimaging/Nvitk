@@ -30,10 +30,13 @@ from qtpy.QtWidgets import (
 
 from nvitk.core.logger import Logger
 from nvitk.db.repo import DataRepo, _default_dataset_root, get_repo_from_settings
+from nvitk.db.settings_paths import _find_repo_root
+from nvitk.db.pipeline_assets import PIPELINE_FILTER_SLOTS
 from nvitk.db.xnat import (
     asset_slot_display_label,
     connect_xnat,
     download_scan_dicoms,
+    download_scan_niftis,
     filter_subjects_by_asset_slots,
     list_asset_slots_for_project,
     list_scans_for_subject,
@@ -97,6 +100,8 @@ class _XnatDownloadWorker(QThread):
         scan_rows: list[dict[str, Any]],
         download_root: Path | None,
         temp_parent: Path | None,
+        download_dicom: bool = True,
+        download_nifti: bool = True,
     ) -> None:
         super().__init__()
         self._config_path = config_path
@@ -105,6 +110,8 @@ class _XnatDownloadWorker(QThread):
         self._items = scan_rows
         self._download_root = download_root
         self._temp_parent = temp_parent
+        self._download_dicom = download_dicom
+        self._download_nifti = download_nifti
 
     def run(self) -> None:
         try:
@@ -162,18 +169,40 @@ class _XnatDownloadWorker(QThread):
                     sequence = str(
                         row.get("asset_slot") or row.get("scan_id") or "scan"
                     )
-                    self.progress.emit(
-                        f"Downloading {subject_uid} / {scan_id}…"
-                    )
                     scan_obj = resolve_xnat_scan_from_scan_row(session, row)
                     if self._download_root is not None:
-                        target = self._download_root / subject_uid / sequence
+                        base = self._download_root / subject_uid / sequence
                     else:
                         parent = self._temp_parent or Path(tempfile.gettempdir())
-                        target = parent / subject_uid / str(scan_id)
-                    target.mkdir(parents=True, exist_ok=True)
-                    download_scan_dicoms(scan_obj, target)
-                    opened_dirs.append(target)
+                        base = parent / subject_uid / str(scan_id)
+
+                    want_dicom = bool(row.get("download_dicom", self._download_dicom))
+                    want_nifti = bool(row.get("download_nifti", self._download_nifti))
+                    if not want_dicom and not want_nifti:
+                        want_dicom = True
+
+                    if want_dicom:
+                        self.progress.emit(
+                            f"Downloading DICOM {subject_uid} / {scan_id}…"
+                        )
+                        dicom_target = base / "DICOM" if want_nifti else base
+                        dicom_target.mkdir(parents=True, exist_ok=True)
+                        download_scan_dicoms(scan_obj, dicom_target)
+                        opened_dirs.append(dicom_target)
+
+                    if want_nifti:
+                        self.progress.emit(
+                            f"Downloading NIFTI {subject_uid} / {scan_id}…"
+                        )
+                        nifti_target = base / "NIFTI" if want_dicom else base
+                        nifti_target.mkdir(parents=True, exist_ok=True)
+                        try:
+                            download_scan_niftis(scan_obj, nifti_target)
+                            opened_dirs.append(nifti_target)
+                        except Exception as nifti_exc:
+                            self.progress.emit(
+                                f"NIFTI unavailable for {subject_uid}/{scan_id}: {nifti_exc}"
+                            )
             self.finished_ok.emit(opened_dirs)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -260,6 +289,14 @@ class DataBrowserPanel(QWidget):
 
         self._config_path = QLineEdit()
         self._config_path.setPlaceholderText("XNAT YAML/JSON config path")
+        repo_root = _find_repo_root()
+        default_cfg = (
+            (repo_root / ".nvitk" / "xnat.json")
+            if repo_root is not None
+            else Path.cwd() / ".nvitk" / "xnat.json"
+        )
+        if default_cfg.is_file():
+            self._config_path.setText(str(default_cfg))
         browse_config = QPushButton("Browse…")
         browse_config.clicked.connect(self._browse_config)
 
@@ -271,6 +308,11 @@ class DataBrowserPanel(QWidget):
         self._temp_only = QCheckBox("Use temporary cache only (default)")
         self._temp_only.setChecked(True)
         self._temp_only.toggled.connect(self._on_temp_only_toggled)
+
+        self._download_dicom = QCheckBox("Download DICOM for selected scans")
+        self._download_dicom.setChecked(True)
+        self._download_nifti = QCheckBox("Download NIFTI for selected scans")
+        self._download_nifti.setChecked(True)
 
         config_row = QHBoxLayout()
         config_row.addWidget(self._config_path, stretch=1)
@@ -287,6 +329,8 @@ class DataBrowserPanel(QWidget):
         lay.addLayout(config_row)
         lay.addWidget(self._temp_only)
         lay.addLayout(download_row)
+        lay.addWidget(self._download_dicom)
+        lay.addWidget(self._download_nifti)
         page.setLayout(lay)
 
         self._project_combo.currentIndexChanged.connect(self._reload_xnat_catalog)
@@ -575,6 +619,10 @@ class DataBrowserPanel(QWidget):
             slots = list_asset_slots_for_project(self._repo, project_id)
             if not slots and self._xnat_subject_slots:
                 slots = sorted({s for ss in self._xnat_subject_slots.values() for s in ss})
+            # Always expose eicab / qvtpy / 4dflows filter checkboxes.
+            for pipeline_slot in PIPELINE_FILTER_SLOTS:
+                if pipeline_slot not in slots:
+                    slots.append(pipeline_slot)
             self._rebuild_xnat_scan_filter_checkboxes(project_id, slots)
         except Exception as exc:
             self._all_subjects = []
@@ -604,8 +652,16 @@ class DataBrowserPanel(QWidget):
             xnat_sequence_to_asset_slot(seq)
             for seq in default_sequences_for_project(project_id)
         }
+        preferred.update(PIPELINE_FILTER_SLOTS)
         ordered = [s for s in slots if s in preferred]
         ordered.extend(s for s in slots if s not in preferred)
+
+        # Prefer pipeline resource checkboxes near the top after preferred scans.
+        pipeline_ordered = [s for s in PIPELINE_FILTER_SLOTS if s in ordered]
+        other_ordered = [s for s in ordered if s not in PIPELINE_FILTER_SLOTS]
+        preferred_scans = [s for s in other_ordered if s in preferred]
+        rest = [s for s in other_ordered if s not in preferred]
+        ordered = preferred_scans + pipeline_ordered + rest
 
         columns = 3
         for idx, slot in enumerate(ordered):
@@ -884,6 +940,8 @@ class DataBrowserPanel(QWidget):
             scan_rows=items,
             download_root=download_root,
             temp_parent=temp_parent,
+            download_dicom=self._download_dicom.isChecked(),
+            download_nifti=self._download_nifti.isChecked(),
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_download_ok)

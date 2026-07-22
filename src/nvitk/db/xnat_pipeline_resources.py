@@ -21,6 +21,7 @@ from nvitk.core.logger import Logger
 
 from .pipeline_assets import (
     QVTPY_PIPELINE_RESOURCES,
+    GUI_PIPELINE_RESOURCES,
     XNAT_RESOURCE_EICAB,
     XNAT_RESOURCE_QVTPY,
     _bundle_asset_row,
@@ -299,7 +300,12 @@ def list_pipeline_assets_for_subject(
     project_id: str,
     subject_uid: str,
 ) -> pd.DataFrame:
-    """Return indexed pipeline bundle rows for *subject_uid*."""
+    """Return indexed pipeline bundle rows for *subject_uid*.
+
+    Includes ``eicab`` / ``qvtpy`` / ``4dflows`` experiment resources. Derived
+    ``4dflows`` file rows (``source=xnat_4dflows``) are collapsed to a single
+    downloadable ``pipeline_4dflows`` bundle entry when no bundle row exists.
+    """
     if not repo.catalog.table_exists("assets"):
         return pd.DataFrame()
 
@@ -311,12 +317,62 @@ def list_pipeline_assets_for_subject(
     if assets.empty:
         return assets
 
-    slots = {resource_label_to_asset_slot(r) for r in QVTPY_PIPELINE_RESOURCES}
+    slots = {resource_label_to_asset_slot(r) for r in GUI_PIPELINE_RESOURCES}
+    bundle = pd.DataFrame()
     if "asset_slot" in assets.columns:
-        assets = assets[assets["asset_slot"].astype(str).isin(slots)]
+        bundle = assets[assets["asset_slot"].astype(str).isin(slots)].copy()
     elif "resource_label" in assets.columns:
-        assets = assets[assets["resource_label"].astype(str).str.lower().isin(QVTPY_PIPELINE_RESOURCES)]
-    else:
+        bundle = assets[
+            assets["resource_label"].astype(str).str.lower().isin(GUI_PIPELINE_RESOURCES)
+        ].copy()
+
+    # Collapse per-file 4dflows assets into one downloadable pipeline row.
+    has_4dflows_bundle = False
+    if not bundle.empty and "asset_slot" in bundle.columns:
+        has_4dflows_bundle = (
+            bundle["asset_slot"].astype(str) == "pipeline_4dflows"
+        ).any()
+    if not has_4dflows_bundle and not bundle.empty and "resource_label" in bundle.columns:
+        has_4dflows_bundle = (
+            bundle["resource_label"].astype(str).str.lower() == "4dflows"
+        ).any()
+
+    if not has_4dflows_bundle:
+        fourd_mask = pd.Series(False, index=assets.index)
+        if "source" in assets.columns:
+            fourd_mask = fourd_mask | (
+                assets["source"].astype(str).str.lower() == "xnat_4dflows"
+            )
+        if "resource_label" in assets.columns:
+            fourd_mask = fourd_mask | (
+                assets["resource_label"].astype(str).str.lower() == "4dflows"
+            )
+        fourd = assets.loc[fourd_mask]
+        if not fourd.empty:
+            row0 = fourd.iloc[0].to_dict()
+            row0["asset_slot"] = "pipeline_4dflows"
+            row0["resource_label"] = "4dflows"
+            row0["asset_uid"] = f"pipeline_bundle:{subject_uid}:4dflows"
+            # Prefer a local directory that already holds the resource tree.
+            local_dir = ""
+            for path in fourd.get("asset_path", pd.Series(dtype=str)).dropna():
+                p = Path(str(path))
+                if p.is_dir() and any(p.rglob("*")):
+                    local_dir = str(p)
+                    break
+                if p.is_file():
+                    # Walk up to a plausible resource folder name.
+                    for parent in p.parents:
+                        if parent.name.lower() in {"4dflows", "qvtpy", "eicab"}:
+                            local_dir = str(parent)
+                            break
+                    if local_dir:
+                        break
+            row0["asset_path"] = local_dir or pd.NA
+            row0["exists_locally"] = bool(local_dir)
+            bundle = pd.concat([bundle, pd.DataFrame([row0])], ignore_index=True)
+
+    if bundle.empty:
         return pd.DataFrame()
 
     if repo.catalog.table_exists("sessions"):
@@ -325,10 +381,12 @@ def list_pipeline_assets_for_subject(
             filters={"project_id": str(project_id), "subject_uid": str(subject_uid)},
             use_sqlite=True,
         )
-        if not sessions.empty and "session_uid" in assets.columns:
+        if not sessions.empty and "session_uid" in bundle.columns:
             session_uids = {str(x) for x in sessions["session_uid"].dropna().unique()}
-            mask = assets["session_uid"].isna() | assets["session_uid"].astype(str).isin(session_uids)
-            assets = assets[mask]
+            mask = bundle["session_uid"].isna() | bundle["session_uid"].astype(str).isin(
+                session_uids
+            )
+            bundle = bundle[mask]
 
     cols = [
         c
@@ -343,9 +401,9 @@ def list_pipeline_assets_for_subject(
             "pipeline_id",
             "metadata_json",
         )
-        if c in assets.columns
+        if c in bundle.columns
     ]
-    return assets[cols].reset_index(drop=True)
+    return bundle[cols].reset_index(drop=True)
 
 
 def _cli_decorator(*args, **kwargs):

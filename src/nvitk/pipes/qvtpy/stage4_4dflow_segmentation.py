@@ -181,6 +181,12 @@ def run_subject(
     rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
     venous_region_growing: bool = True,
     segment_acomm: bool = False,
+    distal_flow_expand: bool = False,
+    distal_hyst_low_factor: float = 3.5,
+    distal_hyst_high_factor: float = 0.5,
+    distal_thicken_iter: int = 0,
+    distal_max_image_frac: float = 0.006,
+    distal_lr_halfspace_slack: int = 2,
 ) -> Path:
     """Build multilabel 4D-flow segmentation locally; return stage-4 output directory."""
     s3 = _stage3_dir(output_root, subject)
@@ -224,6 +230,18 @@ def run_subject(
         f"per-vessel local CD seg (thr={thr_algorithm}, "
         f"RG={region_growing}, rg_frac={rg_intensity_frac})"
     )
+    if bool(distal_flow_expand):
+        log.step(
+            f"[{subject}] distal-flow-expand ON "
+            f"(vessel-tree watershed; "
+            f"hyst_low={float(distal_hyst_low_factor):.2f}, "
+            f"hyst_high={float(distal_hyst_high_factor):.2f}, "
+            f"thicken={int(distal_thicken_iter)}, "
+            f"max_frac={float(distal_max_image_frac):.4f})"
+        )
+    else:
+        log.info(f"[{subject}] distal-flow-expand OFF (default); skipping distal pass")
+
     result = build_seg_4dflow_local(
         cd,
         centerlines_mask,
@@ -244,6 +262,12 @@ def run_subject(
         rg_max_image_frac=float(rg_max_image_frac),
         venous_region_growing=bool(venous_region_growing),
         segment_acomm=bool(segment_acomm),
+        distal_flow_expand=bool(distal_flow_expand),
+        distal_hyst_low_factor=float(distal_hyst_low_factor),
+        distal_hyst_high_factor=float(distal_hyst_high_factor),
+        distal_thicken_iter=int(distal_thicken_iter),
+        distal_max_image_frac=float(distal_max_image_frac),
+        distal_lr_halfspace_slack=int(distal_lr_halfspace_slack),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
@@ -273,9 +297,7 @@ def run_subject(
         prefer_polylines=prefer_arterial,
     )
 
-    meta_path.write_text(
-        json.dumps(
-            _segmentation_meta(
+    meta_doc = _segmentation_meta(
                 subject=subject,
                 nifti_root=nifti_root,
                 cl_path=cl_path,
@@ -304,9 +326,24 @@ def run_subject(
                     else result.aca_sequential_grow.as_dict()
                 ),
                 vessels=[vessel_stats_to_dict(st) for st in result.vessel_stats],
-            ),
-            indent=2,
-        ),
+            )
+    meta_doc["distal_flow_expand"] = bool(distal_flow_expand)
+    meta_doc["distal_method"] = "frangi_hysteresis_watershed"
+    meta_doc["distal_hyst_low_factor"] = float(distal_hyst_low_factor)
+    meta_doc["distal_hyst_high_factor"] = float(distal_hyst_high_factor)
+    meta_doc["distal_thicken_iter"] = int(distal_thicken_iter)
+    meta_doc["distal_max_image_frac"] = float(distal_max_image_frac)
+    meta_doc["distal_lr_halfspace_slack"] = int(distal_lr_halfspace_slack)
+    if result.distal_expand is not None:
+        meta_doc["distal_expand"] = result.distal_expand
+        de = result.distal_expand
+        log.info(
+            f"[{subject}] distal expand meta: "
+            f"method={de.get('method')}, "
+            f"labels={list((de.get('labels') or {}).keys())}"
+        )
+    meta_path.write_text(
+        json.dumps(meta_doc, indent=2),
         encoding="utf-8",
     )
     log.info(f"[{subject}] stage4 segmentation -> {seg_path}")
@@ -405,6 +442,58 @@ def _stage4_cli_options(func):
         show_default=True,
         help="Grow AComm as its own label; off by default (used only for ACA L/R split).",
     )(func)
+    func = click.option(
+        "--distal-flow-expand/--no-distal-flow-expand",
+        default=False,
+        show_default=True,
+        help=(
+            "After region growing, expand MCA/ACA/PCA into a Frangi+hysteresis "
+            "vessel tree via watershed (eICAB-inspired, Python-only). Default OFF."
+        ),
+    )(func)
+    func = click.option(
+        "--distal-hyst-low-factor",
+        type=float,
+        default=3.5,
+        show_default=True,
+        help=(
+            "Distal GMM hysteresis low factor (higher → thinner tree; try 3.5–4.5 to reduce blobs)."
+        ),
+    )(func)
+    func = click.option(
+        "--distal-hyst-high-factor",
+        type=float,
+        default=0.5,
+        show_default=True,
+        help=(
+            "Distal GMM hysteresis high factor. Lower → more high seeds / thicker tree; "
+            "raise slightly to thin."
+        ),
+    )(func)
+    func = click.option(
+        "--distal-thicken-iter",
+        type=int,
+        default=0,
+        show_default=True,
+        help=(
+            "Optional binary dilations of the Frangi tree inside a high-CD gate. "
+            "0 = thinnest (recommended); 1 recovers lumen but can look blobbier."
+        ),
+    )(func)
+    func = click.option(
+        "--distal-max-image-frac",
+        type=float,
+        default=0.006,
+        show_default=True,
+        help="Cap on total voxels claimed by distal expand (fraction of image).",
+    )(func)
+    func = click.option(
+        "--distal-lr-halfspace-slack",
+        type=int,
+        default=2,
+        show_default=True,
+        help="L/R midline slack (voxels) so ACA/MCA/PCA cannot claim the contralateral side.",
+    )(func)
     return func
 
 
@@ -433,6 +522,12 @@ def submit_subject_sge(
     rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
     venous_region_growing: bool = True,
     segment_acomm: bool = False,
+    distal_flow_expand: bool = False,
+    distal_hyst_low_factor: float = 3.5,
+    distal_hyst_high_factor: float = 0.5,
+    distal_thicken_iter: int = 0,
+    distal_max_image_frac: float = 0.006,
+    distal_lr_halfspace_slack: int = 2,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-4 SGE job. Returns qsub job id."""
@@ -486,6 +581,24 @@ def submit_subject_sge(
         parts.append("--segment-acomm")
     else:
         parts.append("--no-segment-acomm")
+    if distal_flow_expand:
+        parts.append("--distal-flow-expand")
+        parts.extend(
+            [
+                "--distal-hyst-low-factor",
+                str(float(distal_hyst_low_factor)),
+                "--distal-hyst-high-factor",
+                str(float(distal_hyst_high_factor)),
+                "--distal-thicken-iter",
+                str(int(distal_thicken_iter)),
+                "--distal-max-image-frac",
+                str(float(distal_max_image_frac)),
+                "--distal-lr-halfspace-slack",
+                str(int(distal_lr_halfspace_slack)),
+            ]
+        )
+    else:
+        parts.append("--no-distal-flow-expand")
     if skip_existing:
         parts.append("--skip-existing")
     python_cmd = " ".join(parts)
@@ -532,6 +645,12 @@ def main(
     rg_max_image_frac: float,
     venous_region_growing: bool,
     segment_acomm: bool,
+    distal_flow_expand: bool,
+    distal_hyst_low_factor: float,
+    distal_hyst_high_factor: float,
+    distal_thicken_iter: int,
+    distal_max_image_frac: float,
+    distal_lr_halfspace_slack: int,
 ) -> None:
     Logger()
     run_subject(
@@ -554,6 +673,12 @@ def main(
         rg_max_image_frac=rg_max_image_frac,
         venous_region_growing=venous_region_growing,
         segment_acomm=segment_acomm,
+        distal_flow_expand=distal_flow_expand,
+        distal_hyst_low_factor=distal_hyst_low_factor,
+        distal_hyst_high_factor=distal_hyst_high_factor,
+        distal_thicken_iter=distal_thicken_iter,
+        distal_max_image_frac=distal_max_image_frac,
+        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
     )
 
 

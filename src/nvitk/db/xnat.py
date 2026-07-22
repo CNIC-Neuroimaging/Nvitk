@@ -419,6 +419,7 @@ _ASSET_SLOT_LABELS: dict[str, str] = {
     "pet": "PET",
     "pipeline_eicab": "eICAB results",
     "pipeline_qvtpy": "QVTPy results",
+    "pipeline_4dflows": "4DFlows results",
 }
 
 
@@ -954,13 +955,14 @@ def _project_subject_pipeline_asset_slots(repo: Any, project_id: str) -> dict[st
     if assets.empty or "asset_slot" not in assets.columns:
         return {}
 
-    pipeline_slots = {"pipeline_eicab", "pipeline_qvtpy"}
-    assets = assets[assets["asset_slot"].astype(str).isin(pipeline_slots)]
-    if assets.empty:
-        return {}
+    from nvitk.db.pipeline_assets import PIPELINE_FILTER_SLOTS
 
+    pipeline_slots = set(PIPELINE_FILTER_SLOTS)
     out: dict[str, set[str]] = {}
-    for subject_uid, group in assets.groupby("subject_uid", sort=False):
+
+    # Bundle rows keyed by pipeline_* asset_slot.
+    slotted = assets[assets["asset_slot"].astype(str).isin(pipeline_slots)]
+    for subject_uid, group in slotted.groupby("subject_uid", sort=False):
         subj = str(subject_uid).strip()
         if not subj:
             continue
@@ -970,7 +972,25 @@ def _project_subject_pipeline_asset_slots(repo: Any, project_id: str) -> dict[st
             if str(s).strip()
         }
         if slots:
-            out[subj] = slots
+            out.setdefault(subj, set()).update(slots)
+
+    # Derived 4dflows files are indexed per-stem (flow_*), not as pipeline_4dflows.
+    # Treat any xnat_4dflows / resource_label=4dflows row as having pipeline_4dflows.
+    fourd_mask = pd.Series(False, index=assets.index)
+    if "source" in assets.columns:
+        fourd_mask = fourd_mask | (
+            assets["source"].astype(str).str.lower() == "xnat_4dflows"
+        )
+    if "resource_label" in assets.columns:
+        fourd_mask = fourd_mask | (
+            assets["resource_label"].astype(str).str.lower() == "4dflows"
+        )
+    if fourd_mask.any():
+        for subject_uid in assets.loc[fourd_mask, "subject_uid"].dropna().unique():
+            subj = str(subject_uid).strip()
+            if subj:
+                out.setdefault(subj, set()).add("pipeline_4dflows")
+
     return out
 
 

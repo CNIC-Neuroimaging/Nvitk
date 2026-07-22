@@ -284,6 +284,12 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
+    distal_flow_expand: bool,
+    distal_hyst_low_factor: float,
+    distal_hyst_high_factor: float,
+    distal_thicken_iter: int,
+    distal_max_image_frac: float,
+    distal_lr_halfspace_slack: int,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -491,6 +497,12 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                         aca_sequential_grow=aca_sequential_grow,
                         aca_overlap_min_voxels=aca_overlap_min_voxels,
                         acomm_junction_radius=acomm_junction_radius,
+                        distal_flow_expand=distal_flow_expand,
+                        distal_hyst_low_factor=distal_hyst_low_factor,
+                        distal_hyst_high_factor=distal_hyst_high_factor,
+                        distal_thicken_iter=distal_thicken_iter,
+                        distal_max_image_frac=distal_max_image_frac,
+                        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
                         backend=backend,
                     )
                     jobs_emitted += 1
@@ -1011,6 +1023,50 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="Stage4: Voronoi-split overlap only within this many vox of AComm junction.",
 )
+@click.option(
+    "--distal-flow-expand/--no-distal-flow-expand",
+    default=True,
+    show_default=True,
+    help=(
+        "Stage4: after region growing, expand MCA/ACA/PCA into a Frangi+hysteresis "
+        "vessel tree via watershed (eICAB-inspired, Python-only). Default OFF."
+    ),
+)
+@click.option(
+    "--distal-hyst-low-factor",
+    type=float,
+    default=2,
+    show_default=True,
+    help="Stage4: distal GMM hysteresis low factor (higher → thinner tree; try 3.5–4.5).",
+)
+@click.option(
+    "--distal-hyst-high-factor",
+    type=float,
+    default=0.5,
+    show_default=True,
+    help="Stage4: distal GMM hysteresis high factor.",
+)
+@click.option(
+    "--distal-thicken-iter",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Stage4: lumen thicken iterations (0=thinnest; 1 can look blobbier).",
+)
+@click.option(
+    "--distal-max-image-frac",
+    type=float,
+    default=0.01,
+    show_default=True,
+    help="Stage4: max voxels claimed by distal expand as fraction of image.",
+)
+@click.option(
+    "--distal-lr-halfspace-slack",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Stage4: L/R midline slack so contralateral ACA/MCA/PCA claims are blocked.",
+)
 # --- stage 5 ---
 @click.option(
     "--loc-arterial-strategy",
@@ -1147,6 +1203,12 @@ def main(
     aca_sequential_grow: bool,
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
+    distal_flow_expand: bool,
+    distal_hyst_low_factor: float,
+    distal_hyst_high_factor: float,
+    distal_thicken_iter: int,
+    distal_max_image_frac: float,
+    distal_lr_halfspace_slack: int,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -1539,6 +1601,12 @@ def main(
                             aca_sequential_grow=aca_sequential_grow,
                             aca_overlap_min_voxels=aca_overlap_min_voxels,
                             acomm_junction_radius=acomm_junction_radius,
+                            distal_flow_expand=distal_flow_expand,
+                            distal_hyst_low_factor=distal_hyst_low_factor,
+                            distal_hyst_high_factor=distal_hyst_high_factor,
+                            distal_thicken_iter=distal_thicken_iter,
+                            distal_max_image_frac=distal_max_image_frac,
+                            distal_lr_halfspace_slack=distal_lr_halfspace_slack,
                         ),
                     )
                 if run_s4t and _local_stage_pending(subj, STAGE_SEG_T, **_local_skip):
@@ -1777,6 +1845,12 @@ def main(
         aca_sequential_grow=aca_sequential_grow,
         aca_overlap_min_voxels=aca_overlap_min_voxels,
         acomm_junction_radius=acomm_junction_radius,
+        distal_flow_expand=distal_flow_expand,
+        distal_hyst_low_factor=distal_hyst_low_factor,
+        distal_hyst_high_factor=distal_hyst_high_factor,
+        distal_thicken_iter=distal_thicken_iter,
+        distal_max_image_frac=distal_max_image_frac,
+        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,

@@ -33,23 +33,32 @@ footer{margin-top:3rem;font-size:.85rem;color:#666;font-style:italic}
 <p class="note"><strong>Viewing:</strong> Open this file in a <strong>web browser</strong> for rendered equations (MathJax). Cursor markdown preview does not typeset LaTeX.</p>
 <h1>qvtpy Measurements — Technical Review</h1>
 <p><strong>Document type:</strong> Internal technical reference  </p>
-<p><strong>Subject:</strong> Mathematical definitions and code mapping for qvtpy stage 6 (hemodynamics) and stage 7 (TOF morphometrics), plus venous region labeling  </p>
-<p><strong>Date:</strong> 17 July 2026  </p>
+<p><strong>Subject:</strong> Mathematical definitions and code mapping for qvtpy stage 4 (distal MCA/ACA/PCA expansion), stage 6 (hemodynamics), stage 7 (TOF morphometrics), and venous region labeling  </p>
+<p><strong>Date:</strong> 22 July 2026  </p>
 <p><strong>Status:</strong> Reflects current <code>nvitk.pipes.qvtpy</code> implementation</p>
 <hr>
 <h2>1. Scope</h2>
-<p>This document covers three measurement areas in the qvtpy pipeline:</p>
+<p>This document covers four measurement / segmentation areas in the qvtpy pipeline:</p>
 <table>
 <thead><tr><th>Area</th><th>Stage</th><th>Legacy reference</th></tr></thead><tbody>
+<tr><td>Distal MCA/ACA/PCA vessel-tree watershed</td><td>stage 4 (optional)</td><td>eICAB WB <code>vessels_flood_filling</code> structure (Python-only port)</td></tr>
 <tr><td>PITC / PWV / damping index</td><td>stage 6</td><td>QVTplus <code>paramMap_params_threshS</code>, <code>enc_PWV</code>, <code>slidingxCor</code></td></tr>
 <tr><td>TOF morphometrics (tortuosity, stenosis, enlargement, …)</td><td>stage 7</td><td><code>cow_morpho</code> (not MATLAB QVTPlus)</td></tr>
 <tr><td>Venous sinus labeling</td><td>stages 3–5</td><td>QVTplus manual <code>LabelsQVT.csv</code> → automated geometry heuristics</td></tr>
 </tbody></table>
-<p>Stage 6 also runs a <strong>separate LOC track</strong> (<code>locs.csv</code> → <code>loc_measurements.csv</code>) for discrete operator-defined locations. PITC/PWV is the <strong>dense vessel-level</strong> track described in Part A.</p>
+<p>Stage 6 also runs a <strong>separate LOC track</strong> (<code>locs.csv</code> → <code>loc_measurements.csv</code>) for discrete operator-defined locations. PITC/PWV is the <strong>dense vessel-level</strong> track described in Part B.</p>
 <hr>
 <h2>2. Architecture overview</h2>
 <pre><code>
 flowchart TD
+  subgraph stage4 [Stage 4 — CD segmentation + optional distal expand]
+    S4a[CD + centerlines_mask] --&gt; S4b[local crop + thr + RG]
+    S4b --&gt; S4c{distal-flow-expand?}
+    S4c --&gt;|yes| S4d[Frangi → hysteresis tree → watershed]
+    S4c --&gt;|no| S4e[seg_4dflow]
+    S4d --&gt; S4e
+  end
+
   subgraph stage6 [Stage 6 — 4D-flow hemodynamics]
     A[4DFlow AP/RL/FH phases] --&gt; B[velocity_mm_s_from_phases]
     C[CD / MAG / vel_mag + seg_4dflow] --&gt; D[cross_section_at_loc]
@@ -78,8 +87,134 @@ flowchart TD
   end
 </code></pre>
 <hr>
-<h1>Part A — 4D-flow hemodynamics (PITC / PWV, stage 6)</h1>
-<h2>A.1 Velocity from PC-MRI phases</h2>
+<h1>Part A — Distal MCA/ACA/PCA expansion (vessel-tree watershed, stage 4)</h1>
+<p>Optional post–region-growing pass controlled by <code>--distal-flow-expand</code> (default <strong>OFF</strong>). It extends already-segmented <strong>MCA / ACA / PCA</strong> labels into distal branches without isotropic CD intensity blobs.</p>
+<p>Structure mirrors eICAB whole-brain <code>vessels_flood_filling</code> (vesselness → hysteresis binary tree → watershed markers into the tree), but every step is implemented in Python (<code>skimage</code> / <code>scipy</code> / <code>sklearn</code>). No vasculature / VED binaries are called.</p>
+<div class="note">
+<strong>Why not intensity region-grow for distal branches?</strong>
+Intensity RG admits any CD-bright neighbour of the seed → spherical “blobs” and contralateral / neighbour-label bleed.
+Watershed confined to a tubular binary mask can only grow along the vessel tree topology.
+</div>
+
+<h2>A.1 Pipeline summary</h2>
+<pre><code>
+flowchart LR
+  cd["CD volume"] --&gt; frangi["Frangi vesselness"]
+  frangi --&gt; gmm["GMM + hysteresis"]
+  gmm --&gt; tree["Binary vessel tree"]
+  seeds["MCA/ACA/PCA seg seeds"] --&gt; cc["Keep CCs touching seeds"]
+  tree --&gt; cc
+  cc --&gt; thin["Keep vesselness ≥ p55 on tree"]
+  thin --&gt; mid["L/R midline (MCA/PCA only)"]
+  mid --&gt; ws["watershed(-EDT)"]
+  ws --&gt; claim["Claim seg==0 (+ MCA/PCA ipsilateral) + caps"]
+</code></pre>
+<p><strong>Targets</strong> (qvtpy label IDs): LACA/RACA (4/5), LMCA/RMCA (6/7), LPCA/RPCA (8/9). ICA, basilar, PComms, and veins are <strong>not</strong> distal targets — they act as hard barriers when already present in <code>seg</code>.</p>
+
+<h2>A.2 Frangi vesselness</h2>
+<p>CD is percentile-normalized to \([0,1]\), then multi-scale Frangi filtering for <em>bright</em> tubular structures (<code>black_ridges=False</code>). Default scales:</p>
+\[
+\sigma \in \{0.5,\,1.0,\,1.5,\,2.0,\,2.5\}
+\]
+<p>The response is re-normalized by its maximum. If Frangi is unavailable, normalized CD is used as a fallback.</p>
+<p><strong>Code:</strong> <code>cd_vesselness()</code> — <code>src/nvitk/pipes/qvtpy/util/distal_vessel_tree.py</code></p>
+
+<h2>A.3 GMM hysteresis vessel tree</h2>
+<p>Inside a CD foreground mask (voxels above the 25th percentile of positive CD), a <strong>3-component Gaussian mixture</strong> is fit on the upper half of positive vesselness samples (so near-zero Frangi noise does not pull thresholds toward zero).</p>
+<p>eICAB-style bounds from the sorted component means / variances:</p>
+\[
+\begin{aligned}
+t_{\mathrm{low}}  &= \mu_{\mathrm{med}} + f_{\mathrm{low}}\sqrt{v_{\mathrm{med}}} \\
+t_{\mathrm{high}} &= \mu_{\mathrm{max}} + f_{\mathrm{high}}\sqrt{v_{\mathrm{max}}}
+\end{aligned}
+\]
+<p>with defaults \(f_{\mathrm{low}}=3.5\), \(f_{\mathrm{high}}=0.5\) (<code>--distal-hyst-low-factor</code>, <code>--distal-hyst-high-factor</code>).</p>
+<p>The binary tree keeps 26-connected components of \(\{V &gt; t_{\mathrm{low}}\}\) that touch at least one voxel with \(V &gt; t_{\mathrm{high}}\) (Canny-style hysteresis). Tiny connected components are dropped.</p>
+<p><strong>Tuning:</strong> raising \(f_{\mathrm{low}}\) (e.g. 3.5–4.5) thins the tree and reduces parenchyma flood.</p>
+<p><strong>Code:</strong> <code>hysteresis_vessel_tree()</code>, <code>apply_hysteresis_threshold_3d()</code></p>
+
+<h2>A.4 Marker-connected pruning</h2>
+<p>Only tree connected components that touch at least one MCA/ACA/PCA seed voxel are retained. This discards venous / noise Frangi forest that never meets CoW markers.</p>
+<p><strong>Code:</strong> <code>keep_tree_components_touching_markers()</code></p>
+
+<h2>A.5 Optional global lumen thicken</h2>
+<p>Controlled by <code>--distal-thicken-iter</code> (default <strong>0</strong>). When \(N&gt;0\), the tree is dilated \(N\) times inside a high-CD gate (85th percentile of positive CD). This recovers lumen thickness but can look blobbier — leave at 0 for tubular results.</p>
+<p><strong>Code:</strong> <code>thicken_tree_in_cd()</code></p>
+
+<h2>A.6 Tree thinning (anti-blob)</h2>
+<p>After marker pruning (and optional global thicken), the tree is intersected with high vesselness:</p>
+\[
+T \leftarrow \bigl(T \cap \{V \ge \mathrm{percentile}_{55}(V|_{T})\}\bigr) \cup \{\mathrm{markers}\}
+\]
+<p>This drops the Frangi “shell” that otherwise fattens masks, while keeping seed voxels so watershed still has markers.</p>
+
+<h2>A.7 Hard barriers and L/R midline</h2>
+<p>Non-target labels already in <code>seg</code> (ICA, basilar, PComms, veins, …) are punched out of the tree. Seed voxels are forced back into the mask so markers always lie inside.</p>
+
+<h3>A.7.1 MCA / PCA (strict)</h3>
+<p>For LMCA/RMCA and LPCA/RPCA:</p>
+<ol>
+<li>Midline on array axis 0 from the two seed centroids.</li>
+<li>A thin sagittal slab is zeroed in the tree so watershed basins cannot cross.</li>
+<li>Claims on the contralateral half-space are rejected (± <code>--distal-lr-halfspace-slack</code>, default 2 vox).</li>
+</ol>
+<p>This stops e.g. LPCA from owning the contralateral PCA when the Frangi tree bridges the midline.</p>
+
+<h3>A.7.2 ACA (no hemisphere gate)</h3>
+<p>ACAs track the exact X centre. Any sagittal punch or L/R claim half-space creates <strong>artificial midline cuts / “barrier bridges”</strong> on A2 and blocks growth into the true vessel lumen.</p>
+<p>For LACA/RACA therefore:</p>
+<ul>
+<li><strong>No</strong> sagittal slab in the tree.</li>
+<li><strong>No</strong> ipsilateral claim filter.</li>
+<li>L/R assignment is done only by competing watershed markers (EDT into the shared anterior tree).</li>
+</ul>
+<p><strong>Code:</strong> <code>_punch_lr_midline_barrier()</code> / <code>_lr_halfspace_ok_mask()</code> applied to MCA/PCA only</p>
+
+<h2>A.8 Distance-transform watershed</h2>
+<p>With binary mask \(T\) and integer marker volume \(M\):</p>
+\[
+L = \mathrm{watershed}\bigl(-\mathrm{EDT}(T),\, M,\, \mathrm{mask}=T\bigr)
+\]
+<p>Each empty tree voxel is assigned to the nearest seed label by Euclidean distance <em>restricted to the mask</em>. Marker erosion is disabled so small ACA/PCA seeds are not wiped.</p>
+<p><strong>Code:</strong> <code>watershed_labels_into_vessels()</code></p>
+
+<h2>A.9 Claim rules and safety caps</h2>
+<p>A voxel is written only if all of the following hold:</p>
+<ul>
+<li>\(L(\mathbf{x}) = \ell\) (watershed label),</li>
+<li>\(\mathrm{seg}(\mathbf{x}) = 0\) (never overwrite another label),</li>
+<li>ipsilateral half-space OK for <strong>MCA/PCA</strong> L/R pairs (not applied to ACA),</li>
+<li>within shared and per-label budgets.</li>
+</ul>
+<p>Caps:</p>
+<table>
+<thead><tr><th>Cap</th><th>Default</th><th>CLI</th></tr></thead><tbody>
+<tr><td>Total claimed voxels</td><td>\(0.006 \times N_{\mathrm{vox}}\)</td><td><code>--distal-max-image-frac</code></td></tr>
+<tr><td>Per-label (all targets)</td><td>\(\max(0.0015\,N_{\mathrm{vox}},\, 5\cdot|\mathrm{seed}|)\)</td><td>(internal)</td></tr>
+</tbody></table>
+<p>When capping, voxels closest to the existing seed (EDT) are preferred. Each label then keeps its largest connected component.</p>
+<p>If the tree still exceeds 1% of the volume after pruning, voxels below the 75th percentile of vesselness on the tree are dropped (oversized-tree safety).</p>
+
+<h2>A.10 CLI and code map</h2>
+<table>
+<thead><tr><th>Flag</th><th>Default</th><th>Role</th></tr></thead><tbody>
+<tr><td><code>--distal-flow-expand / --no-distal-flow-expand</code></td><td>OFF</td><td>Enable pass</td></tr>
+<tr><td><code>--distal-hyst-low-factor</code></td><td>3.5</td><td>Higher → thinner tree</td></tr>
+<tr><td><code>--distal-hyst-high-factor</code></td><td>0.5</td><td>High-seed threshold factor</td></tr>
+<tr><td><code>--distal-thicken-iter</code></td><td>0</td><td>Global lumen dilations (0 = thinnest)</td></tr>
+<tr><td><code>--distal-max-image-frac</code></td><td>0.006</td><td>Total claim budget</td></tr>
+<tr><td><code>--distal-lr-halfspace-slack</code></td><td>2</td><td>Midline tolerance (vox)</td></tr>
+</tbody></table>
+<table>
+<thead><tr><th>Function</th><th>Module</th></tr></thead><tbody>
+<tr><td><code>expand_distal_mca_aca_pca()</code></td><td><code>src/nvitk/pipes/qvtpy/util/vessel_cd_segmentation.py</code></td></tr>
+<tr><td><code>cd_vesselness</code>, <code>hysteresis_vessel_tree</code>, <code>watershed_labels_into_vessels</code>, …</td><td><code>src/nvitk/pipes/qvtpy/util/distal_vessel_tree.py</code></td></tr>
+<tr><td>CLI / SGE wiring</td><td><code>stage4_4dflow_segmentation.py</code>, <code>run.py</code></td></tr>
+</tbody></table>
+<p>Metadata is written to stage-4 <code>segmentation_meta.json</code> under <code>distal_expand</code> / <code>distal_method=frangi_hysteresis_watershed</code>.</p>
+<hr>
+<h1>Part B — 4D-flow hemodynamics (PITC / PWV, stage 6)</h1>
+<h2>B.1 Velocity from PC-MRI phases</h2>
 <p>Phase images (AP, RL, FH) are converted to velocity components (mm/s):</p>
 \[
 v_x = -10 \cdot \text{RL},\quad v_y = -10 \cdot \text{AP},\quad v_z = 10 \cdot \text{FH}

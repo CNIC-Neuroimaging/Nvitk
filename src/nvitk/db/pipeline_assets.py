@@ -25,23 +25,42 @@ log = Logger()
 
 XNAT_RESOURCE_EICAB = qvt_cfg.STAGE1_EICAB_DIR
 XNAT_RESOURCE_QVTPY = qvt_cfg.QVT_SUBDIR
+XNAT_RESOURCE_4DFLOWS = "4dflows"
 
+# Indexed / synced by nvitk-xnat-pipeline-sync (bundle trees).
 QVTPY_PIPELINE_RESOURCES: tuple[str, ...] = (XNAT_RESOURCE_EICAB, XNAT_RESOURCE_QVTPY)
+
+# Downloadable experiment resources shown in the Data / QC browsers.
+GUI_PIPELINE_RESOURCES: tuple[str, ...] = (
+    XNAT_RESOURCE_EICAB,
+    XNAT_RESOURCE_QVTPY,
+    XNAT_RESOURCE_4DFLOWS,
+)
 
 PIPELINE_RESOURCE_TO_SLOT: dict[str, str] = {
     XNAT_RESOURCE_EICAB: "pipeline_eicab",
     XNAT_RESOURCE_QVTPY: "pipeline_qvtpy",
+    XNAT_RESOURCE_4DFLOWS: "pipeline_4dflows",
 }
 
 PIPELINE_RESOURCE_TO_PIPELINE_ID: dict[str, str] = {
     XNAT_RESOURCE_EICAB: "eicab_v1",
     XNAT_RESOURCE_QVTPY: "qvtpy_v1",
+    XNAT_RESOURCE_4DFLOWS: "4dflows_v1",
 }
 
 PIPELINE_RESOURCE_TO_NAME: dict[str, str] = {
     XNAT_RESOURCE_EICAB: "eICAB",
     XNAT_RESOURCE_QVTPY: "QVTPy",
+    XNAT_RESOURCE_4DFLOWS: "4DFlows",
 }
+
+# Always-available filter slots for the Data browser (even if catalog is empty).
+PIPELINE_FILTER_SLOTS: tuple[str, ...] = (
+    "pipeline_eicab",
+    "pipeline_qvtpy",
+    "pipeline_4dflows",
+)
 
 _DEFAULT_QVTPY_QC_STAGES: tuple[str, ...] = (
     "stage2",

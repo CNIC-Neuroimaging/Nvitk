@@ -362,6 +362,54 @@ def qvtpy_label_from_name(name: str) -> int | None:
     return None if out is None else int(out)
 
 
+# Arterial segment letter for anatomical sub-branch naming.
+QVTPY_BRANCH_SEGMENT_LETTER: dict[int, str] = {
+    QVTPY_LMCA: "M",
+    QVTPY_RMCA: "M",
+    QVTPY_LACA: "A",
+    QVTPY_RACA: "A",
+    QVTPY_LPCA: "P",
+    QVTPY_RPCA: "P",
+}
+
+# Vessels that are branched (bifurcation) territories; others stay single-path.
+QVTPY_BRANCHED_LABEL_IDS: frozenset[int] = frozenset(QVTPY_BRANCH_SEGMENT_LETTER)
+
+_BRANCH_SUFFIX_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+
+
+def qvtpy_branch_names(label_id: int, n_branches: int) -> list[str]:
+    """Anatomical names for the branches of one arterial label.
+
+    Branched vessels (MCA/ACA/PCA) name the trunk ``{vessel}-{L}1`` (e.g.
+    ``LACA-A1``) and each side branch a generation-2 segment ``{vessel}-{L}2a``,
+    ``{vessel}-{L}2b``, … (e.g. ``LMCA-M2a``). Non-branched vessels
+    (ICA/basilar/comm/vertebral) use the bare vessel name for the trunk and a
+    ``{vessel}-b2`` … suffix for any extra branches.
+    """
+    base = qvtpy_vessel_name(int(label_id))
+    n = max(1, int(n_branches))
+    letter = QVTPY_BRANCH_SEGMENT_LETTER.get(int(label_id))
+    names: list[str] = []
+    if letter is None:
+        names.append(base)
+        for i in range(1, n):
+            names.append(f"{base}-b{i + 1}")
+        return names
+    names.append(f"{base}-{letter}1")
+    for i in range(1, n):
+        suffix = _BRANCH_SUFFIX_LETTERS[(i - 1) % len(_BRANCH_SUFFIX_LETTERS)]
+        names.append(f"{base}-{letter}2{suffix}")
+    return names
+
+
+def qvtpy_branch_parent_label(branch_name: str) -> int | None:
+    """Parent qvtpy label id for a branch name like ``LMCA-M2a`` (or bare name)."""
+    key = str(branch_name).strip()
+    base = key.split("-", 1)[0].upper()
+    return qvtpy_label_from_name(base)
+
+
 __all__ = [
     "EICAB_ACOMM",
     "EICAB_BACKGROUND",
@@ -401,6 +449,10 @@ __all__ = [
     "QVTPY_ACOMM",
     "QVTPY_ACA_IDS",
     "QVTPY_ARTERIAL_ID_TO_NAME",
+    "QVTPY_BRANCH_SEGMENT_LETTER",
+    "QVTPY_BRANCHED_LABEL_IDS",
+    "qvtpy_branch_names",
+    "qvtpy_branch_parent_label",
     "QVTPY_ARTERIAL_LABEL_IDS",
     "QVTPY_ARTERIAL_NAME_TO_ID",
     "QVTPY_COMM_IDS",

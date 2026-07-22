@@ -34,23 +34,27 @@ from nvitk.pipes.qvtpy.labels import (
     EICAB_RG_BARRIER_LABEL_IDS,
     QVTPY_ACA_IDS,
     QVTPY_ACOMM,
+    QVTPY_ARTERIAL_ID_TO_NAME,
     QVTPY_BASILAR,
     QVTPY_COMM_IDS,
     QVTPY_ICA_BASILAR_IDS,
     QVTPY_LACA,
     QVTPY_LICA,
     QVTPY_LMCA,
+    QVTPY_LPCA,
+    QVTPY_MCA_IDS,
     QVTPY_NON_COMM_ARTERIAL_IDS,
     QVTPY_PCA_IDS,
     QVTPY_RACA,
     QVTPY_RICA,
+    QVTPY_RMCA,
+    QVTPY_RPCA,
     QVTPY_RG_EXPLORE_MORE_IDS,
     QVTPY_RG_INTENSITY_FRAC_VENOUS,
     QVTPY_RG_MCA_PCA_EXPLORE_IDS,
     QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS,
     QVTPY_RG_PCOMM_EICAB_BARRIER_IDS,
     QVTPY_RG_SKIP_LABEL_IDS,
-    QVTPY_RMCA,
     QVTPY_SMALL_ARTERIAL_IDS,
     QVTPY_VENOUS_LABEL_IDS,
     QVTPY_VERTEBRAL_IDS,
@@ -94,6 +98,25 @@ _RG_MIN_GROW_ALLOW_VOXELS: int = 2000  # always allow at least this many grown v
 # Neighbour labels dilated as extra RG walls so PCA/PComm growth cannot slip into
 # the basilar, ICA, or the opposite communicating artery through the P1/junction gap.
 _RG_EXPLORE_NEIGHBOUR_BARRIER_RADIUS: int = 3
+
+# Optional post-RG distal expansion for MCA/ACA/PCA (default OFF).
+# eICAB-inspired: Frangi vesselness → GMM hysteresis tree → watershed markers.
+_DISTAL_MAX_IMAGE_FRAC_DEFAULT: float = 0.006
+_DISTAL_HYST_LOW_FACTOR_DEFAULT: float = 3.5
+_DISTAL_HYST_HIGH_FACTOR_DEFAULT: float = 0.5
+_DISTAL_THICKEN_ITER_DEFAULT: int = 0
+_DISTAL_LR_AXIS: int = 0  # array axis treated as L↔R (matches ACA / typical RAS)
+_DISTAL_LR_HALFSPACE_SLACK_DEFAULT: int = 2
+# Drop the lowest vesselness voxels on the tree to keep growth tubular (anti-blob).
+_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE: float = 55.0
+_DISTAL_LR_PAIRS: tuple[tuple[int, int], ...] = (
+    (QVTPY_LACA, QVTPY_RACA),
+    (QVTPY_LMCA, QVTPY_RMCA),
+    (QVTPY_LPCA, QVTPY_RPCA),
+)
+_DISTAL_TARGET_IDS: frozenset[int] = frozenset(
+    QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS
+)
 
 
 @dataclass(frozen=True)
@@ -183,6 +206,7 @@ class LocalSegResult:
     vessel_stats: list[VesselSegStats] = field(default_factory=list)
     aca_sequential_grow: AcaSequentialGrowInfo | None = None
     vertebral_split: VertebralSplitResult | None = None
+    distal_expand: dict[str, Any] | None = None
 
 
 def crop_min_fraction_for_label(label_id: int) -> float:
@@ -736,6 +760,349 @@ def _finalize_vessel_largest_cc(
     return n_after
 
 
+def _distal_label_name(label_id: int) -> str:
+    return QVTPY_ARTERIAL_ID_TO_NAME.get(int(label_id), f"label-{int(label_id)}")
+
+
+def _distal_lr_midline(
+    seg: np.ndarray,
+    left_id: int,
+    right_id: int,
+    *,
+    axis: int = _DISTAL_LR_AXIS,
+) -> int | None:
+    """Midline coordinate on *axis* from L/R seed centroids (None if a side is missing)."""
+    left = np.argwhere(seg == int(left_id))
+    right = np.argwhere(seg == int(right_id))
+    if left.size == 0 or right.size == 0:
+        return None
+    mid = 0.5 * (
+        float(left[:, int(axis)].mean()) + float(right[:, int(axis)].mean())
+    )
+    return int(round(mid))
+
+
+def _punch_lr_midline_barrier(
+    tree: np.ndarray,
+    mid: int,
+    *,
+    axis: int = _DISTAL_LR_AXIS,
+    width: int = 1,
+) -> np.ndarray:
+    """Zero a thin sagittal slab so L/R watershed basins cannot cross the midline."""
+    out = as_backend_array(tree).astype(bool, copy=True)
+    ax = int(axis)
+    w = max(0, int(width))
+    lo = max(0, int(mid) - w)
+    hi = min(int(out.shape[ax]), int(mid) + w + 1)
+    if ax == 0:
+        out[lo:hi, :, :] = False
+    elif ax == 1:
+        out[:, lo:hi, :] = False
+    else:
+        out[:, :, lo:hi] = False
+    return out
+
+
+def _lr_halfspace_ok_mask(
+    shape: tuple[int, int, int],
+    mid: int,
+    label_id: int,
+    left_id: int,
+    *,
+    axis: int = _DISTAL_LR_AXIS,
+    slack: int = _DISTAL_LR_HALFSPACE_SLACK_DEFAULT,
+) -> np.ndarray:
+    """True where *label_id* is allowed to claim (ipsilateral half-space + slack)."""
+    ok = np.ones(shape, dtype=bool)
+    ax = int(axis)
+    sl = int(slack)
+    ji = int(mid)
+    is_left = int(label_id) == int(left_id)
+    if is_left:
+        if ax == 0:
+            ok[(ji + sl + 1) :, :, :] = False
+        elif ax == 1:
+            ok[:, (ji + sl + 1) :, :] = False
+        else:
+            ok[:, :, (ji + sl + 1) :] = False
+    else:
+        if ax == 0:
+            ok[: max(0, ji - sl), :, :] = False
+        elif ax == 1:
+            ok[:, : max(0, ji - sl), :] = False
+        else:
+            ok[:, :, : max(0, ji - sl)] = False
+    return ok
+
+
+def expand_distal_mca_aca_pca(
+    seg: np.ndarray,
+    cd: np.ndarray,
+    centerlines_mask: np.ndarray | None = None,
+    *,
+    max_image_frac: float = _DISTAL_MAX_IMAGE_FRAC_DEFAULT,
+    hyst_low_factor: float = _DISTAL_HYST_LOW_FACTOR_DEFAULT,
+    hyst_high_factor: float = _DISTAL_HYST_HIGH_FACTOR_DEFAULT,
+    frangi_sigmas: tuple[float, ...] | None = None,
+    thicken_iter: int = _DISTAL_THICKEN_ITER_DEFAULT,
+    lr_halfspace_slack: int = _DISTAL_LR_HALFSPACE_SLACK_DEFAULT,
+) -> dict[str, Any]:
+    """Post-RG distal expansion for MCA/ACA/PCA via vessel-tree watershed.
+
+    eICAB-inspired (Python-only, no vasculature binaries):
+
+    1. Frangi vesselness on CD (fallback: normalized CD)
+    2. GMM + hysteresis → binary vessel tree
+    3. Watershed existing MCA/ACA/PCA seeds into that tree
+
+    Growth cannot leave the binary tree. MCA/PCA pairs get a hard midline punch
+    and claim half-space filter. ACA gets **neither** (no sagittal punch, no
+    half-space claim filter): A2 sits on the X centre, so hemisphere gates create
+    artificial midline cuts; LACA/RACA are separated only by watershed markers.
+    The tree is thinned to high vesselness cores to limit blob thickness.
+    Only previously empty voxels (``seg==0``) are claimed.
+    ``centerlines_mask`` is accepted for API compatibility but unused.
+    """
+    _ = centerlines_mask
+    from nvitk.pipes.qvtpy.util.distal_vessel_tree import (
+        _DISTAL_FRANGI_SIGMAS_DEFAULT,
+        cd_vesselness,
+        hysteresis_vessel_tree,
+        keep_tree_components_touching_markers,
+        thicken_tree_in_cd,
+        watershed_labels_into_vessels,
+    )
+    from scipy import ndimage as ndi
+
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
+    cd_np = as_backend_array(cd).astype(np.float64)
+    target_ids = sorted(int(x) for x in _DISTAL_TARGET_IDS)
+    present = [lid for lid in target_ids if np.any(seg_np == lid)]
+    sigmas = (
+        tuple(frangi_sigmas) if frangi_sigmas is not None else _DISTAL_FRANGI_SIGMAS_DEFAULT
+    )
+    thick_n = max(0, int(thicken_iter))
+    lr_slack = max(0, int(lr_halfspace_slack))
+
+    log.step(
+        "distal MCA/ACA/PCA expansion (vessel-tree watershed): "
+        f"hyst_low={float(hyst_low_factor):.2f}, "
+        f"hyst_high={float(hyst_high_factor):.2f}, "
+        f"max_image_frac={float(max_image_frac):.4f}, "
+        f"thicken_iter={thick_n}, lr_slack={lr_slack}, "
+        f"frangi_sigmas={list(sigmas)}, "
+        f"targets={[_distal_label_name(i) for i in present]} "
+        f"({len(present)}/{len(target_ids)} with seed voxels)"
+    )
+    info: dict[str, Any] = {
+        "enabled": True,
+        "method": "frangi_hysteresis_watershed",
+        "max_image_frac": float(max_image_frac),
+        "hyst_low_factor": float(hyst_low_factor),
+        "hyst_high_factor": float(hyst_high_factor),
+        "thicken_iter": thick_n,
+        "lr_halfspace_slack": lr_slack,
+        "frangi_sigmas": [float(s) for s in sigmas],
+        "labels": {},
+        "lr_midlines": {},
+    }
+    if not present:
+        log.warning("distal expand: no MCA/ACA/PCA seed voxels; skipping")
+        return info
+
+    before_by_id = {lid: int(np.count_nonzero(seg_np == lid)) for lid in target_ids}
+
+    cd_pos = cd_np[cd_np > 0]
+    if cd_pos.size > 0:
+        fg_thr = float(np.percentile(cd_pos, 25.0))
+        fg_mask = cd_np > fg_thr
+    else:
+        fg_mask = np.ones(cd_np.shape, dtype=bool)
+
+    vesselness, vmode = cd_vesselness(cd_np, sigmas=sigmas)
+    tree, tree_meta = hysteresis_vessel_tree(
+        vesselness,
+        fg_mask,
+        low_factor=float(hyst_low_factor),
+        high_factor=float(hyst_high_factor),
+    )
+    info["vesselness_mode"] = vmode
+    info["tree"] = tree_meta
+
+    other = (seg_np != 0) & ~np.isin(seg_np, target_ids)
+    markers = np.zeros(seg_np.shape, dtype=np.int32)
+    for lid in present:
+        markers[seg_np == lid] = lid
+    # Drop Frangi CCs that never touch MCA/ACA/PCA seeds (venous / noise forest).
+    tree, touch_meta = keep_tree_components_touching_markers(tree, markers)
+    info["tree_marker_cc"] = touch_meta
+    if thick_n > 0:
+        tree, thick_meta = thicken_tree_in_cd(
+            tree, cd_np, iterations=thick_n, gate_percentile=85.0
+        )
+        info["tree_thicken"] = thick_meta
+
+    tree = (tree & ~other) | (markers != 0)
+
+    # Thin Frangi shell: keep only higher vesselness on the tree (anti-blob).
+    n_before_thin = int(np.count_nonzero(tree))
+    if n_before_thin > 0:
+        thr_thin = float(
+            np.percentile(
+                vesselness[tree],
+                float(_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE),
+            )
+        )
+        tree = (tree & (vesselness >= thr_thin)) | (markers != 0)
+        tree = tree & ~other
+        info["tree_thin"] = {
+            "percentile": float(_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE),
+            "threshold": thr_thin,
+            "n_before": n_before_thin,
+            "n_after": int(np.count_nonzero(tree)),
+        }
+        log.info(
+            "distal expand: tree thin "
+            f"vesselness≥p{_DISTAL_TREE_VESSELNESS_KEEP_PERCENTILE:g} "
+            f"({n_before_thin} → {info['tree_thin']['n_after']})"
+        )
+
+    claim_ok_by_id: dict[int, np.ndarray] = {}
+    for left_id, right_id in _DISTAL_LR_PAIRS:
+        if left_id not in present or right_id not in present:
+            continue
+        mid = _distal_lr_midline(seg_np, left_id, right_id, axis=_DISTAL_LR_AXIS)
+        if mid is None:
+            continue
+        pair_name = (
+            f"{_distal_label_name(left_id)}/{_distal_label_name(right_id)}"
+        )
+        info["lr_midlines"][pair_name] = int(mid)
+        is_aca_pair = left_id in QVTPY_ACA_IDS and right_id in QVTPY_ACA_IDS
+        if is_aca_pair:
+            # No tree punch and no claim half-space: A2 hugs the X midline;
+            # hemisphere gates leave artificial gaps. Watershed markers alone
+            # assign LACA vs RACA.
+            log.info(
+                f"distal expand: ACA L/R via watershed only (no midline gate) "
+                f"{pair_name} mid={mid}"
+            )
+        else:
+            tree = _punch_lr_midline_barrier(tree, mid, axis=_DISTAL_LR_AXIS, width=1)
+            tree = tree | (markers != 0)
+            claim_ok_by_id[left_id] = _lr_halfspace_ok_mask(
+                seg_np.shape, mid, left_id, left_id, axis=_DISTAL_LR_AXIS, slack=lr_slack
+            )
+            claim_ok_by_id[right_id] = _lr_halfspace_ok_mask(
+                seg_np.shape, mid, right_id, left_id, axis=_DISTAL_LR_AXIS, slack=lr_slack
+            )
+            log.info(
+                f"distal expand: L/R midline barrier {pair_name} "
+                f"axis={_DISTAL_LR_AXIS} mid={mid} slack={lr_slack}"
+            )
+
+    n_tree = int(np.count_nonzero(tree))
+    max_tree = int(max(1, round(0.01 * float(seg_np.size))))
+    if n_tree > max_tree:
+        v_on = vesselness[tree]
+        thr_safe = float(np.percentile(v_on, 75.0))
+        tree_tight = tree & (vesselness >= thr_safe)
+        tree_tight = tree_tight | (markers != 0)
+        tree_tight = tree_tight & ~other
+        tree, touch_meta2 = keep_tree_components_touching_markers(tree_tight, markers)
+        info["tree_safety"] = {
+            "n_before": n_tree,
+            "n_after": int(np.count_nonzero(tree)),
+            "vesselness_p75": thr_safe,
+            "max_tree_vox": max_tree,
+        }
+        log.warning(
+            "distal expand: vessel tree oversized "
+            f"({n_tree} > {max_tree}); kept vesselness≥p75 "
+            f"→ {info['tree_safety']['n_after']} voxels"
+        )
+        n_tree = int(np.count_nonzero(tree))
+        info["tree_marker_cc"] = touch_meta2
+
+    log.info(
+        f"distal expand: vessel tree voxels={n_tree}, "
+        f"marker voxels={int(np.count_nonzero(markers))}, "
+        f"barrier(other)={int(np.count_nonzero(other))}"
+    )
+    if n_tree == 0:
+        log.warning("distal expand: empty vessel tree; skipping watershed")
+        return info
+
+    labeled = watershed_labels_into_vessels(
+        tree, markers, connectivity=3, erode_markers=False
+    )
+    info["n_watershed_labeled"] = int(np.count_nonzero(labeled))
+
+    max_add_total = int(max(1, round(float(max_image_frac) * float(seg_np.size))))
+    added_total = 0
+    for lid in present:
+        name = _distal_label_name(lid)
+        before = before_by_id[lid]
+        claim = (labeled == lid) & (seg_np == 0)
+        if lid in claim_ok_by_id:
+            claim = claim & claim_ok_by_id[lid]
+        n_claim = int(np.count_nonzero(claim))
+        capped = False
+        per_label_cap = max(
+            int(round(0.0015 * float(seg_np.size))),
+            5 * max(1, before),
+        )
+        remain_total = max(0, max_add_total - added_total)
+        allow = min(n_claim, per_label_cap, remain_total)
+        if n_claim > allow:
+            capped = True
+            if allow <= 0:
+                claim = np.zeros_like(claim)
+                n_claim = 0
+            else:
+                coords = np.argwhere(claim)
+                dist = ndi.distance_transform_edt(seg_np != lid)
+                scores = dist[coords[:, 0], coords[:, 1], coords[:, 2]]
+                order = np.argsort(scores)[:allow]
+                keep = np.zeros_like(claim)
+                sel = coords[order]
+                keep[sel[:, 0], sel[:, 1], sel[:, 2]] = True
+                claim = keep
+                n_claim = int(np.count_nonzero(claim))
+        if n_claim > 0:
+            seg_np[claim] = lid
+            added_total += n_claim
+
+        _finalize_vessel_largest_cc(seg_np, lid, stats_by_id=None, log_name=f"distal-{lid}")
+        after = int(np.count_nonzero(seg_np == lid))
+        delta = after - before
+        info["labels"][str(lid)] = {
+            "name": name,
+            "before": before,
+            "after": after,
+            "delta": int(delta),
+            "claimed": int(n_claim),
+            "capped": bool(capped),
+        }
+        log.step(
+            f"distal expand [{name} id={lid}]: done "
+            f"{before} → {after} voxels (Δ={delta:+d}, claimed={n_claim}"
+            f"{', capped' if capped else ''})"
+        )
+
+    total_before = sum(int(v.get("before", 0)) for v in info["labels"].values())
+    total_after = sum(int(v.get("after", 0)) for v in info["labels"].values())
+    log.step(
+        "distal expansion summary: "
+        f"{len(info['labels'])} label(s), "
+        f"total voxels {total_before} → {total_after} "
+        f"(Δ={total_after - total_before:+d}), method=vessel-tree-watershed"
+    )
+    return info
+
+
+
 def build_seg_4dflow_local(
     cd: np.ndarray,
     centerlines_mask: np.ndarray,
@@ -759,8 +1126,18 @@ def build_seg_4dflow_local(
     venous_region_growing: bool = True,
     segment_acomm: bool = False,
     split_vertebral: bool = False,
+    distal_flow_expand: bool = False,
+    distal_hyst_low_factor: float = _DISTAL_HYST_LOW_FACTOR_DEFAULT,
+    distal_hyst_high_factor: float = _DISTAL_HYST_HIGH_FACTOR_DEFAULT,
+    distal_thicken_iter: int = _DISTAL_THICKEN_ITER_DEFAULT,
+    distal_max_image_frac: float = _DISTAL_MAX_IMAGE_FRAC_DEFAULT,
+    distal_lr_halfspace_slack: int = _DISTAL_LR_HALFSPACE_SLACK_DEFAULT,
 ) -> LocalSegResult:
-    """Build multilabel ``seg_4dflow`` from CD and per-label centerline backbone."""
+    """Build multilabel ``seg_4dflow`` from CD and per-label centerline backbone.
+
+    ``distal_flow_expand`` (default False) runs an optional post-RG pass that
+    expands MCA/ACA/PCA into a Frangi+hysteresis vessel tree via watershed.
+    """
     cd = as_backend_array(cd).astype(np.float64)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
     eicab = (
@@ -1079,11 +1456,52 @@ def build_seg_4dflow_local(
             log_name=f"final-{lid}",
         )
 
+    distal_info: dict[str, Any] | None = None
+    if bool(distal_flow_expand) and bool(region_growing):
+        log.step(
+            "optional distal MCA/ACA/PCA expansion "
+            f"(vessel-tree watershed; "
+            f"hyst_low={float(distal_hyst_low_factor):.2f}, "
+            f"hyst_high={float(distal_hyst_high_factor):.2f})"
+        )
+        distal_info = expand_distal_mca_aca_pca(
+            seg,
+            cd,
+            clm,
+            hyst_low_factor=float(distal_hyst_low_factor),
+            hyst_high_factor=float(distal_hyst_high_factor),
+            max_image_frac=float(distal_max_image_frac),
+            thicken_iter=int(distal_thicken_iter),
+            lr_halfspace_slack=int(distal_lr_halfspace_slack),
+        )
+        if distal_info is not None:
+            for lid_s, st in (distal_info.get("labels") or {}).items():
+                log.info(
+                    f"distal expand result [{st.get('name', lid_s)}]: "
+                    f"{st.get('before')} → {st.get('after')} "
+                    f"(Δ={st.get('delta', st.get('after', 0) - st.get('before', 0)):+d}, "
+                    f"claimed={st.get('claimed')})"
+                )
+        for lid in sorted(int(v) for v in np.unique(seg) if int(v) != 0):
+            if int(lid) in _DISTAL_TARGET_IDS:
+                _finalize_vessel_largest_cc(
+                    seg,
+                    lid,
+                    stats_by_id=stats_by_id,
+                    log_name=f"distal-final-{lid}",
+                )
+    elif bool(distal_flow_expand) and not bool(region_growing):
+        log.warning(
+            "distal-flow-expand requested but region_growing is False; "
+            "skipping distal expansion"
+        )
+
     return LocalSegResult(
         segmentation=as_backend_array(seg.astype(np.int32, copy=False)),
         vessel_stats=stats,
         aca_sequential_grow=aca_sequential_info,
         vertebral_split=vertebral_info,
+        distal_expand=distal_info,
     )
 
 
@@ -1141,6 +1559,7 @@ __all__ = [
     "bbox_padding_for_label",
     "build_seg_4dflow_local",
     "crop_min_fraction_for_label",
+    "expand_distal_mca_aca_pca",
     "rg_caps_exceeded",
     "region_growing_enabled_for_label",
     "resolve_venous_rg_intensity_fracs",

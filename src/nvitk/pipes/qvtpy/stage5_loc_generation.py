@@ -46,7 +46,10 @@ from nvitk.pipes.qvtpy.util.loc_selection import (
     select_arterial_locs,
     select_venous_locs,
 )
-from nvitk.pipes.qvtpy.util.centerline_io import load_centerline_meta, load_centerlines
+from nvitk.pipes.qvtpy.util.centerline_io import (
+    load_centerline_meta,
+    load_centerlines_branches,
+)
 from nvitk.pipes.qvtpy.util.mask_cleaning import clean_venous_slab_mask
 from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
 
@@ -138,7 +141,7 @@ def run_subject(
         return out_dir
 
     s4 = output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
-    arterial, venous, cl_meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
+    arterial, venous, cl_meta = load_centerlines_branches(s3, min_points=3, stage4_dir=s4)
     meta = load_centerline_meta(s3)
 
     arterial_seg = None

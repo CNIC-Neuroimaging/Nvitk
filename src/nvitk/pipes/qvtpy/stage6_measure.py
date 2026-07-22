@@ -44,7 +44,12 @@ from nvitk.io.imageio import imread
 from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.measure.cross_section import ThrAlgorithm
-from nvitk.pipes.qvtpy.util.centerline_io import load_arterial_centerlines, load_centerlines
+from nvitk.pipes.qvtpy.util.centerline_io import (
+    flatten_branches,
+    load_arterial_branches,
+    load_arterial_centerlines,
+    load_centerlines,
+)
 from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
 from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
 from nvitk.pipes.qvtpy.util.vessel_hemodynamics import compute_vessel_hemodynamics
@@ -513,9 +518,11 @@ def run_subject(
 
     # ---- Optional centerlines for QC -------------------------------------------
     arterial_cls: dict[int, np.ndarray] | None = None
+    branch_cls_by_name: dict[str, np.ndarray] = {}
     qc_dir = out_dir / "cross-sections"
     if write_cross_section_qc:
         s3 = _stage3_dir(output_root, subject)
+        s4 = _stage4_dir(output_root, subject)
         try:
             arterial_cls = {
                 int(k): to_numpy(v)
@@ -523,6 +530,16 @@ def run_subject(
             }
         except FileNotFoundError:
             log.warning(f"[{subject}] stage6 QC: missing stage3 centerlines, skipping PNGs")
+        # Resolve QC polylines per named branch from the stage-4 branch sidecar.
+        try:
+            branch_cls_by_name = {
+                str(name): to_numpy(pts)
+                for name, pts in flatten_branches(
+                    load_arterial_branches(s4, min_points=3, from_segmentation=True)
+                ).items()
+            }
+        except FileNotFoundError:
+            branch_cls_by_name = {}
 
     # ---- Per-LOC: resegment, masked-plane flow, PI / RI ----------------------
     loc_rows: list[dict[str, str]] = []
@@ -551,7 +568,10 @@ def run_subject(
         vid = int(row["vessel_id"])
         vname = (row.get("vessel_name") or "").strip() or qvtpy_vessel_name(vid)
 
-        if arterial_cls is not None and vid in arterial_cls:
+        qc_poly = branch_cls_by_name.get(vname)
+        if qc_poly is None and arterial_cls is not None:
+            qc_poly = arterial_cls.get(vid)
+        if qc_poly is not None:
             seg_id = int(row.get("segment_id") or 0)
             loc_role = str(row.get("loc_role") or "mid")
             cl_idx = int(row.get("centerline_index") or 0)
@@ -563,7 +583,7 @@ def run_subject(
                     cd=cd,
                     mag=mag,
                     vel_mag=vel_mag,
-                    centerline_pts=arterial_cls[vid],
+                    centerline_pts=qc_poly,
                     loc_index=cl_idx,
                     vessel_name=vname,
                     segment_id=seg_id,

@@ -293,6 +293,125 @@ def _centerline_longest_path(
     return to_numpy(best_path).astype(np.float32)
 
 
+def _branch_paths_from_skeleton(
+    coords_xyz: np.ndarray,
+    *,
+    prefer_points: np.ndarray | None = None,
+    min_branch_points: int = 3,
+) -> list[np.ndarray]:
+    """Decompose a skeleton into a trunk path plus side branches.
+
+    The trunk is the main centerline (graph diameter, or the prior-biased path
+    when *prefer_points* are given). Every remaining deg-1 endpoint is then
+    traced back toward the already-accepted paths; the segment up to the first
+    node that is already covered becomes a side branch. Branches shorter than
+    *min_branch_points* are dropped. Returns ordered ``(N, 3)`` polylines with the
+    trunk first (proximal→distal orientation preserved from the trunk).
+    """
+    if coords_xyz.shape[0] <= 2:
+        return [coords_xyz.astype(np.float32, copy=False)]
+
+    coords = _largest_skeleton_component(coords_xyz)
+    if coords.shape[0] <= 2:
+        return [coords.astype(np.float32, copy=False)]
+
+    nodes, adj, deg = _skeleton_graph(coords)
+    trunk = _centerline_longest_path(coords, prefer_points=prefer_points)
+    trunk_nodes = [tuple(int(v) for v in row) for row in to_numpy(trunk).astype(np.int64)]
+
+    covered: set[tuple[int, int, int]] = set(trunk_nodes)
+    paths: list[np.ndarray] = [to_numpy(trunk).astype(np.float32)]
+
+    endpoints = sorted(n for n, d in deg.items() if d <= 1)
+    for ep in endpoints:
+        if ep in covered:
+            continue
+        # Walk from the endpoint until we hit a node that is already covered.
+        seg: list[tuple[int, int, int]] = []
+        prev: tuple[int, int, int] | None = None
+        cur: tuple[int, int, int] | None = ep
+        guard = 0
+        max_steps = len(nodes) + 1
+        while cur is not None and cur not in covered and guard < max_steps:
+            seg.append(cur)
+            guard += 1
+            nxt = None
+            for nb in adj.get(cur, []):
+                if nb == prev:
+                    continue
+                if nb in seg:
+                    continue
+                nxt = nb
+                break
+            prev, cur = cur, nxt
+        if cur is not None and cur in covered:
+            # Attach to the covered junction so the branch connects to the trunk.
+            seg.append(cur)
+        if len(seg) < int(min_branch_points):
+            continue
+        # Orient proximal→distal: junction (covered end) first, endpoint last.
+        if seg and seg[-1] in covered:
+            seg = list(reversed(seg))
+        paths.append(to_numpy(seg).astype(np.float32))
+        for n in seg:
+            covered.add(n)
+
+    return paths
+
+
+def compute_centerline_branches(
+    vessel_mask: np.ndarray,
+    *,
+    centerline_mask: np.ndarray | None = None,
+    labels: Sequence[int] | None = None,
+    min_points: int = 20,
+    min_branch_points: int = 3,
+    prefer_points_by_label: dict[int, np.ndarray] | None = None,
+) -> dict[int, list[np.ndarray]]:
+    """Per-label list of branch polylines (trunk + bifurcation side branches).
+
+    Same skeletonization / masking semantics as :func:`compute_centerlines`, but
+    instead of one main path per label this returns a list of ordered polylines:
+    the trunk first, then each side branch (deg-1 endpoint traced to the trunk).
+    Labels whose skeleton has fewer than *min_points* voxels are skipped.
+    """
+    arr = as_backend_array(vessel_mask)
+    if arr.ndim != 3:
+        raise ValidationError("vessel_mask must be 3D for centerline computation.")
+    labs = labels or sorted(int(v) for v in np.unique(arr) if int(v) != 0)
+    out: dict[int, list[np.ndarray]] = {}
+    prefs = prefer_points_by_label or {}
+
+    def _branches_for(coords: np.ndarray, lbl: int) -> None:
+        if coords.shape[0] < int(min_points):
+            return
+        out[int(lbl)] = _branch_paths_from_skeleton(
+            coords,
+            prefer_points=prefs.get(int(lbl)),
+            min_branch_points=int(min_branch_points),
+        )
+
+    if centerline_mask is not None:
+        cl = as_backend_array(centerline_mask)
+        if cl.shape != arr.shape:
+            raise ValidationError("centerline_mask must match vessel_mask shape.")
+        cl_bin = cl > 0
+        for lbl in labs:
+            coords = np.argwhere(cl_bin & (arr == int(lbl)))
+            _branches_for(coords, int(lbl))
+        return out
+
+    skeletonize = _require_skeletonize()
+    for lbl in labs:
+        roi = arr == int(lbl)
+        if not np.any(roi):
+            continue
+        sk = skeletonize(to_numpy(roi).astype(np.uint8, copy=False))
+        coords = np.argwhere(as_backend_array(sk) > 0)
+        _branches_for(coords, int(lbl))
+    return out
+
+
 def compute_centerlines(
     vessel_mask: np.ndarray,
     *,
@@ -380,6 +499,7 @@ def centerline_tangents(points_xyz: Any, *, k_half: int = 2) -> Any:
 
 __all__ = [
     "centerline_tangents",
+    "compute_centerline_branches",
     "compute_centerlines",
     "skeletonize_binary",
     "skeletonize_labeled",

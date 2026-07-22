@@ -914,8 +914,27 @@ def _arterial_loc_at_index(
     )
 
 
+def _normalize_arterial_branches(
+    arterial: dict[int, Any],
+) -> dict[int, list[tuple[str, np.ndarray]]]:
+    """Accept either the legacy single-polyline dict or the named-branch dict.
+
+    Legacy ``{label: (N,3)}`` is wrapped as a single trunk named by the vessel;
+    the branched ``{label: [(name, pts), ...]}`` form is passed through.
+    """
+    from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
+
+    out: dict[int, list[tuple[str, np.ndarray]]] = {}
+    for lid, val in arterial.items():
+        if isinstance(val, list):
+            out[int(lid)] = [(str(n), p) for n, p in val]
+        else:
+            out[int(lid)] = [(qvtpy_vessel_name(int(lid)), val)]
+    return out
+
+
 def select_arterial_locs(
-    arterial_polylines: dict[int, np.ndarray],
+    arterial_polylines: dict[int, Any],
     *,
     venous_mask: np.ndarray | None = None,
     mag: np.ndarray | None = None,
@@ -928,50 +947,53 @@ def select_arterial_locs(
     arterial_seg: np.ndarray | None = None,
     eicab_qvtpy: np.ndarray | None = None,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
-    """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json."""
+    """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json.
+
+    ``arterial_polylines`` may be the named-branch mapping
+    ``{parent_label: [(branch_name, pts), ...]}`` (preferred) or the legacy
+    ``{label: pts}`` single-polyline dict. Branched vessels (MCA/ACA/PCA) now emit
+    one mid LOC *per named branch* (``vessel_name`` = branch name, ``vessel_id`` =
+    parent label). ICA/basilar keep a single shared-z mid LOC on the trunk.
+    """
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
-    _ = (venous_mask, endpoint_inset_frac)  # API-stable; unused by current strategies
+    _ = (venous_mask, endpoint_inset_frac, arterial_seg)  # API-stable; unused now
+    branches = _normalize_arterial_branches(arterial_polylines)
     meta_extra: dict[str, Any] = {
-        "dual_loc_fallback_vessels": [],
-        "loc_boundary_method_dual": "arc_length_tertiles",
-        "loc_boundary_method_mca_pca": "bifurcation_arc_midpoints",
-        "loc_boundary_method_aca": "junction_or_cw_eicab_midpoints",
         "loc_boundary_method_mid": "arc_length_midpoint",
-        "arterial_centerline_source": "stage4_seg",
-        "arterial_seg_for_bifurcations": arterial_seg is not None,
-        "aca_loc_methods": {},
+        "arterial_centerline_source": "stage4_seg_branches",
+        "loc_per_branch": True,
+        "arterial_branch_names": {},
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
-    aca_junction = _infer_aca_junction_ijk(eicab_qvtpy) if use_dual else None
-    if aca_junction is not None:
-        meta_extra["aca_junction_ijk"] = [int(x) for x in aca_junction]
+
+    # ICA/basilar shared-z alignment uses the trunk polyline of each label.
+    trunk_by_label = {
+        int(lid): to_numpy(b[0][1]) for lid, b in branches.items() if b
+    }
     ica_basilar_idx = (
-        select_ica_basilar_aligned_loc_indices(arterial_polylines)
-        if use_dual
-        else {}
+        select_ica_basilar_aligned_loc_indices(trunk_by_label) if use_dual else {}
     )
     if ica_basilar_idx:
         meta_extra["ica_basilar_shared_z_locs"] = {
             str(k): int(v) for k, v in ica_basilar_idx.items()
         }
 
-    for vid, pts in sorted(arterial_polylines.items()):
-        pts_np = to_numpy(pts)
-        vname = qvtpy_vessel_name(vid)
-        if pts_np.shape[0] < 3:
-            continue
-
+    for vid, branch_list in sorted(branches.items()):
+        # ICA / basilar: single shared-z mid LOC on the trunk.
         if use_dual and int(vid) in QVTPY_ICA_BASILAR_SINGLE_LOC_IDS:
             if int(vid) not in ica_basilar_idx:
                 continue
+            trunk = to_numpy(branch_list[0][1])
+            if trunk.shape[0] < 3:
+                continue
             out.append(
                 _arterial_loc_at_index(
-                    pts_np,
+                    trunk,
                     ica_basilar_idx[int(vid)],
                     vessel_id=vid,
-                    vessel_name=vname,
+                    vessel_name=qvtpy_vessel_name(vid),
                     segment_id=0,
                     loc_role="mid",
                     mag=mag,
@@ -983,145 +1005,31 @@ def select_arterial_locs(
             )
             continue
 
-        if use_dual and int(vid) in QVTPY_MCA_PCA_BIFURCATION_LOC_IDS:
-            init_idx, fin_idx = pick_mca_pca_loc_indices(
-                pts_np,
-                seg=arterial_seg,
-                label_id=int(vid),
-            )
-            out.append(
-                _arterial_loc_at_index(
-                    pts_np,
-                    init_idx,
-                    vessel_id=vid,
-                    vessel_name=vname,
-                    segment_id=0,
-                    loc_role="init",
-                    mag=mag,
-                    cd=cd,
-                    vel_mag=vel_mag,
-                    voxel_spacing=voxel_spacing,
-                    radius_vox=radius_vox,
-                )
-            )
-            if fin_idx is not None:
-                out.append(
-                    _arterial_loc_at_index(
-                        pts_np,
-                        fin_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=1,
-                        loc_role="fin",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
-            continue
-
-        if use_dual and int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
-            init_idx, fin_idx, aca_method = pick_aca_loc_indices(
-                pts_np,
-                label_id=int(vid),
-                eicab_qvtpy=eicab_qvtpy,
-                junction_ijk=aca_junction,
-            )
-            meta_extra["aca_loc_methods"][vname] = aca_method
-            out.append(
-                _arterial_loc_at_index(
-                    pts_np,
-                    init_idx,
-                    vessel_id=vid,
-                    vessel_name=vname,
-                    segment_id=0,
-                    loc_role="init",
-                    mag=mag,
-                    cd=cd,
-                    vel_mag=vel_mag,
-                    voxel_spacing=voxel_spacing,
-                    radius_vox=radius_vox,
-                )
-            )
-            if fin_idx is not None:
-                out.append(
-                    _arterial_loc_at_index(
-                        pts_np,
-                        fin_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=1,
-                        loc_role="fin",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
-            continue
-
-        if use_dual and int(vid) in QVTPY_DUAL_LOC_ARTERIAL_IDS:
-            endpoints = pick_dual_loc_indices(pts_np.shape[0], pts_np)
-            if endpoints is None:
-                meta_extra["dual_loc_fallback_vessels"].append(vname)
-                mid_idx = pick_mid_loc_index(pts_np.shape[0], pts_np)
-                out.append(
-                    _arterial_loc_at_index(
-                        pts_np,
-                        mid_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=0,
-                        loc_role="mid",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
+        # All other arteries (incl. MCA/ACA/PCA branches): one mid LOC per branch.
+        names_here: list[str] = []
+        for seg_id, (bname, pts) in enumerate(branch_list):
+            pts_np = to_numpy(pts)
+            if pts_np.shape[0] < 3:
                 continue
-            init_idx, fin_idx = endpoints
-            for seg_id, idx, role in (
-                (0, init_idx, "init"),
-                (1, fin_idx, "fin"),
-            ):
-                out.append(
-                    _arterial_loc_at_index(
-                        pts_np,
-                        idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=seg_id,
-                        loc_role=role,
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
+            names_here.append(str(bname))
+            mid_idx = pick_mid_loc_index(pts_np.shape[0], pts_np)
+            out.append(
+                _arterial_loc_at_index(
+                    pts_np,
+                    mid_idx,
+                    vessel_id=vid,
+                    vessel_name=str(bname),
+                    segment_id=seg_id,
+                    loc_role="mid",
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
                 )
-            continue
-
-        mid_idx = pick_mid_loc_index(pts_np.shape[0], pts_np)
-        out.append(
-            _arterial_loc_at_index(
-                pts_np,
-                mid_idx,
-                vessel_id=vid,
-                vessel_name=vname,
-                segment_id=0,
-                loc_role="mid",
-                mag=mag,
-                cd=cd,
-                vel_mag=vel_mag,
-                voxel_spacing=voxel_spacing,
-                radius_vox=radius_vox,
             )
-        )
+        if names_here:
+            meta_extra["arterial_branch_names"][qvtpy_vessel_name(vid)] = names_here
 
     return out, meta_extra
 
