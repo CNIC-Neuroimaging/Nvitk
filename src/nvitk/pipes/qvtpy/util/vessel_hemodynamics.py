@@ -110,7 +110,8 @@ class RootGroup:
 ROOT_GROUPS: tuple[RootGroup, ...] = (
     RootGroup("L_ICA", QVTPY_LICA, (QVTPY_LACA, QVTPY_LMCA)),
     RootGroup("R_ICA", QVTPY_RICA, (QVTPY_RACA, QVTPY_RMCA)),
-    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA, QVTPY_LVA, QVTPY_RVA)),
+    # VAs are proximal dual starts when present (not distal basilar branches).
+    RootGroup("Basilar", QVTPY_BASILAR, (QVTPY_LPCA, QVTPY_RPCA)),
 )
 
 # Hard allow-list per root so mis-tagged or overlapping stations never enter ICA PITC.
@@ -177,6 +178,8 @@ class RegionGeometryViz:
     pwv_n_stations: int = 0
     vessels: dict[str, VesselGeometryViz] = field(default_factory=dict)
     excluded_segments: list[np.ndarray] = field(default_factory=list)
+    # Extra proximal starts (e.g. LVA + RVA tips when both vertebrals are present).
+    root_init_extra_xyz: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass
@@ -451,6 +454,26 @@ def _distance_offset_for_branch(
     return branch_oriented, float(root_arc[-1] + gap)
 
 
+def _basilar_va_proximal_starts(
+    named_branches_by_label: dict[int, list[tuple[str, np.ndarray]]],
+) -> tuple[list[tuple[int, str, np.ndarray]], list[np.ndarray]] | None:
+    """Return (LVA/RVA named trunks oriented proximal→distal, proximal tips) or None."""
+    jobs: list[tuple[int, str, np.ndarray]] = []
+    tips: list[np.ndarray] = []
+    for lid in (int(QVTPY_LVA), int(QVTPY_RVA)):
+        named = named_branches_by_label.get(lid) or []
+        if not named:
+            return None
+        bname, bpts = named[0]
+        oriented = _orient_polyline(bpts, _root_proximal_anchor(bpts))
+        if oriented.shape[0] < 2:
+            return None
+        jobs.append((lid, str(bname), oriented))
+        tips.append(oriented[0].copy())
+    return jobs, tips
+
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -561,11 +584,41 @@ def compute_vessel_hemodynamics(
         if not root_named:
             continue
         _root_trunk_name, root_trunk_pts = root_named[0]
-        root_pts = _orient_polyline(
-            root_trunk_pts, _root_proximal_anchor(root_trunk_pts)
-        )
-        root_anchor = _root_proximal_anchor(root_pts)
-        root_pts = _orient_polyline(root_pts, root_anchor)
+
+        # Posterior tree: when both VAs are present, use dual proximal starts
+        # (VA tips) instead of the single basilar inferior tip.
+        va_starts = None
+        if group.region_id == "Basilar":
+            va_starts = _basilar_va_proximal_starts(named_branches_by_label)
+
+        if va_starts is not None:
+            # Orient basilar from confluence (near VA distal tips) → superior.
+            va_jobs, va_tips = va_starts
+            confluence = np.mean(
+                np.vstack([pts[-1] for _lid, _n, pts in va_jobs]), axis=0
+            )
+            root_pts = _orient_polyline(root_trunk_pts, confluence)
+            va_lengths = [
+                float(_arc_length_mm(pts, voxel_spacing)[-1]) for _lid, _n, pts in va_jobs
+            ]
+            basilar_offset = float(np.mean(va_lengths)) if va_lengths else 0.0
+            root_init_extra = [t.copy() for t in va_tips]
+            # Primary init for overlays: midpoint of the two VA proximal tips.
+            root_init_primary = np.mean(np.vstack(va_tips), axis=0)
+        else:
+            root_pts = _orient_polyline(
+                root_trunk_pts, _root_proximal_anchor(root_trunk_pts)
+            )
+            root_pts = _orient_polyline(root_pts, _root_proximal_anchor(root_pts))
+            basilar_offset = 0.0
+            root_init_extra = []
+            root_init_primary = root_pts[0].copy()
+
+        if va_starts is not None:
+            log.info(
+                f"PITC {group.region_id}: dual VA proximal starts "
+                f"(LVA+RVA); basilar distance offset={basilar_offset:.2f} mm"
+            )
 
         group_stations: list[dict[str, Any]] = []
         # branch_name -> (oriented polyline, distance offset mm, parent label id)
@@ -577,11 +630,13 @@ def compute_vessel_hemodynamics(
         root_rows: list[dict[str, Any]] = []
         for bidx, (bname, bpts) in enumerate(root_named):
             if bidx == 0:
-                pts_i, offset_i = root_pts, 0.0
+                pts_i = root_pts
+                offset_i = float(basilar_offset)
             else:
                 pts_i, offset_i = _distance_offset_for_branch(
                     root_pts, bpts, voxel_spacing
                 )
+                offset_i = float(offset_i) + float(basilar_offset)
             rows_i = _sample_vessel_stations(
                 pts_i,
                 int(group.root_label),
@@ -599,6 +654,23 @@ def compute_vessel_hemodynamics(
             branch_rows_by_name[str(bname)] = rows_i
             root_rows.extend(rows_i)
             group_stations.extend(rows_i)
+
+        # Dual VA proximal starts: sample each VA from its own inferior tip (offset 0).
+        if va_starts is not None:
+            for lid, bname, pts_i in va_starts[0]:
+                rows_i = _sample_vessel_stations(
+                    pts_i,
+                    int(lid),
+                    distance_offset_mm=0.0,
+                    branch_name=str(bname),
+                    **sample_kw,
+                )
+                for r in rows_i:
+                    r["root_region_id"] = group.region_id
+                vessel_polylines[str(bname)] = (pts_i.copy(), 0.0, int(lid))
+                branch_rows_by_name[str(bname)] = rows_i
+                branch_rows_by_label.setdefault(int(lid), []).extend(rows_i)
+                group_stations.extend(rows_i)
 
         eligible_labels = [
             int(blabel)
@@ -619,6 +691,7 @@ def compute_vessel_hemodynamics(
             branch_pts, offset = _distance_offset_for_branch(
                 root_pts, bpts, voxel_spacing
             )
+            offset = float(offset) + float(basilar_offset)
             brows = _sample_vessel_stations(
                 branch_pts,
                 blabel,
@@ -716,7 +789,8 @@ def compute_vessel_hemodynamics(
                 plot_data,
                 quality_thresh=quality_thresh,
                 excluded_segments=[],
-                root_init_xyz=root_pts[0],
+                root_init_xyz=root_init_primary,
+                root_init_extra_xyz=root_init_extra,
             )
 
         result.summary_rows.append(
@@ -1027,6 +1101,7 @@ def _build_region_geometry(
     quality_thresh: float,
     excluded_segments: list[np.ndarray] | None = None,
     root_init_xyz: np.ndarray | None = None,
+    root_init_extra_xyz: list[np.ndarray] | None = None,
 ) -> RegionGeometryViz:
     """Build Napari-ready geometry: oriented polylines, init/fin, station XYZ."""
     from nvitk.core.array import to_numpy
@@ -1037,6 +1112,11 @@ def _build_region_geometry(
         if root_init_xyz is not None
         else root_arr[0].copy()
     )
+    extra_inits = [
+        to_numpy(p).astype("float64", copy=False).reshape(3)
+        for p in (root_init_extra_xyz or [])
+        if p is not None
+    ]
     pwv_meta_by_key: dict[tuple[str, int, float], int] = {}
     pwv_dist = to_numpy(plot_data.get("pwv_distance_mm", [])).astype("float64").reshape(-1)
     pwv_w1 = to_numpy(plot_data.get("pwv_weight_area", [])).astype("float64").reshape(-1)
@@ -1125,6 +1205,7 @@ def _build_region_geometry(
             for seg in (excluded_segments or [])
             if seg is not None and np.asarray(seg).shape[0] >= 2
         ],
+        root_init_extra_xyz=extra_inits,
     )
 
 

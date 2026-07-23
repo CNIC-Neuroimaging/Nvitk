@@ -9,7 +9,7 @@ Submodules (import explicitly):
 - :mod:`centerline_io` — load/write centerline masks and polylines.
 - :mod:`vessel_cd_segmentation` — per-vessel local ``seg_4dflow`` builder.
 - :mod:`aca_sequential_grow` — sequential ACA region growing.
-- :mod:`vertebral_split` — basilar → LVA/RVA split at VB junction.
+- :mod:`vertebral_split` — basilar → LVA/RVA via inferior VB centerline bifurcation.
 - :mod:`loc_selection` — QVTplus-style LOC placement.
 - :mod:`cross_section` — re-export of :mod:`nvitk.measure.cross_section`.
 - :mod:`measure_qc` — stage-6 cross-section QC PNGs.

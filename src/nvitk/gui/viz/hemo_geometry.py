@@ -343,18 +343,21 @@ def add_hemo_geometry_layers(
     default_face = str(face_key or "quality")
     for region in regions:
         color = _REGION_COLORS.get(region.region_id, "#9467bd")
-        init_rows.append(
-            {
-                "centerline_x": float(region.root_init_xyz[0]),
-                "centerline_y": float(region.root_init_xyz[1]),
-                "centerline_z": float(region.root_init_xyz[2]),
-                "region_id": region.region_id,
-                "vessel_name": "root_init",
-                "vessel_id": int(region.root_label),
-                "station_index": 0,
-                "distance_mm": 0.0,
-            }
-        )
+        extras = list(getattr(region, "root_init_extra_xyz", None) or [])
+        init_points = extras if extras else [region.root_init_xyz]
+        for ip, xyz in enumerate(init_points):
+            init_rows.append(
+                {
+                    "centerline_x": float(xyz[0]),
+                    "centerline_y": float(xyz[1]),
+                    "centerline_z": float(xyz[2]),
+                    "region_id": region.region_id,
+                    "vessel_name": "root_init" if ip == 0 else f"root_init_{ip + 1}",
+                    "vessel_id": int(region.root_label),
+                    "station_index": int(ip),
+                    "distance_mm": 0.0,
+                }
+            )
         for vessel in region.vessels.values():
             if vessel.polyline_oriented.shape[0] >= 2:
                 paths.append(vessel.polyline_oriented.astype(np.float32))

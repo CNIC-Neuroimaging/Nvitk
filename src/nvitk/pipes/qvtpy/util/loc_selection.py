@@ -30,10 +30,12 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_PCA_IDS,
     QVTPY_RACA,
     QVTPY_RICA,
+    QVTPY_VERTEBRAL_IDS,
     NAME_LTSV,
     NAME_RTSV,
     NAME_SSSV,
     NAME_STRV,
+    qvtpy_vessel_name,
 )
 
 # ---------------------------------------------------------------------------
@@ -1111,7 +1113,27 @@ def select_arterial_locs(
                 )
             continue
 
-        # Remaining arteries (comm, VA, …): one mid LOC on the trunk.
+        # LVA / RVA (when present after stage-4 VB split): one mid LOC each.
+        if use_dual and int(vid) in QVTPY_VERTEBRAL_IDS:
+            mid_idx = pick_mid_loc_index(trunk.shape[0], trunk)
+            out.append(
+                _arterial_loc_at_index(
+                    trunk,
+                    mid_idx,
+                    vessel_id=vid,
+                    vessel_name=vname,
+                    segment_id=0,
+                    loc_role="mid",
+                    mag=mag,
+                    cd=cd,
+                    vel_mag=vel_mag,
+                    voxel_spacing=voxel_spacing,
+                    radius_vox=radius_vox,
+                )
+            )
+            continue
+
+        # Remaining arteries (comm, …): one mid LOC on the trunk.
         mid_idx = pick_mid_loc_index(trunk.shape[0], trunk)
         out.append(
             _arterial_loc_at_index(

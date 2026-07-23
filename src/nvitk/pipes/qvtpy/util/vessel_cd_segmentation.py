@@ -1336,7 +1336,7 @@ def build_seg_4dflow_local(
     rg_max_image_frac: float | None = _RG_MAX_IMAGE_FRAC_DEFAULT,
     venous_region_growing: bool = True,
     segment_acomm: bool = False,
-    split_vertebral: bool = False,
+    split_vertebral: bool = True,
     distal_flow_expand: bool = False,
     distal_hyst_low_factor: float = _DISTAL_HYST_LOW_FACTOR_DEFAULT,
     distal_hyst_high_factor: float = _DISTAL_HYST_HIGH_FACTOR_DEFAULT,
@@ -1348,6 +1348,8 @@ def build_seg_4dflow_local(
 
     ``distal_flow_expand`` (default False) runs an optional post-RG pass that
     expands MCA/ACA/PCA into a Frangi+hysteresis vessel tree via watershed.
+    ``split_vertebral`` (default True) labels LVA/RVA from an inferior basilar
+    bifurcation when present; otherwise VAs are left absent for that subject.
     """
     cd = as_backend_array(cd).astype(np.float64)
     clm = as_backend_array(centerlines_mask).astype(np.int32, copy=False)
@@ -1617,7 +1619,30 @@ def build_seg_4dflow_local(
         and int(QVTPY_BASILAR) in stats_by_id
         and np.any(seg == int(QVTPY_BASILAR))
     ):
-        seg, vertebral_info = split_vertebral_from_basilar(seg)
+        prefer_bas = None
+        bas_cl = np.argwhere(clm == int(QVTPY_BASILAR))
+        if bas_cl.size:
+            prefer_bas = bas_cl.astype(np.float64)
+        seg, vertebral_info = split_vertebral_from_basilar(
+            seg,
+            prefer_basilar_centerline=prefer_bas,
+        )
+        if vertebral_info.split_applied:
+            bif = vertebral_info.bifurcation_ijk
+            log.step(
+                "vertebral split OK: "
+                f"LVA={vertebral_info.lva_voxels} RVA={vertebral_info.rva_voxels} "
+                f"basilar={vertebral_info.basilar_voxels} "
+                f"confluence={bif} cut_z={vertebral_info.bifurcation_cut_k} "
+                f"hemi={vertebral_info.hemisphere_axis} "
+                f"conf={vertebral_info.confidence:.3f} "
+                f"cl_branches={vertebral_info.n_centerline_branches}"
+            )
+        else:
+            log.info(
+                f"vertebral split: VAs absent "
+                f"({vertebral_info.message or 'no VA bifurcation'})"
+            )
         for lid in (int(QVTPY_BASILAR), *sorted(int(x) for x in QVTPY_VERTEBRAL_IDS)):
             if int(np.count_nonzero(seg == lid)) == 0:
                 continue

@@ -39,6 +39,28 @@ from nvitk.pipes.qvtpy.labels import (
 )
 from nvitk.pipes.qvtpy.util.vessel_hemodynamics import ROOT_GROUPS
 
+
+def _figure_axes(
+    nrows: int,
+    ncols: int,
+    *,
+    figsize: tuple[float, float],
+    fig=None,
+):
+    """Create a new figure or clear *fig* and build an ``(nrows, ncols)`` axes grid."""
+    if fig is None:
+        return plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    fig.clear()
+    axes = fig.subplots(nrows, ncols, squeeze=False)
+    return fig, axes
+
+
+def _safe_tight_layout(fig) -> None:
+    try:
+        fig.tight_layout(pad=0.35)
+    except Exception:
+        pass
+
 log = Logger()
 
 # Region column order / display titles (paper layout: Left ICA, Right ICA, Basilar).
@@ -98,12 +120,22 @@ def make_pitc_figure(
     region_plot_data: dict[str, dict[str, Any]],
     *,
     show_legend: bool = True,
+    fig=None,
 ):
-    """Build a live Matplotlib PITC diagnostics figure."""
+    """Build a live Matplotlib PITC diagnostics figure.
+
+    Pass an existing *fig* (e.g. a QtAgg canvas figure) to redraw in place
+    without replacing the canvas figure / breaking zoom-pan.
+    """
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
-    fig, axes = plt.subplots(2, len(regions), figsize=(4.2 * len(regions), 6.4), squeeze=False)
+    fig, axes = _figure_axes(
+        2,
+        len(regions),
+        figsize=(4.2 * len(regions), 6.4),
+        fig=fig,
+    )
     for col, region in enumerate(regions):
         d = region_plot_data[region]
         dist = to_numpy(d["distance_mm"]).astype("float64")
@@ -119,7 +151,7 @@ def make_pitc_figure(
         ax_q.set_ylabel("Q (StdvFromMean)")
         ax_q.set_xlabel("d (mm)")
         if show_legend:
-            ax_q.legend(loc="lower left", fontsize=8, framealpha=0.9)
+            ax_q.legend(loc="best", fontsize=7, framealpha=0.9)
 
         ax_p = axes[1][col]
         used = quality > thresh
@@ -161,8 +193,8 @@ def make_pitc_figure(
         ax_p.set_ylabel(r"$p_{pi}$")
         ax_p.set_xlabel("d (mm)")
         if show_legend and col == 0:
-            ax_p.legend(loc="upper left", fontsize=8, framealpha=0.9)
-    fig.tight_layout()
+            ax_p.legend(loc="best", fontsize=7, framealpha=0.9)
+    _safe_tight_layout(fig)
     return fig
 
 
@@ -185,16 +217,25 @@ def make_pwv_figure(
     region_plot_data: dict[str, dict[str, Any]],
     *,
     show_legend: bool = True,
+    fig=None,
 ):
     """Build a live Matplotlib PWV diagnostics figure.
 
     Quality-excluded stations are shown in grey (same style as PITC); fits and
     colored markers use only stations with ``Q > quality_thresh``.
+
+    Pass an existing *fig* to redraw in place (GUI dock) without replacing the
+    canvas figure.
     """
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
-    fig, axes = plt.subplots(3, len(regions), figsize=(4.2 * len(regions), 9.0), squeeze=False)
+    fig, axes = _figure_axes(
+        3,
+        len(regions),
+        figsize=(4.2 * len(regions), 9.0),
+        fig=fig,
+    )
     for col, region in enumerate(regions):
         d = region_plot_data[region]
         dist = to_numpy(d.get("pwv_distance_mm", [])).astype("float64")
@@ -282,9 +323,9 @@ def make_pwv_figure(
         ax_w.set_ylabel("Weight")
         ax_w.set_xlabel("d (mm)")
         if show_legend:
-            ax_x.legend(loc="upper left", fontsize=8, framealpha=0.9)
-            ax_w.legend(loc="upper right", fontsize=8, framealpha=0.9)
-    fig.tight_layout()
+            ax_x.legend(loc="best", fontsize=7, framealpha=0.9)
+            ax_w.legend(loc="best", fontsize=7, framealpha=0.9)
+    _safe_tight_layout(fig)
     return fig
 
 
@@ -302,13 +343,21 @@ def make_bjornfoot_qc_figure(
     region_plot_data: dict[str, dict[str, Any]],
     *,
     show_legend: bool = True,
+    fig=None,
 ):
-    """Build a three-row Bjornfoot shared-template fit QC figure."""
+    """Build a three-row Bjornfoot shared-template fit QC figure.
+
+    Pass an existing *fig* to redraw in place (GUI dock) without replacing the
+    canvas figure.
+    """
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
-    fig, axes = plt.subplots(
-        3, len(regions), figsize=(4.2 * len(regions), 9.0), squeeze=False
+    fig, axes = _figure_axes(
+        3,
+        len(regions),
+        figsize=(4.2 * len(regions), 9.0),
+        fig=fig,
     )
     for col, region in enumerate(regions):
         data = region_plot_data[region]
@@ -398,10 +447,10 @@ def make_bjornfoot_qc_figure(
         ax_corr.set_ylabel("Waveform correlation")
         ax_corr.set_xlabel("d (mm)")
         if show_legend and col == 0:
-            ax_rms.legend(loc="upper right", fontsize=8, framealpha=0.9)
-            ax_delay.legend(loc="upper right", fontsize=8, framealpha=0.9)
-            ax_corr.legend(loc="lower right", fontsize=8, framealpha=0.9)
-    fig.tight_layout()
+            ax_rms.legend(loc="best", fontsize=7, framealpha=0.9)
+            ax_delay.legend(loc="best", fontsize=7, framealpha=0.9)
+            ax_corr.legend(loc="best", fontsize=7, framealpha=0.9)
+    _safe_tight_layout(fig)
     return fig
 
 

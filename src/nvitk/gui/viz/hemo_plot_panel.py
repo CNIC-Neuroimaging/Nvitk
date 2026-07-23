@@ -122,6 +122,7 @@ class HemodynamicsPlotPanel(QWidget):
 
             self._fig = Figure(figsize=(5.0, 4.5), dpi=96)
             self._canvas = FigureCanvasQTAgg(self._fig)
+            self._canvas.setMinimumHeight(220)
             self._toolbar = NavigationToolbar2QT(self._canvas, self)
             layout.addWidget(self._toolbar)
             layout.addWidget(self._canvas, stretch=1)
@@ -259,19 +260,20 @@ class HemodynamicsPlotPanel(QWidget):
             make_fn = make_pwv_figure
             label = "PWV: XCor delay, time-to-upstroke, and weights vs distance"
         self._title.setText(label)
-        if self._canvas is None:
+        if self._canvas is None or self._fig is None:
             return
+        # Redraw into the canvas-owned figure so Qt does not resize the dock to
+        # the paper figsize, and so NavigationToolbar zoom/pan stay attached.
         fig = make_fn(
             self._region_plot_data,
             show_legend=bool(self._show_legend.isChecked()),
+            fig=self._fig,
         )
         if fig is None:
-            self._canvas.figure.clear()
+            self._fig.clear()
             self._title.setText(f"{label}\n(No plot data available.)")
             self._canvas.draw_idle()
             return
-        self._fig = fig
-        self._canvas.figure = fig
         if self._toolbar is not None:
             self._toolbar.update()
         self._canvas.draw_idle()
