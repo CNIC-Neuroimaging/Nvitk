@@ -170,11 +170,25 @@ def gui_sge_worker_argv(
 
 
 def build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str:
-    """Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds."""
+    """Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds.
+
+    Injects a small BLAS/OMP thread-cap preamble (``NSLOTS`` / ``NVITK_CPU_LIMIT``,
+    capped at 64) before ``extra_env`` exports so OpenBLAS/MKL never spawn
+    unbounded threads on fat SGE nodes (avoids known segfaults).
+    """
+    # Cap before Python starts: OpenBLAS reads env at library init.
+    thread_preamble = (
+        '_t="${NVITK_CPU_LIMIT:-${NSLOTS:-8}}"; '
+        'case "$_t" in (*[!0-9]*|"") _t=8 ;; esac; '
+        'if [ "$_t" -gt 64 ]; then _t=64; fi; '
+        'export OPENBLAS_NUM_THREADS="$_t" OMP_NUM_THREADS="$_t" '
+        'MKL_NUM_THREADS="$_t" NUMEXPR_NUM_THREADS="$_t" '
+        'VECLIB_MAXIMUM_THREADS="$_t"; '
+    )
     env_exports = " ".join(
         f'export {k}="{v}" &&' for k, v in spec.extra_env.items()
     )
-    inner = f"{env_exports} {spec.python_cmd}".strip()
+    inner = f"{thread_preamble}{env_exports} {spec.python_cmd}".strip()
     nv = "--nv " if spec.use_nv else ""
     parts: list[str] = [
         f"singularity exec {nv}",

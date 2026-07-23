@@ -58,8 +58,8 @@
       "err_subdir": "QVTPY",
       "default_sge_container_root": "/data3/BIOIT_IMAGE/Containers/nvitk_v2026.07.05.sif",
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
-      "sge_project": "MCC_GPU",
-      "sge_account": "MCC_GPU",
+      "sge_project": "MCC",
+      "sge_account": "MCC",
       "sge_ngpu": 1,
       "sge_h_vmem": "40G",
       "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"

@@ -18,8 +18,9 @@ are never labeled.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
@@ -34,12 +35,29 @@ HYST_HIGH_FACTOR_DEFAULT: float = 0.5
 FRANGI_SIGMAS_DEFAULT: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0, 2.5)
 MIN_TREE_CC_VOXELS_DEFAULT: int = 5
 TREE_VESSELNESS_KEEP_PERCENTILE_DEFAULT: float = 55.0
+# Cap GMM fit size: full-volume positive Frangi samples can be millions of
+# voxels; sklearn/OpenBLAS then over-threads and can segfault on fat nodes.
+_GMM_MAX_FIT_SAMPLES: int = 200_000
+_BLAS_THREAD_CAP: int = 8
 
 # Backward-compatible aliases used by qvtpy distal expand.
 _DISTAL_HYST_LOW_FACTOR_DEFAULT = HYST_LOW_FACTOR_DEFAULT
 _DISTAL_HYST_HIGH_FACTOR_DEFAULT = HYST_HIGH_FACTOR_DEFAULT
 _DISTAL_FRANGI_SIGMAS_DEFAULT = FRANGI_SIGMAS_DEFAULT
 _DISTAL_MIN_TREE_CC_VOXELS = MIN_TREE_CC_VOXELS_DEFAULT
+
+
+@contextmanager
+def _blas_thread_limit(n_threads: int = _BLAS_THREAD_CAP) -> Iterator[None]:
+    """Bound OpenBLAS/MKL/OpenMP for the enclosed block (defense in depth)."""
+    n = max(1, int(n_threads))
+    try:
+        from threadpoolctl import threadpool_limits
+
+        with threadpool_limits(limits=n):
+            yield
+    except Exception:  # noqa: BLE001 — optional dep / already-imported BLAS
+        yield
 
 
 @dataclass
@@ -72,11 +90,12 @@ def intensity_vesselness(
     try:
         from skimage.filters import frangi
 
-        v = frangi(
-            to_numpy(vol_norm),
-            sigmas=tuple(float(s) for s in sigmas),
-            black_ridges=False,
-        )
+        with _blas_thread_limit():
+            v = frangi(
+                to_numpy(vol_norm),
+                sigmas=tuple(float(s) for s in sigmas),
+                black_ridges=False,
+            )
         v = np.nan_to_num(as_backend_array(v).astype(np.float64), nan=0.0)
         vmax = float(v.max())
         if vmax > 0.0:
@@ -189,6 +208,16 @@ def hysteresis_vessel_tree(
     meta["n_samples"] = int(samples.size)
     meta["fit_floor"] = float(fit_floor)
 
+    if samples.size > _GMM_MAX_FIT_SAMPLES:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(samples.size, size=_GMM_MAX_FIT_SAMPLES, replace=False)
+        samples = samples[idx]
+        meta["n_samples_fit"] = int(samples.size)
+        meta["gmm_subsampled"] = True
+    else:
+        meta["n_samples_fit"] = int(samples.size)
+        meta["gmm_subsampled"] = False
+
     gmm = GaussianMixture(
         n_components=3,
         tol=1e-3,
@@ -196,7 +225,8 @@ def hysteresis_vessel_tree(
         n_init=1,
         random_state=0,
     )
-    gmm.fit(samples.reshape(-1, 1))
+    with _blas_thread_limit():
+        gmm.fit(to_numpy(samples).reshape(-1, 1))
     means = gmm.means_.flatten()
     variances = gmm.covariances_.flatten()
     order = np.argsort(means)
