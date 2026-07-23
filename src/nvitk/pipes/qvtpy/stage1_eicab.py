@@ -42,7 +42,7 @@ from nvitk.cluster.sge import (
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.segmentation.eicab import config as eicab_cfg
-from nvitk.segmentation.eicab.cluster import submit_eicab_job
+from nvitk.segmentation.eicab.cluster import build_eicab_host_shell_cmd, submit_eicab_job
 from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
@@ -243,6 +243,166 @@ def run_subject(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_stage1_tof(nifti_root: Path, subject: str) -> Path:
+    """Discover TOF when present; else canonical stage0_c path for held SGE jobs."""
+    subj_nifti = nifti_root / subject
+    tof = find_tof_volume(subj_nifti) if subj_nifti.is_dir() else None
+    if tof is None:
+        tof = subj_nifti / "TOF" / "TOF.nii.gz"
+        log.info(
+            f"[{subject}] stage1 eICAB: input TOF not present yet; "
+            f"emitting predicted path {tof} (produced by stage0_c at run time)."
+        )
+    return tof
+
+
+def _postprocess_only_sge_spec(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    eicab_subdir: str | None = None,
+    pipeline_container: Path | None = None,
+    src_dir: Path | None = None,
+    backend: str = "gpu",
+    job_name: str | None = None,
+) -> tuple[StageSpec, ClusterPaths]:
+    """StageSpec/ClusterPaths for ``--only-pp`` inside the pipeline container."""
+    src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
+    pipeline_c = (
+        Path(pipeline_container)
+        if pipeline_container is not None
+        else eicab_cfg.PIPELINE_CONTAINER_PATH
+    )
+    binds = SingularityBinds()
+    parts: list[str] = [
+        *python_module_argv("nvitk.pipes.qvtpy.stage1_eicab"),
+        *sge_backend_cli_args(backend),
+        "--only-pp",
+        "--submit",
+        "local",
+        "--subject",
+        shlex.quote(subject),
+        "--nifti-root",
+        shlex.quote(binds.data),
+        "--output-root",
+        shlex.quote(binds.output),
+    ]
+    if eicab_subdir:
+        parts.extend(["--eicab-subdir", shlex.quote(eicab_subdir.strip())])
+    python_cmd = " ".join(parts)
+
+    paths = ClusterPaths(
+        src=src_p,
+        container=pipeline_c,
+        models=None,
+        data_root=nifti_root,
+        output_root=output_root,
+        log_dir=eicab_cfg.SGE_LOG_DIR,
+        err_dir=eicab_cfg.SGE_ERR_DIR,
+    )
+    jn = job_name or f"{cfg.SGE_JOB_PREFIX}_stage1_eicab_pp_{_SAFE.sub('_', subject)[:36]}"
+    spec = StageSpec(
+        job_name=jn,
+        python_cmd=python_cmd,
+        resources=sge_qvtpy_stage_resources(backend, request_gpu=False),
+        binds=binds,
+        use_nv=sge_stage_use_nv(backend, request_gpu=False),
+        extra_env=sge_stage_extra_env(binds.src, backend),
+    )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    eicab_subdir: str | None = None,
+    skip_existing: bool = False,
+    resolution: float = 0.5,
+    simple_segmentation: bool = False,
+    attention: bool = False,
+    device: str = "cpu",
+    eicab_container: Path | None = None,
+    pipeline_container: Path | None = None,
+    src_dir: Path | None = None,
+    tmp_dir: Path | None = None,
+    thread_limit: int | None = None,
+    sge_pe_smp: int | None = None,
+    local_metric_scratch: bool | None = None,
+    vasculature_dir: Path | None = None,
+    log_dir: Path | None = None,
+    err_dir: Path | None = None,
+    keep_aux_outputs: bool = False,
+    post_process_eicab: bool = True,
+    only_pp: bool = False,
+    resources: SgeResources | None = None,
+    backend: str = "gpu",
+    job_name: str | None = None,
+) -> str:
+    """Return the host shell command for one stage1 array/SGE task.
+
+    Normal eICAB path: host ``singularity run`` chain via
+    :func:`~nvitk.segmentation.eicab.cluster.build_eicab_host_shell_cmd`.
+    ``only_pp``: pipeline-container singularity command (same as
+    :func:`_submit_postprocess_only_sge`).
+    """
+    del skip_existing, resources, log_dir, err_dir  # submit-only / unused for cmd build
+    if only_pp:
+        from nvitk.cluster.sge import build_singularity_command
+
+        spec, paths = _postprocess_only_sge_spec(
+            subject,
+            nifti_root=nifti_root,
+            output_root=output_root,
+            eicab_subdir=eicab_subdir,
+            pipeline_container=pipeline_container,
+            src_dir=src_dir,
+            backend=backend,
+            job_name=job_name,
+        )
+        return build_singularity_command(spec, paths)
+
+    tof = _resolve_stage1_tof(nifti_root, subject)
+    out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
+    tmp = Path(tmp_dir) if tmp_dir is not None else (out_dir / ".eicab_tmp")
+    eicab_c = Path(eicab_container) if eicab_container is not None else eicab_cfg.CONTAINER_PATH
+    pipeline_c = _resolve_pipeline_container(pipeline_container)
+    src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
+    vas_host = (
+        Path(vasculature_dir).expanduser()
+        if vasculature_dir is not None
+        else Path(eicab_cfg.DEFAULT_VASCULATURE_HOST_DIR).expanduser()
+    )
+    metric_scratch = (
+        eicab_cfg.EICAB_LOCAL_METRIC_SCRATCH
+        if local_metric_scratch is None
+        else local_metric_scratch
+    )
+    return build_eicab_host_shell_cmd(
+        input_nifti=tof.resolve(),
+        output_dir=out_dir.resolve(),
+        tmp_dir=tmp.resolve(),
+        eicab_container=eicab_c.resolve(),
+        src_dir=src_p.resolve(),
+        pipeline_container=pipeline_c.resolve(),
+        input_root=nifti_root.resolve(),
+        output_root=output_root.resolve(),
+        vasculature_host=vas_host,
+        resolution=resolution,
+        device=device,
+        simple_segmentation=simple_segmentation,
+        attention=attention,
+        keep_aux_outputs=keep_aux_outputs,
+        post_process_eicab=post_process_eicab,
+        backend=backend,
+        thread_limit=thread_limit,
+        sge_pe_smp=sge_pe_smp,
+        local_metric_scratch=metric_scratch,
+    )
+
+
 def submit_subject_sge(
     subject: str,
     *,
@@ -281,14 +441,7 @@ def submit_subject_sge(
     job starts. We discover the actual file when present, otherwise fall back
     to the canonical stage0_c output path ``{nifti_root}/{subject}/TOF/TOF.nii.gz``.
     """
-    subj_nifti = nifti_root / subject
-    tof = find_tof_volume(subj_nifti) if subj_nifti.is_dir() else None
-    if tof is None:
-        tof = subj_nifti / "TOF" / "TOF.nii.gz"
-        log.info(
-            f"[{subject}] stage1 eICAB: input TOF not present yet; "
-            f"emitting predicted path {tof} (produced by stage0_c at run time)."
-        )
+    tof = _resolve_stage1_tof(nifti_root, subject)
 
     out_dir = _eicab_out_dir(output_root, subject, eicab_subdir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -408,47 +561,15 @@ def _submit_postprocess_only_sge(
     job_name: str | None,
 ) -> str:
     """SGE job: ``python -m nvitk.pipes.qvtpy.stage1_eicab --only-pp`` inside pipeline container."""
-    src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
-    pipeline_c = (
-        Path(pipeline_container)
-        if pipeline_container is not None
-        else eicab_cfg.PIPELINE_CONTAINER_PATH
-    )
-    binds = SingularityBinds()
-    parts: list[str] = [
-        *python_module_argv("nvitk.pipes.qvtpy.stage1_eicab"),
-        *sge_backend_cli_args(backend),
-        "--only-pp",
-        "--submit",
-        "local",
-        "--subject",
-        shlex.quote(subject),
-        "--nifti-root",
-        shlex.quote(binds.data),
-        "--output-root",
-        shlex.quote(binds.output),
-    ]
-    if eicab_subdir:
-        parts.extend(["--eicab-subdir", shlex.quote(eicab_subdir.strip())])
-    python_cmd = " ".join(parts)
-
-    paths = ClusterPaths(
-        src=src_p,
-        container=pipeline_c,
-        models=None,
-        data_root=nifti_root,
+    spec, paths = _postprocess_only_sge_spec(
+        subject,
+        nifti_root=nifti_root,
         output_root=output_root,
-        log_dir=eicab_cfg.SGE_LOG_DIR,
-        err_dir=eicab_cfg.SGE_ERR_DIR,
-    )
-    jn = job_name or f"{cfg.SGE_JOB_PREFIX}_stage1_eicab_pp_{_SAFE.sub('_', subject)[:36]}"
-    spec = StageSpec(
-        job_name=jn,
-        python_cmd=python_cmd,
-        resources=sge_qvtpy_stage_resources(backend, request_gpu=False),
-        binds=binds,
-        use_nv=sge_stage_use_nv(backend, request_gpu=False),
-        extra_env=sge_stage_extra_env(binds.src, backend),
+        eicab_subdir=eicab_subdir,
+        pipeline_container=pipeline_container,
+        src_dir=src_dir,
+        backend=backend,
+        job_name=job_name,
     )
     log.info(f"qvtpy stage1 eICAB post-process only (sge) | subject={subject}")
     log.info(f"  output: {_eicab_out_dir(output_root, subject, eicab_subdir)}")
@@ -741,6 +862,7 @@ def main(
 
 
 __all__ = [
+    "build_subject_sge_command",
     "find_tof_resampled_volume",
     "find_tof_volume",
     "run_postprocess_only",

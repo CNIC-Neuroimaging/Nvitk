@@ -102,22 +102,19 @@ def run_subject(
     return out_dir
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     output_root: Path,
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    hold_jid: str | None = None,
-    emit: TextIO | None = None,
     eicab_mask_preference: str = "wb",
     use_postprocessed_mask: bool = True,
     input_already_smoothed: bool = False,
     n_workers: int | None = None,
     backend: str = "cpu",
-) -> str:
-    """Emit or submit one stage-7 SGE job. Returns qsub job id."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -157,6 +154,68 @@ def submit_subject_sge(
         binds=binds,
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
+    )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    eicab_mask_preference: str = "wb",
+    use_postprocessed_mask: bool = True,
+    input_already_smoothed: bool = False,
+    n_workers: int | None = None,
+    backend: str = "cpu",
+) -> str:
+    """Return the host shell command for one stage7 array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        eicab_mask_preference=eicab_mask_preference,
+        use_postprocessed_mask=use_postprocessed_mask,
+        input_already_smoothed=input_already_smoothed,
+        n_workers=n_workers,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    hold_jid: str | None = None,
+    emit: TextIO | None = None,
+    eicab_mask_preference: str = "wb",
+    use_postprocessed_mask: bool = True,
+    input_already_smoothed: bool = False,
+    n_workers: int | None = None,
+    backend: str = "cpu",
+) -> str:
+    """Emit or submit one stage-7 SGE job. Returns qsub job id."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        eicab_mask_preference=eicab_mask_preference,
+        use_postprocessed_mask=use_postprocessed_mask,
+        input_already_smoothed=input_already_smoothed,
+        n_workers=n_workers,
+        backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 

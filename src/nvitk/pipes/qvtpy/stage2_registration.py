@@ -152,7 +152,7 @@ def run_subject(
 # ---------------------------------------------------------------------------
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     nifti_root: Path,
@@ -164,11 +164,8 @@ def submit_subject_sge(
     dof: int = 6,
     cost: str = "normmi",
     eicab_subdir: str | None = None,
-    hold_jid: str | None = None,
     backend: str = "gpu",
-    emit: TextIO | None = None,
-) -> str:
-    """Emit or submit one stage2 SGE block (FLIRT inside Singularity)."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts: list[str] = [
@@ -209,6 +206,72 @@ def submit_subject_sge(
         binds=binds,
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
+    )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    reference: ReferenceKind = "angio",
+    dof: int = 6,
+    cost: str = "normmi",
+    eicab_subdir: str | None = None,
+    backend: str = "gpu",
+) -> str:
+    """Return the host shell command for one stage2 array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        reference=reference,
+        dof=dof,
+        cost=cost,
+        eicab_subdir=eicab_subdir,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    reference: ReferenceKind = "angio",
+    dof: int = 6,
+    cost: str = "normmi",
+    eicab_subdir: str | None = None,
+    hold_jid: str | None = None,
+    backend: str = "gpu",
+    emit: TextIO | None = None,
+) -> str:
+    """Emit or submit one stage2 SGE block (FLIRT inside Singularity)."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        reference=reference,
+        dof=dof,
+        cost=cost,
+        eicab_subdir=eicab_subdir,
+        backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
@@ -251,7 +314,7 @@ def main(
     )
 
 
-__all__ = ["main", "run_subject", "submit_subject_sge"]
+__all__ = ["main", "run_subject", "build_subject_sge_command", "submit_subject_sge"]
 
 
 if __name__ == "__main__":

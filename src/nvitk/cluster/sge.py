@@ -200,10 +200,23 @@ def build_qsub_command(
     paths: ClusterPaths,
     *,
     hold_jid: str | Sequence[str] | None = None,
+    array_tasks: int | None = None,
+    task_concurrency: int | None = None,
 ) -> list[str]:
-    """Build the ``qsub`` argv for *spec*."""
-    log_file = paths.log_dir / f"{spec.job_name}.log"
-    err_file = paths.err_dir / f"{spec.job_name}.err"
+    """Build the ``qsub`` argv for *spec*.
+
+    When *array_tasks* is set, emit ``-t 1-N`` (and optional ``-tc``) with
+    per-task log/err paths using SGE's ``$TASK_ID``.
+    """
+    if array_tasks is not None:
+        n = int(array_tasks)
+        if n < 1:
+            raise ValueError(f"array_tasks must be >= 1, got {array_tasks!r}")
+        log_file = paths.log_dir / f"{spec.job_name}.$TASK_ID.log"
+        err_file = paths.err_dir / f"{spec.job_name}.$TASK_ID.err"
+    else:
+        log_file = paths.log_dir / f"{spec.job_name}.log"
+        err_file = paths.err_dir / f"{spec.job_name}.err"
 
     argv = [
         "qsub",
@@ -219,6 +232,15 @@ def build_qsub_command(
         argv.extend(["-q", spec.resources.queue])
     if spec.resources.pe_smp:
         argv.extend(["-pe", "smp", str(spec.resources.pe_smp)])
+    if array_tasks is not None:
+        argv.extend(["-t", f"1-{int(array_tasks)}"])
+        if task_concurrency is not None:
+            tc = int(task_concurrency)
+            if tc < 1:
+                raise ValueError(
+                    f"task_concurrency must be >= 1, got {task_concurrency!r}"
+                )
+            argv.extend(["-tc", str(tc)])
 
     if hold_jid:
         if isinstance(hold_jid, str):
@@ -229,6 +251,138 @@ def build_qsub_command(
             argv.extend(["-hold_jid", joined])
 
     return argv
+
+
+@dataclass(frozen=True)
+class ArrayTaskSpec:
+    """One task inside an SGE array job (``SGE_TASK_ID`` maps 1-based to order)."""
+
+    stage_id: str
+    shell_cmd: str
+
+
+def build_array_worker_script(
+    tasks: Sequence[ArrayTaskSpec],
+    *,
+    marker_dir: Path | str,
+) -> str:
+    """Bash worker body for ``qsub -t``: dispatch by ``SGE_TASK_ID`` with done-markers.
+
+    Task ``k`` waits for ``${JOB_ID}.(k-1).done`` before running (except task 1).
+    A marker is written on any exit so later tasks follow completion semantics
+    matching classic ``-hold_jid`` (not success-gated).
+    """
+    if not tasks:
+        raise ValueError("tasks must be non-empty")
+    lines: list[str] = [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        f"MARKER_DIR={shlex.quote(str(marker_dir))}",
+        'mkdir -p "$MARKER_DIR"',
+        'if [[ -z "${SGE_TASK_ID:-}" ]]; then',
+        '  echo "SGE_TASK_ID is unset; this script must run as an SGE array task" >&2',
+        "  exit 1",
+        "fi",
+        'if [[ -z "${JOB_ID:-}" ]]; then',
+        '  echo "JOB_ID is unset; this script must run under SGE" >&2',
+        "  exit 1",
+        "fi",
+        'if [[ "$SGE_TASK_ID" -gt 1 ]]; then',
+        '  prev=$((SGE_TASK_ID - 1))',
+        '  marker="$MARKER_DIR/${JOB_ID}.${prev}.done"',
+        '  while [[ ! -f "$marker" ]]; do',
+        '    sleep 15',
+        "  done",
+        "fi",
+        "case \"$SGE_TASK_ID\" in",
+    ]
+    for i, task in enumerate(tasks, start=1):
+        # Single-quoted heredoc body: commands must not contain the delimiter.
+        cmd = task.shell_cmd.rstrip("\n")
+        lines.append(f"  {i})")
+        lines.append(f"    # stage: {task.stage_id}")
+        lines.append("    set +e")
+        lines.append(f"    {cmd}")
+        lines.append("    rc=$?")
+        lines.append("    set -e")
+        lines.append("    ;;")
+    lines.extend(
+        [
+            "  *)",
+            '    echo "Unexpected SGE_TASK_ID=$SGE_TASK_ID (expected 1-'
+            f'{len(tasks)})" >&2',
+            "    rc=1",
+            "    ;;",
+            "esac",
+            'echo "$rc" > "$MARKER_DIR/${JOB_ID}.${SGE_TASK_ID}.done"',
+            "exit \"$rc\"",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def emit_array_job_block(
+    emit: TextIO,
+    *,
+    job_name: str,
+    resources: SgeResources,
+    paths: ClusterPaths,
+    tasks: Sequence[ArrayTaskSpec],
+    marker_dir: Path | str,
+    task_concurrency: int = 1,
+    use_nv: bool = True,
+) -> str:
+    """Emit one ``qsub -t 1-N -tc …`` block; return shell ``$jid_…`` reference."""
+    if not tasks:
+        raise ValueError("tasks must be non-empty")
+    n_tasks = len(tasks)
+    stage_list = ",".join(t.stage_id for t in tasks)
+    worker = build_array_worker_script(tasks, marker_dir=marker_dir)
+    spec = StageSpec(
+        job_name=job_name,
+        python_cmd="",
+        resources=resources,
+        use_nv=use_nv,
+    )
+    qsub_argv = build_qsub_command(
+        spec,
+        paths,
+        array_tasks=n_tasks,
+        task_concurrency=task_concurrency,
+    )
+    emit_sge_submission_summary_to_terminal(
+        spec,
+        paths,
+        hold_jid=None,
+        qsub_argv=qsub_argv,
+        singularity_cmd=(
+            f"[array {n_tasks} tasks: {stage_list}; markers under {marker_dir}]"
+        ),
+    )
+
+    var = _shell_var(job_name)
+    jid_var = f"jid_{var}"
+    workercmd_var = f"workercmd_{var}"
+    qsub_var = f"qsub_{var}"
+    qsub_lines = "\n  ".join(_quote_qsub_arg(a) for a in qsub_argv)
+
+    emit.write(
+        f"# --- {job_name} (array 1-{n_tasks}; stages: {stage_list}; "
+        f"tc={task_concurrency}) ---\n"
+        f"mkdir -p {shlex.quote(str(marker_dir))}\n"
+        f"read -r -d '' {workercmd_var} << 'ARRAY_WORKER_EOF' || true\n"
+        f"{worker}"
+        f"ARRAY_WORKER_EOF\n"
+        f"\n"
+        f"{qsub_var}=(\n"
+        f"  {qsub_lines}\n"
+        f")\n"
+        f'{jid_var}=$(echo "${workercmd_var}" | "${{{qsub_var}[@]}}")\n'
+        f'echo "{job_name} -> ${jid_var}"\n'
+        f"\n"
+    )
+    return f"${jid_var}"
 
 
 def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
@@ -588,12 +742,15 @@ def submit_chain(
 
 
 __all__ = [
+    "ArrayTaskSpec",
     "ClusterPaths",
     "SgeResources",
     "SingularityBinds",
     "StageSpec",
+    "build_array_worker_script",
     "build_qsub_command",
     "build_singularity_command",
+    "emit_array_job_block",
     "python_module_argv",
     "python_script_argv",
     "gui_sge_worker_script_path",

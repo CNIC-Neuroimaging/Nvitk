@@ -696,7 +696,7 @@ def run_subject(
 # ---------------------------------------------------------------------------
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     nifti_root: Path,
@@ -704,8 +704,6 @@ def submit_subject_sge(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    hold_jid: str | None = None,
-    emit: TextIO | None = None,
     cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
     measure_resegment: bool = False,
     measure_thr_algorithm: str = "lsthr",
@@ -720,8 +718,7 @@ def submit_subject_sge(
     pitc_label_constrain: bool = True,
     save_plots: bool = False,
     backend: str = "gpu",
-) -> str:
-    """Emit or submit one stage-6 SGE job. Returns qsub job id."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -779,6 +776,108 @@ def submit_subject_sge(
         binds=binds,
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
+    )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
+    measure_resegment: bool = False,
+    measure_thr_algorithm: str = "lsthr",
+    cross_section_res: int = 0,
+    cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
+    skip_pitc: bool = False,
+    pitc_stride: int = 1,
+    pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    pitc_quality_metric: str = "stdv_from_mean",
+    pitc_measure_resegment: bool = True,
+    pitc_label_constrain: bool = True,
+    save_plots: bool = False,
+    backend: str = "gpu",
+) -> str:
+    """Return the host shell command for one stage6 array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        cross_section_radius_vox=cross_section_radius_vox,
+        measure_resegment=measure_resegment,
+        measure_thr_algorithm=measure_thr_algorithm,
+        cross_section_res=cross_section_res,
+        cross_section_plane_interp=cross_section_plane_interp,
+        cs_supersampling=cs_supersampling,
+        skip_pitc=skip_pitc,
+        pitc_stride=pitc_stride,
+        pitc_quality_thresh=pitc_quality_thresh,
+        pitc_quality_metric=pitc_quality_metric,
+        pitc_measure_resegment=pitc_measure_resegment,
+        pitc_label_constrain=pitc_label_constrain,
+        save_plots=save_plots,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    hold_jid: str | None = None,
+    emit: TextIO | None = None,
+    cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX,
+    measure_resegment: bool = False,
+    measure_thr_algorithm: str = "lsthr",
+    cross_section_res: int = 0,
+    cross_section_plane_interp: int = 1,
+    cs_supersampling: bool = False,
+    skip_pitc: bool = False,
+    pitc_stride: int = 1,
+    pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
+    pitc_quality_metric: str = "stdv_from_mean",
+    pitc_measure_resegment: bool = True,
+    pitc_label_constrain: bool = True,
+    save_plots: bool = False,
+    backend: str = "gpu",
+) -> str:
+    """Emit or submit one stage-6 SGE job. Returns qsub job id."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        cross_section_radius_vox=cross_section_radius_vox,
+        measure_resegment=measure_resegment,
+        measure_thr_algorithm=measure_thr_algorithm,
+        cross_section_res=cross_section_res,
+        cross_section_plane_interp=cross_section_plane_interp,
+        cs_supersampling=cs_supersampling,
+        skip_pitc=skip_pitc,
+        pitc_stride=pitc_stride,
+        pitc_quality_thresh=pitc_quality_thresh,
+        pitc_quality_metric=pitc_quality_metric,
+        pitc_measure_resegment=pitc_measure_resegment,
+        pitc_label_constrain=pitc_label_constrain,
+        save_plots=save_plots,
+        backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
@@ -892,7 +991,7 @@ def main(
     )
 
 
-__all__ = ["main", "run_subject", "submit_subject_sge"]
+__all__ = ["main", "run_subject", "build_subject_sge_command", "submit_subject_sge"]
 
 
 if __name__ == "__main__":

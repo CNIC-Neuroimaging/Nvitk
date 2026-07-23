@@ -1,4 +1,9 @@
-"""QC subwindow: pipeline/subject selector and Load into Napari."""
+"""QC subwindow: pipeline/subject selector and Load into Napari.
+
+Supports two QC setups:
+- **XNAT** — catalog subjects + download pipeline resources (existing path).
+- **Local** — NIfTI root + results root on disk (no XNAT password).
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,8 @@ from typing import Any, Callable
 from qtpy.QtCore import Qt, QThread, Signal
 from qtpy.QtWidgets import (
     QComboBox,
+    QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -16,6 +23,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -38,11 +46,15 @@ from nvitk.gui.viz.qc_loader import (
     load_qvtpy_qc_layers,
 )
 from nvitk.gui.viz.qc_review_panel import show_qc_measurements
+from nvitk.pipes.qvtpy import config as qvt_cfg
 
 log = Logger()
 
 PIPELINE_QVTPY = "qvtpy"
 PIPELINE_EICAB = "eicab"
+
+SOURCE_XNAT = 0
+SOURCE_LOCAL = 1
 
 
 class _QcLoadWorker(QThread):
@@ -99,9 +111,7 @@ class _QcLoadWorker(QThread):
                 roots.append(primary)
 
             # Also fetch companion resources useful for phases / CD / TOF.
-            companions = (
-                ("4dflows",) if self._pipeline == PIPELINE_QVTPY else ("4dflows",)
-            )
+            companions = ("4dflows",)
             for label in companions:
                 try:
                     self.progress.emit(f"Downloading companion {label}…")
@@ -130,8 +140,51 @@ class _QcLoadWorker(QThread):
             self.failed.emit(str(exc))
 
 
+def _default_local_roots() -> tuple[Path, Path]:
+    """NIfTI + results defaults from qvtpy local config."""
+    nifti = Path(getattr(qvt_cfg, "LOCAL_DEFAULT_NIFTI_ROOT", Path.home()))
+    results = Path(getattr(qvt_cfg, "LOCAL_DEFAULT_RESULTS_ROOT", Path.home()))
+    return nifti, results
+
+
+def _list_subject_dirs(root: Path, prefix: str = "PESA") -> list[str]:
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    for child in sorted(root.iterdir()):
+        if child.is_dir() and child.name.upper().startswith(prefix.upper()):
+            out.append(child.name)
+    return out
+
+
+def _subject_has_pipeline_results(results_root: Path, subject: str, pipeline: str) -> bool:
+    subj = results_root / subject
+    if not subj.is_dir():
+        return False
+    bundle = subj / ("qvtpy" if pipeline == PIPELINE_QVTPY else "eicab")
+    if bundle.is_dir():
+        return True
+    # Unpacked resource or flat stage folders under the subject.
+    if pipeline == PIPELINE_QVTPY:
+        return any(
+            (subj / name).is_dir()
+            for name in (
+                qvt_cfg.STAGE4_SEG_DIR,
+                qvt_cfg.STAGE6_MEASURE_DIR,
+                qvt_cfg.QVT_SUBDIR,
+            )
+        )
+    if (subj / qvt_cfg.STAGE1_EICAB_DIR).is_dir():
+        return True
+    # Flat eICAB export: TOF_* under the subject folder.
+    return any(
+        p.is_file() and p.name.upper().startswith("TOF")
+        for p in subj.glob("TOF*")
+    )
+
+
 class QcPanel(QWidget):
-    """Right-tab QC browser for qvtpy / eicab subjects."""
+    """Right-tab QC browser for qvtpy / eicab subjects (XNAT or local roots)."""
 
     def __init__(
         self,
@@ -157,28 +210,21 @@ class QcPanel(QWidget):
 
             self._repo = _DR(_default_dataset_root(), auto_scaffold=True)
 
-        self._status = QLabel("Select a pipeline and subject, then Load.")
+        self._status = QLabel("Select a QC source, pipeline and subject, then Load.")
         self._status.setWordWrap(True)
+
+        self._source = QComboBox()
+        self._source.addItem("XNAT (catalog)", SOURCE_XNAT)
+        self._source.addItem("Local (NIfTI + results)", SOURCE_LOCAL)
 
         self._pipeline = QComboBox()
         self._pipeline.addItem("qvtpy (4D flow)", PIPELINE_QVTPY)
         self._pipeline.addItem("eicab (TOF)", PIPELINE_EICAB)
         self._pipeline.setCurrentIndex(0)
 
-        self._project = QComboBox()
-        for pid in list_xnat_project_ids():
-            self._project.addItem(get_xnat_project(pid).display_name, pid)
-
-        self._config_path = QLineEdit()
-        self._config_path.setPlaceholderText("XNAT config path")
-        repo_root = _find_repo_root()
-        default_cfg = (
-            (repo_root / ".nvitk" / "xnat.json")
-            if repo_root is not None
-            else Path.cwd() / ".nvitk" / "xnat.json"
-        )
-        if default_cfg.is_file():
-            self._config_path.setText(str(default_cfg))
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._build_xnat_page())
+        self._stack.addWidget(self._build_local_page())
 
         self._subject_search = QLineEdit()
         self._subject_search.setPlaceholderText("Filter subjects…")
@@ -196,26 +242,132 @@ class QcPanel(QWidget):
         btn_row.addWidget(self._btn_load)
 
         lay = QVBoxLayout()
+        lay.addWidget(QLabel("QC source"))
+        lay.addWidget(self._source)
         lay.addWidget(QLabel("Pipeline"))
         lay.addWidget(self._pipeline)
-        lay.addWidget(QLabel("XNAT project"))
-        lay.addWidget(self._project)
-        lay.addWidget(QLabel("XNAT config"))
-        lay.addWidget(self._config_path)
-        lay.addWidget(QLabel("Subjects with indexed resources"))
+        lay.addWidget(self._stack)
+        lay.addWidget(QLabel("Subjects"))
         lay.addWidget(self._subject_search)
         lay.addWidget(self._subjects, stretch=1)
         lay.addLayout(btn_row)
         lay.addWidget(self._status)
         self.setLayout(lay)
 
+        self._source.currentIndexChanged.connect(self._on_source_changed)
         self._pipeline.currentIndexChanged.connect(self._reload_subjects)
-        self._project.currentIndexChanged.connect(self._reload_subjects)
         self._subject_search.textChanged.connect(self._filter_subjects)
         self._subjects.currentItemChanged.connect(self._on_subject_selected)
         self._btn_refresh.clicked.connect(self._reload_subjects)
         self._btn_load.clicked.connect(self._on_load)
 
+        self._on_source_changed()
+
+    def _build_xnat_page(self) -> QWidget:
+        page = QWidget()
+        self._project = QComboBox()
+        for pid in list_xnat_project_ids():
+            self._project.addItem(get_xnat_project(pid).display_name, pid)
+
+        self._config_path = QLineEdit()
+        self._config_path.setPlaceholderText("XNAT config path")
+        repo_root = _find_repo_root()
+        default_cfg = (
+            (repo_root / ".nvitk" / "xnat.json")
+            if repo_root is not None
+            else Path.cwd() / ".nvitk" / "xnat.json"
+        )
+        if default_cfg.is_file():
+            self._config_path.setText(str(default_cfg))
+
+        cfg_row = QHBoxLayout()
+        cfg_row.addWidget(self._config_path, stretch=1)
+        browse_cfg = QPushButton("…")
+        browse_cfg.setFixedWidth(28)
+        browse_cfg.clicked.connect(self._browse_xnat_config)
+        cfg_row.addWidget(browse_cfg)
+
+        lay = QVBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(QLabel("XNAT project"))
+        lay.addWidget(self._project)
+        lay.addWidget(QLabel("XNAT config"))
+        lay.addLayout(cfg_row)
+        page.setLayout(lay)
+
+        self._project.currentIndexChanged.connect(self._reload_subjects)
+        return page
+
+    def _build_local_page(self) -> QWidget:
+        page = QWidget()
+        default_nifti, default_results = _default_local_roots()
+
+        self._nifti_root = QLineEdit()
+        self._nifti_root.setPlaceholderText("NIfTI root (subjects / 4DFlow / …)")
+        if default_nifti.is_dir():
+            self._nifti_root.setText(str(default_nifti))
+
+        self._results_root = QLineEdit()
+        self._results_root.setPlaceholderText("Results root (subjects / qvtpy / …)")
+        if default_results.is_dir():
+            self._results_root.setText(str(default_results))
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow("NIfTI root", self._path_row(self._nifti_root))
+        form.addRow("Results root", self._path_row(self._results_root))
+
+        hint = QLabel(
+            "Subjects are listed from results (preferred) and NIfTI roots. "
+            "Load uses results for QC layers and NIfTI for phases / CD / TOF."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #aaa; font-size: 11px;")
+
+        lay = QVBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addLayout(form)
+        lay.addWidget(hint)
+        page.setLayout(lay)
+        return page
+
+    def _path_row(self, edit: QLineEdit) -> QWidget:
+        row = QWidget()
+        h = QHBoxLayout()
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(edit, stretch=1)
+        btn = QPushButton("…")
+        btn.setFixedWidth(28)
+        btn.clicked.connect(lambda: self._browse_into(edit))
+        h.addWidget(btn)
+        row.setLayout(h)
+        return row
+
+    def _browse_into(self, edit: QLineEdit) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Select directory", edit.text() or str(Path.home())
+        )
+        if path:
+            edit.setText(path)
+            self._reload_subjects()
+
+    def _browse_xnat_config(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select XNAT config",
+            self._config_path.text() or str(Path.home()),
+            "Config (*.json *.yaml *.yml);;All (*)",
+        )
+        if path:
+            self._config_path.setText(path)
+
+    def _is_xnat(self) -> bool:
+        return int(self._source.currentData() or SOURCE_XNAT) == SOURCE_XNAT
+
+    def _on_source_changed(self) -> None:
+        is_xnat = self._is_xnat()
+        self._stack.setCurrentIndex(SOURCE_XNAT if is_xnat else SOURCE_LOCAL)
+        self._btn_load.setText("Load" if is_xnat else "Load from disk")
         self._reload_subjects()
 
     def _current_pipeline(self) -> str:
@@ -233,6 +385,12 @@ class QcPanel(QWidget):
         return resource_label_to_asset_slot(label)
 
     def _reload_subjects(self) -> None:
+        if self._is_xnat():
+            self._reload_xnat_subjects()
+        else:
+            self._reload_local_subjects()
+
+    def _reload_xnat_subjects(self) -> None:
         project_id = self._current_project()
         slot = self._required_slot()
         self._all_subjects = []
@@ -240,7 +398,6 @@ class QcPanel(QWidget):
             assets = self._repo._load_table_frame("assets", use_sqlite=True)
             if not assets.empty and "asset_slot" in assets.columns:
                 hit = assets[assets["asset_slot"].astype(str) == slot]
-                # Also accept resource_label matches.
                 if "resource_label" in assets.columns:
                     label = (
                         XNAT_RESOURCE_QVTPY
@@ -263,7 +420,6 @@ class QcPanel(QWidget):
             else:
                 subjects = []
 
-            # Prefer subjects also present in project sessions when available.
             if project_id and self._repo.catalog.table_exists("sessions"):
                 sessions = self._repo._load_table_frame(
                     "sessions",
@@ -295,6 +451,7 @@ class QcPanel(QWidget):
                         "subject_uid": subject,
                         "asset_path": local_path,
                         "asset_slot": slot,
+                        "source": "xnat",
                     }
                 )
             self._status.setText(
@@ -304,6 +461,53 @@ class QcPanel(QWidget):
             self._status.setText(f"Could not load subjects: {exc}")
         self._filter_subjects()
 
+    def _reload_local_subjects(self) -> None:
+        pipeline = self._current_pipeline()
+        nifti_root = Path(self._nifti_root.text().strip()).expanduser()
+        results_root = Path(self._results_root.text().strip()).expanduser()
+        self._all_subjects = []
+
+        from_results = _list_subject_dirs(results_root)
+        from_nifti = _list_subject_dirs(nifti_root)
+        # Prefer subjects that already have pipeline results for the selected pipeline.
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for subject in from_results:
+            if _subject_has_pipeline_results(results_root, subject, pipeline):
+                ordered.append(subject)
+                seen.add(subject)
+        for subject in from_results:
+            if subject not in seen:
+                ordered.append(subject)
+                seen.add(subject)
+        for subject in from_nifti:
+            if subject not in seen:
+                ordered.append(subject)
+                seen.add(subject)
+
+        for subject in ordered:
+            results_path = results_root / subject
+            nifti_path = nifti_root / subject
+            has_results = _subject_has_pipeline_results(
+                results_root, subject, pipeline
+            )
+            self._all_subjects.append(
+                {
+                    "subject_uid": subject,
+                    "results_path": str(results_path) if results_path.is_dir() else "",
+                    "nifti_path": str(nifti_path) if nifti_path.is_dir() else "",
+                    "has_results": has_results,
+                    "source": "local",
+                }
+            )
+
+        n_ready = sum(1 for r in self._all_subjects if r.get("has_results"))
+        self._status.setText(
+            f"{len(self._all_subjects)} local subject(s) "
+            f"({n_ready} with {pipeline} results)."
+        )
+        self._filter_subjects()
+
     def _filter_subjects(self) -> None:
         needle = self._subject_search.text().strip().lower()
         self._subjects.clear()
@@ -311,7 +515,13 @@ class QcPanel(QWidget):
             subj = row["subject_uid"]
             if needle and needle not in subj.lower():
                 continue
-            item = QListWidgetItem(subj)
+            label = subj
+            if row.get("source") == "local":
+                if row.get("has_results"):
+                    label = f"{subj}  [results]"
+                elif row.get("nifti_path"):
+                    label = f"{subj}  [nifti only]"
+            item = QListWidgetItem(label)
             item.setData(Qt.UserRole, row)
             self._subjects.addItem(item)
         self._btn_load.setEnabled(False)
@@ -332,6 +542,12 @@ class QcPanel(QWidget):
             notify("Select a subject.", error=True)
             return
         row = item.data(Qt.UserRole) or {}
+        if self._is_xnat():
+            self._on_load_xnat(row, item)
+        else:
+            self._on_load_local(row, item)
+
+    def _on_load_xnat(self, row: dict[str, Any], item: QListWidgetItem) -> None:
         subject_uid = str(row.get("subject_uid") or item.text())
         config_text = self._config_path.text().strip()
         if not config_text:
@@ -373,6 +589,53 @@ class QcPanel(QWidget):
         self._worker.failed.connect(self._on_load_failed)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
+
+    def _on_load_local(self, row: dict[str, Any], item: QListWidgetItem) -> None:
+        subject_uid = str(row.get("subject_uid") or item.text().split()[0])
+        results_path = Path(str(row.get("results_path") or "")).expanduser()
+        nifti_path = Path(str(row.get("nifti_path") or "")).expanduser()
+        pipeline = self._current_pipeline()
+
+        primary: Path | None = None
+        if results_path.is_dir() and _subject_has_pipeline_results(
+            results_path.parent, subject_uid, pipeline
+        ):
+            primary = results_path
+        elif results_path.is_dir():
+            primary = results_path
+        elif nifti_path.is_dir():
+            primary = nifti_path
+
+        if primary is None or not primary.is_dir():
+            notify(
+                f"No local results/NIfTI folder for {subject_uid}. "
+                "Check NIfTI / results roots.",
+                error=True,
+            )
+            return
+
+        roots: list[Path] = [primary]
+        if nifti_path.is_dir() and nifti_path.resolve() != primary.resolve():
+            roots.append(nifti_path)
+        if results_path.is_dir() and results_path.resolve() not in {
+            p.resolve() for p in roots
+        }:
+            roots.append(results_path)
+
+        self._btn_load.setEnabled(False)
+        self._status.setText(f"Loading local {subject_uid}…")
+        gui_log(f"QC local load: primary={primary} roots={roots}")
+        try:
+            self._on_load_ok(
+                {
+                    "pipeline": pipeline,
+                    "subject_uid": subject_uid,
+                    "primary": primary,
+                    "roots": roots,
+                }
+            )
+        finally:
+            self._btn_load.setEnabled(self._subjects.currentItem() is not None)
 
     def _on_progress(self, message: str) -> None:
         self._status.setText(message)

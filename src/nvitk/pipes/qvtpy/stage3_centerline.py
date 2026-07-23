@@ -480,7 +480,7 @@ def _stage3_cli_options(func):
     return func
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     nifti_root: Path,
@@ -488,8 +488,6 @@ def submit_subject_sge(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    hold_jid: str | None = None,
-    emit: TextIO | None = None,
     eicab_mask: str = "cw",
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
@@ -502,8 +500,7 @@ def submit_subject_sge(
     totalseg_device: str | None = None,
     totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
-) -> str:
-    """Emit or submit one stage-3 SGE job. Returns qsub job id."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts: list[str] = [
@@ -566,6 +563,100 @@ def submit_subject_sge(
         use_nv=use_nv,
         extra_env=extra_env,
     )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    eicab_mask: str = "cw",
+    cd_up_thresh: float | None = None,
+    cd_shift_hm: bool | None = None,
+    venous_min_component_frac: float = 0.005,
+    eicab_min_island_fraction: float = 0.005,
+    eicab_bridge_open_radius: int = 1,
+    venous_min_branch_points: int = 12,
+    eicab_prefer_pp: bool = True,
+    venous_brain_mask: bool = True,
+    totalseg_device: str | None = None,
+    totalseg_model_dir: Path | None = None,
+    backend: str = "gpu",
+) -> str:
+    """Return the host shell command for one stage3 array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        eicab_mask=eicab_mask,
+        cd_up_thresh=cd_up_thresh,
+        cd_shift_hm=cd_shift_hm,
+        venous_min_component_frac=venous_min_component_frac,
+        eicab_min_island_fraction=eicab_min_island_fraction,
+        eicab_bridge_open_radius=eicab_bridge_open_radius,
+        venous_min_branch_points=venous_min_branch_points,
+        eicab_prefer_pp=eicab_prefer_pp,
+        venous_brain_mask=venous_brain_mask,
+        totalseg_device=totalseg_device,
+        totalseg_model_dir=totalseg_model_dir,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    hold_jid: str | None = None,
+    emit: TextIO | None = None,
+    eicab_mask: str = "cw",
+    cd_up_thresh: float | None = None,
+    cd_shift_hm: bool | None = None,
+    venous_min_component_frac: float = 0.005,
+    eicab_min_island_fraction: float = 0.005,
+    eicab_bridge_open_radius: int = 1,
+    venous_min_branch_points: int = 12,
+    eicab_prefer_pp: bool = True,
+    venous_brain_mask: bool = True,
+    totalseg_device: str | None = None,
+    totalseg_model_dir: Path | None = None,
+    backend: str = "gpu",
+) -> str:
+    """Emit or submit one stage-3 SGE job. Returns qsub job id."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        eicab_mask=eicab_mask,
+        cd_up_thresh=cd_up_thresh,
+        cd_shift_hm=cd_shift_hm,
+        venous_min_component_frac=venous_min_component_frac,
+        eicab_min_island_fraction=eicab_min_island_fraction,
+        eicab_bridge_open_radius=eicab_bridge_open_radius,
+        venous_min_branch_points=venous_min_branch_points,
+        eicab_prefer_pp=eicab_prefer_pp,
+        venous_brain_mask=venous_brain_mask,
+        totalseg_device=totalseg_device,
+        totalseg_model_dir=totalseg_model_dir,
+        backend=backend,
+    )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
@@ -609,7 +700,7 @@ def main(
     )
 
 
-__all__ = ["main", "run_subject", "submit_subject_sge"]
+__all__ = ["main", "run_subject", "build_subject_sge_command", "submit_subject_sge"]
 
 
 if __name__ == "__main__":

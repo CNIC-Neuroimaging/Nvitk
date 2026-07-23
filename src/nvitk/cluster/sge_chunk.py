@@ -16,8 +16,13 @@ from nvitk.core.logger import Logger
 
 log = Logger()
 
-_JOB_ID_FROM_ECHO = re.compile(r"->\s*(\d+)\s*$", re.MULTILINE)
-_BARE_JOB_ID = re.compile(r"^\s*(\d+)\s*$", re.MULTILINE)
+# Terse qsub may print ``12345`` or array forms ``12345.1-7:1``.
+_JOB_ID_FROM_ECHO = re.compile(
+    r"->\s*(\d+)(?:\.\d+-\d+(?::\d+)?)?\s*$", re.MULTILINE
+)
+_BARE_JOB_ID = re.compile(
+    r"^\s*(\d+)(?:\.\d+-\d+(?::\d+)?)?\s*$", re.MULTILINE
+)
 
 
 def chunk_sequence(items: Sequence[str], chunk_size: int) -> list[list[str]]:
@@ -30,18 +35,18 @@ def chunk_sequence(items: Sequence[str], chunk_size: int) -> list[list[str]]:
 
 def warn_if_chunk_exceeds_sge_limit(
     chunk_size: int,
-    stages_per_subject: int,
+    jobs_per_subject: int,
     *,
     max_jobs: int = 1000,
     margin: int = 10,
 ) -> None:
-    need = int(chunk_size) * int(stages_per_subject)
+    need = int(chunk_size) * int(jobs_per_subject)
     cap = int(max_jobs) - int(margin)
-    if stages_per_subject > 0 and need > cap:
+    if jobs_per_subject > 0 and need > cap:
         log.warning(
             f"SGE chunk may exceed per-user job limit: {chunk_size} subjects × "
-            f"{stages_per_subject} stages = {need} jobs (cluster cap ~{max_jobs}). "
-            f"Reduce --sge-subject-chunk-size to {max(1, cap // stages_per_subject)} or fewer."
+            f"{jobs_per_subject} job(s)/subject = {need} jobs (cluster cap ~{max_jobs}). "
+            f"Reduce --sge-subject-chunk-size to {max(1, cap // jobs_per_subject)} or fewer."
         )
 
 

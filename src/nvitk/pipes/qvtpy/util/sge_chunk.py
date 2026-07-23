@@ -70,7 +70,11 @@ def count_sge_stages_per_subject(
     run_s6: bool,
     run_s7: bool,
 ) -> int:
-    """Maximum number of ``qsub`` jobs emitted per subject (all stages enabled)."""
+    """Maximum number of array *tasks* (stages) per subject when all are enabled.
+
+    Master SGE submit emits one array job per subject; this count is the task
+    range size (``-t 1-N``), not the number of ``qsub`` jobs.
+    """
     return len(
         _enabled_stage_ids(
             {
@@ -96,7 +100,7 @@ def count_sge_stages_for_subject(
     results_root: Path,
     nifti_root: Path,
 ) -> int:
-    """Jobs that would be emitted for *subject* (respects ``--skip-processed``)."""
+    """Pending stage *tasks* for *subject* (respects ``--skip-processed``)."""
     return len(
         pending_sge_stage_ids(
             subject,

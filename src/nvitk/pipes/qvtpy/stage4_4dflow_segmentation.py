@@ -497,7 +497,7 @@ def _stage4_cli_options(func):
     return func
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     nifti_root: Path,
@@ -505,8 +505,6 @@ def submit_subject_sge(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    hold_jid: str | None = None,
-    emit: TextIO | None = None,
     crop_padding_bbox: int = 3,
     thr_algorithm: str = "lsthr",
     region_growing: bool = True,
@@ -529,8 +527,7 @@ def submit_subject_sge(
     distal_max_image_frac: float = 0.006,
     distal_lr_halfspace_slack: int = 2,
     backend: str = "gpu",
-) -> str:
-    """Emit or submit one stage-4 SGE job. Returns qsub job id."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -619,6 +616,140 @@ def submit_subject_sge(
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
     )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    crop_padding_bbox: int = 3,
+    thr_algorithm: str = "lsthr",
+    region_growing: bool = True,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT,
+    rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
+    venous_region_growing: bool = True,
+    segment_acomm: bool = False,
+    distal_flow_expand: bool = False,
+    distal_hyst_low_factor: float = 3.5,
+    distal_hyst_high_factor: float = 0.5,
+    distal_thicken_iter: int = 0,
+    distal_max_image_frac: float = 0.006,
+    distal_lr_halfspace_slack: int = 2,
+    backend: str = "gpu",
+) -> str:
+    """Return the host shell command for one stage4 array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        crop_padding_bbox=crop_padding_bbox,
+        thr_algorithm=thr_algorithm,
+        region_growing=region_growing,
+        rg_intensity_frac=rg_intensity_frac,
+        rg_intensity_frac_explore=rg_intensity_frac_explore,
+        rg_intensity_frac_aca=rg_intensity_frac_aca,
+        cl_barrier_radius=cl_barrier_radius,
+        rg_barrier_radius=rg_barrier_radius,
+        aca_sequential_grow=aca_sequential_grow,
+        aca_overlap_min_voxels=aca_overlap_min_voxels,
+        acomm_junction_radius=acomm_junction_radius,
+        rg_max_grow_frac=rg_max_grow_frac,
+        rg_max_image_frac=rg_max_image_frac,
+        venous_region_growing=venous_region_growing,
+        segment_acomm=segment_acomm,
+        distal_flow_expand=distal_flow_expand,
+        distal_hyst_low_factor=distal_hyst_low_factor,
+        distal_hyst_high_factor=distal_hyst_high_factor,
+        distal_thicken_iter=distal_thicken_iter,
+        distal_max_image_frac=distal_max_image_frac,
+        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    hold_jid: str | None = None,
+    emit: TextIO | None = None,
+    crop_padding_bbox: int = 3,
+    thr_algorithm: str = "lsthr",
+    region_growing: bool = True,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT,
+    rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT,
+    venous_region_growing: bool = True,
+    segment_acomm: bool = False,
+    distal_flow_expand: bool = False,
+    distal_hyst_low_factor: float = 3.5,
+    distal_hyst_high_factor: float = 0.5,
+    distal_thicken_iter: int = 0,
+    distal_max_image_frac: float = 0.006,
+    distal_lr_halfspace_slack: int = 2,
+    backend: str = "gpu",
+) -> str:
+    """Emit or submit one stage-4 SGE job. Returns qsub job id."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        crop_padding_bbox=crop_padding_bbox,
+        thr_algorithm=thr_algorithm,
+        region_growing=region_growing,
+        rg_intensity_frac=rg_intensity_frac,
+        rg_intensity_frac_explore=rg_intensity_frac_explore,
+        rg_intensity_frac_aca=rg_intensity_frac_aca,
+        cl_barrier_radius=cl_barrier_radius,
+        rg_barrier_radius=rg_barrier_radius,
+        aca_sequential_grow=aca_sequential_grow,
+        aca_overlap_min_voxels=aca_overlap_min_voxels,
+        acomm_junction_radius=acomm_junction_radius,
+        rg_max_grow_frac=rg_max_grow_frac,
+        rg_max_image_frac=rg_max_image_frac,
+        venous_region_growing=venous_region_growing,
+        segment_acomm=segment_acomm,
+        distal_flow_expand=distal_flow_expand,
+        distal_hyst_low_factor=distal_hyst_low_factor,
+        distal_hyst_high_factor=distal_hyst_high_factor,
+        distal_thicken_iter=distal_thicken_iter,
+        distal_max_image_frac=distal_max_image_frac,
+        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        backend=backend,
+    )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
@@ -687,6 +818,7 @@ __all__ = [
     "EICAB_IN_4DFLOW_NIFTI",
     "main",
     "run_subject",
+    "build_subject_sge_command",
     "submit_subject_sge",
 ]
 

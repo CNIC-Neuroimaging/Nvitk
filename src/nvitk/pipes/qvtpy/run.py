@@ -17,8 +17,9 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
 - ``stage8_xnat_upload`` — upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
 
-SGE: per subject, stages emit in order with ``-hold_jid`` chaining (see
-:func:`nvitk.cluster.sge.submit_stage`).
+SGE: per subject, one ``qsub -t`` array job (task = pending stage) with
+``-tc 1`` and done-markers between tasks (see
+:func:`nvitk.cluster.sge.emit_array_job_block`).
 """
 
 from __future__ import annotations
@@ -41,16 +42,23 @@ from nvitk.cluster.sge_chunk import (
 )
 from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 from nvitk.cluster.sge import (
+    ArrayTaskSpec,
     ClusterPaths,
     SingularityBinds,
     StageSpec,
+    build_singularity_command,
+    emit_array_job_block,
     python_module_argv,
     submit_stage,
     write_script_header,
 )
 from nvitk.core.click_backend import backend_click_option, sge_backend_env
 from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
-from nvitk.pipes.qvtpy.util.sge_backend import sge_qvtpy_stage_resources, sge_stage_use_nv
+from nvitk.pipes.qvtpy.util.sge_backend import (
+    sge_qvtpy_array_resources,
+    sge_qvtpy_stage_resources,
+    sge_stage_use_nv,
+)
 from nvitk.pipes.qvtpy.util.sge_chunk import (
     count_sge_stages_for_subject,
     count_sge_stages_per_subject,
@@ -165,6 +173,65 @@ def _default_nvitk_src_dir() -> Path:
 # ---------------------------------------------------------------------------
 # SGE script emission (per-stage submit_stage)
 # ---------------------------------------------------------------------------
+
+
+def _build_stage0_convert_command(
+    subject: str,
+    *,
+    dicom_root: Path,
+    nifti_root: Path,
+    container: Path,
+    src_dir: Path,
+    compute_phase_derived: bool,
+    skip_existing: bool,
+    phase_background_correction: bool,
+    phase_bg_poly_order: int,
+    phase_bg_static_percentile: float,
+    backend: str = "gpu",
+) -> str:
+    """Host shell command for stage0_c (Singularity + python module)."""
+    binds = SingularityBinds()
+    cmd_parts: list[str] = [
+        *python_module_argv("nvitk.pipes.qvtpy.stage0_convert"),
+        "--backend",
+        shlex.quote(backend),
+        "--subject",
+        shlex.quote(subject),
+        "--dicom-root",
+        shlex.quote(binds.data),
+        "--nifti-root",
+        shlex.quote(binds.output),
+        "--phase-bg-poly-order",
+        str(int(phase_bg_poly_order)),
+        "--phase-bg-static-percentile",
+        str(float(phase_bg_static_percentile)),
+    ]
+    if compute_phase_derived:
+        cmd_parts.append("--compute-phase-derived")
+    if phase_background_correction:
+        cmd_parts.append("--phase-background-correction")
+    if skip_existing:
+        cmd_parts.append("--skip-existing")
+    python_cmd = " ".join(cmd_parts)
+
+    paths = ClusterPaths(
+        src=src_dir,
+        container=container,
+        models=None,
+        data_root=dicom_root,
+        output_root=nifti_root,
+        log_dir=cfg.SGE_LOG_DIR,
+        err_dir=cfg.SGE_ERR_DIR,
+    )
+    spec = StageSpec(
+        job_name=f"{cfg.SGE_JOB_PREFIX}_stage0c_{subject}",
+        python_cmd=python_cmd,
+        resources=sge_qvtpy_stage_resources(backend),
+        binds=binds,
+        use_nv=sge_stage_use_nv(backend),
+        extra_env=sge_backend_env(binds.src, backend),
+    )
+    return build_singularity_command(spec, paths)
 
 
 def _emit_stage0_convert(
@@ -306,7 +373,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pitc_measure_resegment: bool = True,
     pitc_label_constrain: bool = True,
 ) -> int:
-    """Append SGE ``qsub`` blocks for *chunk_subjects*; return jobs emitted."""
+    """Append one SGE array ``qsub`` per subject; return array jobs emitted."""
     from . import (
         stage1_eicab,
         stage2_registration,
@@ -349,290 +416,339 @@ def _emit_qvtpy_sge_subjects_for_chunk(
         def _should_emit(stage_id: str) -> bool:
             return pending is None or stage_id in pending
 
-        def _on_skip(stage_id: str) -> None:
-            nonlocal prev_jid
-            prev_jid = None
-            log.info(f"[{subj}] skip-processed: {stage_id} (outputs present)")
+        tasks: list[ArrayTaskSpec] = []
 
-        prev_jid: str | None = None
-        if run_conv:
-            if _should_emit(STAGE_CONVERT):
-                try:
-                    prev_jid = _emit_stage0_convert(
-                        fh,
-                        subj,
-                        dicom_root=dicom_root_eff,
-                        nifti_root=nifti_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        compute_phase_derived=compute_phase_derived,
-                        skip_existing=skip_existing,
-                        phase_background_correction=phase_background_correction,
-                        phase_bg_poly_order=phase_bg_poly_order,
-                        phase_bg_static_percentile=phase_bg_static_percentile,
-                        backend=backend,
+        if run_conv and _should_emit(STAGE_CONVERT):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_CONVERT,
+                        _build_stage0_convert_command(
+                            subj,
+                            dicom_root=dicom_root_eff,
+                            nifti_root=nifti_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            compute_phase_derived=compute_phase_derived,
+                            skip_existing=skip_existing,
+                            phase_background_correction=phase_background_correction,
+                            phase_bg_poly_order=phase_bg_poly_order,
+                            phase_bg_static_percentile=phase_bg_static_percentile,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage0_c emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_CONVERT)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage0_c emit skipped: {exc}")
+        elif run_conv and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_CONVERT} (outputs present)")
 
-        if run_eicab:
-            if _should_emit(STAGE_EICAB):
-                try:
-                    jid = stage1_eicab.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        skip_existing=skip_existing,
-                        resolution=eicab_resolution,
-                        device=eicab_device,
-                        eicab_container=eicab_container,
-                        pipeline_container=container,
-                        src_dir=src_p,
-                        sge_pe_smp=eicab_sge_pe_smp,
-                        thread_limit=eicab_thread_limit,
-                        local_metric_scratch=eicab_local_metric_scratch,
-                        vasculature_dir=vasculature_dir,
-                        post_process_eicab=post_process_eicab,
-                        hold_jid=prev_jid,
-                        backend=backend,
-                        dry_run=False,
-                        emit=fh,
-                        only_pp=only_pp,
+        if run_eicab and _should_emit(STAGE_EICAB):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_EICAB,
+                        stage1_eicab.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            skip_existing=skip_existing,
+                            resolution=eicab_resolution,
+                            device=eicab_device,
+                            eicab_container=eicab_container,
+                            pipeline_container=container,
+                            src_dir=src_p,
+                            sge_pe_smp=eicab_sge_pe_smp,
+                            thread_limit=eicab_thread_limit,
+                            local_metric_scratch=eicab_local_metric_scratch,
+                            vasculature_dir=vasculature_dir,
+                            post_process_eicab=post_process_eicab,
+                            backend=backend,
+                            only_pp=only_pp,
+                        ),
                     )
-                    prev_jid = jid or prev_jid
-                    jobs_emitted += 1
-                except (FileNotFoundError, OSError) as exc:
-                    import traceback
+                )
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage1 eICAB emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_EICAB)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage1 eICAB emit skipped: {exc}")
+        elif run_eicab and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_EICAB} (outputs present)")
 
-        if run_s2:
-            if _should_emit(STAGE_REG):
-                try:
-                    prev_jid = stage2_registration.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        reference=stage2_reference,
-                        dof=stage2_dof,
-                        cost=stage2_cost,
-                        hold_jid=prev_jid,
-                        backend=backend,
-                        emit=fh,
+        if run_s2 and _should_emit(STAGE_REG):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_REG,
+                        stage2_registration.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            reference=stage2_reference,
+                            dof=stage2_dof,
+                            cost=stage2_cost,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage2 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_REG)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage2 emit skipped: {exc}")
+        elif run_s2 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_REG} (outputs present)")
 
-        if run_s3:
-            if _should_emit(STAGE_CENTERLINE):
-                try:
-                    prev_jid = stage3_centerline.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        eicab_mask=eicab_mask,
-                        eicab_prefer_pp=eicab_prefer_pp,
-                        cd_up_thresh=cd_up_thresh,
-                        cd_shift_hm=cd_shift_hm,
-                        venous_min_component_frac=venous_min_component_frac,
-                        eicab_min_island_fraction=eicab_min_island_fraction,
-                        eicab_bridge_open_radius=eicab_bridge_open_radius,
-                        venous_min_branch_points=venous_min_branch_points,
-                        venous_brain_mask=venous_brain_mask,
-                        totalseg_model_dir=totalseg_model_dir,
-                        backend=backend,
+        if run_s3 and _should_emit(STAGE_CENTERLINE):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_CENTERLINE,
+                        stage3_centerline.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            eicab_mask=eicab_mask,
+                            eicab_prefer_pp=eicab_prefer_pp,
+                            cd_up_thresh=cd_up_thresh,
+                            cd_shift_hm=cd_shift_hm,
+                            venous_min_component_frac=venous_min_component_frac,
+                            eicab_min_island_fraction=eicab_min_island_fraction,
+                            eicab_bridge_open_radius=eicab_bridge_open_radius,
+                            venous_min_branch_points=venous_min_branch_points,
+                            venous_brain_mask=venous_brain_mask,
+                            totalseg_model_dir=totalseg_model_dir,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage3 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_CENTERLINE)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage3 emit skipped: {exc}")
+        elif run_s3 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_CENTERLINE} (outputs present)")
 
-        if run_s4:
-            if _should_emit(STAGE_SEG):
-                try:
-                    prev_jid = stage4_4dflow_segmentation.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        crop_padding_bbox=crop_padding_bbox,
-                        thr_algorithm=thr_algorithm_4dflow,
-                        region_growing=region_growing,
-                        rg_intensity_frac=rg_intensity_frac,
-                        rg_intensity_frac_explore=rg_intensity_frac_explore,
-                        rg_intensity_frac_aca=rg_intensity_frac_aca,
-                        cl_barrier_radius=cl_barrier_radius,
-                        rg_barrier_radius=rg_barrier_radius,
-                        aca_sequential_grow=aca_sequential_grow,
-                        aca_overlap_min_voxels=aca_overlap_min_voxels,
-                        acomm_junction_radius=acomm_junction_radius,
-                        distal_flow_expand=distal_flow_expand,
-                        distal_hyst_low_factor=distal_hyst_low_factor,
-                        distal_hyst_high_factor=distal_hyst_high_factor,
-                        distal_thicken_iter=distal_thicken_iter,
-                        distal_max_image_frac=distal_max_image_frac,
-                        distal_lr_halfspace_slack=distal_lr_halfspace_slack,
-                        backend=backend,
+        if run_s4 and _should_emit(STAGE_SEG):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_SEG,
+                        stage4_4dflow_segmentation.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            crop_padding_bbox=crop_padding_bbox,
+                            thr_algorithm=thr_algorithm_4dflow,
+                            region_growing=region_growing,
+                            rg_intensity_frac=rg_intensity_frac,
+                            rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            rg_intensity_frac_aca=rg_intensity_frac_aca,
+                            cl_barrier_radius=cl_barrier_radius,
+                            rg_barrier_radius=rg_barrier_radius,
+                            aca_sequential_grow=aca_sequential_grow,
+                            aca_overlap_min_voxels=aca_overlap_min_voxels,
+                            acomm_junction_radius=acomm_junction_radius,
+                            distal_flow_expand=distal_flow_expand,
+                            distal_hyst_low_factor=distal_hyst_low_factor,
+                            distal_hyst_high_factor=distal_hyst_high_factor,
+                            distal_thicken_iter=distal_thicken_iter,
+                            distal_max_image_frac=distal_max_image_frac,
+                            distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage4 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_SEG)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage4 emit skipped: {exc}")
+        elif run_s4 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_SEG} (outputs present)")
 
-        if run_s4t:
-            if _should_emit(STAGE_SEG_T):
-                try:
-                    prev_jid = stage4t_4dflow_t_segmentation.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        crop_padding_bbox=crop_padding_bbox,
-                        thr_algorithm=thr_algorithm_4dflow,
-                        region_growing=region_growing,
-                        rg_intensity_frac=rg_intensity_frac,
-                        rg_intensity_frac_explore=rg_intensity_frac_explore,
-                        rg_intensity_frac_aca=rg_intensity_frac_aca,
-                        cl_barrier_radius=cl_barrier_radius,
-                        rg_barrier_radius=rg_barrier_radius,
-                        aca_sequential_grow=aca_sequential_grow,
-                        aca_overlap_min_voxels=aca_overlap_min_voxels,
-                        acomm_junction_radius=acomm_junction_radius,
-                        backend=backend,
+        if run_s4t and _should_emit(STAGE_SEG_T):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_SEG_T,
+                        stage4t_4dflow_t_segmentation.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            crop_padding_bbox=crop_padding_bbox,
+                            thr_algorithm=thr_algorithm_4dflow,
+                            region_growing=region_growing,
+                            rg_intensity_frac=rg_intensity_frac,
+                            rg_intensity_frac_explore=rg_intensity_frac_explore,
+                            cl_barrier_radius=cl_barrier_radius,
+                            rg_barrier_radius=rg_barrier_radius,
+                            aca_sequential_grow=aca_sequential_grow,
+                            aca_overlap_min_voxels=aca_overlap_min_voxels,
+                            acomm_junction_radius=acomm_junction_radius,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage4t emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_SEG_T)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage4t emit skipped: {exc}")
+        elif run_s4t and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_SEG_T} (outputs present)")
 
-        if run_s5:
-            if _should_emit(STAGE_LOC):
-                try:
-                    prev_jid = stage5_loc_generation.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        loc_arterial_strategy=loc_arterial_strategy,
-                        cross_section_radius_vox=cross_section_radius_vox,
-                        venous_min_component_frac=venous_min_component_frac,
-                        loc_endpoint_inset_frac=loc_endpoint_inset_frac,
-                        backend=backend,
+        if run_s5 and _should_emit(STAGE_LOC):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_LOC,
+                        stage5_loc_generation.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            loc_arterial_strategy=loc_arterial_strategy,
+                            cross_section_radius_vox=cross_section_radius_vox,
+                            venous_min_component_frac=venous_min_component_frac,
+                            loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage5 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_LOC)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage5 emit skipped: {exc}")
+        elif run_s5 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_LOC} (outputs present)")
 
-        if run_s6:
-            if _should_emit(STAGE_MEASURE):
-                try:
-                    prev_jid = stage6_measure.submit_subject_sge(
-                        subj,
-                        nifti_root=nifti_root_eff,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        cross_section_radius_vox=cross_section_radius_vox,
-                        measure_resegment=measure_resegment,
-                        measure_thr_algorithm=measure_thr_algorithm,
-                        cross_section_res=cross_section_res,
-                        cross_section_plane_interp=cross_section_plane_interp,
-                        cs_supersampling=cs_supersampling,
-                        pitc_stride=pitc_stride,
-                        pitc_quality_thresh=pitc_quality_thresh,
-                        pitc_quality_metric=pitc_quality_metric,
-                        pitc_measure_resegment=pitc_measure_resegment,
-                        pitc_label_constrain=pitc_label_constrain,
-                        save_plots=save_plots,
-                        backend=backend,
+        if run_s6 and _should_emit(STAGE_MEASURE):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_MEASURE,
+                        stage6_measure.build_subject_sge_command(
+                            subj,
+                            nifti_root=nifti_root_eff,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            cross_section_radius_vox=cross_section_radius_vox,
+                            measure_resegment=measure_resegment,
+                            measure_thr_algorithm=measure_thr_algorithm,
+                            cross_section_res=cross_section_res,
+                            cross_section_plane_interp=cross_section_plane_interp,
+                            cs_supersampling=cs_supersampling,
+                            pitc_stride=pitc_stride,
+                            pitc_quality_thresh=pitc_quality_thresh,
+                            pitc_quality_metric=pitc_quality_metric,
+                            pitc_measure_resegment=pitc_measure_resegment,
+                            pitc_label_constrain=pitc_label_constrain,
+                            save_plots=save_plots,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage6 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_MEASURE)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage6 emit skipped: {exc}")
+        elif run_s6 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_MEASURE} (outputs present)")
 
-        if run_s7:
-            if _should_emit(STAGE_MORPHOMETRICS):
-                try:
-                    stage7_morphometrics.submit_subject_sge(
-                        subj,
-                        output_root=output_root_eff,
-                        container=container,
-                        src_dir=src_p,
-                        skip_existing=skip_existing,
-                        hold_jid=prev_jid,
-                        emit=fh,
-                        backend=backend,
+        if run_s7 and _should_emit(STAGE_MORPHOMETRICS):
+            try:
+                tasks.append(
+                    ArrayTaskSpec(
+                        STAGE_MORPHOMETRICS,
+                        stage7_morphometrics.build_subject_sge_command(
+                            subj,
+                            output_root=output_root_eff,
+                            container=container,
+                            src_dir=src_p,
+                            skip_existing=skip_existing,
+                            backend=backend,
+                        ),
                     )
-                    jobs_emitted += 1
-                except Exception as exc:
-                    import traceback
+                )
+            except Exception as exc:
+                import traceback
 
-                    log.exception(traceback.format_exc())
-                    log.exception(f"[{subj}] stage7 emit skipped: {exc}")
-            elif skip_processed:
-                _on_skip(STAGE_MORPHOMETRICS)
+                log.exception(traceback.format_exc())
+                log.exception(f"[{subj}] stage7 emit skipped: {exc}")
+        elif run_s7 and skip_processed:
+            log.info(f"[{subj}] skip-processed: {STAGE_MORPHOMETRICS} (outputs present)")
+
+        if not tasks:
+            continue
+
+        include_eicab = any(t.stage_id == STAGE_EICAB for t in tasks)
+        resources, use_nv = sge_qvtpy_array_resources(
+            backend,
+            include_eicab=include_eicab,
+            eicab_device=eicab_device,
+            eicab_pe_smp=eicab_sge_pe_smp,
+        )
+        subj_token = _sge_script_subject_token(subj)
+        job_name = f"{cfg.SGE_JOB_PREFIX}_{subj_token}"[:63]
+        marker_dir = output_root_eff / subj / cfg.QVT_SUBDIR / ".sge_array_markers"
+        paths = ClusterPaths(
+            src=src_p,
+            container=container,
+            models=None,
+            data_root=nifti_root_eff,
+            output_root=output_root_eff,
+            log_dir=cfg.SGE_LOG_DIR,
+            err_dir=cfg.SGE_ERR_DIR,
+        )
+        stage_ids = ",".join(t.stage_id for t in tasks)
+        log.info(
+            f"[{subj}] SGE array: {len(tasks)} task(s) [{stage_ids}] "
+            f"job_name={job_name}"
+        )
+        try:
+            emit_array_job_block(
+                fh,
+                job_name=job_name,
+                resources=resources,
+                paths=paths,
+                tasks=tasks,
+                marker_dir=marker_dir,
+                task_concurrency=1,
+                use_nv=use_nv,
+            )
+            jobs_emitted += 1
+        except Exception as exc:
+            import traceback
+
+            log.exception(traceback.format_exc())
+            log.exception(f"[{subj}] array emit skipped: {exc}")
 
     return jobs_emitted
+
 
 
 _SGE_SCRIPT_SUBJECT_TOKEN = re.compile(r"[^\w.-]+")
@@ -1766,6 +1882,8 @@ def main(
             log.info("All subjects already complete for requested stages; nothing to submit to SGE.")
             return
 
+    # One SGE array job per subject (tasks = pending stages).
+    jobs_per_subject = 1
     stages_per_subject = count_sge_stages_per_subject(
         run_conv=run_conv,
         run_eicab=run_eicab,
@@ -1780,15 +1898,15 @@ def main(
     chunk_size = max(1, int(sge_subject_chunk_size))
     serial_subjects = bool(sge_serial_subjects) or chunk_size == 1
     warn_if_chunk_exceeds_sge_limit(
-        chunk_size, stages_per_subject, margin=int(sge_job_margin)
+        chunk_size, jobs_per_subject, margin=int(sge_job_margin)
     )
     initial_subjects = subject_list[:chunk_size]
     remaining_subjects = subject_list[chunk_size:]
     drip_mode = "serial (one subject at a time)" if serial_subjects else "capacity-based"
     log.info(
         f"SGE submit: initial batch {len(initial_subjects)} subject(s), "
-        f"drip {len(remaining_subjects)} more at {stages_per_subject} job(s)/subject "
-        f"({drip_mode})"
+        f"drip {len(remaining_subjects)} more at {jobs_per_subject} array job(s)/subject "
+        f"(up to {stages_per_subject} stage task(s)/subject; {drip_mode})"
     )
 
     emit_kwargs = dict(
@@ -1988,15 +2106,17 @@ def main(
         return code == 0, drip_ids
 
     def _jobs_for_subject(subj: str) -> int:
+        """Queue slots: one array job per subject with pending stage work."""
         if not skip_processed:
-            return stages_per_subject
-        return count_sge_stages_for_subject(
+            return jobs_per_subject
+        n_stages = count_sge_stages_for_subject(
             subj,
             stage_runs=stage_runs_from_emit_kwargs(emit_kwargs),
             skip_processed=True,
             results_root=output_root_eff,
             nifti_root=nifti_root_eff,
         )
+        return 1 if n_stages > 0 else 0
 
     ok = drip_submit_subjects(
         remaining_subjects,

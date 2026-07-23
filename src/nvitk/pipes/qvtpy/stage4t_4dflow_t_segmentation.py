@@ -485,7 +485,7 @@ def _stage4t_cli_options(func):
     return func
 
 
-def submit_subject_sge(
+def _subject_sge_spec(
     subject: str,
     *,
     nifti_root: Path,
@@ -493,8 +493,6 @@ def submit_subject_sge(
     container: Path,
     src_dir: Path | None = None,
     skip_existing: bool = False,
-    hold_jid: str | None = None,
-    emit: TextIO | None = None,
     crop_padding_bbox: int = 3,
     thr_algorithm: str = "lsthr",
     region_growing: bool = True,
@@ -506,8 +504,7 @@ def submit_subject_sge(
     aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
     backend: str = "gpu",
-) -> str:
-    """Emit or submit one stage-4t SGE job. Returns qsub job id."""
+) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -564,6 +561,96 @@ def submit_subject_sge(
         use_nv=sge_stage_use_nv(backend),
         extra_env=sge_stage_extra_env(binds.src, backend),
     )
+    return spec, paths
+
+
+def build_subject_sge_command(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    crop_padding_bbox: int = 3,
+    thr_algorithm: str = "lsthr",
+    region_growing: bool = True,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    backend: str = "gpu",
+) -> str:
+    """Return the host shell command for one stage4t array/SGE task."""
+    from nvitk.cluster.sge import build_singularity_command
+
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        crop_padding_bbox=crop_padding_bbox,
+        thr_algorithm=thr_algorithm,
+        region_growing=region_growing,
+        rg_intensity_frac=rg_intensity_frac,
+        rg_intensity_frac_explore=rg_intensity_frac_explore,
+        cl_barrier_radius=cl_barrier_radius,
+        rg_barrier_radius=rg_barrier_radius,
+        aca_sequential_grow=aca_sequential_grow,
+        aca_overlap_min_voxels=aca_overlap_min_voxels,
+        acomm_junction_radius=acomm_junction_radius,
+        backend=backend,
+    )
+    return build_singularity_command(spec, paths)
+
+
+def submit_subject_sge(
+    subject: str,
+    *,
+    nifti_root: Path,
+    output_root: Path,
+    container: Path,
+    src_dir: Path | None = None,
+    skip_existing: bool = False,
+    hold_jid: str | None = None,
+    emit: TextIO | None = None,
+    crop_padding_bbox: int = 3,
+    thr_algorithm: str = "lsthr",
+    region_growing: bool = True,
+    rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC,
+    rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE,
+    cl_barrier_radius: int = 2,
+    rg_barrier_radius: int = 3,
+    aca_sequential_grow: bool = True,
+    aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
+    acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
+    backend: str = "gpu",
+) -> str:
+    """Emit or submit one stage-4t SGE job. Returns qsub job id."""
+    spec, paths = _subject_sge_spec(
+        subject,
+        nifti_root=nifti_root,
+        output_root=output_root,
+        container=container,
+        src_dir=src_dir,
+        skip_existing=skip_existing,
+        crop_padding_bbox=crop_padding_bbox,
+        thr_algorithm=thr_algorithm,
+        region_growing=region_growing,
+        rg_intensity_frac=rg_intensity_frac,
+        rg_intensity_frac_explore=rg_intensity_frac_explore,
+        cl_barrier_radius=cl_barrier_radius,
+        rg_barrier_radius=rg_barrier_radius,
+        aca_sequential_grow=aca_sequential_grow,
+        aca_overlap_min_voxels=aca_overlap_min_voxels,
+        acomm_junction_radius=acomm_junction_radius,
+        backend=backend,
+    )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
 
 
@@ -606,6 +693,7 @@ def main(
 
 
 __all__ = [
+    "build_subject_sge_command",
     "build_temporal_seg_summary",
     "dice_binary",
     "main",
