@@ -186,7 +186,11 @@ def make_pwv_figure(
     *,
     show_legend: bool = True,
 ):
-    """Build a live Matplotlib PWV diagnostics figure."""
+    """Build a live Matplotlib PWV diagnostics figure.
+
+    Quality-excluded stations are shown in grey (same style as PITC); fits and
+    colored markers use only stations with ``Q > quality_thresh``.
+    """
     regions = [r for r in _REGION_ORDER if r in region_plot_data]
     if not regions:
         return None
@@ -196,6 +200,10 @@ def make_pwv_figure(
         dist = to_numpy(d.get("pwv_distance_mm", [])).astype("float64")
         xcor = to_numpy(d.get("pwv_xcor_time_s", [])).astype("float64")
         upstroke = to_numpy(d.get("pwv_time_to_upstroke_s", [])).astype("float64")
+        excl_dist = to_numpy(d.get("pwv_excluded_distance_mm", [])).astype("float64")
+        excl_xcor = to_numpy(d.get("pwv_excluded_xcor_time_s", [])).astype("float64")
+        excl_up = to_numpy(d.get("pwv_excluded_time_to_upstroke_s", [])).astype("float64")
+        thresh = float(d.get("quality_thresh", 2.5))
         if "pwv_weight_area" in d:
             w1 = to_numpy(d["pwv_weight_area"]).astype("float64")
             w2 = to_numpy(d.get("pwv_weight_quality", [])).astype("float64")
@@ -208,13 +216,66 @@ def make_pwv_figure(
         ax_w = axes[2][col]
         ax_x.set_title(_REGION_TITLES.get(region, region), fontsize=13, fontweight="bold")
 
+        excl_label = f"Q≤{thresh:g}"
+        if excl_dist.size:
+            n_x = min(excl_dist.size, excl_xcor.size)
+            if n_x:
+                finite = np.isfinite(excl_dist[:n_x]) & np.isfinite(excl_xcor[:n_x])
+                if np.any(finite):
+                    ax_x.scatter(
+                        excl_dist[:n_x][finite],
+                        excl_xcor[:n_x][finite],
+                        s=14,
+                        c="0.6",
+                        alpha=0.7,
+                        zorder=1,
+                        label=excl_label,
+                    )
+            n_u = min(excl_dist.size, excl_up.size)
+            if n_u:
+                finite = np.isfinite(excl_dist[:n_u]) & np.isfinite(excl_up[:n_u])
+                if np.any(finite):
+                    ax_u.scatter(
+                        excl_dist[:n_u][finite],
+                        excl_up[:n_u][finite],
+                        s=14,
+                        c="0.6",
+                        alpha=0.7,
+                        zorder=1,
+                        label=excl_label,
+                    )
+            # Weights panel: mark excluded stations on the x-axis at y=0.
+            ax_w.scatter(
+                excl_dist[np.isfinite(excl_dist)],
+                np.zeros(int(np.count_nonzero(np.isfinite(excl_dist)))),
+                s=14,
+                c="0.6",
+                alpha=0.7,
+                zorder=1,
+                label=excl_label,
+            )
+
         if dist.size:
-            ax_x.scatter(dist, xcor, s=16, c="orchid", alpha=0.7, label="raw data")
+            ax_x.scatter(
+                dist, xcor, s=16, c="orchid", alpha=0.7, zorder=2, label="raw data"
+            )
             _draw_pwv_fits(ax_x, dist, xcor, w1, w2)
-            ax_u.scatter(dist, upstroke, s=16, c="teal", alpha=0.7, label="raw data")
+            ax_u.scatter(
+                dist, upstroke, s=16, c="teal", alpha=0.7, zorder=2, label="raw data"
+            )
             _draw_pwv_fits(ax_u, dist, upstroke, w1, w2)
-            ax_w.scatter(dist, w1, s=16, c="limegreen", alpha=0.7, label=r"$W_1$ (area)")
-            ax_w.scatter(dist, w2, s=16, c="royalblue", alpha=0.7, label=r"$W_2$ (quality)")
+            ax_w.scatter(
+                dist, w1, s=16, c="limegreen", alpha=0.7, zorder=2, label=r"$W_1$ (area)"
+            )
+            ax_w.scatter(
+                dist,
+                w2,
+                s=16,
+                c="royalblue",
+                alpha=0.7,
+                zorder=2,
+                label=r"$W_2$ (quality)",
+            )
 
         ax_x.set_ylabel("maximised XCor time (s)")
         ax_u.set_ylabel("time-to-upstroke (s)")

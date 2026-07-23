@@ -277,12 +277,8 @@ def run_gui_tool(
         _run_viz_flow_streamlines_napari(viewer, layer, params, label_ids=label_ids)
         return None
 
-    if tool_id == "viz_pitc":
-        _run_viz_pitc(viewer, layer, params)
-        return None
-
-    if tool_id == "viz_pwv":
-        _run_viz_pwv(viewer, layer, params)
+    if tool_id in {"viz_vessel_hemo", "viz_pitc", "viz_pwv"}:
+        _run_viz_vessel_hemo(viewer, layer, params)
         return None
 
     if tool_id == "measure_generate_suv":
@@ -1865,7 +1861,9 @@ def _prepare_vessel_hemo_for_viz(
         stride=int(params.get("stride") or 1),
         radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
         quality_thresh=float(params.get("quality_thresh") or 2.5),
+        quality_metric=str(params.get("quality_metric") or "stdv_from_mean"),
         measure_resegment=bool(params.get("measure_resegment", True)),
+        label_constrain=bool(params.get("label_constrain", True)),
         collect_plot_data=True,
     )
     root_region = str(params.get("root_region") or "All").strip()
@@ -1877,7 +1875,8 @@ def _prepare_vessel_hemo_for_viz(
     return hemo, regions, reference_layer
 
 
-def _run_viz_pitc(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+def _run_viz_vessel_hemo(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Run PITC + PWV together and open the shared diagnostics dock."""
     from nvitk.gui.viz.hemo_geometry import add_hemo_geometry_layers
     from nvitk.gui.viz.hemo_plot_panel import show_hemodynamics_plot
 
@@ -1886,54 +1885,33 @@ def _run_viz_pitc(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
         viewer,
         regions,
         reference_layer=reference_layer,
-        mode="pitc",
+        mode="hemo",
+        face_key="quality",
         point_size=float(params.get("station_point_size") or 2.5),
     )
     selected_ids = {region.region_id for region in regions}
     show_hemodynamics_plot(
         viewer,
         {key: value for key, value in hemo.region_plot_data.items() if key in selected_ids},
-        mode="pitc",
+        mode="hemo",
+        initial_plot="pitc",
     )
-    lines = ["PITC geometry: init = min-Z endpoint of each root polyline."]
-    for region in regions:
-        init_xyz = ", ".join(f"{v:.1f}" for v in to_numpy(region.root_init_xyz))
-        lines.append(
-            f"{region.region_id}: slope={region.pitc_slope:.4g} r2={region.pitc_r2:.3f} "
-            f"n={region.pitc_n} | init=({init_xyz})"
-        )
-    notify("\n".join(lines))
-
-
-def _run_viz_pwv(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
-    from nvitk.gui.viz.hemo_geometry import add_hemo_geometry_layers
-    from nvitk.gui.viz.hemo_plot_panel import show_hemodynamics_plot
-
-    hemo, regions, reference_layer = _prepare_vessel_hemo_for_viz(viewer, layer, params)
-    add_hemo_geometry_layers(
-        viewer,
-        regions,
-        reference_layer=reference_layer,
-        mode="pwv",
-        point_size=float(params.get("station_point_size") or 2.5),
-    )
-    selected_ids = {region.region_id for region in regions}
-    show_hemodynamics_plot(
-        viewer,
-        {key: value for key, value in hemo.region_plot_data.items() if key in selected_ids},
-        mode="pwv",
-    )
-    lines = ["PWV geometry: init = min-Z endpoint of each root polyline."]
+    lines = ["PITC / PWV geometry: init = min-Z endpoint of each root polyline."]
     for region in regions:
         bj = region.pwv_bjornfoot_m_s if region.pwv_bjornfoot_m_s != "" else "n/a"
         fi = region.pwv_fielding_m_s if region.pwv_fielding_m_s != "" else "n/a"
         init_xyz = ", ".join(f"{v:.1f}" for v in to_numpy(region.root_init_xyz))
         lines.append(
-            f"{region.region_id}: Bjornfoot={bj} Fielding={fi} "
-            f"(n={region.pwv_n_stations}, r={region.pwv_r_fielding}) | "
-            f"init=({init_xyz})"
+            f"{region.region_id}: PITC slope={region.pitc_slope:.4g} r2={region.pitc_r2:.3f} "
+            f"n={region.pitc_n} | Bjornfoot={bj} Fielding={fi} "
+            f"(n_pwv={region.pwv_n_stations}) | init=({init_xyz})"
         )
     notify("\n".join(lines))
+
+
+# Backwards-compatible aliases (QC loader / older call sites).
+_run_viz_pitc = _run_viz_vessel_hemo
+_run_viz_pwv = _run_viz_vessel_hemo
 
 
 def _run_intensity_similarity(

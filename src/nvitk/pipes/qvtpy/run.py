@@ -967,7 +967,7 @@ def _submit_qvtpy_sge_subjects_remote(
     help="Stage3: FWHM shift on threshold curve (default on).",
 )
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
-@click.option("--eicab-min-island-fraction", type=float, default=0.05, show_default=True)
+@click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
 @click.option("--venous-min-branch-points", type=int, default=30, show_default=True)
 @click.option(

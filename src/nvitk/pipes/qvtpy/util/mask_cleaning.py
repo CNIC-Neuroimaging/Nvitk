@@ -25,6 +25,7 @@ def clean_multilabel_islands(
     min_fraction: float = 0.005,
     connectivity: int = 1,
     bridge_open_radius: int = 0,
+    min_fraction_for_label: dict[int, float] | None = None,
 ) -> np.ndarray:
     """Remove per-label connected components smaller than *min_fraction* of label foreground.
 
@@ -33,8 +34,12 @@ def clean_multilabel_islands(
     bridge_open_radius
         If > 0, apply binary opening with a ball footprint of this radius (voxels)
         on each label hull before CC filtering (reduces thin communicating bridges).
+    min_fraction_for_label
+        Optional per-label overrides (e.g. ``0.0`` for PCA/comm so small vessels
+        are not wiped before centerline extraction).
     """
     arr = as_backend_array(labels).astype(np.int32, copy=False)
+    overrides = {int(k): float(v) for k, v in (min_fraction_for_label or {}).items()}
     out = np.zeros_like(arr)
     for lid in sorted(int(v) for v in np.unique(arr) if int(v) != 0):
         roi = arr == lid
@@ -44,7 +49,8 @@ def clean_multilabel_islands(
         n_fg = int(np.count_nonzero(roi))
         if n_fg == 0:
             continue
-        min_size = max(1, int(round(float(min_fraction) * n_fg)))
+        frac = overrides.get(int(lid), float(min_fraction))
+        min_size = max(1, int(round(float(frac) * n_fg)))
         labeled, _ = label_connected(roi, connectivity=int(connectivity))
         labeled_np = as_backend_array(labeled)
         for comp_id in range(1, int(labeled_np.max()) + 1):
@@ -131,6 +137,52 @@ def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int:
         return n_fg
     largest_comp = int(1 + np.argmax(counts[1:]))
     keep = labeled_np == largest_comp
+    seg_np[roi & ~keep] = 0
+    return int(np.count_nonzero(seg_np == lid))
+
+
+def keep_component_touching_seed_inplace(
+    seg: np.ndarray,
+    label_id: int,
+    seed_mask: np.ndarray,
+) -> int:
+    """In-place: keep the *label_id* CC that touches *seed_mask* (largest if several).
+
+    Use when a distal disconnected blob can out-vote the true vessel under a plain
+    largest-CC rule (e.g. ACA A2 island vs eICAB A1-anchored trunk). If no CC
+    touches the seed, falls back to :func:`keep_largest_component_label_inplace`.
+
+    Returns the remaining voxel count for *label_id*.
+    """
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
+    lid = int(label_id)
+    roi = seg_np == lid
+    n_fg = int(np.count_nonzero(roi))
+    if n_fg == 0:
+        return 0
+    seed = as_backend_array(seed_mask).astype(bool)
+    if seed.shape != seg_np.shape:
+        raise ValueError(
+            f"seed_mask shape {seed.shape} must match seg shape {seg_np.shape}"
+        )
+    labeled, num = label_connected(roi, connectivity=1)
+    labeled_np = as_backend_array(labeled)
+    if int(num) <= 1:
+        return n_fg
+    counts = np.bincount(labeled_np.ravel())
+    if counts.size <= 1:
+        return n_fg
+    touch_sizes: list[tuple[int, int]] = []
+    for comp_id in range(1, int(num) + 1):
+        comp = labeled_np == comp_id
+        if not np.any(comp & seed):
+            continue
+        touch_sizes.append((comp_id, int(counts[comp_id]) if comp_id < counts.size else 0))
+    if not touch_sizes:
+        return keep_largest_component_label_inplace(seg_np, lid)
+    # Prefer the seed-touching component with the most voxels.
+    best_comp = max(touch_sizes, key=lambda t: t[1])[0]
+    keep = labeled_np == int(best_comp)
     seg_np[roi & ~keep] = 0
     return int(np.count_nonzero(seg_np == lid))
 
@@ -238,6 +290,7 @@ __all__ = [
     "clean_multilabel_islands",
     "clean_venous_slab_mask",
     "clean_volume_seg_for_pitc",
+    "keep_component_touching_seed_inplace",
     "keep_largest_component_per_label",
     "keep_largest_component_label_inplace",
     "keep_seed_connected_per_label",

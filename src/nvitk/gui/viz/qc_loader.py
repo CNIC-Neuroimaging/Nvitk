@@ -380,7 +380,7 @@ def load_qvtpy_qc_layers(
     stage6 = loaded["stage6_dir"]
     if isinstance(stage6, Path) and stage6.is_dir() and cl_lyr is not None:
         try:
-            from nvitk.gui.tools.runner import _run_viz_pitc, _run_viz_pwv
+            from nvitk.gui.tools.runner import _run_viz_vessel_hemo
 
             hemo_params = {
                 "centerline_layer": cl_lyr.name,
@@ -388,16 +388,19 @@ def load_qvtpy_qc_layers(
                 "ap_layer": ap_lyr.name if ap_lyr is not None else "",
                 "rl_layer": rl_lyr.name if rl_lyr is not None else "",
                 "fh_layer": fh_lyr.name if fh_lyr is not None else "",
+                "reference_layer": cd_lyr.name if cd_lyr is not None else "",
                 "cross_section_radius_vox": 10.0,
                 "measure_resegment": True,
+                "label_constrain": True,
+                "quality_metric": "stdv_from_mean",
+                "quality_thresh": 2.5,
                 "stride": 1,
                 "root_region": "All",
                 "station_point_size": 2.5,
             }
-            # Use CD layer as active for hemo prep.
-            active = cd_lyr or cl_lyr
-            _run_viz_pitc(viewer, active, hemo_params)
-            _run_viz_pwv(viewer, active, hemo_params)
+            # Active layer must be the multilabel segmentation for hemodynamics.
+            active = seg_lyr or cd_lyr or cl_lyr
+            _run_viz_vessel_hemo(viewer, active, hemo_params)
             # Hide hemo overlay layers by default.
             for lyr in viewer.layers:
                 name = str(lyr.name)

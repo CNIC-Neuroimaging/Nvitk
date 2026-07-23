@@ -36,6 +36,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_RICA,
     QVTPY_RMCA,
     QVTPY_RPCA,
+    QVTPY_SMALL_ARTERIAL_IDS,
     qvtpy_branch_names,
     qvtpy_branch_parent_label,
 )
@@ -53,8 +54,9 @@ _ARTERIAL_PARENT_LABEL: dict[int, int] = {
     QVTPY_RPCA: QVTPY_BASILAR,
 }
 
-# MCA/ACA/PCA: keep shorter distal branches when regenerating from segmentation.
+# MCA/ACA/PCA/comm: keep shorter skeletons when regenerating from segmentation / eICAB.
 _SMALL_BRANCH_MIN_POINTS = 2
+_SMALL_CENTERLINE_LABEL_IDS = QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_SMALL_ARTERIAL_IDS
 _DEFAULT_SMOOTH_WINDOW = 5
 _DEFAULT_SMOOTH_SPLINE = True
 
@@ -340,7 +342,7 @@ def centerlines_from_segmentation(
                     prefs = seed.reshape(1, 3)
         lid_min = (
             min(int(min_points), _SMALL_BRANCH_MIN_POINTS)
-            if int(lid) in branch_ids
+            if int(lid) in _SMALL_CENTERLINE_LABEL_IDS
             else int(min_points)
         )
         if int(lid) in QVTPY_BRANCHED_LABEL_IDS:

@@ -15,6 +15,8 @@ from nvitk.pipes.qvtpy.util.vessel_hemodynamics import RegionGeometryViz
 HEMO_INIT_LAYER = "PITC/PWV root init"
 HEMO_PATHS_LAYER = "PITC/PWV centerlines"
 HEMO_EXCLUDED_LAYER = "PITC/PWV excluded branches"
+HEMO_STATIONS_LAYER = "PITC/PWV stations"
+# Legacy names (cleared if present from older tool runs).
 HEMO_PITC_STATIONS_LAYER = "PITC stations"
 HEMO_PWV_STATIONS_LAYER = "PWV stations"
 HEMO_OVERLAY_META = "nvitk_hemo_overlay"
@@ -69,7 +71,10 @@ def color_stations_by_feature(
     feature: str,
     *,
     mode: str = "pitc",
-) -> None:
+    cmap_name: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> tuple[float, float] | None:
     """Color a stations Points layer by a numeric feature.
 
     Recent Napari builds only expose a solid face-color swatch in layer controls,
@@ -79,6 +84,9 @@ def color_stations_by_feature(
     feature-colormap mode: PWV metrics carry NaN for stations not used in the fit,
     and Napari's colormap mapping renders nothing when any value is NaN. NaN values
     are drawn transparent so the remaining stations stay colored.
+
+    Returns the ``(lo, hi)`` contrast limits actually applied, or ``None`` if the
+    layer had no points.
     """
     key = str(feature)
     choices = station_feature_choices(layer)
@@ -93,16 +101,20 @@ def color_stations_by_feature(
     finite_mask = np.isfinite(vals)
     finite = vals[finite_mask]
     if finite.size:
-        lo = float(np.min(finite))
-        hi = float(np.max(finite))
-        if hi <= lo:
-            hi = lo + 1.0
+        auto_lo = float(np.min(finite))
+        auto_hi = float(np.max(finite))
+        if auto_hi <= auto_lo:
+            auto_hi = auto_lo + 1.0
     else:
-        lo, hi = 0.0, 1.0
-    cmap_name = "viridis" if mode == "pitc" else "magma"
-    rgba = _feature_rgba(vals, finite_mask, lo, hi, cmap_name)
+        auto_lo, auto_hi = 0.0, 1.0
+    lo = float(auto_lo if vmin is None else vmin)
+    hi = float(auto_hi if vmax is None else vmax)
+    if hi <= lo:
+        hi = lo + 1.0
+    cmap = str(cmap_name) if cmap_name else ("viridis" if mode == "pitc" else "magma")
+    rgba = _feature_rgba(vals, finite_mask, lo, hi, cmap)
     if rgba.shape[0] == 0:
-        return
+        return None
     if hasattr(layer, "face_color_mode"):
         try:
             layer.face_color_mode = "direct"
@@ -110,7 +122,7 @@ def color_stations_by_feature(
             pass
     layer.face_color = rgba
     if hasattr(layer, "face_colormap"):
-        layer.face_colormap = cmap_name
+        layer.face_colormap = cmap
     if hasattr(layer, "face_contrast_limits"):
         layer.face_contrast_limits = (lo, hi)
     if hasattr(layer, "refresh_colors"):
@@ -118,6 +130,7 @@ def color_stations_by_feature(
             layer.refresh_colors(update_color_mapping=False)
         except TypeError:
             layer.refresh_colors()
+    return lo, hi
 
 
 def _feature_rgba(
@@ -327,9 +340,7 @@ def add_hemo_geometry_layers(
     excluded_paths: list[np.ndarray] = []
     init_rows: list[dict[str, Any]] = []
     station_rows: list[dict[str, Any]] = []
-    default_face = str(
-        face_key or ("quality" if mode == "pitc" else "pwv_weight_area")
-    )
+    default_face = str(face_key or "quality")
     for region in regions:
         color = _REGION_COLORS.get(region.region_id, "#9467bd")
         init_rows.append(
@@ -430,14 +441,13 @@ def add_hemo_geometry_layers(
         "pwv_bjornfoot_waveform_corr",
     )
     station_coords, station_features = _stack_features(station_rows, station_features_all)
-    cmap = "viridis" if mode == "pitc" else "magma"
+    cmap = "viridis"
     limits = _finite_limits(station_features, default_face)
-    station_name = HEMO_PITC_STATIONS_LAYER if mode == "pitc" else HEMO_PWV_STATIONS_LAYER
     station_layer, station_disc = _add_points_layer(
         viewer,
         station_coords,
         station_features,
-        name=station_name,
+        name=HEMO_STATIONS_LAYER,
         reference_layer=reference_layer,
         size=float(point_size),
         symbol="disc",
@@ -448,7 +458,9 @@ def add_hemo_geometry_layers(
     disconnectors.append(station_disc)
     if station_coords.shape[0] and default_face in station_feature_choices(station_layer):
         try:
-            color_stations_by_feature(station_layer, default_face, mode=mode)
+            color_stations_by_feature(
+                station_layer, default_face, mode=mode, cmap_name=cmap
+            )
         except Exception:
             pass
     try:
@@ -473,6 +485,7 @@ __all__ = [
     "HEMO_EXCLUDED_LAYER",
     "HEMO_INIT_LAYER",
     "HEMO_PATHS_LAYER",
+    "HEMO_STATIONS_LAYER",
     "HEMO_PITC_STATIONS_LAYER",
     "HEMO_PWV_STATIONS_LAYER",
     "add_hemo_geometry_layers",

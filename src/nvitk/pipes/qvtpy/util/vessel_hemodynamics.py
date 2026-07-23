@@ -904,10 +904,15 @@ def _collect_region_plot_data(
     # PWV diagnostics over Q>thresh stations (QVTplus enc_PWV_XCor dual-weight figure).
     # W1 = Bjornfoot area/scaling² (tag=0); W2 = Dempsey quality (tag=1).
     good = [r for r in stations if r["quality"] > float(quality_thresh)]
+    excluded = [r for r in stations if r["quality"] <= float(quality_thresh)]
     good.sort(key=lambda r: r["distance_mm"])
+    excluded.sort(key=lambda r: r["distance_mm"])
     pwv_dist_mm = np.array([r["distance_mm"] for r in good], dtype="float64")
     xcor_time_s = np.full(len(good), np.nan, dtype="float64")
     upstroke_s = np.full(len(good), np.nan, dtype="float64")
+    excl_dist_mm = np.array([r["distance_mm"] for r in excluded], dtype="float64")
+    excl_xcor_s = np.full(len(excluded), np.nan, dtype="float64")
+    excl_upstroke_s = np.full(len(excluded), np.nan, dtype="float64")
     bj_weighted_rms = to_numpy(
         pwv_result.get("pwv_bjornfoot_weighted_rms", [])
     ).astype("float64").reshape(-1)
@@ -942,6 +947,15 @@ def _collect_region_plot_data(
             delay_s, _corr = cross_correlation_delay_seconds(ref, r["flow_ts"], tr)
             xcor_time_s[i] = delay_s
             upstroke_s[i] = time_to_upstroke_seconds(
+                as_backend_array(r["flow_ts"]).astype("float64"), tr
+            )
+        # Excluded stations: delays for grey display only (not used in PWV fits).
+        for i, r in enumerate(excluded):
+            if r.get("flow_ts") is None:
+                continue
+            delay_s, _corr = cross_correlation_delay_seconds(ref, r["flow_ts"], tr)
+            excl_xcor_s[i] = delay_s
+            excl_upstroke_s[i] = time_to_upstroke_seconds(
                 as_backend_array(r["flow_ts"]).astype("float64"), tr
             )
     bj_delay_residual_s = np.full(len(good), np.nan, dtype="float64")
@@ -982,6 +996,10 @@ def _collect_region_plot_data(
         "pwv_distance_mm": pwv_dist_mm,
         "pwv_xcor_time_s": xcor_time_s,
         "pwv_time_to_upstroke_s": upstroke_s,
+        # Quality-excluded stations (grey on PWV figures; not in fits).
+        "pwv_excluded_distance_mm": excl_dist_mm,
+        "pwv_excluded_xcor_time_s": excl_xcor_s,
+        "pwv_excluded_time_to_upstroke_s": excl_upstroke_s,
         # W1 = Bjornfoot area weights; W2 = Dempsey quality (QVTplus enc_PWV_XCor).
         "pwv_weight_area": w1,
         "pwv_weight_quality": w2,

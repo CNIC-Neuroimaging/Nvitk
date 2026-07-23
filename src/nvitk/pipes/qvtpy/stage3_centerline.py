@@ -38,12 +38,17 @@ from nvitk.pipes.qvtpy.util.sge_backend import (
 )
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
-from nvitk.morphology.centerline import compute_centerlines
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_ARTERIAL_LABEL_IDS,
+    QVTPY_SMALL_ARTERIAL_IDS,
     VENOUS_UNKNOWN_LABEL,
     relabel_eicab_mask_to_qvtpy,
+)
+from nvitk.pipes.qvtpy.util.centerline_io import (
+    CENTERLINES_MASK_NIFTI,
+    arterial_main_paths,
+    centerlines_from_segmentation,
 )
 from nvitk.pipes.qvtpy.util.brain_mask import brain_mask_for_reference
 from nvitk.pipes.qvtpy.util.paths import resolve_totalseg_model_dir
@@ -198,7 +203,7 @@ def run_subject(
     cd_up_thresh: float | None = None,
     cd_shift_hm: bool | None = None,
     venous_min_component_frac: float = 0.005,
-    eicab_min_island_fraction: float = 0.05,
+    eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
     eicab_prefer_pp: bool = True,
@@ -257,6 +262,9 @@ def run_subject(
     vessel_bin = as_backend_array(vessel_bin.astype(np.uint8, copy=False))
 
     # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
+    # Per-label islands only (no global arterial CC wipe): a global min-size
+    # keyed off total arterial voxels was dropping whole small vessels (PCA/comm).
+    # Centerlines use the same extractor as stage 4 (min_points=3, 2 for MCA/ACA/PCA).
     log.step("clean arterial eICAB labels + island filter")
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
@@ -267,20 +275,16 @@ def run_subject(
         labels_np,
         min_fraction=eicab_min_island_fraction,
         bridge_open_radius=eicab_bridge_open_radius,
+        min_fraction_for_label={int(lid): 0.0 for lid in QVTPY_SMALL_ARTERIAL_IDS},
     )
     # Keep CW labels as fallback; prefer WB for venous arterial exclusion.
     arterial_labels_full = np.asarray(labels_np, dtype=np.int32).copy()
 
-    arterial_vol = np.where(venous_region, 0, labels_np)
-    art_bin = arterial_vol > 0
-    from nvitk.morphology.components import remove_small_components
-
-    min_art = max(1, int(round(eicab_min_island_fraction * int(np.count_nonzero(art_bin)))))
-    art_bin = as_backend_array(remove_small_components(art_bin, min_size=min_art, connectivity=1)).astype(bool)
-    arterial_vol = np.where(art_bin, arterial_vol, 0).astype(np.int32, copy=False)
+    arterial_vol = np.where(venous_region, 0, labels_np).astype(np.int32, copy=False)
     imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))
 
-    arterial = compute_centerlines(arterial_vol, min_points=5)
+    arterial_branches = centerlines_from_segmentation(arterial_vol, min_points=3)
+    arterial = arterial_main_paths(arterial_branches)
     log.step(f"arterial centerlines: {len(arterial)} label(s)")
 
     # ---- Venous: CD ∧ slab [∧ brain] → clean → bifurcate/split skeleton → name/label
@@ -370,8 +374,6 @@ def run_subject(
         venous_branches,
         venous_label_by_name=venous_label_by_name,
     )
-    from nvitk.pipes.qvtpy.util.centerline_io import CENTERLINES_MASK_NIFTI
-
     mask_path = out_dir / CENTERLINES_MASK_NIFTI
     imsave(mask_path, cl_mask, metadata=dict(lab_img.metadata or {}))
 

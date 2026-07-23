@@ -583,9 +583,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
-        "viz_pitc",
+        "viz_vessel_hemo",
         "Visualization",
-        "PITC tree + stations",
+        "PITC / PWV hemodynamics",
         (
             ParamSpec("ap_layer", "AP phase layer", "layer", ""),
             ParamSpec("rl_layer", "RL phase layer", "layer", ""),
@@ -605,53 +605,38 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 choices=("All", "L_ICA", "R_ICA", "Basilar"),
             ),
             ParamSpec("quality_thresh", "Quality threshold", "float", 2.5, min=0.0, max=4.0),
-            ParamSpec("stride", "Station stride", "int", 1, min=1, max=50),
-            ParamSpec("cross_section_radius_vox", "Cross-section radius (vox)", "float", 10.0, min=1.0),
-            ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
-            ParamSpec("station_point_size", "Station point size", "float", 2.5, min=0.1, max=100.0),
-        ),
-        needs_3d=True,
-        run_mode="notify",
-        description=(
-            "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and "
-            "angio/CD layers. Optional JSON with HeartRate for cardiac Δt. Station "
-            "colors are switched in the Napari Points layer controls after run."
-        ),
-    ),
-    GuiToolSpec(
-        "viz_pwv",
-        "Visualization",
-        "PWV stations + timing / Bjornfoot QC",
-        (
-            ParamSpec("ap_layer", "AP phase layer", "layer", ""),
-            ParamSpec("rl_layer", "RL phase layer", "layer", ""),
-            ParamSpec("fh_layer", "FH phase layer", "layer", ""),
-            ParamSpec("reference_layer", "Angio / CD layer", "layer", ""),
             ParamSpec(
-                "heart_rate_json",
-                "Cardiac metadata JSON (HeartRate)",
-                "str",
-                "",
-            ),
-            ParamSpec(
-                "root_region",
-                "Root region",
+                "quality_metric",
+                "Quality metric",
                 "choice",
-                "All",
-                choices=("All", "L_ICA", "R_ICA", "Basilar"),
+                "stdv_from_mean",
+                choices=("stdv_from_mean", "waveform"),
             ),
-            ParamSpec("quality_thresh", "Quality threshold", "float", 2.5, min=0.0, max=4.0),
             ParamSpec("stride", "Station stride", "int", 1, min=1, max=50),
-            ParamSpec("cross_section_radius_vox", "Cross-section radius (vox)", "float", 10.0, min=1.0),
+            ParamSpec(
+                "cross_section_radius_vox",
+                "Cross-section radius (vox)",
+                "float",
+                10.0,
+                min=1.0,
+            ),
             ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
-            ParamSpec("station_point_size", "Station point size", "float", 2.5, min=0.1, max=100.0),
+            ParamSpec("label_constrain", "Constrain to vessel label", "bool", True),
+            ParamSpec(
+                "station_point_size",
+                "Station point size",
+                "float",
+                2.5,
+                min=0.1,
+                max=100.0,
+            ),
         ),
         needs_3d=True,
         run_mode="notify",
         description=(
             "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and "
-            "angio/CD layers. Prefer a DICOM/JSON sidecar with HeartRate for cardiac "
-            "frame duration. Color stations via Napari Points face-color feature after run."
+            "angio/CD layers. Runs PITC and PWV together; switch plots and station "
+            "coloring in the diagnostics dock."
         ),
     ),
     GuiToolSpec(
@@ -1089,6 +1074,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_flowshow",
     "viz_flow_streamlines",
     "viz_pet_hotspots",
+    "viz_vessel_hemo",
     "viz_pitc",
     "viz_pwv",
     "seg_totalsegmentator",

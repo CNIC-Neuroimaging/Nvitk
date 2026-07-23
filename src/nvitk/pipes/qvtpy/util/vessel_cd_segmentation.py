@@ -61,7 +61,10 @@ from nvitk.pipes.qvtpy.labels import (
 )
 from nvitk.pipes.qvtpy.util.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
-from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_label_inplace
+from nvitk.pipes.qvtpy.util.mask_cleaning import (
+    keep_component_touching_seed_inplace,
+    keep_largest_component_label_inplace,
+)
 from nvitk.segmentation.region_growing import merge_forbidden, region_grow_into_label_volume
 
 setup(globals())
@@ -751,15 +754,25 @@ def _finalize_vessel_largest_cc(
     *,
     stats_by_id: dict[int, VesselSegStats] | None = None,
     log_name: str | None = None,
+    seed_mask: np.ndarray | None = None,
 ) -> int:
-    """Keep largest CC for one label; optionally refresh stats and log drops."""
+    """Keep largest CC for one label (or the CC touching *seed_mask* if given).
+
+    When *seed_mask* is provided (e.g. eICAB A1 for ACA), the component that
+    overlaps the seed is retained even if a disconnected distal island is larger.
+    """
     lid = int(label_id)
     n_before = int(np.count_nonzero(seg == lid))
-    n_after = keep_largest_component_label_inplace(seg, lid)
+    if seed_mask is not None:
+        n_after = keep_component_touching_seed_inplace(seg, lid, seed_mask)
+        mode = "seed-anchored-CC"
+    else:
+        n_after = keep_largest_component_label_inplace(seg, lid)
+        mode = "largest-CC"
     dropped = n_before - n_after
     if dropped > 0 and log_name is not None:
         log.info(
-            f"largest-CC {log_name} (label {lid}): {n_before} → {n_after} "
+            f"{mode} {log_name} (label {lid}): {n_before} → {n_after} "
             f"(dropped {dropped} island voxel(s))"
         )
     if stats_by_id is not None:
@@ -772,6 +785,19 @@ def _finalize_vessel_largest_cc(
 
 def _distal_label_name(label_id: int) -> str:
     return QVTPY_ARTERIAL_ID_TO_NAME.get(int(label_id), f"label-{int(label_id)}")
+
+
+def _aca_eicab_a1_seed_mask(
+    eicab_qvtpy: np.ndarray | None,
+    label_id: int,
+) -> np.ndarray | None:
+    """eICAB voxels for this ACA label (A1 / CW seed) used to anchor post-distal CC."""
+    if eicab_qvtpy is None or int(label_id) not in QVTPY_ACA_IDS:
+        return None
+    seed = as_backend_array(eicab_qvtpy) == int(label_id)
+    if not np.any(seed):
+        return None
+    return seed.astype(bool)
 
 
 def _distal_lr_midline(
@@ -927,6 +953,7 @@ def expand_distal_mca_aca_pca(
     cd: np.ndarray,
     centerlines_mask: np.ndarray | None = None,
     *,
+    eicab_qvtpy: np.ndarray | None = None,
     max_image_frac: float = _DISTAL_MAX_IMAGE_FRAC_DEFAULT,
     hyst_low_factor: float = _DISTAL_HYST_LOW_FACTOR_DEFAULT,
     hyst_high_factor: float = _DISTAL_HYST_HIGH_FACTOR_DEFAULT,
@@ -948,7 +975,9 @@ def expand_distal_mca_aca_pca(
     hemisphere gate; an ACA-only vesselness-gated CD corridor reconnects distal
     A2 when Frangi CCs break. Global tree thinning preserves ACA corridor voxels.
     Only previously empty voxels (``seg==0``) outside the ICA/basilar wall are
-    claimed; a final largest-CC pass cleans each label after barriers.
+    claimed; a final CC pass cleans each label after barriers. For ACA, that CC
+    is anchored to the eICAB A1 mask (``eicab_qvtpy``) so a larger disconnected
+    distal island cannot replace the true trunk.
     ``centerlines_mask`` is accepted for API compatibility but unused.
     """
     _ = centerlines_mask
@@ -964,6 +993,11 @@ def expand_distal_mca_aca_pca(
 
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     cd_np = as_backend_array(cd).astype(np.float64)
+    eicab_np = (
+        None
+        if eicab_qvtpy is None
+        else as_backend_array(eicab_qvtpy).astype(np.int32, copy=False)
+    )
     target_ids = sorted(int(x) for x in _DISTAL_TARGET_IDS)
     present = [lid for lid in target_ids if np.any(seg_np == lid)]
     sigmas = (
@@ -1219,7 +1253,14 @@ def expand_distal_mca_aca_pca(
             seg_np[claim] = lid
             added_total += n_claim
 
-        _finalize_vessel_largest_cc(seg_np, lid, stats_by_id=None, log_name=f"distal-{lid}")
+        aca_seed = _aca_eicab_a1_seed_mask(eicab_np, lid)
+        _finalize_vessel_largest_cc(
+            seg_np,
+            lid,
+            stats_by_id=None,
+            log_name=f"distal-{lid}",
+            seed_mask=aca_seed,
+        )
         after = int(np.count_nonzero(seg_np == lid))
         delta = after - before
         info["labels"][str(lid)] = {
@@ -1229,11 +1270,13 @@ def expand_distal_mca_aca_pca(
             "delta": int(delta),
             "claimed": int(n_claim),
             "capped": bool(capped),
+            "cc_anchored_to_eicab_a1": bool(aca_seed is not None),
         }
         log.step(
             f"distal expand [{name} id={lid}]: done "
             f"{before} → {after} voxels (Δ={delta:+d}, claimed={n_claim}"
-            f"{', capped' if capped else ''})"
+            f"{', capped' if capped else ''}"
+            f"{', eICAB-A1 CC' if aca_seed is not None else ''})"
         )
 
     # Strip any distal spill that landed on the ICA/basilar wall, then CC again.
@@ -1244,14 +1287,20 @@ def expand_distal_mca_aca_pca(
         info["ica_basilar_barrier"]["n_spill_cleared"] = n_spill
         log.info(f"distal expand: cleared {n_spill} voxels on ICA/basilar barrier")
     for lid in present:
+        aca_seed = _aca_eicab_a1_seed_mask(eicab_np, lid)
         _finalize_vessel_largest_cc(
-            seg_np, lid, stats_by_id=None, log_name=f"distal-barrier-cc-{lid}"
+            seg_np,
+            lid,
+            stats_by_id=None,
+            log_name=f"distal-barrier-cc-{lid}",
+            seed_mask=aca_seed,
         )
         after = int(np.count_nonzero(seg_np == lid))
         before = before_by_id[lid]
         st = info["labels"][str(lid)]
         st["after"] = after
         st["delta"] = int(after - before)
+        st["cc_anchored_to_eicab_a1"] = bool(aca_seed is not None)
 
     total_before = sum(int(v.get("before", 0)) for v in info["labels"].values())
     total_after = sum(int(v.get("after", 0)) for v in info["labels"].values())
@@ -1630,6 +1679,7 @@ def build_seg_4dflow_local(
             seg,
             cd,
             clm,
+            eicab_qvtpy=eicab,
             hyst_low_factor=float(distal_hyst_low_factor),
             hyst_high_factor=float(distal_hyst_high_factor),
             max_image_frac=float(distal_max_image_frac),
@@ -1646,11 +1696,13 @@ def build_seg_4dflow_local(
                 )
         for lid in sorted(int(v) for v in np.unique(seg) if int(v) != 0):
             if int(lid) in _DISTAL_TARGET_IDS:
+                aca_seed = _aca_eicab_a1_seed_mask(eicab, lid)
                 _finalize_vessel_largest_cc(
                     seg,
                     lid,
                     stats_by_id=stats_by_id,
                     log_name=f"distal-final-{lid}",
+                    seed_mask=aca_seed,
                 )
     elif bool(distal_flow_expand) and not bool(region_growing):
         log.warning(
