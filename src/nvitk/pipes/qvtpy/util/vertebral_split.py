@@ -1,6 +1,6 @@
-"""Split LVA/RVA from grown basilar via vertebro-basilar centerline bifurcation.
+"""Split LVA/RVA from grown basilar via vertebro-basilar **centerline** bifurcation.
 
-After stage-4 basilar region growing, the basilar mask often includes the two
+After stage-4 basilar region growing, the basilar mask may include the two
 vertebral arteries that merge into it (before the superior PCA territory).
 
 Anatomy (array axes ``i=X``, ``j=Y``, ``k=Z``):
@@ -9,12 +9,11 @@ Anatomy (array axes ``i=X``, ``j=Y``, ``k=Z``):
 - The two arms merge at an inferior Y-junction into the basilar.
 - The basilar continues along **+Z** after the confluence.
 
-This module:
-
-1. Builds a detailed centerline of the basilar CC (trunk + bifurcation arms).
-2. Detects an inferior Y-junction (VA confluence). If none → VAs absent.
-3. Labels the two inferior arms as LVA/RVA by **mean X** (hemisphere-aware via
-   ICA when available); the remainder after the merge stays basilar.
+This module detects that Y **only on the centerline branch graph**
+(``compute_centerline_branches``: trunk + side branches that attach to it).
+If the centerline is a single polyline (no bifurcation), VAs are treated as
+absent and the basilar mask is left unchanged — no skeleton-tip / venous-style
+junction fallbacks that can longitudinally bisect a tube.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from nvitk.core.logger import Logger
 from nvitk.morphology.centerline import (
     compute_centerline_branches,
     compute_centerlines,
-    skeletonize_binary,
 )
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_BASILAR,
@@ -46,6 +44,12 @@ log = Logger()
 # Array axis treated as L↔R (matches distal expand / typical RAS i=X).
 _LR_AXIS = 0
 _Z_AXIS = 2
+# Minimum X separation (voxels) between the two VA centerline arms.
+_MIN_VA_X_SEPARATION = 1.5
+# Confluence must leave enough superior stem and sit below this Z percentile
+# of the trunk (avoids cutting at the superior tip of a single tube).
+_MAX_CONFLUENCE_Z_PERCENTILE = 70.0
+_MIN_BASILAR_KEEP_FRAC = 0.15
 
 
 @dataclass(frozen=True)
@@ -103,37 +107,6 @@ def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
     return out
 
 
-def _walk_inferior_skeleton_branch(
-    seed: tuple[int, int, int],
-    junction: tuple[int, int, int],
-    node_set: set[tuple[int, int, int]],
-) -> set[tuple[int, int, int]]:
-    """Skeleton voxels along one inferior branch (descending −Z away from merge)."""
-    jk = int(junction[_Z_AXIS])
-    path: set[tuple[int, int, int]] = {seed}
-    current = seed
-    for _ in range(100_000):
-        candidates = [
-            n
-            for n in _neighbors26(current)
-            if n in node_set and n not in path and n[_Z_AXIS] <= jk
-        ]
-        if not candidates:
-            break
-        next_n = min(
-            candidates,
-            key=lambda t: (
-                t[_Z_AXIS],
-                abs(t[0] - current[0]) + abs(t[1] - current[1]),
-            ),
-        )
-        if next_n[_Z_AXIS] > current[_Z_AXIS]:
-            break
-        path.add(next_n)
-        current = next_n
-    return path
-
-
 def _flood_fill_from_seeds(
     domain: np.ndarray,
     seeds: set[tuple[int, int, int]],
@@ -179,62 +152,73 @@ def _mean_axis(points: set[tuple[int, int, int]], axis: int) -> float:
         return float(np.mean([p[axis] for p in points]))
 
 
-def _min_axis(points: set[tuple[int, int, int]], axis: int) -> float:
-    return float(min(p[axis] for p in points))
+def _pts_to_tuples(pts: np.ndarray) -> list[tuple[int, int, int]]:
+    arr = to_numpy(pts).astype(np.int64).reshape(-1, 3)
+    return [tuple(int(v) for v in row) for row in arr]
 
 
-def _arm_components_from_cluster(
-    cluster: set[tuple[int, int, int]],
-    node_set: set[tuple[int, int, int]],
-) -> list[set[tuple[int, int, int]]]:
-    """Connected components of ``node_set \\ cluster`` that touch the cluster."""
-    outside = node_set - cluster
-    if not outside:
-        return []
-    exits = {m for c in cluster for m in _neighbors26(c) if m in outside}
-    if not exits:
-        return []
-    visited: set[tuple[int, int, int]] = set()
-    arms: list[set[tuple[int, int, int]]] = []
-    for seed in sorted(exits):
-        if seed in visited:
-            continue
-        comp: set[tuple[int, int, int]] = set()
-        q: deque[tuple[int, int, int]] = deque([seed])
-        visited.add(seed)
-        while q:
-            u = q.popleft()
-            comp.add(u)
-            for v in _neighbors26(u):
-                if v in outside and v not in visited:
-                    visited.add(v)
-                    q.append(v)
-        if comp & exits:
-            arms.append(comp)
-    return arms
+def _pts_to_set(pts: np.ndarray) -> set[tuple[int, int, int]]:
+    return set(_pts_to_tuples(pts))
 
 
-def _pair_va_arms_from_cluster(
-    cluster: set[tuple[int, int, int]],
-    node_set: set[tuple[int, int, int]],
+def _nearest_index(
+    trunk: list[tuple[int, int, int]],
+    query: tuple[int, int, int],
+) -> int:
+    best_i = 0
+    best_d = None
+    qx, qy, qz = query
+    for i, (x, y, z) in enumerate(trunk):
+        d = (x - qx) ** 2 + (y - qy) ** 2 + (z - qz) ** 2
+        if best_d is None or d < best_d:
+            best_d = d
+            best_i = i
+    return int(best_i)
+
+
+def _arm_set_from_polyline(
+    pts: list[tuple[int, int, int]],
     *,
-    min_arm_points: int = 3,
-    min_x_separation: float = 1.5,
+    drop: tuple[int, int, int] | None = None,
+) -> set[tuple[int, int, int]]:
+    out = set(pts)
+    if drop is not None:
+        out.discard(drop)
+    return out
+
+
+def _classify_va_bifurcation_at_attach(
+    trunk: list[tuple[int, int, int]],
+    attach_idx: int,
+    side_arm: set[tuple[int, int, int]],
+    *,
+    min_arm_points: int,
+    min_x_separation: float,
 ) -> tuple[
     tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]] | None,
     dict[str, Any],
 ]:
-    """Pick the two inferior VA arms at a Y-junction cluster.
+    """At trunk attachment *attach_idx*, pick two inferior X-separated VA arms.
 
-    Arms are the connected components leaving the junction blob. The highest-mean-Z
-    arm is treated as the basilar continuation (+Z); the two lowest-mean-Z arms are
-    the VAs (ascending along +Z into the merge on distinct X sides).
+    The three arms leaving the confluence are:
+
+    - trunk segment before the attach index
+    - trunk segment after the attach index
+    - the side branch (excluding the junction voxel)
+
+    Exactly one should be the superior basilar continuation (+Z); the other two
+    are the VAs (lower mean Z, separated on X).
     """
-    arms = _arm_components_from_cluster(cluster, node_set)
-    long_arms = [a for a in arms if len(a) >= int(min_arm_points)]
+    junction = trunk[attach_idx]
+    left = _arm_set_from_polyline(trunk[: attach_idx + 1], drop=junction)
+    right = _arm_set_from_polyline(trunk[attach_idx:], drop=junction)
+    side = set(side_arm)
+    side.discard(junction)
+    arms = [a for a in (left, right, side) if len(a) >= int(min_arm_points)]
     diag: dict[str, Any] = {
-        "n_arms": len(arms),
-        "n_long_arms": len(long_arms),
+        "attach_idx": int(attach_idx),
+        "junction": list(junction),
+        "arm_sizes": [len(left), len(right), len(side)],
         "arm_mean_xyz": [
             (
                 round(_mean_axis(a, 0), 2),
@@ -242,15 +226,15 @@ def _pair_va_arms_from_cluster(
                 round(_mean_axis(a, 2), 2),
                 len(a),
             )
-            for a in long_arms
+            for a in arms
         ],
     }
-    if len(long_arms) < 3:
-        diag["reject"] = "need ≥3 long arms (2 VA + basilar)"
+    if len(arms) < 3:
+        diag["reject"] = "need 3 arms at centerline bifurcation (2 VA + basilar)"
         return None, diag
 
-    # Lowest two mean-Z → VAs; highest → basilar continuation along +Z.
-    ranked = sorted(long_arms, key=lambda a: (_mean_axis(a, _Z_AXIS), -len(a)))
+    # Highest mean-Z → basilar continuation; lowest two → VAs.
+    ranked = sorted(arms, key=lambda a: (_mean_axis(a, _Z_AXIS), -len(a)))
     va_a, va_b = ranked[0], ranked[1]
     bas = ranked[-1]
     va_z = 0.5 * (_mean_axis(va_a, _Z_AXIS) + _mean_axis(va_b, _Z_AXIS))
@@ -269,120 +253,104 @@ def _pair_va_arms_from_cluster(
     if dx < float(min_x_separation):
         diag["reject"] = f"VA arms not separated on X (dx={dx:.2f})"
         return None, diag
-    jk = _mean_axis(cluster, _Z_AXIS)
-    if _min_axis(va_a, _Z_AXIS) > jk + 1 and _min_axis(va_b, _Z_AXIS) > jk + 1:
+    # Both VA arms should reach at/below the confluence Z.
+    jk = float(junction[_Z_AXIS])
+    if min(p[_Z_AXIS] for p in va_a) > jk + 1 and min(p[_Z_AXIS] for p in va_b) > jk + 1:
         diag["reject"] = "candidate VA arms do not extend below confluence Z"
         return None, diag
     return (va_a, va_b), diag
 
 
-def _pair_va_from_inferior_endpoints(
-    node_set: set[tuple[int, int, int]],
-    deg: dict[tuple[int, int, int], int],
+def _bifurcation_from_centerline_branches(
+    paths: list[np.ndarray],
     *,
-    min_x_separation: float = 1.5,
-    min_walk: int = 3,
+    min_arm_points: int = 3,
+    min_x_separation: float = _MIN_VA_X_SEPARATION,
 ) -> tuple[
-    tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]] | None,
     tuple[int, int, int] | None,
+    tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]] | None,
     dict[str, Any],
 ]:
-    """Fallback: two lowest-Z skeleton endpoints separated on X as VA tips.
+    """Find VA confluence from trunk + side-branch centerline polylines only.
 
-    Walks each tip toward higher Z until a junction; the first shared / nearest
-    junction is the confluence. Useful when the merge is a soft blob without a
-    clean 3-arm cluster decomposition.
+    ``compute_centerline_branches`` returns trunk first, then each side branch
+    oriented **junction → endpoint**. No skeleton tip / venous junction heuristics.
     """
-    endpoints = [n for n, d in deg.items() if int(d) <= 1]
-    diag: dict[str, Any] = {"n_endpoints": len(endpoints)}
-    if len(endpoints) < 2:
-        diag["reject"] = "fewer than 2 skeleton endpoints"
+    diag: dict[str, Any] = {"n_paths": len(paths)}
+    if len(paths) < 2:
+        diag["reject"] = "no centerline bifurcation (single polyline)"
         return None, None, diag
-    # Candidate VA tips: lowest-Z endpoints.
-    ranked = sorted(endpoints, key=lambda n: (n[_Z_AXIS], n[_LR_AXIS]))
-    # Try pairs among the most inferior endpoints.
-    candidates = ranked[: min(6, len(ranked))]
-    best = None
-    for i in range(len(candidates)):
-        for j in range(i + 1, len(candidates)):
-            a, b = candidates[i], candidates[j]
-            dx = abs(a[_LR_AXIS] - b[_LR_AXIS])
-            if dx < min_x_separation:
-                continue
-            # Walk each tip up (+Z preference) collecting path until degree ≥3.
-            def _walk_up(start: tuple[int, int, int]) -> set[tuple[int, int, int]]:
-                path: set[tuple[int, int, int]] = {start}
-                prev = None
-                cur = start
-                for _ in range(100_000):
-                    nbrs = [m for m in _neighbors26(cur) if m in node_set and m != prev]
-                    if not nbrs:
-                        break
-                    # Prefer ascending / staying near tip Z while exploring.
-                    nxt = max(
-                        nbrs,
-                        key=lambda t: (t[_Z_AXIS], -abs(t[_LR_AXIS] - start[_LR_AXIS])),
-                    )
-                    if nxt in path:
-                        break
-                    path.add(nxt)
-                    prev, cur = cur, nxt
-                    if deg.get(cur, 0) >= 3:
-                        break
-                return path
 
-            wa, wb = _walk_up(a), _walk_up(b)
-            if len(wa) < min_walk or len(wb) < min_walk:
-                continue
-            # Confluence ≈ highest-Z voxel common to both paths, else midpoint of tips' max Z.
-            common = wa & wb
-            if common:
-                bif = max(common, key=lambda n: n[_Z_AXIS])
-            else:
-                # Nearest pair across path ends.
-                end_a = max(wa, key=lambda n: n[_Z_AXIS])
-                end_b = max(wb, key=lambda n: n[_Z_AXIS])
-                bif = end_a if end_a[_Z_AXIS] <= end_b[_Z_AXIS] else end_b
-            score = dx - 0.1 * abs(a[_Z_AXIS] - b[_Z_AXIS])
-            if best is None or score > best[0]:
-                best = (score, wa, wb, bif, a, b)
-    if best is None:
-        diag["reject"] = "no X-separated inferior endpoint pair"
+    trunk = _pts_to_tuples(paths[0])
+    if len(trunk) < 2 * int(min_arm_points):
+        diag["reject"] = "trunk too short for VA bifurcation"
         return None, None, diag
-    _score, wa, wb, bif, tip_a, tip_b = best
+
+    trunk_z = [p[_Z_AXIS] for p in trunk]
+    z_hi = float(np.percentile(trunk_z, _MAX_CONFLUENCE_Z_PERCENTILE))
+    diag["trunk_len"] = len(trunk)
+    diag["max_confluence_z"] = round(z_hi, 2)
+
+    best: tuple[
+        float,
+        tuple[int, int, int],
+        tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]],
+        dict[str, Any],
+    ] | None = None
+    rejects: list[str] = []
+
+    for bi, side_path in enumerate(paths[1:]):
+        side_pts = _pts_to_tuples(side_path)
+        if len(side_pts) < int(min_arm_points):
+            continue
+        # Oriented junction → endpoint by construction.
+        attach_pt = side_pts[0]
+        attach_idx = _nearest_index(trunk, attach_pt)
+        # Snap attach to the nearest trunk voxel (handles 1-voxel offset).
+        attach = trunk[attach_idx]
+        if attach[_Z_AXIS] > z_hi:
+            rejects.append(
+                f"branch{bi + 1}@{list(attach)}: confluence too superior "
+                f"(z={attach[_Z_AXIS]} > p{_MAX_CONFLUENCE_Z_PERCENTILE:g}={z_hi:.1f})"
+            )
+            continue
+        # Need room on both sides of the trunk for a Y (not an endpoint spur).
+        if attach_idx < int(min_arm_points) - 1 or attach_idx > len(trunk) - int(min_arm_points):
+            rejects.append(
+                f"branch{bi + 1}@{list(attach)}: attach near trunk endpoint "
+                f"(idx={attach_idx}/{len(trunk)})"
+            )
+            continue
+        pair, sub = _classify_va_bifurcation_at_attach(
+            trunk,
+            attach_idx,
+            _pts_to_set(side_path),
+            min_arm_points=min_arm_points,
+            min_x_separation=min_x_separation,
+        )
+        if pair is None:
+            rejects.append(
+                f"branch{bi + 1}@{list(attach)}: {sub.get('reject')}"
+            )
+            continue
+        # Prefer more inferior confluence with larger X separation.
+        score = float(sub["va_x_separation"]) - 0.05 * float(attach[_Z_AXIS])
+        if best is None or score > best[0]:
+            best = (score, attach, pair, sub)
+
+    if best is None:
+        diag["reject"] = "no qualifying centerline VA bifurcation"
+        diag["branch_rejects"] = rejects[:8]
+        return None, None, diag
+
+    _score, junction, pair, sub = best
     diag.update(
         {
-            "tips": [list(tip_a), list(tip_b)],
-            "confluence": list(bif),
-            "walk_lens": [len(wa), len(wb)],
+            "accepted": sub,
+            "branch_rejects": rejects[:8],
         }
     )
-    return (wa, wb), bif, diag
-
-
-def _pair_inferior_branches_legacy(
-    junction: tuple[int, int, int],
-    node_set: set[tuple[int, int, int]],
-) -> tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]] | None:
-    """Fallback: two immediate neighbors with z ≤ junction_z."""
-    jk = int(junction[_Z_AXIS])
-    inferior_nbrs = [
-        n for n in _neighbors26(junction) if n in node_set and n[_Z_AXIS] <= jk
-    ]
-    if len(inferior_nbrs) < 2:
-        return None
-    walks = [_walk_inferior_skeleton_branch(n, junction, node_set) for n in inferior_nbrs]
-    walks = [w for w in walks if len(w) >= 2]
-    if len(walks) < 2:
-        return None
-    if len(walks) == 2:
-        a, b = walks[0], walks[1]
-    else:
-        walks.sort(key=lambda w: _mean_axis(w, _LR_AXIS))
-        a, b = walks[0], walks[-1]
-    if abs(_mean_axis(a, _LR_AXIS) - _mean_axis(b, _LR_AXIS)) < 1.0:
-        return None
-    return a, b
+    return junction, pair, diag
 
 
 def _left_has_higher_x(seg_np: np.ndarray) -> bool | None:
@@ -399,12 +367,7 @@ def _order_branches_left_right(
     b: set[tuple[int, int, int]],
     seg_np: np.ndarray,
 ) -> tuple[set[tuple[int, int, int]], set[tuple[int, int, int]], str, float, float]:
-    """Order (a, b) into (LVA_seeds, RVA_seeds) by mean X position.
-
-    L/R is decided on the X axis: each VA sits on its own L/R X side before
-    ascending along +Z into the basilar confluence. ICA centroids resolve which
-    X extreme is patient-left; fallback assumes RAS (left = higher X).
-    """
+    """Order (a, b) into (LVA_seeds, RVA_seeds) by mean X position."""
     mx_a = _mean_axis(a, _LR_AXIS)
     mx_b = _mean_axis(b, _LR_AXIS)
     left_higher = _left_has_higher_x(seg_np)
@@ -445,14 +408,13 @@ def split_vertebral_from_basilar(
     min_branch_points: int = 3,
     bifurcation_cut_margin: int = 0,
 ) -> tuple[np.ndarray, VertebralSplitResult]:
-    """Relabel inferior basilar into LVA/RVA when a vertebro-basilar bifurcation exists.
+    """Relabel inferior basilar into LVA/RVA when a centerline Y-bifurcation exists.
 
-    VAs ascend along **+Z** on distinct L/R **X** sides, merge at an inferior
-    Y-junction, and the basilar continues along +Z. The split is placed
-    **exactly on the bifurcation cluster**: junction voxels stay basilar; the two
-    inferior arms are flood-filled into LVA/RVA (X half-spaces). Optional
-    *bifurcation_cut_margin* (>0) adds a legacy soft ``z < junction_z - margin``
-    gate. Without a qualifying bifurcation, the basilar mask is left unchanged.
+    Detection uses only ``compute_centerline_branches`` (trunk + attaching side
+    branches). A single-polyline centerline means VAs are absent — no tip-based
+    fallback that can longitudinally bisect the basilar tube. The cut is at the
+    bifurcation: junction voxel stays basilar; inferior arms flood into LVA/RVA
+    on X half-spaces.
     """
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     basilar = as_backend_array(seg_np == int(QVTPY_BASILAR)).astype(bool)
@@ -475,7 +437,6 @@ def split_vertebral_from_basilar(
         log.info("vertebral split: empty basilar mask — VAs absent")
         return seg_np, replace(empty, basilar_voxels=0, message="empty basilar mask")
 
-    # Detailed centerline: trunk (superior-biased) + all bifurcation side arms.
     prefer = _prefer_superior_basilar(basilar, prefer_basilar_centerline)
     basilar_lab = basilar.astype(np.int32) * int(QVTPY_BASILAR)
     branch_map = compute_centerline_branches(
@@ -494,129 +455,39 @@ def split_vertebral_from_basilar(
         f"(prefer={'stage3/superior' if prefer is not None else 'none'})"
     )
 
-    skel = as_backend_array(skeletonize_binary(basilar)).astype(bool)
-    n_skel = int(np.count_nonzero(skel))
-    skel_coords = np.argwhere(skel)
-    from nvitk.morphology.polyline_graph import junction_clusters, skeleton_graph
-
-    nodes, _adj, deg = skeleton_graph(skel_coords.astype(np.float64))
-    node_set = set(nodes)
-    clusters = junction_clusters(nodes, deg, min_degree=3)
-    log.info(
-        f"vertebral split: skeleton voxels={n_skel}, "
-        f"junction clusters={len(clusters)} "
-        f"(centerline_branches={n_branches})"
+    junction, branch_pair, bif_diag = _bifurcation_from_centerline_branches(
+        paths,
+        min_arm_points=max(2, int(min_branch_points) - 1),
+        min_x_separation=_MIN_VA_X_SEPARATION,
     )
-    junction: tuple[int, int, int] | None = None
-    junction_cluster: set[tuple[int, int, int]] = set()
-    branch_pair: tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]] | None = None
-    junction_degree = 0
-
-    if not clusters:
-        log.info(
-            "vertebral split: no degree≥3 junction clusters; "
-            "trying inferior-endpoint fallback"
-        )
-        ep_pair, ep_bif, ep_diag = _pair_va_from_inferior_endpoints(node_set, deg)
-        if ep_pair is None or ep_bif is None:
+    if junction is None or branch_pair is None:
+        reason = bif_diag.get("reject") or "no centerline VA bifurcation"
+        extra = bif_diag.get("branch_rejects") or []
+        if extra:
             log.info(
-                f"vertebral split: VAs absent ({ep_diag.get('reject') or 'no clusters'})"
+                f"vertebral split: VAs absent ({reason}); "
+                f"branch checks={extra[:3]}"
             )
-            return seg_np, replace(
-                empty,
-                n_centerline_branches=n_branches,
-                message="no skeleton bifurcation (VAs absent)",
-            )
-        branch_pair = ep_pair
-        junction = ep_bif
-        junction_cluster = {ep_bif}
-        # Expand to the full junction cluster containing the bifurcation if any.
-        for cluster_list in clusters:
-            if ep_bif in cluster_list:
-                junction_cluster = set(cluster_list)
-                break
-        junction_degree = int(deg.get(ep_bif, 0))
-        log.info(
-            f"vertebral split: accepted via inferior-endpoint fallback "
-            f"(tips={ep_diag.get('tips')} confluence={list(ep_bif)})"
+        else:
+            log.info(f"vertebral split: VAs absent ({reason})")
+        return seg_np, replace(
+            empty,
+            n_centerline_branches=n_branches,
+            message=str(reason),
         )
-    else:
-        # Prefer inferior clusters first (VA confluence is below the basilar stem).
-        def _cluster_z(cluster_list: list[tuple[int, int, int]]) -> float:
-            return float(np.mean([n[_Z_AXIS] for n in cluster_list]))
 
-        n_reject_logged = 0
-        for cluster_list in sorted(clusters, key=_cluster_z):
-            cluster = set(cluster_list)
-            rep = max(cluster_list, key=lambda n: (deg.get(n, 0), n))
-            pair, diag = _pair_va_arms_from_cluster(
-                cluster, node_set, min_arm_points=max(2, int(min_branch_points) - 1)
-            )
-            if pair is None:
-                legacy = _pair_inferior_branches_legacy(rep, node_set)
-                if legacy is None:
-                    if n_reject_logged < 5:
-                        log.info(
-                            f"vertebral split: cluster@{rep} rejected "
-                            f"({diag.get('reject')}; arms={diag.get('arm_mean_xyz')})"
-                        )
-                        n_reject_logged += 1
-                    continue
-                branch_pair = legacy
-                log.info(
-                    f"vertebral split: cluster@{rep} accepted via legacy "
-                    "inferior-neighbor walk"
-                )
-            else:
-                branch_pair = pair
-                log.info(
-                    f"vertebral split: cluster@{rep} accepted as VA confluence "
-                    f"(va_z={diag.get('va_mean_z')} bas_z={diag.get('basilar_mean_z')} "
-                    f"dx={diag.get('va_x_separation')} arms={diag.get('arm_mean_xyz')})"
-                )
-            junction = rep
-            junction_cluster = cluster
-            junction_degree = int(
-                deg.get(rep, len([n for n in _neighbors26(rep) if n in node_set]))
-            )
-            break
-
-        if junction is None or branch_pair is None:
-            ep_pair, ep_bif, ep_diag = _pair_va_from_inferior_endpoints(node_set, deg)
-            if ep_pair is not None and ep_bif is not None:
-                branch_pair = ep_pair
-                junction = ep_bif
-                junction_cluster = {ep_bif}
-                for cluster_list in clusters:
-                    if ep_bif in cluster_list:
-                        junction_cluster = set(cluster_list)
-                        break
-                junction_degree = int(deg.get(ep_bif, 0))
-                log.info(
-                    f"vertebral split: accepted via inferior-endpoint fallback "
-                    f"(tips={ep_diag.get('tips')} confluence={ep_diag.get('confluence')} "
-                    f"walks={ep_diag.get('walk_lens')})"
-                )
-            else:
-                log.info(
-                    "vertebral split: no Y-junction with two inferior X-separated VA arms "
-                    f"— VAs absent ({ep_diag.get('reject')})"
-                )
-                return seg_np, replace(
-                    empty,
-                    n_centerline_branches=n_branches,
-                    message="no inferior VA confluence bifurcation (VAs absent)",
-                )
-
-    assert junction is not None and branch_pair is not None
     ji, jj, jk = int(junction[0]), int(junction[1]), int(junction[2])
+    accepted = bif_diag.get("accepted") or {}
     log.step(
-        f"vertebral split: confluence at ijk=({ji},{jj},{jk}) "
-        f"degree={junction_degree} cluster_voxels={len(junction_cluster)} "
+        f"vertebral split: centerline confluence at ijk=({ji},{jj},{jk}) "
+        f"branches={n_branches} "
+        f"va_z={accepted.get('va_mean_z')} bas_z={accepted.get('basilar_mean_z')} "
+        f"dx={accepted.get('va_x_separation')} "
         f"(VAs ascend +Z on L/R X → merge → basilar +Z)"
     )
 
-    # Seeds are arm voxels outside the junction; drop any accidental junction hits.
+    junction_cluster = {junction}
+    # Seeds are arm voxels outside the junction.
     raw_a = {p for p in branch_pair[0] if p not in junction_cluster}
     raw_b = {p for p in branch_pair[1] if p not in junction_cluster}
     if len(raw_a) < 2 or len(raw_b) < 2:
@@ -628,6 +499,7 @@ def split_vertebral_from_basilar(
     rva_x = _mean_axis(rva_seeds, _LR_AXIS)
     lva_z = _mean_axis(lva_seeds, _Z_AXIS)
     rva_z = _mean_axis(rva_seeds, _Z_AXIS)
+    dx_lr = abs(lva_x - rva_x)
     log.info(
         f"vertebral split: L/R by X-axis ({hemisphere_axis}): "
         f"arm0_mean_x={mx_a:.2f} arm1_mean_x={mx_b:.2f} → "
@@ -636,22 +508,26 @@ def split_vertebral_from_basilar(
         f"RVA mean_x={rva_x:.2f} mean_z={rva_z:.2f} "
         f"(skel={len(rva_seeds)})"
     )
+    if dx_lr < _MIN_VA_X_SEPARATION:
+        log.info(
+            f"vertebral split: L/R arms not separated on X "
+            f"(dx={dx_lr:.2f} < {_MIN_VA_X_SEPARATION}) — skip"
+        )
+        return seg_np, replace(
+            empty,
+            bifurcation_ijk=junction,
+            n_centerline_branches=n_branches,
+            hemisphere_axis=hemisphere_axis,
+            message="L/R VA arms not separated on X",
+        )
 
-    # Exact bifurcation cut:
-    # - junction-cluster voxels stay basilar (the merge point itself)
-    # - everything with z > junction_z stays basilar (post-merge stem along +Z)
-    # - VA flood is only at z <= junction_z, excluding the junction, on X half-spaces
     cut_margin = max(0, int(bifurcation_cut_margin))
-    cut_k = int(jk) - cut_margin  # default margin=0 → cut exactly at bifurcation Z
+    cut_k = int(jk) - cut_margin
     junction_mask = np.zeros(basilar.shape, dtype=bool)
-    if junction_cluster:
-        jc = np.asarray(list(junction_cluster), dtype=np.int64)
-        junction_mask[jc[:, 0], jc[:, 1], jc[:, 2]] = True
+    junction_mask[ji, jj, jk] = True
     k_axis = np.arange(basilar.shape[_Z_AXIS], dtype=np.int32)
     va_domain = basilar & ~junction_mask & (k_axis[None, None, :] <= cut_k)
     n_va_domain = int(np.count_nonzero(va_domain))
-    # Split the VA domain on X so L/R arms cannot flood into each other when
-    # they briefly touch near the confluence.
     mid_x = 0.5 * (lva_x + rva_x)
     x_coords = np.arange(basilar.shape[_LR_AXIS], dtype=np.float64)
     if _LR_AXIS == 0:
@@ -665,9 +541,8 @@ def split_vertebral_from_basilar(
         lva_domain = va_domain & (x_grid <= mid_x + 0.5)
         rva_domain = va_domain & (x_grid >= mid_x - 0.5)
     log.info(
-        f"vertebral split: cut at bifurcation "
-        f"(ijk=({ji},{jj},{jk}), cluster={len(junction_cluster)}, "
-        f"z<={cut_k}, margin={cut_margin}) "
+        f"vertebral split: cut at centerline bifurcation "
+        f"(ijk=({ji},{jj},{jk}), z<={cut_k}, margin={cut_margin}) "
         f"VA_domain={n_va_domain} X-midline={mid_x:.1f} "
         f"(LVA_x={lva_x:.1f}, RVA_x={rva_x:.1f})"
     )
@@ -676,7 +551,6 @@ def split_vertebral_from_basilar(
         return seg_np, replace(
             empty,
             bifurcation_ijk=junction,
-            junction_degree=junction_degree,
             n_centerline_branches=n_branches,
             hemisphere_axis=hemisphere_axis,
             bifurcation_cut_k=int(cut_k),
@@ -685,7 +559,6 @@ def split_vertebral_from_basilar(
 
     lva_mask = _flood_fill_from_seeds(lva_domain, lva_seeds)
     rva_mask = _flood_fill_from_seeds(rva_domain & ~lva_mask, rva_seeds)
-    # Never relabel the bifurcation itself.
     lva_mask &= ~junction_mask
     rva_mask &= ~junction_mask
     n_lva = int(np.count_nonzero(lva_mask))
@@ -698,7 +571,6 @@ def split_vertebral_from_basilar(
         return seg_np, replace(
             empty,
             bifurcation_ijk=junction,
-            junction_degree=junction_degree,
             n_centerline_branches=n_branches,
             lva_voxels=n_lva,
             rva_voxels=n_rva,
@@ -709,6 +581,28 @@ def split_vertebral_from_basilar(
 
     superior = basilar & ~(lva_mask | rva_mask)
     n_bas_keep = int(np.count_nonzero(superior))
+    min_bas_keep = max(
+        int(min_branch_voxels),
+        int(round(_MIN_BASILAR_KEEP_FRAC * float(n_basilar))),
+    )
+    if n_bas_keep < min_bas_keep:
+        log.info(
+            f"vertebral split: basilar remnant too small after cut "
+            f"({n_bas_keep} < {min_bas_keep}) — skip "
+            "(likely false confluence on a single tube)"
+        )
+        return seg_np, replace(
+            empty,
+            bifurcation_ijk=junction,
+            n_centerline_branches=n_branches,
+            lva_voxels=n_lva,
+            rva_voxels=n_rva,
+            basilar_voxels=n_bas_keep,
+            hemisphere_axis=hemisphere_axis,
+            bifurcation_cut_k=int(cut_k),
+            message="basilar remnant too small (false confluence guard)",
+        )
+
     out = seg_np.copy()
     out[basilar] = 0
     out[superior] = int(QVTPY_BASILAR)
@@ -734,7 +628,7 @@ def split_vertebral_from_basilar(
     return out, VertebralSplitResult(
         split_applied=True,
         bifurcation_ijk=(ji, jj, jk),
-        junction_degree=junction_degree,
+        junction_degree=3,  # centerline Y (trunk split + side branch)
         n_centerline_branches=n_branches,
         lva_voxels=n_lva,
         rva_voxels=n_rva,
