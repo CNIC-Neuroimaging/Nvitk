@@ -1999,6 +1999,10 @@ def _run_viz_vessel_cross_sections(
     params: dict[str, Any],
 ) -> None:
     from nvitk.gui.viz.vessel_cross_sections import install_vessel_cross_sections
+    from nvitk.pipes.qvtpy.util.centerline_io import (
+        CENTERLINE_SEG_BRANCHES_JSON,
+        load_arterial_branches,
+    )
 
     cd_name = _layer_param(params, "cd_layer")
     if not cd_name:
@@ -2056,6 +2060,35 @@ def _run_viz_vessel_cross_sections(
     elif ap_name or rl_name or fh_name:
         raise ValueError("Select AP, RL, and FH phase layers together for flow waveforms.")
 
+    # Prefer stage-4 named branches (same geometry as stage 6) when the
+    # centerline mask lives next to centerlines_seg_branches.json.
+    arterial_br = None
+    cl_src = _layer_source_path(cl_layer)
+    stage_dirs: list[Path] = []
+    if cl_src is not None:
+        stage_dirs.append(cl_src.parent)
+    # Also try seg layer path / common QC layout.
+    if seg_name:
+        try:
+            seg_src = _layer_source_path(_resolve_layer(viewer, seg_name))
+            if seg_src is not None and seg_src.parent not in stage_dirs:
+                stage_dirs.append(seg_src.parent)
+        except Exception:
+            pass
+    for stage_dir in stage_dirs:
+        if (stage_dir / CENTERLINE_SEG_BRANCHES_JSON).is_file():
+            try:
+                arterial_br = load_arterial_branches(
+                    stage_dir, min_points=3, from_segmentation=True
+                )
+                gui_log(
+                    f"Vessel XS: using stage-4/6 named branches from {stage_dir} "
+                    f"({sum(len(v) for v in arterial_br.values())} polylines)."
+                )
+                break
+            except Exception as exc:
+                gui_log(f"Vessel XS: could not load branches from {stage_dir}: {exc}")
+
     app_state = getattr(viewer, "_nvitk_app_state", None)
     if not isinstance(app_state, dict):
         app_state = {}
@@ -2070,9 +2103,16 @@ def _run_viz_vessel_cross_sections(
         vx=vx,
         vy=vy,
         vz=vz,
+        arterial_branches=arterial_br,
+    )
+    branch_note = (
+        " (stage-4/6 named branches)"
+        if arterial_br
+        else " (re-extracted from mask)"
     )
     notify(
-        f"Vessel cross-sections active (centerline: {cl_layer.name}, CD: {intensity_layer.name}).\n"
+        f"Vessel cross-sections active (centerline: {cl_layer.name}, CD: {intensity_layer.name})"
+        f"{branch_note}.\n"
         "Uncheck 'Pick cross-section on click' in the dock (or hide 'Vessel centerlines (xs)') "
         "to freely rotate/pan the 3D view. Left-click near a centerline to inspect. "
         "Normal arrow follows centerline order."

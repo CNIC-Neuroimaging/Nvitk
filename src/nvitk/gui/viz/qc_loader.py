@@ -302,6 +302,23 @@ def load_qvtpy_qc_layers(
                     _to_np(layer_to_image(fh_lyr).data),
                 )
 
+            # Prefer stage-4 named bifurcation branches so XS polylines coincide
+            # with stage 4/6 centerline geometry (not a re-extracted trunk).
+            arterial_br = None
+            try:
+                from nvitk.pipes.qvtpy.util.centerline_io import (
+                    CENTERLINE_SEG_BRANCHES_JSON,
+                    flatten_branches,
+                    load_arterial_branches,
+                )
+
+                if (stage4 / CENTERLINE_SEG_BRANCHES_JSON).is_file():
+                    arterial_br = load_arterial_branches(
+                        stage4, min_points=3, from_segmentation=True
+                    )
+            except Exception as br_load_exc:
+                log.warning("QC stage-4 branches load failed: %s", br_load_exc)
+
             install_vessel_cross_sections(
                 viewer,
                 app_state,
@@ -317,6 +334,7 @@ def load_qvtpy_qc_layers(
                 vx=vx,
                 vy=vy,
                 vz=vz,
+                arterial_branches=arterial_br,
             )
             xs_state = app_state.get("vessel_xs") or {}
             panel = xs_state.get("panel")
@@ -326,19 +344,9 @@ def load_qvtpy_qc_layers(
                 lyr = _set_layer_visible(viewer, name, True)
                 if lyr is not None:
                     loaded[name] = lyr
-            # Attach named bifurcation branches (LACA-A1, LMCA-M2a, …) when the
-            # stage-4 sidecar is present so QC can surface them beside the mask.
+            # Tip points labeled by branch name for visual QC.
             try:
-                from nvitk.pipes.qvtpy.util.centerline_io import (
-                    CENTERLINE_SEG_BRANCHES_JSON,
-                    flatten_branches,
-                    load_arterial_branches,
-                )
-
-                if (stage4 / CENTERLINE_SEG_BRANCHES_JSON).is_file():
-                    arterial_br = load_arterial_branches(
-                        stage4, min_points=3, from_segmentation=True
-                    )
+                if arterial_br:
                     flat = flatten_branches(arterial_br)
                     loaded["arterial_branches"] = {
                         name: pts for name, pts in flat.items()
@@ -346,7 +354,9 @@ def load_qvtpy_qc_layers(
                     xs_state = app_state.get("vessel_xs") or {}
                     xs_state["branch_names"] = sorted(flat.keys())
                     app_state["vessel_xs"] = xs_state
-                    # Tip points labeled by branch name for visual QC.
+                    # Polylines are voxel indices — copy the reference layer
+                    # affine/scale so tips land in the same world space as
+                    # seg / CD / LOCs / vessel-XS overlays.
                     tips = []
                     tip_names: list[str] = []
                     for name, pts in sorted(flat.items()):
@@ -355,20 +365,41 @@ def load_qvtpy_qc_layers(
                             tips.append(arr[-1])
                             tip_names.append(str(name))
                     if tips:
-                        tip_layer = viewer.add_points(
-                            np.asarray(tips, dtype=float),
-                            name="Branch tips (named)",
-                            size=8,
-                            face_color="yellow",
-                            border_color="black",
-                            text={
+                        from nvitk.gui.core.spatial import layer_affine
+
+                        ref = (
+                            loaded.get("seg")
+                            or cl_lyr
+                            or loaded.get("cd")
+                            or (
+                                viewer.layers[-1] if viewer.layers else None
+                            )
+                        )
+                        tip_kwargs: dict[str, Any] = {
+                            "name": "Branch tips (named)",
+                            "size": 2,
+                            "face_color": "#ff0000",
+                            "border_color": "black",
+                            "text": {
                                 "string": "{branch_name}",
                                 "size": 9,
                                 "color": "white",
                                 "anchor": "upper_left",
                             },
-                            properties={"branch_name": tip_names},
-                            visible=True,
+                            "properties": {"branch_name": tip_names},
+                            "visible": True,
+                        }
+                        if ref is not None:
+                            aff = layer_affine(ref)
+                            if aff is not None:
+                                tip_kwargs["affine"] = aff
+                            elif getattr(ref, "scale", None) is not None:
+                                tip_kwargs["scale"] = tuple(
+                                    float(x) for x in ref.scale
+                                )
+                        tip_layer = viewer.add_points(
+                            np.asarray(tips, dtype=float),
+                            **tip_kwargs,
                         )
                         loaded["branch_tips"] = tip_layer
             except Exception as br_exc:

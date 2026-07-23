@@ -9,7 +9,6 @@ import pandas as pd
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -20,25 +19,23 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nvitk.db.qvtpy_qc import QcReviewDecision, publish_qvtpy_qc_reviews
+from nvitk.db.qvtpy_qc import (
+    QC_METRIC_VARIABLES,
+    QcReviewDecision,
+    publish_qvtpy_qc_reviews,
+)
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 
 DOCK_OBJECT_NAME = "nvitk_qc_measurements_dock"
 
-# UI metric groups shown as review rows.
-_LOC_METRICS: tuple[tuple[str, str, str], ...] = (
-    ("flow", "flow_mean", "Flow (time-avg)"),
-    ("flow_tseries", "flow_tseries", "Flow (timeseries)"),
-    ("pi", "pi", "PI"),
-    ("ri", "ri", "RI"),
-)
-_HEMO_METRICS: tuple[tuple[str, str, str], ...] = (
-    ("pitc", "pitc_slope", "PITC slope"),
-    ("pitc_intercept", "pitc_intercept", "PITC intercept"),
-    ("pwv", "pwv", "PWV (Bjornfoot)"),
-    ("pwv_fielding", "pwv_fielding_xcor", "PWV (Fielding)"),
-)
+# Territory roots in vessel_hemodynamics.csv (row_kind == "root").
+_HEMO_TERRITORIES: tuple[str, ...] = ("L_ICA", "R_ICA", "Basilar")
+_HEMO_TERRITORY_LABEL: dict[str, str] = {
+    "L_ICA": "LICA",
+    "R_ICA": "RICA",
+    "Basilar": "BASILAR",
+}
 
 
 def _fmt(value: Any) -> str:
@@ -50,8 +47,22 @@ def _fmt(value: Any) -> str:
         return str(value)
 
 
+def _fmt_parts(parts: list[str]) -> str:
+    return "; ".join(p for p in parts if p)
+
+
 def load_qc_measurement_rows(stage6_dir: Path) -> list[dict[str, Any]]:
-    """Build review-table rows from stage6 CSV resource files."""
+    """Build grouped QC review rows from stage-6 CSVs.
+
+    Grouping
+    --------
+    1. **LOC / vessel** — one OK/FAIL covering flow (time-avg + timeseries), PI, RI.
+    2. **PITC / territory** — one OK/FAIL per LICA / RICA / BASILAR covering slope +
+       intercept (all stations in that territory).
+    3. **PWV / territory** — one OK/FAIL per territory covering Bjornfoot + Fielding.
+
+    Branch-level PITC/PWV rows are omitted; only territory (root) values are shown.
+    """
     rows: list[dict[str, Any]] = []
     loc_csv = Path(stage6_dir) / "loc_measurements.csv"
     hemo_csv = Path(stage6_dir) / "vessel_hemodynamics.csv"
@@ -70,82 +81,102 @@ def load_qc_measurement_rows(stage6_dir: Path) -> list[dict[str, Any]]:
             mean_flow_ml_min = (
                 float(mean_flow) * 60.0 if pd.notna(mean_flow) else None
             )
-            rows.append(
-                {
-                    "metric_key": "flow",
-                    "variable_id": "flow_mean",
-                    "metric_label": "Flow (time-avg)",
-                    "region_id": region,
-                    "value": mean_flow_ml_min,
-                    "unit": "mL/min",
-                }
-            )
+            value_parts: list[str] = []
+            if mean_flow_ml_min is not None:
+                value_parts.append(f"flow_tavg={_fmt(mean_flow_ml_min)} mL/min")
             if flow_cols:
                 series = [
                     float(row[c]) * 60.0
                     for c in flow_cols
                     if pd.notna(row.get(c))
                 ]
-                summary = (
-                    f"n={len(series)} mean={sum(series)/len(series):.3g}"
-                    if series
-                    else ""
-                )
-                rows.append(
-                    {
-                        "metric_key": "flow_tseries",
-                        "variable_id": "flow_tseries",
-                        "metric_label": "Flow (timeseries)",
-                        "region_id": region,
-                        "value": summary,
-                        "unit": "mL/min",
-                    }
-                )
-            for key, var, label in _LOC_METRICS[2:]:
-                col = f"loc_{var}" if var in ("pi", "ri") else var
-                val = row.get(col)
-                rows.append(
-                    {
-                        "metric_key": key,
-                        "variable_id": var,
-                        "metric_label": label,
-                        "region_id": region,
-                        "value": float(val) if pd.notna(val) else None,
-                        "unit": "dimensionless",
-                    }
-                )
+                if series:
+                    value_parts.append(
+                        f"flow_tseries n={len(series)} "
+                        f"mean={sum(series) / len(series):.3g} mL/min"
+                    )
+            pi = row.get("loc_pi")
+            ri = row.get("loc_ri")
+            if pd.notna(pi):
+                value_parts.append(f"PI={_fmt(float(pi))}")
+            if pd.notna(ri):
+                value_parts.append(f"RI={_fmt(float(ri))}")
+            rows.append(
+                {
+                    "metric_key": "loc",
+                    "variable_ids": list(QC_METRIC_VARIABLES["loc"]),
+                    "metric_label": "Flow / PI / RI",
+                    "region_id": region,
+                    "region_label": region,
+                    "value": _fmt_parts(value_parts),
+                    "unit": "",
+                }
+            )
 
     if hemo_csv.is_file():
         df = pd.read_csv(hemo_csv)
-        col_map = {
-            "pitc_slope": ("pitc_slope", "PITC slope", "1/mm"),
-            "pitc_intercept": ("pitc_intercept", "PITC intercept", "dimensionless"),
-            "pwv_bjornfoot_m_s": ("pwv", "PWV (Bjornfoot)", "m/s"),
-            "pwv_fielding_m_s": ("pwv_fielding_xcor", "PWV (Fielding)", "m/s"),
-        }
-        for _, row in df.iterrows():
-            region = str(row.get("region_id") or "").strip()
-            if not region:
+        # Territory roots only — skip named-branch damping / empty PITC-PWV rows.
+        if "row_kind" in df.columns:
+            roots = df[df["row_kind"].astype(str).str.lower() == "root"]
+        else:
+            roots = df[df["region_id"].astype(str).isin(_HEMO_TERRITORIES)]
+        for territory in _HEMO_TERRITORIES:
+            hit = roots[roots["region_id"].astype(str) == territory]
+            if hit.empty:
                 continue
-            for col, (var, label, unit) in col_map.items():
-                if col not in df.columns:
-                    continue
-                val = row.get(col)
+            row = hit.iloc[0]
+            label = _HEMO_TERRITORY_LABEL.get(territory, territory)
+
+            pitc_parts: list[str] = []
+            slope = row.get("pitc_slope")
+            intercept = row.get("pitc_intercept")
+            r2 = row.get("pitc_r2")
+            n_fit = row.get("pitc_n")
+            if pd.notna(slope):
+                pitc_parts.append(f"slope={_fmt(float(slope))} 1/mm")
+            if pd.notna(intercept):
+                pitc_parts.append(f"intercept={_fmt(float(intercept))}")
+            if pd.notna(r2):
+                pitc_parts.append(f"r²={_fmt(float(r2))}")
+            if pd.notna(n_fit):
+                pitc_parts.append(f"n={int(float(n_fit))}")
+            if pitc_parts:
                 rows.append(
                     {
-                        "metric_key": var,
-                        "variable_id": var,
-                        "metric_label": label,
-                        "region_id": region,
-                        "value": float(val) if pd.notna(val) else None,
-                        "unit": unit,
+                        "metric_key": "pitc",
+                        "variable_ids": list(QC_METRIC_VARIABLES["pitc"]),
+                        "metric_label": "PITC (slope + intercept)",
+                        "region_id": territory,
+                        "region_label": label,
+                        "value": _fmt_parts(pitc_parts),
+                        "unit": "",
+                    }
+                )
+
+            pwv_parts: list[str] = []
+            bj = row.get("pwv_bjornfoot_m_s")
+            fi = row.get("pwv_fielding_m_s")
+            if pd.notna(bj):
+                pwv_parts.append(f"Bjornfoot={_fmt(float(bj))} m/s")
+            if pd.notna(fi):
+                pwv_parts.append(f"Fielding={_fmt(float(fi))} m/s")
+            if pwv_parts:
+                rows.append(
+                    {
+                        "metric_key": "pwv",
+                        "variable_ids": list(QC_METRIC_VARIABLES["pwv"]),
+                        "metric_label": "PWV (Bjornfoot + Fielding)",
+                        "region_id": territory,
+                        "region_label": label,
+                        "value": _fmt_parts(pwv_parts),
+                        "unit": "",
                     }
                 )
     return rows
 
 
 class QcMeasurementsPanel(QWidget):
-    """Table of per-vessel metrics with OK/FAIL + comments."""
+    """Table of grouped per-vessel / per-territory metrics with OK/FAIL + comments."""
 
     COL_REGION = 0
     COL_METRIC = 1
@@ -171,7 +202,35 @@ class QcMeasurementsPanel(QWidget):
             ["Region / vessel", "Metric", "Value", "OK / FAIL", "Comment"]
         )
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self._table.setAlternatingRowColors(True)
+        # Uniform row color — alternating rows hide light text on dark Napari UI.
+        self._table.setAlternatingRowColors(False)
+        self._table.setStyleSheet(
+            "QTableWidget {"
+            "  background-color: #2b2b2b;"
+            "  color: #e8e8e8;"
+            "  gridline-color: #454545;"
+            "  alternate-background-color: #2b2b2b;"
+            "}"
+            "QTableWidget::item {"
+            "  background-color: #2b2b2b;"
+            "  color: #e8e8e8;"
+            "}"
+            "QTableWidget::item:selected {"
+            "  background-color: #3d5a80;"
+            "  color: #ffffff;"
+            "}"
+            "QHeaderView::section {"
+            "  background-color: #353535;"
+            "  color: #e8e8e8;"
+            "  padding: 4px;"
+            "  border: 1px solid #454545;"
+            "}"
+            "QComboBox, QLineEdit {"
+            "  background-color: #1e1e1e;"
+            "  color: #e8e8e8;"
+            "  border: 1px solid #555;"
+            "}"
+        )
 
         self._btn_revise = QPushButton("Mark as revised")
         self._btn_revise.setEnabled(False)
@@ -196,12 +255,15 @@ class QcMeasurementsPanel(QWidget):
         self._table.setRowCount(0)
         self._table.setRowCount(len(self._rows))
         for i, row in enumerate(self._rows):
-            region_item = QTableWidgetItem(str(row.get("region_id") or ""))
+            region_item = QTableWidgetItem(
+                str(row.get("region_label") or row.get("region_id") or "")
+            )
             region_item.setFlags(region_item.flags() & ~Qt.ItemIsEditable)
             metric_item = QTableWidgetItem(str(row.get("metric_label") or ""))
             metric_item.setFlags(metric_item.flags() & ~Qt.ItemIsEditable)
-            value_item = QTableWidgetItem(_fmt(row.get("value")))
+            value_item = QTableWidgetItem(str(row.get("value") or ""))
             value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
+            value_item.setToolTip(str(row.get("value") or ""))
 
             status = QComboBox()
             status.addItem("—", "")
@@ -218,9 +280,13 @@ class QcMeasurementsPanel(QWidget):
             self._table.setCellWidget(i, self.COL_STATUS, status)
             self._table.setCellWidget(i, self.COL_COMMENT, comment)
 
+        n_loc = sum(1 for r in self._rows if r.get("metric_key") == "loc")
+        n_pitc = sum(1 for r in self._rows if r.get("metric_key") == "pitc")
+        n_pwv = sum(1 for r in self._rows if r.get("metric_key") == "pwv")
         self._status.setText(
-            f"{len(self._rows)} measurement(s) for {self._subject_uid}. "
-            "Mark every row OK/FAIL, then revise."
+            f"{len(self._rows)} check(s) for {self._subject_uid} "
+            f"(LOC vessels={n_loc}, PITC territories={n_pitc}, PWV territories={n_pwv}). "
+            "One OK/FAIL covers the grouped metrics; then revise."
         )
         self._refresh_revise_enabled()
         return len(self._rows)
@@ -240,6 +306,7 @@ class QcMeasurementsPanel(QWidget):
         self._btn_revise.setEnabled(self._all_marked())
 
     def _collect_decisions(self) -> list[QcReviewDecision]:
+        """Expand each grouped UI row into one decision per underlying variable_id."""
         decisions: list[QcReviewDecision] = []
         for i, row in enumerate(self._rows):
             status_w = self._table.cellWidget(i, self.COL_STATUS)
@@ -254,14 +321,20 @@ class QcMeasurementsPanel(QWidget):
             )
             if not status:
                 continue
-            decisions.append(
-                QcReviewDecision(
-                    variable_id=str(row.get("variable_id") or ""),
-                    region_id=str(row.get("region_id") or ""),
-                    qc_status=status,
-                    comment=comment,
+            region = str(row.get("region_id") or "")
+            vars_ = list(row.get("variable_ids") or ())
+            if not vars_:
+                key = str(row.get("metric_key") or "")
+                vars_ = list(QC_METRIC_VARIABLES.get(key, ()))
+            for var in vars_:
+                decisions.append(
+                    QcReviewDecision(
+                        variable_id=str(var),
+                        region_id=region,
+                        qc_status=status,
+                        comment=comment,
+                    )
                 )
-            )
         return decisions
 
     def _on_mark_revised(self) -> None:

@@ -2,9 +2,9 @@
 
 Entry point for the whole Dixon v5 pipeline (stages 1-3). Same shape as
 :mod:`nvitk.pipes.pesa_fat.ct_pet_v5.run`: dispatches each stage either
-locally (in-process loop) or on SGE (one chain per subject with
-``-hold_jid`` between stages). ``--base-hold`` should be set when a stage 0
-job is already in queue so every subject's stage 1 waits on its stage 0.
+locally (in-process loop) or on SGE (one array job per subject; tasks =
+stages with ``-tc 1`` + done-markers). ``--base-hold`` should be set when a
+stage 0 job is already in queue so every subject's array waits on its stage 0.
 """
 
 from __future__ import annotations
@@ -28,6 +28,11 @@ from nvitk.pipes.pesa_fat.common.paths import (
 from nvitk.pipes.pesa_fat.common import stage0_convert
 from nvitk.pipes.pesa_fat.common.xnat_inputs import XnatPesaFatRequest, download_pesa_fat_dicoms_from_xnat
 from nvitk.pipes.pesa_fat.common.db_publish import publish_stage3_excel
+from nvitk.pipes.pesa_fat.common.sge_array import (
+    array_marker_dir,
+    sge_pesa_array_resources,
+    submit_subject_stage_array,
+)
 from nvitk.pipes.pesa_fat.common.sge_db import pesa_fat_sge_db_submission
 from nvitk.cluster.sge import (
     ClusterPaths,
@@ -35,7 +40,6 @@ from nvitk.cluster.sge import (
     SingularityBinds,
     StageSpec,
     python_module_argv,
-    submit_chain,
     write_script_header,
 )
 from nvitk.pipes.pesa_fat.common.stage3_batch_summary import aggregate_stage3_summary
@@ -230,11 +234,16 @@ def submit_subject_chain(
     log_level: str = "INFO",
     emit: TextIO | None = None,
 ) -> list[str]:
-    """Submit the Dixon v5 SGE chain for a *single* subject.
+    """Submit one Dixon v5 SGE array job for a *single* subject.
 
-    Stages are submitted in order with ``-hold_jid`` linking them. Returns
-    the list of jids (one per stage, in ``stages_sel`` order).
+    Array tasks are the selected stages in order (``-tc 1`` + done-markers).
+    *base_hold* is applied to the whole array (e.g. the subject's stage-0 jid).
+
+    Returns ``[jid]`` (one array job id) so batch aggregate/QC can hold on it.
     """
+    if not stages_sel:
+        return []
+
     paths = _cluster_paths(lay, container, src_dir)
     if model_dir is not None:
         paths = ClusterPaths(
@@ -247,7 +256,6 @@ def submit_subject_chain(
             err_dir=paths.err_dir,
         )
     binds = SingularityBinds()
-
     db_env, db_binds = pesa_fat_sge_db_submission()
 
     specs: list[StageSpec] = []
@@ -282,8 +290,32 @@ def submit_subject_chain(
                 extra_host_binds=stage_binds,
             )
         )
-    jids = submit_chain(specs, paths, base_hold=base_hold, dry_run=dry_run, emit=emit)
-    log.info(f"[{subject}] Dixon v5 SGE chain jids: {jids}")
+
+    array_resources, use_nv = sge_pesa_array_resources(
+        stages_sel,
+        device=device,
+        project=cfg.SGE_PROJECT,
+        account=cfg.SGE_ACCOUNT,
+        queue=cfg.SGE_QUEUE,
+        h_vmem_stage1=cfg.SGE_H_VMEM,
+        h_vmem_cpu=cfg.SGE_CPU_H_VMEM,
+        ngpu=cfg.SGE_NGPU,
+        cpu_ngpu=cfg.SGE_CPU_NGPU,
+    )
+    jids = submit_subject_stage_array(
+        subject=subject,
+        job_prefix=cfg.SGE_JOB_PREFIX,
+        stages_sel=stages_sel,
+        stage_specs=specs,
+        paths=paths,
+        resources=array_resources,
+        use_nv=use_nv,
+        base_hold=base_hold,
+        dry_run=dry_run,
+        emit=emit,
+        marker_dir=array_marker_dir(lay, cfg.SGE_JOB_PREFIX, subject),
+    )
+    log.info(f"[{subject}] Dixon v5 SGE array jids: {jids} (tasks={stages_sel})")
     return jids
 
 

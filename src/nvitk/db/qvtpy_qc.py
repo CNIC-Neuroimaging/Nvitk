@@ -21,12 +21,10 @@ log = Logger()
 
 QC_STATUS_VALUES = frozenset({"PENDING", "OK", "FAIL"})
 
-# Metrics shown in the QC review table (map UI name -> DB variable_id(s)).
+# Metrics shown in the QC review table (grouped UI key -> DB variable_id(s)).
+# One OK/FAIL in the UI expands to all listed variables for that region.
 QC_METRIC_VARIABLES: dict[str, tuple[str, ...]] = {
-    "flow": ("flow_mean",),
-    "flow_tseries": ("flow_tseries",),
-    "pi": ("pi",),
-    "ri": ("ri",),
+    "loc": ("flow_mean", "flow_tseries", "pi", "ri"),
     "pitc": ("pitc_slope", "pitc_intercept"),
     "pwv": ("pwv", "pwv_fielding_xcor"),
 }

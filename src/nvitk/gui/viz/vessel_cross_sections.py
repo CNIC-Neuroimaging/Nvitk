@@ -323,6 +323,77 @@ def _label_color_map(centerlines: dict[int, np.ndarray]) -> dict[int, str]:
     }
 
 
+def centerlines_dict_from_arterial_branches(
+    arterial: dict[int, list[tuple[str, Any]]],
+    *,
+    min_points: int = 3,
+) -> tuple[dict[int, np.ndarray], dict[int, int], dict[int, str]]:
+    """Flatten stage-4/6 named branches into pickable centerline keys.
+
+    Returns
+    -------
+    centerlines
+        Synthetic int key → polyline (exact stage polylines, not re-extracted).
+    volume_label_by_key
+        Synthetic key → parent qvtpy seg label (for plane label constraints).
+    branch_name_by_key
+        Synthetic key → branch name (``LMCA-M2a``, …).
+    """
+    centerlines: dict[int, np.ndarray] = {}
+    volume_label_by_key: dict[int, int] = {}
+    branch_name_by_key: dict[int, str] = {}
+    key = 1
+    for parent_lid in sorted(int(k) for k in arterial.keys()):
+        for name, pts in arterial.get(parent_lid) or []:
+            arr = to_numpy(pts).astype(np.float32, copy=False).reshape(-1, 3)
+            if arr.shape[0] < int(min_points):
+                continue
+            centerlines[key] = arr
+            volume_label_by_key[key] = int(parent_lid)
+            branch_name_by_key[key] = str(name)
+            key += 1
+    return centerlines, volume_label_by_key, branch_name_by_key
+
+
+def build_centerlines_dict(
+    centerline_mask: np.ndarray,
+    *,
+    segmentation: np.ndarray | None = None,
+    min_points: int = 5,
+) -> dict[int, np.ndarray]:
+    """Ordered polylines per label from centerline (+ optional seg) masks.
+
+    Fallback when stage-4 ``centerlines_seg_branches.json`` is unavailable.
+    Prefer :func:`centerlines_dict_from_arterial_branches` so overlays match
+    stage 4/6 bifurcation geometry.
+    """
+    cl = to_numpy(centerline_mask)
+    labels = sorted(int(v) for v in np.unique(cl) if int(v) != 0)
+    if not labels:
+        return {}
+    if segmentation is not None:
+        seg = to_numpy(segmentation).astype(np.int32, copy=False)
+        return compute_centerlines(
+            seg,
+            centerline_mask=cl,
+            labels=labels,
+            min_points=min_points,
+        )
+    out: dict[int, np.ndarray] = {}
+    for lbl in labels:
+        roi = np.zeros(cl.shape, dtype=np.int32)
+        roi[cl == int(lbl)] = int(lbl)
+        part = compute_centerlines(
+            roi,
+            centerline_mask=cl,
+            labels=[int(lbl)],
+            min_points=min_points,
+        )
+        if int(lbl) in part:
+            out[int(lbl)] = part[int(lbl)]
+    return out
+
+
 def _stack_centerline_points(
     centerlines: dict[int, np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -396,45 +467,12 @@ def _add_centerline_points_layer(
     return layer, point_labels, label_colors
 
 
-def build_centerlines_dict(
-    centerline_mask: np.ndarray,
-    *,
-    segmentation: np.ndarray | None = None,
-    min_points: int = 5,
-) -> dict[int, np.ndarray]:
-    """Ordered polylines per label from centerline (+ optional seg) masks."""
-    cl = to_numpy(centerline_mask)
-    labels = sorted(int(v) for v in np.unique(cl) if int(v) != 0)
-    if not labels:
-        return {}
-    if segmentation is not None:
-        seg = to_numpy(segmentation).astype(np.int32, copy=False)
-        return compute_centerlines(
-            seg,
-            centerline_mask=cl,
-            labels=labels,
-            min_points=min_points,
-        )
-    out: dict[int, np.ndarray] = {}
-    for lbl in labels:
-        roi = np.zeros(cl.shape, dtype=np.int32)
-        roi[cl == int(lbl)] = int(lbl)
-        part = compute_centerlines(
-            roi,
-            centerline_mask=cl,
-            labels=[int(lbl)],
-            min_points=min_points,
-        )
-        if int(lbl) in part:
-            out[int(lbl)] = part[int(lbl)]
-    return out
-
-
 def _add_centerline_paths(
     viewer: Any,
     centerlines: dict[int, np.ndarray],
     *,
     reference_layer: Any,
+    smooth_display: bool = True,
 ) -> Any:
     paths = []
     colors = []
@@ -442,7 +480,11 @@ def _add_centerline_paths(
         pts = centerlines[lbl]
         if pts is None or pts.shape[0] < 2:
             continue
-        disp = smooth_polyline_display(pts)
+        disp = (
+            smooth_polyline_display(pts)
+            if smooth_display
+            else np.asarray(pts, dtype=np.float32)
+        )
         paths.append(disp.astype(np.float32))
         colors.append(_TAB10[i % len(_TAB10)])
     if not paths:
@@ -519,6 +561,9 @@ def _neighbor_flow_waveforms(
     if pts is None or pts.shape[0] < 1:
         return []
     p = state["params"]
+    vol_lid = int(
+        (state.get("volume_label_by_key") or {}).get(int(pick.label), pick.label)
+    )
     tangents = centerline_tangents(pts, k_half=2)
     out: list[dict[str, Any]] = []
     for offset in (-2, -1, 0, 1, 2):
@@ -539,7 +584,7 @@ def _neighbor_flow_waveforms(
                 measure_resegment=p["measure_resegment"],
                 thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
                 volume_seg=state.get("segmentation"),
-                volume_label_id=int(pick.label),
+                volume_label_id=vol_lid,
                 label_constrain=not p["measure_resegment"],
             )
         except Exception:
@@ -575,17 +620,34 @@ def install_vessel_cross_sections(
     vx: np.ndarray | None = None,
     vy: np.ndarray | None = None,
     vz: np.ndarray | None = None,
+    arterial_branches: dict[int, list[tuple[str, Any]]] | None = None,
 ) -> None:
-    """Register Napari layers, dock, and 3D click-to-inspect behavior."""
+    """Register Napari layers, dock, and 3D click-to-inspect behavior.
+
+    When *arterial_branches* is provided (stage-4/6 ``centerlines_seg_branches``),
+    those exact named polylines are used so the overlay coincides with pipeline
+    centerlines. Otherwise polylines are re-extracted from *centerline_mask*.
+    """
     shutdown_vessel_cross_sections(app_state)
 
     cd = _intensity_volume(intensity_layer)
     p = _params_from_dict(params)
-    centerlines = build_centerlines_dict(
-        centerline_mask,
-        segmentation=segmentation,
-        min_points=5,
-    )
+    volume_label_by_key: dict[int, int] = {}
+    branch_name_by_key: dict[int, str] = {}
+    from_stage_branches = False
+    if arterial_branches:
+        centerlines, volume_label_by_key, branch_name_by_key = (
+            centerlines_dict_from_arterial_branches(arterial_branches, min_points=3)
+        )
+        from_stage_branches = bool(centerlines)
+    if not from_stage_branches:
+        centerlines = build_centerlines_dict(
+            centerline_mask,
+            segmentation=segmentation,
+            min_points=5,
+        )
+        volume_label_by_key = {int(k): int(k) for k in centerlines}
+        branch_name_by_key = {int(k): str(k) for k in centerlines}
     if not centerlines:
         raise ValueError("No centerlines found (check centerline mask labels and min length).")
 
@@ -593,7 +655,11 @@ def install_vessel_cross_sections(
     _remove_layers_named(viewer, names)
 
     centerlines_layer = _add_centerline_paths(
-        viewer, centerlines, reference_layer=intensity_layer
+        viewer,
+        centerlines,
+        reference_layer=intensity_layer,
+        # Keep stage-4/6 geometry exact (no display smoothing drift).
+        smooth_display=not from_stage_branches,
     )
     cl_points_layer, cl_point_labels, cl_label_colors = _add_centerline_points_layer(
         viewer, centerlines, reference_layer=intensity_layer
@@ -626,6 +692,9 @@ def install_vessel_cross_sections(
         "vy": vy,
         "vz": vz,
         "centerlines": centerlines,
+        "volume_label_by_key": volume_label_by_key,
+        "branch_name_by_key": branch_name_by_key,
+        "from_stage_branches": from_stage_branches,
         "segmentation": segmentation,
         "params": p,
         "voxel_spacing": voxel_sp,
@@ -640,6 +709,7 @@ def install_vessel_cross_sections(
         "intensity_layer": intensity_layer,
         "centerlines_layer": centerlines_layer,
         "centerline_mask": centerline_mask,
+        "branch_names": sorted(branch_name_by_key.values()),
     }
 
     def _update_plane_and_normal(pick: CenterlinePick, tangent: np.ndarray) -> None:
@@ -746,6 +816,8 @@ def install_vessel_cross_sections(
             centerline_pts=pts,
             index=pick.index,
         )
+        vol_lid = int(volume_label_by_key.get(int(pick.label), pick.label))
+        branch_name = str(branch_name_by_key.get(int(pick.label), pick.label))
         try:
             result = cross_section_at_point(
                 pick.point,
@@ -759,7 +831,7 @@ def install_vessel_cross_sections(
                 measure_resegment=p["measure_resegment"],
                 thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
                 volume_seg=state["segmentation"],
-                volume_label_id=pick.label,
+                volume_label_id=vol_lid,
             )
         except Exception as exc:
             panel.clear(f"Cross-section failed: {exc}")
@@ -773,7 +845,7 @@ def install_vessel_cross_sections(
         if intensity_2d is None:
             intensity_2d = state["cd"]
         title = (
-            f"Label {pick.label}  index {pick.index}\n"
+            f"{branch_name}  index {pick.index}\n"
             f"area {result.area_mm2:.2f} mm²  circularity {result.circularity:.3f}"
         )
         waveforms = _neighbor_flow_waveforms(pick, centerlines, state)
@@ -894,9 +966,9 @@ def install_vessel_cross_sections(
         pass
 
     app_state["vessel_xs"] = {
+        **state,
         "viewer": viewer,
         "callback": _on_mouse_pick,
-        "intensity_layer": intensity_layer,
         "dock": dock,
         "intensity_layer_name": intensity_layer.name,
         "prev_ndisplay": prev_ndisplay,
@@ -912,6 +984,7 @@ __all__ = [
     "XS_TANGENT",
     "XS_SEG",
     "build_centerlines_dict",
+    "centerlines_dict_from_arterial_branches",
     "install_vessel_cross_sections",
     "shutdown_vessel_cross_sections",
 ]

@@ -917,7 +917,7 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option(
     "--sge-subject-chunk-size",
     type=int,
-    default=100,
+    default=900,
     show_default=True,
     help=(
         "(sge) Subjects in the first submission batch (must fit ~1000 jobs/user). "

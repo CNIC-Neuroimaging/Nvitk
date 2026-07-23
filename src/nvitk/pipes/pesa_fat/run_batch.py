@@ -11,11 +11,11 @@ Two execution modes:
   ``--submit local`` for the selected stages.
 * ``--submit sge`` — for every subject we submit a stage-0 SGE job
   (``qsub`` wrapping ``singularity exec python -m stage0_convert``) and
-  capture its jid. Each pipeline's per-subject chain is then submitted
-  with ``-hold_jid`` pointing at that jid, so stages 1-2-3 wait for the
-  subject's own stage 0 to finish. The CT-PET and Dixon chains of a given
-  subject run in parallel after stage 0. Optional ``stage4`` appends a CPU
-  QC job that holds on all stage-3 jids when stage 3 is part of the script.
+  capture its jid. Each pipeline then submits **one array job per subject**
+  (tasks = stages 1–3, ``-tc 1`` + done-markers) with ``-hold_jid`` on that
+  stage-0 jid. CT-PET and Dixon arrays for a given subject run in parallel
+  after stage 0. Optional ``stage4`` appends a CPU QC job that holds on all
+  pipeline array jids when stage 3 is part of the script.
 
 Examples
 --------

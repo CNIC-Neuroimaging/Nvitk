@@ -346,8 +346,13 @@ def emit_array_job_block(
     marker_dir: Path | str,
     task_concurrency: int = 1,
     use_nv: bool = True,
+    hold_jid: str | Sequence[str] | None = None,
 ) -> str:
-    """Emit one ``qsub -t 1-N -tc …`` block; return shell ``$jid_…`` reference."""
+    """Emit one ``qsub -t 1-N -tc …`` block; return shell ``$jid_…`` reference.
+
+    *hold_jid* is applied to the whole array (classic ``-hold_jid``), e.g. so a
+    per-subject stage0 job completes before the stage1–3 array starts.
+    """
     if not tasks:
         raise ValueError("tasks must be non-empty")
     n_tasks = len(tasks)
@@ -362,13 +367,14 @@ def emit_array_job_block(
     qsub_argv = build_qsub_command(
         spec,
         paths,
+        hold_jid=hold_jid,
         array_tasks=n_tasks,
         task_concurrency=task_concurrency,
     )
     emit_sge_submission_summary_to_terminal(
         spec,
         paths,
-        hold_jid=None,
+        hold_jid=hold_jid,
         qsub_argv=qsub_argv,
         singularity_cmd=(
             f"[array {n_tasks} tasks: {stage_list}; markers under {marker_dir}]"
@@ -380,10 +386,11 @@ def emit_array_job_block(
     workercmd_var = f"workercmd_{var}"
     qsub_var = f"qsub_{var}"
     qsub_lines = "\n  ".join(_quote_qsub_arg(a) for a in qsub_argv)
+    hold_descr = _hold_jid_repr(hold_jid)
 
     emit.write(
         f"# --- {job_name} (array 1-{n_tasks}; stages: {stage_list}; "
-        f"tc={task_concurrency}) ---\n"
+        f"tc={task_concurrency}; hold: {hold_descr}) ---\n"
         f"mkdir -p {shlex.quote(str(marker_dir))}\n"
         f"read -r -d '' {workercmd_var} << 'ARRAY_WORKER_EOF' || true\n"
         f"{worker}"
@@ -397,6 +404,75 @@ def emit_array_job_block(
         f"\n"
     )
     return f"${jid_var}"
+
+
+def submit_array_job(
+    *,
+    job_name: str,
+    resources: SgeResources,
+    paths: ClusterPaths,
+    tasks: Sequence[ArrayTaskSpec],
+    marker_dir: Path | str,
+    task_concurrency: int = 1,
+    use_nv: bool = True,
+    hold_jid: str | Sequence[str] | None = None,
+    dry_run: bool = False,
+    emit: TextIO | None = None,
+) -> str:
+    """Submit or emit one SGE array job; return jid (or ``$jid_…`` / ``DRY_RUN``)."""
+    if emit is not None:
+        return emit_array_job_block(
+            emit,
+            job_name=job_name,
+            resources=resources,
+            paths=paths,
+            tasks=tasks,
+            marker_dir=marker_dir,
+            task_concurrency=task_concurrency,
+            use_nv=use_nv,
+            hold_jid=hold_jid,
+        )
+
+    if not tasks:
+        raise ValueError("tasks must be non-empty")
+    n_tasks = len(tasks)
+    stage_list = ",".join(t.stage_id for t in tasks)
+    worker = build_array_worker_script(tasks, marker_dir=marker_dir)
+    spec = StageSpec(
+        job_name=job_name,
+        python_cmd="",
+        resources=resources,
+        use_nv=use_nv,
+    )
+    qsub_argv = build_qsub_command(
+        spec,
+        paths,
+        hold_jid=hold_jid,
+        array_tasks=n_tasks,
+        task_concurrency=task_concurrency,
+    )
+    emit_sge_submission_summary_to_terminal(
+        spec,
+        paths,
+        hold_jid=hold_jid,
+        qsub_argv=qsub_argv,
+        singularity_cmd=(
+            f"[array {n_tasks} tasks: {stage_list}; markers under {marker_dir}]"
+        ),
+    )
+    if dry_run:
+        return "DRY_RUN"
+
+    paths.ensure_dirs()
+    Path(marker_dir).mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        qsub_argv,
+        input=worker,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
@@ -765,6 +841,7 @@ __all__ = [
     "build_qsub_command",
     "build_singularity_command",
     "emit_array_job_block",
+    "submit_array_job",
     "python_module_argv",
     "python_script_argv",
     "gui_sge_worker_script_path",

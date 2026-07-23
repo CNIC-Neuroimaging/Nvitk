@@ -46,12 +46,17 @@ _STRV_REF = np.array([0.0, 1.0, 1.0], dtype=np.float64)
 
 # Dual init/fin LOCs at ⅓ and ⅔ arc length (empty: ACAs use junction/CW stations).
 QVTPY_DUAL_LOC_ARTERIAL_IDS: frozenset[int] = frozenset()
-# MCA / PCA: dual init/fin LOCs at bifurcation-based stations (see pick_mca_pca_loc_indices).
+# MCA / PCA: legacy skeleton-bifurcation LOC ids (kept for fallbacks / meta).
 QVTPY_MCA_PCA_BIFURCATION_LOC_IDS: frozenset[int] = frozenset(
     QVTPY_MCA_IDS | QVTPY_PCA_IDS
 )
-# ACA: init proximal to AComm (or CW eICAB mid), fin distal of junction / CW.
+# ACA: AComm / CW fallback when named side branches are absent.
 QVTPY_ACA_JUNCTION_LOC_IDS: frozenset[int] = frozenset(QVTPY_ACA_IDS)
+# MCA / ACA / PCA: dual init/fin from trunk ↔ side-branch intersections
+# (M1/A1/P1 then M2/A2/P2) on named stage-4 centerlines.
+QVTPY_BRANCH_INTERSECTION_LOC_IDS: frozenset[int] = frozenset(
+    QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS
+)
 # L/R ICA + basilar: one LOC each, ideally on a common axial (z) plane at max axial alignment.
 QVTPY_ICA_BASILAR_SINGLE_LOC_IDS: frozenset[int] = frozenset(
     {QVTPY_LICA, QVTPY_RICA, QVTPY_BASILAR}
@@ -254,6 +259,90 @@ def _proximal_neighbor_at_junction(
     return neighbors[int(np.argmin(dists))]
 
 
+def _side_branch_attach_index_on_trunk(
+    trunk: np.ndarray,
+    side: np.ndarray,
+    *,
+    max_dist_vox: float = 3.0,
+) -> int | None:
+    """Trunk polyline index where a side branch meets the main path.
+
+    Stage-4 side branches are oriented **junction → endpoint**, so the first
+    point is preferred; the distal tip is tried only if the junction end is
+    farther than *max_dist_vox* from the trunk.
+    """
+    trunk_pts = to_numpy(trunk).astype(np.float64).reshape(-1, 3)
+    side_pts = to_numpy(side).astype(np.float64).reshape(-1, 3)
+    n = int(trunk_pts.shape[0])
+    if n < 2 or side_pts.shape[0] < 1:
+        return None
+    max_d = float(max_dist_vox)
+
+    def _nearest(xyz: np.ndarray) -> tuple[int, float]:
+        d = np.linalg.norm(trunk_pts - xyz.reshape(1, 3), axis=1)
+        i = int(np.argmin(d))
+        return i, float(d[i])
+
+    i0, d0 = _nearest(side_pts[0])
+    if d0 <= max_d and i0 > 0:
+        return i0
+    if side_pts.shape[0] > 1:
+        i1, d1 = _nearest(side_pts[-1])
+        if d1 <= max_d and i1 > 0:
+            return i1
+    return None
+
+
+def pick_branch_intersection_loc_indices(
+    trunk: np.ndarray,
+    side_branches: list[np.ndarray] | tuple[np.ndarray, ...],
+    *,
+    max_dist_vox: float = 3.0,
+) -> tuple[int, int | None, str]:
+    """Init/fin LOCs from trunk ↔ sub-branch intersection points.
+
+    Intersections are the attach points of named side branches (M2/A2/P2, …)
+    onto the main trunk (M1/A1/P1). Along the trunk (proximal → distal):
+
+    * **init** — arc midpoint between vessel start and the **first** intersection
+    * **fin** — arc midpoint between the first intersection and the **second**
+      (or the vessel end when only one intersection exists)
+
+    Returns ``(init_idx, fin_idx_or_None, method)``.
+    """
+    pts = to_numpy(trunk).astype(np.float64).reshape(-1, 3)
+    n = int(pts.shape[0])
+    if n < 1:
+        return 0, None, "empty_trunk"
+
+    attach_idxs: list[int] = []
+    for side in side_branches:
+        ai = _side_branch_attach_index_on_trunk(
+            pts, side, max_dist_vox=float(max_dist_vox)
+        )
+        if ai is not None:
+            attach_idxs.append(int(ai))
+    attach_idxs = sorted(set(attach_idxs))
+    if not attach_idxs:
+        return pick_index_at_arc_fraction(pts, 0.25), None, "no_branch_intersection"
+
+    j1 = int(attach_idxs[0])
+    j2 = int(attach_idxs[1]) if len(attach_idxs) >= 2 else n - 1
+    if j2 <= j1:
+        j2 = n - 1
+
+    init_idx = pick_index_arc_midpoint_between(pts, 0, j1)
+    fin_idx = pick_index_arc_midpoint_between(pts, j1, j2)
+    if fin_idx <= init_idx:
+        fin_idx = int(np.clip(j1 + 1, 0, n - 1))
+    method = (
+        "branch_intersections"
+        if len(attach_idxs) >= 2
+        else "branch_intersection_to_end"
+    )
+    return init_idx, fin_idx, method
+
+
 def pick_mca_pca_loc_indices(
     points: np.ndarray,
     *,
@@ -261,7 +350,10 @@ def pick_mca_pca_loc_indices(
     label_id: int | None = None,
     junction_max_dist_vox: float = 3.0,
 ) -> tuple[int, int | None]:
-    """Init/fin LOCs for MCA/PCA from skeleton bifurcations.
+    """Init/fin LOCs for MCA/PCA from skeleton bifurcations (legacy fallback).
+
+    Prefer :func:`pick_branch_intersection_loc_indices` when named stage-4
+    side branches are available.
 
   * ≥1 bifurcation — init at arc midpoint start → first bifurcation; fin at arc
     midpoint first bifurcation → distal target on the longest downstream branch
@@ -958,12 +1050,12 @@ def select_arterial_locs(
     LOC policy (``strategy="qvtpy"``):
 
     - ICA / basilar: one shared-z mid LOC on the trunk
-    - MCA / PCA: exactly two LOCs (init/fin) via bifurcation arc midpoints on the trunk
-    - ACA: exactly two LOCs (init/fin) via AComm / CW eICAB stations on the trunk
+    - MCA / ACA / PCA: exactly two LOCs (init/fin) from trunk ↔ side-branch
+      intersections on the named stage-4 centerlines (M1/A1/P1 then M2/A2/P2)
     - Other labels: one mid LOC on the trunk
 
-    Stage-4 named side branches are kept for PITC/PWV (stage 6); they do **not**
-    create extra stage-5 LOCs.
+    Stage-4 named side branches define the intersection stations used for MCA /
+    ACA / PCA LOCs; they do **not** create extra stage-5 LOCs themselves.
     """
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
@@ -972,14 +1064,16 @@ def select_arterial_locs(
     meta_extra: dict[str, Any] = {
         "dual_loc_fallback_vessels": [],
         "loc_boundary_method_dual": "arc_length_tertiles",
-        "loc_boundary_method_mca_pca": "bifurcation_arc_midpoints",
-        "loc_boundary_method_aca": "junction_or_cw_eicab_midpoints",
+        "loc_boundary_method_mca_aca_pca": "trunk_side_branch_intersections",
+        "loc_boundary_method_mca_pca": "trunk_side_branch_intersections",
+        "loc_boundary_method_aca": "trunk_side_branch_intersections",
         "loc_boundary_method_mid": "arc_length_midpoint",
         "arterial_centerline_source": "stage4_seg_branches",
         "loc_per_branch": False,
         "arterial_branch_names": {},
         "arterial_seg_for_bifurcations": arterial_seg is not None,
         "aca_loc_methods": {},
+        "branch_intersection_loc_methods": {},
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
@@ -1031,55 +1125,45 @@ def select_arterial_locs(
             )
             continue
 
-        # MCA / PCA: exactly two LOCs (init/fin) from bifurcation stations.
-        if use_dual and int(vid) in QVTPY_MCA_PCA_BIFURCATION_LOC_IDS:
-            init_idx, fin_idx = pick_mca_pca_loc_indices(
-                trunk,
-                seg=arterial_seg,
-                label_id=int(vid),
-            )
-            out.append(
-                _arterial_loc_at_index(
-                    trunk,
-                    init_idx,
-                    vessel_id=vid,
-                    vessel_name=vname,
-                    segment_id=0,
-                    loc_role="init",
-                    mag=mag,
-                    cd=cd,
-                    vel_mag=vel_mag,
-                    voxel_spacing=voxel_spacing,
-                    radius_vox=radius_vox,
+        # MCA / ACA / PCA: init/fin from trunk ↔ side-branch intersections.
+        if use_dual and int(vid) in QVTPY_BRANCH_INTERSECTION_LOC_IDS:
+            side_pts = [to_numpy(p) for _n, p in branch_list[1:]]
+            init_idx: int
+            fin_idx: int | None
+            method: str
+            if side_pts:
+                init_idx, fin_idx, method = pick_branch_intersection_loc_indices(
+                    trunk, side_pts
                 )
-            )
-            if fin_idx is not None:
-                out.append(
-                    _arterial_loc_at_index(
-                        trunk,
-                        fin_idx,
-                        vessel_id=vid,
-                        vessel_name=vname,
-                        segment_id=1,
-                        loc_role="fin",
-                        mag=mag,
-                        cd=cd,
-                        vel_mag=vel_mag,
-                        voxel_spacing=voxel_spacing,
-                        radius_vox=radius_vox,
-                    )
-                )
-            continue
+            else:
+                method = "no_side_branches"
+                init_idx, fin_idx = 0, None
 
-        # ACA: exactly two LOCs (init/fin) from AComm / CW stations.
-        if use_dual and int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
-            init_idx, fin_idx, aca_method = pick_aca_loc_indices(
-                trunk,
-                label_id=int(vid),
-                eicab_qvtpy=eicab_qvtpy,
-                junction_ijk=aca_junction,
-            )
-            meta_extra["aca_loc_methods"][vname] = aca_method
+            # Fallbacks when named side branches are missing / do not attach.
+            if method in ("no_branch_intersection", "no_side_branches", "empty_trunk"):
+                if int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
+                    init_idx, fin_idx, method = pick_aca_loc_indices(
+                        trunk,
+                        label_id=int(vid),
+                        eicab_qvtpy=eicab_qvtpy,
+                        junction_ijk=aca_junction,
+                    )
+                    method = f"aca_fallback:{method}"
+                else:
+                    init_idx, fin_idx = pick_mca_pca_loc_indices(
+                        trunk,
+                        seg=arterial_seg,
+                        label_id=int(vid),
+                    )
+                    method = (
+                        "skeleton_bifurcation_fallback"
+                        if fin_idx is not None
+                        else "quarter_arc_fallback"
+                    )
+
+            meta_extra["branch_intersection_loc_methods"][vname] = method
+            if int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
+                meta_extra["aca_loc_methods"][vname] = method
             out.append(
                 _arterial_loc_at_index(
                     trunk,
@@ -1181,8 +1265,10 @@ def loc_record_to_dict(rec: LocRecord) -> dict[str, float | int | str]:
 
 __all__ = [
     "LocRecord",
+    "QVTPY_BRANCH_INTERSECTION_LOC_IDS",
     "loc_record_to_dict",
     "pick_aca_loc_indices",
+    "pick_branch_intersection_loc_indices",
     "pick_dual_loc_indices",
     "pick_mca_pca_loc_indices",
     "pick_index_arc_midpoint_between",
