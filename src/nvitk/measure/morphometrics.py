@@ -22,7 +22,7 @@ from nvitk.measure.morpho.preprocess_taubin import (
 )
 from nvitk.measure.morpho.run_case import N_WORKERS, run_case
 from nvitk.measure.morphometrics_config import MorphometricsConfig, default_morphometrics_config
-from nvitk.pipes.qvtpy.util.morpho_topology import build_eicab_topology_mapping
+from nvitk.pipes.qvtpy.util.eicab.morpho_topology import build_eicab_topology_mapping
 
 __all__ = [
     "MorphometricsConfig",

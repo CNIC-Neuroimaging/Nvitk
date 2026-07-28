@@ -263,7 +263,7 @@ def run_case(
     elif mapping_json and os.path.exists(mapping_json):
         resolved_mapping = load_mapping(mapping_json)
     else:
-        from nvitk.pipes.qvtpy.util.morpho_topology import build_eicab_topology_mapping
+        from nvitk.pipes.qvtpy.util.eicab.morpho_topology import build_eicab_topology_mapping
 
         resolved_mapping = build_eicab_topology_mapping()
 

@@ -156,7 +156,7 @@ def build_eicab_postprocess_shell_cmd(
     c_out = f"{binds.output}{rel_out.as_posix()}"
     py_cmd = (
         "from pathlib import Path; "
-        "from nvitk.pipes.qvtpy.util.eicab_postprocess import postprocess_eicab_directory; "
+        "from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory; "
         f"postprocess_eicab_directory(Path({json.dumps(c_out)}))"
     )
     inner = (

@@ -28,7 +28,7 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -36,7 +36,7 @@ from nvitk.pipes.qvtpy.util.sge_backend import (
 )
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.eicab_masks import find_tof_resampled_volume
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import find_tof_resampled_volume
 from nvitk.registration.fsl.flirt import flirt_register_rigid
 
 log = Logger()

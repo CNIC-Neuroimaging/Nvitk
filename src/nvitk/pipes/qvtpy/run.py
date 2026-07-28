@@ -54,12 +54,12 @@ from nvitk.cluster.sge import (
 )
 from nvitk.core.click_backend import backend_click_option, sge_backend_env
 from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_qvtpy_array_resources,
     sge_qvtpy_stage_resources,
     sge_stage_use_nv,
 )
-from nvitk.pipes.qvtpy.util.sge_chunk import (
+from nvitk.pipes.qvtpy.util.io.sge_chunk import (
     count_sge_stages_for_subject,
     count_sge_stages_per_subject,
     filter_subjects_pending_work,
@@ -769,7 +769,7 @@ def _local_stage_pending(
 ) -> bool:
     if not skip_processed:
         return True
-    from nvitk.pipes.qvtpy.util.qc_report import check_subject_stages
+    from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages
 
     checks = check_subject_stages(
         subj,
@@ -1353,7 +1353,7 @@ def main(
 ) -> None:
     Logger()
 
-    from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local, resolve_totalseg_model_dir
+    from nvitk.pipes.qvtpy.util.io.paths import layout_cluster, layout_local, resolve_totalseg_model_dir
 
     local_paths = layout_local(
         dicom_root=cfg.LOCAL_DEFAULT_DICOM_ROOT if dicom_root is None else dicom_root,
@@ -1521,7 +1521,7 @@ def main(
             )
 
             if submit == "sge" and use_xnat and subject_list:
-                from nvitk.pipes.qvtpy.util.cluster_upload import (
+                from nvitk.pipes.qvtpy.util.io.cluster_upload import (
                     prompt_ssh_credentials,
                     stream_subjects_xnat_to_cluster,
                 )
@@ -1797,7 +1797,7 @@ def main(
                     )
 
     if run_s8:
-        from nvitk.pipes.qvtpy.util.xnat_upload import parse_require_stages, run_xnat_upload
+        from nvitk.pipes.qvtpy.util.io.xnat_upload import parse_require_stages, run_xnat_upload
 
         if xnat_conn is None:
             raise click.ClickException("stage8_xnat_upload requires XNAT credentials.")
@@ -1811,7 +1811,7 @@ def main(
         if results_source == "cluster":
             remote_results = cluster_paths.results_root
             if not (ssh_host_resolved and ssh_user and ssh_password):
-                from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+                from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
 
                 ssh_host_resolved, ssh_user, ssh_password = prompt_ssh_credentials(
                     remote_host=remote_host,
@@ -2042,7 +2042,7 @@ def main(
 
     log.reset(restart_progress=False)
     if not (ssh_host_resolved and ssh_user and ssh_password):
-        from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+        from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
 
         ssh_host_resolved, ssh_user, ssh_password = prompt_ssh_credentials(
             remote_host=remote_host,

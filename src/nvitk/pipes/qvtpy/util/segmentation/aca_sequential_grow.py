@@ -1,6 +1,6 @@
 """Sequential ACA region growing and AComm junction overlap correction (qvtpy).
 
-Called from :func:`~nvitk.pipes.qvtpy.util.vessel_cd_segmentation.build_seg_4dflow_local`
+Called from :func:`~nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation.build_seg_4dflow_local`
 when ``aca_sequential_grow`` is enabled: grow present ACA(s) with explore-style
 segmentation/centerline barriers (MCA, ICA, comms, …). When both L/R are present
 and a junction is known, allow overlap only near AComm, plane-split there, then
@@ -31,7 +31,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_RPCOMM,
 )
 from nvitk.morphology import dilate
-from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
+from nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation import (
     AcaSequentialGrowInfo,
     VesselSegStats,
     _RG_EXPLORE_CL_BARRIER_RADIUS,

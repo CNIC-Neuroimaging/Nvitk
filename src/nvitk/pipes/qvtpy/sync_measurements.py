@@ -30,7 +30,7 @@ from nvitk.cluster.remote_transfer import (
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.common.db_publish import publish_stage6, resolve_repo
-from nvitk.pipes.qvtpy.util.paths import CLUSTER_HOST_ALIASES, layout_cluster
+from nvitk.pipes.qvtpy.util.io.paths import CLUSTER_HOST_ALIASES, layout_cluster
 
 log = Logger()
 

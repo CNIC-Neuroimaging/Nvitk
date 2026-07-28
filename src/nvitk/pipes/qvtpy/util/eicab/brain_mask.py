@@ -12,7 +12,7 @@ from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
-from nvitk.pipes.qvtpy.util.paths import resolve_totalseg_model_dir
+from nvitk.pipes.qvtpy.util.io.paths import resolve_totalseg_model_dir
 from nvitk.segmentation.total_segmentator import run_totalsegmentator
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.transform.resampling import resample_to

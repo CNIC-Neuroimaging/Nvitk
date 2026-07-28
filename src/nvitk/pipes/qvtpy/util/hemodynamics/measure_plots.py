@@ -37,7 +37,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID,
     qvtpy_vessel_name,
 )
-from nvitk.pipes.qvtpy.util.vessel_hemodynamics import ROOT_GROUPS
+from nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics import ROOT_GROUPS
 
 
 def _figure_axes(
@@ -565,10 +565,10 @@ def save_pitc_region_masks(
     Each mask keeps the ``seg_4dflow`` labels of the region's root and downstream
     branches, so a reviewer can see exactly which branches fed each PITC fit.
     Isolated islands should already be removed by
-    :func:`~nvitk.pipes.qvtpy.util.mask_cleaning.clean_volume_seg_for_pitc`; this
+    :func:`~nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_volume_seg_for_pitc`; this
     export also keeps the largest component per label as a safety net.
     """
-    from nvitk.pipes.qvtpy.util.mask_cleaning import keep_largest_component_per_label
+    from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import keep_largest_component_per_label
 
     seg = keep_largest_component_per_label(to_numpy(volume_seg).astype(np.int32, copy=False))
     seg = to_numpy(seg).astype(np.int32, copy=False)

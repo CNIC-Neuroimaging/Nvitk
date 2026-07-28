@@ -1566,7 +1566,7 @@ def _run_measure_centerline_arc_length(
 ) -> None:
     from nvitk.gui.viz.centerline import centerline_polyline_for_label
     from nvitk.morphology.polyline_graph import extract_polylines_from_centerline
-    from nvitk.pipes.qvtpy.util.loc_selection import polyline_cumulative_arc_length
+    from nvitk.pipes.qvtpy.util.loc.loc_selection import polyline_cumulative_arc_length
 
     arr = to_numpy(layer.data)
     if arr.ndim != 3:
@@ -1636,7 +1636,7 @@ def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any
     from nvitk.gui.viz.loc_points import load_locs_csv
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
     from nvitk.pipes.qvtpy import config as qcfg
-    from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
+    from nvitk.pipes.qvtpy.util.loc.loc_measure import run_loc_measurements
 
     csv_s = str(params.get("locs_csv") or "").strip()
     subject = str(params.get("subject") or "").strip()
@@ -1775,7 +1775,7 @@ def _prepare_vessel_hemo_for_viz(
 ):
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
     from nvitk.pipes.qvtpy.stage6_measure import _cardiac_frame_duration_s
-    from nvitk.pipes.qvtpy.util.vessel_hemodynamics import compute_vessel_hemodynamics
+    from nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics import compute_vessel_hemodynamics
 
     ap_name = _layer_param(params, "ap_layer")
     rl_name = _layer_param(params, "rl_layer")
@@ -1812,8 +1812,20 @@ def _prepare_vessel_hemo_for_viz(
     n_t = int(ap_data.shape[3]) if getattr(ap_data, "ndim", 0) >= 4 else None
     temporal_resolution = None
     tr_source = "none"
+    # Prefer an explicit frame duration (e.g. stage-6 measure_meta) when provided.
+    tr_override = params.get("temporal_resolution_s")
+    if tr_override is not None and str(tr_override).strip() != "":
+        try:
+            temporal_resolution = float(tr_override)
+            tr_source = "params"
+            gui_log(
+                f"Cardiac frame duration {temporal_resolution * 1e3:.3f} ms "
+                f"(source=params, n_t={n_t})"
+            )
+        except (TypeError, ValueError):
+            temporal_resolution = None
     json_path = str(params.get("heart_rate_json") or "").strip()
-    if json_path:
+    if temporal_resolution is None and json_path:
         from pathlib import Path
         import json as _json
 
@@ -1848,8 +1860,17 @@ def _prepare_vessel_hemo_for_viz(
                 f"(source={tr_source} from AP layer metadata, n_t={n_t})"
             )
 
+    prefer_polylines = params.get("prefer_polylines")
+    if prefer_polylines is not None and not isinstance(prefer_polylines, dict):
+        prefer_polylines = None
+    waveform_centerlines = params.get("waveform_centerlines")
+    if waveform_centerlines is not None and not isinstance(waveform_centerlines, dict):
+        waveform_centerlines = None
+
     hemo = compute_vessel_hemodynamics(
+        waveform_centerlines,
         volume_seg=segmentation,
+        prefer_polylines=prefer_polylines,
         cd=cd,
         mag=mag,
         vel_mag=vel_mag,
@@ -1864,6 +1885,10 @@ def _prepare_vessel_hemo_for_viz(
         quality_metric=str(params.get("quality_metric") or "stdv_from_mean"),
         measure_resegment=bool(params.get("measure_resegment", True)),
         label_constrain=bool(params.get("label_constrain", True)),
+        thr_algorithm=str(params.get("thr_algorithm") or "lsthr"),
+        cross_section_res=int(params.get("cross_section_res") or 0),
+        plane_interp_order=int(params.get("cross_section_plane_interp") or 1),
+        cs_supersampling=bool(params.get("cs_supersampling", False)),
         collect_plot_data=True,
     )
     root_region = str(params.get("root_region") or "All").strip()
@@ -1999,10 +2024,13 @@ def _run_viz_vessel_cross_sections(
     params: dict[str, Any],
 ) -> None:
     from nvitk.gui.viz.vessel_cross_sections import install_vessel_cross_sections
-    from nvitk.pipes.qvtpy.util.centerline_io import (
+    from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
         CENTERLINE_SEG_BRANCHES_JSON,
         load_arterial_branches,
+        load_centerline_meta,
+        load_venous_centerlines,
     )
+    from nvitk.pipes.qvtpy import config as qvt_cfg
 
     cd_name = _layer_param(params, "cd_layer")
     if not cd_name:
@@ -2062,7 +2090,10 @@ def _run_viz_vessel_cross_sections(
 
     # Prefer stage-4 named branches (same geometry as stage 6) when the
     # centerline mask lives next to centerlines_seg_branches.json.
+    # Venous polylines come from stage-3 (not present in seg_4dflow).
     arterial_br = None
+    venous_cls = None
+    venous_labels = None
     cl_src = _layer_source_path(cl_layer)
     stage_dirs: list[Path] = []
     if cl_src is not None:
@@ -2088,6 +2119,31 @@ def _run_viz_vessel_cross_sections(
                 break
             except Exception as exc:
                 gui_log(f"Vessel XS: could not load branches from {stage_dir}: {exc}")
+    for stage_dir in stage_dirs:
+        candidates = [
+            stage_dir,
+            stage_dir.parent / qvt_cfg.STAGE3_CENTERLINE_DIR,
+        ]
+        for s3 in candidates:
+            try:
+                if not (s3 / "centerline_meta.json").is_file():
+                    continue
+                meta3 = load_centerline_meta(s3)
+                venous_cls = load_venous_centerlines(s3, min_points=3, meta=meta3)
+                venous_labels = {
+                    str(k): int(v)
+                    for k, v in (meta3.get("venous_label_by_name") or {}).items()
+                }
+                if venous_cls:
+                    gui_log(
+                        f"Vessel XS: including {len(venous_cls)} venous "
+                        f"centerlines from {s3}."
+                    )
+                break
+            except Exception as exc:
+                gui_log(f"Vessel XS: could not load venous from {s3}: {exc}")
+        if venous_cls:
+            break
 
     app_state = getattr(viewer, "_nvitk_app_state", None)
     if not isinstance(app_state, dict):
@@ -2104,12 +2160,19 @@ def _run_viz_vessel_cross_sections(
         vy=vy,
         vz=vz,
         arterial_branches=arterial_br,
+        venous_centerlines=venous_cls,
+        venous_label_by_name=venous_labels,
     )
-    branch_note = (
-        " (stage-4/6 named branches)"
-        if arterial_br
-        else " (re-extracted from mask)"
-    )
+    if arterial_br:
+        branch_note = " (stage-4/6 named branches"
+        if venous_cls:
+            branch_note += f" + {len(venous_cls)} venous"
+        branch_note += ")"
+    else:
+        branch_note = " (re-extracted from mask"
+        if venous_cls:
+            branch_note += f" + {len(venous_cls)} venous"
+        branch_note += ")"
     notify(
         f"Vessel cross-sections active (centerline: {cl_layer.name}, CD: {intensity_layer.name})"
         f"{branch_note}.\n"

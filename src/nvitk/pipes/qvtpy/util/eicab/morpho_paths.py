@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskResolution, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskResolution, resolve_eicab_mask
 
 EicabMaskPreference = Literal["cw", "wb"]
 

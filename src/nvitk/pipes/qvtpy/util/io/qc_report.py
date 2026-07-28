@@ -36,7 +36,7 @@ from nvitk.pipes.qvtpy.stage0_download import (
     sequence_slot_dir,
 )
 from nvitk.pipes.qvtpy.stage1_eicab import _output_has_segmentation
-from nvitk.pipes.qvtpy.util.morpho_paths import STAGE7_SKIP_MARKER
+from nvitk.pipes.qvtpy.util.eicab.morpho_paths import STAGE7_SKIP_MARKER
 
 _DEFAULT_SUBJECT_PREVIEW = 3
 
@@ -103,7 +103,7 @@ def filter_subjects_with_required_sequences(
     subject_list = sorted({s for s in subjects if s})
 
     if database_root is not None and project_id is not None:
-        from nvitk.pipes.qvtpy.util.db_subject_filter import (
+        from nvitk.pipes.qvtpy.util.io.db_subject_filter import (
             filter_subjects_by_qvtpy_scan_availability,
         )
 

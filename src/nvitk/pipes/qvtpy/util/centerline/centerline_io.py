@@ -40,7 +40,7 @@ from nvitk.pipes.qvtpy.labels import (
     qvtpy_branch_names,
     qvtpy_branch_parent_label,
 )
-from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
+from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import venous_name_to_label_id
 
 setup(globals())
 

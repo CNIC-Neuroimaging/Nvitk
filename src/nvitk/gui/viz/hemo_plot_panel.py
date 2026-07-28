@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -43,6 +44,7 @@ class HemodynamicsPlotPanel(QWidget):
         self._toolbar = None
         self._fig = None
         self._region_plot_data: dict[str, dict[str, Any]] = {}
+        self._saved_plot_paths: dict[str, Any] = {}
         self._station_layer: Any | None = None
         self._auto_limits: tuple[float, float] | None = None
 
@@ -228,9 +230,11 @@ class HemodynamicsPlotPanel(QWidget):
         *,
         mode: str = "hemo",
         initial_plot: str = "pitc",
+        saved_plot_paths: dict[str, Any] | None = None,
     ) -> None:
         """Render a live measurement figure with zoom/pan controls."""
         self._region_plot_data = region_plot_data
+        self._saved_plot_paths = dict(saved_plot_paths or {})
         _ = mode
         idx = self._plot_selector.findData(str(initial_plot))
         self._plot_selector.blockSignals(True)
@@ -238,16 +242,58 @@ class HemodynamicsPlotPanel(QWidget):
         self._plot_selector.blockSignals(False)
         self._render_current_plot()
 
+    def _show_saved_png(self, kind: str, label: str) -> bool:
+        """Display a stage-6 PNG when interactive arrays are unavailable."""
+        path = self._saved_plot_paths.get(str(kind))
+        if path is None or self._fig is None or self._canvas is None:
+            return False
+        try:
+            from matplotlib.image import imread
+            from pathlib import Path
+
+            p = Path(path)
+            if not p.is_file():
+                return False
+            img = imread(str(p))
+            self._fig.clear()
+            ax = self._fig.add_subplot(111)
+            ax.imshow(img)
+            ax.set_axis_off()
+            self._fig.tight_layout()
+            self._title.setText(f"{label}\n(saved stage-6 figure)")
+            if self._toolbar is not None:
+                self._toolbar.update()
+            self._canvas.draw_idle()
+            return True
+        except Exception:
+            return False
+
+    def _has_interactive_arrays(self, kind: str) -> bool:
+        if not self._region_plot_data:
+            return False
+        if kind == "pitc":
+            return any(
+                np.asarray(d.get("distance_mm", [])).size
+                for d in self._region_plot_data.values()
+                if isinstance(d, dict)
+            )
+        # PWV / Bjornfoot need timing (or residual) arrays from the viz bundle.
+        return any(
+            np.asarray(d.get("pwv_distance_mm", [])).size
+            for d in self._region_plot_data.values()
+            if isinstance(d, dict)
+        )
+
     def _render_current_plot(self, _index: int | None = None) -> None:
         """Render the selected PITC, PWV, or Bjornfoot QC figure."""
         kind = self._plot_selector.currentData() or "pitc"
         if kind == "pitc":
-            from nvitk.pipes.qvtpy.util.measure_plots import make_pitc_figure
+            from nvitk.pipes.qvtpy.util.hemodynamics.measure_plots import make_pitc_figure
 
             make_fn = make_pitc_figure
             label = "PITC: quality and pulsatility index vs distance"
         elif kind == "bjornfoot":
-            from nvitk.pipes.qvtpy.util.measure_plots import make_bjornfoot_qc_figure
+            from nvitk.pipes.qvtpy.util.hemodynamics.measure_plots import make_bjornfoot_qc_figure
 
             make_fn = make_bjornfoot_qc_figure
             label = (
@@ -255,21 +301,23 @@ class HemodynamicsPlotPanel(QWidget):
                 "and waveform correlation"
             )
         else:
-            from nvitk.pipes.qvtpy.util.measure_plots import make_pwv_figure
+            from nvitk.pipes.qvtpy.util.hemodynamics.measure_plots import make_pwv_figure
 
             make_fn = make_pwv_figure
             label = "PWV: XCor delay, time-to-upstroke, and weights vs distance"
         self._title.setText(label)
         if self._canvas is None or self._fig is None:
             return
-        # Redraw into the canvas-owned figure so Qt does not resize the dock to
-        # the paper figsize, and so NavigationToolbar zoom/pan stay attached.
-        fig = make_fn(
-            self._region_plot_data,
-            show_legend=bool(self._show_legend.isChecked()),
-            fig=self._fig,
-        )
+        fig = None
+        if self._has_interactive_arrays(str(kind)):
+            fig = make_fn(
+                self._region_plot_data,
+                show_legend=bool(self._show_legend.isChecked()),
+                fig=self._fig,
+            )
         if fig is None:
+            if self._show_saved_png(str(kind), label):
+                return
             self._fig.clear()
             self._title.setText(f"{label}\n(No plot data available.)")
             self._canvas.draw_idle()
@@ -305,10 +353,16 @@ def show_hemodynamics_plot(
     station_layer: Any | None = None,
     default_face_key: str | None = None,
     initial_plot: str = "pitc",
+    saved_plot_paths: dict[str, Any] | None = None,
 ) -> Any:
     """Generate and show the merged PITC/PWV diagnostics dock."""
     panel = HemodynamicsPlotPanel()
-    panel.show_plot(region_plot_data, mode=mode, initial_plot=initial_plot)
+    panel.show_plot(
+        region_plot_data,
+        mode=mode,
+        initial_plot=initial_plot,
+        saved_plot_paths=saved_plot_paths,
+    )
     state = getattr(viewer, "_nvitk_hemo_overlay_state", None)
     layer = station_layer
     face_key = default_face_key

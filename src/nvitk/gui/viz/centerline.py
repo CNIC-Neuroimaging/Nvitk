@@ -9,7 +9,7 @@ import numpy as np
 
 from nvitk.core.array import to_numpy
 from nvitk.morphology.polyline_graph import detect_junctions_from_centerline
-from nvitk.pipes.qvtpy.util.venous_flexion import rasterize_polylines_to_volume, split_polyline_at_indices
+from nvitk.pipes.qvtpy.util.centerline.venous_flexion import rasterize_polylines_to_volume, split_polyline_at_indices
 
 JUNCTION_POINTS_LAYER = "Skeleton junctions"
 JUNCTION_META_KEY = "nvitk_junction_source"

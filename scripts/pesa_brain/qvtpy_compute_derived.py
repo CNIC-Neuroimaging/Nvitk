@@ -50,13 +50,13 @@ from nvitk.io.conversors.phase2volume import (
 from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage0_download import load_subjects
-from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
-from nvitk.pipes.qvtpy.util.paths import (
+from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
+from nvitk.pipes.qvtpy.util.io.paths import (
     CLUSTER_HOST_ALIASES,
     layout_cluster,
     layout_local,
 )
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
     sge_stage_use_nv,

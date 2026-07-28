@@ -31,7 +31,7 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -40,17 +40,17 @@ from nvitk.pipes.qvtpy.util.sge_backend import (
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
-from nvitk.pipes.qvtpy.util.loc_selection import (
+from nvitk.pipes.qvtpy.util.centerline.flow_volume_masks import binary_vessel_segment_cd, venous_search_region
+from nvitk.pipes.qvtpy.util.loc.loc_selection import (
     loc_record_to_dict,
     select_arterial_locs,
     select_venous_locs,
 )
-from nvitk.pipes.qvtpy.util.centerline_io import (
+from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     load_centerline_meta,
     load_centerlines_branches,
 )
-from nvitk.pipes.qvtpy.util.mask_cleaning import clean_venous_slab_mask
+from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import clean_venous_slab_mask
 from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
 
 setup(globals())
@@ -129,7 +129,7 @@ def run_subject(
     del tangent_k_half  # tangents computed inside loc_selection
     # ---- Prerequisites: stage3 centerlines -----------------------------------
     s3 = _stage3_dir(output_root, subject)
-    from nvitk.pipes.qvtpy.util.centerline_io import centerlines_mask_path
+    from nvitk.pipes.qvtpy.util.centerline.centerline_io import centerlines_mask_path
 
     if not centerlines_mask_path(s3).is_file():
         raise FileNotFoundError(f"Missing {centerlines_mask_path(s3)} (run stage3)")

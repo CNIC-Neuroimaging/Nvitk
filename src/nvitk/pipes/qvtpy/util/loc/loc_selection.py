@@ -908,7 +908,7 @@ def select_venous_locs(
     radius_vox: float = 10.0,
 ) -> list[LocRecord]:
     """One LOC per venous vessel (SSSV/STRV/LTSV/RTSV) with geometry validation."""
-    from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
+    from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import venous_name_to_label_id
 
     if not venous_polylines:
         return []

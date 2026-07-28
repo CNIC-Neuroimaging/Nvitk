@@ -59,9 +59,9 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_VENOUS_LABEL_IDS,
     QVTPY_VERTEBRAL_IDS,
 )
-from nvitk.pipes.qvtpy.util.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
+from nvitk.pipes.qvtpy.util.segmentation.vertebral_split import VertebralSplitResult, split_vertebral_from_basilar
 from nvitk.filters.sliding_threshold import binary_mask_sliding_threshold_3d
-from nvitk.pipes.qvtpy.util.mask_cleaning import (
+from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import (
     keep_component_touching_seed_inplace,
     keep_largest_component_label_inplace,
 )
@@ -981,7 +981,7 @@ def expand_distal_mca_aca_pca(
     ``centerlines_mask`` is accepted for API compatibility but unused.
     """
     _ = centerlines_mask
-    from nvitk.pipes.qvtpy.util.distal_vessel_tree import (
+    from nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree import (
         _DISTAL_FRANGI_SIGMAS_DEFAULT,
         cd_vesselness,
         hysteresis_vessel_tree,
@@ -1472,7 +1472,7 @@ def build_seg_4dflow_local(
 
     if region_growing:
         if use_aca_sequential:
-            from nvitk.pipes.qvtpy.util.aca_sequential_grow import _region_grow_acas_sequential
+            from nvitk.pipes.qvtpy.util.segmentation.aca_sequential_grow import _region_grow_acas_sequential
 
             log.step(
                 "region growing: ACA sequential path enabled "

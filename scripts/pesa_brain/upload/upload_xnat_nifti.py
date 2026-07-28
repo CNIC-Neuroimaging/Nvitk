@@ -30,8 +30,8 @@ from nvitk.core.logger import Logger
 from nvitk.db.xnat import _coalesce_attr, classify_scan, connect_xnat, resolve_subject_labels
 from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 from nvitk.db.xnat_upload import resolve_subject_experiment, upload_directory_to_xnat_resource
-from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
-from nvitk.pipes.qvtpy.util.paths import CLUSTER_HOST_ALIASES
+from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
+from nvitk.pipes.qvtpy.util.io.paths import CLUSTER_HOST_ALIASES
 
 log = Logger()
 

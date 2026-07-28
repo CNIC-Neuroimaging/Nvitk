@@ -16,14 +16,14 @@ from nvitk.morphology.centerline_siphon import (
     ica_otsu_mask,
 )
 from nvitk.pipes.qvtpy.labels import EICAB_LICA, EICAB_RICA
-from nvitk.pipes.qvtpy.util.centerline_io import rasterize_centerlines_mask
-from nvitk.pipes.qvtpy.util.eicab_masks import (
+from nvitk.pipes.qvtpy.util.centerline.centerline_io import rasterize_centerlines_mask
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import (
     CENTERLINES_MASK_PP_NIFTI,
     eicab_pp_path,
     find_tof_resampled_volume,
     resolve_eicab_mask,
 )
-from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import _dilated_other_segmentation_barrier
+from nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation import _dilated_other_segmentation_barrier
 from nvitk.segmentation.region_growing import region_grow_into_label_volume
 
 setup(globals())

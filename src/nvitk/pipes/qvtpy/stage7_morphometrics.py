@@ -31,12 +31,12 @@ from nvitk.core.logger import Logger
 from nvitk.measure.morphometrics import run_morphometrics_case
 from nvitk.measure.morphometrics_config import MorphometricsConfig
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.morpho_paths import (
+from nvitk.pipes.qvtpy.util.eicab.morpho_paths import (
     STAGE7_SKIP_MARKER,
     resolve_stage7_seg_mask,
     stage7_dir,
 )
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,

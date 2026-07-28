@@ -3,7 +3,7 @@
 These are processing defaults ported from cow_morpho. Paths (segmentation input,
 output directory, vessel topology) are resolved by the qvtpy stage-7 driver
 (:mod:`nvitk.pipes.qvtpy.stage7_morphometrics`) via
-:mod:`nvitk.pipes.qvtpy.util.morpho_paths` and
+:mod:`nvitk.pipes.qvtpy.util.eicab.morpho_paths` and
 :mod:`nvitk.pipes.qvtpy.config` layout constants — not here.
 """
 

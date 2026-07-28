@@ -32,7 +32,7 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -44,15 +44,15 @@ from nvitk.io.imageio import imread
 from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.measure.cross_section import ThrAlgorithm
-from nvitk.pipes.qvtpy.util.centerline_io import (
+from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     flatten_branches,
     load_arterial_branches,
     load_arterial_centerlines,
     load_centerlines,
 )
-from nvitk.pipes.qvtpy.util.loc_measure import run_loc_measurements
-from nvitk.pipes.qvtpy.util.measure_qc import save_loc_cross_section_qc_png
-from nvitk.pipes.qvtpy.util.vessel_hemodynamics import compute_vessel_hemodynamics
+from nvitk.pipes.qvtpy.util.loc.loc_measure import run_loc_measurements
+from nvitk.pipes.qvtpy.util.hemodynamics.measure_qc import save_loc_cross_section_qc_png
+from nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics import compute_vessel_hemodynamics
 from nvitk.measure.hemodynamics import QUALITY_THRESH_DEFAULT
 from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
@@ -331,7 +331,7 @@ def _run_vessel_hemodynamics(
     try:
         arterial, venous, meta = load_centerlines(s3, min_points=3, stage4_dir=s4)
         prefer_arterial = {int(k): to_numpy(v) for k, v in arterial.items()}
-        from nvitk.pipes.qvtpy.util.venous_heuristics import venous_name_to_label_id
+        from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import venous_name_to_label_id
 
         venous_ids = {
             k: int(v) for k, v in (meta.get("venous_label_by_name") or {}).items()
@@ -364,7 +364,9 @@ def _run_vessel_hemodynamics(
         cross_section_res=int(cross_section_res),
         plane_interp_order=int(cross_section_plane_interp),
         cs_supersampling=bool(cs_supersampling),
-        collect_plot_data=bool(save_plots),
+        # Always collect plot/geometry data so QC can reload pipeline results
+        # without recomputing in the GUI (PNGs remain gated by save_plots).
+        collect_plot_data=True,
     )
 
     with (out_dir / "pitc_profile.csv").open("w", newline="", encoding="utf-8") as fh:
@@ -386,6 +388,16 @@ def _run_vessel_hemodynamics(
         f"{summary['n_regions']} roots -> vessel_hemodynamics.csv"
     )
 
+    try:
+        from nvitk.pipes.qvtpy.util.hemodynamics.hemo_viz_io import write_hemo_viz_bundle
+
+        bundle_path = write_hemo_viz_bundle(out_dir, hemo)
+        if bundle_path is not None:
+            summary["hemo_viz_bundle"] = bundle_path.name
+            log.info(f"[{subject}] stage6: wrote {bundle_path.name} for QC reload")
+    except Exception as exc:  # noqa: BLE001 - bundle is optional for stage success
+        log.warning(f"[{subject}] stage6: failed to write hemo_viz_bundle ({exc})")
+
     if save_plots:
         _save_measurement_plots(
             subject,
@@ -405,7 +417,7 @@ def _save_measurement_plots(
     seg_metadata: dict | None,
 ) -> None:
     """Render PITC/PWV/Bjornfoot-QC/flow figures and per-region PITC masks."""
-    from nvitk.pipes.qvtpy.util.measure_plots import (
+    from nvitk.pipes.qvtpy.util.hemodynamics.measure_plots import (
         plot_bjornfoot_qc_figure,
         plot_flow_waveforms,
         plot_pitc_figure,

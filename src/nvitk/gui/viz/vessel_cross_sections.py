@@ -355,6 +355,41 @@ def centerlines_dict_from_arterial_branches(
     return centerlines, volume_label_by_key, branch_name_by_key
 
 
+def append_venous_centerlines(
+    centerlines: dict[int, np.ndarray],
+    volume_label_by_key: dict[int, int],
+    branch_name_by_key: dict[int, str],
+    venous: dict[str, Any] | None,
+    *,
+    venous_label_by_name: dict[str, int] | None = None,
+    min_points: int = 3,
+) -> int:
+    """Append named venous polylines onto an existing XS centerline map.
+
+    Returns the number of venous vessels added.
+    """
+    if not venous:
+        return 0
+    from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import venous_name_to_label_id
+
+    key = (max(centerlines.keys()) + 1) if centerlines else 1
+    n_added = 0
+    for name in sorted(str(n) for n in venous.keys()):
+        pts = venous.get(name)
+        if pts is None:
+            continue
+        arr = to_numpy(pts).astype(np.float32, copy=False).reshape(-1, 3)
+        if arr.shape[0] < int(min_points):
+            continue
+        lid = int(venous_name_to_label_id(name, venous_label_by_name))
+        centerlines[key] = arr
+        volume_label_by_key[key] = lid
+        branch_name_by_key[key] = str(name)
+        key += 1
+        n_added += 1
+    return n_added
+
+
 def build_centerlines_dict(
     centerline_mask: np.ndarray,
     *,
@@ -621,12 +656,17 @@ def install_vessel_cross_sections(
     vy: np.ndarray | None = None,
     vz: np.ndarray | None = None,
     arterial_branches: dict[int, list[tuple[str, Any]]] | None = None,
+    venous_centerlines: dict[str, Any] | None = None,
+    venous_label_by_name: dict[str, int] | None = None,
 ) -> None:
     """Register Napari layers, dock, and 3D click-to-inspect behavior.
 
     When *arterial_branches* is provided (stage-4/6 ``centerlines_seg_branches``),
     those exact named polylines are used so the overlay coincides with pipeline
     centerlines. Otherwise polylines are re-extracted from *centerline_mask*.
+
+    Optional *venous_centerlines* (stage-3 name → polyline) are always appended
+    when present so venous vessels are pickable alongside arterial branches.
     """
     shutdown_vessel_cross_sections(app_state)
 
@@ -648,6 +688,18 @@ def install_vessel_cross_sections(
         )
         volume_label_by_key = {int(k): int(k) for k in centerlines}
         branch_name_by_key = {int(k): str(k) for k in centerlines}
+    n_venous = append_venous_centerlines(
+        centerlines,
+        volume_label_by_key,
+        branch_name_by_key,
+        venous_centerlines,
+        venous_label_by_name=venous_label_by_name,
+        min_points=3,
+    )
+    if n_venous:
+        # Venous polylines are exact stage-3 geometry — keep display unsmoothed
+        # whenever any stage polylines are present.
+        from_stage_branches = True
     if not centerlines:
         raise ValueError("No centerlines found (check centerline mask labels and min length).")
 
@@ -985,6 +1037,7 @@ __all__ = [
     "XS_SEG",
     "build_centerlines_dict",
     "centerlines_dict_from_arterial_branches",
+    "append_venous_centerlines",
     "install_vessel_cross_sections",
     "shutdown_vessel_cross_sections",
 ]

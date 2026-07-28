@@ -30,7 +30,7 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -45,24 +45,24 @@ from nvitk.pipes.qvtpy.labels import (
     VENOUS_UNKNOWN_LABEL,
     relabel_eicab_mask_to_qvtpy,
 )
-from nvitk.pipes.qvtpy.util.centerline_io import (
+from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     CENTERLINES_MASK_NIFTI,
     arterial_main_paths,
     centerlines_from_segmentation,
 )
-from nvitk.pipes.qvtpy.util.brain_mask import brain_mask_for_reference
-from nvitk.pipes.qvtpy.util.paths import resolve_totalseg_model_dir
-from nvitk.pipes.qvtpy.util.eicab_masks import EicabMaskKind, resolve_eicab_mask
-from nvitk.pipes.qvtpy.util.flow_volume_masks import (
+from nvitk.pipes.qvtpy.util.eicab.brain_mask import brain_mask_for_reference
+from nvitk.pipes.qvtpy.util.io.paths import resolve_totalseg_model_dir
+from nvitk.pipes.qvtpy.util.eicab.eicab_masks import EicabMaskKind, resolve_eicab_mask
+from nvitk.pipes.qvtpy.util.centerline.flow_volume_masks import (
     arterial_exclusion_mask,
     binary_vessel_segment_cd,
     venous_search_region,
 )
-from nvitk.pipes.qvtpy.util.mask_cleaning import (
+from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import (
     clean_multilabel_islands,
     clean_venous_slab_mask,
 )
-from nvitk.pipes.qvtpy.util.venous_heuristics import assign_venous_branches, venous_name_to_label_id
+from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import assign_venous_branches, venous_name_to_label_id
 from nvitk.registration.fsl.flirt import flirt_apply_rigid
 
 setup(globals())

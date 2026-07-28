@@ -46,9 +46,9 @@ from nvitk.segmentation.eicab.cluster import build_eicab_host_shell_cmd, submit_
 from nvitk.segmentation.eicab.runner import run_eicab
 
 from . import config as cfg
-from .util.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
-from .util.eicab_postprocess import postprocess_eicab_directory
-from .util.sge_backend import (
+from .util.eicab.eicab_masks import find_tof_resampled_volume, resolve_eicab_mask
+from .util.eicab.eicab_postprocess import postprocess_eicab_directory
+from .util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -833,7 +833,7 @@ def main(
         return
 
     log.reset(restart_progress=False)
-    from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+    from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
 
     host_resolved, user, password = prompt_ssh_credentials(
         remote_host=remote_host,

@@ -373,7 +373,7 @@ def build_all_label_waveforms(
     """
     from nvitk.morphology.centerline import compute_centerlines
     from nvitk.pipes.qvtpy.labels import QVTPY_VENOUS_LABEL_IDS
-    from nvitk.pipes.qvtpy.util.loc_selection import pick_mid_loc_index
+    from nvitk.pipes.qvtpy.util.loc.loc_selection import pick_mid_loc_index
 
     cls = {int(k): (as_backend_array(v)).astype("float64") for k, v in centerlines.items()}
     present_venous = {
@@ -507,7 +507,7 @@ def compute_vessel_hemodynamics(
     """Compute per-root PITC/PWV and per-branch damping from dense centerline sampling.
 
     Arterial centerlines are regenerated from *volume_seg* with the same logic as
-    stage-4 ``centerlines_mask_4dflow`` (:func:`~nvitk.pipes.qvtpy.util.centerline_io.centerlines_from_segmentation`),
+    stage-4 ``centerlines_mask_4dflow`` (:func:`~nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation`),
     including **all named bifurcation branches** (e.g. ``LMCA-M1``, ``LMCA-M2a``).
     Every named branch is densely sampled into the root PITC/PWV station pool
     (matching stage-4/5 branch coverage). Optional *prefer_polylines* (stage-3
@@ -515,10 +515,10 @@ def compute_vessel_hemodynamics(
     (e.g. venous) are kept for waveform plots only.
     """
     from nvitk.core.array import to_numpy
-    from nvitk.pipes.qvtpy.util.centerline_io import (
+    from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
         centerlines_from_segmentation,
     )
-    from nvitk.pipes.qvtpy.util.mask_cleaning import clean_volume_seg_for_pitc
+    from nvitk.pipes.qvtpy.util.centerline.mask_cleaning import clean_volume_seg_for_pitc
 
     result = VesselHemodynamicsResult()
     extras = {

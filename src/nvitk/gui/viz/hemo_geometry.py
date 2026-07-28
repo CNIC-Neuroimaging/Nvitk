@@ -10,7 +10,7 @@ import numpy as np
 from nvitk.core.array import to_numpy
 from nvitk.gui.core.spatial import layer_affine
 from nvitk.gui.viz.layers import init_points_layer_style, install_points_style_sync
-from nvitk.pipes.qvtpy.util.vessel_hemodynamics import RegionGeometryViz
+from nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics import RegionGeometryViz
 
 HEMO_INIT_LAYER = "PITC/PWV root init"
 HEMO_PATHS_LAYER = "PITC/PWV centerlines"

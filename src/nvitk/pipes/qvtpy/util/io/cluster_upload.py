@@ -19,7 +19,7 @@ from nvitk.cluster.remote_transfer import (
 )
 from nvitk.core.logger import Logger
 from nvitk.db.xnat_config import XnatConnectionConfig
-from nvitk.pipes.qvtpy.util.paths import QvtpyPaths
+from nvitk.pipes.qvtpy.util.io.paths import QvtpyPaths
 
 log = Logger()
 

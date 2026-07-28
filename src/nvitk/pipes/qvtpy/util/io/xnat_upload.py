@@ -30,9 +30,9 @@ from nvitk.pipes.qvtpy.stages import (
     STAGE_SEG_T,
 )
 from nvitk.pipes.qvtpy.stage1_eicab import _output_has_segmentation
-from nvitk.pipes.qvtpy.util.qc_report import check_subject_stages, parse_stages
+from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages, parse_stages
 
-from nvitk.pipes.qvtpy.util.cluster_upload import (
+from nvitk.pipes.qvtpy.util.io.cluster_upload import (
     fetch_subject_results_sftp,
     remote_subject_results_dir,
 )

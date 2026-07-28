@@ -34,7 +34,7 @@ SGE_JOB_PREFIX: str = "QVTPY"
 # Roots (cluster defaults; see util.paths for local vs cluster layout)
 # ---------------------------------------------------------------------------
 
-from nvitk.pipes.qvtpy.util.paths import (  # noqa: E402
+from nvitk.pipes.qvtpy.util.io.paths import (  # noqa: E402
     CLUSTER_HOST_ALIASES,
     DEFAULT_DICOM_ROOT,
     DEFAULT_NIFTI_ROOT,

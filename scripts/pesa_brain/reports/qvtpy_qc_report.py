@@ -44,13 +44,13 @@ from nvitk.pipes.qvtpy.stage0_download import (
     load_subjects,
     resolve_subjects_for_xnat_pipeline,
 )
-from nvitk.pipes.qvtpy.util.paths import (
+from nvitk.pipes.qvtpy.util.io.paths import (
     LOCAL_DEFAULT_DICOM_ROOT,
     LOCAL_DEFAULT_NIFTI_ROOT,
     LOCAL_DEFAULT_RESULTS_ROOT,
     layout_local,
 )
-from nvitk.pipes.qvtpy.util.qc_report import (
+from nvitk.pipes.qvtpy.util.io.qc_report import (
     DEFAULT_STAGES,
     ReportSubjects,
     filter_subjects_with_required_sequences,

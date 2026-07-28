@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             keep_aux_outputs=args.keep_aux_outputs,
         )
         if args.post_process_eicab:
-            from nvitk.pipes.qvtpy.util.eicab_postprocess import postprocess_eicab_directory
+            from nvitk.pipes.qvtpy.util.eicab.eicab_postprocess import postprocess_eicab_directory
 
             postprocess_eicab_directory(args.output)
     except Exception as exc:

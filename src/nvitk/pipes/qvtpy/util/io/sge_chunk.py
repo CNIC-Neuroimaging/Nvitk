@@ -46,7 +46,7 @@ def pending_sge_stage_ids(
     if not skip_processed or not enabled:
         return enabled
 
-    from nvitk.pipes.qvtpy.util.qc_report import check_subject_stages
+    from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages
 
     checks = check_subject_stages(
         subject,

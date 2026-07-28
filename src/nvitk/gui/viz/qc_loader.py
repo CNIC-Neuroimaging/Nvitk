@@ -304,18 +304,36 @@ def load_qvtpy_qc_layers(
 
             # Prefer stage-4 named bifurcation branches so XS polylines coincide
             # with stage 4/6 centerline geometry (not a re-extracted trunk).
+            # Venous polylines come from stage-3 (not in seg_4dflow).
             arterial_br = None
+            venous_cls: dict[str, Any] | None = None
+            venous_labels: dict[str, int] | None = None
             try:
-                from nvitk.pipes.qvtpy.util.centerline_io import (
+                from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
                     CENTERLINE_SEG_BRANCHES_JSON,
                     flatten_branches,
                     load_arterial_branches,
+                    load_venous_centerlines,
+                    load_centerline_meta,
                 )
 
                 if (stage4 / CENTERLINE_SEG_BRANCHES_JSON).is_file():
                     arterial_br = load_arterial_branches(
                         stage4, min_points=3, from_segmentation=True
                     )
+                stage3 = qvt / cfg.STAGE3_CENTERLINE_DIR
+                if stage3.is_dir():
+                    try:
+                        meta3 = load_centerline_meta(stage3)
+                        venous_cls = load_venous_centerlines(
+                            stage3, min_points=3, meta=meta3
+                        )
+                        venous_labels = {
+                            str(k): int(v)
+                            for k, v in (meta3.get("venous_label_by_name") or {}).items()
+                        }
+                    except Exception as ven_exc:
+                        log.warning("QC stage-3 venous load failed: %s", ven_exc)
             except Exception as br_load_exc:
                 log.warning("QC stage-4 branches load failed: %s", br_load_exc)
 
@@ -327,7 +345,8 @@ def load_qvtpy_qc_layers(
                 segmentation=seg_arr,
                 params={
                     "cross_section_radius_vox": 10.0,
-                    "measure_resegment": True,
+                    # QC: show stage-4 seg masks in-plane (no CD resegmentation).
+                    "measure_resegment": False,
                     "thr_algorithm": "otsu",
                     "show_segmentation_3d": True,
                 },
@@ -335,6 +354,8 @@ def load_qvtpy_qc_layers(
                 vy=vy,
                 vz=vz,
                 arterial_branches=arterial_br,
+                venous_centerlines=venous_cls,
+                venous_label_by_name=venous_labels,
             )
             xs_state = app_state.get("vessel_xs") or {}
             panel = xs_state.get("panel")
@@ -344,108 +365,205 @@ def load_qvtpy_qc_layers(
                 lyr = _set_layer_visible(viewer, name, True)
                 if lyr is not None:
                     loaded[name] = lyr
-            # Tip points labeled by branch name for visual QC.
+            # Tip points labeled by branch / venous name for visual QC.
             try:
+                tip_sources: dict[str, Any] = {}
                 if arterial_br:
-                    flat = flatten_branches(arterial_br)
+                    tip_sources.update(flatten_branches(arterial_br))
                     loaded["arterial_branches"] = {
-                        name: pts for name, pts in flat.items()
+                        name: pts for name, pts in tip_sources.items()
                     }
-                    xs_state = app_state.get("vessel_xs") or {}
-                    xs_state["branch_names"] = sorted(flat.keys())
-                    app_state["vessel_xs"] = xs_state
-                    # Polylines are voxel indices — copy the reference layer
-                    # affine/scale so tips land in the same world space as
-                    # seg / CD / LOCs / vessel-XS overlays.
-                    tips = []
-                    tip_names: list[str] = []
-                    for name, pts in sorted(flat.items()):
-                        arr = _to_np(pts)
-                        if arr.ndim == 2 and arr.shape[0] >= 1:
-                            tips.append(arr[-1])
-                            tip_names.append(str(name))
-                    if tips:
-                        from nvitk.gui.core.spatial import layer_affine
+                if venous_cls:
+                    tip_sources.update(venous_cls)
+                    loaded["venous_centerlines"] = dict(venous_cls)
+                xs_state = app_state.get("vessel_xs") or {}
+                xs_state["branch_names"] = sorted(tip_sources.keys())
+                app_state["vessel_xs"] = xs_state
+                # Polylines are voxel indices — copy the reference layer
+                # affine/scale so tips land in the same world space as
+                # seg / CD / LOCs / vessel-XS overlays.
+                tips = []
+                tip_names: list[str] = []
+                for name, pts in sorted(tip_sources.items()):
+                    arr = _to_np(pts)
+                    if arr.ndim == 2 and arr.shape[0] >= 1:
+                        tips.append(arr[-1])
+                        tip_names.append(str(name))
+                if tips:
+                    from nvitk.gui.core.spatial import layer_affine
 
-                        ref = (
-                            loaded.get("seg")
-                            or cl_lyr
-                            or loaded.get("cd")
-                            or (
-                                viewer.layers[-1] if viewer.layers else None
+                    ref = (
+                        loaded.get("seg")
+                        or cl_lyr
+                        or loaded.get("cd")
+                        or (
+                            viewer.layers[-1] if viewer.layers else None
+                        )
+                    )
+                    tip_kwargs: dict[str, Any] = {
+                        "name": "Branch tips (named)",
+                        "size": 2,
+                        "face_color": "#ff0000",
+                        "border_color": "black",
+                        "text": {
+                            "string": "{branch_name}",
+                            "size": 9,
+                            "color": "white",
+                            "anchor": "upper_left",
+                        },
+                        "properties": {"branch_name": tip_names},
+                        "visible": True,
+                    }
+                    if ref is not None:
+                        aff = layer_affine(ref)
+                        if aff is not None:
+                            tip_kwargs["affine"] = aff
+                        elif getattr(ref, "scale", None) is not None:
+                            tip_kwargs["scale"] = tuple(
+                                float(x) for x in ref.scale
                             )
-                        )
-                        tip_kwargs: dict[str, Any] = {
-                            "name": "Branch tips (named)",
-                            "size": 2,
-                            "face_color": "#ff0000",
-                            "border_color": "black",
-                            "text": {
-                                "string": "{branch_name}",
-                                "size": 9,
-                                "color": "white",
-                                "anchor": "upper_left",
-                            },
-                            "properties": {"branch_name": tip_names},
-                            "visible": True,
-                        }
-                        if ref is not None:
-                            aff = layer_affine(ref)
-                            if aff is not None:
-                                tip_kwargs["affine"] = aff
-                            elif getattr(ref, "scale", None) is not None:
-                                tip_kwargs["scale"] = tuple(
-                                    float(x) for x in ref.scale
-                                )
-                        tip_layer = viewer.add_points(
-                            np.asarray(tips, dtype=float),
-                            **tip_kwargs,
-                        )
-                        loaded["branch_tips"] = tip_layer
+                    tip_layer = viewer.add_points(
+                        np.asarray(tips, dtype=float),
+                        **tip_kwargs,
+                    )
+                    loaded["branch_tips"] = tip_layer
             except Exception as br_exc:
                 log.warning("QC branch-name overlay failed: %s", br_exc)
         except Exception as exc:
             log.warning("QC vessel cross-sections failed: %s", exc)
 
-    # --- PITC / PWV overlays + diagnostics (off) ---
+    # --- PITC / PWV overlays + diagnostics ---
+    # Station coloring / PWV tabs need full stage-6-style plot + geometry arrays.
+    # Reported slopes / PWV numbers always come from vessel_hemodynamics.csv.
     stage6 = loaded["stage6_dir"]
-    if isinstance(stage6, Path) and stage6.is_dir() and cl_lyr is not None:
+    if isinstance(stage6, Path) and stage6.is_dir():
         try:
-            from nvitk.gui.tools.runner import _run_viz_vessel_hemo
+            from nvitk.gui.viz.hemo_geometry import add_hemo_geometry_layers
+            from nvitk.gui.viz.hemo_plot_panel import show_hemodynamics_plot
+            from nvitk.pipes.qvtpy.util.hemodynamics.hemo_viz_io import (
+                apply_saved_hemo_summaries,
+                hemo_params_from_measure_meta,
+                load_saved_root_summaries,
+                load_stage6_hemo_for_qc,
+                plot_data_has_interactive_pwv,
+                stage6_saved_plot_paths,
+            )
 
-            hemo_params = {
-                "centerline_layer": cl_lyr.name,
-                "segmentation_layer": seg_lyr.name if seg_lyr is not None else "",
-                "ap_layer": ap_lyr.name if ap_lyr is not None else "",
-                "rl_layer": rl_lyr.name if rl_lyr is not None else "",
-                "fh_layer": fh_lyr.name if fh_lyr is not None else "",
-                "reference_layer": cd_lyr.name if cd_lyr is not None else "",
-                "cross_section_radius_vox": 10.0,
-                "measure_resegment": True,
-                "label_constrain": True,
-                "quality_metric": "stdv_from_mean",
-                "quality_thresh": 2.5,
-                "stride": 1,
-                "root_region": "All",
-                "station_point_size": 2.5,
-            }
-            # Active layer must be the multilabel segmentation for hemodynamics.
-            active = seg_lyr or cd_lyr or cl_lyr
-            _run_viz_vessel_hemo(viewer, active, hemo_params)
-            # Hide hemo overlay layers by default.
-            for lyr in viewer.layers:
-                name = str(lyr.name)
-                if any(
-                    key in name.lower()
-                    for key in (
-                        "pitc",
-                        "pwv",
-                        "root init",
-                        "station",
-                        "hemo",
+            plot_data, regions, pngs = load_stage6_hemo_for_qc(stage6)
+            need_recompute = not regions or not plot_data_has_interactive_pwv(
+                plot_data
+            )
+            if (
+                need_recompute
+                and seg_lyr is not None
+                and ap_lyr is not None
+                and rl_lyr is not None
+                and fh_lyr is not None
+            ):
+                from nvitk.gui.tools.runner import _prepare_vessel_hemo_for_viz
+                from nvitk.pipes.qvtpy.util.centerline.centerline_io import load_centerlines
+
+                hemo_params = hemo_params_from_measure_meta(stage6)
+                hemo_params.update(
+                    {
+                        "centerline_layer": cl_lyr.name if cl_lyr is not None else "",
+                        "segmentation_layer": seg_lyr.name,
+                        "ap_layer": ap_lyr.name,
+                        "rl_layer": rl_lyr.name,
+                        "fh_layer": fh_lyr.name,
+                        "reference_layer": (
+                            cd_lyr.name if cd_lyr is not None else seg_lyr.name
+                        ),
+                    }
+                )
+                # Match stage-6 prefer_polylines / venous waveform seeds.
+                try:
+                    s3 = qvt / cfg.STAGE3_CENTERLINE_DIR
+                    s4 = qvt / cfg.STAGE4_SEG_DIR
+                    arterial, venous, meta = load_centerlines(
+                        s3, min_points=3, stage4_dir=s4
                     )
-                ):
-                    lyr.visible = False
+                    prefer_arterial = {
+                        int(k): to_numpy(v) for k, v in arterial.items()
+                    }
+                    hemo_params["prefer_polylines"] = prefer_arterial or None
+                    from nvitk.pipes.qvtpy.util.centerline.venous_heuristics import (
+                        venous_name_to_label_id,
+                    )
+
+                    venous_ids = {
+                        k: int(v)
+                        for k, v in (meta.get("venous_label_by_name") or {}).items()
+                    }
+                    waveform_cls: dict[int, Any] = {}
+                    for name, poly in venous.items():
+                        lid = venous_name_to_label_id(str(name), venous_ids)
+                        if lid is not None:
+                            waveform_cls[int(lid)] = to_numpy(poly)
+                    if waveform_cls:
+                        hemo_params["waveform_centerlines"] = waveform_cls
+                except Exception as cl_exc:
+                    log.warning(
+                        "QC PITC/PWV: stage3/4 centerlines unavailable (%s)",
+                        cl_exc,
+                    )
+
+                log.info(
+                    "QC PITC/PWV: recomputing station/plot arrays "
+                    "(stage-6 algorithm); slopes/PWV from saved CSV"
+                )
+                hemo, regions, _ref = _prepare_vessel_hemo_for_viz(
+                    viewer, seg_lyr, hemo_params
+                )
+                plot_data = dict(hemo.region_plot_data)
+                summaries = load_saved_root_summaries(stage6)
+                apply_saved_hemo_summaries(
+                    plot_data,
+                    regions,
+                    summaries,
+                    quality_thresh=float(
+                        hemo_params.get("quality_thresh") or 2.5
+                    ),
+                )
+                pngs = stage6_saved_plot_paths(stage6)
+
+            if not plot_data and not pngs and not regions:
+                log.warning(
+                    "QC PITC/PWV: no hemodynamics data available under %s",
+                    stage6,
+                )
+            else:
+                reference_layer = cd_lyr or seg_lyr or cl_lyr
+                if regions:
+                    add_hemo_geometry_layers(
+                        viewer,
+                        regions,
+                        reference_layer=reference_layer,
+                        mode="hemo",
+                        face_key="quality",
+                        point_size=2.5,
+                    )
+                show_hemodynamics_plot(
+                    viewer,
+                    plot_data,
+                    mode="hemo",
+                    initial_plot="pitc",
+                    saved_plot_paths=pngs,
+                )
+                # Hide hemo overlay layers by default.
+                for lyr in viewer.layers:
+                    name = str(lyr.name)
+                    if any(
+                        key in name.lower()
+                        for key in (
+                            "pitc",
+                            "pwv",
+                            "root init",
+                            "station",
+                            "hemo",
+                        )
+                    ):
+                        lyr.visible = False
         except Exception as exc:
             log.warning("QC PITC/PWV overlays failed: %s", exc)
 

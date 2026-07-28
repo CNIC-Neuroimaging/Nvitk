@@ -10,8 +10,8 @@ from nvitk.core.logger import Logger
 from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage0_download import resolve_subjects_for_xnat_pipeline
-from nvitk.pipes.qvtpy.util.paths import layout_cluster, layout_local
-from nvitk.pipes.qvtpy.util.xnat_upload import (
+from nvitk.pipes.qvtpy.util.io.paths import layout_cluster, layout_local
+from nvitk.pipes.qvtpy.util.io.xnat_upload import (
     DEFAULT_XNAT_UPLOAD_STAGES,
     parse_require_stages,
     run_xnat_upload,
@@ -101,7 +101,7 @@ def main(
     remote_results: Path | None = None
     if cluster_mode:
         remote_results = cluster_paths.results_root
-        from nvitk.pipes.qvtpy.util.cluster_upload import prompt_ssh_credentials
+        from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
 
         ssh_host, ssh_user, ssh_password = prompt_ssh_credentials(
             remote_host=remote_host,

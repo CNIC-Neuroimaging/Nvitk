@@ -184,7 +184,7 @@ def resolve_subjects_for_xnat_pipeline(
     """
     from nvitk.db.xnat import list_xnat_project_subject_labels
     from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
-    from nvitk.pipes.qvtpy.util.db_subject_filter import (
+    from nvitk.pipes.qvtpy.util.io.db_subject_filter import (
         filter_subjects_by_qvtpy_scan_availability,
     )
 
@@ -687,7 +687,7 @@ def main(
 ) -> None:
     Logger()
 
-    from nvitk.pipes.qvtpy.util.paths import layout_local
+    from nvitk.pipes.qvtpy.util.io.paths import layout_local
 
     local_paths = layout_local(dicom_root=dicom_root if dicom_root else None)
 

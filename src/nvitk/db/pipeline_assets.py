@@ -17,7 +17,7 @@ from nvitk.core.logger import Logger
 from nvitk.db.storage import utc_now_iso
 from nvitk.pipes.qvtpy import config as qvt_cfg
 from nvitk.pipes.qvtpy.stage1_eicab import _output_has_segmentation
-from nvitk.pipes.qvtpy.util.qc_report import check_subject_stages
+from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages
 
 from .repo import DataRepo
 

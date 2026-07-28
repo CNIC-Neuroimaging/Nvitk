@@ -29,7 +29,7 @@ from nvitk.cluster.sge import (
     submit_stage,
 )
 from nvitk.core.click_backend import backend_click_option
-from nvitk.pipes.qvtpy.util.sge_backend import (
+from nvitk.pipes.qvtpy.util.io.sge_backend import (
     sge_backend_cli_args,
     sge_qvtpy_stage_resources,
     sge_stage_extra_env,
@@ -38,14 +38,14 @@ from nvitk.pipes.qvtpy.util.sge_backend import (
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
-from nvitk.pipes.qvtpy.util.centerline_io import (
+from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
     centerline_meta_path,
     centerlines_mask_path,
     export_centerlines_from_segmentation,
     load_arterial_centerlines,
     load_venous_centerlines,
 )
-from nvitk.pipes.qvtpy.util.vessel_cd_segmentation import (
+from nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation import (
     ThrAlgorithm,
     VESSEL_EXTRA_PADDING,
     _ACA_OVERLAP_MIN_VOXELS_DEFAULT,
