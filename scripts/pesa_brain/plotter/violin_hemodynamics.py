@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""Violin + scatter hemodynamics plots from qvtpy ``image_measurements``.
+
+Builds one figure per metric (flow, PI, RI, PITC slope, PWV Fielding, PWV
+Bjornfoot) with vessels ordered and colored by territory, matching the PESA-Brain
+hemodynamics style. Annotates per-vessel sample size ``n``.
+
+Examples::
+
+    python scripts/pesa_brain/plotter/violin_hemodynamics.py \\
+        --output-path /tmp/hemo_violins
+
+    python scripts/pesa_brain/plotter/violin_hemodynamics.py \\
+        --output-path /tmp/hemo_violins \\
+        --pipeline-version 4dflow_v3 \\
+        --subjects PESA-Brain
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import click
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+from nvitk.core.logger import Logger
+from nvitk.pipes.qvtpy.common.db_publish import (
+    QVTPY_PIPELINE_ALIASES,
+    QVTPY_PIPELINE_ID,
+    resolve_repo,
+)
+from nvitk.pipes.qvtpy.stage0_download import load_subjects
+from nvitk.db.xnat import parse_subject_tokens
+from nvitk.db.xnat_projects import resolve_xnat_project_cohort_token
+
+log = Logger()
+
+# Display order for LOC-level metrics (existing qvtpy vessels only; no C1/C3 split).
+# Territory groups match the attached PESA-Brain figure.
+_VESSEL_SPECS: list[tuple[str, str, str]] = [
+    # (display_label, db_region_id, territory_group)
+    ("TCBF", "TCBF", "TCBF & ICAs"),
+    ("LICA", "LICA", "TCBF & ICAs"),
+    ("RICA", "RICA", "TCBF & ICAs"),
+    ("LMCA", "LMCA", "Anterior Circ."),
+    ("RMCA", "RMCA", "Anterior Circ."),
+    ("LACA", "LACA", "Anterior Circ."),
+    ("RACA", "RACA", "Anterior Circ."),
+    ("BA", "BASILAR", "Posterior Circ."),
+    ("LVA", "LVA", "Posterior Circ."),
+    ("RVA", "RVA", "Posterior Circ."),
+    ("LPCA", "LPCA", "Posterior Circ."),
+    ("RPCA", "RPCA", "Posterior Circ."),
+    ("SSS", "SSSV", "Venous Drainage"),
+    ("STR", "STRV", "Venous Drainage"),
+    ("LTS", "LTSV", "Venous Drainage"),
+    ("RTS", "RTSV", "Venous Drainage"),
+]
+
+_PITC_PWV_SPECS: list[tuple[str, str, str]] = [
+    ("L_ICA", "L_ICA", "TCBF & ICAs"),
+    ("R_ICA", "R_ICA", "TCBF & ICAs"),
+    ("Basilar", "Basilar", "Posterior Circ."),
+]
+
+_TERRITORY_COLORS: dict[str, str] = {
+    "TCBF & ICAs": "#c9a0c9",       # light purple/pink
+    "Anterior Circ.": "#8fbc8f",    # seafoam
+    "Posterior Circ.": "#f0e68c",   # pale yellow
+    "Venous Drainage": "#b8b4d8",   # periwinkle
+}
+
+_METRICS: list[dict[str, Any]] = [
+    {
+        "key": "flow",
+        "variable_id": "flow_mean",
+        "title": "Blood Flow Rates in All Vessel Segments",
+        "ylabel": "Volumetric Flow Rate (mL/min)",
+        "filename": "flow_mean_violin.png",
+        "panel": "A",
+        "kind": "loc",
+        "derive_tcbf": True,
+    },
+    {
+        "key": "pi",
+        "variable_id": "pi",
+        "title": "Pulsatility Index in All Vessel Segments",
+        "ylabel": "Pulsatility Index",
+        "filename": "pi_violin.png",
+        "panel": "B",
+        "kind": "loc",
+        "derive_tcbf": False,
+    },
+    {
+        "key": "ri",
+        "variable_id": "ri",
+        "title": "Resistivity Index in All Vessel Segments",
+        "ylabel": "Resistivity Index",
+        "filename": "ri_violin.png",
+        "panel": "C",
+        "kind": "loc",
+        "derive_tcbf": False,
+    },
+    {
+        "key": "pitc_slope",
+        "variable_id": "pitc_slope",
+        "title": "PITC Slope by Root Territory",
+        "ylabel": "PITC Slope (1/mm)",
+        "filename": "pitc_slope_violin.png",
+        "panel": "D",
+        "kind": "root",
+        "derive_tcbf": False,
+    },
+    {
+        "key": "pwv_f",
+        "variable_id": "pwv_fielding_xcor",
+        "title": "PWV Fielding (XCor) by Root Territory",
+        "ylabel": "PWV Fielding (m/s)",
+        "filename": "pwv_fielding_violin.png",
+        "panel": "E",
+        "kind": "root",
+        "derive_tcbf": False,
+    },
+    {
+        "key": "pwv_b",
+        "variable_id": "pwv",
+        "title": "PWV Bjornfoot by Root Territory",
+        "ylabel": "PWV Bjornfoot (m/s)",
+        "filename": "pwv_bjornfoot_violin.png",
+        "panel": "F",
+        "kind": "root",
+        "derive_tcbf": False,
+    },
+]
+
+
+def _resolve_pipeline_id(pipeline_version: str) -> str:
+    token = str(pipeline_version or "").strip()
+    if not token or token.lower() in {a.lower() for a in QVTPY_PIPELINE_ALIASES}:
+        return QVTPY_PIPELINE_ID
+    return token
+
+
+def _resolve_subjects_filter(subjects: str | None) -> list[str] | None:
+    if subjects is None or not str(subjects).strip():
+        return None
+    tokens = parse_subject_tokens(subjects)
+    if len(tokens) == 1 and resolve_xnat_project_cohort_token(tokens[0]) is not None:
+        return None  # cohort applied via DataRepo.image(..., cohort_id=...)
+    return load_subjects(subjects=subjects, subjects_file=None)
+
+
+def _cohort_id_from_subjects(subjects: str | None) -> str | bool:
+    if subjects is None or not str(subjects).strip():
+        return False
+    tokens = parse_subject_tokens(subjects)
+    if len(tokens) == 1 and resolve_xnat_project_cohort_token(tokens[0]) is not None:
+        return tokens[0].strip()
+    return False
+
+
+def _load_long_measurements(
+    *,
+    pipeline_id: str,
+    variable_ids: list[str],
+    subjects: str | None,
+) -> pd.DataFrame:
+    repo = resolve_repo(prefer_sge=False)
+    cohort = _cohort_id_from_subjects(subjects)
+    subject_filter = _resolve_subjects_filter(subjects)
+    df = repo.image(
+        modality="4dflow",
+        variables=variable_ids,
+        pipeline=pipeline_id,
+        wide=False,
+        cohort_id=cohort,
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if subject_filter is not None:
+        df = df[df["subject_uid"].astype(str).isin(subject_filter)].copy()
+    if "pipeline_id" in df.columns:
+        df = df[df["pipeline_id"].astype(str) == str(pipeline_id)].copy()
+    return df
+
+
+def _derive_tcbf(flow_df: pd.DataFrame) -> pd.DataFrame:
+    """TCBF = LICA + RICA + BASILAR flow_mean per subject."""
+    need = {"LICA", "RICA", "BASILAR"}
+    rows: list[dict[str, Any]] = []
+    for sid, g in flow_df.groupby("subject_uid", dropna=False):
+        by_reg = {
+            str(r): float(v)
+            for r, v in zip(g["region_id"], g["value_num"], strict=False)
+            if pd.notna(v)
+        }
+        if not need.issubset(by_reg):
+            continue
+        rows.append(
+            {
+                "subject_uid": sid,
+                "region_id": "TCBF",
+                "variable_id": "flow_mean",
+                "value_num": by_reg["LICA"] + by_reg["RICA"] + by_reg["BASILAR"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _prepare_plot_frame(
+    long_df: pd.DataFrame,
+    *,
+    variable_id: str,
+    specs: list[tuple[str, str, str]],
+    derive_tcbf: bool,
+) -> pd.DataFrame:
+    sub = long_df[long_df["variable_id"].astype(str) == variable_id].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=["subject_uid", "vessel", "group", "value"])
+
+    if derive_tcbf and variable_id == "flow_mean":
+        tcbf = _derive_tcbf(sub)
+        if not tcbf.empty:
+            sub = pd.concat([sub, tcbf], ignore_index=True)
+
+    region_to_display = {db: disp for disp, db, _g in specs}
+    region_to_group = {db: grp for _d, db, grp in specs}
+    order = [disp for disp, _db, _g in specs]
+
+    sub["region_id"] = sub["region_id"].astype(str)
+    sub = sub[sub["region_id"].isin(region_to_display)].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=["subject_uid", "vessel", "group", "value"])
+
+    out = pd.DataFrame(
+        {
+            "subject_uid": sub["subject_uid"].astype(str),
+            "vessel": sub["region_id"].map(region_to_display),
+            "group": sub["region_id"].map(region_to_group),
+            "value": pd.to_numeric(sub["value_num"], errors="coerce"),
+        }
+    )
+    out = out.dropna(subset=["value", "vessel"])
+    out["vessel"] = pd.Categorical(out["vessel"], categories=order, ordered=True)
+    out = out.sort_values(["vessel", "subject_uid"])
+    return out
+
+
+def _plot_violin_figure(
+    plot_df: pd.DataFrame,
+    *,
+    title: str,
+    ylabel: str,
+    panel: str,
+    output_path: Path,
+) -> Path | None:
+    if plot_df.empty:
+        log.warning("Skipping empty figure: %s", title)
+        return None
+
+    vessels = [v for v in plot_df["vessel"].cat.categories if v in set(plot_df["vessel"])]
+    n_by_vessel = plot_df.groupby("vessel", observed=True)["value"].count().to_dict()
+
+    sns.set_theme(style="whitegrid", font_scale=1.05)
+    fig, ax = plt.subplots(figsize=(max(10.0, 0.7 * len(vessels) + 4.0), 6.5))
+
+    palette = {
+        g: _TERRITORY_COLORS.get(g, "#aaaaaa")
+        for g in plot_df["group"].dropna().unique()
+    }
+
+    sns.violinplot(
+        data=plot_df,
+        x="vessel",
+        y="value",
+        hue="group",
+        order=vessels,
+        hue_order=[g for g in _TERRITORY_COLORS if g in palette],
+        palette=palette,
+        inner=None,
+        cut=0,
+        density_norm="width",
+        linewidth=1.0,
+        alpha=0.75,
+        dodge=False,
+        ax=ax,
+    )
+
+    # White boxplot inside each violin.
+    sns.boxplot(
+        data=plot_df,
+        x="vessel",
+        y="value",
+        order=vessels,
+        width=0.18,
+        showfliers=False,
+        boxprops={"facecolor": "white", "edgecolor": "black", "linewidth": 1.0},
+        medianprops={"color": "black", "linewidth": 1.2},
+        whiskerprops={"color": "black", "linewidth": 1.0},
+        capprops={"color": "black", "linewidth": 1.0},
+        ax=ax,
+    )
+
+    # Individual subject points (scatter).
+    sns.stripplot(
+        data=plot_df,
+        x="vessel",
+        y="value",
+        order=vessels,
+        color="black",
+        size=3.0,
+        alpha=0.55,
+        jitter=0.12,
+        ax=ax,
+        zorder=3,
+    )
+
+    ax.set_title(title, fontsize=16, fontweight="bold", pad=12)
+    ax.set_xlabel("")
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_ylim(bottom=0)
+    ax.tick_params(axis="x", rotation=45, labelsize=10)
+    ax.grid(True, alpha=0.35)
+
+    # Per-vessel N under tick labels.
+    tick_labels = []
+    for v in vessels:
+        n = int(n_by_vessel.get(v, 0) or 0)
+        tick_labels.append(f"{v}\n(n={n})")
+    ax.set_xticklabels(tick_labels)
+
+    # Panel letter (top-right).
+    ax.text(
+        0.98,
+        0.98,
+        str(panel),
+        transform=ax.transAxes,
+        fontsize=18,
+        fontweight="bold",
+        ha="right",
+        va="top",
+    )
+
+    # Territory legend (dedupe seaborn's hue legend).
+    handles, labels = ax.get_legend_handles_labels()
+    seen: set[str] = set()
+    uniq_h, uniq_l = [], []
+    for h, lab in zip(handles, labels, strict=False):
+        if lab in seen or lab not in _TERRITORY_COLORS:
+            continue
+        seen.add(lab)
+        uniq_h.append(h)
+        uniq_l.append(lab)
+    if uniq_h:
+        ax.legend(
+            uniq_h,
+            uniq_l,
+            title="",
+            loc="upper center",
+            frameon=True,
+            fontsize=9,
+        )
+    elif ax.get_legend() is not None:
+        ax.get_legend().remove()
+
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Wrote %s", output_path)
+    return output_path
+
+
+@click.command("violin-hemodynamics")
+@click.option(
+    "--output-path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Directory for output PNG figures.",
+)
+@click.option(
+    "--pipeline-version",
+    default=QVTPY_PIPELINE_ID,
+    show_default=True,
+    help=(
+        "image_measurements pipeline_id (or alias: qvtpy / latest / v3). "
+        f"Default is the current qvtpy id ({QVTPY_PIPELINE_ID})."
+    ),
+)
+@click.option(
+    "--subjects",
+    default=None,
+    help=(
+        "Optional comma/space-separated subject ids, or a cohort alias "
+        "(e.g. PESA-Brain). Omit to use all subjects for the pipeline."
+    ),
+)
+@click.option(
+    "--metrics",
+    default="flow,pi,ri,pitc_slope,pwv_f,pwv_b",
+    show_default=True,
+    help="Comma-separated metric keys to plot.",
+)
+def main(
+    output_path: Path,
+    pipeline_version: str,
+    subjects: str | None,
+    metrics: str,
+) -> None:
+    """Create territory-grouped violin plots for qvtpy hemodynamics."""
+    out_dir = Path(output_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_id = _resolve_pipeline_id(pipeline_version)
+    wanted = {m.strip().lower() for m in metrics.split(",") if m.strip()}
+    specs = [m for m in _METRICS if m["key"] in wanted]
+    if not specs:
+        raise click.UsageError(f"No known metrics in --metrics={metrics!r}")
+
+    variable_ids = sorted({m["variable_id"] for m in specs})
+    log.info(
+        "Loading image_measurements (pipeline=%s, variables=%s)",
+        pipeline_id,
+        ",".join(variable_ids),
+    )
+    long_df = _load_long_measurements(
+        pipeline_id=pipeline_id,
+        variable_ids=variable_ids,
+        subjects=subjects,
+    )
+    if long_df.empty:
+        raise click.ClickException(
+            f"No image_measurements rows for pipeline={pipeline_id!r}. "
+            "Run scripts/pesa_brain/db/sync_db_results.py first."
+        )
+    log.info("Loaded %d measurement row(s)", len(long_df))
+
+    written: list[Path] = []
+    for meta in specs:
+        vessel_specs = _VESSEL_SPECS if meta["kind"] == "loc" else _PITC_PWV_SPECS
+        plot_df = _prepare_plot_frame(
+            long_df,
+            variable_id=meta["variable_id"],
+            specs=vessel_specs,
+            derive_tcbf=bool(meta.get("derive_tcbf")),
+        )
+        path = _plot_violin_figure(
+            plot_df,
+            title=meta["title"],
+            ylabel=meta["ylabel"],
+            panel=meta["panel"],
+            output_path=out_dir / meta["filename"],
+        )
+        if path is not None:
+            written.append(path)
+
+    if not written:
+        raise click.ClickException("No figures were written (empty data for all metrics).")
+    log.info("Wrote %d figure(s) under %s", len(written), out_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -279,35 +279,71 @@ def build_array_worker_script(
     tasks: Sequence[ArrayTaskSpec],
     *,
     marker_dir: Path | str,
+    marker_wait_timeout_sec: int = 1800,
 ) -> str:
     """Bash worker body for ``qsub -t``: dispatch by ``SGE_TASK_ID`` with done-markers.
 
     Task ``k`` waits for ``${JOB_ID}.(k-1).done`` before running (except task 1).
-    A marker is written on any exit so later tasks follow completion semantics
-    matching classic ``-hold_jid`` (not success-gated).
+    With ``-tc 1`` the predecessor has already left the queue when task ``k``
+    starts, so the wait is only for NFS/marker visibility — not the predecessor
+    runtime. An ``EXIT`` trap always writes a marker when possible; ``SIGKILL``
+    (OOM killer) cannot run the trap, so the wait has a hard timeout to avoid
+    sleeping forever with empty logs.
     """
     if not tasks:
         raise ValueError("tasks must be non-empty")
+    timeout = max(60, int(marker_wait_timeout_sec))
     lines: list[str] = [
         "#!/usr/bin/env bash",
         "set -uo pipefail",
         f"MARKER_DIR={shlex.quote(str(marker_dir))}",
+        f"MARKER_WAIT_TIMEOUT={timeout}",
+        "rc=1",
         'mkdir -p "$MARKER_DIR"',
+        "_write_done_marker() {",
+        '  if [[ -n "${JOB_ID:-}" && -n "${SGE_TASK_ID:-}" ]]; then',
+        '    mkdir -p "$MARKER_DIR" 2>/dev/null || true',
+        '    echo "${rc:-1}" > "$MARKER_DIR/${JOB_ID}.${SGE_TASK_ID}.done" || true',
+        "  fi",
+        "}",
+        "trap '_write_done_marker' EXIT",
         'if [[ -z "${SGE_TASK_ID:-}" ]]; then',
         '  echo "SGE_TASK_ID is unset; this script must run as an SGE array task" >&2',
+        "  rc=1",
         "  exit 1",
         "fi",
         'if [[ -z "${JOB_ID:-}" ]]; then',
         '  echo "JOB_ID is unset; this script must run under SGE" >&2',
+        "  rc=1",
         "  exit 1",
         "fi",
         'if [[ "$SGE_TASK_ID" -gt 1 ]]; then',
         '  prev=$((SGE_TASK_ID - 1))',
         '  marker="$MARKER_DIR/${JOB_ID}.${prev}.done"',
+        '  echo "[nvitk|SGE] task $SGE_TASK_ID waiting for predecessor marker $marker '
+        '(timeout=${MARKER_WAIT_TIMEOUT}s)"',
+        "  waited=0",
         '  while [[ ! -f "$marker" ]]; do',
-        '    sleep 15',
+        "    if (( waited >= MARKER_WAIT_TIMEOUT )); then",
+        '      echo "[nvitk|SGE] ERROR: timed out after ${waited}s waiting for $marker" >&2',
+        '      echo "[nvitk|SGE] Predecessor task $prev likely exited without a done-marker '
+        '(SIGKILL/OOM or node failure). Aborting." >&2',
+        "      rc=99",
+        "      exit 99",
+        "    fi",
+        "    sleep 15",
+        "    waited=$((waited + 15))",
+        "    if (( waited % 60 == 0 )); then",
+        '      echo "[nvitk|SGE] still waiting for $marker (${waited}s / '
+        '${MARKER_WAIT_TIMEOUT}s)"',
+        "    fi",
         "  done",
+        '  pred_rc=$(cat "$marker" 2>/dev/null || echo "?")',
+        '  echo "[nvitk|SGE] predecessor task $prev done (marker_rc=$pred_rc); '
+        'starting task $SGE_TASK_ID"',
         "fi",
+        'echo "[nvitk|SGE] running task $SGE_TASK_ID / '
+        f'{len(tasks)}"',
         "case \"$SGE_TASK_ID\" in",
     ]
     for i, task in enumerate(tasks, start=1):
@@ -328,7 +364,7 @@ def build_array_worker_script(
             "    rc=1",
             "    ;;",
             "esac",
-            'echo "$rc" > "$MARKER_DIR/${JOB_ID}.${SGE_TASK_ID}.done"',
+            'echo "[nvitk|SGE] task $SGE_TASK_ID finished rc=$rc"',
             "exit \"$rc\"",
             "",
         ]

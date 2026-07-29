@@ -108,12 +108,18 @@ def _arm_length_from_junction(
     """Steps from *junction* along *first* until the next endpoint/junction."""
     prev, cur = junction, first
     length = 1
+    seen = {junction, first}
     while True:
         nbrs = [m for m in _neighbors26(cur) if m in node_set and m != prev]
         deg = sum(1 for m in _neighbors26(cur) if m in node_set)
         if deg != 2 or not nbrs:
             return length
-        prev, cur = cur, nbrs[0]
+        nxt = nbrs[0]
+        if nxt in seen:
+            # Deg-2 cycle (tiny skeleton loop): treat as arm end.
+            return length
+        seen.add(nxt)
+        prev, cur = cur, nxt
         length += 1
 
 
@@ -376,6 +382,7 @@ def _chains_from_specials(
         for n0 in adj.get(start, []):
             path: list[tuple[int, int, int]] = [start, n0]
             prev, cur = start, n0
+            seen_walk = {start, n0}
             while cur not in special_set:
                 nbrs = [x for x in adj.get(cur, []) if x != prev]
                 if not nbrs:
@@ -387,7 +394,11 @@ def _chains_from_specials(
                         nbrs,
                         key=lambda n: _arm_length_from_junction(cur, n, node_set),
                     )
+                if nxt in seen_walk:
+                    # Residual skeleton cycle without a special; stop the walk.
+                    break
                 path.append(nxt)
+                seen_walk.add(nxt)
                 prev, cur = cur, nxt
 
             key = _chain_key(path[0], path[-1])

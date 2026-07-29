@@ -23,6 +23,7 @@ from typing import Callable, Optional, TypeVar, Union
 T = TypeVar("T")
 
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.progress import Progress, TaskID
 
 from nvitk.core.patterns import Singleton
@@ -168,6 +169,8 @@ class Logger(metaclass=Singleton):
 
         # Internal log buffer.
         self._log_buffer: list[str] = []
+        self._replaced_stream_handler: logging.StreamHandler | None = None
+        self._rich_handler: RichHandler | None = None
 
         self._show_debug_locals = False
         self.set_level(level)
@@ -372,12 +375,42 @@ class Logger(metaclass=Singleton):
                     record.msg = f"{record.msg} | LOCALS={caller_locals}"
             return True
 
+    def _swap_to_rich_handler(self) -> None:
+        """Replace the stderr StreamHandler with a RichHandler sharing the progress console."""
+        for h in list(self._logger.handlers):
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, (logging.FileHandler, RichHandler)):
+                self._logger.removeHandler(h)
+                self._replaced_stream_handler = h
+                break
+
+        rh = RichHandler(
+            console=self._base_console,
+            show_time=True,
+            show_level=True,
+            show_path=False,
+            markup=False,
+            rich_tracebacks=False,
+        )
+        rh.setLevel(self._logger.level)
+        self._rich_handler = rh
+        self._logger.addHandler(rh)
+
+    def _swap_to_stream_handler(self) -> None:
+        """Restore the original stderr StreamHandler after progress ends."""
+        if self._rich_handler:
+            self._logger.removeHandler(self._rich_handler)
+            self._rich_handler = None
+        if self._replaced_stream_handler:
+            self._logger.addHandler(self._replaced_stream_handler)
+            self._replaced_stream_handler = None
+
     def ensure_progress(self) -> None:
         """Start Rich :class:`~rich.progress.Progress` if not already running (terminal only)."""
         if self._progress is not None or in_notebook():
             return
         self._progress = Progress(console=self._base_console, transient=False)
         self._progress.start()
+        self._swap_to_rich_handler()
 
     def stop_progress(self) -> None:
         """Stop and clear the Rich progress display (no-op in notebooks)."""
@@ -385,6 +418,7 @@ class Logger(metaclass=Singleton):
             return
         self._progress.stop()
         self._progress = None
+        self._swap_to_stream_handler()
 
     def step(self, msg: str, *args, **kwargs) -> None:
         """Emit an indented INFO line for a sub-step within a pipeline stage."""
@@ -413,6 +447,7 @@ class Logger(metaclass=Singleton):
             else:
                 self._progress = Progress(console=self._base_console, transient=False)
                 self._progress.start()
+                self._swap_to_rich_handler()
         task_id = self._progress.add_task(
             description,
             total=total,
@@ -499,11 +534,13 @@ class Logger(metaclass=Singleton):
         """
         if self._progress:
             self._progress.stop()
+            self._swap_to_stream_handler()
         self._log_buffer.clear()
         self.remove_file_handlers()
         if not in_notebook() and restart_progress:
             self._progress = Progress(console=self._base_console, transient=False)
             self._progress.start()
+            self._swap_to_rich_handler()
 
     def __repr__(self) -> str:
         """``Logger(name=..., level=..., file_handlers=...)``."""
