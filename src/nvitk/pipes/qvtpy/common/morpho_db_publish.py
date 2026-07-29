@@ -3,11 +3,14 @@
 Long-form rows are upserted under pipeline ``tof_morpho_v1``. Per-vessel scalar
 summaries are aggregated from the ``00_Path_Summary`` sheet of
 ``case_metrics_donut_tree.xlsx``.
+
+When ``stenosis_percent_max`` / length totals are absent (older Excel exports),
+values are recovered from ``*_segments_detail_json``.
 """
 
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 from typing import Any
 
@@ -27,13 +30,22 @@ TOF_MORPHO_PIPELINE_NAME = "TOF Morphometrics"
 TOF_MORPHO_MODALITY = "tof"
 TOF_MORPHO_PIPELINE_ALIASES = ("tof_morpho", "morpho", "tof_morpho_v1")
 
+# variable_id -> unit
 _SCALAR_VARS: dict[str, str] = {
     "length_mm": "mm",
     "radius_mean_mm": "mm",
     "radius_max_mm": "mm",
     "tortuosity_dm": "dimensionless",
+    "curvature_mean_1_per_mm": "1/mm",
+    "curvature_p95_1_per_mm": "1/mm",
     "stenosis_percent_max": "%",
+    "stenosis_segments_n": "count",
+    "stenosis_length_total_mm": "mm",
+    "radius_min_stenotic_mm": "mm",
     "enlargement_percent_max": "%",
+    "enlargement_segments_n": "count",
+    "enlargement_length_total_mm": "mm",
+    "radius_max_enlarged_mm": "mm",
 }
 
 
@@ -90,33 +102,127 @@ def _measurement_row(
     }
 
 
+def _parse_segment_details(raw: Any) -> list[dict[str, Any]]:
+    if raw is None or (isinstance(raw, float) and not np.isfinite(raw)):
+        return []
+    if isinstance(raw, list):
+        return [d for d in raw if isinstance(d, dict)]
+    text = str(raw).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return []
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [d for d in data if isinstance(d, dict)]
+    return []
+
+
+def _segment_degree_max(raw: Any) -> float | None:
+    degrees = [
+        float(d["degree_pct"])
+        for d in _parse_segment_details(raw)
+        if d.get("degree_pct") is not None and np.isfinite(float(d["degree_pct"]))
+    ]
+    return float(max(degrees)) if degrees else None
+
+
+def _segment_length_sum(raw: Any) -> float | None:
+    lengths = [
+        float(d["length_mm"])
+        for d in _parse_segment_details(raw)
+        if d.get("length_mm") is not None and np.isfinite(float(d["length_mm"]))
+    ]
+    return float(sum(lengths)) if lengths else None
+
+
+def _enrich_path_summary_from_segment_json(path_df: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing stenosis/enlargement scalars from segment detail JSON."""
+    df = path_df.copy()
+
+    if "stenosis_segments_detail_json" in df.columns:
+        if "stenosis_percent_max" not in df.columns:
+            df["stenosis_percent_max"] = np.nan
+        if "stenosis_length_total_mm" not in df.columns:
+            df["stenosis_length_total_mm"] = np.nan
+        for idx in df.index:
+            if not np.isfinite(pd.to_numeric(df.at[idx, "stenosis_percent_max"], errors="coerce")):
+                deg = _segment_degree_max(df.at[idx, "stenosis_segments_detail_json"])
+                if deg is not None:
+                    df.at[idx, "stenosis_percent_max"] = deg
+            if not np.isfinite(pd.to_numeric(df.at[idx, "stenosis_length_total_mm"], errors="coerce")):
+                length = _segment_length_sum(df.at[idx, "stenosis_segments_detail_json"])
+                if length is not None:
+                    df.at[idx, "stenosis_length_total_mm"] = length
+
+    if "enlargement_segments_detail_json" in df.columns:
+        if "enlargement_percent_max" not in df.columns:
+            df["enlargement_percent_max"] = np.nan
+        if "enlargement_length_total_mm" not in df.columns:
+            df["enlargement_length_total_mm"] = np.nan
+        for idx in df.index:
+            if not np.isfinite(pd.to_numeric(df.at[idx, "enlargement_percent_max"], errors="coerce")):
+                deg = _segment_degree_max(df.at[idx, "enlargement_segments_detail_json"])
+                if deg is not None:
+                    df.at[idx, "enlargement_percent_max"] = deg
+            if not np.isfinite(pd.to_numeric(df.at[idx, "enlargement_length_total_mm"], errors="coerce")):
+                length = _segment_length_sum(df.at[idx, "enlargement_segments_detail_json"])
+                if length is not None:
+                    df.at[idx, "enlargement_length_total_mm"] = length
+
+    return df
+
+
 def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
     if path_df.empty or "vessel_name" not in path_df.columns:
         return pd.DataFrame()
+
+    path_df = _enrich_path_summary_from_segment_json(path_df)
 
     rows: list[dict[str, Any]] = []
     for vessel, group in path_df.groupby("vessel_name", dropna=True):
         region = str(vessel).strip()
         if not region:
             continue
-        lengths = pd.to_numeric(group.get("length_mm"), errors="coerce")
+
+        def _col(col: str) -> pd.Series:
+            if col not in group.columns:
+                return pd.Series(np.nan, index=group.index, dtype=float)
+            return pd.to_numeric(group[col], errors="coerce")
+
+        lengths = _col("length_mm")
         valid = lengths.notna() & np.isfinite(lengths) & (lengths > 0)
         if not valid.any():
             continue
 
         def _wmean(col: str) -> float | None:
-            vals = pd.to_numeric(group.get(col), errors="coerce")
+            vals = _col(col)
             good = valid & vals.notna() & np.isfinite(vals)
             if not good.any():
                 return None
             return float(np.average(vals[good], weights=lengths[good]))
 
         def _max(col: str) -> float | None:
-            vals = pd.to_numeric(group.get(col), errors="coerce")
+            vals = _col(col)
             good = vals.notna() & np.isfinite(vals)
             if not good.any():
                 return None
             return float(vals[good].max())
+
+        def _min(col: str) -> float | None:
+            vals = _col(col)
+            good = vals.notna() & np.isfinite(vals)
+            if not good.any():
+                return None
+            return float(vals[good].min())
+
+        def _sum(col: str) -> float | None:
+            vals = _col(col)
+            good = vals.notna() & np.isfinite(vals)
+            if not good.any():
+                return None
+            return float(vals[good].sum())
 
         radius_max = _max("radius_p95_mm")
         if radius_max is None:
@@ -128,8 +234,16 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             "radius_mean_mm": _wmean("radius_mean_mm"),
             "radius_max_mm": radius_max,
             "tortuosity_dm": _wmean("tortuosity_dm"),
+            "curvature_mean_1_per_mm": _wmean("curvature_mean_1_per_mm"),
+            "curvature_p95_1_per_mm": _wmean("curvature_p95_1_per_mm"),
             "stenosis_percent_max": _max("stenosis_percent_max"),
+            "stenosis_segments_n": _sum("stenosis_segments_n"),
+            "stenosis_length_total_mm": _sum("stenosis_length_total_mm"),
+            "radius_min_stenotic_mm": _min("radius_min_stenotic_mm"),
             "enlargement_percent_max": _max("enlargement_percent_max"),
+            "enlargement_segments_n": _sum("enlargement_segments_n"),
+            "enlargement_length_total_mm": _sum("enlargement_length_total_mm"),
+            "radius_max_enlarged_mm": _max("radius_max_enlarged_mm"),
         }
         rows.append(row)
     return pd.DataFrame(rows)

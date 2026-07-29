@@ -113,6 +113,38 @@ def _finite(value: Any) -> float | None:
     return float(v)
 
 
+def _select_init_loc_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep one LOC row per ``vessel_name``: prefer ``init`` / ``segment_id==0``.
+
+    Stage 5 writes ACA/MCA/PCA as init then fin under the same vessel name.
+    Older CSVs without ``loc_role`` keep the first row per vessel (init order).
+    """
+    if df.empty or "vessel_name" not in df.columns:
+        return df
+    has_role = "loc_role" in df.columns
+    has_seg = "segment_id" in df.columns
+    keep_idx: list[Any] = []
+    for _name, group in df.groupby("vessel_name", sort=False, dropna=False):
+        if len(group) == 1:
+            keep_idx.append(group.index[0])
+            continue
+        chosen_idx = None
+        if has_role:
+            roles = group["loc_role"].astype(str).str.strip().str.lower()
+            init_mask = roles == "init"
+            if init_mask.any():
+                chosen_idx = group.index[init_mask][0]
+        if chosen_idx is None and has_seg:
+            segs = pd.to_numeric(group["segment_id"], errors="coerce")
+            zero_mask = segs == 0
+            if zero_mask.any():
+                chosen_idx = group.index[zero_mask][0]
+        if chosen_idx is None:
+            chosen_idx = group.index[0]
+        keep_idx.append(chosen_idx)
+    return df.loc[keep_idx].reset_index(drop=True)
+
+
 def _rows_from_loc_measurements(
     subject_uid: str, loc_csv: Path, updated_at: str
 ) -> list[dict[str, Any]]:
@@ -121,6 +153,7 @@ def _rows_from_loc_measurements(
     df = pd.read_csv(loc_csv)
     if df.empty:
         return []
+    df = _select_init_loc_rows(df)
     flow_cols = sorted(
         (c for c in df.columns if str(c).startswith("loc_flow_ml_s_t")),
         key=lambda c: int(str(c).rsplit("_t", 1)[1]),

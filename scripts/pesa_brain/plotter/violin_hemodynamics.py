@@ -23,6 +23,7 @@ from typing import Any
 
 import click
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -244,9 +245,31 @@ def _prepare_plot_frame(
         }
     )
     out = out.dropna(subset=["value", "vessel"])
+    n_before = len(out)
+    out = out[out["value"] != 0].copy()
+    n_zeros = n_before - len(out)
+    if n_zeros:
+        log.info(
+            "Dropped %d zero placeholder value(s) for variable=%s",
+            n_zeros,
+            variable_id,
+        )
     out["vessel"] = pd.Categorical(out["vessel"], categories=order, ordered=True)
     out = out.sort_values(["vessel", "subject_uid"])
     return out
+
+
+def _flag_outliers_iqr(df: pd.DataFrame, *, k: float = 1.5) -> pd.Series:
+    """Return boolean mask of IQR outliers, computed per vessel."""
+    is_outlier = pd.Series(False, index=df.index)
+    for vessel, grp in df.groupby("vessel", observed=True):
+        q1 = grp["value"].quantile(0.25)
+        q3 = grp["value"].quantile(0.75)
+        iqr = q3 - q1
+        lo, hi = q1 - k * iqr, q3 + k * iqr
+        mask = (grp["value"] < lo) | (grp["value"] > hi)
+        is_outlier.loc[mask[mask].index] = True
+    return is_outlier
 
 
 def _plot_violin_figure(
@@ -256,10 +279,22 @@ def _plot_violin_figure(
     ylabel: str,
     panel: str,
     output_path: Path,
+    outlier_rem: bool = False,
+    outlier_high: bool = False,
 ) -> Path | None:
     if plot_df.empty:
         log.warning("Skipping empty figure: %s", title)
         return None
+
+    outlier_mask = _flag_outliers_iqr(plot_df)
+    outlier_df = plot_df[outlier_mask].copy() if outlier_high else pd.DataFrame()
+
+    if outlier_rem:
+        n_before = len(plot_df)
+        plot_df = plot_df[~outlier_mask].copy()
+        n_removed = n_before - len(plot_df)
+        if n_removed:
+            log.info("  outlier-rem: removed %d/%d points for %s", n_removed, n_before, title)
 
     vessels = [v for v in plot_df["vessel"].cat.categories if v in set(plot_df["vessel"])]
     n_by_vessel = plot_df.groupby("vessel", observed=True)["value"].count().to_dict()
@@ -312,16 +347,37 @@ def _plot_violin_figure(
         order=vessels,
         color="black",
         size=3.0,
-        alpha=0.55,
+        alpha=0.25,
         jitter=0.12,
         ax=ax,
         zorder=3,
     )
 
+    if outlier_high and not outlier_df.empty:
+        vessel_to_x = {v: i for i, v in enumerate(vessels)}
+        for _, row in outlier_df.iterrows():
+            xi = vessel_to_x.get(row["vessel"])
+            if xi is None:
+                continue
+            ax.scatter(
+                [xi], [row["value"]],
+                marker="D", s=40, facecolors="none", edgecolors="red",
+                linewidths=1.5, zorder=5,
+            )
+            ax.annotate(
+                str(row["subject_uid"]),
+                xy=(xi, row["value"]),
+                xytext=(6, 4),
+                textcoords="offset points",
+                fontsize=5.5,
+                color="red",
+                alpha=0.85,
+            )
+
     ax.set_title(title, fontsize=16, fontweight="bold", pad=12)
     ax.set_xlabel("")
     ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_ylim(bottom=0)
+    ax.set_ylim(bottom=-50 if 'Flow' in title else 0)
     ax.tick_params(axis="x", rotation=45, labelsize=10)
     ax.grid(True, alpha=0.35)
 
@@ -404,11 +460,25 @@ def _plot_violin_figure(
     show_default=True,
     help="Comma-separated metric keys to plot.",
 )
+@click.option(
+    "--outlier-rem/--no-outlier-rem",
+    is_flag=True,
+    default=True,
+    help="Remove IQR outliers per vessel before plotting.",
+)
+@click.option(
+    "--outlier-high/--no-outlier-high",
+    is_flag=True,
+    default=False,
+    help="Highlight IQR outliers with subject uid labels.",
+)
 def main(
     output_path: Path,
     pipeline_version: str,
     subjects: str | None,
     metrics: str,
+    outlier_rem: bool,
+    outlier_high: bool,
 ) -> None:
     """Create territory-grouped violin plots for qvtpy hemodynamics."""
     out_dir = Path(output_path)
@@ -452,6 +522,8 @@ def main(
             ylabel=meta["ylabel"],
             panel=meta["panel"],
             output_path=out_dir / meta["filename"],
+            outlier_rem=outlier_rem,
+            outlier_high=outlier_high,
         )
         if path is not None:
             written.append(path)

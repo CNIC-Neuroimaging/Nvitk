@@ -30,6 +30,7 @@ from nvitk.cluster.remote_transfer import (
 from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.common.db_publish import publish_stage6, resolve_repo
+from nvitk.pipes.qvtpy.util.eicab.morpho_paths import STAGE7_SKIP_MARKER
 from nvitk.pipes.qvtpy.util.io.paths import CLUSTER_HOST_ALIASES, layout_cluster
 
 log = Logger()
@@ -38,10 +39,15 @@ _STAGE6_FILES: tuple[str, ...] = (
     "loc_measurements.csv",
     "vessel_hemodynamics.csv",
 )
+_STAGE7_FILES: tuple[str, ...] = (STAGE7_SKIP_MARKER,)
 
 
 def _stage6_dir(output_root: Path, subject: str) -> Path:
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR
+
+
+def _stage7_dir(output_root: Path, subject: str) -> Path:
+    return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE7_MORPHOMETRICS_DIR
 
 
 def _subjects_with_stage6(output_root: Path) -> list[str]:
@@ -55,6 +61,20 @@ def _subjects_with_stage6(output_root: Path) -> list[str]:
         ).is_file():
             out.append(subj_dir.name)
     return out
+
+
+def _subjects_with_stage7(output_root: Path) -> list[str]:
+    if not output_root.is_dir():
+        return []
+    out: list[str] = []
+    for subj_dir in sorted(p for p in output_root.iterdir() if p.is_dir()):
+        if (_stage7_dir(output_root, subj_dir.name) / STAGE7_SKIP_MARKER).is_file():
+            out.append(subj_dir.name)
+    return out
+
+
+def _subjects_with_stage6_or_stage7(output_root: Path) -> list[str]:
+    return sorted(set(_subjects_with_stage6(output_root)) | set(_subjects_with_stage7(output_root)))
 
 
 def _resolve_ssh_credentials(
@@ -108,6 +128,57 @@ def _download_stage6_from_sge(
                 ready.append(subject)
             else:
                 log.warning("[%s] no stage6 measurement files on cluster", subject)
+    return ready
+
+
+def _download_stage6_and_stage7_from_sge(
+    *,
+    subjects: list[str],
+    cluster_results_root: Path,
+    local_temp_root: Path,
+    host: str,
+    user: str,
+    password: str,
+) -> list[str]:
+    """SFTP stage-6 CSVs and stage-7 Excel into ``local_temp_root``."""
+    ready: list[str] = []
+    with sftp_session(host=host, user=user, password=password) as (_client, sftp):
+        for subject in subjects:
+            got_any = False
+            remote_s6 = _stage6_dir(cluster_results_root, subject)
+            local_s6 = _stage6_dir(local_temp_root, subject)
+            local_s6.mkdir(parents=True, exist_ok=True)
+            for name in _STAGE6_FILES:
+                remote_s = str(remote_s6 / name)
+                if not remote_path_exists(sftp, remote_s):
+                    continue
+                local_path = local_s6 / name
+                try:
+                    download_remote_file(sftp, remote_s, local_path)
+                    got_any = True
+                    log.info("Downloaded %s -> %s", remote_s, local_path)
+                except OSError as exc:
+                    log.warning("[%s] download failed for %s: %s", subject, name, exc)
+
+            remote_s7 = _stage7_dir(cluster_results_root, subject)
+            local_s7 = _stage7_dir(local_temp_root, subject)
+            local_s7.mkdir(parents=True, exist_ok=True)
+            for name in _STAGE7_FILES:
+                remote_s = str(remote_s7 / name)
+                if not remote_path_exists(sftp, remote_s):
+                    continue
+                local_path = local_s7 / name
+                try:
+                    download_remote_file(sftp, remote_s, local_path)
+                    got_any = True
+                    log.info("Downloaded %s -> %s", remote_s, local_path)
+                except OSError as exc:
+                    log.warning("[%s] download failed for %s: %s", subject, name, exc)
+
+            if got_any:
+                ready.append(subject)
+            else:
+                log.warning("[%s] no stage6/stage7 measurement files on cluster", subject)
     return ready
 
 

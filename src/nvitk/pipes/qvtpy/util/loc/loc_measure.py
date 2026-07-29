@@ -87,9 +87,18 @@ def measure_loc_row(
     flow_2d = flow_ts.reshape(1, -1)
     nt = int(vx.shape[3])
 
+    loc_role = str(row.get("loc_role") or "").strip()
+    seg_raw = row.get("segment_id")
+    try:
+        segment_id: int | str = int(seg_raw) if seg_raw not in (None, "") else ""
+    except (TypeError, ValueError):
+        segment_id = str(seg_raw) if seg_raw is not None else ""
+
     rec: dict[str, float | int | str] = {
         "vessel_id": vid,
         "vessel_name": vname,
+        "segment_id": segment_id,
+        "loc_role": loc_role,
         "loc_cross_section_radius_vox": float(cross_section_radius_vox),
         "loc_cross_section_area_mm2": float(area_mm2),
         "loc_mean_velocity_mm_s": float(mean_velocity_mm_s(vel_ts)),

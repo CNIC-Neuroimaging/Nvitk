@@ -79,6 +79,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "run, use the diagnostics dock to switch plots (PITC / PWV / Bjornfoot), color "
         "stations by feature, choose colormap / contrast caps, and toggle the legend."
     ),
+    "viz_tof_morphometrics": (
+        "Load qvtpy stage-7 morphometrics centerline VTPs for debugging. Set stage7_dir "
+        "to <subject>/qvtpy/stage7_morphometrics. Color samples by radius, stenosis, or "
+        "curvature; a left dock shows Path Summary scalars when available."
+    ),
     "export_view_png": (
         "Save the Napari 3D render window as PNG (same camera and orientation as on screen)."
     ),

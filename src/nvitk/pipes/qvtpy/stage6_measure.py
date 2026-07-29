@@ -518,6 +518,8 @@ def run_subject(
     fieldnames = [
         "vessel_id",
         "vessel_name",
+        "segment_id",
+        "loc_role",
         "loc_cross_section_radius_vox",
         "loc_cross_section_area_mm2",
         "loc_mean_velocity_mm_s",

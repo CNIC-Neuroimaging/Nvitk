@@ -567,6 +567,29 @@ def load_qvtpy_qc_layers(
         except Exception as exc:
             log.warning("QC PITC/PWV overlays failed: %s", exc)
 
+    # --- Stage-7 morphometrics centerlines (optional) ---
+    stage7 = qvt / cfg.STAGE7_MORPHOMETRICS_DIR
+    if (stage7 / "centerlines").is_dir():
+        try:
+            from nvitk.gui.viz.morpho_viz import install_morphometrics_viz
+
+            ref = loaded.get("cd") or loaded.get("seg") or loaded.get("centerlines")
+            info = install_morphometrics_viz(
+                viewer,
+                stage7,
+                reference_layer=ref,
+                color_by="radius",
+            )
+            loaded["stage7_dir"] = stage7
+            loaded["morpho"] = info
+            # Hide by default so QC stays focused on hemodynamics.
+            for lyr in viewer.layers:
+                name = str(lyr.name)
+                if name.startswith("Morpho"):
+                    lyr.visible = False
+        except Exception as exc:
+            log.warning("QC morphometrics overlays failed: %s", exc)
+
     return loaded
 
 

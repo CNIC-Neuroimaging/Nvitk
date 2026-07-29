@@ -160,6 +160,52 @@ def try_publish_qvtpy_qc_reviews(**kwargs: Any) -> dict[str, int] | None:
         return None
 
 
+def subject_qc_status_summary(
+    repo: DataRepo | None = None,
+    *,
+    pipeline_id: str = QVTPY_PIPELINE_ID,
+) -> dict[str, str]:
+    """Per-subject revision status from ``image_measurements.qc_status``.
+
+    Returns a dict mapping ``subject_uid`` to one of:
+    - ``"revised"``  — every QC-relevant row for the subject has OK or FAIL.
+    - ``"partial"``  — some rows are reviewed, others still PENDING / blank.
+    - ``"pending"``  — no rows have been reviewed yet (all PENDING or no rows).
+    """
+    repo = resolve_repo(repo)
+    if not repo.catalog.table_exists("image_measurements"):
+        return {}
+    try:
+        df = repo.get(
+            "image_measurements",
+            cohort_id=False,
+            columns=["subject_uid", "pipeline_id", "variable_id", "qc_status"],
+        )
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+    df = df[df["pipeline_id"].astype(str) == str(pipeline_id)]
+    qc_vars = set()
+    for vars_ in QC_METRIC_VARIABLES.values():
+        qc_vars.update(vars_)
+    if qc_vars:
+        df = df[df["variable_id"].astype(str).isin(qc_vars)]
+    if df.empty:
+        return {}
+    out: dict[str, str] = {}
+    for subj, grp in df.groupby("subject_uid"):
+        statuses = grp["qc_status"].astype(str).str.strip().str.upper()
+        reviewed = statuses.isin({"OK", "FAIL"})
+        if reviewed.all():
+            out[str(subj)] = "revised"
+        elif reviewed.any():
+            out[str(subj)] = "partial"
+        else:
+            out[str(subj)] = "pending"
+    return out
+
+
 __all__ = [
     "QC_METRIC_VARIABLES",
     "QC_STATUS_VALUES",
@@ -167,5 +213,6 @@ __all__ = [
     "TableMissingError",
     "normalize_qc_status",
     "publish_qvtpy_qc_reviews",
+    "subject_qc_status_summary",
     "try_publish_qvtpy_qc_reviews",
 ]

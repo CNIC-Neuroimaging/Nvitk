@@ -281,6 +281,10 @@ def run_gui_tool(
         _run_viz_vessel_hemo(viewer, layer, params)
         return None
 
+    if tool_id == "viz_tof_morphometrics":
+        _run_viz_tof_morphometrics(viewer, layer, params)
+        return None
+
     if tool_id == "measure_generate_suv":
         from nvitk.measure.suv import suv_image
 
@@ -1937,6 +1941,36 @@ def _run_viz_vessel_hemo(viewer: Any, layer: Any, params: dict[str, Any]) -> Non
 # Backwards-compatible aliases (QC loader / older call sites).
 _run_viz_pitc = _run_viz_vessel_hemo
 _run_viz_pwv = _run_viz_vessel_hemo
+
+
+def _run_viz_tof_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Load stage-7 morphometrics centerline VTPs for debugging."""
+    from nvitk.gui.viz.morpho_viz import install_morphometrics_viz
+
+    stage7 = str(params.get("stage7_dir") or "").strip()
+    if not stage7:
+        raise ValueError(
+            "Set stage7_dir to the subject stage-7 folder "
+            "(…/<subject>/qvtpy/stage7_morphometrics)."
+        )
+    stage7_path = Path(stage7)
+    if not stage7_path.is_dir():
+        raise FileNotFoundError(f"stage7_dir not found: {stage7_path}")
+
+    ref_name = str(params.get("reference_layer") or "").strip()
+    ref_layer = _resolve_layer(viewer, ref_name) if ref_name else layer
+    info = install_morphometrics_viz(
+        viewer,
+        stage7_path,
+        reference_layer=ref_layer,
+        color_by=str(params.get("color_by") or "radius"),
+        point_size=float(params.get("point_size") or 2.0),
+        edge_width=float(params.get("edge_width") or 0.35),
+    )
+    notify(
+        f"TOF morphometrics: loaded {info['n_paths']} centerline path(s) "
+        f"(color_by={info['color_by']}) from {stage7_path}."
+    )
 
 
 def _run_intensity_similarity(

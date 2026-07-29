@@ -640,6 +640,41 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "viz_tof_morphometrics",
+        "Visualization",
+        "TOF morphometrics (stage7)",
+        (
+            ParamSpec(
+                "stage7_dir",
+                "Stage-7 morphometrics directory",
+                "str",
+                "",
+            ),
+            ParamSpec(
+                "reference_layer",
+                "Reference image layer (affine)",
+                "layer",
+                "",
+            ),
+            ParamSpec(
+                "color_by",
+                "Color samples by",
+                "choice",
+                "radius",
+                choices=("radius", "stenosis", "curvature"),
+            ),
+            ParamSpec("point_size", "Sample point size", "float", 2.0, min=0.1, max=50.0),
+            ParamSpec("edge_width", "Centerline width", "float", 0.35, min=0.05, max=5.0),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Load stage-7 centerline VTPs from qvtpy/stage7_morphometrics/centerlines/. "
+            "Paths are drawn as polylines; samples are colored by radius, stenosis, or "
+            "curvature. Set stage7_dir to the subject stage7 folder."
+        ),
+    ),
+    GuiToolSpec(
         "export_view_png",
         "Visualization",
         "Export 3D view (PNG)",
@@ -1077,6 +1112,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_vessel_hemo",
     "viz_pitc",
     "viz_pwv",
+    "viz_tof_morphometrics",
     "seg_totalsegmentator",
     "seg_eicab",
     "seg_split_lr_cc",

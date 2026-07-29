@@ -1370,11 +1370,15 @@ class DataRepo:
         """
         Append *df* to the existing table and drop duplicates on *key_columns* (default: manifest keys).
 
+        Always reads the current Parquet (not SQLite) so sequential upserts without an
+        intervening index rebuild do not drop recently written rows.
+
         Returns the combined frame after :meth:`write_table`.
         """
         definition = self.catalog.get_table(table)
         df = self._enforce_measurement_columns(table, df)
-        existing = self.get(table, cohort_id=False)
+        # SQLite may lag Parquet when build_sqlite_index=False between upserts.
+        existing = self.get(table, cohort_id=False, use_sqlite=False)
         combined = pd.concat([existing, df], ignore_index=True)
         combined = self._enforce_measurement_columns(table, combined)
         keys = key_columns or list(definition.key_columns)

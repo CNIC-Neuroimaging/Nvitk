@@ -45,6 +45,7 @@ from nvitk.gui.viz.qc_loader import (
     load_eicab_qc_layers,
     load_qvtpy_qc_layers,
 )
+from nvitk.db.qvtpy_qc import subject_qc_status_summary
 from nvitk.gui.viz.qc_review_panel import show_qc_measurements
 from nvitk.pipes.qvtpy import config as qvt_cfg
 
@@ -232,6 +233,7 @@ class QcPanel(QWidget):
 
         self._subjects = QListWidget()
         self._all_subjects: list[dict[str, Any]] = []
+        self._qc_statuses: dict[str, str] = {}  # subject_uid → revised/partial/pending
 
         self._btn_refresh = QPushButton("Refresh subjects")
         self._btn_load = QPushButton("Load")
@@ -384,7 +386,15 @@ class QcPanel(QWidget):
         )
         return resource_label_to_asset_slot(label)
 
+    def _refresh_qc_statuses(self) -> None:
+        """Query the DB for per-subject QC revision status."""
+        try:
+            self._qc_statuses = subject_qc_status_summary(repo=self._repo)
+        except Exception:
+            self._qc_statuses = {}
+
     def _reload_subjects(self) -> None:
+        self._refresh_qc_statuses()
         if self._is_xnat():
             self._reload_xnat_subjects()
         else:
@@ -508,6 +518,15 @@ class QcPanel(QWidget):
         )
         self._filter_subjects()
 
+    _QC_TAG: dict[str, str] = {
+        "revised": "  ✓ revised",
+        "partial": "  ◑ partial",
+    }
+    _QC_COLOR: dict[str, str] = {
+        "revised": "#4caf50",
+        "partial": "#ff9800",
+    }
+
     def _filter_subjects(self) -> None:
         needle = self._subject_search.text().strip().lower()
         self._subjects.clear()
@@ -521,8 +540,17 @@ class QcPanel(QWidget):
                     label = f"{subj}  [results]"
                 elif row.get("nifti_path"):
                     label = f"{subj}  [nifti only]"
+            qc = self._qc_statuses.get(subj, "")
+            tag = self._QC_TAG.get(qc, "")
+            if tag:
+                label = f"{label}{tag}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, row)
+            color = self._QC_COLOR.get(qc)
+            if color:
+                from qtpy.QtGui import QColor
+
+                item.setForeground(QColor(color))
             self._subjects.addItem(item)
         self._btn_load.setEnabled(False)
 
@@ -661,6 +689,7 @@ class QcPanel(QWidget):
                         self._viewer,
                         subject_uid=subject_uid,
                         stage6_dir=stage6,
+                        on_revised=self._on_subject_revised,
                     )
                 notify(f"QC loaded qvtpy subject {subject_uid}.")
             else:
@@ -674,6 +703,11 @@ class QcPanel(QWidget):
         except Exception as exc:
             self._status.setText(str(exc))
             notify(f"QC load failed while opening layers: {exc}", error=True)
+
+    def _on_subject_revised(self) -> None:
+        """Refresh QC status tags after a subject is marked as revised."""
+        self._refresh_qc_statuses()
+        self._filter_subjects()
 
     def _on_load_failed(self, message: str) -> None:
         self._status.setText(message)

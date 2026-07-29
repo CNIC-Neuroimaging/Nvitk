@@ -377,8 +377,9 @@ def show_qc_measurements(
     *,
     subject_uid: str,
     stage6_dir: Path,
+    on_revised: Callable[[], None] | None = None,
 ) -> QcMeasurementsPanel:
-    panel = QcMeasurementsPanel()
+    panel = QcMeasurementsPanel(on_revised=on_revised)
     attach_qc_measurements_dock(viewer, panel)
     n = panel.load_from_stage6(subject_uid, stage6_dir)
     if n == 0:
