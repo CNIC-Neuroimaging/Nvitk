@@ -52,9 +52,13 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
     "restoration": [
         ToolEntry("", "nvitk.restoration.bilateral", label="bilateral 2d/3d", supports_gpu=True, library_only=True),
         ToolEntry("", "nvitk.restoration.n4_bias", label="N4 bias field correction (ANTs)", library_only=True),
+        ToolEntry("", "nvitk.restoration.mri_super_resolution", label="MRI super-resolution (ANTsPyNet)", library_only=True),
     ],
     "segmentation": [
         ToolEntry("", "nvitk.segmentation.mouse_brain", label="mouse brain extraction/parcellation (ANTsPyNet)", library_only=True),
+        ToolEntry("", "nvitk.segmentation.brain_extraction", label="multi-modal brain extraction (ANTsPyNet)", library_only=True),
+        ToolEntry("", "nvitk.segmentation.mra_vessel", label="MRA-TOF vessel segmentation (ANTsPyNet)", library_only=True),
+        ToolEntry("", "nvitk.segmentation.dkt", label="Desikan-Killiany-Tourville parcellation (ANTsPyNet)", library_only=True),
         ToolEntry("", "nvitk.segmentation.blood_flood", label="blood flood / distal vessel expand", library_only=True),
     ],
     "measure": [

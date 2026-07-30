@@ -8,6 +8,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "ANTs N4 bias-field correction on the active intensity volume. "
         "Optional mask layer restricts the bias estimate."
     ),
+    "mri_super_resolution": (
+        "ANTsPyNet MRI super-resolution on the active volume. "
+        "Use integer expansion factors only (default 1,1,2 for thick-slice). "
+        "Supported: 1,1,2 | 1,1,3 | 1,1,4 | 1,1,6 | 2,2,2 | 2,2,4; feature vgg or grader."
+    ),
     "sliding_threshold": "Adaptive threshold along one axis (useful for uneven intensity).",
     "dilate": "Expand foreground voxels by a spherical footprint.",
     "erode": "Shrink foreground voxels by a spherical footprint.",
@@ -56,6 +61,18 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_mouse_brain": (
         "ANTsPyNet mouse brain extraction (mask) or regional parcellation on the "
         "active MRI volume. For parcellation, optionally supply a brain mask layer."
+    ),
+    "seg_brain_extraction": (
+        "ANTsPyNet multi-modal brain extraction on the active MRI volume. "
+        "For modalities like t1t2infant, set a second modality layer."
+    ),
+    "seg_mra_vessel": (
+        "ANTsPyNet MRA-TOF vessel segmentation (probability map) on the active "
+        "volume. Leave mask at (none) to auto-extract a brain mask, or supply a "
+        "binary brain mask layer (any positive foreground is binarized)."
+    ),
+    "seg_dkt": (
+        "ANTsPyNet Desikan-Killiany-Tourville cortical parcellation on a T1w volume."
     ),
     "measure_centerline_arc_length": (
         "Report centerline polyline arc length in voxels and mm (debug)."

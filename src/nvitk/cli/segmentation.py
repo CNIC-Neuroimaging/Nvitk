@@ -1,4 +1,4 @@
-"""``nvitk-seg`` CLI — segmentation tools (mouse brain, blood flood)."""
+"""``nvitk-seg`` CLI — segmentation tools (ANTsPyNet + blood flood)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,13 @@ from nvitk.segmentation.blood_flood import (
     TREE_VESSELNESS_KEEP_PERCENTILE_DEFAULT,
     blood_flood,
 )
+from nvitk.segmentation.brain_extraction import (
+    BRAIN_EXTRACTION_MODALITIES,
+    brain_extraction,
+)
+from nvitk.segmentation.dkt import desikan_killiany_tourville_labeling
 from nvitk.segmentation.mouse_brain import mouse_brain_segmentation
+from nvitk.segmentation.mra_vessel import mra_vessel_segmentation
 
 log = Logger()
 
@@ -115,6 +121,210 @@ def cmd_mouse_brain(
             "mode": mode.lower(),
             "modality": modality.lower(),
             "which_parcellation": which_parcellation,
+            "verbose": verbose,
+        },
+    )
+
+
+def _brain_extraction_runner(
+    image,
+    mask=None,
+    *,
+    modality: str,
+    image2_path: str | None,
+    verbose: bool,
+):
+    _ = mask
+    if image2_path:
+        image2 = imread(image2_path)
+        return brain_extraction([image, image2], modality=modality, verbose=verbose)
+    return brain_extraction(image, modality=modality, verbose=verbose)
+
+
+@main.command("brain-extraction")
+@io_options
+@backend_option(False)
+@submit_options
+@click.option(
+    "--modality",
+    type=click.Choice(list(BRAIN_EXTRACTION_MODALITIES), case_sensitive=False),
+    default="t1",
+    show_default=True,
+    help="ANTsPyNet brain_extraction modality.",
+)
+@click.option(
+    "--image2",
+    "image2_path",
+    type=click.Path(path_type=Path, exists=True),
+    default=None,
+    help="Optional second modality volume (e.g. T2 for t1t2infant).",
+)
+@click.option("--verbose", is_flag=True, default=False)
+def cmd_brain_extraction(
+    input_path: Path,
+    output_path: Path,
+    backend: str,
+    submit: str,
+    emit_script: Path | None,
+    direct_submit: bool,
+    no_remote: bool,
+    dry_run: bool,
+    modality: str,
+    image2_path: Path | None,
+    verbose: bool,
+) -> None:
+    """Multi-modal brain extraction (ANTsPyNet)."""
+    if image2_path is not None and submit.lower() != "local":
+        raise click.ClickException("--image2 currently requires --submit local.")
+    dispatch_tool(
+        tool="seg",
+        subcommand="brain-extraction",
+        module_file="segmentation.py",
+        input_path=input_path,
+        output_path=output_path,
+        submit=submit,
+        backend=backend,
+        mask_path=None,
+        emit_script=emit_script,
+        direct_submit=direct_submit,
+        no_remote=no_remote,
+        dry_run=dry_run,
+        runner=_brain_extraction_runner,
+        runner_kwargs={
+            "modality": modality.lower(),
+            "image2_path": str(image2_path) if image2_path else None,
+            "verbose": verbose,
+        },
+    )
+
+
+def _mra_runner(
+    image,
+    mask=None,
+    *,
+    prediction_batch_size: int,
+    patch_stride_length: int,
+    verbose: bool,
+):
+    return mra_vessel_segmentation(
+        image,
+        mask=mask,
+        prediction_batch_size=prediction_batch_size,
+        patch_stride_length=patch_stride_length,
+        verbose=verbose,
+    )
+
+
+@main.command("mra-vessel")
+@io_options
+@mask_option
+@backend_option(False)
+@submit_options
+@click.option("--prediction-batch-size", type=int, default=16, show_default=True)
+@click.option("--patch-stride-length", type=int, default=32, show_default=True)
+@click.option("--verbose", is_flag=True, default=False)
+def cmd_mra_vessel(
+    input_path: Path,
+    output_path: Path,
+    mask_path: Path | None,
+    backend: str,
+    submit: str,
+    emit_script: Path | None,
+    direct_submit: bool,
+    no_remote: bool,
+    dry_run: bool,
+    prediction_batch_size: int,
+    patch_stride_length: int,
+    verbose: bool,
+) -> None:
+    """MRA-TOF vessel segmentation (ANTsPyNet probability map)."""
+    dispatch_tool(
+        tool="seg",
+        subcommand="mra-vessel",
+        module_file="segmentation.py",
+        input_path=input_path,
+        output_path=output_path,
+        submit=submit,
+        backend=backend,
+        mask_path=mask_path,
+        emit_script=emit_script,
+        direct_submit=direct_submit,
+        no_remote=no_remote,
+        dry_run=dry_run,
+        runner=_mra_runner,
+        runner_kwargs={
+            "prediction_batch_size": prediction_batch_size,
+            "patch_stride_length": patch_stride_length,
+            "verbose": verbose,
+        },
+    )
+
+
+def _dkt_runner(
+    image,
+    mask=None,
+    *,
+    do_preprocessing: bool,
+    do_lobar_parcellation: bool,
+    do_denoising: bool,
+    version: int,
+    verbose: bool,
+):
+    _ = mask
+    return desikan_killiany_tourville_labeling(
+        image,
+        do_preprocessing=do_preprocessing,
+        do_lobar_parcellation=do_lobar_parcellation,
+        do_denoising=do_denoising,
+        version=version,
+        verbose=verbose,
+    )
+
+
+@main.command("dkt")
+@io_options
+@backend_option(False)
+@submit_options
+@click.option("--preprocessing/--no-preprocessing", default=True, show_default=True)
+@click.option("--lobar/--no-lobar", "do_lobar_parcellation", default=False, show_default=True)
+@click.option("--denoising/--no-denoising", default=True, show_default=True)
+@click.option("--version", type=int, default=0, show_default=True)
+@click.option("--verbose", is_flag=True, default=False)
+def cmd_dkt(
+    input_path: Path,
+    output_path: Path,
+    backend: str,
+    submit: str,
+    emit_script: Path | None,
+    direct_submit: bool,
+    no_remote: bool,
+    dry_run: bool,
+    preprocessing: bool,
+    do_lobar_parcellation: bool,
+    denoising: bool,
+    version: int,
+    verbose: bool,
+) -> None:
+    """Desikan-Killiany-Tourville cortical parcellation (ANTsPyNet)."""
+    dispatch_tool(
+        tool="seg",
+        subcommand="dkt",
+        module_file="segmentation.py",
+        input_path=input_path,
+        output_path=output_path,
+        submit=submit,
+        backend=backend,
+        mask_path=None,
+        emit_script=emit_script,
+        direct_submit=direct_submit,
+        no_remote=no_remote,
+        dry_run=dry_run,
+        runner=_dkt_runner,
+        runner_kwargs={
+            "do_preprocessing": preprocessing,
+            "do_lobar_parcellation": do_lobar_parcellation,
+            "do_denoising": denoising,
+            "version": version,
             "verbose": verbose,
         },
     )

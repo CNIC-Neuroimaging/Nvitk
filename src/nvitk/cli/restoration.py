@@ -1,4 +1,4 @@
-"""``nvitk-restore`` CLI — restoration tools (bilateral, N4 bias correction)."""
+"""``nvitk-restore`` CLI — restoration tools (bilateral, N4, MRI super-resolution)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from nvitk.restoration import (
     bilateral_2d,
     bilateral_3d,
     estimate_bilateral_parameters,
+    mri_super_resolution,
     n4_bias_field_correction,
 )
 
@@ -149,6 +150,82 @@ def cmd_n4(
             "shrink_factor": shrink_factor,
             "spline_param": spline_param,
             "rescale_intensities": rescale_intensities,
+            "verbose": verbose,
+        },
+    )
+
+
+def _parse_expansion(text: str) -> tuple[int, ...]:
+    parts = [p.strip() for p in str(text).replace(";", ",").split(",") if p.strip()]
+    if len(parts) == 1:
+        v = int(round(float(parts[0])))
+        return (v, v, v)
+    if len(parts) != 3:
+        raise click.ClickException(
+            "--expansion-factor must be one value or three comma-separated integers "
+            "(e.g. 1,1,2)."
+        )
+    return tuple(int(round(float(p))) for p in parts)
+
+
+def _mri_sr_runner(image, *, expansion_factor: tuple[int, ...], feature: str, verbose: bool):
+    return mri_super_resolution(
+        image,
+        expansion_factor=expansion_factor,
+        feature=feature,
+        verbose=bool(verbose),
+    )
+
+
+@main.command("mri-sr")
+@io_options
+@backend_option(False)
+@submit_options
+@click.option(
+    "--expansion-factor",
+    default="1,1,2",
+    show_default=True,
+    help="Per-axis integer upsampling (1,1,2 | 1,1,3 | 1,1,4 | 1,1,6 | 2,2,2 | 2,2,4).",
+)
+@click.option(
+    "--feature",
+    type=click.Choice(["vgg", "grader"], case_sensitive=False),
+    default="vgg",
+    show_default=True,
+    help="ANTsPyNet feature backbone.",
+)
+@click.option("--verbose", is_flag=True, default=False)
+def cmd_mri_sr(
+    input_path: Path,
+    output_path: Path,
+    backend: str,
+    submit: str,
+    emit_script: Path | None,
+    direct_submit: bool,
+    no_remote: bool,
+    dry_run: bool,
+    expansion_factor: str,
+    feature: str,
+    verbose: bool,
+) -> None:
+    """MRI super-resolution (ANTsPyNet)."""
+    dispatch_tool(
+        tool="restore",
+        subcommand="mri-sr",
+        module_file="restoration.py",
+        input_path=input_path,
+        output_path=output_path,
+        submit=submit,
+        backend=backend,
+        mask_path=None,
+        emit_script=emit_script,
+        direct_submit=direct_submit,
+        no_remote=no_remote,
+        dry_run=dry_run,
+        runner=_mri_sr_runner,
+        runner_kwargs={
+            "expansion_factor": _parse_expansion(expansion_factor),
+            "feature": feature,
             "verbose": verbose,
         },
     )

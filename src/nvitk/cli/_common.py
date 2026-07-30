@@ -23,14 +23,6 @@ def backend_option(supports_gpu: bool = True):
     _ = supports_gpu  # legacy arg; backend is always exposed on tool CLIs
 
     def decorator(f):
-        f = click.option(
-            "--backend",
-            type=click.Choice(["cpu", "gpu"], case_sensitive=False),
-            default="gpu",
-            show_default=True,
-            help="Array backend: cpu (NumPy) or gpu (CuPy).",
-        )(f)
-
         from functools import wraps
 
         @wraps(f)
@@ -38,7 +30,16 @@ def backend_option(supports_gpu: bool = True):
             apply_cli_backend(kwargs.get("backend", "gpu"))
             return f(*args, **kwargs)
 
-        return wrapper
+        # Preserve Click options attached closer to the function (below this decorator).
+        wrapper.__click_params__ = list(getattr(f, "__click_params__", []))  # type: ignore[attr-defined]
+
+        return click.option(
+            "--backend",
+            type=click.Choice(["cpu", "gpu"], case_sensitive=False),
+            default="gpu",
+            show_default=True,
+            help="Array backend: cpu (NumPy) or gpu (CuPy).",
+        )(wrapper)
 
     return decorator
 
@@ -80,10 +81,15 @@ def submit_options(f):
         default="local",
         show_default=True,
     )(f)
-    f = click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None)
-    f = click.option("--direct-submit", is_flag=True, default=False)
-    f = click.option("--no-remote", is_flag=True, default=False)
-    f = click.option("--dry-run", is_flag=True, default=False)
+    f = click.option(
+        "--emit-script",
+        "emit_script",
+        type=click.Path(path_type=Path),
+        default=None,
+    )(f)
+    f = click.option("--direct-submit", is_flag=True, default=False)(f)
+    f = click.option("--no-remote", is_flag=True, default=False)(f)
+    f = click.option("--dry-run", is_flag=True, default=False)(f)
     return f
 
 

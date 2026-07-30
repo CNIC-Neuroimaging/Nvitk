@@ -481,6 +481,26 @@ def run_gui_tool(
             )
             return coerce_tool_output(out)
 
+    if tool_id == "mri_super_resolution":
+        from nvitk.restoration import mri_super_resolution
+
+        text = str(params.get("expansion_factor") or "1,1,2").replace(";", ",")
+        parts = [p.strip() for p in text.split(",") if p.strip()]
+        if len(parts) == 1:
+            v = int(round(float(parts[0])))
+            expansion = (v, v, v)
+        elif len(parts) == 3:
+            expansion = tuple(int(round(float(p))) for p in parts)
+        else:
+            raise ValueError("expansion_factor must be one value or three comma-separated integers")
+        with using("numpy"):
+            out = mri_super_resolution(
+                img,
+                expansion_factor=expansion,
+                feature=str(params.get("sr_feature") or "vgg"),
+            )
+            return coerce_tool_output(out)
+
     if tool_id == "sliding_threshold":
         from nvitk.filters.sliding_threshold import (
             binary_mask_sliding_threshold_2d,
@@ -1023,6 +1043,53 @@ def run_gui_tool(
                 modality=str(params.get("mouse_modality") or "t2"),
                 which_parcellation=str(params.get("which_parcellation") or "nick"),
                 mask=mask_img,
+            )
+            return coerce_tool_output(out)
+
+    if tool_id == "seg_brain_extraction":
+        from nvitk.segmentation.brain_extraction import brain_extraction
+
+        modality = str(params.get("brain_modality") or "t1").lower()
+        image2_name = str(params.get("image2_layer") or "").strip()
+        ants_in: Any = img
+        if image2_name and image2_name not in ("", "(none)"):
+            layer2 = _resolve_layer(viewer, image2_name)
+            img2 = layer_to_image(layer2)
+            ants_in = [img, img2]
+        with using("numpy"):
+            out = brain_extraction(ants_in, modality=modality)
+            return coerce_tool_output(out)
+
+    if tool_id == "seg_mra_vessel":
+        from nvitk.segmentation.mra_vessel import mra_vessel_segmentation
+
+        mask_img = None
+        mask_name = _layer_param(params, "mask_layer")
+        if not mask_name:
+            # Back-compat if an older panel still sends reference_layer.
+            mask_name = _layer_param(params, "reference_layer")
+        if mask_name:
+            mask_layer = _resolve_layer(viewer, mask_name)
+            _, mask_img, _ = align_mask_to_reference_layer(mask_layer, layer, order=0)
+        with using("numpy"):
+            out = mra_vessel_segmentation(
+                img,
+                mask=mask_img,
+                prediction_batch_size=int(params.get("prediction_batch_size") or 16),
+                patch_stride_length=int(params.get("patch_stride_length") or 32),
+            )
+            return coerce_tool_output(out)
+
+    if tool_id == "seg_dkt":
+        from nvitk.segmentation.dkt import desikan_killiany_tourville_labeling
+
+        with using("numpy"):
+            out = desikan_killiany_tourville_labeling(
+                img,
+                do_preprocessing=bool(params.get("dkt_preprocessing", True)),
+                do_lobar_parcellation=bool(params.get("dkt_lobar", False)),
+                do_denoising=bool(params.get("dkt_denoising", True)),
+                version=int(params.get("dkt_version") or 0),
             )
             return coerce_tool_output(out)
 

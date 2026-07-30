@@ -1106,14 +1106,14 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option(
     "--pcomm-min-points",
     type=int,
-    default=5,
+    default=8,
     show_default=True,
     help="Stage3: drop LPCOMM/RPCOMM centerlines shorter than this (filters tiny FPs).",
 )
 @click.option(
     "--arterial-branch-min-points",
     type=int,
-    default=10,
+    default=15,
     show_default=True,
     help="Stage3: min points to keep MCA/ACA/PCA bifurcation side branches.",
 )

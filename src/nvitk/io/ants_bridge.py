@@ -80,7 +80,30 @@ def from_ants_image(ants_image: Any) -> np.ndarray:
     return np.asarray(ants_image.numpy())
 
 
+def ants_result_to_array(result: Any) -> np.ndarray:
+    """Coerce an ANTsPyNet return value (image, list, or dict) to a NumPy array."""
+    if isinstance(result, (list, tuple)) and result:
+        # DKT and similar APIs return ``[segmentation, *probability_images]``.
+        return from_ants_image(result[0])
+    if isinstance(result, dict):
+        for key in (
+            "segmentation_image",
+            "segmentation",
+            "probability_image",
+            "probability_brain_mask",
+            "mask",
+            "output_image",
+            "super_resolution",
+        ):
+            if key in result and result[key] is not None:
+                return from_ants_image(result[key])
+        first = next(iter(result.values()))
+        return from_ants_image(first)
+    return from_ants_image(result)
+
+
 __all__ = [
+    "ants_result_to_array",
     "from_ants_image",
     "require_ants",
     "require_antspynet",
