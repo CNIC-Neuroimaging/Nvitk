@@ -956,6 +956,7 @@ def expand_distal_mca_aca_pca(
     frangi_sigmas: tuple[float, ...] | None = None,
     thicken_iter: int = _DISTAL_THICKEN_ITER_DEFAULT,
     lr_halfspace_slack: int = _DISTAL_LR_HALFSPACE_SLACK_DEFAULT,
+    pp_distal: bool = False,
 ) -> dict[str, Any]:
     """Post-RG distal expansion for MCA/ACA/PCA via vessel-tree watershed.
 
@@ -974,6 +975,8 @@ def expand_distal_mca_aca_pca(
     claimed; a final CC pass cleans each label after barriers. For ACA, that CC
     is anchored to the eICAB A1 mask (``eicab_qvtpy``) so a larger disconnected
     distal island cannot replace the true trunk.
+    When *pp_distal* is true, a curvature / protrusion filter removes small
+    wart-like surface bumps while protecting pre-expansion voxels.
     ``centerlines_mask`` is accepted for API compatibility but unused.
     """
     _ = centerlines_mask
@@ -999,6 +1002,7 @@ def expand_distal_mca_aca_pca(
     )
     thick_n = max(0, int(thicken_iter))
     lr_slack = max(0, int(lr_halfspace_slack))
+    do_pp = bool(pp_distal)
 
     log.step(
         "distal MCA/ACA/PCA expansion (vessel-tree watershed): "
@@ -1006,6 +1010,7 @@ def expand_distal_mca_aca_pca(
         f"hyst_high={float(hyst_high_factor):.2f}, "
         f"max_image_frac={float(max_image_frac):.4f}, "
         f"thicken_iter={thick_n}, lr_slack={lr_slack}, "
+        f"pp_distal={do_pp}, "
         f"frangi_sigmas={list(sigmas)}, "
         f"targets={[_distal_label_name(i) for i in present]} "
         f"({len(present)}/{len(target_ids)} with seed voxels)"
@@ -1018,6 +1023,7 @@ def expand_distal_mca_aca_pca(
         "hyst_high_factor": float(hyst_high_factor),
         "thicken_iter": thick_n,
         "lr_halfspace_slack": lr_slack,
+        "pp_distal": do_pp,
         "frangi_sigmas": [float(s) for s in sigmas],
         "labels": {},
         "lr_midlines": {},
@@ -1026,6 +1032,10 @@ def expand_distal_mca_aca_pca(
         log.warning("distal expand: no MCA/ACA/PCA seed voxels; skipping")
         return info
 
+    # Pre-expansion ROIs: protected from curvature/protrusion wart removal.
+    protect_by_label = {
+        int(lid): (seg_np == int(lid)).astype(bool, copy=True) for lid in present
+    }
     before_by_id = {lid: int(np.count_nonzero(seg_np == lid)) for lid in target_ids}
 
     cd_pos = cd_np[cd_np > 0]
@@ -1297,6 +1307,34 @@ def expand_distal_mca_aca_pca(
         st["delta"] = int(after - before)
         st["cc_anchored_to_eicab_a1"] = bool(aca_seed is not None)
 
+    if do_pp:
+        from nvitk.segmentation.protrusion_filter import filter_label_protrusions_in_seg
+
+        log.step("distal pp: curvature / protrusion wart filter (protect pre-expansion)")
+        pp_info = filter_label_protrusions_in_seg(
+            seg_np,
+            present,
+            protect_by_label=protect_by_label,
+        )
+        info["pp_distal_filter"] = pp_info
+        for lid in present:
+            aca_seed = _aca_eicab_a1_seed_mask(eicab_np, lid)
+            _finalize_vessel_largest_cc(
+                seg_np,
+                lid,
+                stats_by_id=None,
+                log_name=f"distal-pp-cc-{lid}",
+                seed_mask=aca_seed,
+            )
+            after = int(np.count_nonzero(seg_np == lid))
+            before = before_by_id[lid]
+            st = info["labels"][str(lid)]
+            st["after"] = after
+            st["delta"] = int(after - before)
+            st["pp_removed"] = int(
+                (pp_info.get("labels") or {}).get(str(lid), {}).get("n_removed", 0)
+            )
+
     total_before = sum(int(v.get("before", 0)) for v in info["labels"].values())
     total_after = sum(int(v.get("after", 0)) for v in info["labels"].values())
     log.step(
@@ -1304,6 +1342,7 @@ def expand_distal_mca_aca_pca(
         f"{len(info['labels'])} label(s), "
         f"total voxels {total_before} → {total_after} "
         f"(Δ={total_after - total_before:+d}), method=vessel-tree-watershed"
+        f"{', pp_distal' if do_pp else ''}"
     )
     return info
 
@@ -1338,6 +1377,7 @@ def build_seg_4dflow_local(
     distal_thicken_iter: int = _DISTAL_THICKEN_ITER_DEFAULT,
     distal_max_image_frac: float = _DISTAL_MAX_IMAGE_FRAC_DEFAULT,
     distal_lr_halfspace_slack: int = _DISTAL_LR_HALFSPACE_SLACK_DEFAULT,
+    pp_distal: bool = False,
 ) -> LocalSegResult:
     """Build multilabel ``seg_4dflow`` from CD and per-label centerline backbone.
 
@@ -1705,6 +1745,7 @@ def build_seg_4dflow_local(
             max_image_frac=float(distal_max_image_frac),
             thicken_iter=int(distal_thicken_iter),
             lr_halfspace_slack=int(distal_lr_halfspace_slack),
+            pp_distal=bool(pp_distal),
         )
         if distal_info is not None:
             for lid_s, st in (distal_info.get("labels") or {}).items():

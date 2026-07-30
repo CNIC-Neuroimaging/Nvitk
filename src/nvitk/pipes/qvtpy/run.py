@@ -359,6 +359,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     distal_thicken_iter: int,
     distal_max_image_frac: float,
     distal_lr_halfspace_slack: int,
+    pp_distal: bool,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -574,6 +575,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             distal_thicken_iter=distal_thicken_iter,
                             distal_max_image_frac=distal_max_image_frac,
                             distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+                            pp_distal=pp_distal,
                             backend=backend,
                         ),
                     )
@@ -1212,6 +1214,15 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help="Stage4: L/R midline slack so contralateral ACA/MCA/PCA claims are blocked.",
 )
+@click.option(
+    "--pp-distal/--no-pp-distal",
+    default=True,
+    show_default=True,
+    help=(
+        "Stage4: after distal expand, remove small wart-like surface protrusions "
+        "(curvature filter; pre-expansion voxels protected)."
+    ),
+)
 # --- stage 5 ---
 @click.option(
     "--loc-arterial-strategy",
@@ -1368,6 +1379,7 @@ def main(
     distal_thicken_iter: int,
     distal_max_image_frac: float,
     distal_lr_halfspace_slack: int,
+    pp_distal: bool,
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
@@ -1786,6 +1798,7 @@ def main(
                             distal_thicken_iter=distal_thicken_iter,
                             distal_max_image_frac=distal_max_image_frac,
                             distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+                            pp_distal=pp_distal,
                         ),
                     )
                 if run_s4t and _local_stage_pending(subj, STAGE_SEG_T, **_local_skip):
@@ -2035,6 +2048,7 @@ def main(
         distal_thicken_iter=distal_thicken_iter,
         distal_max_image_frac=distal_max_image_frac,
         distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        pp_distal=pp_distal,
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,

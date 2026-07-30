@@ -14,6 +14,7 @@ from . import (
     labels,
     mask_ops,
     mouse_brain,
+    protrusion_filter,
     region_growing,
     total_segmentator,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "hull_edt",
     "mask_ops",
     "mouse_brain",
+    "protrusion_filter",
     "region_growing",
     "total_segmentator",
 ]

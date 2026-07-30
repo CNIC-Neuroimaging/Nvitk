@@ -187,6 +187,7 @@ def run_subject(
     distal_thicken_iter: int = 0,
     distal_max_image_frac: float = 0.006,
     distal_lr_halfspace_slack: int = 2,
+    pp_distal: bool = False,
 ) -> Path:
     """Build multilabel 4D-flow segmentation locally; return stage-4 output directory."""
     s3 = _stage3_dir(output_root, subject)
@@ -237,7 +238,8 @@ def run_subject(
             f"hyst_low={float(distal_hyst_low_factor):.2f}, "
             f"hyst_high={float(distal_hyst_high_factor):.2f}, "
             f"thicken={int(distal_thicken_iter)}, "
-            f"max_frac={float(distal_max_image_frac):.4f})"
+            f"max_frac={float(distal_max_image_frac):.4f}, "
+            f"pp_distal={bool(pp_distal)})"
         )
     else:
         log.info(f"[{subject}] distal-flow-expand OFF (default); skipping distal pass")
@@ -268,6 +270,7 @@ def run_subject(
         distal_thicken_iter=int(distal_thicken_iter),
         distal_max_image_frac=float(distal_max_image_frac),
         distal_lr_halfspace_slack=int(distal_lr_halfspace_slack),
+        pp_distal=bool(pp_distal),
     )
 
     imsave(seg_path, result.segmentation, metadata=ref_meta)
@@ -356,6 +359,7 @@ def run_subject(
     meta_doc["distal_thicken_iter"] = int(distal_thicken_iter)
     meta_doc["distal_max_image_frac"] = float(distal_max_image_frac)
     meta_doc["distal_lr_halfspace_slack"] = int(distal_lr_halfspace_slack)
+    meta_doc["pp_distal"] = bool(pp_distal)
     if result.distal_expand is not None:
         meta_doc["distal_expand"] = result.distal_expand
         de = result.distal_expand
@@ -516,6 +520,15 @@ def _stage4_cli_options(func):
         show_default=True,
         help="L/R midline slack (voxels) so ACA/MCA/PCA cannot claim the contralateral side.",
     )(func)
+    func = click.option(
+        "--pp-distal/--no-pp-distal",
+        default=False,
+        show_default=True,
+        help=(
+            "After distal expand, remove small wart-like surface protrusions via a "
+            "curvature filter (pre-expansion voxels are protected)."
+        ),
+    )(func)
     return func
 
 
@@ -548,6 +561,7 @@ def _subject_sge_spec(
     distal_thicken_iter: int = 0,
     distal_max_image_frac: float = 0.006,
     distal_lr_halfspace_slack: int = 2,
+    pp_distal: bool = False,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
@@ -616,6 +630,10 @@ def _subject_sge_spec(
                 str(int(distal_lr_halfspace_slack)),
             ]
         )
+        if pp_distal:
+            parts.append("--pp-distal")
+        else:
+            parts.append("--no-pp-distal")
     else:
         parts.append("--no-distal-flow-expand")
     if skip_existing:
@@ -670,6 +688,7 @@ def build_subject_sge_command(
     distal_thicken_iter: int = 0,
     distal_max_image_frac: float = 0.006,
     distal_lr_halfspace_slack: int = 2,
+    pp_distal: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Return the host shell command for one stage4 array/SGE task."""
@@ -703,6 +722,7 @@ def build_subject_sge_command(
         distal_thicken_iter=distal_thicken_iter,
         distal_max_image_frac=distal_max_image_frac,
         distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        pp_distal=pp_distal,
         backend=backend,
     )
     return build_singularity_command(spec, paths)
@@ -739,6 +759,7 @@ def submit_subject_sge(
     distal_thicken_iter: int = 0,
     distal_max_image_frac: float = 0.006,
     distal_lr_halfspace_slack: int = 2,
+    pp_distal: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-4 SGE job. Returns qsub job id."""
@@ -770,6 +791,7 @@ def submit_subject_sge(
         distal_thicken_iter=distal_thicken_iter,
         distal_max_image_frac=distal_max_image_frac,
         distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        pp_distal=pp_distal,
         backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
@@ -804,6 +826,7 @@ def main(
     distal_thicken_iter: int,
     distal_max_image_frac: float,
     distal_lr_halfspace_slack: int,
+    pp_distal: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -832,6 +855,7 @@ def main(
         distal_thicken_iter=distal_thicken_iter,
         distal_max_image_frac=distal_max_image_frac,
         distal_lr_halfspace_slack=distal_lr_halfspace_slack,
+        pp_distal=pp_distal,
     )
 
 
