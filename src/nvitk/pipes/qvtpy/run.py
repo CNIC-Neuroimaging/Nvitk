@@ -1150,7 +1150,7 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option("--rg-barrier-radius", type=int, default=3, show_default=True, help="Stage4: dilate other seg during RG (vox).")
 @click.option(
     "--aca-sequential-grow/--no-aca-sequential-grow",
-    default=True,
+    default=False,
     show_default=True,
     help="Stage4: LACA then RACA grow; overlap corrected at junction when needed.",
 )
