@@ -190,20 +190,16 @@ def stdv_from_mean_station(
     # Robust floors: avoid 1/eps blow-ups when mean flow/area ≈ 0.
     floor_f = max(abs(mu_f), float(np.max(np.abs(fpc))) * 0.05, eps)
     floor_a = max(abs(mu_a), float(np.max(np.abs(ar))) * 0.05 if ar.size else eps, eps)
-    qv_meanflow = float(np.clip(1.0 - float(np.std(fpc)) / floor_f, -1.0, 1.0))
-    qv_area = float(np.clip(1.0 - float(np.std(ar)) / floor_a, -1.0, 1.0))
-    qv_circ = float(np.clip(float(np.mean(di)) if di.size else 0.0, 0.0, 1.0))
+    # qv_meanflow = float(np.clip(1.0 - float(np.std(fpc)) / floor_f, -1.0, 1.0))
+    # qv_area = float(np.clip(1.0 - float(np.std(ar)) / floor_a, -1.0, 1.0))
+    # qv_circ = float(np.clip(float(np.mean(di)) if di.size else 0.0, 0.0, 1.0))
+    qv_meanflow = max(-1.0, min(1.0, 1.0 - float(np.std(fpc)) / floor_f))     # Clipped to [-1, 1]
+    qv_area     = max(-1.0, min(1.0, 1.0 - float(np.std(ar)) / floor_a))      # Clipped to [-1, 1]
+    qv_circ     = max(0.0, min(1.0, float(np.mean(di)) if di.size else 0.0))  # Clipped to [0, 1]
+
     minmax_phase = np.max(fp, axis=0) - np.min(fp, axis=0)
-    qv_tight = float(
-        np.clip(1.0 - float(np.mean(minmax_phase)) / floor_f, -1.0, 1.0)
-    )
-    return float(
-        np.clip(
-            qv_meanflow + qv_area + qv_circ + qv_tight,
-            0.0,
-            float(QUALITY_SCALE_MAX),
-        )
-    )
+    qv_tight = float(max(-1.0, min(1.0, 1.0 - float(np.mean(minmax_phase)) / floor_f)))          # Clipped to [-1, 1]
+    return max(0.0, min(float(QUALITY_SCALE_MAX), qv_meanflow + qv_area + qv_circ + qv_tight))   # Clipped to [0, QUALITY_SCALE_MAX]
 
 
 def stdv_from_mean_branch(
@@ -387,13 +383,13 @@ def bjornfoot_prepare_waveforms(
     Returns ``(F_norm, W, keep_mask)`` where *keep_mask* selects rows kept for
     Bjornfoot (always all rows for ``area``; quality-filtered for ``quality``).
     """
-    F = to_numpy(as_backend_array(flow_matrix)).astype(np.float64)
+    F = as_backend_array(flow_matrix).astype(np.float64)
     if F.ndim != 2:
         F = F.reshape(1, -1)
     n, _m = F.shape
-    A = to_numpy(as_backend_array(areas)).astype(np.float64).reshape(-1)[:n]
+    A = as_backend_array(areas).astype(np.float64).reshape(-1)[:n]
     Q = (
-        to_numpy(as_backend_array(qualities)).astype(np.float64).reshape(-1)[:n]
+        as_backend_array(qualities).astype(np.float64).reshape(-1)[:n]
         if qualities is not None
         else np.full(n, QUALITY_SCALE_MAX, dtype=np.float64)
     )
@@ -412,14 +408,14 @@ def bjornfoot_prepare_waveforms(
         scaling = 1.0 / (float(np.std(ft)) + eps)
         F_out[i] = ft * scaling
         A_out[i] = area_i / (scaling * scaling)
-    amax = float(np.max(A_out[keep])) if int(keep.sum()) else 0.0
+    amax = float(np.max(as_backend_array(A_out[keep]))) if int(keep.sum()) else 0.0
     if amax > eps:
         A_out = A_out / amax
     if weight_mode == "quality":
-        W = to_numpy(quality_weights(Q, thresh=thresh))
+        W = quality_weights(Q, thresh=thresh)
     else:
         W = A_out.copy()
-    W = np.clip(W, 0.0, None)
+    W = np.maximum(W, 0.0)
     W[~keep] = 0.0
     return F_out, W, keep
 
@@ -432,7 +428,7 @@ def _pwvest3_share_components(
     weights: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Return fitted waveforms, observations, and weights for ``PWVest3_share``."""
-    params = np.asarray(in_params, dtype=np.float64).reshape(-1)
+    params = as_backend_array(in_params).astype(np.float64).reshape(-1)
     m = int(params.size - 1)
     if m < 2:
         return None
@@ -441,9 +437,9 @@ def _pwvest3_share_components(
     if pwv <= 0.0 or not np.isfinite(pwv):
         return None
     tr = float(temporal_resolution_s)
-    D = np.asarray(distances_m, dtype=np.float64).reshape(-1)
-    F = np.asarray(flows_norm, dtype=np.float64)
-    Qw = np.asarray(weights, dtype=np.float64).reshape(-1)
+    D = as_backend_array(distances_m).astype(np.float64).reshape(-1)
+    F = as_backend_array(flows_norm).astype(np.float64)
+    Qw = as_backend_array(weights).astype(np.float64).reshape(-1)
     n = int(min(D.size, F.shape[0], Qw.size))
     if n < 1:
         return None
@@ -457,20 +453,20 @@ def _pwvest3_share_components(
     vel3 = np.tile(velocity, 3)
     region = np.arange(m, 2 * m)
     delta_t = tV[np.newaxis, :] - D[:, np.newaxis] / pwv
-    from scipy.interpolate import interp1d
 
+    from scipy.interpolate import interp1d
     interp = interp1d(
-        tV,
-        vel3,
+        to_numpy(tV),
+        to_numpy(vel3),
         kind="linear",
         bounds_error=False,
         fill_value="extrapolate",
         assume_sorted=True,
     )
-    v_shift = interp(delta_t)[:, region]
+    v_shift = as_backend_array(interp(to_numpy(delta_t))).astype(np.float64)[:, region]
     if not np.all(np.isfinite(v_shift)) or not np.all(np.isfinite(F)):
         return None
-    return v_shift, F, np.clip(Qw, 0.0, None)
+    return v_shift, F, np.maximum(Qw, 0.0)
 
 
 def _pwvest3_share_diff(
@@ -521,7 +517,7 @@ def _pwvest3_share_diagnostics(
         where=denom > 1e-12,
     )
     return {
-        "template_norm": np.asarray(in_params[:-1], dtype=np.float64),
+        "template_norm": as_backend_array(in_params[:-1]).astype(np.float64),
         "fitted_waveforms_norm": fitted,
         "observed_waveforms_norm": observed,
         "weighted_residual_rms": weighted_rms,
@@ -553,8 +549,8 @@ def pwvest3_share_residuals(
     weights: np.ndarray,
 ) -> np.ndarray:
     """Flattened weighted residuals for least-squares / ML fitting."""
-    m = int(np.asarray(in_params, dtype=np.float64).reshape(-1).size - 1)
-    n = int(np.asarray(flows_norm).shape[0]) if np.ndim(flows_norm) else 0
+    m = int(as_backend_array(in_params).astype(np.float64).reshape(-1).size - 1)
+    n = int(as_backend_array(flows_norm).shape[0]) if np.ndim(flows_norm) else 0
     n_res = max(n * max(m, 0), 1)
     diff = _pwvest3_share_diff(
         in_params, distances_m, flows_norm, temporal_resolution_s, weights
@@ -581,8 +577,8 @@ def pwv_bjornfoot_optimize(
     (paper ML estimator; QVTplus ``fminunc`` analogue via ``scipy.optimize.least_squares``).
     Returns ``pwv_m_s`` and residual cost; non-positive / ≥30 m/s → ``nan``.
     """
-    dist = to_numpy(as_backend_array(distances_m)).astype("float64").reshape(-1)
-    flows = to_numpy(as_backend_array(flow_matrix)).astype("float64")
+    dist = as_backend_array(distances_m).astype(np.float64).reshape(-1)
+    flows = as_backend_array(flow_matrix).astype(np.float64)
     if flows.ndim != 2 or flows.shape[0] < 2:
         return {
             "pwv_m_s": float("nan"),
@@ -592,7 +588,7 @@ def pwv_bjornfoot_optimize(
     if areas is None:
         areas_arr = np.ones(flows.shape[0], dtype=np.float64)
     else:
-        areas_arr = to_numpy(as_backend_array(areas)).astype("float64").reshape(-1)
+        areas_arr = as_backend_array(areas).astype(np.float64).reshape(-1)
     F_norm, W, keep = bjornfoot_prepare_waveforms(
         flows,
         areas_arr,
@@ -612,14 +608,14 @@ def pwv_bjornfoot_optimize(
     x0 = np.concatenate([np.mean(F_k, axis=0), np.array([_BJORNFOOT_PWV0])])
 
     def residuals(x: np.ndarray) -> np.ndarray:
-        return pwvest3_share_residuals(x, dist_k, F_k, tr, W_k)
+        with using("numpy"):            
+            return pwvest3_share_residuals(to_numpy(x), to_numpy(dist_k), to_numpy(F_k), tr, to_numpy(W_k))
 
     from scipy.optimize import least_squares
 
-    # Unbounded Levenberg–Marquardt (QVTplus fminunc / paper least-squares).
     res = least_squares(
         residuals,
-        x0,
+        to_numpy(x0),
         method="lm",
         ftol=1e-7,
         xtol=1e-7,
@@ -627,11 +623,14 @@ def pwv_bjornfoot_optimize(
     )
     pwv_raw = float(res.x[-1])
     cost = float(np.sum(res.fun * res.fun)) if res.fun is not None else float("nan")
-    diagnostics = (
-        _pwvest3_share_diagnostics(res.x, dist_k, F_k, tr, W_k)
-        if np.isfinite(pwv_raw) and pwv_raw > 0.0
-        else {}
-    )
+    with using("numpy"):
+        diagnostics = (
+            _pwvest3_share_diagnostics(to_numpy(res.x), to_numpy(dist_k), to_numpy(F_k), tr, to_numpy(W_k))
+            if np.isfinite(to_numpy(pwv_raw)) and to_numpy(pwv_raw) > 0.0
+            else {}
+        )
+
+    
     expected_delay_s = (
         (dist_k - dist_k[0]) / pwv_raw
         if np.isfinite(pwv_raw) and pwv_raw > 0.0
@@ -666,7 +665,7 @@ def normalize_waveform(flow_t, *, eps: float = 1e-9):
 
 def _circular_fractional_shift(x, shift_frames: float):
     """Shift a periodic 1D waveform by *shift_frames* (fractional) via interpolation."""
-    xv = (as_backend_array(x)).astype("float64").reshape(-1)
+    xv = (as_backend_array(x)).astype(np.float64).reshape(-1)
     nt = xv.size
     if nt == 0:
         return xv
@@ -687,7 +686,7 @@ def upsample_periodic_cycle(
     Triples the waveform for periodic boundaries, then interpolates onto ``n_up``
     samples spanning one cycle. Returns ``(upsampled, samples_per_frame)``.
     """
-    x = to_numpy(as_backend_array(flow_t)).astype(np.float64).reshape(-1)
+    x = as_backend_array(flow_t).astype(np.float64).reshape(-1)
     nt = int(x.size)
     n_up = max(int(n_up), max(nt * 2, 8))
     if nt < 2:
@@ -698,8 +697,8 @@ def upsample_periodic_cycle(
     # Cubic spline on the tripled trace (matches MATLAB interp1(...,'spline')).
     from scipy.interpolate import CubicSpline
 
-    cs = CubicSpline(t3, x3, bc_type="not-a-knot")
-    return cs(t_up).astype(np.float64), float(n_up) / float(nt)
+    cs = CubicSpline(to_numpy(t3), to_numpy(x3), bc_type="not-a-knot")
+    return as_backend_array(cs(to_numpy(t_up)).astype(np.float64)), float(n_up) / float(nt)
 
 
 def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
@@ -709,8 +708,8 @@ def circular_cross_correlation_lag(reference, signal) -> tuple[float, float]:
     to match *reference* (wrapped to ``(-n/2, n/2]``). Prefer
     :func:`cross_correlation_delay_seconds` for PWV (sign + sub-frame upsample).
     """
-    ref = (as_backend_array(reference)).astype("float64").reshape(-1)
-    sig = (as_backend_array(signal)).astype("float64").reshape(-1)
+    ref = (as_backend_array(reference)).astype(np.float64).reshape(-1)
+    sig = (as_backend_array(signal)).astype(np.float64).reshape(-1)
     nt = int(min(ref.size, sig.size))
     if nt < 2:
         return 0.0, 0.0
@@ -775,7 +774,7 @@ def time_to_upstroke_seconds(
 
 def _mad_outlier_mask(y: np.ndarray, *, z_thresh: float = 3.5) -> np.ndarray:
     """True for inliers under a robust MAD z-score (QVTplus ``isoutlier`` analogue)."""
-    yv = np.asarray(y, dtype=np.float64).reshape(-1)
+    yv = as_backend_array(y).astype(np.float64).reshape(-1)
     keep = np.isfinite(yv)
     if int(keep.sum()) < 4:
         return keep
@@ -813,7 +812,8 @@ def pwv_fielding_xcor(
         }
     tr = float(temporal_resolution_s)
     n = int(flows.shape[0])
-    ref_i = int(np.clip(reference_index, 0, n - 1))
+    # ref_i = int(np.clip(reference_index, 0, n - 1))
+    ref_i = max(0, min(reference_index, n - 1))
     ref = flows[ref_i]
     lags_s = np.zeros(n, dtype="float64")
     corrs = np.zeros(n, dtype="float64")

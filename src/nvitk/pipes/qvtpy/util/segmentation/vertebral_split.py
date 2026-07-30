@@ -22,7 +22,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 from typing import Any
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
 from nvitk.morphology.centerline import (
@@ -89,9 +89,9 @@ class VertebralSplitResult:
             "message": self.message,
         }
         if self.lva_centerline is not None and self.lva_centerline.size > 0:
-            out["lva_centerline"] = to_numpy(self.lva_centerline).astype(float).tolist()
+            out["lva_centerline"] = as_backend_array(self.lva_centerline).astype(float).tolist()
         if self.rva_centerline is not None and self.rva_centerline.size > 0:
-            out["rva_centerline"] = to_numpy(self.rva_centerline).astype(float).tolist()
+            out["rva_centerline"] = as_backend_array(self.rva_centerline).astype(float).tolist()
         return out
 
 
@@ -148,12 +148,12 @@ def _flood_fill_from_seeds(
 
 
 def _mean_axis(points: set[tuple[int, int, int]], axis: int) -> float:
-    with using("numpy"):
-        return float(np.mean([p[axis] for p in points]))
+    # with using("numpy"):
+    return float(np.mean(as_backend_array([p[axis] for p in points])))
 
 
 def _pts_to_tuples(pts: np.ndarray) -> list[tuple[int, int, int]]:
-    arr = to_numpy(pts).astype(np.int64).reshape(-1, 3)
+    arr = as_backend_array(pts).astype(np.int64).reshape(-1, 3)
     return [tuple(int(v) for v in row) for row in arr]
 
 
@@ -287,7 +287,7 @@ def _bifurcation_from_centerline_branches(
         return None, None, diag
 
     trunk_z = [p[_Z_AXIS] for p in trunk]
-    z_hi = float(np.percentile(trunk_z, _MAX_CONFLUENCE_Z_PERCENTILE))
+    z_hi = float(np.percentile(as_backend_array(trunk_z), _MAX_CONFLUENCE_Z_PERCENTILE))
     diag["trunk_len"] = len(trunk)
     diag["max_confluence_z"] = round(z_hi, 2)
 

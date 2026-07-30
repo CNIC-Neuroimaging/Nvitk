@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup
+from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
 
 setup(globals())
@@ -139,8 +139,6 @@ def apply_hysteresis_threshold_3d(
     high: float,
 ) -> np.ndarray:
     """Keep ``>low`` CCs that touch any ``>high`` voxel (26-connectivity)."""
-    from scipy import ndimage as ndi
-
     img = as_backend_array(image).astype(np.float64)
     low = float(min(low, high))
     mask_low = img > low
@@ -151,7 +149,7 @@ def apply_hysteresis_threshold_3d(
         return np.zeros(img.shape, dtype=bool)
     sums = ndi.sum(mask_high, labels_low, index=np.arange(1, n_lab + 1))
     connected = np.zeros(n_lab + 1, dtype=bool)
-    connected[1:] = np.asarray(sums) > 0
+    connected[1:] = as_backend_array(sums) > 0
     return connected[labels_low]
 
 
@@ -169,116 +167,116 @@ def hysteresis_vessel_tree(
     GMM is fit on the upper half of positive vesselness inside ``mask`` so near-zero
     Frangi noise does not pull ``lowt`` toward zero (which floods parenchyma).
     """
-    from scipy import ndimage as ndi
     from sklearn.mixture import GaussianMixture
 
-    v = as_backend_array(vesselness).astype(np.float64)
-    if mask is not None:
-        m = as_backend_array(mask).astype(bool)
-        assert m.shape == v.shape, "vesselness and mask shapes must match"
-        samples_all = v[m]
-    else:
-        m = None
-        samples_all = v.ravel()
-    samples_all = samples_all[np.isfinite(samples_all)]
-    meta: dict[str, Any] = {
-        "low_factor": float(low_factor),
-        "high_factor": float(high_factor),
-        "n_samples_mask": int(samples_all.size),
-    }
-    pos = samples_all[samples_all > 0]
-    if pos.size < 50:
-        thr = float(np.percentile(pos, 90.0)) if pos.size else 0.0
-        tree = v > thr
+    with using("numpy"):
+        v = as_backend_array(vesselness).astype(np.float64)
+        if mask is not None:
+            m = as_backend_array(mask).astype(bool)
+            assert m.shape == v.shape, "vesselness and mask shapes must match"
+            samples_all = v[m]
+        else:
+            m = None
+            samples_all = v.ravel()
+        samples_all = samples_all[np.isfinite(samples_all)]
+        meta: dict[str, Any] = {
+            "low_factor": float(low_factor),
+            "high_factor": float(high_factor),
+            "n_samples_mask": int(samples_all.size),
+        }
+        pos = samples_all[samples_all > 0]
+        if pos.size < 50:
+            thr = float(np.percentile(pos, 90.0)) if pos.size else 0.0
+            tree = v > thr
+            if m is not None:
+                tree &= m
+            meta.update(
+                {
+                    "mode": "percentile_fallback",
+                    "threshold": thr,
+                    "n_samples": int(pos.size),
+                }
+            )
+            return tree.astype(bool), meta
+
+        fit_floor = float(np.percentile(pos, float(fit_positive_percentile)))
+        samples = pos[pos >= fit_floor]
+        if samples.size < 50:
+            samples = pos
+        meta["n_samples"] = int(samples.size)
+        meta["fit_floor"] = float(fit_floor)
+
+        if samples.size > _GMM_MAX_FIT_SAMPLES:
+            rng = np.random.default_rng(0)
+            idx = rng.choice(samples.size, size=_GMM_MAX_FIT_SAMPLES, replace=False)
+            samples = samples[idx]
+            meta["n_samples_fit"] = int(samples.size)
+            meta["gmm_subsampled"] = True
+        else:
+            meta["n_samples_fit"] = int(samples.size)
+            meta["gmm_subsampled"] = False
+
+        gmm = GaussianMixture(
+            n_components=3,
+            tol=1e-3,
+            max_iter=100,
+            n_init=1,
+            random_state=0,
+        )
+        with _blas_thread_limit():
+            gmm.fit(to_numpy(samples).reshape(-1, 1))
+        means = gmm.means_.flatten()
+        variances = gmm.covariances_.flatten()
+        order = np.argsort(means)
+        means_s = means[order]
+        vars_s = variances[order]
+        median_mean, median_var = float(means_s[1]), float(vars_s[1])
+        max_mean, max_var = float(means_s[2]), float(vars_s[2])
+        lowt, hight = _thresholds_sigma(
+            median_mean,
+            median_var,
+            max_mean,
+            max_var,
+            low_factor=float(low_factor),
+            high_factor=float(high_factor),
+        )
+        if hight < lowt:
+            lowt, hight = hight, lowt
+        vmax = float(np.max(samples))
+        if not np.any(v > hight):
+            hight = min(hight, max(vmax * 0.99, float(np.quantile(samples, 0.995))))
+            if hight < lowt:
+                lowt = max(0.0, hight * 0.9)
+            meta["hight_clamped"] = True
+        tree = apply_hysteresis_threshold_3d(v, low=lowt, high=hight)
         if m is not None:
             tree &= m
+
+        min_cc = max(1, int(min_cc_voxels))
+        keep = np.zeros(1, dtype=bool)
+        lab, n_lab = ndi.label(tree, structure=np.ones((3, 3, 3), dtype=np.uint8))
+        if n_lab > 0:
+            counts = np.bincount(lab.ravel())
+            keep = np.zeros(n_lab + 1, dtype=bool)
+            keep[1:] = counts[1:] >= min_cc
+            tree = keep[lab]
+
         meta.update(
             {
-                "mode": "percentile_fallback",
-                "threshold": thr,
-                "n_samples": int(pos.size),
+                "mode": "gmm_hysteresis",
+                "means": [float(x) for x in means_s],
+                "lowt": float(lowt),
+                "hight": float(hight),
+                "n_tree_voxels": int(np.count_nonzero(tree)),
+                "n_cc_kept": int(np.count_nonzero(keep[1:])) if n_lab > 0 else 0,
             }
         )
-        return tree.astype(bool), meta
-
-    fit_floor = float(np.percentile(pos, float(fit_positive_percentile)))
-    samples = pos[pos >= fit_floor]
-    if samples.size < 50:
-        samples = pos
-    meta["n_samples"] = int(samples.size)
-    meta["fit_floor"] = float(fit_floor)
-
-    if samples.size > _GMM_MAX_FIT_SAMPLES:
-        rng = np.random.default_rng(0)
-        idx = rng.choice(samples.size, size=_GMM_MAX_FIT_SAMPLES, replace=False)
-        samples = samples[idx]
-        meta["n_samples_fit"] = int(samples.size)
-        meta["gmm_subsampled"] = True
-    else:
-        meta["n_samples_fit"] = int(samples.size)
-        meta["gmm_subsampled"] = False
-
-    gmm = GaussianMixture(
-        n_components=3,
-        tol=1e-3,
-        max_iter=100,
-        n_init=1,
-        random_state=0,
-    )
-    with _blas_thread_limit():
-        gmm.fit(to_numpy(samples).reshape(-1, 1))
-    means = gmm.means_.flatten()
-    variances = gmm.covariances_.flatten()
-    order = np.argsort(means)
-    means_s = means[order]
-    vars_s = variances[order]
-    median_mean, median_var = float(means_s[1]), float(vars_s[1])
-    max_mean, max_var = float(means_s[2]), float(vars_s[2])
-    lowt, hight = _thresholds_sigma(
-        median_mean,
-        median_var,
-        max_mean,
-        max_var,
-        low_factor=float(low_factor),
-        high_factor=float(high_factor),
-    )
-    if hight < lowt:
-        lowt, hight = hight, lowt
-    vmax = float(np.max(samples))
-    if not np.any(v > hight):
-        hight = min(hight, max(vmax * 0.99, float(np.quantile(samples, 0.995))))
-        if hight < lowt:
-            lowt = max(0.0, hight * 0.9)
-        meta["hight_clamped"] = True
-    tree = apply_hysteresis_threshold_3d(v, low=lowt, high=hight)
-    if m is not None:
-        tree &= m
-
-    min_cc = max(1, int(min_cc_voxels))
-    keep = np.zeros(1, dtype=bool)
-    lab, n_lab = ndi.label(tree, structure=np.ones((3, 3, 3), dtype=np.uint8))
-    if n_lab > 0:
-        counts = np.bincount(lab.ravel())
-        keep = np.zeros(n_lab + 1, dtype=bool)
-        keep[1:] = counts[1:] >= min_cc
-        tree = keep[lab]
-
-    meta.update(
-        {
-            "mode": "gmm_hysteresis",
-            "means": [float(x) for x in means_s],
-            "lowt": float(lowt),
-            "hight": float(hight),
-            "n_tree_voxels": int(np.count_nonzero(tree)),
-            "n_cc_kept": int(np.count_nonzero(keep[1:])) if n_lab > 0 else 0,
-        }
-    )
-    log.info(
-        "blood_flood tree: hysteresis "
-        f"lowt={lowt:.4g} hight={hight:.4g} "
-        f"voxels={meta['n_tree_voxels']}"
-    )
-    return tree.astype(bool), meta
+        log.info(
+            "blood_flood tree: hysteresis "
+            f"lowt={lowt:.4g} hight={hight:.4g} "
+            f"voxels={meta['n_tree_voxels']}"
+        )
+    return as_backend_array(tree).astype(bool), meta
 
 
 def keep_tree_components_touching_markers(
@@ -286,8 +284,6 @@ def keep_tree_components_touching_markers(
     markers: np.ndarray,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Retain only vessel-tree CCs that touch at least one marker voxel."""
-    from scipy import ndimage as ndi
-
     vessels = as_backend_array(tree).astype(bool)
     marks = as_backend_array(markers) != 0
     if not np.any(vessels):
@@ -298,7 +294,7 @@ def keep_tree_components_touching_markers(
         return vessels, {"n_before": 0, "n_after": 0, "n_cc_kept": 0}
     touch = ndi.sum(marks, lab, index=np.arange(1, n_lab + 1))
     keep = np.zeros(n_lab + 1, dtype=bool)
-    keep[1:] = np.asarray(touch) > 0
+    keep[1:] = as_backend_array(touch) > 0
     out = keep[lab] | marks
     meta = {
         "n_before": int(np.count_nonzero(vessels)),
@@ -322,8 +318,6 @@ def thicken_tree_in_intensity(
     gate_percentile: float = 70.0,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """1-voxel lumen thicken inside a high-intensity gate (not a parenchyma flood)."""
-    from scipy import ndimage as ndi
-
     cores = as_backend_array(tree).astype(bool)
     vol = as_backend_array(intensity).astype(np.float64)
     pos = vol[vol > 0]

@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup, using
+from nvitk.core.backend import setup, using, get_current_backend
 from nvitk.core.logger import Logger
 from nvitk.morphology import dilate
 from nvitk.morphology.centerline import skeletonize_binary
@@ -850,13 +850,11 @@ def _punch_lr_midline_barrier(
 
 
 def _dilate_bool(mask: np.ndarray, radius: int) -> np.ndarray:
-    from scipy import ndimage as ndi
-
     m = as_backend_array(mask).astype(bool)
     r = max(0, int(radius))
     if r <= 0 or not np.any(m):
         return m
-    return ndi.binary_dilation(m, iterations=r)
+    return ndi.binary_dilation(m, iterations=r, brute_force=True if get_current_backend() == "cupy" else False)
 
 
 def _aca_distal_corridor(
@@ -876,8 +874,6 @@ def _aca_distal_corridor(
     Also admits nearby pre-prune Frangi-tree voxels so orphaned A2 islands can
     rejoin through a short CD bridge.
     """
-    from scipy import ndimage as ndi
-
     seeds = as_backend_array(aca_seed_mask).astype(bool)
     if not np.any(seeds):
         return seeds, {"n_seeds": 0, "n_corridor": 0}
@@ -989,8 +985,6 @@ def expand_distal_mca_aca_pca(
         thicken_tree_in_cd,
         watershed_labels_into_vessels,
     )
-    from scipy import ndimage as ndi
-
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     cd_np = as_backend_array(cd).astype(np.float64)
     eicab_np = (
@@ -1051,9 +1045,10 @@ def expand_distal_mca_aca_pca(
     info["vesselness_mode"] = vmode
     info["tree"] = tree_meta
 
-    other = (seg_np != 0) & ~np.isin(seg_np, target_ids)
+    seg_np_np = as_backend_array(seg_np)
+    other = (seg_np_np != 0) & ~np.isin(seg_np_np, as_backend_array(target_ids))
     # Dilated ICA + basilar: nowhere in this band may receive a distal label.
-    ica_basilar = np.isin(seg_np, list(QVTPY_ICA_BASILAR_IDS))
+    ica_basilar = np.isin(seg_np_np, as_backend_array(list(QVTPY_ICA_BASILAR_IDS)))
     ica_basilar_barrier = _dilate_bool(ica_basilar, _DISTAL_ICA_BASILAR_BARRIER_RADIUS)
     hard_barrier = other | ica_basilar_barrier
     info["ica_basilar_barrier"] = {
@@ -1087,7 +1082,7 @@ def expand_distal_mca_aca_pca(
     aca_protect = np.zeros(seg_np.shape, dtype=bool)
     aca_corridor = np.zeros(seg_np.shape, dtype=bool)
     if aca_present:
-        aca_seed = np.isin(seg_np, list(QVTPY_ACA_IDS)) & ~ica_basilar_barrier
+        aca_seed = np.isin(seg_np, as_backend_array(list(QVTPY_ACA_IDS))) & ~ica_basilar_barrier
         aca_protect = _dilate_bool(aca_seed, _DISTAL_ACA_PROTECT_RADIUS)
         # Floor: hysteresis lowt if available, else a mild positive vesselness cut.
         v_floor = float(tree_meta.get("lowt", 0.0) or 0.0)
@@ -1280,7 +1275,7 @@ def expand_distal_mca_aca_pca(
         )
 
     # Strip any distal spill that landed on the ICA/basilar wall, then CC again.
-    spill = np.isin(seg_np, target_ids) & ica_basilar_barrier & (markers == 0)
+    spill = np.isin(seg_np, as_backend_array(target_ids)) & ica_basilar_barrier & (markers == 0)
     n_spill = int(np.count_nonzero(spill))
     if n_spill > 0:
         seg_np[spill] = 0

@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.array import as_backend_array
 from nvitk.core.backend import setup
 from nvitk.io.imageio import imread, imsave
 from nvitk.morphology.centerline import compute_centerline_branches, compute_centerlines
@@ -147,7 +147,7 @@ def export_branch_vtps(
     written: list[Path] = []
     for lid, branches in sorted(arterial.items()):
         for name, pts in branches:
-            pts_np = to_numpy(pts).astype(float).reshape(-1, 3)
+            pts_np = as_backend_array(pts).astype(float).reshape(-1, 3)
             if pts_np.shape[0] < 2:
                 continue
             poly = build_polyline_polydata(pts_np, [])
@@ -235,7 +235,7 @@ def _parent_contact_seed(
     parent_id: int,
 ) -> np.ndarray | None:
     """Voxel near the child/parent interface (proximal trunk seed)."""
-    seg_np = to_numpy(seg).astype(np.int32, copy=False)
+    seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     child = seg_np == int(child_id)
     parent = seg_np == int(parent_id)
     if not np.any(child) or not np.any(parent):
@@ -266,9 +266,7 @@ def smooth_centerline_polyline(
     Uses a centered moving average; optionally resamples with a mild spline
     (``s>0``) so small distal branches remain continuous without sharp kinks.
     """
-    import numpy as np
-
-    pts = to_numpy(points).astype(np.float64, copy=False)
+    pts = as_backend_array(points).astype(np.float64, copy=False)
     if pts.ndim != 2 or pts.shape[1] != 3 or pts.shape[0] < 3:
         return as_backend_array(pts)
 
@@ -326,8 +324,6 @@ def centerlines_from_segmentation(
     MCA/ACA/PCA use a parent-contact seed from the segmentation. Optional light
     smoothing is applied per branch by default.
     """
-    import numpy as np
-
     seg_np = as_backend_array(seg).astype(np.int32, copy=False)
     prefer = {int(k): v for k, v in (prefer_polylines or {}).items() if v is not None}
     if labels is None:
@@ -425,7 +421,7 @@ def export_centerlines_from_segmentation(
     # vessel paints the parent label (viz/back-compat). Branch identity + points
     # are persisted separately in the branches sidecar JSON below.
     arterial_for_mask = {
-        int(lid): np.vstack([to_numpy(pts) for _n, pts in branches])
+        int(lid): np.vstack([as_backend_array(pts) for _n, pts in branches])
         for lid, branches in arterial.items()
         if branches
     }
@@ -446,7 +442,7 @@ def export_centerlines_from_segmentation(
     n_arterial_points = 0
     for lid, branches in sorted(arterial.items()):
         for gen_idx, (name, pts) in enumerate(branches):
-            pts_np = to_numpy(pts).astype(float)
+            pts_np = as_backend_array(pts).astype(float)
             n_arterial_points += int(pts_np.shape[0])
             branch_records.append(
                 {
@@ -506,7 +502,7 @@ def _polyline_for_label(
     min_points: int,
 ) -> Any | None:
     """Ordered (N,3) polyline for voxels with *label_id* in the centerline mask."""
-    m = to_numpy(mask).astype(np.int32, copy=False)
+    m = as_backend_array(mask).astype(np.int32, copy=False)
     roi = m == int(label_id)
     if not roi.any():
         return None
