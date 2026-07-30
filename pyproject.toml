@@ -69,6 +69,8 @@ dependencies = [
   "nipype>=1.11.0",
   "gudhi>=3.12.0",
   "fireants>=1.5.0",
+  "antspynet>=0.3.2",
+  "antspyx>=0.6.3",
 
   # -----------------------------------------------------------------------------
   # Mesh processing dependencies
@@ -165,6 +167,7 @@ nikon2nifti = "nvitk.io.conversors.nikon2nifti:main"
 # -----------------------------------------------------------------------------
 nvitk-totalseg = "nvitk.segmentation.total_segmentator.cli:main"
 nvitk-eicab = "nvitk.segmentation.eicab.cli:main"
+nvitk-seg = "nvitk.cli.segmentation:main"
 
 # -----------------------------------------------------------------------------
 # Registration scripts

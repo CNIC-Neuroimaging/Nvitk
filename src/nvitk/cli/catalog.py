@@ -51,6 +51,11 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
     ],
     "restoration": [
         ToolEntry("", "nvitk.restoration.bilateral", label="bilateral 2d/3d", supports_gpu=True, library_only=True),
+        ToolEntry("", "nvitk.restoration.n4_bias", label="N4 bias field correction (ANTs)", library_only=True),
+    ],
+    "segmentation": [
+        ToolEntry("", "nvitk.segmentation.mouse_brain", label="mouse brain extraction/parcellation (ANTsPyNet)", library_only=True),
+        ToolEntry("", "nvitk.segmentation.blood_flood", label="blood flood / distal vessel expand", library_only=True),
     ],
     "measure": [
         ToolEntry("", "nvitk.measure.volume", label="volume", library_only=True),
@@ -75,6 +80,7 @@ _CMD_TO_SUBMODULE: dict[str, str] = {
     "nikon2nifti": "conversion",
     "nvitk-totalseg": "segmentation",
     "nvitk-eicab": "segmentation",
+    "nvitk-seg": "segmentation",
     "nvitk-flirt": "registration",
     "nvitk-ants": "registration",
     "nvitk-fireants": "registration",

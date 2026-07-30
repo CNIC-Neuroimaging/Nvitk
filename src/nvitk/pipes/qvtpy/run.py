@@ -338,6 +338,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    pcomm_min_points: int,
+    arterial_branch_min_points: int,
     venous_brain_mask: bool,
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
@@ -360,6 +362,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
+    distal_locs: bool,
     measure_resegment: bool,
     measure_thr_algorithm: str,
     cross_section_res: int,
@@ -526,6 +529,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             eicab_min_island_fraction=eicab_min_island_fraction,
                             eicab_bridge_open_radius=eicab_bridge_open_radius,
                             venous_min_branch_points=venous_min_branch_points,
+                            pcomm_min_points=pcomm_min_points,
+                            arterial_branch_min_points=arterial_branch_min_points,
                             venous_brain_mask=venous_brain_mask,
                             totalseg_model_dir=totalseg_model_dir,
                             backend=backend,
@@ -631,6 +636,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
                             cross_section_radius_vox=cross_section_radius_vox,
                             venous_min_component_frac=venous_min_component_frac,
                             loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                            distal_locs=distal_locs,
                             backend=backend,
                         ),
                     )
@@ -869,6 +875,15 @@ def _submit_qvtpy_sge_subjects_remote(
     default=None,
     help="Text/CSV/XLSX file with subject IDs.",
 )
+@click.option(
+    "--subjects-2-exclude",
+    "subjects_2_exclude",
+    default=None,
+    help=(
+        "Comma/whitespace-separated subject IDs to drop from the resolved run list "
+        "(after --subjects / --subjects-file / cohort expansion). Applies to local and SGE."
+    ),
+)
 @click.option("--submit", type=click.Choice(["local", "sge"]), default="local", show_default=True)
 @click.option(
     "--container",
@@ -1087,6 +1102,20 @@ def _submit_qvtpy_sge_subjects_remote(
 @click.option("--eicab-bridge-open-radius", type=int, default=0, show_default=True)
 @click.option("--venous-min-branch-points", type=int, default=30, show_default=True)
 @click.option(
+    "--pcomm-min-points",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Stage3: drop LPCOMM/RPCOMM centerlines shorter than this (filters tiny FPs).",
+)
+@click.option(
+    "--arterial-branch-min-points",
+    type=int,
+    default=10,
+    show_default=True,
+    help="Stage3: min points to keep MCA/ACA/PCA bifurcation side branches.",
+)
+@click.option(
     "--venous-brain-mask/--no-venous-brain-mask",
     default=True,
     show_default=True,
@@ -1145,7 +1174,7 @@ def _submit_qvtpy_sge_subjects_remote(
     show_default=True,
     help=(
         "Stage4: after region growing, expand MCA/ACA/PCA into a Frangi+hysteresis "
-        "vessel tree via watershed (eICAB-inspired, Python-only). Default OFF."
+        "vessel tree via watershed (eICAB-inspired, Python-only). Default ON."
     ),
 )
 @click.option(
@@ -1192,6 +1221,15 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
 @click.option("--loc-endpoint-inset-frac", type=float, default=0.08, show_default=True, help="Stage5: dual LOC inset from polyline ends.")
+@click.option(
+    "--distal-locs/--no-distal-locs",
+    default=False,
+    show_default=True,
+    help=(
+        "Stage5: for MCA/ACA/PCA also emit distal (fin) LOCs past the stage-3 "
+        "A1/M1/P1 span. Default off: one init LOC per vessel."
+    ),
+)
 # --- stage 6 ---
 @click.option(
     "--measure-resegment/--no-measure-resegment",
@@ -1216,7 +1254,7 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option(
     "--save-plots/--no-save-plots",
-    default=False,
+    default=True,
     show_default=True,
     help="Stage6: render paper-style PITC/PWV/flow figures + per-region PITC branch masks.",
 )
@@ -1266,6 +1304,7 @@ def main(
     stages_spec: str,
     subjects: str | None,
     subjects_file: Path | None,
+    subjects_2_exclude: str | None,
     submit: str,
     container: Path,
     src_dir: Path | None,
@@ -1308,6 +1347,8 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    pcomm_min_points: int,
+    arterial_branch_min_points: int,
     venous_brain_mask: bool,
     totalseg_model_dir: Path | None,
     crop_padding_bbox: int,
@@ -1330,6 +1371,7 @@ def main(
     loc_arterial_strategy: str,
     cross_section_radius_vox: float,
     loc_endpoint_inset_frac: float,
+    distal_locs: bool,
     measure_resegment: bool,
     measure_thr_algorithm: str,
     cross_section_res: int,
@@ -1495,6 +1537,23 @@ def main(
 
     if not subject_list:
         raise click.ClickException("No subjects resolved from inputs.")
+
+    if subjects_2_exclude:
+        from nvitk.db.xnat import parse_subject_tokens
+
+        exclude = set(parse_subject_tokens(subjects_2_exclude))
+        if exclude:
+            before = len(subject_list)
+            subject_list = [s for s in subject_list if s not in exclude]
+            n_dropped = before - len(subject_list)
+            log.info(
+                f"--subjects-2-exclude: dropped {n_dropped}/{before} subject(s) "
+                f"({len(subject_list)} remaining)"
+            )
+            if not subject_list:
+                raise click.ClickException(
+                    "No subjects left after --subjects-2-exclude."
+                )
 
     ssh_host_resolved: str | None = None
     ssh_user: str | None = None
@@ -1694,6 +1753,8 @@ def main(
                             eicab_min_island_fraction=eicab_min_island_fraction,
                             eicab_bridge_open_radius=eicab_bridge_open_radius,
                             venous_min_branch_points=venous_min_branch_points,
+                            pcomm_min_points=pcomm_min_points,
+                            arterial_branch_min_points=arterial_branch_min_points,
                             venous_brain_mask=venous_brain_mask,
                             totalseg_model_dir=totalseg_model_dir_eff,
                             totalseg_device=backend,
@@ -1762,6 +1823,7 @@ def main(
                             cross_section_radius_vox=cross_section_radius_vox,
                             venous_min_component_frac=venous_min_component_frac,
                             loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+                            distal_locs=distal_locs,
                         ),
                     )
                 if run_s6 and _local_stage_pending(subj, STAGE_MEASURE, **_local_skip):
@@ -1952,6 +2014,8 @@ def main(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        pcomm_min_points=pcomm_min_points,
+        arterial_branch_min_points=arterial_branch_min_points,
         venous_brain_mask=venous_brain_mask,
         totalseg_model_dir=totalseg_model_dir_eff,
         crop_padding_bbox=crop_padding_bbox,
@@ -1974,6 +2038,7 @@ def main(
         loc_arterial_strategy=loc_arterial_strategy,
         cross_section_radius_vox=cross_section_radius_vox,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+        distal_locs=distal_locs,
         measure_resegment=measure_resegment,
         measure_thr_algorithm=measure_thr_algorithm,
         cross_section_res=cross_section_res,

@@ -47,6 +47,7 @@ from nvitk.pipes.qvtpy.util.loc.loc_selection import (
     select_venous_locs,
 )
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
+    load_arterial_centerlines,
     load_centerline_meta,
     load_centerlines_branches,
 )
@@ -124,6 +125,7 @@ def run_subject(
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
+    distal_locs: bool = False,
 ) -> Path:
     """Place arterial and venous LOCs; return stage-5 output directory."""
     del tangent_k_half  # tangents computed inside loc_selection
@@ -143,6 +145,8 @@ def run_subject(
     s4 = output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
     arterial, venous, cl_meta = load_centerlines_branches(s3, min_points=3, stage4_dir=s4)
     meta = load_centerline_meta(s3)
+    # Proximal A1/M1/P1 trunks from stage-3 (pre-RG / pre-distal expansion).
+    stage3_arterial = load_arterial_centerlines(s3, min_points=3, meta=meta)
 
     arterial_seg = None
     seg_path = s4 / "seg_4dflow.nii.gz"
@@ -188,6 +192,8 @@ def run_subject(
         endpoint_inset_frac=loc_endpoint_inset_frac,
         arterial_seg=arterial_seg,
         eicab_qvtpy=eicab_qvtpy,
+        stage3_arterial=stage3_arterial,
+        distal_locs=bool(distal_locs),
     )
     for rec in arterial_recs:
         rows.append(loc_record_to_dict(rec))
@@ -235,6 +241,7 @@ def run_subject(
                 "loc_arterial_strategy": loc_arterial_strategy,
                 "loc_endpoint_inset_frac": float(loc_endpoint_inset_frac),
                 "cross_section_radius_vox": float(cross_section_radius_vox),
+                "distal_locs": bool(distal_locs),
                 "centerline_meta_source": cl_meta.get("source", "stage3"),
                 **arterial_meta,
             },
@@ -263,6 +270,7 @@ def _subject_sge_spec(
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
+    distal_locs: bool = False,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
@@ -285,6 +293,8 @@ def _subject_sge_spec(
         "--loc-endpoint-inset-frac",
         str(float(loc_endpoint_inset_frac)),
     ]
+    if distal_locs:
+        parts.append("--distal-locs")
     if skip_existing:
         parts.append("--skip-existing")
     python_cmd = " ".join(parts)
@@ -320,6 +330,7 @@ def build_subject_sge_command(
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
+    distal_locs: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Return the host shell command for one stage5 array/SGE task."""
@@ -336,6 +347,7 @@ def build_subject_sge_command(
         cross_section_radius_vox=cross_section_radius_vox,
         venous_min_component_frac=venous_min_component_frac,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+        distal_locs=distal_locs,
         backend=backend,
     )
     return build_singularity_command(spec, paths)
@@ -355,6 +367,7 @@ def submit_subject_sge(
     cross_section_radius_vox: float = 10.0,
     venous_min_component_frac: float = 0.005,
     loc_endpoint_inset_frac: float = 0.08,
+    distal_locs: bool = False,
     backend: str = "gpu",
 ) -> str:
     """Emit or submit one stage-5 SGE job. Returns qsub job id."""
@@ -369,6 +382,7 @@ def submit_subject_sge(
         cross_section_radius_vox=cross_section_radius_vox,
         venous_min_component_frac=venous_min_component_frac,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+        distal_locs=distal_locs,
         backend=backend,
     )
     return submit_stage(spec, paths, hold_jid=hold_jid, emit=emit)
@@ -390,6 +404,12 @@ def submit_subject_sge(
 @click.option("--cross-section-radius-vox", type=float, default=10.0, show_default=True)
 @click.option("--venous-min-component-frac", type=float, default=0.005, show_default=True)
 @click.option("--loc-endpoint-inset-frac", type=float, default=0.08, show_default=True)
+@click.option(
+    "--distal-locs/--no-distal-locs",
+    default=False,
+    show_default=True,
+    help="MCA/ACA/PCA: also emit distal (fin) LOCs past the stage-3 A1/M1/P1 span.",
+)
 def main(
     subject: str,
     nifti_root: Path,
@@ -400,6 +420,7 @@ def main(
     cross_section_radius_vox: float,
     venous_min_component_frac: float,
     loc_endpoint_inset_frac: float,
+    distal_locs: bool,
 ) -> None:
     Logger()
     run_subject(
@@ -412,6 +433,7 @@ def main(
         cross_section_radius_vox=cross_section_radius_vox,
         venous_min_component_frac=venous_min_component_frac,
         loc_endpoint_inset_frac=loc_endpoint_inset_frac,
+        distal_locs=distal_locs,
     )
 
 

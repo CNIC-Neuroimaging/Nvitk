@@ -41,6 +41,7 @@ from nvitk.io.imageio import imread, imsave
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.labels import (
     QVTPY_ARTERIAL_LABEL_IDS,
+    QVTPY_PCOMM_IDS,
     QVTPY_SMALL_ARTERIAL_IDS,
     VENOUS_UNKNOWN_LABEL,
     relabel_eicab_mask_to_qvtpy,
@@ -206,6 +207,8 @@ def run_subject(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 0,
     venous_min_branch_points: int = 12,
+    pcomm_min_points: int = 5,
+    arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
     totalseg_device: str = "gpu",
@@ -264,7 +267,8 @@ def run_subject(
     # ---- Arterial labels: clean eICAB, clear venous slab, island filter ------
     # Per-label islands only (no global arterial CC wipe): a global min-size
     # keyed off total arterial voxels was dropping whole small vessels (PCA/comm).
-    # Centerlines use the same extractor as stage 4 (min_points=3, 2 for MCA/ACA/PCA).
+    # PCOMM uses *pcomm_min_points*; MCA/ACA/PCA side branches use
+    # *arterial_branch_min_points*.
     log.step("clean arterial eICAB labels + island filter")
     venous_region = venous_search_region(shape3)
     labels_np = as_backend_array(labels_arr).astype(np.int32, copy=False)
@@ -283,9 +287,32 @@ def run_subject(
     arterial_vol = np.where(venous_region, 0, labels_np).astype(np.int32, copy=False)
     imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))
 
-    arterial_branches = centerlines_from_segmentation(arterial_vol, min_points=3)
+    arterial_branches = centerlines_from_segmentation(
+        arterial_vol,
+        min_points=3,
+        pcomm_min_points=int(pcomm_min_points),
+        min_branch_points=int(arterial_branch_min_points),
+    )
     arterial = arterial_main_paths(arterial_branches)
-    log.step(f"arterial centerlines: {len(arterial)} label(s)")
+    # Dropped PCOMMs must leave the analysis: clear them from the eICAB seed
+    # mask so stage-4 cannot grow a mask and stage-5 cannot place a LOC.
+    dropped_pcomm = sorted(
+        int(lid) for lid in QVTPY_PCOMM_IDS if int(lid) not in arterial
+    )
+    if dropped_pcomm:
+        for lid in dropped_pcomm:
+            arterial_vol[arterial_vol == int(lid)] = 0
+            arterial_labels_full[arterial_labels_full == int(lid)] = 0
+        imsave(warped_labels, arterial_vol, metadata=dict(lab_img.metadata or {}))
+        log.info(
+            f"[{subject}] cleared dropped PCOMM label(s) from eicab_in_4dflow: "
+            f"{dropped_pcomm}"
+        )
+    log.step(
+        f"arterial centerlines: {len(arterial)} label(s) "
+        f"(pcomm_min_points={int(pcomm_min_points)}, "
+        f"arterial_branch_min_points={int(arterial_branch_min_points)})"
+    )
 
     # ---- Venous: CD ∧ slab [∧ brain] → clean → bifurcate/split skeleton → name/label
     log.step("venous branch detection from CD + slab region")
@@ -395,6 +422,7 @@ def run_subject(
         "eicab_labels_source": str(eicab_res.path),
         "arterial_label_scheme": "qvtpy",
         "arterial_labels": [int(k) for k in sorted(arterial.keys())],
+        "dropped_pcomm_labels": list(dropped_pcomm),
         "venous_vessels": list(venous_branches.keys()),
         "venous_label_by_name": venous_label_by_name,
         "n_venous_points": int(sum(p.shape[0] for p in venous_branches.values())),
@@ -411,6 +439,8 @@ def run_subject(
         "venous_region_axis1_third": int(max(1, round(shape3[1] / 3.0))),
         "min_points_per_vessel": 5,
         "venous_min_branch_points": int(venous_min_branch_points),
+        "pcomm_min_points": int(pcomm_min_points),
+        "arterial_branch_min_points": int(arterial_branch_min_points),
         "venous_brain_mask": bool(venous_brain_mask),
         "totalseg_task": "total_mr",
         "totalseg_roi_subset": ["brain"],
@@ -452,6 +482,20 @@ def _stage3_cli_options(func):
     func = click.option("--eicab-min-island-fraction", type=float, default=0.005, show_default=True)(func)
     func = click.option("--eicab-bridge-open-radius", type=int, default=1, show_default=True)(func)
     func = click.option("--venous-min-branch-points", type=int, default=12, show_default=True)(func)
+    func = click.option(
+        "--pcomm-min-points",
+        type=int,
+        default=5,
+        show_default=True,
+        help="Drop LPCOMM/RPCOMM centerlines shorter than this (filters tiny FPs).",
+    )(func)
+    func = click.option(
+        "--arterial-branch-min-points",
+        type=int,
+        default=5,
+        show_default=True,
+        help="Min points to keep MCA/ACA/PCA bifurcation side branches.",
+    )(func)
     func = click.option(
         "--eicab-prefer-pp/--no-eicab-prefer-pp",
         default=True,
@@ -495,6 +539,8 @@ def _subject_sge_spec(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
+    pcomm_min_points: int = 5,
+    arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
     totalseg_device: str | None = None,
@@ -522,6 +568,10 @@ def _subject_sge_spec(
         str(int(eicab_bridge_open_radius)),
         "--venous-min-branch-points",
         str(int(venous_min_branch_points)),
+        "--pcomm-min-points",
+        str(int(pcomm_min_points)),
+        "--arterial-branch-min-points",
+        str(int(arterial_branch_min_points)),
     ]
     if skip_existing:
         parts.append("--skip-existing")
@@ -581,6 +631,8 @@ def build_subject_sge_command(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
+    pcomm_min_points: int = 5,
+    arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
     totalseg_device: str | None = None,
@@ -604,6 +656,8 @@ def build_subject_sge_command(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        pcomm_min_points=pcomm_min_points,
+        arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
         totalseg_device=totalseg_device,
@@ -630,6 +684,8 @@ def submit_subject_sge(
     eicab_min_island_fraction: float = 0.005,
     eicab_bridge_open_radius: int = 1,
     venous_min_branch_points: int = 12,
+    pcomm_min_points: int = 5,
+    arterial_branch_min_points: int = 5,
     eicab_prefer_pp: bool = True,
     venous_brain_mask: bool = True,
     totalseg_device: str | None = None,
@@ -651,6 +707,8 @@ def submit_subject_sge(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        pcomm_min_points=pcomm_min_points,
+        arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
         totalseg_device=totalseg_device,
@@ -675,6 +733,8 @@ def main(
     eicab_min_island_fraction: float,
     eicab_bridge_open_radius: int,
     venous_min_branch_points: int,
+    pcomm_min_points: int,
+    arterial_branch_min_points: int,
     eicab_prefer_pp: bool,
     venous_brain_mask: bool,
     totalseg_device: str,
@@ -693,6 +753,8 @@ def main(
         eicab_min_island_fraction=eicab_min_island_fraction,
         eicab_bridge_open_radius=eicab_bridge_open_radius,
         venous_min_branch_points=venous_min_branch_points,
+        pcomm_min_points=pcomm_min_points,
+        arterial_branch_min_points=arterial_branch_min_points,
         eicab_prefer_pp=eicab_prefer_pp,
         venous_brain_mask=venous_brain_mask,
         totalseg_device=totalseg_device,

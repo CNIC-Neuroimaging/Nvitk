@@ -4,6 +4,10 @@ from __future__ import annotations
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "bilateral": "Edge-preserving Gaussian smoothing on the active image or mask.",
+    "n4_bias": (
+        "ANTs N4 bias-field correction on the active intensity volume. "
+        "Optional mask layer restricts the bias estimate."
+    ),
     "sliding_threshold": "Adaptive threshold along one axis (useful for uneven intensity).",
     "dilate": "Expand foreground voxels by a spherical footprint.",
     "erode": "Shrink foreground voxels by a spherical footprint.",
@@ -43,6 +47,15 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_region_grow": (
         "Grow from seed voxels. Barriers block other label ids only; "
         "mask and centerline layers use separate dilation radii."
+    ),
+    "seg_blood_flood": (
+        "Active layer = marker / seed labels; intensity layer = CD or TOF. "
+        "Frangi vesselness → hysteresis tree → watershed (same algorithm as qvtpy "
+        "distal vessel expansion). Optional barrier punches hard walls out of the tree."
+    ),
+    "seg_mouse_brain": (
+        "ANTsPyNet mouse brain extraction (mask) or regional parcellation on the "
+        "active MRI volume. For parcellation, optionally supply a brain mask layer."
     ),
     "measure_centerline_arc_length": (
         "Report centerline polyline arc length in voxels and mm (debug)."

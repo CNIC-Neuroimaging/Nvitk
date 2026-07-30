@@ -293,6 +293,74 @@ def _side_branch_attach_index_on_trunk(
     return None
 
 
+def pick_x1_init_distal_fin_loc_indices(
+    stage3_trunk: np.ndarray,
+    stage4_trunk: np.ndarray,
+    side_branches: list[np.ndarray] | tuple[np.ndarray, ...] = (),
+    *,
+    max_dist_vox: float = 5.0,
+) -> tuple[int, int | None, str]:
+    """Init on stage-3 A1/M1/P1 midpoint; fin on stage-4-only distal span.
+
+    Stage-3 MCA/ACA/PCA centerlines are the pre-RG / pre-distal-expansion proximal
+    segment (A1/M1/P1). The init LOC is the arc-length midpoint of that segment,
+    mapped onto the stage-4 trunk.
+
+    Stage-3 coverage mapped onto stage-4 (``[i_lo, i_hi]``) is **forbidden** for
+    the fin LOC. Fin may only use stage-4 stations strictly distal of that span
+    (toward the first distal side-branch attach, else the vessel end).
+    """
+    s3 = to_numpy(stage3_trunk).astype(np.float64).reshape(-1, 3)
+    s4 = to_numpy(stage4_trunk).astype(np.float64).reshape(-1, 3)
+    n4 = int(s4.shape[0])
+    if n4 < 1:
+        return 0, None, "empty_stage4"
+    if s3.shape[0] < 1:
+        return pick_index_at_arc_fraction(s4, 0.25), None, "empty_stage3"
+
+    mapped = [
+        int(np.argmin(np.linalg.norm(s4 - p.reshape(1, 3), axis=1)))
+        for p in s3
+    ]
+    i_lo = int(min(mapped))
+    i_hi = int(max(mapped))
+    if i_hi <= i_lo:
+        i_hi = min(n4 - 1, i_lo + 1)
+
+    # Geometric midpoint of the stage-3 (A1/M1/P1) polyline → nearest stage-4 index.
+    mid3 = s3[pick_index_at_arc_fraction(s3, 0.5)]
+    init_idx = int(np.argmin(np.linalg.norm(s4 - mid3.reshape(1, 3), axis=1)))
+    # Keep init inside the mapped proximal span when possible.
+    init_idx = int(np.clip(init_idx, i_lo, i_hi))
+
+    # Forbidden for fin: every stage-4 index covered by the stage-3 centerline.
+    # Allowed fin domain is strictly distal of that span.
+    fin_lo = i_hi + 1
+    if fin_lo >= n4:
+        return init_idx, None, "stage3_x1_mid_no_stage4_only_distal"
+
+    attach_distal: list[int] = []
+    for side in side_branches:
+        ai = _side_branch_attach_index_on_trunk(
+            s4, side, max_dist_vox=float(max_dist_vox)
+        )
+        if ai is not None and int(ai) >= fin_lo:
+            attach_distal.append(int(ai))
+    if attach_distal:
+        j2 = int(min(attach_distal))
+        fin_idx = pick_index_arc_midpoint_between(s4, fin_lo, j2)
+        method = "stage3_x1_mid_stage4_past_to_branch"
+    else:
+        fin_idx = pick_index_arc_midpoint_between(s4, fin_lo, n4 - 1)
+        method = "stage3_x1_mid_stage4_past_to_end"
+
+    # Hard clamp: never land fin on a stage-3 (forbidden) station.
+    fin_idx = int(np.clip(fin_idx, fin_lo, n4 - 1))
+    if fin_idx <= init_idx or fin_idx <= i_hi:
+        return init_idx, None, f"{method}_no_distal"
+    return init_idx, fin_idx, method
+
+
 def pick_branch_intersection_loc_indices(
     trunk: np.ndarray,
     side_branches: list[np.ndarray] | tuple[np.ndarray, ...],
@@ -1040,6 +1108,8 @@ def select_arterial_locs(
     endpoint_inset_frac: float = 0.08,
     arterial_seg: np.ndarray | None = None,
     eicab_qvtpy: np.ndarray | None = None,
+    stage3_arterial: dict[int, Any] | None = None,
+    distal_locs: bool = False,
 ) -> tuple[list[LocRecord], dict[str, Any]]:
     """Select arterial LOCs. Returns ``(records, meta_extra)`` for loc_meta.json.
 
@@ -1050,23 +1120,42 @@ def select_arterial_locs(
     LOC policy (``strategy="qvtpy"``):
 
     - ICA / basilar: one shared-z mid LOC on the trunk
-    - MCA / ACA / PCA: exactly two LOCs (init/fin) from trunk ↔ side-branch
-      intersections on the named stage-4 centerlines (M1/A1/P1 then M2/A2/P2)
+    - MCA / ACA / PCA: init at the midpoint of the stage-3 A1/M1/P1 centerline
+      (pre-RG / pre-distal expansion); when *distal_locs* is true, also place fin
+      distal of that span on the stage-4 trunk (stage-3 coverage forbidden for fin)
+    - ACOMM: never measured (insufficient resolution)
+    - PCOMM: only when present in the arterial set (stage-3 min-points survivors)
     - Other labels: one mid LOC on the trunk
 
-    Stage-4 named side branches define the intersection stations used for MCA /
-    ACA / PCA LOCs; they do **not** create extra stage-5 LOCs themselves.
+    *stage3_arterial* supplies proximal A1/M1/P1 trunks keyed by label id (polyline
+    or named-branch list). When missing for a vessel, falls back to trunk ↔
+    side-branch intersections on stage-4 alone.
     """
     from nvitk.pipes.qvtpy.labels import qvtpy_vessel_name
 
     _ = (venous_mask, endpoint_inset_frac)  # API-stable; unused by current strategies
     branches = _normalize_arterial_branches(arterial_polylines)
+    stage3_trunks: dict[int, np.ndarray] = {}
+    if stage3_arterial:
+        for lid, val in stage3_arterial.items():
+            pts = None
+            if isinstance(val, list) and val:
+                first = val[0]
+                pts = first[1] if isinstance(first, tuple) else first
+            elif val is not None:
+                pts = val
+            if pts is None:
+                continue
+            arr = to_numpy(pts).astype(np.float64).reshape(-1, 3)
+            if arr.shape[0] >= 2:
+                stage3_trunks[int(lid)] = arr
+
     meta_extra: dict[str, Any] = {
         "dual_loc_fallback_vessels": [],
         "loc_boundary_method_dual": "arc_length_tertiles",
-        "loc_boundary_method_mca_aca_pca": "trunk_side_branch_intersections",
-        "loc_boundary_method_mca_pca": "trunk_side_branch_intersections",
-        "loc_boundary_method_aca": "trunk_side_branch_intersections",
+        "loc_boundary_method_mca_aca_pca": "stage3_x1_mid_stage4_distal",
+        "loc_boundary_method_mca_pca": "stage3_x1_mid_stage4_distal",
+        "loc_boundary_method_aca": "stage3_x1_mid_stage4_distal",
         "loc_boundary_method_mid": "arc_length_midpoint",
         "arterial_centerline_source": "stage4_seg_branches",
         "loc_per_branch": False,
@@ -1074,6 +1163,9 @@ def select_arterial_locs(
         "arterial_seg_for_bifurcations": arterial_seg is not None,
         "aca_loc_methods": {},
         "branch_intersection_loc_methods": {},
+        "skipped_acomm": True,
+        "stage3_x1_vessels": [],
+        "distal_locs": bool(distal_locs),
     }
     out: list[LocRecord] = []
     use_dual = strategy == "qvtpy"
@@ -1096,6 +1188,10 @@ def select_arterial_locs(
     for vid, branch_list in sorted(branches.items()):
         if not branch_list:
             continue
+        # ACOMM: never place LOCs (insufficient resolution for measurement).
+        if int(vid) == int(QVTPY_ACOMM):
+            continue
+        # PCOMM survivors only — absent labels (stage-3 drop) never appear here.
         trunk = to_numpy(branch_list[0][1])
         vname = qvtpy_vessel_name(vid)
         names_here = [str(n) for n, _p in branch_list]
@@ -1125,13 +1221,19 @@ def select_arterial_locs(
             )
             continue
 
-        # MCA / ACA / PCA: init/fin from trunk ↔ side-branch intersections.
+        # MCA / ACA / PCA: init on stage-3 A1/M1/P1 mid; fin distal on stage-4.
         if use_dual and int(vid) in QVTPY_BRANCH_INTERSECTION_LOC_IDS:
             side_pts = [to_numpy(p) for _n, p in branch_list[1:]]
             init_idx: int
             fin_idx: int | None
             method: str
-            if side_pts:
+            s3_trunk = stage3_trunks.get(int(vid))
+            if s3_trunk is not None:
+                init_idx, fin_idx, method = pick_x1_init_distal_fin_loc_indices(
+                    s3_trunk, trunk, side_pts
+                )
+                meta_extra["stage3_x1_vessels"].append(vname)
+            elif side_pts:
                 init_idx, fin_idx, method = pick_branch_intersection_loc_indices(
                     trunk, side_pts
                 )
@@ -1139,8 +1241,14 @@ def select_arterial_locs(
                 method = "no_side_branches"
                 init_idx, fin_idx = 0, None
 
-            # Fallbacks when named side branches are missing / do not attach.
-            if method in ("no_branch_intersection", "no_side_branches", "empty_trunk"):
+            # Fallbacks when stage-3 / named side branches are missing.
+            if method in (
+                "no_branch_intersection",
+                "no_side_branches",
+                "empty_trunk",
+                "empty_stage3",
+                "empty_stage4",
+            ):
                 if int(vid) in QVTPY_ACA_JUNCTION_LOC_IDS:
                     init_idx, fin_idx, method = pick_aca_loc_indices(
                         trunk,
@@ -1179,7 +1287,8 @@ def select_arterial_locs(
                     radius_vox=radius_vox,
                 )
             )
-            if fin_idx is not None:
+            # Fin (distal) LOCs are computed above but only emitted when enabled.
+            if distal_locs and fin_idx is not None:
                 out.append(
                     _arterial_loc_at_index(
                         trunk,
@@ -1217,7 +1326,7 @@ def select_arterial_locs(
             )
             continue
 
-        # Remaining arteries (comm, …): one mid LOC on the trunk.
+        # Remaining arteries (surviving PCOMM, …): one mid LOC on the trunk.
         mid_idx = pick_mid_loc_index(trunk.shape[0], trunk)
         out.append(
             _arterial_loc_at_index(
@@ -1272,6 +1381,7 @@ __all__ = [
     "pick_dual_loc_indices",
     "pick_mca_pca_loc_indices",
     "pick_index_arc_midpoint_between",
+    "pick_x1_init_distal_fin_loc_indices",
     "pick_axial_alignment_index",
     "select_ica_basilar_aligned_loc_indices",
     "pick_equal_section_boundary_indices",

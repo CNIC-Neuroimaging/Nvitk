@@ -164,6 +164,7 @@ QVTPY_ACA_IDS: frozenset[int] = frozenset({QVTPY_LACA, QVTPY_RACA})
 QVTPY_MCA_IDS: frozenset[int] = frozenset({QVTPY_LMCA, QVTPY_RMCA})
 QVTPY_PCA_IDS: frozenset[int] = frozenset({QVTPY_LPCA, QVTPY_RPCA})
 QVTPY_COMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM, QVTPY_ACOMM})
+QVTPY_PCOMM_IDS: frozenset[int] = frozenset({QVTPY_LPCOMM, QVTPY_RPCOMM})
 QVTPY_VERTEBRAL_IDS: frozenset[int] = frozenset({QVTPY_LVA, QVTPY_RVA})
 QVTPY_NON_COMM_ARTERIAL_IDS: frozenset[int] = (
     QVTPY_ARTERIAL_LABEL_IDS - QVTPY_COMM_IDS - QVTPY_VERTEBRAL_IDS
@@ -456,6 +457,7 @@ __all__ = [
     "QVTPY_ARTERIAL_LABEL_IDS",
     "QVTPY_ARTERIAL_NAME_TO_ID",
     "QVTPY_COMM_IDS",
+    "QVTPY_PCOMM_IDS",
     "QVTPY_ICA_BASILAR_IDS",
     "QVTPY_LVA",
     "QVTPY_NON_COMM_ARTERIAL_IDS",

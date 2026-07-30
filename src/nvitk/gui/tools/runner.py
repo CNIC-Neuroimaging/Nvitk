@@ -461,6 +461,26 @@ def run_gui_tool(
         with using(bk):
             return coerce_tool_output(bilateral(img, **kw))
 
+    if tool_id == "n4_bias":
+        from nvitk.restoration import n4_bias_field_correction
+
+        mask_img = None
+        ref_name = str(params.get("reference_layer") or "").strip()
+        if ref_name and ref_name not in ("", "(none)"):
+            mask_layer = _resolve_layer(viewer, ref_name)
+            _, mask_img, _ = align_mask_to_reference_layer(mask_layer, layer, order=0)
+        shrink = int(params.get("shrink_factor") or 4)
+        spline = float(params.get("spline_param") or 0.0)
+        with using("numpy"):
+            out = n4_bias_field_correction(
+                img,
+                mask=mask_img,
+                shrink_factor=shrink,
+                spline_param=spline if spline > 0 else None,
+                rescale_intensities=bool(params.get("rescale_intensities")),
+            )
+            return coerce_tool_output(out)
+
     if tool_id == "sliding_threshold":
         from nvitk.filters.sliding_threshold import (
             binary_mask_sliding_threshold_2d,
@@ -939,6 +959,72 @@ def run_gui_tool(
             polarity="hyperintense",
         )
         return mask.astype(np.uint8)
+
+    if tool_id == "seg_blood_flood":
+        from nvitk.segmentation.blood_flood import blood_flood
+
+        intensity_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        ref = layer_to_image(intensity_layer)
+        _, markers_img, markers_resampled = align_mask_to_reference_layer(
+            layer, intensity_layer, proc_data, order=0
+        )
+        if markers_resampled:
+            gui_log(
+                f"Resampled markers '{layer.name}' onto intensity '{intensity_layer.name}' "
+                f"grid {tuple(ref.data.shape)}."
+            )
+        barrier_arr = None
+        bar_name = _layer_param(params, "barrier_layer")
+        if bar_name:
+            bar_layer = _resolve_layer(viewer, bar_name)
+            _, bar_img, _ = align_mask_to_reference_layer(bar_layer, intensity_layer, order=0)
+            barrier_arr = to_numpy(bar_img.data)
+
+        sigmas_raw = str(params.get("frangi_sigmas") or "").strip()
+        if sigmas_raw:
+            frangi_sigmas = tuple(
+                float(x) for x in sigmas_raw.replace(";", ",").split(",") if x.strip()
+            )
+        else:
+            frangi_sigmas = None
+        thin_pct = float(params.get("thin_vesselness_percentile") if params.get("thin_vesselness_percentile") is not None else 55.0)
+        thin = None if thin_pct < 0 else thin_pct
+        with using(bk):
+            result = blood_flood(
+                to_numpy(ref.data),
+                to_numpy(markers_img.data),
+                barrier=barrier_arr,
+                frangi_sigmas=frangi_sigmas,
+                hyst_low_factor=float(params.get("hyst_low_factor") or 3.0),
+                hyst_high_factor=float(params.get("hyst_high_factor") or 0.5),
+                thicken_iter=int(params.get("thicken_iter") or 0),
+                thin_vesselness_percentile=thin,
+                connectivity=int(params.get("connectivity") or 3),
+            )
+            gui_log(
+                f"Blood flood: vesselness={result.vesselness_mode}, "
+                f"tree_voxels={int(np.count_nonzero(result.tree))}, "
+                f"labeled={int(np.count_nonzero(result.labels))}"
+            )
+            return coerce_tool_output(result.labels)
+
+    if tool_id == "seg_mouse_brain":
+        from nvitk.segmentation.mouse_brain import mouse_brain_segmentation
+
+        mask_img = None
+        ref_name = str(params.get("reference_layer") or "").strip()
+        if ref_name and ref_name not in ("", "(none)"):
+            mask_layer = _resolve_layer(viewer, ref_name)
+            _, mask_img, _ = align_mask_to_reference_layer(mask_layer, layer, order=0)
+        with using("numpy"):
+            out = mouse_brain_segmentation(
+                img,
+                mode=str(params.get("mouse_brain_mode") or "extraction"),
+                modality=str(params.get("mouse_modality") or "t2"),
+                which_parcellation=str(params.get("which_parcellation") or "nick"),
+                mask=mask_img,
+            )
+            return coerce_tool_output(out)
 
     if tool_id == "seg_adjust_masks":
         from nvitk.segmentation.labels import adjust_masks

@@ -32,6 +32,7 @@ from nvitk.pipes.qvtpy.labels import (
     QVTPY_MCA_IDS,
     QVTPY_ACA_IDS,
     QVTPY_PCA_IDS,
+    QVTPY_PCOMM_IDS,
     QVTPY_RACA,
     QVTPY_RICA,
     QVTPY_RMCA,
@@ -54,9 +55,12 @@ _ARTERIAL_PARENT_LABEL: dict[int, int] = {
     QVTPY_RPCA: QVTPY_BASILAR,
 }
 
-# MCA/ACA/PCA/comm: keep shorter skeletons when regenerating from segmentation / eICAB.
+# MCA/ACA/PCA: keep shorter trunk skeletons when regenerating from segmentation.
+# PCOMM uses *pcomm_min_points* (stricter) to drop tiny false-positive stubs.
 _SMALL_BRANCH_MIN_POINTS = 2
 _SMALL_CENTERLINE_LABEL_IDS = QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_SMALL_ARTERIAL_IDS
+_DEFAULT_PCOMM_MIN_POINTS = 5
+_DEFAULT_ARTERIAL_BRANCH_MIN_POINTS = 5
 _DEFAULT_SMOOTH_WINDOW = 5
 _DEFAULT_SMOOTH_SPLINE = True
 
@@ -300,7 +304,8 @@ def centerlines_from_segmentation(
     seg: np.ndarray,
     *,
     min_points: int = 3,
-    min_branch_points: int = 3,
+    min_branch_points: int = _DEFAULT_ARTERIAL_BRANCH_MIN_POINTS,
+    pcomm_min_points: int = _DEFAULT_PCOMM_MIN_POINTS,
     prefer_polylines: dict[int, Any] | None = None,
     labels: list[int] | None = None,
     smooth: bool = True,
@@ -314,6 +319,8 @@ def centerlines_from_segmentation(
     :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`); ICA/basilar/comm/vertebral
     stay single-path (one branch = the bare vessel name).
 
+    *pcomm_min_points* drops very short LPCOMM/RPCOMM skeletons (false positives).
+    *min_branch_points* drops short MCA/ACA/PCA bifurcation side branches.
     *prefer_polylines* (typically stage-3 arterial CLs) bias branched vessels so
     proximal trunks are not dropped by a distal-only graph diameter. When absent,
     MCA/ACA/PCA use a parent-contact seed from the segmentation. Optional light
@@ -328,7 +335,6 @@ def centerlines_from_segmentation(
     else:
         label_ids = sorted(int(v) for v in labels)
 
-    branch_ids = QVTPY_MCA_IDS | QVTPY_ACA_IDS | QVTPY_PCA_IDS
     arterial: dict[int, list[tuple[str, Any]]] = {}
     for lid in label_ids:
         if int(lid) not in QVTPY_ARTERIAL_LABEL_IDS:
@@ -340,11 +346,12 @@ def centerlines_from_segmentation(
                 seed = _parent_contact_seed(seg_np, int(lid), int(parent))
                 if seed is not None:
                     prefs = seed.reshape(1, 3)
-        lid_min = (
-            min(int(min_points), _SMALL_BRANCH_MIN_POINTS)
-            if int(lid) in _SMALL_CENTERLINE_LABEL_IDS
-            else int(min_points)
-        )
+        if int(lid) in QVTPY_PCOMM_IDS:
+            lid_min = max(2, int(pcomm_min_points))
+        elif int(lid) in _SMALL_CENTERLINE_LABEL_IDS:
+            lid_min = min(int(min_points), _SMALL_BRANCH_MIN_POINTS)
+        else:
+            lid_min = int(min_points)
         if int(lid) in QVTPY_BRANCHED_LABEL_IDS:
             br = compute_centerline_branches(
                 seg_np,
@@ -384,6 +391,8 @@ def export_centerlines_from_segmentation(
     *,
     metadata: dict[str, Any] | None = None,
     min_points: int = 3,
+    min_branch_points: int = _DEFAULT_ARTERIAL_BRANCH_MIN_POINTS,
+    pcomm_min_points: int = _DEFAULT_PCOMM_MIN_POINTS,
     venous_polylines: dict[str, Any] | None = None,
     venous_label_by_name: dict[str, int] | None = None,
     prefer_polylines: dict[int, Any] | None = None,
@@ -405,6 +414,8 @@ def export_centerlines_from_segmentation(
     arterial = centerlines_from_segmentation(
         seg_np,
         min_points=int(min_points),
+        min_branch_points=int(min_branch_points),
+        pcomm_min_points=int(pcomm_min_points),
         prefer_polylines=prefer_polylines,
         smooth=bool(smooth),
         smooth_window=int(smooth_window),

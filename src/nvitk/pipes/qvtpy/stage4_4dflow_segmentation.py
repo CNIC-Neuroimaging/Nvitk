@@ -288,6 +288,28 @@ def run_subject(
         venous_polylines = load_venous_centerlines(s3, min_points=3, meta=meta3)
         if centerlines_mask_path(s3).is_file():
             prefer_arterial = load_arterial_centerlines(s3, min_points=3, meta=meta3)
+        stage3_arterial_labels = {
+            int(x) for x in (meta3.get("arterial_labels") or [])
+        }
+        # Honor stage-3 PCOMM drops: never keep a mask/CL for a PCOMM that was
+        # filtered by pcomm_min_points.
+        from nvitk.pipes.qvtpy.labels import QVTPY_PCOMM_IDS
+
+        seg_arr = as_backend_array(result.segmentation)
+        cleared = []
+        for lid in QVTPY_PCOMM_IDS:
+            if int(lid) in stage3_arterial_labels:
+                continue
+            if int(np.count_nonzero(seg_arr == int(lid))) == 0:
+                continue
+            seg_arr[seg_arr == int(lid)] = 0
+            cleared.append(int(lid))
+        if cleared:
+            result.segmentation = seg_arr
+            imsave(seg_path, seg_arr, metadata=ref_meta)
+            log.info(
+                f"[{subject}] stage4: cleared dropped PCOMM mask label(s): {cleared}"
+            )
     export_centerlines_from_segmentation(
         result.segmentation,
         out_dir,

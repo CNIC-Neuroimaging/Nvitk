@@ -1,6 +1,7 @@
 """
 Segmentation utilities: label-map primitives, hemisphere splitting,
-blood-vessel flood fill, and external engine wrappers (TotalSegmentator, eICAB).
+blood-vessel flood fill, mouse brain (ANTsPyNet), and external engine wrappers
+(TotalSegmentator, eICAB).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from . import (
     hull_edt,
     labels,
     mask_ops,
+    mouse_brain,
     region_growing,
     total_segmentator,
 )
@@ -23,6 +25,7 @@ __all__ = [
     "hemisphere",
     "hull_edt",
     "mask_ops",
+    "mouse_brain",
     "region_growing",
     "total_segmentator",
 ]
