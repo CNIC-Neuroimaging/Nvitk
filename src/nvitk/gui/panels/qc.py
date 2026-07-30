@@ -41,6 +41,7 @@ from nvitk.db.xnat_projects import get_xnat_project, list_xnat_project_ids
 from nvitk.gui.core.log_panel import gui_log
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.viz.qc_loader import (
+    download_phase_niftis_for_qc,
     download_pipeline_resource_for_qc,
     load_eicab_qc_layers,
     load_qvtpy_qc_layers,
@@ -95,6 +96,10 @@ class _QcLoadWorker(QThread):
             roots: list[Path] = []
             local = Path(self._local_path) if self._local_path else None
             if local is not None and local.is_dir() and any(local.rglob("*")):
+                from nvitk.db.xnat_pipeline_resources import unwrap_xnat_resource_download
+
+                # Catalog cache may still hold xnatpy ZIP nesting.
+                local = unwrap_xnat_resource_download(local, resource)
                 self.progress.emit(f"Using local cache {local}")
                 roots.append(local)
                 primary = local
@@ -128,6 +133,23 @@ class _QcLoadWorker(QThread):
                     roots.append(companion)
                 except Exception as exc:
                     self.progress.emit(f"Companion {label} skipped: {exc}")
+
+            # Scan-level AP/RL/FH phase NIfTIs (not in the 4dflows derivative bundle).
+            try:
+                self.progress.emit("Downloading AP/RL/FH phase NIfTIs…")
+                phases_root = download_phase_niftis_for_qc(
+                    config_path=self._config_path,
+                    project_id=self._project_id,
+                    subject_uid=self._subject_uid,
+                    password=self._password,
+                    download_root=self._download_root,
+                    app_state=self._app_state,
+                )
+                roots.append(phases_root)
+                # Subject root also helps find_phase_paths / CD discovery.
+                roots.append(phases_root.parent)
+            except Exception as exc:
+                self.progress.emit(f"Phase NIfTI download skipped: {exc}")
 
             self.finished_ok.emit(
                 {
@@ -270,6 +292,10 @@ class QcPanel(QWidget):
         self._project = QComboBox()
         for pid in list_xnat_project_ids():
             self._project.addItem(get_xnat_project(pid).display_name, pid)
+        # Prefer PESA Brain as the QC default project.
+        pesa_idx = self._project.findData("PESA_Brain")
+        if pesa_idx >= 0:
+            self._project.setCurrentIndex(pesa_idx)
 
         self._config_path = QLineEdit()
         self._config_path.setPlaceholderText("XNAT config path")

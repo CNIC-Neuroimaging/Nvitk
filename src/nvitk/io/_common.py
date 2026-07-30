@@ -91,6 +91,24 @@ def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
         raise FileNotFoundError(str(path))
 
     if p.is_dir():
+        # Prefer NIfTI when the folder clearly contains volumes and no DICOM files.
+        has_nifti = False
+        has_dicom = False
+        try:
+            for child in p.iterdir():
+                if not child.is_file():
+                    continue
+                name = child.name.lower()
+                if name.endswith(".nii.gz") or name.endswith(".nii"):
+                    has_nifti = True
+                elif name.endswith(".dcm") or name == "dicomdir":
+                    has_dicom = True
+                if has_nifti and has_dicom:
+                    break
+        except OSError:
+            pass
+        if has_nifti and not has_dicom:
+            return "nifti"
         # By convention, reading a directory means DICOM source.
         return "dicom"
 

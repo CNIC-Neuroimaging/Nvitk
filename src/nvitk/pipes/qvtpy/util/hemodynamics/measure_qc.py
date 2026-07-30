@@ -70,7 +70,7 @@ def save_loc_cross_section_qc_png(
     cross_section_res: int = 0,
     plane_interp_order: int = 1,
     measure_resegment: bool = False,
-    cs_supersampling: bool = False,
+    cs_supersampling: bool = True,
     thr_algorithm: ThrAlgorithm = "lsthr",
     volume_seg: np.ndarray | None = None,
     volume_label_id: int = 0,

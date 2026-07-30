@@ -20,6 +20,7 @@ import stat
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -38,6 +39,7 @@ log = Logger()
 RESOURCE_LABEL = "NIFTI"
 FOURDFLOWS_RESOURCE_LABEL = "4dflows"
 FLOW_SEQUENCES = ("4DFLOW_AP", "4DFLOW_RL", "4DFLOW_FH")
+EXPECTED_SCAN_SEQUENCES = ("TOF", *FLOW_SEQUENCES)
 FLOW_DERIVED_STEMS = (
     "Angiography_3D",
     # "Angiography_4D",
@@ -47,6 +49,63 @@ FLOW_DERIVED_STEMS = (
     # "VelocityMagnitude_4D",
     # "VelocityMeanComponents",
 )
+
+
+@dataclass
+class ResourceOutcome:
+    resource: str
+    status: str
+    detail: str = ""
+    n_files: int = 0
+
+
+@dataclass
+class SubjectUploadRecord:
+    subject: str
+    experiment_label: str = ""
+    outcomes: list[ResourceOutcome] = field(default_factory=list)
+    error: str = ""
+
+
+def _format_nifti_upload_report(records: list[SubjectUploadRecord]) -> str:
+    lines: list[str] = [
+        "==== XNAT NIfTI / 4dflows upload report ====",
+        f"subjects attempted: {len(records)}",
+    ]
+    uploaded: list[str] = []
+    incomplete: list[str] = []
+    failed: list[str] = []
+
+    for rec in records:
+        if rec.error:
+            failed.append(f"  {rec.subject}: {rec.error}")
+            continue
+        if not rec.outcomes:
+            incomplete.append(f"  {rec.subject}: no resources uploaded")
+            continue
+        for out in rec.outcomes:
+            label = f"  {rec.subject}/{out.resource}"
+            detail = f" ({out.detail})" if out.detail else ""
+            files = f" [{out.n_files} file(s)]" if out.n_files else ""
+            if out.status == "uploaded":
+                uploaded.append(f"{label}: uploaded{files}{detail}")
+            elif out.status == "failed":
+                failed.append(f"{label}: failed{detail}")
+            else:
+                incomplete.append(f"{label}: {out.status}{detail}")
+
+    def _section(title: str, items: list[str]) -> None:
+        lines.append("")
+        lines.append(f"-- {title} ({len(items)}) --")
+        if items:
+            lines.extend(items)
+        else:
+            lines.append("  (none)")
+
+    _section("Uploaded resources", uploaded)
+    _section("Incomplete / skipped resources", incomplete)
+    _section("Failed", failed)
+    return "\n".join(lines)
 
 
 def _iter_existing_files(directory: Path, patterns: Iterable[str]) -> list[Path]:
@@ -451,13 +510,19 @@ def main(
             if not subject_list:
                 raise click.ClickException("No subjects resolved for upload.")
 
-        uploaded_subjects = 0
+        records: list[SubjectUploadRecord] = []
         for subject in subject_list:
+            record = SubjectUploadRecord(subject=subject)
             try:
                 experiment, experiment_label = resolve_subject_experiment(project_obj, subject)
+                record.experiment_label = experiment_label
                 scans_by_sequence = _resolve_sequence_scans(experiment)
                 if not scans_by_sequence:
-                    log.warning(f"[{subject}] no TOF/4DFlow scans found in experiment {experiment_label}")
+                    record.error = (
+                        f"no TOF/4DFlow scans found in experiment {experiment_label}"
+                    )
+                    log.warning(f"[{subject}] {record.error}")
+                    records.append(record)
                     continue
 
                 with tempfile.TemporaryDirectory(prefix=f"nvitk-upload-xnat-nifti-{subject}-") as tmp:
@@ -482,39 +547,104 @@ def main(
                     )
                     if not uploads and derived_stage is None:
                         kind = "JSON" if only_json else "NIfTI"
-                        log.warning(f"[{subject}] no {kind} files found to upload")
+                        record.error = f"no {kind} files found to upload"
+                        log.warning(f"[{subject}] {record.error}")
+                        records.append(record)
                         continue
 
                     overwrite = not only_json
-                    for sequence, local_stage_dir in uploads.items():
+                    for sequence in EXPECTED_SCAN_SEQUENCES:
+                        local_stage_dir = uploads.get(sequence)
+                        if local_stage_dir is None:
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"scan:{sequence}/{resource_label}",
+                                    status="missing_local",
+                                    detail="no local files staged",
+                                )
+                            )
+                            continue
                         scan = scans_by_sequence.get(sequence)
                         if scan is None:
-                            log.warning(f"[{subject}] XNAT scan missing for sequence {sequence}; skipping upload")
+                            detail = "XNAT scan missing for sequence"
+                            log.warning(f"[{subject}] {detail} {sequence}; skipping upload")
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"scan:{sequence}/{resource_label}",
+                                    status="missing_xnat_scan",
+                                    detail=detail,
+                                )
+                            )
                             continue
-                        _upload_stage_to_scan(
-                            scan,
-                            local_stage_dir,
-                            resource_label=resource_label,
-                            overwrite=overwrite,
-                        )
+                        try:
+                            n_files = _upload_stage_to_scan(
+                                scan,
+                                local_stage_dir,
+                                resource_label=resource_label,
+                                overwrite=overwrite,
+                            )
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"scan:{sequence}/{resource_label}",
+                                    status="uploaded",
+                                    n_files=n_files,
+                                )
+                            )
+                        except Exception as exc:
+                            log.warning(f"[{subject}] {sequence} upload failed: {exc}")
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"scan:{sequence}/{resource_label}",
+                                    status="failed",
+                                    detail=str(exc),
+                                )
+                            )
 
                     if derived_stage is not None:
                         log.info(
                             f"[{subject}] upload derivatives -> experiment resource {FOURDFLOWS_RESOURCE_LABEL!r}"
                         )
-                        upload_directory_to_xnat_resource(
-                            experiment,
-                            FOURDFLOWS_RESOURCE_LABEL,
-                            derived_stage,
-                            overwrite=overwrite,
+                        try:
+                            n_files = upload_directory_to_xnat_resource(
+                                experiment,
+                                FOURDFLOWS_RESOURCE_LABEL,
+                                derived_stage,
+                                overwrite=overwrite,
+                            )
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"experiment:{FOURDFLOWS_RESOURCE_LABEL}",
+                                    status="uploaded",
+                                    n_files=n_files,
+                                )
+                            )
+                        except Exception as exc:
+                            log.warning(f"[{subject}] {FOURDFLOWS_RESOURCE_LABEL} upload failed: {exc}")
+                            record.outcomes.append(
+                                ResourceOutcome(
+                                    resource=f"experiment:{FOURDFLOWS_RESOURCE_LABEL}",
+                                    status="failed",
+                                    detail=str(exc),
+                                )
+                            )
+                    else:
+                        record.outcomes.append(
+                            ResourceOutcome(
+                                resource=f"experiment:{FOURDFLOWS_RESOURCE_LABEL}",
+                                status="missing_local",
+                                detail="no derived 4D-flow files staged",
+                            )
                         )
 
-                uploaded_subjects += 1
+                records.append(record)
             except Exception as exc:
+                record.error = str(exc)
                 log.warning(f"[{subject}] upload failed: {exc}")
+                records.append(record)
 
-    kind = "JSON sidecar" if only_json else "NIfTI"
-    click.echo(f"Uploaded {kind} resources for {uploaded_subjects} subject(s).")
+    report = _format_nifti_upload_report(records)
+    log.info("NIfTI upload summary:\n%s", report)
+    click.echo(report)
 
 
 if __name__ == "__main__":

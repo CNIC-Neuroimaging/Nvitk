@@ -558,7 +558,13 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("cross_section_res", "Plane resolution (0=auto)", "int", 0, min=0, max=1024),
             ParamSpec("interpolate_plane", "Interpolate plane sampling", "bool", True),
             ParamSpec("interp_vals", "Samples per voxel (auto res)", "int", 4, min=1, max=16),
-            ParamSpec("measure_resegment", "Resegment in cross-section plane", "bool", True),
+            ParamSpec("measure_resegment", "Resegment in cross-section plane", "bool", False),
+            ParamSpec(
+                "cs_supersampling",
+                "Supersample plane (~4×)",
+                "bool",
+                True,
+            ),
             ParamSpec(
                 "thr_algorithm",
                 "2D threshold method",
@@ -578,8 +584,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         needs_3d=True,
         run_mode="notify",
         description=(
-            "Active layer = centerline mask; pick CD and optional segmentation in parameters. "
-            "Click in 3D for oblique cross-sections; plane normal sense follows the click side."
+            "Active layer = centerline mask; pick CD, phases, and optional segmentation. "
+            "Click in 3D for oblique cross-sections; optional supersampling (~4×) for "
+            "finer in-plane resegmentation or mask upsampling."
         ),
     ),
     GuiToolSpec(
@@ -620,7 +627,13 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 10.0,
                 min=1.0,
             ),
-            ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
+            ParamSpec("measure_resegment", "Resegment in-plane", "bool", False),
+            ParamSpec(
+                "cs_supersampling",
+                "Supersample plane (~4×)",
+                "bool",
+                True,
+            ),
             ParamSpec("label_constrain", "Constrain to vessel label", "bool", True),
             ParamSpec(
                 "station_point_size",
@@ -892,7 +905,8 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("rl_layer", "RL phase layer (optional)", "layer", ""),
             ParamSpec("fh_layer", "FH phase layer (optional)", "layer", ""),
             ParamSpec("cross_section_radius_vox", "Cross-section radius (vox)", "float", 10.0, min=1.0),
-            ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
+            ParamSpec("measure_resegment", "Resegment in-plane", "bool", False),
+            ParamSpec("cs_supersampling", "Supersample plane (~4×)", "bool", True),
         ),
         run_mode="notify",
     ),
@@ -913,7 +927,8 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 choices=("pseudo_loc", "voxel_avg", "both"),
             ),
             ParamSpec("cross_section_radius_vox", "Pseudo-LOC radius (vox)", "float", 10.0, min=1.0),
-            ParamSpec("measure_resegment", "Resegment in-plane", "bool", True),
+            ParamSpec("measure_resegment", "Resegment in-plane", "bool", False),
+            ParamSpec("cs_supersampling", "Supersample plane (~4×)", "bool", True),
         ),
         needs_reference_layer=True,
         run_mode="notify",

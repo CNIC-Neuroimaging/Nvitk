@@ -172,9 +172,8 @@ def install_morphometrics_viz(
 
     paths: list[np.ndarray] = []
     edge_colors: list[str] = []
-    sample_coords: list[np.ndarray] = []
-    sample_vals: list[np.ndarray] = []
-    sample_names: list[str] = []
+    # Keep full polylines + arrays so the dock can recolor without reloading VTPs.
+    stored: list[dict[str, Any]] = []
 
     palette = (
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -186,13 +185,13 @@ def install_morphometrics_viz(
             continue
         paths.append(data_pts.astype(np.float32))
         edge_colors.append(palette[i % len(palette)])
-        vals = _pick_scalar(item["arrays"], color_by, data_pts.shape[0])
-        # Subsample points for readability on dense polylines.
-        step = max(1, data_pts.shape[0] // 80)
-        idx = np.arange(0, data_pts.shape[0], step)
-        sample_coords.append(data_pts[idx])
-        sample_vals.append(vals[idx])
-        sample_names.extend([str(item["name"])] * int(idx.size))
+        stored.append(
+            {
+                "name": str(item["name"]),
+                "points": data_pts,
+                "arrays": item["arrays"],
+            }
+        )
 
     meta = {MORPHO_OVERLAY_META: True}
     if paths:
@@ -213,40 +212,26 @@ def install_morphometrics_viz(
         except Exception:
             pass
 
-    if sample_coords:
-        coords = np.concatenate(sample_coords, axis=0)
-        values = np.concatenate(sample_vals, axis=0)
-        features = {
-            "vessel_name": np.asarray(sample_names, dtype=object),
-            "value": values.astype(np.float64),
-            "color_by": np.asarray([str(color_by)] * len(sample_names), dtype=object),
-        }
-        finite = np.isfinite(values)
-        if finite.any():
-            lo = float(np.min(values[finite]))
-            hi = float(np.max(values[finite]))
-            if hi <= lo:
-                hi = lo + 1.0
-        else:
-            lo, hi = 0.0, 1.0
-        pt_kwargs: dict[str, Any] = {
-            "name": MORPHO_POINTS_LAYER,
-            "features": features,
-            "size": float(point_size),
-            "symbol": "disc",
-            "face_color": "value",
-            "face_colormap": "viridis",
-            "face_contrast_limits": (lo, hi),
-            "border_width": 0,
-            "metadata": meta,
-        }
-        aff = layer_affine(reference_layer) if reference_layer is not None else None
-        if aff is not None:
-            pt_kwargs["affine"] = aff
-        viewer.add_points(coords.astype(np.float64), **pt_kwargs)
+    points_layer = _add_or_update_morpho_points(
+        viewer,
+        stored,
+        color_by=color_by,
+        point_size=point_size,
+        reference_layer=reference_layer,
+        metadata=meta,
+    )
 
     summary = _path_summary_table(stage7_dir)
-    _attach_summary_dock(viewer, summary, stage7_dir=stage7_dir, color_by=color_by)
+    _attach_summary_dock(
+        viewer,
+        summary,
+        stage7_dir=stage7_dir,
+        color_by=color_by,
+        polylines=stored,
+        points_layer=points_layer,
+        reference_layer=reference_layer,
+        point_size=point_size,
+    )
 
     return {
         "stage7_dir": stage7_dir,
@@ -256,51 +241,228 @@ def install_morphometrics_viz(
     }
 
 
+def _add_or_update_morpho_points(
+    viewer: Any,
+    polylines: list[dict[str, Any]],
+    *,
+    color_by: str,
+    point_size: float,
+    reference_layer: Any | None,
+    metadata: dict[str, Any],
+) -> Any | None:
+    """Create/update the Morpho samples Points layer colored by *color_by*."""
+    sample_coords: list[np.ndarray] = []
+    sample_vals: list[np.ndarray] = []
+    sample_names: list[str] = []
+    for item in polylines:
+        data_pts = item["points"]
+        vals = _pick_scalar(item["arrays"], color_by, data_pts.shape[0])
+        step = max(1, data_pts.shape[0] // 80)
+        idx = np.arange(0, data_pts.shape[0], step)
+        sample_coords.append(data_pts[idx])
+        sample_vals.append(vals[idx])
+        sample_names.extend([str(item["name"])] * int(idx.size))
+    if not sample_coords:
+        return None
+    coords = np.concatenate(sample_coords, axis=0)
+    values = np.concatenate(sample_vals, axis=0)
+    features = {
+        "vessel_name": np.asarray(sample_names, dtype=object),
+        "value": values.astype(np.float64),
+        "color_by": np.asarray([str(color_by)] * len(sample_names), dtype=object),
+    }
+    finite = np.isfinite(values)
+    if finite.any():
+        lo = float(np.min(values[finite]))
+        hi = float(np.max(values[finite]))
+        if hi <= lo:
+            hi = lo + 1.0
+    else:
+        lo, hi = 0.0, 1.0
+
+    existing = None
+    for lyr in viewer.layers:
+        if lyr.name == MORPHO_POINTS_LAYER:
+            existing = lyr
+            break
+    if existing is not None:
+        existing.data = coords.astype(np.float64)
+        existing.features = features
+        existing.size = float(point_size)
+        try:
+            existing.face_colormap = "viridis"
+            existing.face_contrast_limits = (lo, hi)
+            existing.face_color = "value"
+            if hasattr(existing, "face_color_mode"):
+                existing.face_color_mode = "colormap"
+            if hasattr(existing, "refresh_colors"):
+                try:
+                    existing.refresh_colors(update_color_mapping=True)
+                except TypeError:
+                    existing.refresh_colors()
+        except Exception:
+            # Fall back to explicit RGBA (NaN-safe).
+            existing.face_color = _scalar_rgba(values, lo, hi)
+        return existing
+
+    pt_kwargs: dict[str, Any] = {
+        "name": MORPHO_POINTS_LAYER,
+        "features": features,
+        "size": float(point_size),
+        "symbol": "disc",
+        "face_color": "value",
+        "face_colormap": "viridis",
+        "face_contrast_limits": (lo, hi),
+        "border_width": 0,
+        "metadata": metadata,
+    }
+    aff = layer_affine(reference_layer) if reference_layer is not None else None
+    if aff is not None:
+        pt_kwargs["affine"] = aff
+    return viewer.add_points(coords.astype(np.float64), **pt_kwargs)
+
+
+def _scalar_rgba(values: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    import matplotlib as mpl
+
+    try:
+        cmap = mpl.colormaps["viridis"]
+    except (KeyError, AttributeError):
+        cmap = mpl.cm.get_cmap("viridis")
+    span = hi - lo if hi > lo else 1.0
+    norm = np.clip((np.nan_to_num(values, nan=lo) - lo) / span, 0.0, 1.0)
+    rgba = np.asarray(cmap(norm), dtype=np.float64)
+    finite = np.isfinite(values)
+    rgba[~finite] = (0.0, 0.0, 0.0, 0.0)
+    return rgba
+
+
 def _attach_summary_dock(
     viewer: Any,
     summary: pd.DataFrame,
     *,
     stage7_dir: Path,
     color_by: str,
+    polylines: list[dict[str, Any]] | None = None,
+    points_layer: Any | None = None,
+    reference_layer: Any | None = None,
+    point_size: float = 2.0,
 ) -> None:
     try:
-        from qtpy.QtWidgets import QLabel, QTextEdit, QVBoxLayout, QWidget
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import (
+            QComboBox,
+            QHBoxLayout,
+            QHeaderView,
+            QLabel,
+            QTableWidget,
+            QTableWidgetItem,
+            QVBoxLayout,
+            QWidget,
+        )
     except Exception:
         return
 
     panel = QWidget()
     layout = QVBoxLayout(panel)
     layout.addWidget(QLabel(f"Stage-7 morphometrics\n{stage7_dir}"))
-    layout.addWidget(QLabel(f"Color by: {color_by}"))
-    text = QTextEdit()
-    text.setReadOnly(True)
+
+    color_row = QHBoxLayout()
+    color_row.addWidget(QLabel("Color samples by"))
+    color_selector = QComboBox()
+    for key in ("radius", "stenosis", "curvature"):
+        color_selector.addItem(key, key)
+    idx = color_selector.findData(str(color_by))
+    color_selector.setCurrentIndex(idx if idx >= 0 else 0)
+    color_row.addWidget(color_selector, stretch=1)
+    layout.addLayout(color_row)
+
+    table = QTableWidget(0, 0)
+    table.setAlternatingRowColors(False)
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    table.horizontalHeader().setStretchLastSection(True)
+    table.setStyleSheet(
+        "QTableWidget {"
+        "  background-color: #2b2b2b; color: #e8e8e8; gridline-color: #454545;"
+        "}"
+        "QHeaderView::section {"
+        "  background-color: #353535; color: #e8e8e8; padding: 4px;"
+        "  border: 1px solid #454545;"
+        "}"
+    )
+    preferred_cols = (
+        "vessel_name",
+        "full_name",
+        "length_mm",
+        "radius_mean_mm",
+        "tortuosity_dm",
+        "radius_p95_mm",
+        "stenosis_percent",
+        "curvature_mean",
+    )
     if summary.empty:
-        text.setPlainText("No 00_Path_Summary available.")
+        table.setColumnCount(1)
+        table.setHorizontalHeaderLabels(["Info"])
+        table.setRowCount(1)
+        table.setItem(0, 0, QTableWidgetItem("No 00_Path_Summary available."))
     else:
-        cols = [
-            c
-            for c in (
-                "vessel_name",
-                "full_name",
-                "length_mm",
-                "radius_mean_mm",
-                "tortuosity_dm",
-                "radius_p95_mm",
-            )
-            if c in summary.columns
-        ]
+        cols = [c for c in preferred_cols if c in summary.columns]
         if not cols:
-            cols = list(summary.columns[:6])
-        preview = summary[cols].head(40)
-        text.setPlainText(preview.to_string(index=False))
-    layout.addWidget(text)
+            cols = list(summary.columns[:8])
+        preview = summary[cols].head(80)
+        table.setColumnCount(len(cols))
+        table.setHorizontalHeaderLabels([str(c) for c in cols])
+        table.setRowCount(len(preview))
+        for r, (_, row) in enumerate(preview.iterrows()):
+            for c, col in enumerate(cols):
+                val = row.get(col)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    text = ""
+                elif isinstance(val, float):
+                    text = f"{val:.4g}"
+                else:
+                    text = str(val)
+                item = QTableWidgetItem(text)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                table.setItem(r, c, item)
+    layout.addWidget(table, stretch=1)
+
+    state = {
+        "polylines": polylines or [],
+        "points_layer": points_layer,
+        "reference_layer": reference_layer,
+        "point_size": float(point_size),
+    }
+
+    def _on_color_changed(_index: int = 0) -> None:
+        key = str(color_selector.currentData() or color_selector.currentText() or "radius")
+        if not state["polylines"]:
+            return
+        layer = _add_or_update_morpho_points(
+            viewer,
+            state["polylines"],
+            color_by=key,
+            point_size=state["point_size"],
+            reference_layer=state["reference_layer"],
+            metadata={MORPHO_OVERLAY_META: True},
+        )
+        state["points_layer"] = layer
+
+    color_selector.currentIndexChanged.connect(_on_color_changed)
+
     attach_left_inspection_dock(
         viewer,
         panel,
-        object_name="nvitkMorphoDock",
+        object_name="nvitk_morphometrics_dock",
         title="Morphometrics",
-        tabify_with=["nvitkHemoDock", "nvitkCrossSectionDock"],
-        minimum_width=300,
+        tabify_with=[
+            "nvitk_hemodynamics_hemo_dock",
+            "nvitk_hemodynamics_pitc_dock",
+            "nvitk_hemodynamics_pwv_dock",
+            "nvitk_vessel_cross_section_dock",
+            "nvitk_qc_measurements_dock",
+        ],
+        minimum_width=320,
     )
 
 

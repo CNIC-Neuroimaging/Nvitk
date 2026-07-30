@@ -225,8 +225,13 @@ def open_paths_with_nvitk(
     paths: str | Path | Sequence[str | Path],
     *,
     stack = False,
+    force_type: str | None = None,
 ) -> list[Any]:
-    """Open one or more paths with nvitk.io and add Napari layers."""
+    """Open one or more paths with nvitk.io and add Napari layers.
+
+    *force_type* is forwarded to :func:`~nvitk.io.imread` (e.g. ``\"nifti\"`` when
+    opening a directory that must not be treated as DICOM).
+    """
     _ = stack
     path_list = _normalize_paths(paths)
     layers = []
@@ -235,7 +240,7 @@ def open_paths_with_nvitk(
         if not _nvitk_can_open(path):
             continue
         try:
-            result = imread(path, backend="numpy")
+            result = imread(path, backend="numpy", force_type=force_type)
         except Exception as exc:
             _notify_error(f"Could not read {path} with nvitk.io:\n{exc}")
             continue

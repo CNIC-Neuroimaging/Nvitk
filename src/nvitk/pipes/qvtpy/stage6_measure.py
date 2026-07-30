@@ -469,13 +469,13 @@ def run_subject(
     measure_thr_algorithm: ThrAlgorithm = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
-    cs_supersampling: bool = False,
+    cs_supersampling: bool = True,
     write_cross_section_qc: bool = True,
     skip_pitc: bool = False,
     pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
     pitc_quality_metric: str = "stdv_from_mean",
-    pitc_measure_resegment: bool = True,
+    pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
     save_plots: bool = False,
 ) -> Path:
@@ -723,12 +723,12 @@ def _subject_sge_spec(
     measure_thr_algorithm: str = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
-    cs_supersampling: bool = False,
+    cs_supersampling: bool = True,
     skip_pitc: bool = False,
     pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
     pitc_quality_metric: str = "stdv_from_mean",
-    pitc_measure_resegment: bool = True,
+    pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
     save_plots: bool = False,
     backend: str = "gpu",
@@ -759,18 +759,19 @@ def _subject_sge_spec(
         "--pitc-quality-metric",
         shlex.quote(str(pitc_quality_metric)),
     ]
-    if cs_supersampling:
-        parts.append("--cs-supersampling")
+    # Match CLI defaults: no LOC/PITC resegment, supersampling on.
+    if measure_resegment:
+        parts.append("--measure-resegment")
+    if not cs_supersampling:
+        parts.append("--no-cs-supersampling")
+    if pitc_measure_resegment:
+        parts.append("--pitc-measure-resegment")
     if skip_pitc:
         parts.append("--skip-pitc")
     if save_plots:
         parts.append("--save-plots")
     if skip_existing:
         parts.append("--skip-existing")
-    if not measure_resegment:
-        parts.append("--no-measure-resegment")
-    if not pitc_measure_resegment:
-        parts.append("--no-pitc-measure-resegment")
     if not pitc_label_constrain:
         parts.append("--no-pitc-label-constrain")
     python_cmd = " ".join(parts)
@@ -807,12 +808,12 @@ def build_subject_sge_command(
     measure_thr_algorithm: str = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
-    cs_supersampling: bool = False,
+    cs_supersampling: bool = True,
     skip_pitc: bool = False,
     pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
     pitc_quality_metric: str = "stdv_from_mean",
-    pitc_measure_resegment: bool = True,
+    pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
     save_plots: bool = False,
     backend: str = "gpu",
@@ -860,12 +861,12 @@ def submit_subject_sge(
     measure_thr_algorithm: str = "lsthr",
     cross_section_res: int = 0,
     cross_section_plane_interp: int = 1,
-    cs_supersampling: bool = False,
+    cs_supersampling: bool = True,
     skip_pitc: bool = False,
     pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
     pitc_quality_metric: str = "stdv_from_mean",
-    pitc_measure_resegment: bool = True,
+    pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
     save_plots: bool = False,
     backend: str = "gpu",
@@ -907,7 +908,7 @@ def submit_subject_sge(
     "--measure-resegment/--no-measure-resegment",
     default=False,
     show_default=True,
-    help="Recompute in-plane segmentation at each LOC (default off).",
+    help="Recompute in-plane segmentation at each LOC (default off; use stage-4 masks).",
 )
 @click.option(
     "--measure-thr-algorithm",
@@ -920,9 +921,9 @@ def submit_subject_sge(
 @click.option("--cross-section-plane-interp", type=int, default=1, show_default=True)
 @click.option(
     "--cs-supersampling/--no-cs-supersampling",
-    default=False,
+    default=True,
     show_default=True,
-    help="Supersample oblique cross-section grid (~4×); default is native voxel sampling.",
+    help="Supersample oblique cross-section grid (~4×) for intensity + mask sampling.",
 )
 @click.option(
     "--skip-pitc/--no-skip-pitc",
@@ -948,9 +949,9 @@ def submit_subject_sge(
 )
 @click.option(
     "--pitc-measure-resegment/--no-pitc-measure-resegment",
-    default=True,
+    default=False,
     show_default=True,
-    help="In-plane MAG+CD+VEL resegmentation at each PITC station (QVTplus-style).",
+    help="In-plane MAG+CD+VEL resegmentation at each PITC station (default off).",
 )
 @click.option(
     "--pitc-label-constrain/--no-pitc-label-constrain",

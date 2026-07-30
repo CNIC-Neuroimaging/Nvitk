@@ -7,23 +7,23 @@ downloads bundles to a local cache while syncing.
 
 Examples::
 
-    # Metadata only (no download) for all catalog subjects in PESA_Brain
-    python scripts/sync_qvtpy_xnat_resources.py \\
-        --dataset-root ~/nvitk/dataset/nvitk-dataset \\
+    # Metadata only (no download) using subjects already in the local DB sessions table
+    python scripts/pesa_brain/db/sync_db_xnat_resources.py \\
+        --dataset-root dataset/nvitk-dataset \\
         --config .nvitk/xnat.json \\
         --build-sqlite-index
 
     # Download + index for explicit subjects
-    python scripts/sync_qvtpy_xnat_resources.py \\
-        --dataset-root ~/nvitk/dataset/nvitk-dataset \\
+    python scripts/pesa_brain/db/sync_db_xnat_resources.py \\
+        --dataset-root dataset/nvitk-dataset \\
         --config .nvitk/xnat.json \\
         --subjects PESA5745609,PESA123 \\
         --download-root /data/RESULTS/QVTPy \\
         --download
 
     # Merge XNAT availability with an on-disk results tree
-    python scripts/sync_qvtpy_xnat_resources.py \\
-        --dataset-root ~/nvitk/dataset/nvitk-dataset \\
+    python scripts/pesa_brain/db/sync_db_xnat_resources.py \\
+        --dataset-root dataset/nvitk-dataset \\
         --with-local /data/RESULTS/QVTPy \\
         --build-sqlite-index
 """

@@ -65,6 +65,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Active layer = centerline mask; choose CD, AP/RL/FH phases, and optional segmentation. "
         "Per-label paths from the mask; click in 3D for oblique cross-sections with "
         "selected and ±2 neighboring flow waveforms when phase layers are provided. "
+        "Enable 'Supersample plane (~4×)' for a finer in-plane grid (resegment on the "
+        "supersampled plane, or upsample the stage-4 mask when not resegmenting). "
         "Toggle 'Pick cross-section on click' in the dock to rotate/pan the 3D view freely."
     ),
     "viz_pitc": (
@@ -75,7 +77,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "viz_vessel_hemo": (
         "Active layer = stage-4 multilabel segmentation. Requires AP/RL/FH and angio/CD "
-        "layers. Computes PITC and PWV together (same defaults as qvtpy stage 6). After "
+        "layers. Computes PITC and PWV together (same defaults as qvtpy stage 6: "
+        "supersampled plane, no in-plane resegmentation). After "
         "run, use the diagnostics dock to switch plots (PITC / PWV / Bjornfoot), color "
         "stations by feature, choose colormap / contrast caps, and toggle the legend."
     ),

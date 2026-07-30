@@ -214,10 +214,21 @@ def xnat_resource_has_files(experiment: Any, resource_label: str) -> bool:
     resources = getattr(experiment, "resources", None)
     if resources is None:
         return False
-    if resource_label not in resources:
+    label = str(resource_label).strip()
+    key = label if label in resources else None
+    if key is None:
+        label_l = label.lower()
+        try:
+            for candidate in resources.keys():
+                if str(candidate).strip().lower() == label_l:
+                    key = str(candidate)
+                    break
+        except Exception:
+            return False
+    if key is None:
         return False
     try:
-        resource = resources[resource_label]
+        resource = resources[key]
     except (KeyError, TypeError, AttributeError):
         return False
     return _resource_has_files(resource)

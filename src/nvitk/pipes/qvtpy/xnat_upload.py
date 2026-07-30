@@ -1,4 +1,8 @@
-"""CLI: upload qvtpy/eICAB results to XNAT session resources."""
+"""CLI: upload qvtpy/eICAB results to XNAT session resources.
+
+Requires a complete qvtpy tree through stage-7 morphometrics before uploading
+the ``qvtpy`` resource (stage2–stage7 by default; stage7 is always enforced).
+"""
 
 from __future__ import annotations
 
@@ -45,13 +49,16 @@ _DEFAULT_REQUIRE_STAGES = ",".join(DEFAULT_XNAT_UPLOAD_STAGES)
     "--require-stages",
     default=_DEFAULT_REQUIRE_STAGES,
     show_default=True,
-    help="QVTpy stages that must be complete before uploading the qvtpy resource.",
+    help=(
+        "QVTpy stages that must be complete before uploading the qvtpy resource. "
+        "stage7 (morphometrics) is always required for a complete pipeline upload."
+    ),
 )
 @click.option("--upload-eicab/--no-upload-eicab", default=True, show_default=True)
 @click.option("--upload-qvtpy/--no-upload-qvtpy", default=True, show_default=True)
 @click.option(
     "--skip-existing/--overwrite-existing",
-    default=True,
+    default=False,
     show_default=True,
     help="Skip XNAT resources that already have files, or overwrite them.",
 )
@@ -70,7 +77,7 @@ def main(
     skip_existing: bool,
     dry_run: bool,
 ) -> None:
-    """Upload eicab/ and qvtpy/ result trees to XNAT session resources."""
+    """Upload complete eicab/ + qvtpy/ trees (through stage-7 morphometrics) to XNAT."""
     Logger()
     if subjects is None and subjects_file is None:
         raise click.ClickException("Provide --subjects or --subjects-file.")

@@ -1658,7 +1658,7 @@ def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any
 
     nifti_root = str(params.get("nifti_root") or "").strip()
     volume_seg = None
-    measure_resegment = bool(params.get("measure_resegment", True))
+    measure_resegment = bool(params.get("measure_resegment", False))
     if not measure_resegment and subject and nifti_root:
         seg_p = (
             Path(output_root or ".")
@@ -1694,6 +1694,7 @@ def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any
         voxel_spacing=voxel_spacing,
         cross_section_radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
         measure_resegment=measure_resegment,
+        cs_supersampling=bool(params.get("cs_supersampling", True)),
         volume_seg=volume_seg,
     )
     out_csv = csv_path.parent / "loc_measurements.csv"
@@ -1759,8 +1760,8 @@ def _run_measure_mask_hemodynamics(
             method=method,
             voxel_spacing=voxel_spacing,
             radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
-            measure_resegment=bool(params.get("measure_resegment", True)),
-            volume_seg=mask_data if not bool(params.get("measure_resegment", True)) else None,
+            measure_resegment=bool(params.get("measure_resegment", False)),
+            volume_seg=mask_data if not bool(params.get("measure_resegment", False)) else None,
         )
         for res in results:
             extra = ""
@@ -1887,12 +1888,12 @@ def _prepare_vessel_hemo_for_viz(
         radius_vox=float(params.get("cross_section_radius_vox") or 10.0),
         quality_thresh=float(params.get("quality_thresh") or 2.5),
         quality_metric=str(params.get("quality_metric") or "stdv_from_mean"),
-        measure_resegment=bool(params.get("measure_resegment", True)),
+        measure_resegment=bool(params.get("measure_resegment", False)),
         label_constrain=bool(params.get("label_constrain", True)),
         thr_algorithm=str(params.get("thr_algorithm") or "lsthr"),
         cross_section_res=int(params.get("cross_section_res") or 0),
         plane_interp_order=int(params.get("cross_section_plane_interp") or 1),
-        cs_supersampling=bool(params.get("cs_supersampling", False)),
+        cs_supersampling=bool(params.get("cs_supersampling", True)),
         collect_plot_data=True,
     )
     root_region = str(params.get("root_region") or "All").strip()
@@ -2105,7 +2106,7 @@ def _run_viz_vessel_cross_sections(
             )
         seg_arr = to_numpy(seg_img.data).astype(np.int32, copy=False)
 
-    if not bool(params.get("measure_resegment", True)) and seg_arr is None:
+    if not bool(params.get("measure_resegment", False)) and seg_arr is None:
         raise ValueError(
             "Disable re-segmentation only when a segmentation layer is provided."
         )

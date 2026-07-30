@@ -61,16 +61,58 @@ def _open_nifti(viewer: Any, path: Path, *, name: str, visible: bool) -> Any | N
 
 
 def resolve_qvtpy_tree(resource_root: Path) -> Path:
-    """Return the directory that contains ``qvtpy/`` stage folders."""
+    """Return the directory that contains ``qvtpy/`` stage folders.
+
+    Accepts a subject root, a ``qvtpy/`` folder, or an XNAT unpack that still has
+    ``…/resources/qvtpy/files/stage*`` nesting.
+    """
     root = Path(resource_root)
-    if (root / cfg.QVT_SUBDIR).is_dir():
+    if (root / cfg.QVT_SUBDIR).is_dir() and (
+        (root / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR).is_dir()
+        or (root / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR).is_dir()
+    ):
         return root
-    if root.name == cfg.QVT_SUBDIR:
+    if root.name == cfg.QVT_SUBDIR and (
+        (root / cfg.STAGE6_MEASURE_DIR).is_dir()
+        or (root / cfg.STAGE4_SEG_DIR).is_dir()
+    ):
         return root.parent
+    # Prefer a directory that already holds stage folders (local or unwrapped XNAT).
+    stage6 = _find_first(root, (f"**/{cfg.STAGE6_MEASURE_DIR}",))
+    if stage6 is not None and stage6.is_dir():
+        parent = stage6.parent
+        if parent.name == cfg.QVT_SUBDIR:
+            return parent.parent
+        return parent
     nested = _find_first(root, (f"**/{cfg.QVT_SUBDIR}",))
     if nested is not None and nested.is_dir():
         return nested.parent
     return root
+
+
+def resolve_stage6_dir(resource_root: Path) -> Path | None:
+    """Locate ``stage6_measure`` under a subject / qvtpy / XNAT download tree."""
+    root = Path(resource_root)
+    subject_root = resolve_qvtpy_tree(root)
+    candidates = (
+        subject_root / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR,
+        subject_root / cfg.STAGE6_MEASURE_DIR,
+        root / cfg.STAGE6_MEASURE_DIR,
+    )
+    for path in candidates:
+        if path.is_dir() and (
+            (path / "loc_measurements.csv").is_file()
+            or (path / "vessel_hemodynamics.csv").is_file()
+        ):
+            return path
+    hit = _find_first(
+        root,
+        (
+            f"**/{cfg.STAGE6_MEASURE_DIR}/loc_measurements.csv",
+            f"**/{cfg.STAGE6_MEASURE_DIR}/vessel_hemodynamics.csv",
+        ),
+    )
+    return hit.parent if hit is not None else None
 
 
 def resolve_eicab_tree(resource_root: Path) -> Path:
@@ -94,6 +136,15 @@ def find_phase_paths(search_roots: list[Path]) -> dict[str, Path]:
             axis_dir = _find_first(root, (f"**/4DFlow/{folder}", f"**/{folder}"))
             if axis_dir is not None and axis_dir.is_dir():
                 hit = _find_first(axis_dir, ("*_ph.nii.gz", "*_ph.nii", "*phase*.nii.gz"))
+                if hit is None:
+                    # XNAT downloads may keep original names; prefer non-magnitude.
+                    for cand in sorted(axis_dir.glob("*.nii*")):
+                        stem = cand.name.lower()
+                        if stem.endswith(".nii.gz") or stem.endswith(".nii"):
+                            if "_m." in stem or stem.endswith("_m.nii") or stem.endswith("_m.nii.gz"):
+                                continue
+                            hit = cand
+                            break
                 if hit is not None:
                     out[axis] = hit
                     break
@@ -188,10 +239,11 @@ def load_qvtpy_qc_layers(
         qvt = subject_root
 
     search_roots = [subject_root, qvt, *(extra_search_roots or [])]
+    stage6_dir = resolve_stage6_dir(resource_root) or (qvt / cfg.STAGE6_MEASURE_DIR)
     loaded: dict[str, Any] = {
         "subject_root": subject_root,
         "qvt_dir": qvt,
-        "stage6_dir": qvt / cfg.STAGE6_MEASURE_DIR,
+        "stage6_dir": stage6_dir,
     }
 
     # --- Phase images (default visibility off) ---
@@ -202,6 +254,14 @@ def load_qvtpy_qc_layers(
             loaded[f"phase_{axis}"] = _open_nifti(
                 viewer, path, name=label, visible=False
             )
+    missing_phases = [a for a in ("ap", "rl", "fh") if f"phase_{a}" not in loaded]
+    if missing_phases:
+        log.warning(
+            "QC: missing phase NIfTIs %s (cross-section waveforms / PITC recompute "
+            "need AP+RL+FH). Searched under: %s",
+            missing_phases,
+            [str(r) for r in search_roots],
+        )
 
     # --- Complex Difference (on) ---
     cd_path = find_cd_path(search_roots)
@@ -345,8 +405,9 @@ def load_qvtpy_qc_layers(
                 segmentation=seg_arr,
                 params={
                     "cross_section_radius_vox": 10.0,
-                    # QC: show stage-4 seg masks in-plane (no CD resegmentation).
+                    # QC: upsample stage-4 seg masks in-plane (no CD resegmentation).
                     "measure_resegment": False,
+                    "cs_supersampling": True,
                     "thr_algorithm": "otsu",
                     "show_segmentation_3d": True,
                 },
@@ -627,3 +688,99 @@ def download_pipeline_resource_for_qc(
         experiment, _ = resolve_subject_experiment(project, subject_uid)
         download_experiment_resource(experiment, resource_label, target)
     return target
+
+
+def download_phase_niftis_for_qc(
+    *,
+    config_path: Path,
+    project_id: str,
+    subject_uid: str,
+    password: str,
+    download_root: Path,
+    app_state: dict[str, Any] | None = None,
+) -> Path:
+    """Download 4DFLOW AP/RL/FH scan NIfTIs into ``{root}/{subject}/4DFlow/{AP,RL,FH}``.
+
+    Layout matches :func:`find_phase_paths` so QC loading discovers phases the same
+    way as the local NIfTI tree.
+    """
+    from nvitk.db.xnat import classify_scan, connect_xnat, download_scan_niftis
+    from nvitk.db.xnat_config import load_xnat_profile, resolve_xnat_connection
+    from nvitk.db.xnat_upload import resolve_subject_experiment
+
+    if app_state is not None:
+        roots = list(app_state.get("xnat_temp_dirs") or [])
+        if str(download_root) not in roots:
+            roots.append(str(download_root))
+            app_state["xnat_temp_dirs"] = roots
+
+    axis_by_seq = {
+        "4DFLOW_AP": "AP",
+        "4DFLOW_RL": "RL",
+        "4DFLOW_FH": "FH",
+    }
+    subject_root = Path(download_root) / subject_uid
+    flow_root = subject_root / "4DFlow"
+    # Skip re-download when all three axes already have NIfTIs.
+    if all(
+        any((flow_root / axis).glob("*.nii*"))
+        for axis in axis_by_seq.values()
+    ):
+        return flow_root
+
+    profile = load_xnat_profile(config_path)
+    conn = resolve_xnat_connection(
+        profile, project=project_id, password=password or None
+    )
+    with connect_xnat(conn) as session:
+        project = session.projects[project_id]
+        experiment, _ = resolve_subject_experiment(project, subject_uid)
+        for scan in getattr(experiment, "scans", {}).values():
+            series = str(
+                getattr(scan, "series_description", None)
+                or getattr(scan, "type", None)
+                or getattr(scan, "label", None)
+                or ""
+            )
+            # Empty quality must stay None — classify_scan rejects non-"usable"
+            # strings, and "" would incorrectly skip every unlabeled scan.
+            raw_quality = getattr(scan, "quality", None)
+            quality = (
+                None
+                if raw_quality in (None, "")
+                else str(raw_quality)
+            )
+            classification = classify_scan(series, quality)
+            if classification is None:
+                continue
+            seq = str(classification.get("sequence") or "").strip().upper()
+            axis = axis_by_seq.get(seq)
+            if axis is None:
+                continue
+            target = flow_root / axis
+            if target.is_dir() and any(target.glob("*.nii*")):
+                continue
+            target.mkdir(parents=True, exist_ok=True)
+            try:
+                download_scan_niftis(scan, target)
+            except Exception as exc:
+                log.warning(
+                    "QC phase download failed for %s (%s): %s",
+                    subject_uid,
+                    axis,
+                    exc,
+                )
+    return flow_root
+
+
+__all__ = [
+    "download_phase_niftis_for_qc",
+    "download_pipeline_resource_for_qc",
+    "find_cd_path",
+    "find_phase_paths",
+    "load_eicab_qc_layers",
+    "load_qvtpy_qc_layers",
+    "resolve_eicab_tree",
+    "resolve_qvtpy_tree",
+    "resolve_stage6_dir",
+]

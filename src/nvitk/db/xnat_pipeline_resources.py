@@ -51,6 +51,27 @@ _DEFAULT_QVTPY_QC_STAGES: tuple[str, ...] = (
 )
 
 
+def _resource_key_ci(resources: Any, resource_label: str) -> str | None:
+    """Return the actual resources-dict key matching *resource_label* (case-insensitive)."""
+    label = str(resource_label).strip()
+    if resources is None:
+        return None
+    try:
+        if label in resources:
+            return label
+    except TypeError:
+        return None
+    label_l = label.lower()
+    try:
+        keys = list(resources.keys())
+    except Exception:
+        return None
+    for key in keys:
+        if str(key).strip().lower() == label_l:
+            return str(key)
+    return None
+
+
 def _resource_file_count(resource: Any) -> int:
     files = getattr(resource, "files", None)
     if files is None:
@@ -99,18 +120,103 @@ def inspect_xnat_pipeline_resource(
 ) -> dict[str, Any]:
     """Return availability metadata for one experiment resource (no download)."""
     label = str(resource_label).strip().lower()
-    has_files = xnat_resource_has_files(experiment, label)
+    resources = getattr(experiment, "resources", None) or {}
+    key = _resource_key_ci(resources, label)
+    has_files = False
     n_files = 0
-    if has_files:
-        resources = getattr(experiment, "resources", None) or {}
-        if label in resources:
-            n_files = _resource_file_count(resources[label])
+    if key is not None:
+        try:
+            resource = resources[key]
+        except (KeyError, TypeError, AttributeError):
+            resource = None
+        if resource is not None:
+            n_files = _resource_file_count(resource)
+            has_files = n_files > 0 or xnat_resource_has_files(experiment, key)
     return {
         "resource_label": label,
         "available": bool(has_files),
         "n_files": int(n_files),
         "complete": bool(has_files and n_files > 0),
+        "xnat_resource_key": key or label,
     }
+
+
+def _find_xnat_files_root(dest: Path, resource_label: str) -> Path | None:
+    """Locate the ``…/resources/<label>/files`` directory from an xnatpy ZIP unpack."""
+    label = str(resource_label).strip().lower()
+    if not dest.is_dir():
+        return None
+    candidates: list[Path] = []
+    for files_dir in dest.rglob("files"):
+        if not files_dir.is_dir():
+            continue
+        parent = files_dir.parent
+        # Expect …/resources/<resource_label>/files
+        if parent.parent.name.lower() != "resources":
+            continue
+        candidates.append(files_dir)
+    if not candidates:
+        return None
+    labeled = [p for p in candidates if p.parent.name.lower() == label]
+    pool = labeled or candidates
+    pool.sort(key=lambda p: (len(p.parts), str(p)))
+    return pool[0]
+
+
+def unwrap_xnat_resource_download(dest_dir: Path, resource_label: str) -> Path:
+    """Promote ``{experiment}/resources/{label}/files/*`` up to *dest_dir*.
+
+    xnatpy ``download_dir`` extracts the REST ZIP with experiment/resource nesting.
+    Local QC / pipeline loaders expect the uploaded payload (stage folders, NIfTIs)
+    directly under the destination, matching the on-disk results layout.
+    """
+    dest = Path(dest_dir).expanduser().resolve()
+    if not dest.is_dir():
+        return dest
+    files_root = _find_xnat_files_root(dest, resource_label)
+    if files_root is None:
+        return dest
+    try:
+        if files_root.resolve() == dest.resolve():
+            return dest
+    except Exception:
+        pass
+    # Already unwrapped: stage folders or NIfTIs sit directly under dest.
+    if any(
+        (dest / name).exists()
+        for name in (
+            "stage6_measure",
+            "stage4_4dflow_segmentation",
+            "stage1_eicab",
+            "ComplexDifference_3D.nii.gz",
+            "ComplexDifference_3D.nii",
+        )
+    ):
+        return dest
+
+    staging = dest.parent / f".{dest.name}_unwrap_tmp"
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    shutil.copytree(files_root, staging)
+    # Replace dest contents with the promoted payload.
+    for child in list(dest.iterdir()):
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            try:
+                child.unlink()
+            except Exception:
+                pass
+    for child in staging.iterdir():
+        target = dest / child.name
+        if target.exists():
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                target.unlink(missing_ok=True)
+        shutil.move(str(child), str(target))
+    shutil.rmtree(staging, ignore_errors=True)
+    return dest
 
 
 def download_experiment_resource(
@@ -120,24 +226,30 @@ def download_experiment_resource(
     *,
     overwrite: bool = False,
 ) -> Path:
-    """Download an experiment-level XNAT resource into *dest_dir*."""
+    """Download an experiment-level XNAT resource into *dest_dir*.
+
+    After download, unwraps xnatpy's ``{experiment}/resources/{label}/files`` nesting
+    so *dest_dir* matches the local pipeline results layout.
+    """
     label = str(resource_label).strip()
     dest = Path(dest_dir).expanduser().resolve()
     if dest.exists():
         if not overwrite and any(dest.rglob("*")):
-            return dest
+            return unwrap_xnat_resource_download(dest, label)
         shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
 
     resources = getattr(experiment, "resources", None) or {}
-    if label not in resources:
+    key = _resource_key_ci(resources, label)
+    if key is None:
         raise LookupError(f"Resource {label!r} not found on experiment")
-    resource = resources[label]
+    resource = resources[key]
 
     download_dir = getattr(resource, "download_dir", None)
     if callable(download_dir):
-        download_dir(str(dest), extract=True)
-        return dest
+        # xnat>=0.6 download_dir already unpacks the ZIP; it does not accept extract=.
+        download_dir(str(dest), verbose=False)
+        return unwrap_xnat_resource_download(dest, label)
 
     with tempfile.TemporaryDirectory(prefix="nvitk-xnat-pipeline-") as tmp:
         zip_path = Path(tmp) / f"{label}.zip"
@@ -155,8 +267,7 @@ def download_experiment_resource(
             shutil.copytree(bundle, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(bundle, dest / bundle.name)
-    return dest
-
+    return unwrap_xnat_resource_download(dest, label)
 
 def _describe_downloaded_resource(resource_dir: Path, resource_label: str) -> dict[str, Any]:
     label = str(resource_label).strip().lower()
@@ -196,30 +307,45 @@ def sync_xnat_pipeline_resources(
         subjects_file=subjects_file,
         id_type=id_type,
     )
+    subject_source = "cli/catalog"
     if not subject_labels and repo.catalog.table_exists("sessions"):
-        subject_labels = sorted(
-            {
-                str(s)
-                for s in repo._load_table_frame(
-                    "sessions",
-                    filters={"project_id": project_id},
-                    use_sqlite=True,
-                )["subject_uid"]
-                .dropna()
-                .unique()
-            }
+        sessions = repo._load_table_frame(
+            "sessions",
+            filters={"project_id": project_id},
+            use_sqlite=True,
         )
+        if not sessions.empty and "subject_uid" in sessions.columns:
+            subject_labels = sorted(
+                {str(s) for s in sessions["subject_uid"].dropna().unique()}
+            )
+            subject_source = f"sessions:{project_id}"
 
     resource_labels = [str(r).strip().lower() for r in resources if str(r).strip()]
     batch = source_batch_id or f"xnat_pipeline_{utc_now_iso().replace(':', '').replace('-', '')}"
     rows: list[dict[str, Any]] = []
+    n_checked = 0
+    n_missing_experiment = 0
+    n_no_resource = 0
 
     with connect_xnat(config) as session:
         project = session.projects[project_id]
+        if not subject_labels:
+            subject_labels = sorted(str(s) for s in project.subjects.keys())
+            subject_source = f"xnat:{project_id}"
+        log.info(
+            "Indexing pipeline resources %s for %d subject(s) from %s (project=%s)",
+            ",".join(resource_labels),
+            len(subject_labels),
+            subject_source,
+            project_id,
+        )
+
         for subject_uid in subject_labels:
+            n_checked += 1
             try:
                 experiment, experiment_label = resolve_subject_experiment(project, subject_uid)
             except LookupError as exc:
+                n_missing_experiment += 1
                 log.warning(f"[{subject_uid}] skip pipeline resources: {exc}")
                 continue
 
@@ -230,10 +356,12 @@ def sync_xnat_pipeline_resources(
                 experiment_label=experiment_label,
             )
 
+            found_any = False
             for resource_label in resource_labels:
                 info = inspect_xnat_pipeline_resource(experiment, resource_label)
                 if not info.get("available"):
                     continue
+                found_any = True
 
                 local_path = ""
                 exists_locally = False
@@ -279,10 +407,18 @@ def sync_xnat_pipeline_resources(
                         extra_meta=extra,
                     )
                 )
+            if not found_any:
+                n_no_resource += 1
 
     df = pd.DataFrame(rows)
     if df.empty:
-        log.info("No qvtpy/eICAB pipeline resources indexed from XNAT.")
+        log.info(
+            "No qvtpy/eICAB pipeline resources indexed from XNAT "
+            "(checked=%d, missing_experiment=%d, no_eicab/qvtpy=%d).",
+            n_checked,
+            n_missing_experiment,
+            n_no_resource,
+        )
         return df
 
     repo.upsert_table(
@@ -291,7 +427,15 @@ def sync_xnat_pipeline_resources(
         provenance={"source": "xnat_pipeline", "project_id": project_id},
         build_sqlite_index=build_sqlite_index,
     )
-    log.info(f"Indexed {len(df)} XNAT pipeline resource row(s) for project {project_id}")
+    log.info(
+        "Indexed %d XNAT pipeline resource row(s) for project %s "
+        "(checked=%d, missing_experiment=%d, no_eicab/qvtpy=%d)",
+        len(df),
+        project_id,
+        n_checked,
+        n_missing_experiment,
+        n_no_resource,
+    )
     return df
 
 
@@ -421,9 +565,9 @@ _click_option = click.option if click is not None else _cli_decorator
 @_click_option(
     "--dataset-root",
     type=click.Path(path_type=Path) if click is not None else None,
-    default=Path("dataset"),
+    default=Path("dataset/nvitk-dataset"),
     show_default=True,
-    help="Dataset root to update.",
+    help="Dataset root to update (use the nvitk-dataset tree, not the empty parent dataset/).",
 )
 @_click_option(
     "--config",
@@ -464,7 +608,7 @@ _click_option = click.option if click is not None else _cli_decorator
 @_click_option(
     "--resources",
     type=str,
-    default="eicab,qvtpy",
+    default="eicab,qvtpy,4dflows",
     show_default=True,
     help="Comma-separated experiment resource labels to index.",
 )
@@ -561,4 +705,5 @@ __all__ = [
     "inspect_xnat_pipeline_resource",
     "list_pipeline_assets_for_subject",
     "sync_xnat_pipeline_resources",
+    "unwrap_xnat_resource_download",
 ]

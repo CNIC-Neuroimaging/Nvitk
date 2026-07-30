@@ -21,7 +21,6 @@ from nvitk.db.xnat_upload import (
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stages import (
     STAGE_CENTERLINE,
-    STAGE_EICAB,
     STAGE_LOC,
     STAGE_MEASURE,
     STAGE_MORPHOMETRICS,
@@ -44,6 +43,7 @@ ResultsSource = Literal["local", "cluster"]
 XNAT_RESOURCE_EICAB = cfg.STAGE1_EICAB_DIR
 XNAT_RESOURCE_QVTPY = cfg.QVT_SUBDIR
 
+# Full qvtpy tree through stage-7 morphometrics (required for a complete XNAT bundle).
 DEFAULT_XNAT_UPLOAD_STAGES: tuple[str, ...] = (
     STAGE_REG,
     STAGE_CENTERLINE,
@@ -63,6 +63,17 @@ _ALLOWED_REQUIRE_STAGES: frozenset[str] = frozenset(
         STAGE_MEASURE,
         STAGE_MORPHOMETRICS,
     }
+)
+
+# Ordered for stable report / gate lists (stage4t optional).
+_REQUIRE_STAGE_ORDER: tuple[str, ...] = (
+    STAGE_REG,
+    STAGE_CENTERLINE,
+    STAGE_SEG,
+    STAGE_SEG_T,
+    STAGE_LOC,
+    STAGE_MEASURE,
+    STAGE_MORPHOMETRICS,
 )
 
 
@@ -98,8 +109,25 @@ class UploadResult:
         return all(o.status != UploadStatus.ERROR for o in outcomes)
 
 
+def ensure_full_pipeline_require_stages(stages: list[str]) -> list[str]:
+    """Ensure the upload gate includes stage-7 morphometrics for a complete bundle."""
+    selected = {s for s in stages if s in _ALLOWED_REQUIRE_STAGES}
+    if STAGE_MORPHOMETRICS not in selected:
+        log.warning(
+            "Appending %s (TOF morphometrics) to --require-stages so XNAT "
+            "uploads include the complete pipeline results.",
+            STAGE_MORPHOMETRICS,
+        )
+        selected.add(STAGE_MORPHOMETRICS)
+    return [s for s in _REQUIRE_STAGE_ORDER if s in selected]
+
+
 def parse_require_stages(spec: str) -> list[str]:
-    """Parse ``--require-stages`` into canonical qvtpy stage ids."""
+    """Parse ``--require-stages`` into canonical qvtpy stage ids.
+
+    Always includes ``stage7`` (morphometrics) so uploaded ``qvtpy`` resources
+    reflect the complete pipeline, not hemodynamics-only outputs.
+    """
     stages = parse_stages(spec)
     invalid = [s for s in stages if s not in _ALLOWED_REQUIRE_STAGES]
     if invalid:
@@ -108,7 +136,7 @@ def parse_require_stages(spec: str) -> list[str]:
             f"Invalid --require-stages for XNAT upload: {', '.join(invalid)}. "
             f"Allowed: {allowed}"
         )
-    return stages
+    return ensure_full_pipeline_require_stages(stages)
 
 
 def eicab_dir(output_root: Path, subject: str) -> Path:
@@ -304,6 +332,61 @@ def _tally_resource(summary: BatchUploadSummary, outcome: ResourceUploadOutcome 
         summary.errors += 1
 
 
+def format_batch_upload_report(summary: BatchUploadSummary) -> str:
+    """Human-readable uploaded / incomplete / failed report for one batch."""
+    lines: list[str] = [
+        "==== XNAT pipeline upload report ====",
+        f"subjects attempted: {summary.subjects}",
+        (
+            f"eicab  uploaded={summary.eicab_uploaded} skipped={summary.eicab_skipped} "
+            f"incomplete={summary.eicab_incomplete}"
+        ),
+        (
+            f"qvtpy  uploaded={summary.qvtpy_uploaded} skipped={summary.qvtpy_skipped} "
+            f"incomplete={summary.qvtpy_incomplete}"
+        ),
+        f"subject-level errors: {summary.errors}",
+    ]
+
+    uploaded: list[str] = []
+    incomplete: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+
+    for result in summary.results:
+        if result.error:
+            failed.append(f"  {result.subject}: {result.error}")
+            continue
+        for outcome in (result.eicab, result.qvtpy):
+            if outcome is None:
+                continue
+            label = f"  {result.subject}/{outcome.resource}"
+            detail = f" ({outcome.detail})" if outcome.detail and outcome.detail != "ok" else ""
+            files = f" [{outcome.n_files} file(s)]" if outcome.n_files else ""
+            if outcome.status in (UploadStatus.UPLOADED, UploadStatus.DRY_RUN):
+                uploaded.append(f"{label}: {outcome.status.value}{files}{detail}")
+            elif outcome.status == UploadStatus.SKIPPED:
+                skipped.append(f"{label}: skipped{detail}")
+            elif outcome.status == UploadStatus.INCOMPLETE:
+                incomplete.append(f"{label}: incomplete{detail}")
+            elif outcome.status == UploadStatus.ERROR:
+                failed.append(f"{label}: error{detail}")
+
+    def _section(title: str, items: list[str]) -> None:
+        lines.append("")
+        lines.append(f"-- {title} ({len(items)}) --")
+        if items:
+            lines.extend(items)
+        else:
+            lines.append("  (none)")
+
+    _section("Uploaded resources", uploaded)
+    _section("Skipped resources", skipped)
+    _section("Incomplete resources", incomplete)
+    _section("Failed", failed)
+    return "\n".join(lines)
+
+
 def _upload_subject_from_staging(
     subject: str,
     *,
@@ -374,7 +457,9 @@ def run_xnat_upload(
     remote_results_root: Path | None = None,
 ) -> BatchUploadSummary:
     """Upload qvtpy/eicab results for *subjects* to XNAT."""
-    stages = list(required_stages or DEFAULT_XNAT_UPLOAD_STAGES)
+    stages = ensure_full_pipeline_require_stages(
+        list(required_stages or DEFAULT_XNAT_UPLOAD_STAGES)
+    )
     summary = BatchUploadSummary()
     summary.subjects = len(subjects)
     cluster_mode = results_source == "cluster"
@@ -468,13 +553,9 @@ def run_xnat_upload(
             _tally_resource(summary, result.eicab, "eicab")
             _tally_resource(summary, result.qvtpy, "qvtpy")
 
-    log.info(
-        "XNAT upload summary: "
-        f"eicab uploaded={summary.eicab_uploaded} skipped={summary.eicab_skipped} "
-        f"incomplete={summary.eicab_incomplete}; "
-        f"qvtpy uploaded={summary.qvtpy_uploaded} skipped={summary.qvtpy_skipped} "
-        f"incomplete={summary.qvtpy_incomplete}; errors={summary.errors}"
-    )
+    report = format_batch_upload_report(summary)
+    log.info("XNAT upload summary:\n%s", report)
+    print(report)
     return summary
 
 
@@ -486,6 +567,8 @@ __all__ = [
     "UploadStatus",
     "eicab_complete",
     "eicab_dir",
+    "ensure_full_pipeline_require_stages",
+    "format_batch_upload_report",
     "parse_require_stages",
     "qvtpy_all_required_complete",
     "qvtpy_dir",

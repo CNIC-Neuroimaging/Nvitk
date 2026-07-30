@@ -272,6 +272,58 @@ def _flag_outliers_iqr(df: pd.DataFrame, *, k: float = 1.5) -> pd.Series:
     return is_outlier
 
 
+def _flag_low_values(df: pd.DataFrame, *, thresh: float) -> pd.Series:
+    """Return boolean mask of values strictly below ``thresh``."""
+    return df["value"].astype(float) < float(thresh)
+
+
+def _low_vals_export_df(df: pd.DataFrame, *, thresh: float) -> pd.DataFrame:
+    """Build subject/vessel/value table for values below ``thresh``."""
+    mask = _flag_low_values(df, thresh=thresh)
+    out = df.loc[mask, ["subject_uid", "vessel", "value"]].copy()
+    out = out.rename(columns={"value": "highlighted_value"})
+    out["threshold"] = float(thresh)
+    out = out.sort_values(["vessel", "subject_uid", "highlighted_value"])
+    return out.reset_index(drop=True)
+
+
+def _annotate_flagged_points(
+    ax,
+    flagged_df: pd.DataFrame,
+    *,
+    vessels: list[str],
+    edgecolor: str,
+    text_color: str,
+    marker: str = "D",
+) -> None:
+    if flagged_df.empty:
+        return
+    vessel_to_x = {v: i for i, v in enumerate(vessels)}
+    for _, row in flagged_df.iterrows():
+        xi = vessel_to_x.get(row["vessel"])
+        if xi is None:
+            continue
+        ax.scatter(
+            [xi],
+            [row["value"]],
+            marker=marker,
+            s=40,
+            facecolors="none",
+            edgecolors=edgecolor,
+            linewidths=1.5,
+            zorder=5,
+        )
+        ax.annotate(
+            str(row["subject_uid"]),
+            xy=(xi, row["value"]),
+            xytext=(6, 4),
+            textcoords="offset points",
+            fontsize=5.5,
+            color=text_color,
+            alpha=0.85,
+        )
+
+
 def _plot_violin_figure(
     plot_df: pd.DataFrame,
     *,
@@ -281,6 +333,8 @@ def _plot_violin_figure(
     output_path: Path,
     outlier_rem: bool = False,
     outlier_high: bool = False,
+    flag_low_vals: bool = False,
+    low_val_thresh: float = 50.0,
 ) -> Path | None:
     if plot_df.empty:
         log.warning("Skipping empty figure: %s", title)
@@ -289,12 +343,35 @@ def _plot_violin_figure(
     outlier_mask = _flag_outliers_iqr(plot_df)
     outlier_df = plot_df[outlier_mask].copy() if outlier_high else pd.DataFrame()
 
+    if flag_low_vals:
+        low_mask = _flag_low_values(plot_df, thresh=low_val_thresh)
+        n_low = int(low_mask.sum())
+        if n_low:
+            plot_df = plot_df[~low_mask].copy()
+            log.info(
+                "  flag-low-vals: dropped %d/%d points below %g for %s",
+                n_low,
+                n_low + len(plot_df),
+                low_val_thresh,
+                title,
+            )
+            # Recompute IQR on the remaining points so outlier-rem matches the plot.
+            outlier_mask = _flag_outliers_iqr(plot_df)
+            if outlier_high:
+                outlier_df = plot_df[outlier_mask].copy()
+
+    if plot_df.empty:
+        log.warning("Skipping empty figure after low-val drop: %s", title)
+        return None
+
     if outlier_rem:
         n_before = len(plot_df)
         plot_df = plot_df[~outlier_mask].copy()
         n_removed = n_before - len(plot_df)
         if n_removed:
             log.info("  outlier-rem: removed %d/%d points for %s", n_removed, n_before, title)
+        if outlier_high and not outlier_df.empty:
+            outlier_df = outlier_df[outlier_df.index.isin(plot_df.index)]
 
     vessels = [v for v in plot_df["vessel"].cat.categories if v in set(plot_df["vessel"])]
     n_by_vessel = plot_df.groupby("vessel", observed=True)["value"].count().to_dict()
@@ -354,25 +431,23 @@ def _plot_violin_figure(
     )
 
     if outlier_high and not outlier_df.empty:
-        vessel_to_x = {v: i for i, v in enumerate(vessels)}
-        for _, row in outlier_df.iterrows():
-            xi = vessel_to_x.get(row["vessel"])
-            if xi is None:
-                continue
-            ax.scatter(
-                [xi], [row["value"]],
-                marker="D", s=40, facecolors="none", edgecolors="red",
-                linewidths=1.5, zorder=5,
-            )
-            ax.annotate(
-                str(row["subject_uid"]),
-                xy=(xi, row["value"]),
-                xytext=(6, 4),
-                textcoords="offset points",
-                fontsize=5.5,
-                color="red",
-                alpha=0.85,
-            )
+        _annotate_flagged_points(
+            ax,
+            outlier_df,
+            vessels=vessels,
+            edgecolor="red",
+            text_color="red",
+        )
+
+    if flag_low_vals:
+        ax.axhline(
+            float(low_val_thresh),
+            color="#d97706",
+            linestyle="--",
+            linewidth=1.0,
+            alpha=0.7,
+            zorder=2,
+        )
 
     ax.set_title(title, fontsize=16, fontweight="bold", pad=12)
     ax.set_xlabel("")
@@ -472,6 +547,23 @@ def _plot_violin_figure(
     default=False,
     help="Highlight IQR outliers with subject uid labels.",
 )
+@click.option(
+    "--flag-low-vals/--no-flag-low-vals",
+    is_flag=True,
+    default=False,
+    help=(
+        "Drop values below --low-val-thresh from the plot, draw a dashed "
+        "threshold line, and write a CSV per metric listing those rows "
+        "(subject_uid / vessel / highlighted_value)."
+    ),
+)
+@click.option(
+    "--low-val-thresh",
+    type=float,
+    default=25.0,
+    show_default=True,
+    help="Absolute threshold for --flag-low-vals (e.g. 50 mL/min for flow).",
+)
 def main(
     output_path: Path,
     pipeline_version: str,
@@ -479,6 +571,8 @@ def main(
     metrics: str,
     outlier_rem: bool,
     outlier_high: bool,
+    flag_low_vals: bool,
+    low_val_thresh: float,
 ) -> None:
     """Create territory-grouped violin plots for qvtpy hemodynamics."""
     out_dir = Path(output_path)
@@ -516,6 +610,16 @@ def main(
             specs=vessel_specs,
             derive_tcbf=bool(meta.get("derive_tcbf")),
         )
+        if flag_low_vals and not plot_df.empty:
+            low_export = _low_vals_export_df(plot_df, thresh=low_val_thresh)
+            csv_path = out_dir / f"{meta['key']}_low_vals.csv"
+            low_export.to_csv(csv_path, index=False)
+            log.info(
+                "Wrote %d low-value row(s) (< %g) to %s",
+                len(low_export),
+                low_val_thresh,
+                csv_path,
+            )
         path = _plot_violin_figure(
             plot_df,
             title=meta["title"],
@@ -524,6 +628,8 @@ def main(
             output_path=out_dir / meta["filename"],
             outlier_rem=outlier_rem,
             outlier_high=outlier_high,
+            flag_low_vals=flag_low_vals,
+            low_val_thresh=low_val_thresh,
         )
         if path is not None:
             written.append(path)

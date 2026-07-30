@@ -302,14 +302,19 @@ def _voxel_spacing(layer: Any) -> tuple[float, float, float]:
 
 
 def _params_from_dict(params: dict[str, Any]) -> dict[str, Any]:
-    resegment = bool(params.get("measure_resegment", True))
+    resegment = bool(params.get("measure_resegment", False))
+    supersampling = bool(params.get("cs_supersampling", True))
     interp = bool(params.get("interpolate_plane", True)) and resegment
+    # Keep interp_vals for supersampled grid even when not resegmenting, so the
+    # stage-4 mask is nearest-neighbor upsampled onto the finer plane.
+    default_interp = 4 if (resegment or supersampling) else 1
     return {
         "radius_vox": float(params.get("cross_section_radius_vox") or 12.0),
         "cross_section_res": int(params.get("cross_section_res") or 0),
-        "interp_vals": int(params.get("interp_vals") or 4) if resegment else 1,
+        "interp_vals": int(params.get("interp_vals") or default_interp),
         "plane_interp_order": 1 if interp else 0,
         "measure_resegment": resegment,
+        "cs_supersampling": supersampling,
         "thr_algorithm": str(params.get("thr_algorithm") or "lsthr"),
         "centerline_window": int(str(params.get("centerline_window") or "5")),
         "show_segmentation_3d": bool(params.get("show_segmentation_3d", True)),
@@ -614,8 +619,10 @@ def _neighbor_flow_waveforms(
                 vel_mag=state["cd"],
                 voxel_spacing=state["voxel_spacing"],
                 radius_vox=p["radius_vox"],
+                interp_vals=p["interp_vals"],
                 cross_section_res=p["cross_section_res"],
                 plane_interp_order=p["plane_interp_order"],
+                cs_supersampling=p.get("cs_supersampling", False),
                 measure_resegment=p["measure_resegment"],
                 thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
                 volume_seg=state.get("segmentation"),
@@ -880,6 +887,7 @@ def install_vessel_cross_sections(
                 interp_vals=p["interp_vals"],
                 cross_section_res=p["cross_section_res"],
                 plane_interp_order=p["plane_interp_order"],
+                cs_supersampling=p.get("cs_supersampling", False),
                 measure_resegment=p["measure_resegment"],
                 thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
                 volume_seg=state["segmentation"],
@@ -894,8 +902,18 @@ def install_vessel_cross_sections(
         _update_tangent_visual(pick, tang)
 
         intensity_2d = result.intensity_2d
-        if intensity_2d is None:
-            intensity_2d = state["cd"]
+        if intensity_2d is None or int(getattr(np.asarray(intensity_2d), "ndim", 0)) != 2:
+            # Never fall back to the 3D CD volume for the 2D dock.
+            intensity_2d = np.zeros_like(result.mask_2d, dtype=np.float64)
+        else:
+            intensity_2d = np.asarray(intensity_2d)
+            mask_arr = np.asarray(result.mask_2d)
+            if intensity_2d.shape != mask_arr.shape:
+                # Should not happen after cross_section_at_point fix; guard the dock.
+                panel.clear(
+                    f"Intensity/mask shape mismatch: {intensity_2d.shape} vs {mask_arr.shape}"
+                )
+                return
         title = (
             f"{branch_name}  index {pick.index}\n"
             f"area {result.area_mm2:.2f} mm²  circularity {result.circularity:.3f}"

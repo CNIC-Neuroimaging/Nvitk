@@ -155,9 +155,14 @@ def cross_section_at_point(
     volume_seg: np.ndarray | None = None,
     volume_label_id: int = 0,
 ) -> CrossSectionResult:
-    """Oblique cross-section at a centerline point using a single 3D intensity volume."""
+    """Oblique cross-section at a centerline point using a single 3D intensity volume.
+
+    Intensity and mask are always sampled on the same in-plane grid. When
+    *cs_supersampling* is on, that grid is finer: the intensity crop is linearly
+    interpolated onto it, and (without resegmentation) the volume mask is
+    nearest-neighbor sampled onto the same fine grid so overlays coincide.
+    """
     u, v = plane_basis_from_tangent(tangent)
-    res_display = _plane_res_nearest(radius_vox, cross_section_res)
     res_meas = resolve_plane_res(
         radius_vox,
         cross_section_res=cross_section_res,
@@ -167,21 +172,22 @@ def cross_section_at_point(
     center = as_backend_array(center_xyz).astype(np.float64).reshape(3)
     tang = as_backend_array(tangent).astype(np.float64).reshape(3)
 
-    plane_display = oblique_plane_coords(
-        center, u, v, radius_vox=radius_vox, res=res_display
-    )
     plane_meas = oblique_plane_coords(
         center, u, v, radius_vox=radius_vox, res=res_meas
     )
-    cd_sl_display = oblique_slice_with_coords(cd, plane_display, order=0)
 
     if measure_resegment:
         order_meas = int(plane_interp_order)
         cd_sl = oblique_slice_with_coords(cd, plane_meas, order=order_meas)
         mask, circ = segment_in_plane_cd_only(cd_sl, thr_algorithm=thr_algorithm)
+        intensity_2d = cd_sl
     else:
         if volume_seg is None:
             raise ValueError("volume_seg is required when measure_resegment is False")
+        # Upsample the raw crop onto the (possibly supersampled) plane; keep
+        # label masks as nearest-neighbor so overlays share the same grid.
+        intensity_order = 1 if cs_supersampling else 0
+        intensity_2d = oblique_slice_with_coords(cd, plane_meas, order=intensity_order)
         seg_sl = oblique_slice_with_coords(
             volume_seg.astype(np.float32), plane_meas, order=0
         )
@@ -206,7 +212,7 @@ def cross_section_at_point(
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
         plane_res=res_meas,
         radius_vox=float(radius_vox),
-        intensity_2d=as_backend_array(cd_sl_display),
+        intensity_2d=as_backend_array(intensity_2d),
     )
 
 
@@ -426,9 +432,9 @@ def cross_section_at_loc(
     plane_meas = oblique_plane_coords(
         center, u, v, radius_vox=radius_vox, res=res
     )
-    cd_sl = oblique_slice_with_coords(cd, plane_meas, order=order)
 
     if measure_resegment:
+        cd_sl = oblique_slice_with_coords(cd, plane_meas, order=order)
         mag_sl = oblique_slice_with_coords(mag, plane_meas, order=order)
         vel_sl = oblique_slice_with_coords(vel_mag, plane_meas, order=order)
         if label_constrain and volume_seg is not None:
@@ -453,6 +459,9 @@ def cross_section_at_loc(
     else:
         if volume_seg is None:
             raise ValueError("volume_seg is required when measure_resegment is False")
+        # Match GUI display: upsample intensity on the fine plane; NN for labels.
+        intensity_order = 1 if cs_supersampling else 0
+        cd_sl = oblique_slice_with_coords(cd, plane_meas, order=intensity_order)
         seg_sl = oblique_slice_with_coords(
             volume_seg.astype(np.float32), plane_meas, order=0
         )
@@ -477,6 +486,7 @@ def cross_section_at_loc(
         pixel_spacing_mm=tilt_corrected_spacing_mm(voxel_spacing, tang),
         plane_res=res,
         radius_vox=float(radius_vox),
+        intensity_2d=as_backend_array(cd_sl),
     )
 
 

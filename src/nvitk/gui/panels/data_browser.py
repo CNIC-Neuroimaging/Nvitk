@@ -76,6 +76,62 @@ _ITEM_ROLE = int(Qt.UserRole) + 1
 SOURCE_XNAT = 0
 SOURCE_LOCAL = 1
 
+# Prefer these when auto-opening pipeline resource trees (eicab / qvtpy / 4dflows).
+_PREFERRED_PIPELINE_NIFTI_SUBSTR = (
+    "tof_resampled",
+    "eicab_cw",
+    "eicab_wb",
+    "complexdifference_3d",
+    "angiography_3d",
+    "seg_4dflow",
+    "centerlines_mask_4dflow",
+    "centerlines_mask",
+)
+
+
+def _is_nifti_path(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".nii.gz") or name.endswith(".nii")
+
+
+def _collect_nifti_files(root: Path, *, max_files: int = 40) -> list[Path]:
+    """NIfTI files under *root*, preferred names first, then shallowest paths."""
+    found: list[Path] = []
+    for p in root.rglob("*"):
+        if p.is_file() and _is_nifti_path(p) and not p.name.startswith("."):
+            found.append(p)
+    if not found:
+        return []
+
+    preferred: list[Path] = []
+    rest: list[Path] = []
+    for p in found:
+        low = p.name.lower()
+        if any(key in low for key in _PREFERRED_PIPELINE_NIFTI_SUBSTR):
+            preferred.append(p)
+        else:
+            rest.append(p)
+    preferred.sort(key=lambda p: (len(p.parts), p.name.lower()))
+    rest.sort(key=lambda p: (len(p.parts), p.name.lower()))
+    ordered = preferred + rest
+    if len(ordered) > max_files:
+        log.info(
+            "Opening %d of %d NIfTI file(s) under %s",
+            max_files,
+            len(ordered),
+            root,
+        )
+    return ordered[:max_files]
+
+
+def _payload_path_format(payload: Any) -> tuple[Path, str]:
+    """Normalize worker payloads to ``(path, format)`` with format ``dicom``/``nifti``."""
+    if isinstance(payload, dict):
+        path = Path(payload.get("path") or "")
+        fmt = str(payload.get("format") or "auto").strip().lower()
+        return path, fmt
+    return Path(payload), "auto"
+
 
 def _resolve_repo() -> tuple[DataRepo, Path]:
     try:
@@ -142,7 +198,9 @@ class _XnatDownloadWorker(QThread):
                         if local_path and Path(local_path).is_dir() and any(
                             Path(local_path).rglob("*")
                         ):
-                            opened_dirs.append(Path(local_path))
+                            opened_dirs.append(
+                                {"path": Path(local_path), "format": "nifti"}
+                            )
                             continue
                         experiment, _ = resolve_subject_experiment(
                             project, subject_uid
@@ -162,7 +220,8 @@ class _XnatDownloadWorker(QThread):
                         download_experiment_resource(
                             experiment, resource_label, target
                         )
-                        opened_dirs.append(target)
+                        # Pipeline resources (eicab / qvtpy / 4dflows) are NIfTI trees.
+                        opened_dirs.append({"path": target, "format": "nifti"})
                         continue
 
                     scan_id = str(row.get("scan_id") or "")
@@ -188,7 +247,9 @@ class _XnatDownloadWorker(QThread):
                         dicom_target = base / "DICOM" if want_nifti else base
                         dicom_target.mkdir(parents=True, exist_ok=True)
                         download_scan_dicoms(scan_obj, dicom_target)
-                        opened_dirs.append(dicom_target)
+                        opened_dirs.append(
+                            {"path": dicom_target, "format": "dicom"}
+                        )
 
                     if want_nifti:
                         self.progress.emit(
@@ -198,7 +259,9 @@ class _XnatDownloadWorker(QThread):
                         nifti_target.mkdir(parents=True, exist_ok=True)
                         try:
                             download_scan_niftis(scan_obj, nifti_target)
-                            opened_dirs.append(nifti_target)
+                            opened_dirs.append(
+                                {"path": nifti_target, "format": "nifti"}
+                            )
                         except Exception as nifti_exc:
                             self.progress.emit(
                                 f"NIFTI unavailable for {subject_uid}/{scan_id}: {nifti_exc}"
@@ -309,10 +372,22 @@ class DataBrowserPanel(QWidget):
         self._temp_only.setChecked(True)
         self._temp_only.toggled.connect(self._on_temp_only_toggled)
 
-        self._download_dicom = QCheckBox("Download DICOM for selected scans")
-        self._download_dicom.setChecked(True)
-        self._download_nifti = QCheckBox("Download NIFTI for selected scans")
-        self._download_nifti.setChecked(True)
+        # Raw scans may exist as DICOM and/or NIfTI on XNAT; pick one reader.
+        # Pipeline resources (eicab / qvtpy / 4dflows) are always NIfTI.
+        self._scan_format = QComboBox()
+        self._scan_format.addItem("NIfTI", "nifti")
+        self._scan_format.addItem("DICOM", "dicom")
+        self._scan_format.setCurrentIndex(0)
+        self._scan_format.setToolTip(
+            "Format used to download and open raw scan series. "
+            "Pipeline result resources are always opened as NIfTI."
+        )
+        scan_format_hint = QLabel(
+            "Raw scans: choose DICOM or NIfTI reader. "
+            "Pipeline resources always use NIfTI."
+        )
+        scan_format_hint.setWordWrap(True)
+        scan_format_hint.setStyleSheet("color: #888;")
 
         config_row = QHBoxLayout()
         config_row.addWidget(self._config_path, stretch=1)
@@ -322,6 +397,10 @@ class DataBrowserPanel(QWidget):
         download_row.addWidget(self._download_path, stretch=1)
         download_row.addWidget(browse_download)
 
+        scan_format_row = QHBoxLayout()
+        scan_format_row.addWidget(QLabel("Raw scan reader"))
+        scan_format_row.addWidget(self._scan_format, stretch=1)
+
         lay = QVBoxLayout()
         lay.addWidget(QLabel("XNAT project"))
         lay.addWidget(self._project_combo)
@@ -329,8 +408,8 @@ class DataBrowserPanel(QWidget):
         lay.addLayout(config_row)
         lay.addWidget(self._temp_only)
         lay.addLayout(download_row)
-        lay.addWidget(self._download_dicom)
-        lay.addWidget(self._download_nifti)
+        lay.addLayout(scan_format_row)
+        lay.addWidget(scan_format_hint)
         page.setLayout(lay)
 
         self._project_combo.currentIndexChanged.connect(self._reload_xnat_catalog)
@@ -785,7 +864,7 @@ class DataBrowserPanel(QWidget):
                 label = asset_slot_display_label(slot or resource)
                 exists = bool(row.get("exists_locally"))
                 hint = " (local cache)" if exists else " (XNAT)"
-                item = QListWidgetItem(f"[pipeline] {label}{hint}")
+                item = QListWidgetItem(f"[pipeline · NIfTI] {label}{hint}")
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(Qt.Unchecked)
                 payload = row.to_dict()
@@ -867,6 +946,16 @@ class DataBrowserPanel(QWidget):
         else:
             self._on_local_load()
 
+    def _scan_reader_is_dicom(self) -> bool:
+        return str(self._scan_format.currentData() or "nifti") == "dicom"
+
+    def _uncheck_selected_resources(self) -> None:
+        """Clear checkboxes for series/assets just retrieved."""
+        for i in range(self._resource_list.count()):
+            item = self._resource_list.item(i)
+            if item is not None and item.checkState() == Qt.Checked:
+                item.setCheckState(Qt.Unchecked)
+
     def _on_local_load(self) -> None:
         assets = self._selected_local_assets()
         if not assets:
@@ -885,6 +974,7 @@ class DataBrowserPanel(QWidget):
                 paths.append(str(path))
             except Exception as exc:
                 log.warning(f"Could not open {path}: {exc}")
+        self._uncheck_selected_resources()
         self._record_opened(paths)
         notify(f"Opened {opened} asset(s) in Napari.")
 
@@ -930,6 +1020,7 @@ class DataBrowserPanel(QWidget):
             download_root = Path(self._download_path.text().strip()).expanduser()
             download_root.mkdir(parents=True, exist_ok=True)
 
+        use_dicom = self._scan_reader_is_dicom()
         self._action_btn.setEnabled(False)
         self._status.setText("Connecting to XNAT…")
 
@@ -940,8 +1031,8 @@ class DataBrowserPanel(QWidget):
             scan_rows=items,
             download_root=download_root,
             temp_parent=temp_parent,
-            download_dicom=self._download_dicom.isChecked(),
-            download_nifti=self._download_nifti.isChecked(),
+            download_dicom=use_dicom,
+            download_nifti=not use_dicom,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_download_ok)
@@ -962,21 +1053,45 @@ class DataBrowserPanel(QWidget):
                 inputs.append({"path": p, "name": Path(p).name})
             self._app_state["inputs"] = inputs
 
-    def _on_download_ok(self, dirs: list) -> None:
-        paths = []
-        opened = 0
-        for d in dirs:
-            path = Path(d)
-            if not path.is_dir():
+    def _on_download_ok(self, payloads: list) -> None:
+        paths: list[str] = []
+        opened_layers = 0
+        for payload in payloads:
+            path, fmt = _payload_path_format(payload)
+            if not path.exists():
                 continue
             try:
-                open_paths_with_nvitk(self._viewer, path)
-                opened += 1
-                paths.append(str(path))
+                if fmt == "nifti" or (
+                    fmt == "auto"
+                    and path.is_dir()
+                    and _collect_nifti_files(path, max_files=1)
+                ):
+                    nifti_files = (
+                        [path]
+                        if path.is_file() and _is_nifti_path(path)
+                        else _collect_nifti_files(path)
+                    )
+                    if not nifti_files:
+                        log.warning("No NIfTI files found under %s", path)
+                        continue
+                    layers = open_paths_with_nvitk(
+                        self._viewer, nifti_files, force_type="nifti"
+                    )
+                    opened_layers += len(layers)
+                    paths.extend(str(p) for p in nifti_files)
+                else:
+                    layers = open_paths_with_nvitk(self._viewer, path)
+                    opened_layers += len(layers)
+                    if layers:
+                        paths.append(str(path))
             except Exception as exc:
                 log.warning(f"Could not open {path}: {exc}")
+        self._uncheck_selected_resources()
         self._record_opened(paths)
-        notify(f"Downloaded and opened {opened} resource(s) in Napari.")
+        notify(
+            f"Downloaded and opened {opened_layers} layer(s) "
+            f"from {len(payloads)} resource(s) in Napari."
+        )
 
     def _on_download_failed(self, message: str) -> None:
         self._status.setText(message)

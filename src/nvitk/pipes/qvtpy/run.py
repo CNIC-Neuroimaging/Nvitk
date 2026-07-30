@@ -370,7 +370,7 @@ def _emit_qvtpy_sge_subjects_for_chunk(
     pitc_stride: int = 1,
     pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT,
     pitc_quality_metric: str = "stdv_from_mean",
-    pitc_measure_resegment: bool = True,
+    pitc_measure_resegment: bool = False,
     pitc_label_constrain: bool = True,
 ) -> int:
     """Append one SGE array ``qsub`` per subject; return array jobs emitted."""
@@ -1195,8 +1195,9 @@ def _submit_qvtpy_sge_subjects_remote(
 # --- stage 6 ---
 @click.option(
     "--measure-resegment/--no-measure-resegment",
-    default=True,
+    default=False,
     show_default=True,
+    help="Stage6 LOC: in-plane resegmentation (default off; upsample stage-4 masks).",
 )
 @click.option(
     "--measure-thr-algorithm",
@@ -1211,7 +1212,7 @@ def _submit_qvtpy_sge_subjects_remote(
     "--cs-supersampling/--no-cs-supersampling",
     default=True,
     show_default=True,
-    help="Stage6: supersample oblique cross-section grid (~4×).",
+    help="Stage6: supersample oblique cross-section grid (~4×) for intensity + masks.",
 )
 @click.option(
     "--save-plots/--no-save-plots",
@@ -1234,8 +1235,9 @@ def _submit_qvtpy_sge_subjects_remote(
 )
 @click.option(
     "--pitc-measure-resegment/--no-pitc-measure-resegment",
-    default=True,
+    default=False,
     show_default=True,
+    help="Stage6 PITC/PWV: in-plane resegmentation (default off).",
 )
 @click.option(
     "--pitc-label-constrain/--no-pitc-label-constrain",
