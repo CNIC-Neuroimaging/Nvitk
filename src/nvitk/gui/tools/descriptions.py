@@ -14,6 +14,20 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Supported: 1,1,2 | 1,1,3 | 1,1,4 | 1,1,6 | 2,2,2 | 2,2,4; feature vgg or grader."
     ),
     "sliding_threshold": "Adaptive threshold along one axis (useful for uneven intensity).",
+    "hessian_filter": (
+        "Hybrid Hessian ridge / vesselness filter (skimage.filters.hessian). "
+        "Use bright ridges (default) for TOF/CD; enable black ridges for dark vessels."
+    ),
+    "jerman_filter": (
+        "Jerman multiscale vesselness (IEEE TMI 2016). More uniform vessel response "
+        "than Frangi/Hessian across scales; use bright ridges (default) for TOF/CD. "
+        "Tau in [0.5, 1]: lower → stronger enhancement."
+    ),
+    "snakes_filter": (
+        "Kass snakes / parametric active contours (IJCV 1988). Deforms an initial "
+        "mask contour under tension/rigidity and image line/edge energies. "
+        "Requires an init contour mask; 3-D volumes are processed slice-wise."
+    ),
     "dilate": "Expand foreground voxels by a spherical footprint.",
     "erode": "Shrink foreground voxels by a spherical footprint.",
     "open": "Erosion followed by dilation (removes small protrusions).",
@@ -35,6 +49,14 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "siphon_correct": "Correct ICA siphon centerlines using a TOF/MRA reference.",
     "mask_genus": "Report topological genus of a mask (handles / tunnels).",
     "seg_get_label": "Extract one label id into a binary mask layer.",
+    "img_mask_keep_inside": (
+        "Active layer = intensity image; reference = mask/segmentation. "
+        "Keep voxels inside the mask (or listed mask label ids); fill the rest."
+    ),
+    "img_mask_keep_outside": (
+        "Active layer = intensity image; reference = mask/segmentation. "
+        "Keep voxels outside the mask (or listed mask label ids); fill the rest."
+    ),
     "seg_combine_labels": "Merge selected labels into one output label.",
     "seg_remove_labels": "Zero out selected label ids in a label map.",
     "seg_pet_ureter": "PET-guided ureter segmentation from organ/body masks.",
@@ -54,9 +76,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "mask and centerline layers use separate dilation radii."
     ),
     "seg_blood_flood": (
-        "Active layer = marker / seed labels; intensity layer = CD or TOF. "
-        "Frangi vesselness → hysteresis tree → watershed (same algorithm as qvtpy "
-        "distal vessel expansion). Optional barrier punches hard walls out of the tree."
+        "Two modes. expand: active layer = seed/marker labels, intensity layer = CD/TOF "
+        "(qvtpy distal vessel expansion). from_scratch: active layer = intensity only; "
+        "builds a Frangi→hysteresis vessel tree and labels connected components "
+        "(optional ROI mask layer). Optional barrier punches hard walls out of the tree."
     ),
     "seg_mouse_brain": (
         "ANTsPyNet mouse brain extraction or parcellation (T2w mouse MRI). "
@@ -70,8 +93,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "seg_mra_vessel": (
         "ANTsPyNet MRA-TOF vessel segmentation (probability map) on the active "
-        "volume. Leave mask at (none) to auto-extract a brain mask, or supply a "
-        "binary brain mask layer (any positive foreground is binarized)."
+        "volume. Uses streaming patch inference to avoid OOM on large TOFs. "
+        "Leave mask at (none) to auto-extract a brain mask, or supply a binary "
+        "brain mask layer. Prefer small batch size (default 2) on CPU."
     ),
     "seg_dkt": (
         "ANTsPyNet Desikan-Killiany-Tourville cortical parcellation on a T1w volume."
@@ -140,9 +164,6 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "orient_volume": (
         "Show NIfTI axis codes or mirror/permute the Napari display to a target layout."
-    ),
-    "layer_metadata": (
-        "Print spacing, FOV, origin, orientation, direction, and affine for the active layer."
     ),
     "reorient_volume": (
         "Reorient the active volume for mouse/ANTs layouts. "

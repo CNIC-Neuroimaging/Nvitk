@@ -6,13 +6,16 @@ Stage 7 (``case_metrics_donut_tree.xlsx``) → pipeline ``tof_morpho_v1``.
 
 Examples::
 
-    python scripts/pesa_brain/db/sync_db_results.py \\
+    python scripts/pesa_brain/db/sync_db_measurements.py \\
         --results-path /data/RESULTS/QVTPy
 
-    python scripts/pesa_brain/db/sync_db_results.py \\
+    python scripts/pesa_brain/db/sync_db_measurements.py \\
         --results-path /data/RESULTS/QVTPy --skip-existing
 
-    python scripts/pesa_brain/db/sync_db_results.py \\
+    python scripts/pesa_brain/db/sync_db_measurements.py \\
+        --results-path /data/RESULTS/QVTPy --subjects PESA5745609 --drop-existing
+
+    python scripts/pesa_brain/db/sync_db_measurements.py \\
         --from-sge --subjects PESA5745609,PESA123
 """
 
@@ -128,6 +131,58 @@ def _existing_subjects(repo, pipeline_id: str) -> set[str]:
         return set()
 
 
+def _drop_pipeline_measurements_for_subjects(
+    repo,
+    *,
+    pipeline_id: str,
+    subject_uids: set[str],
+) -> int:
+    """Remove all ``image_measurements`` rows for *pipeline_id* × *subject_uids*.
+
+    Returns the number of dropped rows. Writes Parquet without rebuilding SQLite
+    (caller may rebuild after the subsequent upsert).
+    """
+    if not subject_uids:
+        return 0
+    try:
+        existing = repo.get("image_measurements", cohort_id=False, use_sqlite=False)
+    except Exception as exc:
+        log.warning(
+            "Could not read image_measurements for drop-existing (%s); skipping drop.",
+            exc,
+        )
+        return 0
+    if existing is None or existing.empty:
+        return 0
+    if "pipeline_id" not in existing.columns or "subject_uid" not in existing.columns:
+        log.warning(
+            "image_measurements missing pipeline_id/subject_uid; skipping drop-existing."
+        )
+        return 0
+
+    drop_mask = existing["pipeline_id"].astype(str).eq(str(pipeline_id)) & existing[
+        "subject_uid"
+    ].astype(str).isin(subject_uids)
+    n_drop = int(drop_mask.sum())
+    if n_drop == 0:
+        return 0
+
+    kept = existing.loc[~drop_mask].reset_index(drop=True)
+    repo.write_table(
+        "image_measurements",
+        kept,
+        provenance={
+            "importer": "qvtpy_sync_db_measurements",
+            "action": "drop-existing",
+            "pipeline_id": pipeline_id,
+            "n_subjects": len(subject_uids),
+            "n_dropped": n_drop,
+        },
+        build_sqlite_index=False,
+    )
+    return n_drop
+
+
 @click.command("sync-db-results")
 @click.option(
     "--results-path",
@@ -188,6 +243,16 @@ def _existing_subjects(repo, pipeline_id: str) -> set[str]:
     ),
 )
 @click.option(
+    "--drop-existing/--no-drop-existing",
+    default=False,
+    show_default=True,
+    help=(
+        "Before uploading stage6 rows, delete all existing image_measurements for "
+        "those subjects under pipeline 4dflow_v3 (so orphaned variables/regions "
+        "from prior runs are removed). Mutually exclusive with --skip-existing."
+    ),
+)
+@click.option(
     "--build-sqlite-index/--no-build-sqlite-index",
     default=True,
     show_default=True,
@@ -203,11 +268,14 @@ def main(
     remote_user: str | None,
     cluster_results_root: Path | None,
     skip_existing: bool,
+    drop_existing: bool,
     build_sqlite_index: bool,
 ) -> None:
     """Sync qvtpy stage-6/7 results into image_measurements and rebuild SQLite."""
     if subjects is not None and subjects_file is not None:
         raise click.UsageError("Provide at most one of --subjects or --subjects-file.")
+    if skip_existing and drop_existing:
+        raise click.UsageError("Provide at most one of --skip-existing or --drop-existing.")
 
     temp_root: Path | None = None
     try:
@@ -284,6 +352,7 @@ def main(
         n_ok_s7 = 0
         n_skip_s6 = 0
         n_skip_s7 = 0
+        subjects_s6: set[str] = set()
 
         log.ensure_progress()
         progress_task = log.progress(
@@ -309,6 +378,7 @@ def main(
                     )
                     if not rows6.empty:
                         frames_s6.append(rows6)
+                        subjects_s6.add(str(subject))
                         n_ok_s6 += 1
                     log.info("[%s] stage6: %d row(s) from %s", subject, len(rows6), s6)
 
@@ -337,6 +407,19 @@ def main(
                 n_skip_s7,
             )
             return
+
+        if drop_existing and subjects_s6:
+            n_dropped = _drop_pipeline_measurements_for_subjects(
+                repo,
+                pipeline_id=QVTPY_PIPELINE_ID,
+                subject_uids=subjects_s6,
+            )
+            log.info(
+                "drop-existing: removed %d row(s) of pipeline=%s for %d subject(s)",
+                n_dropped,
+                QVTPY_PIPELINE_ID,
+                len(subjects_s6),
+            )
 
         n_s6_rows = 0
         n_s7_rows = 0
@@ -387,7 +470,7 @@ def main(
 
         log.info(
             "sync-db-results: stage6=%d rows/%d subjects (%s), "
-            "stage7=%d rows/%d subjects (%s)%s",
+            "stage7=%d rows/%d subjects (%s)%s%s",
             n_s6_rows,
             n_ok_s6,
             QVTPY_PIPELINE_ID,
@@ -395,6 +478,7 @@ def main(
             n_ok_s7,
             TOF_MORPHO_PIPELINE_ID,
             ", from-sge" if from_sge else "",
+            ", drop-existing" if drop_existing else "",
         )
     finally:
         if temp_root is not None and temp_root.exists():

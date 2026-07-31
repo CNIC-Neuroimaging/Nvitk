@@ -23,8 +23,10 @@ from nvitk.segmentation.blood_flood import (
     FRANGI_SIGMAS_DEFAULT,
     HYST_HIGH_FACTOR_DEFAULT,
     HYST_LOW_FACTOR_DEFAULT,
+    MIN_TREE_CC_VOXELS_DEFAULT,
     TREE_VESSELNESS_KEEP_PERCENTILE_DEFAULT,
     blood_flood,
+    blood_flood_from_scratch,
 )
 from nvitk.segmentation.brain_extraction import (
     BRAIN_EXTRACTION_MODALITIES,
@@ -254,7 +256,7 @@ def _mra_runner(
 @mask_option
 @backend_option(False)
 @submit_options
-@click.option("--prediction-batch-size", type=int, default=16, show_default=True)
+@click.option("--prediction-batch-size", type=int, default=2, show_default=True)
 @click.option("--patch-stride-length", type=int, default=32, show_default=True)
 @click.option("--verbose", is_flag=True, default=False)
 def cmd_mra_vessel(
@@ -375,11 +377,25 @@ def _parse_sigmas(text: str | None) -> tuple[float, ...]:
 @backend_option(True)
 @submit_options
 @click.option(
+    "--mode",
+    type=click.Choice(["expand", "from-scratch"], case_sensitive=False),
+    default="expand",
+    show_default=True,
+    help="expand: markers + intensity; from-scratch: intensity only → CC labels.",
+)
+@click.option(
     "--markers",
     "markers_path",
     type=click.Path(path_type=Path, exists=True),
-    required=True,
-    help="Integer seed / marker label volume (0 = background).",
+    default=None,
+    help="Seed / marker labels (required for expand; 0 = background).",
+)
+@click.option(
+    "--mask",
+    "mask_path",
+    type=click.Path(path_type=Path, exists=True),
+    default=None,
+    help="Optional ROI / brain mask (from-scratch).",
 )
 @click.option(
     "--barrier",
@@ -403,6 +419,13 @@ def _parse_sigmas(text: str | None) -> tuple[float, ...]:
     show_default=True,
     help="Keep tree voxels above this vesselness percentile; <0 disables thinning.",
 )
+@click.option(
+    "--min-cc-voxels",
+    type=int,
+    default=MIN_TREE_CC_VOXELS_DEFAULT,
+    show_default=True,
+    help="Drop tree connected components smaller than this (from-scratch).",
+)
 @click.option("--connectivity", type=int, default=3, show_default=True)
 @click.option(
     "--save-tree",
@@ -419,21 +442,27 @@ def cmd_blood_flood(
     direct_submit: bool,
     no_remote: bool,
     dry_run: bool,
-    markers_path: Path,
+    mode: str,
+    markers_path: Path | None,
+    mask_path: Path | None,
     barrier_path: Path | None,
     frangi_sigmas: str | None,
     hyst_low_factor: float,
     hyst_high_factor: float,
     thicken_iter: int,
     thin_vesselness_percentile: float,
+    min_cc_voxels: int,
     connectivity: int,
     save_tree: Path | None,
 ) -> None:
-    """Frangi → hysteresis vessel tree → marker watershed (qvtpy distal expand)."""
+    """Frangi → hysteresis vessel tree; expand from markers or segment from scratch."""
     if submit.lower() != "local":
         raise click.ClickException(
             "blood-flood SGE submit is not wired yet; use --submit local."
         )
+    mode_key = mode.lower().replace("_", "-")
+    if mode_key == "expand" and markers_path is None:
+        raise click.ClickException("--markers is required for --mode expand.")
     apply_cli_backend(backend)
     bk = "cupy" if backend.lower() in ("gpu", "cupy") else "numpy"
     thin = (
@@ -441,21 +470,35 @@ def cmd_blood_flood(
         if float(thin_vesselness_percentile) < 0
         else float(thin_vesselness_percentile)
     )
+    common_kw = {
+        "frangi_sigmas": _parse_sigmas(frangi_sigmas),
+        "hyst_low_factor": float(hyst_low_factor),
+        "hyst_high_factor": float(hyst_high_factor),
+        "thicken_iter": int(thicken_iter),
+        "thin_vesselness_percentile": thin,
+        "connectivity": int(connectivity),
+    }
     with using(bk):
         intensity = imread(input_path, backend=bk)
-        markers = imread(markers_path, backend=bk)
         barrier = imread(barrier_path, backend=bk) if barrier_path else None
-        result = blood_flood(
-            to_numpy(intensity.data),
-            to_numpy(markers.data),
-            barrier=to_numpy(barrier.data) if barrier is not None else None,
-            frangi_sigmas=_parse_sigmas(frangi_sigmas),
-            hyst_low_factor=float(hyst_low_factor),
-            hyst_high_factor=float(hyst_high_factor),
-            thicken_iter=int(thicken_iter),
-            thin_vesselness_percentile=thin,
-            connectivity=int(connectivity),
-        )
+        barrier_np = to_numpy(barrier.data) if barrier is not None else None
+        if mode_key in ("from-scratch", "fromscratch"):
+            roi = imread(mask_path, backend=bk) if mask_path else None
+            result = blood_flood_from_scratch(
+                to_numpy(intensity.data),
+                mask=to_numpy(roi.data) if roi is not None else None,
+                barrier=barrier_np,
+                min_cc_voxels=int(min_cc_voxels),
+                **common_kw,
+            )
+        else:
+            markers = imread(markers_path, backend=bk)
+            result = blood_flood(
+                to_numpy(intensity.data),
+                to_numpy(markers.data),
+                barrier=barrier_np,
+                **common_kw,
+            )
         out = output_path
         out.parent.mkdir(parents=True, exist_ok=True)
         imsave(out, result.labels, metadata=dict(intensity.metadata or {}))

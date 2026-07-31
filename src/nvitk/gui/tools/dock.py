@@ -72,6 +72,7 @@ def build_tools_dock(
     layout.setSpacing(6)
 
     label_selector = LabelSelectorWidget()
+    label_selector.set_viewer(viewer)
     pipeline_form = PipelineCliForm()
     pipeline_form.set_viewer(viewer)
     totalseg_roi = TotalSegRoiWidget()
@@ -152,6 +153,9 @@ def build_tools_dock(
                 if guessed:
                     label_selector.set_schema_key(guessed)
             label_selector.refresh_from_layer(layer)
+            # refresh may promote Image → Labels; track the live layer.
+            layer = label_selector.current_layer() or _active_layer()
+            _last_active_layer_id = id(layer) if layer is not None else None
             _apply_label_visibility()
             _filtered_layer = layer if is_label_like_layer(layer) else None
         else:
@@ -209,10 +213,11 @@ def build_tools_dock(
                 if guessed:
                     label_selector.set_schema_key(guessed)
             label_selector.refresh_from_layer(layer)
+            layer = label_selector.current_layer() or _active_layer()
             _apply_label_visibility()
             nonlocal _filtered_layer, _last_active_layer_id
             _filtered_layer = layer if is_label_like_layer(layer) else None
-            _last_active_layer_id = id(layer)
+            _last_active_layer_id = id(layer) if layer is not None else None
         else:
             _restore_filtered_layer()
             _last_active_layer_id = id(layer) if layer is not None else None

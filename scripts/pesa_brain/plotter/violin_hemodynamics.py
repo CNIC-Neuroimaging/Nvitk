@@ -538,7 +538,7 @@ def _plot_violin_figure(
 @click.option(
     "--outlier-rem/--no-outlier-rem",
     is_flag=True,
-    default=True,
+    default=False,
     help="Remove IQR outliers per vessel before plotting.",
 )
 @click.option(

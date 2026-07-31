@@ -156,6 +156,87 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("shift_hm", "Shift HM (half-max on curvature)", "bool", True),
         ),
     ),
+    GuiToolSpec(
+        "hessian_filter",
+        "Filters",
+        "Hessian (skimage)",
+        (
+            ParamSpec(
+                "hessian_sigmas",
+                "Sigmas (comma-separated)",
+                "str",
+                "1,3,5,7,9",
+            ),
+            ParamSpec("black_ridges", "Black ridges (else bright)", "bool", False),
+            ParamSpec("hessian_alpha", "Alpha", "float", 0.5, min=0.01, max=10.0),
+            ParamSpec("hessian_beta", "Beta", "float", 0.5, min=0.01, max=10.0),
+            ParamSpec("hessian_gamma", "Gamma", "float", 15.0, min=0.1, max=100.0),
+        ),
+    ),
+    GuiToolSpec(
+        "jerman_filter",
+        "Filters",
+        "Jerman vesselness",
+        (
+            ParamSpec(
+                "jerman_sigmas",
+                "Sigmas (comma-separated)",
+                "str",
+                "1,3,5,7,9",
+            ),
+            ParamSpec("black_ridges", "Black ridges (else bright)", "bool", False),
+            ParamSpec("jerman_tau", "Tau", "float", 0.5, min=0.5, max=1.0),
+        ),
+    ),
+    GuiToolSpec(
+        "snakes_filter",
+        "Filters",
+        "Snakes (active contours)",
+        (
+            ParamSpec("reference_layer", "Init contour mask layer", "layer", ""),
+            ParamSpec("snakes_alpha", "Alpha (tension)", "float", 0.01, min=0.0, max=5.0),
+            ParamSpec("snakes_beta", "Beta (rigidity)", "float", 0.1, min=0.0, max=50.0),
+            ParamSpec("snakes_w_line", "w_line (intensity)", "float", 0.0, min=-10.0, max=10.0),
+            ParamSpec("snakes_w_edge", "w_edge (edges)", "float", 1.0, min=-10.0, max=10.0),
+            ParamSpec("snakes_gamma", "Gamma (time step)", "float", 0.01, min=1e-5, max=1.0),
+            ParamSpec("snakes_max_iter", "Max iterations", "int", 2500, min=10, max=20000),
+            ParamSpec("snakes_sigma", "Gaussian sigma", "float", 1.0, min=0.0, max=20.0),
+            ParamSpec("snakes_n_points", "Control points", "int", 400, min=16, max=4000),
+            ParamSpec("snakes_axis", "3D slice axis", "int", 0, min=0, max=2),
+        ),
+        needs_reference_layer=True,
+    ),
+    GuiToolSpec(
+        "img_mask_keep_inside",
+        "Filters",
+        "Mask: keep inside",
+
+        (
+            ParamSpec("reference_layer", "Mask / segmentation layer", "layer", ""),
+            ParamSpec("fill_value", "Fill value (outside mask)", "float", 0.0),
+            ParamSpec(
+                "mask_label_ids",
+                "Mask label id(s) (empty = all nonzero)",
+                "str",
+                "",
+            ),
+        ),
+    ),
+    GuiToolSpec(
+        "img_mask_keep_outside",
+        "Filters",
+        "Mask: keep outside",
+        (
+            ParamSpec("reference_layer", "Mask / segmentation layer", "layer", ""),
+            ParamSpec("fill_value", "Fill value (inside mask)", "float", 0.0),
+            ParamSpec(
+                "mask_label_ids",
+                "Mask label id(s) (empty = all nonzero)",
+                "str",
+                "",
+            ),
+        ),
+    ),
     GuiToolSpec("dilate", "Morphology", "Dilate", _MORPH_PARAMS),
     GuiToolSpec("erode", "Morphology", "Erode", _MORPH_PARAMS),
     GuiToolSpec("open", "Morphology", "Open", _MORPH_PARAMS),
@@ -416,9 +497,27 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
     GuiToolSpec(
         "seg_blood_flood",
         "Segmentation",
-        "Blood flood (distal vessel expand)",
+        "Blood flood (vessel tree)",
         (
-            ParamSpec("reference_layer", "Intensity image layer (CD/TOF)", "layer", ""),
+            ParamSpec(
+                "blood_flood_mode",
+                "Mode",
+                "choice",
+                "expand",
+                choices=("expand", "from_scratch"),
+            ),
+            ParamSpec(
+                "reference_layer",
+                "Intensity image (expand mode)",
+                "layer",
+                "",
+            ),
+            ParamSpec(
+                "mask_layer",
+                "ROI / brain mask (from-scratch, optional)",
+                "layer",
+                "",
+            ),
             ParamSpec("barrier_layer", "Barrier mask layer (optional)", "layer", ""),
             ParamSpec("hyst_low_factor", "Hysteresis low factor", "float", 3.0, min=0.1, max=20.0),
             ParamSpec("hyst_high_factor", "Hysteresis high factor", "float", 0.5, min=0.01, max=5.0),
@@ -437,9 +536,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 "str",
                 "0.5,1.0,1.5,2.0,2.5",
             ),
+            ParamSpec("min_cc_voxels", "Min tree CC size (from-scratch)", "int", 5, min=1, max=100000),
             ParamSpec("connectivity", "Connectivity", "int", 3, min=1, max=3),
         ),
-        needs_reference_layer=True,
         needs_3d=True,
     ),
     GuiToolSpec(
@@ -514,7 +613,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "MRA-TOF vessel segmentation (ANTsPyNet)",
         (
             ParamSpec("mask_layer", "Brain mask layer (optional; auto if none)", "layer", ""),
-            ParamSpec("prediction_batch_size", "Prediction batch size", "int", 16, min=1, max=64),
+            ParamSpec("prediction_batch_size", "Prediction batch size", "int", 2, min=1, max=64),
             ParamSpec("patch_stride_length", "Patch stride length", "int", 32, min=8, max=128),
         ),
         needs_3d=True,
@@ -992,17 +1091,6 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
-        "layer_metadata",
-        "Transform",
-        "Layer metadata (spacing / affine)",
-        (),
-        run_mode="notify",
-        description=(
-            "Show spacing, FOV, origin, orientation, direction, and affine for the "
-            "active layer (also written to the log panel)."
-        ),
-    ),
-    GuiToolSpec(
         "reorient_volume",
         "Transform",
         "Reorient (permute / reference / mouse)",
@@ -1357,7 +1445,6 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "seg_totalsegmentator",
     "seg_eicab",
     "orient_volume",
-    "layer_metadata",
     "reorient_volume",
     "seg_mouse_brain",
     "seg_brain_extraction",

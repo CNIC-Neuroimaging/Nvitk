@@ -1,7 +1,7 @@
-"""Image filtering primitives (thresholding, etc.)."""
+"""Image filtering primitives (thresholding, Hessian, Jerman, snakes, etc.)."""
 
 from __future__ import annotations
 
-from . import sliding_threshold
+from . import hessian, jerman, sliding_threshold, snakes
 
-__all__ = ["sliding_threshold"]
+__all__ = ["hessian", "jerman", "sliding_threshold", "snakes"]

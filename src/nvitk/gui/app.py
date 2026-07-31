@@ -23,6 +23,7 @@ from nvitk.gui.core.spatial import attach_orientation_status, find_spatial_refer
 from nvitk.gui.core.log_panel import build_log_dock_widget
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
+from nvitk.gui.panels.image_properties import ImagePropertiesPanel
 from nvitk.gui.tools.dock import build_tools_dock
 from nvitk.gui.core.warnings import install_napari_display_warnings
 
@@ -108,6 +109,7 @@ def run_app() -> None:
         record_step=lambda step: _record_step(app_state, step),
     )
     dicom_tags_panel = DicomTagsPanel()
+    image_props_panel = ImagePropertiesPanel()
 
     def _on_xnat_inputs_opened(paths: list[str]) -> None:
         for p in paths:
@@ -411,6 +413,7 @@ def run_app() -> None:
     tabs.addTab(xnat_panel, data_tab_label)
     tabs.addTab(qc_panel, "QC")
     tabs.addTab(statmodels_panel, "Statmodels")
+    tabs.addTab(image_props_panel, "Image properties")
     dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
     tabs.addTab(mesh_panel.native, "Mesh")
     tabs.addTab(layers_tab, "Layers")
@@ -449,15 +452,22 @@ def run_app() -> None:
                 "DICOM metadata for the active layer",
             )
 
+    def _refresh_image_properties_tab() -> None:
+        layer = viewer.layers.selection.active if viewer.layers else None
+        image_props_panel.refresh_from_layer(layer)
+
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_changed(_event: Any) -> None:
         _refresh_dicom_tags_tab()
+        _refresh_image_properties_tab()
 
     @viewer.layers.events.inserted.connect
     def _on_layer_inserted_dicom(_event: Any) -> None:
         _refresh_dicom_tags_tab()
+        _refresh_image_properties_tab()
 
     _refresh_dicom_tags_tab()
+    _refresh_image_properties_tab()
 
     try:
         qt_viewer = viewer.window._qt_viewer

@@ -1,7 +1,8 @@
-"""Binary mask logical operators (union, intersection, subtract, …)."""
+"""Binary mask logical operators and mask→image intensity apply."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,22 @@ from nvitk.types import Image
 def _as_bool(mask: Image | Any) -> np.ndarray:
     arr = to_numpy(mask.data if isinstance(mask, Image) else mask)
     return as_backend_array(arr > 0).astype(bool)
+
+
+def _foreground_mask(
+    mask: Image | Any,
+    *,
+    label_ids: Sequence[int] | None = None,
+) -> np.ndarray:
+    """Boolean foreground from a mask / label map.
+
+    Empty *label_ids* → any nonzero voxel. Otherwise only listed label ids.
+    """
+    arr = to_numpy(mask.data if isinstance(mask, Image) else mask)
+    if label_ids:
+        ids = np.asarray([int(x) for x in label_ids], dtype=arr.dtype)
+        return as_backend_array(np.isin(arr, ids))
+    return as_backend_array(arr != 0)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:
@@ -73,7 +90,61 @@ def mask_complement(
     return _wrap_like(mask, (w & ~a).astype(np.uint8))
 
 
+def apply_mask_to_image(
+    image: Image | Any,
+    mask: Image | Any,
+    *,
+    mode: str = "keep_inside",
+    fill_value: float = 0.0,
+    label_ids: Sequence[int] | None = None,
+) -> Image | Any:
+    """Apply a segmentation mask to an intensity image.
+
+    Parameters
+    ----------
+    image
+        Intensity volume (active layer).
+    mask
+        Segmentation / binary mask on the same grid as *image*.
+    mode
+        ``keep_inside`` — retain voxels where the mask is foreground; fill the rest.
+        ``keep_outside`` — retain voxels where the mask is background; fill the rest.
+    fill_value
+        Value written into discarded voxels (default ``0``).
+    label_ids
+        Optional label ids treated as foreground; ``None`` / empty → any nonzero.
+    """
+    vol = to_numpy(image.data if isinstance(image, Image) else image)
+    fg = to_numpy(_foreground_mask(mask, label_ids=label_ids))
+    if fg.shape != vol.shape:
+        raise ValueError(
+            f"Mask shape {fg.shape} must match image shape {vol.shape}."
+        )
+    mode_key = str(mode or "keep_inside").strip().lower().replace("-", "_")
+    if mode_key in ("keep_inside", "inside", "in"):
+        keep = fg
+    elif mode_key in ("keep_outside", "outside", "out"):
+        keep = ~fg
+    else:
+        raise ValueError(
+            f"Unknown mask apply mode {mode!r}; use 'keep_inside' or 'keep_outside'."
+        )
+    out = np.array(vol, copy=True, dtype=np.result_type(vol.dtype, np.float32))
+    fill = np.asarray(fill_value, dtype=out.dtype)
+    out[~keep] = fill
+    # Preserve original dtype when fill fits (e.g. integer volumes + fill 0).
+    if np.can_cast(fill, vol.dtype, casting="safe") or (
+        np.issubdtype(vol.dtype, np.integer) and float(fill_value) == int(fill_value)
+    ):
+        try:
+            out = out.astype(vol.dtype, copy=False)
+        except (TypeError, ValueError):
+            pass
+    return _wrap_like(image, as_backend_array(out))
+
+
 __all__ = [
+    "apply_mask_to_image",
     "mask_union",
     "mask_intersection",
     "mask_subtract",

@@ -402,14 +402,6 @@ def run_gui_tool(
         notify(f"Reoriented {previous} → {target}.")
         return None
 
-    if tool_id == "layer_metadata":
-        from nvitk.gui.core.spatial import format_layer_spatial_info
-
-        text = format_layer_spatial_info(layer)
-        gui_log(text)
-        notify(text)
-        return None
-
     if tool_id == "reorient_volume":
         from nvitk.gui.core.orientation import configure_viewer_for_layer
         from nvitk.io._common import orientation_codes_from_affine
@@ -617,6 +609,107 @@ def run_gui_tool(
             else:
                 raise ValueError(f"Sliding threshold expects 2D or 3D data, got {arr.ndim}D")
             return coerce_tool_output(out)
+
+    if tool_id == "hessian_filter":
+        from nvitk.filters.hessian import hessian_filter, parse_sigmas
+
+        with using("numpy"):
+            out = hessian_filter(
+                img,
+                sigmas=parse_sigmas(str(params.get("hessian_sigmas") or "")),
+                black_ridges=bool(params.get("black_ridges", False)),
+                alpha=float(params.get("hessian_alpha") or 0.5),
+                beta=float(params.get("hessian_beta") or 0.5),
+                gamma=float(params.get("hessian_gamma") or 15.0),
+            )
+            return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id == "jerman_filter":
+        from nvitk.filters.jerman import jerman_filter, parse_sigmas
+
+        with using("numpy"):
+            out = jerman_filter(
+                img,
+                sigmas=parse_sigmas(str(params.get("jerman_sigmas") or "")),
+                tau=float(params.get("jerman_tau") or 0.5),
+                black_ridges=bool(params.get("black_ridges", False)),
+            )
+            return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id == "snakes_filter":
+        from nvitk.gui.labels.visibility import is_label_like_layer, label_source_data
+        from nvitk.filters.snakes import snakes_filter
+
+        mask_name = _layer_param(params, "reference_layer")
+        if not mask_name:
+            raise ValueError("Select an init contour mask layer in the reference dropdown.")
+        mask_layer = _resolve_layer(viewer, mask_name)
+        mask_src = label_source_data(mask_layer) if is_label_like_layer(mask_layer) else None
+        _, mask_img, resampled = align_mask_to_reference_layer(
+            mask_layer, layer, mask_src, order=0
+        )
+        if resampled:
+            gui_log(
+                f"Resampled init mask '{mask_layer.name}' onto image '{layer.name}' "
+                f"grid {tuple(img.data.shape)}."
+            )
+        with using("numpy"):
+            def _f(key: str, default: float) -> float:
+                v = params.get(key)
+                return float(default if v is None else v)
+
+            def _i(key: str, default: int) -> int:
+                v = params.get(key)
+                return int(default if v is None else v)
+
+            out = snakes_filter(
+                img,
+                mask_img,
+                alpha=_f("snakes_alpha", 0.01),
+                beta=_f("snakes_beta", 0.1),
+                w_line=_f("snakes_w_line", 0.0),
+                w_edge=_f("snakes_w_edge", 1.0),
+                gamma=_f("snakes_gamma", 0.01),
+                max_num_iter=_i("snakes_max_iter", 2500),
+                gaussian_sigma=_f("snakes_sigma", 1.0),
+                n_points=_i("snakes_n_points", 400),
+                axis=_i("snakes_axis", 0),
+            )
+            return coerce_tool_output(out.data if hasattr(out, "data") else out)
+
+    if tool_id in ("img_mask_keep_inside", "img_mask_keep_outside"):
+        from nvitk.gui.labels.visibility import is_label_like_layer, label_source_data
+        from nvitk.segmentation.mask_ops import apply_mask_to_image
+
+        mask_name = _layer_param(params, "reference_layer")
+        if not mask_name:
+            raise ValueError("Select a mask / segmentation layer in the reference dropdown.")
+        mask_layer = _resolve_layer(viewer, mask_name)
+        # Prefer unfiltered label source so hidden labels still contribute if listed.
+        mask_src = label_source_data(mask_layer) if is_label_like_layer(mask_layer) else None
+        _, mask_img, resampled = align_mask_to_reference_layer(
+            mask_layer, layer, mask_src, order=0
+        )
+        if resampled:
+            gui_log(
+                f"Resampled mask '{mask_layer.name}' onto image '{layer.name}' "
+                f"grid {tuple(img.data.shape)}."
+            )
+        lids = parse_label_ids(str(params.get("mask_label_ids") or ""))
+        mode = "keep_inside" if tool_id == "img_mask_keep_inside" else "keep_outside"
+        with using(bk):
+            out = apply_mask_to_image(
+                img,
+                mask_img,
+                mode=mode,
+                fill_value=float(params.get("fill_value") or 0.0),
+                label_ids=lids or None,
+            )
+            gui_log(
+                f"Mask apply ({mode}): fill={params.get('fill_value') or 0.0}"
+                + (f", labels={lids}" if lids else ", labels=all nonzero")
+            )
+            return coerce_tool_output(out.data if hasattr(out, "data") else out)
 
     if tool_id in ("dilate", "erode", "open", "close", "fill_holes"):
         return _morph_common(img, tool_id, params)
@@ -1088,9 +1181,71 @@ def run_gui_tool(
         return mask.astype(np.uint8)
 
     if tool_id == "seg_blood_flood":
-        from nvitk.segmentation.blood_flood import blood_flood
+        from nvitk.segmentation.blood_flood import blood_flood, blood_flood_from_scratch
 
-        intensity_layer = _resolve_layer(viewer, str(params.get("reference_layer") or ""))
+        mode = str(params.get("blood_flood_mode") or "expand").strip().lower()
+        sigmas_raw = str(params.get("frangi_sigmas") or "").strip()
+        if sigmas_raw:
+            frangi_sigmas = tuple(
+                float(x) for x in sigmas_raw.replace(";", ",").split(",") if x.strip()
+            )
+        else:
+            frangi_sigmas = None
+        thin_pct = float(
+            params.get("thin_vesselness_percentile")
+            if params.get("thin_vesselness_percentile") is not None
+            else 55.0
+        )
+        thin = None if thin_pct < 0 else thin_pct
+        common_kw = {
+            "frangi_sigmas": frangi_sigmas,
+            "hyst_low_factor": float(params.get("hyst_low_factor") or 3.0),
+            "hyst_high_factor": float(params.get("hyst_high_factor") or 0.5),
+            "thicken_iter": int(params.get("thicken_iter") or 0),
+            "thin_vesselness_percentile": thin,
+            "connectivity": int(params.get("connectivity") or 3),
+        }
+
+        barrier_arr = None
+        bar_name = _layer_param(params, "barrier_layer")
+
+        if mode in ("from_scratch", "scratch", "de_novo", "segment"):
+            # Active layer = intensity; optional mask_layer = ROI / brain mask.
+            intensity = img
+            roi_mask = None
+            mask_name = _layer_param(params, "mask_layer")
+            if mask_name:
+                roi_layer = _resolve_layer(viewer, mask_name)
+                _, roi_img, _ = align_mask_to_reference_layer(roi_layer, layer, order=0)
+                roi_mask = to_numpy(roi_img.data)
+            if bar_name:
+                bar_layer = _resolve_layer(viewer, bar_name)
+                _, bar_img, _ = align_mask_to_reference_layer(bar_layer, layer, order=0)
+                barrier_arr = to_numpy(bar_img.data)
+            with using(bk):
+                result = blood_flood_from_scratch(
+                    to_numpy(intensity.data),
+                    mask=roi_mask,
+                    barrier=barrier_arr,
+                    min_cc_voxels=int(params.get("min_cc_voxels") or 5),
+                    **common_kw,
+                )
+                gui_log(
+                    f"Blood flood (from_scratch): vesselness={result.vesselness_mode}, "
+                    f"tree_voxels={int(np.count_nonzero(result.tree))}, "
+                    f"components={result.info.get('n_components')}, "
+                    f"labeled={int(np.count_nonzero(result.labels))}"
+                )
+                return coerce_tool_output(result.labels)
+
+        # expand: active = markers; reference_layer = intensity (required).
+        intensity_name = _layer_param(params, "reference_layer")
+        if not intensity_name:
+            raise ValueError(
+                "expand mode requires an intensity image layer "
+                "(CD/TOF) in the reference layer dropdown."
+            )
+        intensity_layer = _resolve_layer(viewer, intensity_name)
         ref = layer_to_image(intensity_layer)
         _, markers_img, markers_resampled = align_mask_to_reference_layer(
             layer, intensity_layer, proc_data, order=0
@@ -1100,36 +1255,19 @@ def run_gui_tool(
                 f"Resampled markers '{layer.name}' onto intensity '{intensity_layer.name}' "
                 f"grid {tuple(ref.data.shape)}."
             )
-        barrier_arr = None
-        bar_name = _layer_param(params, "barrier_layer")
         if bar_name:
             bar_layer = _resolve_layer(viewer, bar_name)
             _, bar_img, _ = align_mask_to_reference_layer(bar_layer, intensity_layer, order=0)
             barrier_arr = to_numpy(bar_img.data)
-
-        sigmas_raw = str(params.get("frangi_sigmas") or "").strip()
-        if sigmas_raw:
-            frangi_sigmas = tuple(
-                float(x) for x in sigmas_raw.replace(";", ",").split(",") if x.strip()
-            )
-        else:
-            frangi_sigmas = None
-        thin_pct = float(params.get("thin_vesselness_percentile") if params.get("thin_vesselness_percentile") is not None else 55.0)
-        thin = None if thin_pct < 0 else thin_pct
         with using(bk):
             result = blood_flood(
                 to_numpy(ref.data),
                 to_numpy(markers_img.data),
                 barrier=barrier_arr,
-                frangi_sigmas=frangi_sigmas,
-                hyst_low_factor=float(params.get("hyst_low_factor") or 3.0),
-                hyst_high_factor=float(params.get("hyst_high_factor") or 0.5),
-                thicken_iter=int(params.get("thicken_iter") or 0),
-                thin_vesselness_percentile=thin,
-                connectivity=int(params.get("connectivity") or 3),
+                **common_kw,
             )
             gui_log(
-                f"Blood flood: vesselness={result.vesselness_mode}, "
+                f"Blood flood (expand): vesselness={result.vesselness_mode}, "
                 f"tree_voxels={int(np.count_nonzero(result.tree))}, "
                 f"labeled={int(np.count_nonzero(result.labels))}"
             )
@@ -1198,7 +1336,7 @@ def run_gui_tool(
             out = mra_vessel_segmentation(
                 img,
                 mask=mask_img,
-                prediction_batch_size=int(params.get("prediction_batch_size") or 16),
+                prediction_batch_size=int(params.get("prediction_batch_size") or 2),
                 patch_stride_length=int(params.get("patch_stride_length") or 32),
             )
             return coerce_tool_output(out)

@@ -42,7 +42,11 @@ class CatalogNode:
 _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
     "filters": [
         ToolEntry("", "nvitk.filters.sliding_threshold", label="sliding-threshold (3d/2d)", supports_gpu=True, library_only=True),
+        ToolEntry("", "nvitk.filters.hessian", label="hessian (skimage ridge / vessel filter)", library_only=True),
+        ToolEntry("", "nvitk.filters.jerman", label="jerman (vesselness / ridge filter)", library_only=True),
+        ToolEntry("", "nvitk.filters.snakes", label="snakes (Kass active contours)", library_only=True, requires_mask=True),
     ],
+
     "morphology": [
         ToolEntry("", "nvitk.morphology.binary", label="dilate / erode / open / close / fill-holes", supports_gpu=True, requires_mask=True, library_only=True),
         ToolEntry("", "nvitk.morphology.components", label="label-cc, remove-small-components", supports_gpu=True, requires_mask=True, library_only=True),
@@ -59,7 +63,12 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.segmentation.brain_extraction", label="multi-modal brain extraction (ANTsPyNet)", library_only=True),
         ToolEntry("", "nvitk.segmentation.mra_vessel", label="MRA-TOF vessel segmentation (ANTsPyNet)", library_only=True),
         ToolEntry("", "nvitk.segmentation.dkt", label="Desikan-Killiany-Tourville parcellation (ANTsPyNet)", library_only=True),
-        ToolEntry("", "nvitk.segmentation.blood_flood", label="blood flood / distal vessel expand", library_only=True),
+        ToolEntry(
+            "",
+            "nvitk.segmentation.blood_flood",
+            label="blood flood (expand + from-scratch vessel tree)",
+            library_only=True,
+        ),
     ],
     "measure": [
         ToolEntry("", "nvitk.measure.volume", label="volume", library_only=True),

@@ -476,6 +476,7 @@ def blood_flood(
     )
     info: dict[str, Any] = {
         "method": "frangi_hysteresis_watershed",
+        "mode": "expand",
         "frangi_sigmas": list(sigmas),
         "hyst_low_factor": float(hyst_low_factor),
         "hyst_high_factor": float(hyst_high_factor),
@@ -563,6 +564,106 @@ def blood_flood(
     )
 
 
+def blood_flood_from_scratch(
+    intensity: np.ndarray,
+    *,
+    mask: np.ndarray | None = None,
+    barrier: np.ndarray | None = None,
+    frangi_sigmas: tuple[float, ...] | list[float] | None = None,
+    hyst_low_factor: float = HYST_LOW_FACTOR_DEFAULT,
+    hyst_high_factor: float = HYST_HIGH_FACTOR_DEFAULT,
+    thicken_iter: int = 0,
+    thicken_gate_percentile: float = 85.0,
+    thin_vesselness_percentile: float | None = TREE_VESSELNESS_KEEP_PERCENTILE_DEFAULT,
+    min_cc_voxels: int = MIN_TREE_CC_VOXELS_DEFAULT,
+    connectivity: int = 3,
+) -> BloodFloodResult:
+    """Segment vessels from an intensity volume with no seed / marker mask.
+
+    Same Frangi → hysteresis tree as :func:`blood_flood`, but labels are
+    connected components of the tree (no watershed expansion from seeds).
+    """
+    vol = as_backend_array(intensity).astype(np.float64)
+    sigmas = (
+        tuple(frangi_sigmas)
+        if frangi_sigmas is not None
+        else FRANGI_SIGMAS_DEFAULT
+    )
+    info: dict[str, Any] = {
+        "method": "frangi_hysteresis_cc",
+        "mode": "from_scratch",
+        "frangi_sigmas": list(sigmas),
+        "hyst_low_factor": float(hyst_low_factor),
+        "hyst_high_factor": float(hyst_high_factor),
+        "thicken_iter": int(thicken_iter),
+        "min_cc_voxels": int(min_cc_voxels),
+    }
+
+    vesselness, vmode = intensity_vesselness(vol, sigmas=sigmas)
+    info["vesselness_mode"] = vmode
+    tree, tree_meta = hysteresis_vessel_tree(
+        vesselness,
+        mask,
+        low_factor=float(hyst_low_factor),
+        high_factor=float(hyst_high_factor),
+        min_cc_voxels=int(min_cc_voxels),
+    )
+    info["tree"] = tree_meta
+
+    thick_n = max(0, int(thicken_iter))
+    if thick_n > 0:
+        tree, thick_meta = thicken_tree_in_intensity(
+            tree,
+            vol,
+            iterations=thick_n,
+            gate_percentile=float(thicken_gate_percentile),
+        )
+        info["tree_thicken"] = thick_meta
+
+    if barrier is not None:
+        hard = as_backend_array(barrier).astype(bool)
+        if hard.shape != vol.shape:
+            raise ValueError(
+                f"barrier shape {hard.shape} must match intensity shape {vol.shape}"
+            )
+        tree = tree & ~hard
+        info["barrier_voxels"] = int(np.count_nonzero(hard))
+
+    if thin_vesselness_percentile is not None and np.count_nonzero(tree) > 0:
+        tree, thin_meta = thin_tree_by_vesselness(
+            tree,
+            vesselness,
+            keep_percentile=float(thin_vesselness_percentile),
+            protect=None,
+        )
+        if barrier is not None:
+            tree = tree & ~as_backend_array(barrier).astype(bool)
+        info["tree_thin"] = thin_meta
+
+    # 26-connectivity for CCs when connectivity>=3; else face connectivity.
+    if int(connectivity) >= 3:
+        structure = np.ones((3, 3, 3), dtype=np.uint8)
+    else:
+        structure = ndi.generate_binary_structure(3, int(connectivity))
+    labels, n_lab = ndi.label(tree, structure=structure)
+    labels = as_backend_array(labels).astype(np.int32, copy=False)
+    info["n_tree_voxels"] = int(np.count_nonzero(tree))
+    info["n_labeled"] = int(np.count_nonzero(labels))
+    info["n_components"] = int(n_lab)
+    log.info(
+        f"blood_flood from_scratch: tree_voxels={info['n_tree_voxels']} "
+        f"components={n_lab}"
+    )
+
+    return BloodFloodResult(
+        labels=labels,
+        tree=tree.astype(bool),
+        vesselness=vesselness,
+        vesselness_mode=vmode,
+        info=info,
+    )
+
+
 __all__ = [
     "BloodFloodResult",
     "FRANGI_SIGMAS_DEFAULT",
@@ -575,6 +676,7 @@ __all__ = [
     "_DISTAL_HYST_LOW_FACTOR_DEFAULT",
     "apply_hysteresis_threshold_3d",
     "blood_flood",
+    "blood_flood_from_scratch",
     "cd_vesselness",
     "hysteresis_vessel_tree",
     "intensity_vesselness",

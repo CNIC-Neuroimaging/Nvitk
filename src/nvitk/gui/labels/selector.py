@@ -6,8 +6,10 @@ from typing import Any
 
 import numpy as np
 from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -15,20 +17,56 @@ from qtpy.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from nvitk.core.array import to_numpy
 from nvitk.gui.labels.catalog import (
     all_schemas,
     get_schema,
     guess_schema_from_layer,
     schema_keys,
 )
-from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
+from nvitk.gui.labels.visibility import (
+    ensure_labels_layer,
+    get_label_color,
+    is_label_like_layer,
+    label_source_data,
+    set_label_color,
+    unique_layer_labels,
+)
 
 LABEL_SELECTOR_SCROLL_MIN = 80
+
+
+def _rgba_to_qcolor(rgba: np.ndarray) -> QColor:
+    arr = np.asarray(rgba, dtype=float).reshape(-1)
+    r = int(np.clip(arr[0], 0.0, 1.0) * 255)
+    g = int(np.clip(arr[1], 0.0, 1.0) * 255)
+    b = int(np.clip(arr[2], 0.0, 1.0) * 255)
+    a = int(np.clip(arr[3] if arr.size > 3 else 1.0, 0.0, 1.0) * 255)
+    return QColor(r, g, b, a)
+
+
+def _qcolor_to_rgba(color: QColor) -> np.ndarray:
+    return np.array(
+        [
+            color.red() / 255.0,
+            color.green() / 255.0,
+            color.blue() / 255.0,
+            color.alpha() / 255.0,
+        ],
+        dtype=np.float32,
+    )
+
+
+def _swatch_stylesheet(rgba: np.ndarray) -> str:
+    c = _rgba_to_qcolor(rgba)
+    return (
+        f"QToolButton {{ background-color: rgba({c.red()},{c.green()},{c.blue()},{c.alpha()}); "
+        f"border: 1px solid #666; border-radius: 3px; }}"
+    )
 
 
 class LabelSelectorWidget(QGroupBox):
@@ -39,6 +77,7 @@ class LabelSelectorWidget(QGroupBox):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Label selection", parent)
         self._checks: list[QCheckBox] = []
+        self._color_buttons: dict[int, QToolButton] = {}
         self._schema_key = "generic"
         self._hint = QLabel("Choose a label mapping, then select labels below.")
         self._hint.setWordWrap(True)
@@ -94,6 +133,11 @@ class LabelSelectorWidget(QGroupBox):
         self._btn_guess.clicked.connect(self._guess_schema)
 
         self._layer_ref: Any | None = None
+        self._viewer: Any | None = None
+
+    def set_viewer(self, viewer: Any | None) -> None:
+        """Napari viewer used to promote Image masks to Labels for color editing."""
+        self._viewer = viewer
 
     def _emit_selection_changed(self) -> None:
         self.selection_changed.emit()
@@ -134,6 +178,10 @@ class LabelSelectorWidget(QGroupBox):
     def schema_key(self) -> str:
         return self._schema_key
 
+    def current_layer(self) -> Any | None:
+        """Layer currently bound to the selector (may be Labels after Image promote)."""
+        return self._layer_ref
+
     def set_expanded(self, expanded: bool) -> None:
         """Fill remaining dock height when visible; collapse when hidden."""
         if expanded:
@@ -149,7 +197,69 @@ class LabelSelectorWidget(QGroupBox):
             self._scroll.setMinimumHeight(0)
             self._scroll.setMaximumHeight(200)
 
+    def _supports_color_edit(self, layer: Any) -> bool:
+        if layer is None:
+            return False
+        if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+            return True
+        # Discrete Image masks (e.g. QC segs) can be promoted to Labels.
+        return bool(self._viewer is not None and is_label_like_layer(layer))
+
+    def _ensure_colorable_layer(self, layer: Any) -> Any:
+        if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+            return layer
+        if self._viewer is None:
+            raise TypeError("No viewer available to convert the mask to a Labels layer.")
+        new_layer = ensure_labels_layer(self._viewer, layer)
+        self._layer_ref = new_layer
+        return new_layer
+
+    def _make_color_button(self, layer: Any, lid: int) -> QToolButton:
+        btn = QToolButton()
+        btn.setFixedSize(18, 18)
+        btn.setToolTip(f"Change color for label {lid}")
+        btn.setProperty("label_id", lid)
+        rgba = get_label_color(layer, lid)
+        btn.setStyleSheet(_swatch_stylesheet(rgba))
+        btn.clicked.connect(lambda _checked=False, label_id=lid: self._edit_label_color(label_id))
+        self._color_buttons[lid] = btn
+        return btn
+
+    def _edit_label_color(self, label_id: int) -> None:
+        layer = self._layer_ref
+        if layer is None or not self._supports_color_edit(layer):
+            return
+        try:
+            layer = self._ensure_colorable_layer(layer)
+        except Exception:
+            return
+        current = _rgba_to_qcolor(get_label_color(layer, label_id))
+        try:
+            options = QColorDialog.ColorDialogOption.ShowAlphaChannel
+        except AttributeError:
+            options = QColorDialog.ShowAlphaChannel  # type: ignore[attr-defined]
+        chosen = QColorDialog.getColor(current, self, f"Label {label_id} color", options)
+        if not chosen.isValid():
+            return
+        rgba = _qcolor_to_rgba(chosen)
+        set_label_color(layer, label_id, rgba, selected_ids=self.selected_ids())
+        btn = self._color_buttons.get(int(label_id))
+        if btn is not None:
+            btn.setStyleSheet(_swatch_stylesheet(rgba))
+
     def refresh_from_layer(self, layer: Any | None) -> None:
+        # Promote discrete Image masks once so swatches / color visibility work.
+        if (
+            layer is not None
+            and self._viewer is not None
+            and type(layer).__name__ != "Labels"
+            and is_label_like_layer(layer)
+        ):
+            try:
+                layer = ensure_labels_layer(self._viewer, layer)
+            except Exception:
+                pass
+
         self._layer_ref = layer
         while self._inner_layout.count():
             item = self._inner_layout.takeAt(0)
@@ -157,6 +267,7 @@ class LabelSelectorWidget(QGroupBox):
             if w is not None:
                 w.deleteLater()
         self._checks.clear()
+        self._color_buttons.clear()
 
         if layer is None:
             self._hint.setText("No layer selected.")
@@ -175,14 +286,31 @@ class LabelSelectorWidget(QGroupBox):
 
         mapped = sum(1 for lid in ids if schema and schema.name_for(lid))
         schema_title = schema.title if schema else "Generic"
+        color_hint = (
+            " — click the color square to edit"
+            if self._supports_color_edit(layer)
+            else ""
+        )
         self._hint.setText(
             f"{len(ids)} label(s) in “{layer.name}” — {schema_title}"
             + (f" ({mapped} named)" if schema and schema.id_to_name else "")
+            + color_hint
         )
 
+        can_color = self._supports_color_edit(layer)
         for lid in ids:
             text = schema.display(lid) if schema else f"Label {lid}"
             in_layer = lid in layer_ids
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            if can_color and in_layer:
+                row_layout.addWidget(self._make_color_button(layer, lid))
+            elif can_color:
+                spacer = QWidget()
+                spacer.setFixedSize(18, 18)
+                row_layout.addWidget(spacer)
             cb = QCheckBox(text)
             cb.setProperty("label_id", lid)
             cb.blockSignals(True)
@@ -192,7 +320,8 @@ class LabelSelectorWidget(QGroupBox):
                 cb.setEnabled(False)
                 cb.setStyleSheet("color: gray;")
             self._wire_checkbox(cb)
-            self._inner_layout.addWidget(cb)
+            row_layout.addWidget(cb, stretch=1)
+            self._inner_layout.addWidget(row)
             self._checks.append(cb)
         self._emit_selection_changed()
 
