@@ -60,7 +60,7 @@
       "default_sge_scripts_dir": "/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/",
       "sge_project": "MCC",
       "sge_account": "MCC",
-      "sge_ngpu": 1,
+      "sge_ngpu": 0,
       "sge_h_vmem": "40G",
       "default_sge_model_root": "/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/"
     },

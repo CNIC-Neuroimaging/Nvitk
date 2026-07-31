@@ -39,6 +39,7 @@ def dcm2nii(
     *,
     custom_naming: str | None = None,
     force_ras: bool = False,
+    mouse_reorient: bool = False,
     process_rtstruct: bool = False,
     revert_scaling: bool = False,
     save_metadata: bool = False,
@@ -60,6 +61,7 @@ def dcm2nii(
         output_root,
         custom_naming=custom_naming,
         force_ras=force_ras,
+        mouse_reorient=mouse_reorient,
         process_rtstruct=process_rtstruct,
         revert_scaling=revert_scaling,
         save_metadata=save_metadata,
@@ -83,6 +85,15 @@ def dcm2nii(
 @_click_option("--naming", type=str, default=None, help='Custom naming with DICOM tags split by underscore (e.g. "AccessionNumber_Modality").')
 @_click_option("--multifile", is_flag=True, help="Process each direct input subdirectory as a separate case.")
 @_click_option("--force-ras", is_flag=True, help="Force canonical RAS orientation.")
+@_click_option(
+    "--mouse-reorient",
+    is_flag=True,
+    help=(
+        "Reorient preclinical volumes so AP moves from array Z to Y and write "
+        "canonical LAS (ANTsPy mouse gallery layout: R→L, P→A, I→S). "
+        "Use when anatomy has AP on Z (coronal in-plane L/R×S/I)."
+    ),
+)
 @_click_option("--log-level", "--log_level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False) if click is not None else None, default="INFO", help="Logging level.")
 @_click_option("--log-path", "--log_path", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Log directory (reserved).")
 @_click_option("--debug", is_flag=True, help="Raise full traceback on failure.")
@@ -100,6 +111,7 @@ def main(
     naming: str | None,
     multifile: bool,
     force_ras: bool,
+    mouse_reorient: bool,
     log_level: str,
     log_path: Path | None,
     debug: bool,
@@ -143,6 +155,7 @@ def main(
                         str(target),
                         custom_naming=naming,
                         force_ras=force_ras,
+                        mouse_reorient=mouse_reorient,
                         process_rtstruct=process_rtstruct,
                         revert_scaling=revert_scaling,
                         save_metadata=save_metadata,
@@ -166,6 +179,7 @@ def main(
             str(output_path),
             custom_naming=naming,
             force_ras=force_ras,
+            mouse_reorient=mouse_reorient,
             process_rtstruct=process_rtstruct,
             revert_scaling=revert_scaling,
             save_metadata=save_metadata,

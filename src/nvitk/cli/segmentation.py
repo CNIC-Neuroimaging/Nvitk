@@ -31,7 +31,10 @@ from nvitk.segmentation.brain_extraction import (
     brain_extraction,
 )
 from nvitk.segmentation.dkt import desikan_killiany_tourville_labeling
-from nvitk.segmentation.mouse_brain import mouse_brain_segmentation
+from nvitk.segmentation.mouse_brain import (
+    MOUSE_EXTRACTION_MODALITIES,
+    mouse_brain_segmentation,
+)
 from nvitk.segmentation.mra_vessel import mra_vessel_segmentation
 
 log = Logger()
@@ -49,14 +52,22 @@ def _mouse_brain_runner(
     mode: str,
     modality: str,
     which_parcellation: str,
+    do_n4: bool,
+    binarize: bool,
+    return_isotropic_output: bool,
+    fix_spacing: bool,
     verbose: bool,
 ):
     return mouse_brain_segmentation(
         image,
         mode=mode,  # type: ignore[arg-type]
-        modality=modality,  # type: ignore[arg-type]
+        modality=modality,
         which_parcellation=which_parcellation,
         mask=mask,
+        do_n4=bool(do_n4),
+        binarize=bool(binarize),
+        return_isotropic_output=bool(return_isotropic_output),
+        fix_spacing=bool(fix_spacing),
         verbose=bool(verbose),
     )
 
@@ -75,17 +86,32 @@ def _mouse_brain_runner(
 )
 @click.option(
     "--modality",
-    type=click.Choice(["t2", "t1"], case_sensitive=False),
+    type=click.Choice(list(MOUSE_EXTRACTION_MODALITIES), case_sensitive=False),
     default="t2",
     show_default=True,
-    help="Imaging contrast for extraction.",
+    help="Imaging contrast for extraction (no T1 model in ANTsPyNet).",
 )
 @click.option(
     "--which-parcellation",
+    type=click.Choice(["nick", "tct", "jay"], case_sensitive=False),
     default="nick",
     show_default=True,
     help="Parcellation scheme (ANTsPyNet).",
 )
+@click.option("--n4/--no-n4", "do_n4", default=True, show_default=True, help="N4 bias correction first.")
+@click.option(
+    "--fix-spacing/--no-fix-spacing",
+    default=True,
+    show_default=True,
+    help="If spacing looks like unit voxels, rescale FOV to ~20 mm (mouse template).",
+)
+@click.option(
+    "--binarize/--probabilities",
+    default=True,
+    show_default=True,
+    help="Threshold extraction probability map to a binary mask.",
+)
+@click.option("--isotropic-output", "return_isotropic_output", is_flag=True, default=False)
 @click.option("--verbose", is_flag=True, default=False)
 def cmd_mouse_brain(
     input_path: Path,
@@ -100,6 +126,10 @@ def cmd_mouse_brain(
     mode: str,
     modality: str,
     which_parcellation: str,
+    do_n4: bool,
+    fix_spacing: bool,
+    binarize: bool,
+    return_isotropic_output: bool,
     verbose: bool,
 ) -> None:
     """Mouse brain extraction / parcellation (ANTsPyNet)."""
@@ -120,7 +150,11 @@ def cmd_mouse_brain(
         runner_kwargs={
             "mode": mode.lower(),
             "modality": modality.lower(),
-            "which_parcellation": which_parcellation,
+            "which_parcellation": which_parcellation.lower(),
+            "do_n4": do_n4,
+            "binarize": binarize,
+            "return_isotropic_output": return_isotropic_output,
+            "fix_spacing": fix_spacing,
             "verbose": verbose,
         },
     )

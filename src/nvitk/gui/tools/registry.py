@@ -459,9 +459,19 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 "Modality (extraction)",
                 "choice",
                 "t2",
-                choices=("t2", "t1"),
+                choices=("t2", "ex5coronal", "ex5sagittal"),
             ),
-            ParamSpec("which_parcellation", "Parcellation scheme", "str", "nick"),
+            ParamSpec(
+                "which_parcellation",
+                "Parcellation scheme",
+                "choice",
+                "nick",
+                choices=("nick", "tct", "jay"),
+            ),
+            ParamSpec("do_n4", "N4 bias correction first", "bool", True),
+            ParamSpec("fix_spacing", "Auto-fix unit spacing → ~20 mm FOV", "bool", True),
+            ParamSpec("binarize", "Binarize extraction (thresh 0.5)", "bool", True),
+            ParamSpec("return_isotropic_output", "Isotropic output resampling", "bool", False),
             ParamSpec("reference_layer", "Brain mask layer (parcellation, optional)", "layer", ""),
         ),
         needs_3d=True,
@@ -982,6 +992,85 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         ),
     ),
     GuiToolSpec(
+        "layer_metadata",
+        "Transform",
+        "Layer metadata (spacing / affine)",
+        (),
+        run_mode="notify",
+        description=(
+            "Show spacing, FOV, origin, orientation, direction, and affine for the "
+            "active layer (also written to the log panel)."
+        ),
+    ),
+    GuiToolSpec(
+        "reorient_volume",
+        "Transform",
+        "Reorient (permute / reference / mouse)",
+        (
+            ParamSpec(
+                "reorient_mode",
+                "Mode",
+                "choice",
+                "mouse",
+                choices=("mouse", "reference", "manual"),
+            ),
+            ParamSpec("reference_layer", "Reference layer (optional)", "layer", ""),
+            ParamSpec(
+                "target_orientation",
+                "Target orientation",
+                "choice",
+                "LAS",
+                choices=("RAS", "LPS", "LAS", "RPS", "RSA", "LPI", "LSA", "RPI", "LIA", "RIA"),
+            ),
+            ParamSpec("permute_order", "Permute order (e.g. 0,2,1)", "str", "0,1,2"),
+            ParamSpec("flip_x", "Flip axis 0 (X)", "bool", False),
+            ParamSpec("flip_y", "Flip axis 1 (Y)", "bool", False),
+            ParamSpec("flip_z", "Flip axis 2 (Z)", "bool", False),
+            ParamSpec(
+                "reset_affine",
+                "Reset affine to target codes (ignore wrong header)",
+                "bool",
+                False,
+            ),
+        ),
+        needs_3d=True,
+        description=(
+            "Physically reorient voxel data: mouse preset (AP on Z → AP on Y, LAS), "
+            "match a reference layer's axis codes, or manual permute/flips/target. "
+            "Use reset-affine when the header axes do not match anatomy."
+        ),
+    ),
+    GuiToolSpec(
+        "rotate_volume",
+        "Transform",
+        "Rotate volume",
+        (
+            ParamSpec("angle_degrees", "Angle (degrees, CCW)", "float", 90.0, min=-360, max=360),
+            ParamSpec("axis", "Rotate around axis", "int", 2, min=0, max=2),
+            ParamSpec("order", "Interpolation order (0=labels)", "int", 1, min=0, max=5),
+            ParamSpec("reshape", "Expand canvas to fit", "bool", False),
+        ),
+        needs_3d=True,
+        description=(
+            "Rotate the active 3D layer around axis 0/1/2 (default Z). "
+            "Use order 0 for label masks. Keep reshape off to preserve shape."
+        ),
+    ),
+    GuiToolSpec(
+        "swap_axes",
+        "Transform",
+        "Swap axes",
+        (
+            ParamSpec("swap_axis0", "First axis", "int", 0, min=0, max=3),
+            ParamSpec("swap_axis1", "Second axis", "int", 1, min=0, max=3),
+        ),
+        needs_3d=True,
+        description=(
+            "Exchange two array axes of the active volume (e.g. 0↔2 to turn XYZ into ZYX). "
+            "Spacing/affine columns are updated when metadata is present."
+        ),
+    ),
+    GuiToolSpec(
         "isotropy",
         "Transform",
         "Isotropy (resample anisotropic axis)",
@@ -1267,6 +1356,9 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_tof_morphometrics",
     "seg_totalsegmentator",
     "seg_eicab",
+    "orient_volume",
+    "layer_metadata",
+    "reorient_volume",
     "seg_mouse_brain",
     "seg_brain_extraction",
     "seg_mra_vessel",

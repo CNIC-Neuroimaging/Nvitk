@@ -34,6 +34,20 @@ def require_antspynet():
     return antspynet
 
 
+def _affine_matrix(image: Any) -> np.ndarray | None:
+    aff = getattr(image, "affine", None)
+    if aff is None:
+        meta = getattr(image, "metadata", None) or {}
+        if isinstance(meta, dict):
+            aff = meta.get("affine")
+    if aff is None:
+        return None
+    arr = np.asarray(aff, dtype=float)
+    if arr.shape != (4, 4):
+        return None
+    return arr
+
+
 def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
     tuple[float, ...] | None,
     tuple[float, ...] | None,
@@ -55,6 +69,39 @@ def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
             origin = tuple(float(v) for v in meta["origin"][:ndim])
         if meta.get("direction") is not None:
             direction = np.asarray(meta["direction"], dtype=float)
+
+    # Derive missing / inconsistent geometry from the voxel→world affine
+    # (critical for ANTsPyNet template registration / center-of-mass alignment).
+    aff = _affine_matrix(image)
+    if aff is not None:
+        n = min(3, ndim)
+        aff_spacing = tuple(float(np.linalg.norm(aff[:n, i])) for i in range(n))
+        if spacing is None:
+            spacing = aff_spacing
+            if ndim > n:
+                spacing = spacing + tuple(1.0 for _ in range(ndim - n))
+        elif (
+            len(spacing) >= n
+            and all(abs(float(s) - 1.0) < 1e-3 for s in spacing[:n])
+            and any(abs(a - 1.0) > 1e-3 for a in aff_spacing)
+        ):
+            # Napari often leaves scale at (1,1,1) while the affine still encodes
+            # real mm spacing — prefer the affine.
+            spacing = aff_spacing + (tuple(spacing[n:]) if len(spacing) > n else ())
+            if ndim > len(spacing):
+                spacing = spacing + tuple(1.0 for _ in range(ndim - len(spacing)))
+        if origin is None:
+            origin = tuple(float(aff[i, 3]) for i in range(n))
+            if ndim > n:
+                origin = origin + tuple(0.0 for _ in range(ndim - n))
+        if direction is None and n >= 2:
+            dirs = np.eye(n, dtype=float)
+            for i in range(n):
+                col = aff[:n, i]
+                norm = float(np.linalg.norm(col))
+                if norm > 0:
+                    dirs[:, i] = col / norm
+            direction = dirs
     return spacing, origin, direction
 
 

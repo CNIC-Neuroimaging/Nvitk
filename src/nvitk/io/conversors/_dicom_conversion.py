@@ -1305,6 +1305,28 @@ def _force_ras_nifti(image: Any) -> Any:
     return image
 
 
+def _mouse_reorient_nifti(image: Any) -> Any:
+    """Permute AP from Z→Y and assign canonical LAS (ANTsPy mouse gallery layout)."""
+    from nvitk.transform.reorient import mouse_reorient_nifti
+
+    _info("Applying mouse reorientation (permute 0,2,1 → LAS)")
+    return mouse_reorient_nifti(image)
+
+
+def _apply_nifti_reorient_flags(
+    image: Any,
+    *,
+    force_ras: bool = False,
+    mouse_reorient: bool = False,
+) -> Any:
+    if force_ras and not mouse_reorient:
+        image = _force_ras_nifti(image)
+    if mouse_reorient:
+        # Mouse preset rebuilds a canonical LAS affine; RAS-first is unnecessary.
+        image = _mouse_reorient_nifti(image)
+    return image
+
+
 def _spatial_sort_ds_list(ds_list: list[Any]) -> list[Any]:
     """Order slices along the slice normal when IOP/IPP are available."""
     if not ds_list:
@@ -1462,6 +1484,7 @@ def _convert_ds_list_to_nifti_image(
     ds_list: list[Any],
     *,
     force_ras: bool = False,
+    mouse_reorient: bool = False,
     md: dict[str, Any] | None = None,
     revert_scaling: bool = False,
     rescale_type: str = "DV",
@@ -1572,11 +1595,15 @@ def _convert_ds_list_to_nifti_image(
                 revert_scaling=revert_scaling,
                 rescale_type=rescale_type,
             )
-            if force_ras:
-                image = _force_ras_nifti(image)
+        if force_ras or mouse_reorient:
+            image = _apply_nifti_reorient_flags(
+                image, force_ras=force_ras, mouse_reorient=mouse_reorient
+            )
 
         return image, actual_rescale_type
     except Exception as exc:
+        import traceback
+        _warn(traceback.format_exc())
         _warn(f"Standard conversion with fallbacks failed: {exc}")
         return None
     finally:
@@ -1675,8 +1702,7 @@ def _load_zeiss_series_arrays(
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
-        if force_ras:
-            image = _force_ras_nifti(image)
+        image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
         data = np.asanyarray(image.dataobj)
         return [
             _prepare_array_output(
@@ -1700,10 +1726,12 @@ def _load_standard_series_arrays(
     revert_scaling: bool,
     rescale_type: str,
     tmp_dir: Path | None = None,
+    mouse_reorient: bool = False,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
     converted = _convert_ds_list_to_nifti_image(
         ds_list,
         force_ras=force_ras,
+        mouse_reorient=mouse_reorient,
         md=md,
         revert_scaling=revert_scaling,
         rescale_type=rescale_type,
@@ -1893,6 +1921,7 @@ def _fallback_save_pixel_arrays(
     final_output_path: str,
     *,
     force_ras: bool = False,
+    mouse_reorient: bool = False,
     md: dict[str, Any] | None = None,
     revert_scaling: bool = False,
     save_metadata: bool = False,
@@ -1903,6 +1932,7 @@ def _fallback_save_pixel_arrays(
     converted = _convert_ds_list_to_nifti_image(
         ds_list,
         force_ras=force_ras,
+        mouse_reorient=mouse_reorient,
         md=md,
         revert_scaling=revert_scaling,
         rescale_type=rescale_type,
@@ -2137,17 +2167,7 @@ def _process_zeiss_series(
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
-        if force_ras:
-            ornt_from = nib.orientations.io_orientation(image.affine)
-            ornt_to = nib.orientations.axcodes2ornt(("R", "A", "S"))
-            xfm = nib.orientations.ornt_transform(ornt_from, ornt_to)
-            _info(f"Forcing RAS reorientation with transform:\n {xfm}")
-            if xfm.size:
-                data_ras = nib.orientations.apply_orientation(image.get_fdata(), xfm)
-                aff_ras = image.affine @ nib.orientations.inv_ornt_aff(xfm, image.shape)
-                image = nib.Nifti1Image(data_ras, aff_ras, header=image.header.copy())
-                image.set_sform(aff_ras, code=1)
-                image.set_qform(aff_ras, code=1)
+        image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
 
         md_full = {
             k: v
@@ -2214,6 +2234,7 @@ def _process_one_series(
     *,
     custom_naming: str | None,
     force_ras: bool,
+    mouse_reorient: bool = False,
     revert_scaling: bool = False,
     append_label: bool = True,
     save_metadata: bool = False,
@@ -2302,6 +2323,7 @@ def _process_one_series(
         ds_list,
         final_output_path,
         force_ras=force_ras,
+        mouse_reorient=mouse_reorient,
         md=md,
         revert_scaling=revert_scaling,
         save_metadata=save_metadata,
@@ -2318,6 +2340,7 @@ def run_dicom2nifti(
     *,
     custom_naming: str | None = None,
     force_ras: bool = False,
+    mouse_reorient: bool = False,
     process_rtstruct: bool = False,
     revert_scaling: bool = False,
     save_metadata: bool = False,
@@ -2409,6 +2432,7 @@ def run_dicom2nifti(
                                 sub[0],
                                 custom_naming=custom_naming,
                                 force_ras=force_ras,
+                                mouse_reorient=mouse_reorient,
                                 revert_scaling=revert_scaling,
                                 append_label=True,
                                 save_metadata=save_metadata,
@@ -2437,6 +2461,7 @@ def run_dicom2nifti(
                     first_ds,
                     custom_naming=custom_naming,
                     force_ras=force_ras,
+                    mouse_reorient=mouse_reorient,
                     revert_scaling=revert_scaling,
                     append_label=False,
                     save_metadata=save_metadata,

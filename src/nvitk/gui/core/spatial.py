@@ -42,20 +42,50 @@ def layer_affine(layer: Any) -> np.ndarray | None:
 
 
 def layer_spacing(layer: Any) -> tuple[float, ...] | None:
-    """Voxel spacing in layer axis order."""
-    scale = getattr(layer, "scale", None)
-    if scale is not None:
-        return tuple(float(x) for x in scale)
+    """Voxel spacing in layer axis order.
+
+    Prefer file metadata / affine column norms over Napari ``scale``. When a
+    layer is displayed with an affine, Napari typically leaves ``scale`` at
+    ``(1,1,1)``, which must not override the real mm spacing.
+    """
     meta = nvitk_metadata_from_layer(layer)
     sp = meta.get("spacing")
     if sp is not None:
-        return tuple(float(x) for x in sp[:3])
+        try:
+            seq = tuple(float(v) for v in sp)
+            if len(seq) >= 3:
+                return seq[:3]
+            if seq:
+                return seq
+        except Exception:
+            pass
     if all(k in meta for k in ("x_res", "y_res", "z_res")):
         return (float(meta["x_res"]), float(meta["y_res"]), float(meta["z_res"]))
+
     aff = layer_affine(layer)
+    aff_norms: tuple[float, ...] | None = None
     if aff is not None:
         r = aff[:3, :3]
-        return tuple(float(np.linalg.norm(r[:, i])) for i in range(3))
+        aff_norms = tuple(float(np.linalg.norm(r[:, i])) for i in range(3))
+
+    scale = getattr(layer, "scale", None)
+    scale_t: tuple[float, ...] | None = None
+    if scale is not None and len(scale) >= 3:
+        scale_t = tuple(float(x) for x in scale[:3])
+
+    # Identity affine + meaningful scale → 4D scale-only display path.
+    if (
+        aff_norms is not None
+        and scale_t is not None
+        and all(abs(a - 1.0) < 1e-6 for a in aff_norms)
+        and any(abs(s - 1.0) > 1e-6 for s in scale_t)
+    ):
+        return scale_t
+
+    if aff_norms is not None and max(aff_norms) > 1e-8:
+        return aff_norms
+    if scale_t is not None:
+        return scale_t
     return None
 
 
@@ -417,6 +447,69 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
         except Exception:
             pass
     return text
+
+
+def format_layer_spatial_info(layer: Any) -> str:
+    """Human-readable spatial metadata for the active Napari layer."""
+    name = getattr(layer, "name", "?")
+    data = getattr(layer, "data", None)
+    shape = tuple(int(s) for s in data.shape) if data is not None else ()
+    dtype = getattr(data, "dtype", None)
+    meta = nvitk_metadata_from_layer(layer)
+    aff = layer_affine(layer)
+    sp = layer_spacing(layer)
+    scale = getattr(layer, "scale", None)
+    scale_t = tuple(float(x) for x in scale) if scale is not None else None
+    axes = meta.get("axes") or getattr(layer, "axis_labels", None)
+    orient = meta.get("orientation")
+    if orient is None and aff is not None:
+        try:
+            import nibabel as nib
+
+            orient = "".join(nib.orientations.aff2axcodes(aff[:3, :3]))
+        except Exception:
+            orient = None
+    origin = None
+    direction = None
+    if aff is not None:
+        origin = tuple(float(aff[i, 3]) for i in range(min(3, aff.shape[0])))
+        direction = aff[:3, :3].copy()
+        for i in range(3):
+            nrm = float(np.linalg.norm(direction[:, i]))
+            if nrm > 0:
+                direction[:, i] /= nrm
+    fov = None
+    if sp is not None and len(shape) >= len(sp):
+        fov = tuple(float(shape[i]) * float(sp[i]) for i in range(len(sp)))
+
+    lines = [
+        f"Layer: {name}",
+        f"shape: {shape}",
+        f"dtype: {dtype}",
+        f"axes: {axes!r}",
+        f"orientation: {orient!r}",
+        f"spacing (mm): {sp}",
+        f"fov (mm): {fov}",
+        f"origin: {origin}",
+        f"Napari scale: {scale_t}",
+        f"source: {meta.get('source')!r}",
+    ]
+    if direction is not None:
+        lines.append("direction:")
+        lines.append(np.array2string(np.asarray(direction, dtype=float), precision=4))
+    if aff is not None:
+        lines.append("affine:")
+        lines.append(np.array2string(np.asarray(aff, dtype=float), precision=6))
+    src = meta.get("affine_source")
+    if src is not None:
+        try:
+            src_a = to_numpy(src).astype(float)
+            if aff is None or not np.allclose(src_a, aff):
+                lines.append("affine_source (file):")
+                lines.append(np.array2string(src_a, precision=6))
+        except Exception:
+            pass
+    return "\n".join(lines)
 
 
 def _layer_for_orientation_status(viewer: Any) -> Any | None:

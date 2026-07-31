@@ -59,8 +59,10 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "distal vessel expansion). Optional barrier punches hard walls out of the tree."
     ),
     "seg_mouse_brain": (
-        "ANTsPyNet mouse brain extraction (mask) or regional parcellation on the "
-        "active MRI volume. For parcellation, optionally supply a brain mask layer."
+        "ANTsPyNet mouse brain extraction or parcellation (T2w mouse MRI). "
+        "No T1 model — use modality t2 (or ex5* for histology). "
+        "If voxel spacing is ~1 mm (unit header), auto-rescales FOV to ~20 mm "
+        "(mouse template size). N4 preprocess on by default."
     ),
     "seg_brain_extraction": (
         "ANTsPyNet multi-modal brain extraction on the active MRI volume. "
@@ -131,6 +133,27 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "reg_flirt_apply": "Apply a saved FLIRT transform to a volume.",
     "isotropy": "Resample to near-isotropic voxel spacing.",
     "resample_to": "Resample to a target voxel size.",
+    "rotate_volume": (
+        "Rotate the active volume around axis 0/1/2 (default Z = 2). "
+        "Angle is counter-clockwise in the plane orthogonal to that axis. "
+        "Use interpolation order 0 for label masks."
+    ),
+    "orient_volume": (
+        "Show NIfTI axis codes or mirror/permute the Napari display to a target layout."
+    ),
+    "layer_metadata": (
+        "Print spacing, FOV, origin, orientation, direction, and affine for the active layer."
+    ),
+    "reorient_volume": (
+        "Reorient the active volume for mouse/ANTs layouts. "
+        "Modes: mouse (permute 0,2,1 + LAS), reference (match another layer), "
+        "or manual permute/flips/target codes. Enable reset-affine when the "
+        "NIfTI header axes disagree with anatomy (e.g. AP stored on Z)."
+    ),
+    "swap_axes": (
+        "Swap two array axes of the active volume (e.g. 0 and 2). "
+        "Updates spacing/affine metadata when available."
+    ),
     "oblique_slice": "Extract an oblique 2D slice through the volume.",
     "qvtpy_locs": "Load or generate QVTpy LOC CSV and show as points.",
     "measure_loc_hemodynamics": "Hemodynamics along LOC centerlines (QVTpy-style).",

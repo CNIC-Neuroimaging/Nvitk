@@ -402,6 +402,91 @@ def run_gui_tool(
         notify(f"Reoriented {previous} → {target}.")
         return None
 
+    if tool_id == "layer_metadata":
+        from nvitk.gui.core.spatial import format_layer_spatial_info
+
+        text = format_layer_spatial_info(layer)
+        gui_log(text)
+        notify(text)
+        return None
+
+    if tool_id == "reorient_volume":
+        from nvitk.gui.core.orientation import configure_viewer_for_layer
+        from nvitk.io._common import orientation_codes_from_affine
+        from nvitk.transform.reorient import reorient_volume
+
+        raw = layer_data_for_tool(layer.data)
+        src = layer_to_image(layer, raw)
+        if src.ndim != 3:
+            raise ValueError("Reorient requires a 3D layer.")
+
+        mode = str(params.get("reorient_mode") or "mouse").strip().lower()
+        ref_img = None
+        ref_name = str(params.get("reference_layer") or "").strip()
+        if mode in ("reference", "ref") or ref_name:
+            if not ref_name or ref_name.lower() in ("(none)", "none", ""):
+                if mode in ("reference", "ref"):
+                    raise ValueError("Reference mode requires a reference layer.")
+            else:
+                ref_layer = _resolve_layer(viewer, ref_name)
+                ref_img = layer_to_image(ref_layer)
+
+        flip_axes = (
+            bool(params.get("flip_x")),
+            bool(params.get("flip_y")),
+            bool(params.get("flip_z")),
+        )
+        with using(get_global_backend()):
+            out = reorient_volume(
+                src,
+                mode=mode,
+                reference=ref_img,
+                target_orientation=str(params.get("target_orientation") or "LAS"),
+                permute_order=str(params.get("permute_order") or "0,1,2"),
+                flip_axes=flip_axes,
+                reset_affine=bool(params.get("reset_affine")),
+            )
+
+        arr = to_numpy(out.data)
+        new_aff = out.affine
+        if new_aff is None:
+            raise ValueError("Reorient produced no affine.")
+        new_aff = np.asarray(to_numpy(new_aff), dtype=float)
+        codes = orientation_codes_from_affine(new_aff) or (
+            out.orientation or str(params.get("target_orientation") or "")
+        )
+
+        name = f"{layer.name}_reorient"
+        meta = dict(getattr(layer, "metadata", None) or {})
+        nv = dict(nvitk_metadata_from_layer(layer))
+        nv["affine"] = new_aff
+        nv["orientation"] = codes
+        for i, key in enumerate(("x_res", "y_res", "z_res")):
+            nv[key] = float(np.linalg.norm(new_aff[:3, i]))
+        nv["spacing"] = (nv["x_res"], nv["y_res"], nv["z_res"])
+        nv["shape"] = tuple(int(s) for s in arr.shape)
+        meta["nvitk_metadata"] = nv
+        meta["orientation"] = codes
+        if out.axes:
+            meta["axes"] = out.axes
+
+        new_layer = viewer.add_image(arr, name=name, affine=new_aff, metadata=meta)
+        if out.axes and len(out.axes) == int(arr.ndim):
+            try:
+                new_layer.axis_labels = tuple(out.axes)
+            except Exception:
+                pass
+        configure_viewer_for_layer(viewer, new_layer, configure_dims=True)
+        try:
+            viewer.reset_view()
+        except Exception:
+            pass
+        notify(
+            f"Reoriented → {name} ({codes}, shape={tuple(arr.shape)}, "
+            f"spacing={[round(nv[k], 4) for k in ('x_res', 'y_res', 'z_res')]})"
+        )
+        return None
+
     bk = get_global_backend()
     data = layer_data_for_tool(layer.data)
     if not gpu_enabled():
@@ -594,6 +679,28 @@ def run_gui_tool(
             kw["factor"] = factor
         with using(bk):
             return coerce_tool_output(isotropy(img, **kw))
+
+    if tool_id == "rotate_volume":
+        from nvitk.transform.rotate import rotate_volume
+
+        with using(bk):
+            out = rotate_volume(
+                img,
+                float(params.get("angle_degrees") if params.get("angle_degrees") is not None else 90.0),
+                axis=int(params.get("axis") if params.get("axis") is not None else 2),
+                order=int(params.get("order") if params.get("order") is not None else 1),
+                reshape=bool(params.get("reshape")),
+            )
+            return coerce_tool_output(getattr(out, "data", out))
+
+    if tool_id == "swap_axes":
+        from nvitk.transform.swap_axes import swap_axes
+
+        a0 = int(params.get("swap_axis0") if params.get("swap_axis0") is not None else 0)
+        a1 = int(params.get("swap_axis1") if params.get("swap_axis1") is not None else 1)
+        with using(bk):
+            out = swap_axes(img, a0, a1)
+            return coerce_tool_output(getattr(out, "data", out))
 
     if tool_id == "resample_to":
         from nvitk.transform.resampling import resample_to
@@ -1036,6 +1143,13 @@ def run_gui_tool(
         if ref_name and ref_name not in ("", "(none)"):
             mask_layer = _resolve_layer(viewer, ref_name)
             _, mask_img, _ = align_mask_to_reference_layer(mask_layer, layer, order=0)
+        gui_log(
+            "Mouse brain: running ANTsPyNet "
+            f"(mode={params.get('mouse_brain_mode')!r}, "
+            f"modality={params.get('mouse_modality')!r}, "
+            f"parc={params.get('which_parcellation')!r}, "
+            f"n4={bool(params.get('do_n4', True))})"
+        )
         with using("numpy"):
             out = mouse_brain_segmentation(
                 img,
@@ -1043,6 +1157,15 @@ def run_gui_tool(
                 modality=str(params.get("mouse_modality") or "t2"),
                 which_parcellation=str(params.get("which_parcellation") or "nick"),
                 mask=mask_img,
+                do_n4=bool(params.get("do_n4", True)),
+                binarize=bool(params.get("binarize", True)),
+                return_isotropic_output=bool(params.get("return_isotropic_output", False)),
+                fix_spacing=bool(params.get("fix_spacing", True)),
+                verbose=True,
+            )
+            gui_log(
+                f"Mouse brain: finished → shape={getattr(out, 'shape', None)} "
+                f"dtype={getattr(out, 'dtype', None)}"
             )
             return coerce_tool_output(out)
 

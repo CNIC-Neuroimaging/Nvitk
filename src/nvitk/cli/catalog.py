@@ -72,6 +72,8 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.transform.resampling", label="resample-to", library_only=True),
         ToolEntry("", "nvitk.transform.isotropy", label="isotropy", library_only=True),
         ToolEntry("", "nvitk.transform.oblique", label="oblique-slice", library_only=True),
+        ToolEntry("", "nvitk.transform.rotate", label="rotate volume", library_only=True),
+        ToolEntry("", "nvitk.transform.swap_axes", label="swap / permute axes", library_only=True),
         ToolEntry("", "nvitk.transform.rotation", label="z-rotation correction", library_only=True),
     ],
 }
