@@ -33,6 +33,7 @@ src/nvitk.egg-info/
 docs/
 tests/
 test/
+skills/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
