@@ -115,6 +115,36 @@ def _ensure_nifti_path(layer: Any, *, prefix: str) -> Path:
     return path
 
 
+def _export_layer_nifti(layer: Any, *, prefix: str, filename: str = "volume.nii.gz") -> Path:
+    """Always write *layer*'s current data + affine to a temp NIfTI (no source short-circuit)."""
+    from nvitk.io import imsave
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"nvitk_{prefix}_"))
+    path = tmp_dir / filename
+    imsave(path, layer_to_image(layer))
+    return path
+
+
+def _bridge_same_label_components(seg: Any, *, max_gap: int = 24) -> Any:
+    """Connect nearby disconnected CCs that share the same label id (MST tubes)."""
+    import numpy as numpy
+    from nvitk.morphology.mst_bridge import bridge_binary_components_mst
+    from scipy import ndimage as ndi
+
+    # Force host arrays: scipy.ndimage / MST bridge are CPU-only.
+    # Use stock NumPy — module ``np`` may be a CuPy proxy via ``setup(globals())``.
+    out = numpy.asarray(to_numpy(seg), dtype=numpy.int32).copy()
+    labels = [int(x) for x in numpy.unique(out) if int(x) != 0]
+    for lab in labels:
+        mask = out == lab
+        n_cc = int(ndi.label(mask)[1])
+        if n_cc <= 1:
+            continue
+        bridged = bridge_binary_components_mst(mask, max_gap=max_gap, tube_radius=1)
+        out[numpy.asarray(to_numpy(bridged), dtype=bool)] = lab
+    return out
+
+
 def _run_pipeline_cli(spec: Any, params: dict[str, Any]) -> None:
     cmd = str(spec.cli_command or "").strip()
     if not cmd:
@@ -273,6 +303,10 @@ def run_gui_tool(
         from nvitk.gui.lab.mouse_tof_cow import start_mouse_tof_cow
 
         start_mouse_tof_cow(viewer, layer)
+        return None
+
+    if tool_id == "measure_morphometrics":
+        _run_measure_morphometrics(viewer, layer, params)
         return None
 
     if tool_id == "viz_flowshow":
@@ -2423,6 +2457,109 @@ def _run_viz_tof_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         f"TOF morphometrics: loaded {info['n_paths']} centerline path(s) "
         f"(color_by={info['color_by']}) from {stage7_path}."
     )
+
+
+def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Run morphometrics on the selected multilabel Labels / Image layer.
+
+    Empty ``output_dir``: write to a temp folder (not kept as a user result) and
+    display centerlines / surfaces via the morphometrics viz dock.
+    """
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+    from nvitk.gui.viz.morpho_viz import DEFAULT_MORPHO_POINT_SIZE, install_morphometrics_viz
+    from nvitk.io import imsave
+    from nvitk.measure.morphometrics import run_morphometrics_case
+    from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
+
+    if layer is None:
+        raise ValueError("Select a multilabel segmentation layer first.")
+
+    out_s = str(params.get("output_dir") or "").strip()
+    persist = bool(out_s)
+    if persist:
+        out_dir = Path(out_s).expanduser().resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = Path(tempfile.mkdtemp(prefix="nvitk_morphometrics_"))
+
+    # Always export the *current* Labels data with the layer affine (never reuse a
+    # stale intensity source path that would scramble spacing / orientation).
+    import numpy as numpy
+
+    seg = numpy.asarray(to_numpy(layer.data), dtype=numpy.int32)
+    bridged = numpy.asarray(_bridge_same_label_components(seg, max_gap=24), dtype=numpy.int32)
+    n_bridged = int(numpy.count_nonzero(bridged != seg))
+    if n_bridged:
+        notify(f"Bridged {n_bridged} voxel(s) to reconnect same-label vessel fragments.")
+
+    seg_path = Path(tempfile.mkdtemp(prefix="nvitk_morphometrics_seg_")) / "seg.nii.gz"
+    imsave(seg_path, layer_to_image(layer, data=bridged))
+
+    topology = str(params.get("topology") or TOPOLOGY_NONE).strip() or TOPOLOGY_NONE
+    n_workers = int(params.get("n_workers") or 1)
+    skip_existing = bool(params.get("skip_existing")) and persist
+    already_smoothed = bool(params.get("input_already_smoothed"))
+
+    if persist:
+        notify(f"Morphometrics running (topology={topology!r}) → {out_dir} …")
+    else:
+        notify(
+            f"Morphometrics running (topology={topology!r}); "
+            "no output directory — results displayed in GUI only…"
+        )
+    excel = run_morphometrics_case(
+        seg_path,
+        out_dir,
+        mapping_json=topology,
+        case_out_dir_override=out_dir,
+        n_workers=n_workers,
+        input_already_smoothed=already_smoothed,
+        skip_if_excel_exists=skip_existing,
+    )
+
+    # Show the (bridged) vessel mask used for computation as a Labels layer.
+    spatial = layer_spatial_kwargs(layer)
+    mask_name = f"{getattr(layer, 'name', 'seg')}_morpho_input"
+    try:
+        mask_layer = viewer.add_labels(
+            bridged.astype(numpy.int32, copy=False),
+            name=mask_name,
+            opacity=0.45,
+            **spatial,
+        )
+        try:
+            mask_layer._nvitk_label_like = True
+        except Exception:
+            pass
+    except Exception as mask_exc:  # noqa: BLE001
+        notify(f"Could not add morpho input mask layer: {mask_exc}", error=True)
+
+    try:
+        info = install_morphometrics_viz(
+            viewer,
+            out_dir,
+            reference_layer=layer,
+            color_by="radius",
+            point_size=DEFAULT_MORPHO_POINT_SIZE,
+            show_surfaces=True,
+        )
+        n_paths = int(info.get("n_paths") or 0)
+        n_surf = int(info.get("n_surfaces") or 0)
+    except Exception as viz_exc:  # noqa: BLE001
+        n_paths = 0
+        n_surf = 0
+        notify(f"Morphometrics viz skipped: {viz_exc}", error=True)
+
+    if persist:
+        notify(
+            f"Morphometrics done: {excel} "
+            f"({n_paths} path(s), {n_surf} surface layer(s) shown)."
+        )
+    else:
+        notify(
+            f"Morphometrics done ({n_paths} path(s), {n_surf} surface(s) in GUI; "
+            "nothing saved — set Output directory to persist)."
+        )
 
 
 def _run_intensity_similarity(

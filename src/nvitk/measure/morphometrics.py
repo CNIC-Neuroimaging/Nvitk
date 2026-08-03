@@ -21,8 +21,13 @@ from nvitk.measure.morpho.preprocess_taubin import (
     save_segmentation,
 )
 from nvitk.measure.morpho.run_case import N_WORKERS, run_case
+from nvitk.measure.morpho.topology_io import (
+    TOPOLOGY_NONE,
+    default_qvtpy_topology_path,
+    load_topology,
+    resolve_topology_path,
+)
 from nvitk.measure.morphometrics_config import MorphometricsConfig, default_morphometrics_config
-from nvitk.pipes.qvtpy.util.eicab.morpho_topology import build_eicab_topology_mapping
 
 __all__ = [
     "MorphometricsConfig",
@@ -73,6 +78,33 @@ def _smooth_taubin(
     return output_path
 
 
+def _resolve_mapping(
+    *,
+    mapping: dict | None,
+    mapping_json: str | None,
+) -> tuple[dict | None, str | None]:
+    """Resolve topology mapping for morphometrics.
+
+    Returns ``(mapping_dict_or_empty, mapping_json_path_or_None)``.
+    An empty dict means vessel-wise only (no topology awareness).
+    """
+    if mapping is not None:
+        return mapping, mapping_json
+
+    token = None if mapping_json is None else str(mapping_json).strip()
+    if token is not None and token.lower() == TOPOLOGY_NONE:
+        return {}, None
+    if token is not None and token != "":
+        path = resolve_topology_path(token)
+        if path is None:
+            return {}, None
+        return load_topology(path) or {}, str(path)
+
+    # Default: qvtpy / eICAB topology JSON (same content as former coded mapping).
+    path = default_qvtpy_topology_path()
+    return load_topology(path) or {}, str(path)
+
+
 def run_morphometrics_case(
     seg_path: str | Path,
     out_dir: str | Path,
@@ -85,7 +117,13 @@ def run_morphometrics_case(
     input_already_smoothed: bool = False,
     skip_if_excel_exists: bool = False,
 ) -> Path:
-    """Run full TOF morphometrics for one eICAB segmentation NIfTI.
+    """Run full TOF morphometrics for one multilabel segmentation NIfTI.
+
+    Topology resolution order:
+    1. Explicit ``mapping`` dict
+    2. ``mapping_json`` path / basename under ``measure/morpho/topology/``
+    3. ``mapping_json="none"`` → vessel-wise only (no topology)
+    4. Default ``qvtpy_topology.json``
 
     Returns path to ``case_metrics_donut_tree.xlsx``.
     """
@@ -102,7 +140,7 @@ def run_morphometrics_case(
     else:
         pipeline_skipped = False
 
-    topo = mapping if mapping is not None else build_eicab_topology_mapping()
+    topo, topo_json = _resolve_mapping(mapping=mapping, mapping_json=mapping_json)
     workers = int(n_workers) if n_workers is not None else (cfg.n_workers or N_WORKERS)
 
     if not pipeline_skipped:
@@ -121,8 +159,8 @@ def run_morphometrics_case(
         run_case(
             seg_path=str(pipeline_seg),
             out_dir=str(case_dir.parent),
-            mapping_json=mapping_json,
-            mapping=topo,
+            mapping_json=topo_json,
+            mapping=topo if topo is not None else {},
             case_out_dir_override=str(case_dir),
             n_workers=workers,
         )

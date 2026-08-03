@@ -34,7 +34,6 @@ PATH_SUMMARY_EXPORT_DROP_COLUMNS = [
     "inflection_count",
     "bend_peak_count",
     "radius_ref_mm",
-    "degree_of_stenosis_pct",
     "radius_min_mm",
     "enlargement_radius_ref_mm",
     "enlargement_radius_max_mm",

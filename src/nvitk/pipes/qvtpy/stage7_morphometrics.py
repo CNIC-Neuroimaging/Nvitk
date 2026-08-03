@@ -30,6 +30,7 @@ from nvitk.core.click_backend import backend_click_option
 from nvitk.core.logger import Logger
 from nvitk.measure.morphometrics import run_morphometrics_case
 from nvitk.measure.morphometrics_config import MorphometricsConfig
+from nvitk.measure.morpho.topology_io import default_qvtpy_topology_path
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.util.eicab.morpho_paths import (
     STAGE7_SKIP_MARKER,
@@ -84,6 +85,7 @@ def run_subject(
     run_morphometrics_case(
         mask_res.path,
         out_dir,
+        mapping_json=str(default_qvtpy_topology_path()),
         case_out_dir_override=out_dir,
         n_workers=n_workers,
         config=morpho_config,

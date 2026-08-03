@@ -38,6 +38,7 @@ from nvitk.measure.morphometrics_config import (
     FINAL_CENTERLINE_OVERLAP_TOL_MM,
     INFLECT_KAPPA_MIN,
     INFLECT_SMOOTH_WIN,
+    KEEP_SHARED_PREFIX_AT_BIFURCATION_MM,
     PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES,
     RADIUS_SOURCE_FOR_CALIBER_DETECTION,
     RETRY_VMTK_WITH_TRIMMED_SEEDS,
@@ -377,6 +378,7 @@ def save_centerline_result_vtps(res: dict, centerline_dir: Optional[str], center
             (res["torsion_1_per_mm"], "Torsion"),
             (res["radius_mm"], "EffectiveRadius"),
             (res["radius_mm"], "CrossSectionRadius"),
+            (np.pi * np.asarray(res["radius_mm"], dtype=float) ** 2, "CrossSectionArea"),
             (res.get("maximum_inscribed_sphere_radius_mm", np.full(len(pts), np.nan)), "MaximumInscribedSphereRadius"),
             (res.get("stenosis_detection_radius_mm", res["radius_mm"]), "StenosisDetectionRadius"),
             (res.get("stenosis_reference_radius_point", np.full(len(pts), np.nan)), "StenosisReferenceRadius"),
@@ -540,7 +542,26 @@ def prune_overlapping_final_centerlines(
             ref_points.append(pts)
             continue
 
-        start_idx = max(0, prefix_n - 1)
+        # Keep a short shared neighborhood so the bifurcation junction remains
+        # on each arm (full shared trunk is still removed to avoid duplicates).
+        keep_mm = float(KEEP_SHARED_PREFIX_AT_BIFURCATION_MM)
+        if keep_mm > 0 and prefix_n >= 2:
+            prefix_pts = pts[:prefix_n]
+            prefix_len = float(np.linalg.norm(np.diff(prefix_pts, axis=0), axis=1).sum()) if prefix_n > 1 else 0.0
+            if prefix_len <= keep_mm + 1e-9:
+                keep_n = prefix_n
+            else:
+                # Walk backward from the bifurcation end of the shared prefix.
+                keep_n = 1
+                acc = 0.0
+                for i in range(prefix_n - 1, 0, -1):
+                    acc += float(np.linalg.norm(prefix_pts[i] - prefix_pts[i - 1]))
+                    keep_n += 1
+                    if acc >= keep_mm:
+                        break
+            start_idx = max(0, prefix_n - keep_n)
+        else:
+            start_idx = max(0, prefix_n - 1)
         if len(pts) - start_idx < int(FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE):
             discarded.add(str(res["path_id"]))
             print(

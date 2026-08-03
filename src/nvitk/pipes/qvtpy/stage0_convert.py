@@ -192,6 +192,7 @@ def convert_subject(
         force_ras=True,
         compress=True,
         save_metadata=True,
+        include_private_tags=True,
     )
 
 

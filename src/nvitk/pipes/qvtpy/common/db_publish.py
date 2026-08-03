@@ -7,7 +7,8 @@ for the same ``(subject_uid, pipeline_id, variable_id, region_id, frame_index)``
 Sources (written by :mod:`nvitk.pipes.qvtpy.stage6_measure`):
 
 - ``loc_measurements.csv`` — per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min), and the
-  per-frame ``flow_tseries`` (mL/min).
+  per-frame ``flow_tseries`` (mL/min). Includes surviving PCOMMs (``LPCOMM`` /
+  ``RPCOMM``) when stage-5 placed mid-LOCs; ACOMM is never measured.
 - ``vessel_hemodynamics.csv`` — per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
   (Bjornfoot) / ``pwv_fielding_xcor`` and per-branch ``damping_index``.
 """
@@ -35,6 +36,19 @@ QVTPY_PIPELINE_ALIASES = ("qvtpy", "latest", "v3", "3")
 
 _UPSERT_KEY = ["subject_uid", "pipeline_id", "variable_id", "region_id", "frame_index"]
 _ML_S_TO_ML_MIN = 60.0
+
+
+def count_pcomm_rows(rows: pd.DataFrame) -> dict[str, int]:
+    """Count published rows for LPCOMM / RPCOMM (by ``region_id``)."""
+    if rows is None or rows.empty or "region_id" not in rows.columns:
+        return {"LPCOMM": 0, "RPCOMM": 0, "total": 0}
+    regions = rows["region_id"].astype(str)
+    counts = {
+        "LPCOMM": int((regions == "LPCOMM").sum()),
+        "RPCOMM": int((regions == "RPCOMM").sum()),
+    }
+    counts["total"] = counts["LPCOMM"] + counts["RPCOMM"]
+    return counts
 
 
 def qvtpy_pipeline_catalog_spec() -> dict[str, Any]:
@@ -289,6 +303,21 @@ def publish_stage6(
     if rows.empty:
         log.warning("No qvtpy stage6 measurements to publish: %s", stage6_dir)
         return rows
+    pcomm = count_pcomm_rows(rows)
+    if pcomm["total"]:
+        log.info(
+            "stage6 publish %s: PCOMM rows LPCOMM=%d RPCOMM=%d (of %d total)",
+            subject_uid,
+            pcomm["LPCOMM"],
+            pcomm["RPCOMM"],
+            len(rows),
+        )
+    else:
+        log.info(
+            "stage6 publish %s: no LPCOMM/RPCOMM rows among %d measurement(s)",
+            subject_uid,
+            len(rows),
+        )
     if source_batch_id and "source_batch_id" in rows.columns:
         rows = rows.copy()
         rows["source_batch_id"] = str(source_batch_id).strip()
@@ -352,6 +381,7 @@ __all__ = [
     "QVTPY_PIPELINE_ID",
     "QVTPY_PIPELINE_NAME",
     "build_image_measurement_rows_from_stage6",
+    "count_pcomm_rows",
     "maybe_publish_stage6_on_sge",
     "publish_stage6",
     "qvtpy_pipeline_catalog_spec",

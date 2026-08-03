@@ -134,13 +134,48 @@ def _normalize_venc_to_mm_s(raw: float, *, source_hint: str = "") -> float:
     return v
 
 
+def _scalar_venc_from_raw(raw: Any, *, source_hint: str = "") -> float | None:
+    """Parse a VENC scalar, including Philips ``(2001,101A)`` 3-float lists.
+
+    For a length-3 list (one component per AP/FH/RL phase), the non-zero entry is
+    the encoding magnitude for that series.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        vals: list[float] = []
+        for x in raw:
+            try:
+                vals.append(float(x))
+            except (TypeError, ValueError):
+                continue
+        nonzero = [abs(v) for v in vals if abs(v) > 1e-9]
+        if not nonzero:
+            return None
+        try:
+            return _normalize_venc_to_mm_s(float(max(nonzero)), source_hint=source_hint)
+        except ValueError:
+            return None
+    try:
+        return _normalize_venc_to_mm_s(float(raw), source_hint=source_hint)
+    except (TypeError, ValueError):
+        return None
+
+
 def _venc_from_json_payload(payload: dict[str, Any]) -> float | None:
+    # Prefer explicit VENC / Philips private tag, then legacy cm/s fields.
+    for key in ("VENC", "(2001,101A)", "(2001,101a)"):
+        if key in payload:
+            v = _scalar_venc_from_raw(payload[key], source_hint=key)
+            if v is not None:
+                return v
     for field_name in ("VelocityEncoding", "PhaseEncodingVelocity"):
         if field_name in payload:
             # Legacy nvitk sidecars: store cm/s–scale; multiply to mm/s (unchanged).
-            return float(payload[field_name]) * 10.0
-    if "VENC" in payload:
-        return _normalize_venc_to_mm_s(float(payload["VENC"]), source_hint="VENC")
+            try:
+                return float(payload[field_name]) * 10.0
+            except (TypeError, ValueError):
+                continue
     return None
 
 
@@ -162,18 +197,30 @@ def _venc_from_json_dir(ap_dir: Path) -> tuple[float | None, str | None]:
 def _venc_from_nifti_metadata(meta: dict[str, Any] | None) -> tuple[float | None, str | None]:
     if not meta:
         return None, None
-    candidates = ("VENC", "VelocityEncoding", "PhaseEncodingVelocity", "venc", "velocity_encoding")
+    candidates = (
+        "VENC",
+        "(2001,101A)",
+        "(2001,101a)",
+        "VelocityEncoding",
+        "PhaseEncodingVelocity",
+        "venc",
+        "velocity_encoding",
+    )
     for key in candidates:
         raw = meta.get(key)
-        if raw is None:
-            raw = meta.get(key.lower()) if key != key.lower() else None
+        if raw is None and key != key.lower():
+            raw = meta.get(key.lower())
         if raw is None:
             continue
-        try:
-            v = _normalize_venc_to_mm_s(float(raw), source_hint=key)
+        # Legacy VelocityEncoding / PhaseEncodingVelocity: cm/s ×10.
+        if key in ("VelocityEncoding", "PhaseEncodingVelocity"):
+            try:
+                return float(raw) * 10.0, f"nifti_meta:{key}"
+            except (TypeError, ValueError):
+                continue
+        v = _scalar_venc_from_raw(raw, source_hint=key)
+        if v is not None:
             return v, f"nifti_meta:{key}"
-        except (TypeError, ValueError):
-            continue
     return None, None
 
 
@@ -186,6 +233,12 @@ def _venc_from_single_dicom(path: Path) -> float | None:
         ds = pydicom.dcmread(str(path), stop_before_pixels=True, force=True)
     except Exception:
         return None
+    # Philips private PhaseEncodingVelocity (2001,101A): 3-float list.
+    elem_philips = ds.get((0x2001, 0x101A), None)
+    if elem_philips is not None and elem_philips.value is not None:
+        v = _scalar_venc_from_raw(elem_philips.value, source_hint="DICOM_2001_101A")
+        if v is not None:
+            return v
     # Standard: Velocity Encoding Maximum Value (0018,9217), mm/s in MR often as FD.
     elem = ds.get((0x0018, 0x9217), None)
     if elem is not None and elem.value is not None:
@@ -228,15 +281,11 @@ def resolve_venc_mm_s(
     dicom_search_dir: Path | None = None,
     log_context: str = "",
 ) -> tuple[float, str]:
-    """Resolve VENC in mm/s: JSON sidecars, then NIfTI metadata, then DICOM, then *default_mm_s*.
+    """Resolve VENC in mm/s: NIfTI metadata, then JSON sidecars, then DICOM, then default.
 
     Returns ``(venc_mm_s, source_tag)``. When falling back to default, logs a warning
     (MATLAB QVTplus often used fixed 700 mm/s when tags were absent).
     """
-    v, src = _venc_from_json_dir(ap_dir)
-    if v is not None:
-        return v, src
-
     for meta, label in (
         (ap_phase_metadata, "ap_phase"),
         (magnitude_metadata, "magnitude"),
@@ -245,6 +294,10 @@ def resolve_venc_mm_s(
         if v2 is not None:
             return v2, f"{label}:{src2}"
 
+    v, src = _venc_from_json_dir(ap_dir)
+    if v is not None:
+        return v, src
+
     if dicom_search_dir is not None:
         v3, src3 = _venc_from_dicom_directory(dicom_search_dir)
         if v3 is not None:
@@ -252,7 +305,7 @@ def resolve_venc_mm_s(
 
     ctx = f" ({log_context})" if log_context else ""
     log.warning(
-        "VENC not found in JSON, NIfTI metadata, or DICOM under search paths%s; "
+        "VENC not found in NIfTI metadata, JSON, or DICOM under search paths%s; "
         "using default %.1f mm/s (fallback VENC).",
         ctx,
         float(default_mm_s),

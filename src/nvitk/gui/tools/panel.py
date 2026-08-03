@@ -20,6 +20,7 @@ from nvitk.gui.tools.registry import (
     tool_by_id,
     tool_id_from_label,
 )
+from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
 
 
@@ -85,6 +86,9 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "label_ids",
         "new_id",
         "output_dir",
+        "topology",
+        "n_workers",
+        "input_already_smoothed",
         "working_dir",
         "task",
         "correction_ids",
@@ -398,6 +402,13 @@ def build_tool_panel(
         label_id={"label": "Label id", "min": 0, "max": 9999, "value": 1},
         new_id={"label": "Output label id", "min": 0, "max": 9999, "value": 1},
         output_dir={"label": "Output directory", "value": ""},
+        topology={
+            "choices": list(_morpho_topology_choices()),
+            "label": "Topology JSON",
+            "value": "none",
+        },
+        n_workers={"label": "Workers", "min": 1, "max": 64, "value": 1},
+        input_already_smoothed={"label": "Input already Taubin-smoothed", "value": False},
         working_dir={"label": "Working directory", "value": "."},
         task={
             "choices": list(AVAILABLE_TASKS),
@@ -781,6 +792,9 @@ def build_tool_panel(
         label_id: int,
         new_id: int,
         output_dir: str,
+        topology: str,
+        n_workers: int,
+        input_already_smoothed: bool,
         working_dir: str,
         task: str,
         correction_ids: str,

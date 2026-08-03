@@ -140,6 +140,10 @@ METADATA_TO_SAVE = [
     "(0020,0062)",
     "submodality",
     "rescale_type",
+    "HeartRate",
+    "(0018,1088)",
+    "VENC",
+    "(2001,101A)",
 ]
 
 OP_SOP_CLASS_UIDS = {
@@ -643,6 +647,46 @@ def _filter_metadata_for_nifti(metadata: dict[str, Any], additional_tags: list[s
     return filtered_metadata
 
 
+def _venc_scalar_from_philips_list(raw: Any) -> float | None:
+    """Collapse Philips ``(2001,101A)`` 3-float list to the non-zero encoding value."""
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        vals = []
+        for x in raw:
+            try:
+                vals.append(float(x))
+            except (TypeError, ValueError):
+                continue
+        nonzero = [abs(v) for v in vals if abs(v) > 1e-9]
+        if not nonzero:
+            return None
+        return float(max(nonzero))
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if abs(v) > 1e-9 else None
+
+
+def _enrich_venc_and_heartrate_aliases(md: dict[str, Any]) -> dict[str, Any]:
+    """Ensure friendly ``VENC`` / ``HeartRate`` keys when DICOM tags are present."""
+    out = dict(md)
+    if "VENC" not in out:
+        raw = out.get("(2001,101A)") or out.get("(2001,101a)")
+        scalar = _venc_scalar_from_philips_list(raw)
+        if scalar is not None:
+            out["VENC"] = float(scalar)
+    if "HeartRate" not in out:
+        hr = out.get("(0018,1088)")
+        if hr is not None:
+            try:
+                out["HeartRate"] = float(hr)
+            except (TypeError, ValueError):
+                out["HeartRate"] = hr
+    return out
+
+
 def _get_nifti_extension(compress: bool = False) -> str:
     return ".nii.gz" if compress else ".nii"
 
@@ -650,7 +694,7 @@ def _get_nifti_extension(compress: bool = False) -> str:
 def _save_metadata_json(nifti_path: str, metadata: dict[str, Any]) -> None:
     try:
         json_path = nifti_path.replace(".nii.gz", ".json").replace(".nii", ".json")
-        keep, clean_metadata = _strip_array_values(metadata)
+        keep, clean_metadata = _strip_array_values(_enrich_venc_and_heartrate_aliases(metadata))
         if not keep or not isinstance(clean_metadata, dict):
             clean_metadata = {}
         with open(json_path, "w", encoding="utf-8") as f:
@@ -909,7 +953,8 @@ def _save_image_with_metadata(
     additional_tags: list[str] | None = None,
 ) -> None:
     try:
-        md_filtered = _filter_metadata_for_nifti(md, additional_tags)
+        md_enriched = _enrich_venc_and_heartrate_aliases(md)
+        md_filtered = _filter_metadata_for_nifti(md_enriched, additional_tags)
         keep, md_clean = _strip_array_values(md_filtered)
         if not keep or not isinstance(md_clean, dict):
             md_clean = {}

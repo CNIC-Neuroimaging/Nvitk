@@ -717,6 +717,18 @@ class QcPanel(QWidget):
                         stage6_dir=stage6,
                         on_revised=self._on_subject_revised,
                     )
+                try:
+                    from nvitk.gui.viz.cohort_violin_panel import show_cohort_violin
+
+                    self._cohort_violin_panel = show_cohort_violin(
+                        self._viewer,
+                        highlight_subject=subject_uid,
+                    )
+                except Exception as violin_exc:  # noqa: BLE001
+                    notify(
+                        f"Cohort violin dock skipped: {violin_exc}",
+                        error=True,
+                    )
                 notify(f"QC loaded qvtpy subject {subject_uid}.")
             else:
                 load_eicab_qc_layers(

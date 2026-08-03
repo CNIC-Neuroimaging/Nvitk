@@ -24,7 +24,6 @@ from nvitk.viz.centerline_pick import (
 )
 
 from nvitk.gui.core.spatial import (
-    layer_affine,
     layer_spatial_kwargs,
     layer_spacing,
     world_to_data_coords,
@@ -134,62 +133,6 @@ def _disconnect_pick_callback(target: Any, callback: Any) -> None:
             target.mouse_drag_callbacks.remove(callback)
     except Exception:
         pass
-
-
-def _world_to_layer_data(layer: Any, position: Any) -> np.ndarray | None:
-    """Unclipped world→data coords for *layer*'s 3D spatial grid.
-
-    Uses ``layer.world_to_data`` (per-layer transform), which correctly handles a
-    3D layer embedded in a higher-dim viewer, then keeps the trailing 3 axes.
-    """
-    if position is None:
-        return None
-    try:
-        data_pos = layer.world_to_data(position)
-        pos = to_numpy(data_pos).astype(np.float64).ravel()
-    except Exception:
-        pos = to_numpy(position).astype(np.float64).ravel()
-        aff = layer_affine(layer)
-        if aff is not None and pos.size >= 3:
-            inv = np.linalg.inv(to_numpy(aff).astype(np.float64))
-            homog = np.array([pos[-3], pos[-2], pos[-1], 1.0], dtype=np.float64)
-            pos = (inv @ homog)[:3]
-    if pos.size < 3:
-        return None
-    return pos[-3:].astype(np.float64)
-
-
-def _view_ray_in_layer_data(
-    layer: Any,
-    position: Any,
-    view_direction: Any,
-) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Ray (origin, into-scene unit direction) in *layer* data coords.
-
-    Mapping both the click point and a point one step along the view direction with
-    the layer's own ``world_to_data`` keeps origin and direction on the same axes,
-    even when a higher-dim (4D) layer shifts Napari's displayed world axes.
-    """
-    if position is None:
-        return None, None
-    origin = _world_to_layer_data(layer, position)
-    if origin is None:
-        return None, None
-    if view_direction is None:
-        return origin, None
-    pos_arr = to_numpy(position).astype(np.float64).ravel()
-    vd_arr = to_numpy(view_direction).astype(np.float64).ravel()
-    n = min(pos_arr.size, vd_arr.size)
-    if n == 0:
-        return origin, None
-    tip = _world_to_layer_data(layer, pos_arr[:n] + vd_arr[:n])
-    if tip is None:
-        return origin, None
-    direction = -(tip - origin)
-    norm = float(np.linalg.norm(direction))
-    if norm <= 1e-9:
-        return origin, None
-    return origin, (direction / norm).astype(np.float64)
 
 
 def _plane_square_corners(
@@ -930,17 +873,12 @@ def install_vessel_cross_sections(
     def _pick_view_line_from_event(event: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
         """View line in voxel space: through click, direction into the scene.
 
-        Both the ray origin and direction are mapped with ``intensity_layer.world_to_data``
-        so the pick stays consistent even when extra 4D layers embed the intensity layer
-        on different world axes (Napari right-aligns dims, shifting ``dims_displayed``).
+        Prefer Napari ``get_ray_intersections`` on the intensity layer so the ray
+        matches the viewer's transform / displayed dims (same stack as status hover).
         """
-        pos = getattr(event, "position", None)
-        if pos is None:
-            pos = getattr(getattr(viewer, "cursor", None), "position", None)
-        view_dir = getattr(event, "view_direction", None)
-        if view_dir is None:
-            view_dir = getattr(getattr(viewer, "dims", None), "view_direction", None)
-        return _view_ray_in_layer_data(intensity_layer, pos, view_dir)
+        from nvitk.gui.core.label_pick import view_ray_via_layer
+
+        return view_ray_via_layer(intensity_layer, event, viewer=viewer)
 
     def _try_pick_from_event(event: Any, *, ndisplay: int) -> CenterlinePick | None:
         pos = getattr(event, "position", None)

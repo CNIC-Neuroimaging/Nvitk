@@ -1,0 +1,32 @@
+{
+  "1": {
+    "name": "LICA",
+    "full_name": "LICA",
+    "side": "L",
+    "pair": "ICA",
+    "territory": "anterior",
+    "flow_from": "systemic",
+    "flow_to": [],
+    "no_upstream_start": "inferior"
+  },
+  "2": {
+    "name": "RICA",
+    "full_name": "RICA",
+    "side": "R",
+    "pair": "ICA",
+    "territory": "anterior",
+    "flow_from": "systemic",
+    "flow_to": [],
+    "no_upstream_start": "inferior"
+  },
+  "3": {
+    "name": "BASILAR",
+    "full_name": "BASILAR",
+    "side": "",
+    "pair": null,
+    "territory": "posterior",
+    "flow_from": "systemic",
+    "flow_to": [],
+    "no_upstream_start": "inferior"
+  }
+}

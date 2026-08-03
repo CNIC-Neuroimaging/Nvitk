@@ -263,9 +263,9 @@ def run_case(
     elif mapping_json and os.path.exists(mapping_json):
         resolved_mapping = load_mapping(mapping_json)
     else:
-        from nvitk.pipes.qvtpy.util.eicab.morpho_topology import build_eicab_topology_mapping
+        from nvitk.measure.morpho.topology_io import load_qvtpy_topology
 
-        resolved_mapping = build_eicab_topology_mapping()
+        resolved_mapping = load_qvtpy_topology()
 
     case_id = os.path.basename(seg_path).replace(".nii.gz", "").replace(".nii", "")
     case_out_dir = case_out_dir_override or os.path.join(out_dir, case_id)

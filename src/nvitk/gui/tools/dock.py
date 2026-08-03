@@ -286,9 +286,11 @@ def build_tools_dock(
     cow_btn_layout = QHBoxLayout()
     cow_btn_layout.setContentsMargins(0, 0, 0, 0)
     btn_cow_add = QPushButton("Add CC to tree")
+    btn_cow_deselect = QPushButton("Deselect")
     btn_cow_done = QPushButton("Tree done")
     btn_cow_cancel = QPushButton("Cancel")
     cow_btn_layout.addWidget(btn_cow_add)
+    cow_btn_layout.addWidget(btn_cow_deselect)
     cow_btn_layout.addWidget(btn_cow_done)
     cow_btn_layout.addWidget(btn_cow_cancel)
     cow_btn_row.setLayout(cow_btn_layout)
@@ -315,6 +317,7 @@ def build_tools_dock(
             )
             enabled = False
         btn_cow_add.setEnabled(enabled)
+        btn_cow_deselect.setEnabled(enabled)
         btn_cow_done.setEnabled(enabled)
         btn_cow_cancel.setEnabled(active)
 
@@ -327,6 +330,17 @@ def build_tools_dock(
             notify("No active Mouse TOF CoW session. Run the tool first.", error=True)
             return
         sess.add_highlighted_cc()
+        _sync_cow_row()
+
+    def _cow_deselect() -> None:
+        from nvitk.gui.lab.mouse_tof_cow import get_session
+        from nvitk.gui.tools.runner import notify
+
+        sess = get_session(viewer)
+        if sess is None:
+            notify("No active Mouse TOF CoW session. Run the tool first.", error=True)
+            return
+        sess.clear_highlight()
         _sync_cow_row()
 
     def _cow_done() -> None:
@@ -347,6 +361,7 @@ def build_tools_dock(
         _sync_cow_row()
 
     btn_cow_add.clicked.connect(_cow_add)
+    btn_cow_deselect.clicked.connect(_cow_deselect)
     btn_cow_done.clicked.connect(_cow_done)
     btn_cow_cancel.clicked.connect(_cow_cancel)
 

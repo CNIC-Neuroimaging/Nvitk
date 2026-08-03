@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
+from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 
 ParamKind = Literal[
     "int",
@@ -1266,6 +1267,37 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description="Report polyline arc length in voxels and mm for debugging.",
     ),
     GuiToolSpec(
+        "measure_morphometrics",
+        "Measure",
+        "Morphometrics",
+        (
+            ParamSpec("output_dir", "Output directory", "str", ""),
+            ParamSpec(
+                "topology",
+                "Topology JSON",
+                "choice",
+                "none",
+                choices=_morpho_topology_choices(),
+            ),
+            ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
+            ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
+            ParamSpec(
+                "input_already_smoothed",
+                "Input already Taubin-smoothed",
+                "bool",
+                False,
+            ),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Run vessel-wise TOF morphometrics on the selected multilabel Labels layer. "
+            "Choose a topology JSON under measure/morpho/topology, or 'none' for "
+            "topology-agnostic per-label metrics. Leave Output directory empty to "
+            "show results in the GUI only."
+        ),
+    ),
+    GuiToolSpec(
         "masked_stats",
         "Measure",
         "Masked intensity stats",
@@ -1440,6 +1472,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "centerline_cut_junctions",
     "measure_generate_suv",
     "measure_centerline_arc_length",
+    "measure_morphometrics",
     "measure_loc_hemodynamics",
     "volume_mm3",
     "volume_cc",

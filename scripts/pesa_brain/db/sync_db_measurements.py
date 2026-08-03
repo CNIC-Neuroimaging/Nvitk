@@ -4,6 +4,10 @@
 Stage 6 (``loc_measurements.csv`` / ``vessel_hemodynamics.csv``) → pipeline ``4dflow_v3``.
 Stage 7 (``case_metrics_donut_tree.xlsx``) → pipeline ``tof_morpho_v1``.
 
+LOC hemodynamics include surviving PCOMMs (``LPCOMM`` / ``RPCOMM``) when present in
+``loc_measurements.csv``; ACOMM is never measured. This sync script publishes all
+LOC vessel rows without a vessel blacklist — PCOMM counts are logged in the summary.
+
 Examples::
 
     python scripts/pesa_brain/db/sync_db_measurements.py \\
@@ -35,6 +39,7 @@ from nvitk.pipes.qvtpy.common.db_publish import (
     QVTPY_PIPELINE_ID,
     _UPSERT_KEY,
     build_image_measurement_rows_from_stage6,
+    count_pcomm_rows,
     resolve_repo,
 )
 from nvitk.pipes.qvtpy.common.morpho_db_publish import (
@@ -428,11 +433,15 @@ def main(
             batch6 = pd.concat(frames_s6, ignore_index=True)
             n_s6_rows = len(batch6)
             all_batches.append(batch6)
+            pcomm = count_pcomm_rows(batch6)
             log.info(
-                "Collected %d stage6 row(s) for %d subject(s) (pipeline=%s)",
+                "Collected %d stage6 row(s) for %d subject(s) (pipeline=%s); "
+                "PCOMM: LPCOMM=%d RPCOMM=%d",
                 n_s6_rows,
                 n_ok_s6,
                 QVTPY_PIPELINE_ID,
+                pcomm["LPCOMM"],
+                pcomm["RPCOMM"],
             )
 
         if frames_s7:

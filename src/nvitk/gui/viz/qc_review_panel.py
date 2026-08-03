@@ -51,8 +51,12 @@ def _fmt_parts(parts: list[str]) -> str:
     return "; ".join(p for p in parts if p)
 
 
-def load_qc_measurement_rows(stage6_dir: Path) -> list[dict[str, Any]]:
-    """Build grouped QC review rows from stage-6 CSVs.
+def load_qc_measurement_rows(
+    stage6_dir: Path,
+    *,
+    stage7_dir: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Build grouped QC review rows from stage-6 CSVs (+ optional stage-7 stenosis).
 
     Grouping
     --------
@@ -60,6 +64,8 @@ def load_qc_measurement_rows(stage6_dir: Path) -> list[dict[str, Any]]:
     2. **PITC / territory** — one OK/FAIL per LICA / RICA / BASILAR covering slope +
        intercept (all stations in that territory).
     3. **PWV / territory** — one OK/FAIL per territory covering Bjornfoot + Fielding.
+    4. **Stenosis / vessel** — informational morphometrics rows from stage-7 Path Summary
+       (max stenosis %, length, segment count). Empty ``variable_ids`` → display only.
 
     Branch-level PITC/PWV rows are omitted; only territory (root) values are shown.
     """
@@ -172,6 +178,53 @@ def load_qc_measurement_rows(stage6_dir: Path) -> list[dict[str, Any]]:
                         "unit": "",
                     }
                 )
+
+    # Stage-7 morphometrics stenosis (optional; display-only unless DB variables exist).
+    s7 = Path(stage7_dir) if stage7_dir is not None else Path(stage6_dir).parent / "stage7_morphometrics"
+    excel = s7 / "case_metrics_donut_tree.xlsx"
+    if excel.is_file():
+        try:
+            from nvitk.gui.viz.morpho_viz import _aggregate_summary_by_vessel
+
+            raw = pd.read_excel(excel, sheet_name="00_Path_Summary")
+            summary = _aggregate_summary_by_vessel(raw)
+            for _, row in summary.iterrows():
+                vessel = str(row.get("vessel_name") or "").strip()
+                if not vessel:
+                    continue
+                parts: list[str] = []
+                sten_max = row.get("stenosis_percent_max", row.get("degree_of_stenosis_pct"))
+                if pd.notna(sten_max):
+                    parts.append(f"stenosis_max={_fmt(float(sten_max))} %")
+                sten_len = row.get("stenosis_length_total_mm")
+                if pd.notna(sten_len):
+                    parts.append(f"stenosis_len={_fmt(float(sten_len))} mm")
+                sten_n = row.get("stenosis_segments_n")
+                if pd.notna(sten_n):
+                    parts.append(f"segments={int(float(sten_n))}")
+                r_mean = row.get("radius_mean_mm")
+                if pd.notna(r_mean):
+                    parts.append(f"radius_mean={_fmt(float(r_mean))} mm")
+                if not parts:
+                    continue
+                rows.append(
+                    {
+                        "metric_key": "stenosis",
+                        "variable_ids": [],
+                        "metric_label": "Stenosis / caliber",
+                        "region_id": vessel,
+                        "region_label": vessel,
+                        "value": _fmt_parts(parts),
+                        "unit": "",
+                        "review_optional": True,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Keep hemodynamics QC usable even if morphometrics Excel is incomplete.
+            from nvitk.core.logger import Logger
+
+            Logger().warning("QC stenosis rows skipped: %s", exc)
+
     return rows
 
 
@@ -251,7 +304,8 @@ class QcMeasurementsPanel(QWidget):
 
     def load_from_stage6(self, subject_uid: str, stage6_dir: Path) -> int:
         self._subject_uid = str(subject_uid).strip()
-        self._rows = load_qc_measurement_rows(stage6_dir)
+        stage7_dir = Path(stage6_dir).parent / "stage7_morphometrics"
+        self._rows = load_qc_measurement_rows(stage6_dir, stage7_dir=stage7_dir)
         self._table.setRowCount(0)
         self._table.setRowCount(len(self._rows))
         for i, row in enumerate(self._rows):
@@ -283,10 +337,11 @@ class QcMeasurementsPanel(QWidget):
         n_loc = sum(1 for r in self._rows if r.get("metric_key") == "loc")
         n_pitc = sum(1 for r in self._rows if r.get("metric_key") == "pitc")
         n_pwv = sum(1 for r in self._rows if r.get("metric_key") == "pwv")
+        n_sten = sum(1 for r in self._rows if r.get("metric_key") == "stenosis")
         self._status.setText(
             f"{len(self._rows)} check(s) for {self._subject_uid} "
-            f"(LOC vessels={n_loc}, PITC territories={n_pitc}, PWV territories={n_pwv}). "
-            "One OK/FAIL covers the grouped metrics; then revise."
+            f"(LOC={n_loc}, PITC={n_pitc}, PWV={n_pwv}, stenosis={n_sten}). "
+            "One OK/FAIL covers the grouped metrics; stenosis rows are optional."
         )
         self._refresh_revise_enabled()
         return len(self._rows)
@@ -294,13 +349,18 @@ class QcMeasurementsPanel(QWidget):
     def _all_marked(self) -> bool:
         if self._table.rowCount() == 0:
             return False
+        required = False
         for i in range(self._table.rowCount()):
+            row = self._rows[i] if i < len(self._rows) else {}
+            if row.get("review_optional"):
+                continue
+            required = True
             w = self._table.cellWidget(i, self.COL_STATUS)
             if not isinstance(w, QComboBox):
                 return False
             if not str(w.currentData() or "").strip():
                 return False
-        return True
+        return required
 
     def _refresh_revise_enabled(self, *_args: Any) -> None:
         self._btn_revise.setEnabled(self._all_marked())

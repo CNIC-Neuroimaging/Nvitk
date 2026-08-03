@@ -82,7 +82,11 @@ DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM = 3
 
 DISCARD_SHORT_CENTERLINE_PATHS = True
 MIN_CENTERLINE_PATH_LENGTH_MM = 7.5
+# Trim duplicated shared trunks on later tree arms, but keep a short junction
+# neighborhood so bifurcations are not erased from the exported polylines.
 PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES = True
+# Keep this much shared-prefix arc length (mm) on each arm after overlap prune.
+KEEP_SHARED_PREFIX_AT_BIFURCATION_MM = 2.0
 FINAL_CENTERLINE_OVERLAP_TOL_MM = None
 FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE = 10
 
@@ -96,6 +100,8 @@ VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM = {"LICA": 10.0, "RICA": 10.0, "BA": 10.0
 
 ENABLE_RECURSIVE_TREE_SEGMENTS = True
 TREE_SEGMENT_ASSIGN_TOL_MM = None
+# After anatomic split export, drop full root→terminal VTPs to avoid duplicate
+# overlapping overlays of the same vessel.
 REMOVE_ROOT_TO_TERMINAL_CENTERLINE_VTPS_AFTER_SPLIT = True
 
 SKELETON_STEP_MM = None

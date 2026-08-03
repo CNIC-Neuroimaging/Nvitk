@@ -377,10 +377,11 @@ def process_component_tree_vmtk(
     if EXPORT_ANATOMIC_SPLIT_CENTERLINES and use_tree_mode:
         expected_anatomic = int(len(path_results))
         saved_anatomic = list(dict.fromkeys(saved_anatomic))
-        if len(saved_anatomic) < expected_anatomic:
+        # Only fall back to full root→terminal exports when anatomic split wrote
+        # nothing — stacking fallbacks on partial splits reintroduces overlapping trunks.
+        if not saved_anatomic:
             print(
-                f"    [anatomic sanity] Expected at least {expected_anatomic} final centerline VTP(s) "
-                f"after pruning, but anatomical export wrote {len(saved_anatomic)}. "
+                "    [anatomic sanity] Anatomical export wrote no centerline VTP(s). "
                 "Writing anatomical fallback centerline(s) so no surviving vessel path is lost."
             )
             fallback_saved = save_anatomic_fallback_centerlines(
@@ -390,7 +391,13 @@ def process_component_tree_vmtk(
                 centerline_dir=centerline_dir,
                 centerline_radius_dir=centerline_radius_dir,
             )
-            saved_anatomic = list(dict.fromkeys(saved_anatomic + fallback_saved))
+            saved_anatomic = list(dict.fromkeys(fallback_saved))
+        elif len(saved_anatomic) < expected_anatomic:
+            print(
+                f"    [anatomic sanity] Anatomical export wrote {len(saved_anatomic)} "
+                f"segment VTP(s) (paths={expected_anatomic}); keeping split segments only "
+                "to avoid overlapping root→terminal duplicates."
+            )
         tree_summary["n_anatomic_centerline_vtps_expected_min"] = expected_anatomic
         tree_summary["n_anatomic_centerline_vtps_written"] = int(len(saved_anatomic))
         tree_summary["anatomic_centerline_vtps_written"] = ";".join(saved_anatomic)

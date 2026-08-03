@@ -181,181 +181,16 @@ def _disconnect_pick_callback(target: Any, callback: Any) -> None:
         pass
 
 
-def _world_to_layer_data(layer: Any, position: Any) -> np.ndarray | None:
-    """Unclipped world→data coords for *layer*'s trailing 3 spatial axes."""
-    if position is None:
-        return None
-    try:
-        data_pos = layer.world_to_data(position)
-        pos = to_numpy(data_pos).astype(np.float64).ravel()
-    except Exception:
-        from nvitk.gui.core.spatial import layer_affine
-
-        pos = to_numpy(position).astype(np.float64).ravel()
-        aff = layer_affine(layer)
-        if aff is not None and pos.size >= 3:
-            inv = np.linalg.inv(to_numpy(aff).astype(np.float64))
-            homog = np.array([pos[-3], pos[-2], pos[-1], 1.0], dtype=np.float64)
-            pos = (inv @ homog)[:3]
-    if pos.size < 3:
-        return None
-    return pos[-3:].astype(np.float64)
-
-
-def _view_ray_in_layer_data(
-    layer: Any,
-    position: Any,
-    view_direction: Any,
-) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Ray (origin, into-scene unit direction) in *layer* data coords."""
-    if position is None:
-        return None, None
-    origin = _world_to_layer_data(layer, position)
-    if origin is None:
-        return None, None
-    if view_direction is None:
-        return origin, None
-    pos_arr = to_numpy(position).astype(np.float64).ravel()
-    vd_arr = to_numpy(view_direction).astype(np.float64).ravel()
-    n = min(pos_arr.size, vd_arr.size)
-    if n == 0:
-        return origin, None
-    tip = _world_to_layer_data(layer, pos_arr[:n] + vd_arr[:n])
-    if tip is None:
-        return origin, None
-    # Napari view_direction points toward the camera; pick into the scene.
-    direction = -(tip - origin)
-    norm = float(np.linalg.norm(direction))
-    if norm <= 1e-9:
-        return origin, None
-    return origin, (direction / norm).astype(np.float64)
-
-
-def _ray_box_t_range(
-    origin: np.ndarray,
-    direction: np.ndarray,
-    shape: tuple[int, ...],
-) -> tuple[float, float] | None:
-    """Intersection of ray with [0, shape) AABB; return ``(t_enter, t_exit)``."""
-    t0 = -np.inf
-    t1 = np.inf
-    for i in range(3):
-        o = float(origin[i])
-        d = float(direction[i])
-        lo, hi = 0.0, float(shape[i]) - 1e-6
-        if abs(d) < 1e-12:
-            if o < lo or o > hi:
-                return None
-            continue
-        ta = (lo - o) / d
-        tb = (hi - o) / d
-        tn, tf = (ta, tb) if ta <= tb else (tb, ta)
-        t0 = max(t0, tn)
-        t1 = min(t1, tf)
-        if t0 > t1:
-            return None
-    if t1 < 0:
-        return None
-    return max(0.0, t0), t1
-
-
-def _sample_label_along_ray(
-    volume: np.ndarray,
-    origin: np.ndarray,
-    direction: np.ndarray,
-    *,
-    step: float = 0.5,
-    skip_ids: set[int] | None = None,
-) -> int | None:
-    """First positive label along a data-space ray (front-most hit)."""
-    bounds = _ray_box_t_range(origin, direction, volume.shape)
-    if bounds is None:
-        return None
-    t_enter, t_exit = bounds
-    skip = skip_ids or set()
-    t = float(t_enter)
-    # Slight push past the near face to avoid empty boundary hits.
-    t += 0.25 * float(step)
-    shape = volume.shape
-    while t <= t_exit:
-        p = origin + t * direction
-        zi = int(round(float(p[0])))
-        yi = int(round(float(p[1])))
-        xi = int(round(float(p[2])))
-        if 0 <= zi < shape[0] and 0 <= yi < shape[1] and 0 <= xi < shape[2]:
-            lid = int(volume[zi, yi, xi])
-            if lid > 0 and lid not in skip:
-                return lid
-        t += float(step)
-    return None
-
-
-def _sample_label_2d(layer: Any, event: Any) -> int | None:
-    """Slice / plane pick via Napari ``get_value``."""
-    pos = getattr(event, "position", None)
-    if pos is None:
-        return None
-    try:
-        val = layer.get_value(pos, world=True)
-    except TypeError:
-        try:
-            val = layer.get_value(pos)
-        except Exception:
-            return None
-    except Exception:
-        return None
-    if val is None:
-        return None
-    try:
-        lid = int(val)
-    except (TypeError, ValueError):
-        return None
-    return lid if lid > 0 else None
-
-
 def _sample_label(
     layer: Any,
     event: Any,
     *,
     viewer: Any | None = None,
-    skip_ids: set[int] | None = None,
 ) -> int | None:
-    """Return positive label id under click (2D slice or 3D volume ray)."""
-    ndisplay = 2
-    if viewer is not None:
-        try:
-            ndisplay = int(getattr(viewer.dims, "ndisplay", 2))
-        except Exception:
-            ndisplay = 2
+    """Return positive label id under click via Napari's Labels pick API."""
+    from nvitk.gui.core.label_pick import label_id_under_mouse
 
-    # Prefer direct value in 2D; in 3D volume view get_value is often empty.
-    if ndisplay != 3:
-        lid = _sample_label_2d(layer, event)
-        if lid is not None:
-            if skip_ids and lid in skip_ids:
-                return lid  # caller reports "already assigned"
-            return lid
-
-    view_dir = getattr(event, "view_direction", None)
-    if view_dir is None and viewer is not None:
-        view_dir = getattr(getattr(viewer, "camera", None), "view_direction", None)
-    origin, direction = _view_ray_in_layer_data(
-        layer, getattr(event, "position", None), view_dir
-    )
-    if origin is None or direction is None:
-        # Fallback: clipped world→data point (may still work in some 3D modes).
-        return _sample_label_2d(layer, event)
-
-    meta = getattr(layer, "metadata", None) or {}
-    cached = meta.get(_META_SOURCE_KEY)
-    vol = to_numpy(cached if cached is not None else layer.data)
-    if vol.ndim != 3:
-        return None
-    lid = _sample_label_along_ray(vol, origin, direction, skip_ids=skip_ids)
-    if lid is None and ndisplay == 3:
-        # Soft fallback to get_value if ray missed thin structures.
-        return _sample_label_2d(layer, event)
-    return lid
+    return label_id_under_mouse(layer, event, viewer=viewer)
 
 
 @dataclass
@@ -418,17 +253,16 @@ class MouseTofCowSession:
             return
         if not _is_left_mouse_button(event):
             return
+        from nvitk.gui.tools.runner import notify
+
         lid = _sample_label(
             self.labels_layer,
             event,
             viewer=self.viewer,
-            skip_ids=set(self.assigned),
         )
         if lid is None:
             return
         if lid in self.assigned:
-            from nvitk.gui.tools.runner import notify
-
             notify(f"CC {lid} already assigned to tree label {self.assigned[lid]}.", error=True)
             return
         self.highlight_id = int(lid)
@@ -437,6 +271,16 @@ class MouseTofCowSession:
         yield  # napari mouse_drag generator protocol
         while getattr(event, "type", None) == "mouse_move":
             yield
+
+    def clear_highlight(self) -> None:
+        """Clear the pending CC highlight without changing assignments."""
+        self.highlight_id = None
+        try:
+            if hasattr(self.labels_layer, "show_selected_label"):
+                self.labels_layer.show_selected_label = False
+        except Exception:
+            pass
+        self._push_status()
 
     def _apply_highlight(self) -> None:
         layer = self.labels_layer

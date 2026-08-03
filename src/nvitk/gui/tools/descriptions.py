@@ -108,6 +108,13 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "measure_centerline_arc_length": (
         "Report centerline polyline arc length in voxels and mm (debug)."
     ),
+    "measure_morphometrics": (
+        "Run TOF morphometrics on the selected multilabel Labels layer. "
+        "Topology dropdown lists JSON files under measure/morpho/topology "
+        "(qvtpy_topology.json, mouse_root_topology.json, …); choose 'none' for "
+        "vessel-wise metrics without CoW topology. Leave Output directory empty "
+        "to display results in the GUI only (nothing persisted)."
+    ),
     "seg_adjust_masks": "Morphological adjust label masks (open/close per label).",
     "seg_totalsegmentator": "Run TotalSegmentator on the active image.",
     "seg_eicab": "Run EICAB segmentation (cluster or local).",
