@@ -552,7 +552,12 @@ def build_tool_panel(
             "label": "Polyline extraction mode",
             "value": "junction_split",
         },
-        min_branch_points={"label": "Min points per branch", "min": 2, "max": 5000, "value": 5},
+        min_branch_points={
+            "label": "Min branch points (0 = keep all)",
+            "min": 0,
+            "max": 5000,
+            "value": 0,
+        },
         min_junction_degree={"label": "Min skeleton degree", "min": 2, "max": 26, "value": 3},
         branch_id={"label": "Branch id (-1 = auto)", "min": -1, "max": 99, "value": -1},
         reskeletonize={"label": "Re-skeletonize centerline mask", "value": False},

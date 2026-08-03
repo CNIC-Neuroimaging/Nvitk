@@ -250,6 +250,19 @@ def run_case(
         raise FileNotFoundError(f"Segmentation not found: {seg_path}")
 
     multilabel, _affine, spacing = load_multilabel_nifti(seg_path)
+    if bool(getattr(_config, "BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES", False)):
+        from nvitk.morphology.mst_bridge import fill_multilabel_gaps_mst
+
+        multilabel = fill_multilabel_gaps_mst(
+            multilabel,
+            close_radius=int(getattr(_config, "BRIDGE_LABEL_CLOSE_RADIUS", 0)),
+            bridge_max_gap=int(getattr(_config, "BRIDGE_LABEL_MAX_GAP_VOXELS", 12)),
+            bridge_radius=1,
+        )
+        print(
+            "  Bridged nearby same-label gaps "
+            f"(max_gap={int(getattr(_config, 'BRIDGE_LABEL_MAX_GAP_VOXELS', 12))} vx)."
+        )
     if not _config.PROCESS_ALL_CONNECTED_COMPONENTS:
         multilabel = keep_largest_component_per_label(multilabel)
 
@@ -263,9 +276,9 @@ def run_case(
     elif mapping_json and os.path.exists(mapping_json):
         resolved_mapping = load_mapping(mapping_json)
     else:
-        from nvitk.measure.morpho.topology_io import load_qvtpy_topology
+        from nvitk.measure.morpho.topology_io import load_eicab_topology
 
-        resolved_mapping = load_qvtpy_topology()
+        resolved_mapping = load_eicab_topology()
 
     case_id = os.path.basename(seg_path).replace(".nii.gz", "").replace(".nii", "")
     case_out_dir = case_out_dir_override or os.path.join(out_dir, case_id)

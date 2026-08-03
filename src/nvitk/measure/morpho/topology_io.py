@@ -2,6 +2,12 @@
 
 Topology files live under ``nvitk/measure/morpho/topology/*.json`` and use the
 schema expected by :func:`nvitk.measure.morpho.io_utils.load_mapping`.
+
+- ``eicab_topology.json`` — eICAB TOF label IDs (1–18). Used by qvtpy stage-7
+  morphometrics (input masks are eICAB, not ``seg_4dflow``).
+- ``qvtpy_topology.json`` — 4D-flow / qvtpy pipeline label IDs (arterial 1–14,
+  venous 31–34). Reference only; not selected by the qvtpy pipeline.
+- ``mouse_root_topology.json`` — mouse CoW root vessels.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ from nvitk.measure.morpho.io_utils import load_mapping
 from nvitk.measure.morpho.models import VesselInfo
 
 TOPOLOGY_NONE = "none"
+EICAB_TOPOLOGY_NAME = "eicab_topology.json"
 QVTPY_TOPOLOGY_NAME = "qvtpy_topology.json"
 MOUSE_ROOT_TOPOLOGY_NAME = "mouse_root_topology.json"
 
@@ -65,25 +72,33 @@ def load_topology(name_or_path: str | Path | None) -> dict[int, VesselInfo] | No
     return load_mapping(str(path))
 
 
-def default_qvtpy_topology_path() -> Path:
-    """Path to the qvtpy / eICAB topology JSON (source of truth for stage-7)."""
-    return topology_dir() / QVTPY_TOPOLOGY_NAME
+def default_eicab_topology_path() -> Path:
+    """Path to the eICAB topology JSON (qvtpy stage-7 morphometrics default)."""
+    return topology_dir() / EICAB_TOPOLOGY_NAME
 
 
-def load_qvtpy_topology() -> dict[int, VesselInfo]:
-    """Load the default qvtpy topology mapping."""
-    path = default_qvtpy_topology_path()
+def load_eicab_topology() -> dict[int, VesselInfo]:
+    """Load the eICAB topology mapping (TOF / eICAB label IDs)."""
+    path = default_eicab_topology_path()
     if not path.is_file():
-        raise FileNotFoundError(f"Missing qvtpy topology JSON: {path}")
+        raise FileNotFoundError(f"Missing eICAB topology JSON: {path}")
     return load_mapping(str(path))
 
 
+# Back-compat aliases (historically misnamed "qvtpy" while content was eICAB).
+default_qvtpy_topology_path = default_eicab_topology_path
+load_qvtpy_topology = load_eicab_topology
+
+
 __all__ = [
+    "EICAB_TOPOLOGY_NAME",
     "MOUSE_ROOT_TOPOLOGY_NAME",
     "QVTPY_TOPOLOGY_NAME",
     "TOPOLOGY_NONE",
+    "default_eicab_topology_path",
     "default_qvtpy_topology_path",
     "list_topology_jsons",
+    "load_eicab_topology",
     "load_qvtpy_topology",
     "load_topology",
     "resolve_topology_path",

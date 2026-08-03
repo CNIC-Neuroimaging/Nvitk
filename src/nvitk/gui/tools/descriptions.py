@@ -45,6 +45,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "centerline_detect_junctions": (
         "Mark skeleton branch points (degree ≥ N) on a 3D centerline mask."
     ),
+    "centerline_to_polyline": (
+        "Convert a complete centerline mask into smoothed Napari path shapes. "
+        "Per label keeps the main path and all unique branch edges through "
+        "bifurcations. Min branch points (0 = keep all) is the only prune."
+    ),
     "centerline_cut_junctions": (
         "Split a label at junction markers from Detect skeleton junctions."
     ),
@@ -111,7 +116,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "measure_morphometrics": (
         "Run TOF morphometrics on the selected multilabel Labels layer. "
         "Topology dropdown lists JSON files under measure/morpho/topology "
-        "(qvtpy_topology.json, mouse_root_topology.json, …); choose 'none' for "
+        "(eicab_topology.json for TOF/eICAB labels, qvtpy_topology.json for "
+        "4D-flow reference labels, mouse_root_topology.json, …); choose 'none' for "
         "vessel-wise metrics without CoW topology. Leave Output directory empty "
         "to display results in the GUI only (nothing persisted)."
     ),

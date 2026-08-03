@@ -355,6 +355,9 @@ def centerlines_from_segmentation(
                 min_points=int(lid_min),
                 min_branch_points=int(min_branch_points),
                 prefer_points_by_label={int(lid): prefs} if prefs is not None else None,
+                keep_all_components=True,
+                bridge_max_gap=12,
+                connected_edges=True,
             )
             paths = br.get(int(lid)) or []
         else:
@@ -363,6 +366,7 @@ def centerlines_from_segmentation(
                 labels=[int(lid)],
                 min_points=int(lid_min),
                 prefer_points_by_label={int(lid): prefs} if prefs is not None else None,
+                bridge_max_gap=12,
             )
             pts = cl.get(int(lid))
             paths = [pts] if pts is not None else []

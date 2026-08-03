@@ -12,7 +12,14 @@ from __future__ import annotations
 
 from ._common import make_ball_footprint
 from .binary import close, dilate, erode, fill_holes, open
-from .centerline import compute_centerlines, skeletonize_binary, skeletonize_labeled
+from .centerline import (
+    compute_centerline_branches,
+    compute_centerlines,
+    compute_connected_centerline_tree,
+    skeletonize_binary,
+    skeletonize_labeled,
+    unique_skeleton_edge_polylines,
+)
 from .centerline_siphon import (
     GenusReport,
     SiphonCorrectionResult,
@@ -46,8 +53,11 @@ __all__ = [
     "clean_ica_mask_after_centerline",
     "clean_mask_geodesic_cl",
     "close",
+    "compute_centerline_branches",
     "compute_centerlines",
+    "compute_connected_centerline_tree",
     "compute_corrected_centerline",
+    "unique_skeleton_edge_polylines",
     "compute_mask_genus",
     "correct_siphon_centerlines",
     "dilate",

@@ -1,19 +1,19 @@
-"""eICAB / qvtpy label topology for TOF morphometrics.
+"""eICAB vessel-topology mapping for qvtpy stage-7 morphometrics.
 
-The vessel graph is defined by
-``nvitk/measure/morpho/topology/qvtpy_topology.json``. This module keeps a
-compatibility loader used by legacy imports.
+Stage-7 still runs on eICAB TOF multilabel masks, so the topology source of
+truth is ``nvitk/measure/morpho/topology/eicab_topology.json`` (not the
+4D-flow ``qvtpy_topology.json`` reference file).
 """
 
 from __future__ import annotations
 
 from nvitk.measure.morpho.models import VesselInfo
-from nvitk.measure.morpho.topology_io import load_qvtpy_topology
+from nvitk.measure.morpho.topology_io import load_eicab_topology
 
 
 def build_eicab_topology_mapping() -> dict[int, VesselInfo]:
-    """Return label-id -> :class:`VesselInfo` from ``qvtpy_topology.json``."""
-    return load_qvtpy_topology()
+    """Return label-id -> :class:`VesselInfo` from ``eicab_topology.json``."""
+    return load_eicab_topology()
 
 
 __all__ = ["build_eicab_topology_mapping"]

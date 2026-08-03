@@ -56,6 +56,7 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "seg_remove_labels",
     "centerline_detect_junctions",
     "centerline_cut_junctions",
+    "centerline_to_polyline",
     "viz_pet_hotspots",
     "viz_flowshow",
     "viz_flow_streamlines",
@@ -292,6 +293,31 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
         description=(
             "Mark skeleton branch points (degree ≥ N) on a 3D centerline mask."
+        ),
+    ),
+    GuiToolSpec(
+        "centerline_to_polyline",
+        "Centerline",
+        "To polyline",
+        (
+            ParamSpec(
+                "min_branch_points",
+                "Min branch points (0 = keep all)",
+                "int",
+                0,
+                min=0,
+                max=5000,
+            ),
+            ParamSpec("reskeletonize", "Re-skeletonize mask (thick masks only)", "bool", False),
+            ParamSpec("edge_width", "Path line width", "float", 0.35, min=0.05, max=5.0),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Convert a complete centerline mask into smoothed Napari path shapes. "
+            "Per label: longest main path plus every unique branch edge through "
+            "bifurcations (no dropped corridors). Optional min branch points is "
+            "the only length prune (0 = keep all)."
         ),
     ),
     GuiToolSpec(
@@ -1292,9 +1318,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
         description=(
             "Run vessel-wise TOF morphometrics on the selected multilabel Labels layer. "
-            "Choose a topology JSON under measure/morpho/topology, or 'none' for "
-            "topology-agnostic per-label metrics. Leave Output directory empty to "
-            "show results in the GUI only."
+            "Choose a topology JSON under measure/morpho/topology "
+            "(eicab_topology.json for TOF/eICAB; qvtpy_topology.json is the "
+            "4D-flow label reference), or 'none' for topology-agnostic "
+            "per-label metrics. Leave Output directory empty to show results "
+            "in the GUI only."
         ),
     ),
     GuiToolSpec(
@@ -1470,6 +1498,7 @@ def operation_help_text(tool_id: str | None) -> str:
 SGE_BLOCKLIST: frozenset[str] = frozenset({
     "centerline_detect_junctions",
     "centerline_cut_junctions",
+    "centerline_to_polyline",
     "measure_generate_suv",
     "measure_centerline_arc_length",
     "measure_morphometrics",

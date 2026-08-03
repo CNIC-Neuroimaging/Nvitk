@@ -38,7 +38,7 @@ Works on Windows Slicer builds (no antspyx wheels).
 2. Under **Additional module paths**, add the **module folder** (not its parent):
 
    ```text
-   /home/imarcoss/nvitk/slicer/MouseTOFCoW
+   ~/nvitk/slicer/MouseTOFCoW
    ```
 
    On Windows, e.g. `C:\path\to\nvitk\slicer\MouseTOFCoW`

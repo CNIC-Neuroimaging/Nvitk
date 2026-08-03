@@ -85,6 +85,7 @@ from nvitk.measure.morpho.tree_regions import (
 )
 from nvitk.measure.morpho.tree_segments import (
     annotate_anatomic_tree_segments,
+    build_connected_skeleton_edge_segments,
     build_recursive_tree_segments,
     save_anatomic_fallback_centerlines,
     save_anatomic_split_tree_centerlines,
@@ -184,11 +185,22 @@ def process_component_tree_vmtk(
     path_results = []
     point_sheets = {}
     n_short_centerline_paths_discarded = 0
-    recursive_tree_segments = build_recursive_tree_segments(tree, spacing) if use_tree_mode and ENABLE_RECURSIVE_TREE_SEGMENTS else []
-    if recursive_tree_segments:
-        recursive_tree_segments = annotate_anatomic_tree_segments(tree, recursive_tree_segments)
-    if recursive_tree_segments:
-        print(f"    [tree segments] Recursive skeleton segments: {len(recursive_tree_segments)}")
+    # Prefer unique morphology skeleton edges (connected at junctions, no
+    # overlapping trunks, all endpoints/roots covered). Fall back to the older
+    # root-directed recursive walk only if edge extraction yields nothing.
+    recursive_tree_segments = []
+    if use_tree_mode and ENABLE_RECURSIVE_TREE_SEGMENTS:
+        recursive_tree_segments = build_connected_skeleton_edge_segments(tree, spacing)
+        if not recursive_tree_segments:
+            recursive_tree_segments = build_recursive_tree_segments(tree, spacing)
+        if recursive_tree_segments:
+            recursive_tree_segments = annotate_anatomic_tree_segments(
+                tree, recursive_tree_segments
+            )
+            print(
+                f"    [tree segments] Connected skeleton-edge segments: "
+                f"{len(recursive_tree_segments)}"
+            )
 
     for path_i, path_vox in enumerate(path_vox_list, start=1):
         if len(path_vox) < 2:
@@ -354,6 +366,7 @@ def process_component_tree_vmtk(
                 centerline_radius_dir=centerline_radius_dir,
                 spacing=spacing,
                 root_idx=int(root_idx) if root_idx is not None else None,
+                mask_cc=mask_cc.astype(bool),
             )
         else:
             save_recursive_labeled_tree_path_centerlines(

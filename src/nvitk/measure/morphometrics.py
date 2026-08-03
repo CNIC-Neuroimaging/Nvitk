@@ -23,7 +23,7 @@ from nvitk.measure.morpho.preprocess_taubin import (
 from nvitk.measure.morpho.run_case import N_WORKERS, run_case
 from nvitk.measure.morpho.topology_io import (
     TOPOLOGY_NONE,
-    default_qvtpy_topology_path,
+    default_eicab_topology_path,
     load_topology,
     resolve_topology_path,
 )
@@ -100,8 +100,8 @@ def _resolve_mapping(
             return {}, None
         return load_topology(path) or {}, str(path)
 
-    # Default: qvtpy / eICAB topology JSON (same content as former coded mapping).
-    path = default_qvtpy_topology_path()
+    # Default: eICAB topology (TOF label IDs). Not the 4D-flow qvtpy_topology.json.
+    path = default_eicab_topology_path()
     return load_topology(path) or {}, str(path)
 
 
@@ -123,7 +123,7 @@ def run_morphometrics_case(
     1. Explicit ``mapping`` dict
     2. ``mapping_json`` path / basename under ``measure/morpho/topology/``
     3. ``mapping_json="none"`` → vessel-wise only (no topology)
-    4. Default ``qvtpy_topology.json``
+    4. Default ``eicab_topology.json``
 
     Returns path to ``case_metrics_donut_tree.xlsx``.
     """

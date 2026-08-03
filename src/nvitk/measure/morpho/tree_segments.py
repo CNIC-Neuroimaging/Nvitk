@@ -18,13 +18,90 @@ from nvitk.measure.morphometrics_config import (
     TREE_REGION_ROLE_CODES,
     TREE_SEGMENT_ASSIGN_TOL_MM,
 )
-from .geometry import arc_length, contiguous_true_runs, cumulative_s, resample_generated_centerline_points
+from .geometry import arc_length, resample_generated_centerline_points
 from .io_utils import safe_filename
-from .metrics import discrete_curvature, discrete_torsion
+from .metrics import discrete_curvature, discrete_torsion, radius_from_edt
 from .models import SkeletonTree, VesselInfo
 from .skeleton import dijkstra_dist_from_root
 from .surface import add_string_point_array, build_polyline_polydata, save_vtp
 from .tree_regions import branch_label_from_path, branch_path_from_segment_name
+
+_ATTR_TRANSFER_KEYS = (
+    "is_stenotic",
+    "is_enlarged",
+    "is_enlarged_cs",
+    "is_enlarged_mis",
+    "radius_mm",
+    "maximum_inscribed_sphere_radius_mm",
+    "stenosis_detection_radius_mm",
+    "stenosis_reference_radius_point",
+    "stenosis_threshold_radius_point",
+    "stenosis_raw_percent_point",
+    "stenosis_core_candidate_point",
+    "stenosis_support_candidate_point",
+    "stenosis_percent_point",
+    "enlargement_reference_radius_point",
+    "enlargement_threshold_radius_point",
+    "enlargement_percent_point",
+)
+
+
+def _path_results_attribute_cloud(
+    path_results: List[dict],
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Stack all path-result points + per-point attributes for nearest-neighbor transfer."""
+    pts_list: List[np.ndarray] = []
+    vals: dict[str, List[np.ndarray]] = {k: [] for k in _ATTR_TRANSFER_KEYS}
+    for res in path_results:
+        pts = centerline_points_from_result(res)
+        if len(pts) < 1:
+            continue
+        n = len(pts)
+        pts_list.append(pts)
+        defaults = {
+            "is_stenotic": np.zeros(n),
+            "is_enlarged": np.zeros(n),
+            "is_enlarged_cs": np.zeros(n),
+            "is_enlarged_mis": np.zeros(n),
+            "radius_mm": np.full(n, np.nan),
+            "maximum_inscribed_sphere_radius_mm": np.full(n, np.nan),
+            "stenosis_detection_radius_mm": np.asarray(
+                res.get("radius_mm", np.full(n, np.nan)), dtype=float
+            ),
+            "stenosis_reference_radius_point": np.full(n, np.nan),
+            "stenosis_threshold_radius_point": np.full(n, np.nan),
+            "stenosis_raw_percent_point": np.full(n, np.nan),
+            "stenosis_core_candidate_point": np.zeros(n, dtype=float),
+            "stenosis_support_candidate_point": np.zeros(n, dtype=float),
+            "stenosis_percent_point": np.full(n, np.nan),
+            "enlargement_reference_radius_point": np.full(n, np.nan),
+            "enlargement_threshold_radius_point": np.full(n, np.nan),
+            "enlargement_percent_point": np.full(n, np.nan),
+        }
+        for key in _ATTR_TRANSFER_KEYS:
+            vals[key].append(np.asarray(res.get(key, defaults[key]), dtype=float)[:n])
+    if not pts_list:
+        return np.empty((0, 3), dtype=float), {k: np.empty(0, dtype=float) for k in _ATTR_TRANSFER_KEYS}
+    return np.vstack(pts_list), {k: np.concatenate(v) for k, v in vals.items()}
+
+
+def _transfer_attrs_to_points(
+    query_pts: np.ndarray,
+    cloud_pts: np.ndarray,
+    cloud_vals: dict[str, np.ndarray],
+    *,
+    max_dist_mm: float,
+) -> dict[str, np.ndarray]:
+    n = len(query_pts)
+    out = {k: np.full(n, np.nan, dtype=float) for k in cloud_vals}
+    if n == 0 or len(cloud_pts) == 0:
+        return out
+    dist, idx = cKDTree(cloud_pts).query(query_pts, k=1)
+    ok = np.isfinite(dist) & (dist <= float(max_dist_mm))
+    for key, arr in cloud_vals.items():
+        transferred = np.asarray(arr, dtype=float)[idx]
+        out[key] = np.where(ok, transferred, np.nan)
+    return out
 
 def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
     if tree.root is None:
@@ -148,6 +225,127 @@ def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
 
             if cur in branch_node_to_cluster:
                 queue.append((end_junction, start_junction, depth + 1, segment_name))
+
+    return segments
+
+
+def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[dict]:
+    """Build anatomic segments from unique morphology skeleton edges.
+
+    Uses :func:`~nvitk.morphology.centerline.unique_skeleton_edge_polylines` so
+    every endpoint (including proximal roots) and every junction-to-junction
+    edge is covered exactly once. Edges are oriented away from the tree root
+    when distances are available so anatomic naming still works.
+    """
+    from nvitk.morphology.centerline import unique_skeleton_edge_polylines
+
+    spacing = np.asarray(spacing, dtype=float)
+    pts = np.asarray(tree.pts_vox, dtype=np.float32)
+    if pts.shape[0] < 2:
+        return []
+
+    if tree.root is not None and tree.dist_from_root_mm is not None:
+        dist_root = np.asarray(tree.dist_from_root_mm, dtype=float)
+    elif tree.root is not None:
+        dist_root = dijkstra_dist_from_root(tree, int(tree.root), spacing)
+    else:
+        dist_root = np.zeros(len(pts), dtype=float)
+
+    branchpoint_set = set(int(x) for x in tree.branchpoints)
+    endpoints = set(int(x) for x in tree.endpoints)
+
+    branch_node_to_cluster: Dict[int, int] = {}
+    cluster_members: Dict[int, List[int]] = {}
+    seen_branch_nodes = set()
+    for bp in sorted(branchpoint_set, key=lambda node: (float(dist_root[node]), node)):
+        if bp in seen_branch_nodes:
+            continue
+        cluster_id = len(cluster_members) + 1
+        queue_cluster = deque([bp])
+        seen_branch_nodes.add(bp)
+        members = []
+        while queue_cluster:
+            node = int(queue_cluster.popleft())
+            members.append(node)
+            branch_node_to_cluster[node] = cluster_id
+            for nbr in tree.neighbors[node]:
+                nbr = int(nbr)
+                if nbr in branchpoint_set and nbr not in seen_branch_nodes:
+                    seen_branch_nodes.add(nbr)
+                    queue_cluster.append(nbr)
+        cluster_members[cluster_id] = sorted(members, key=lambda node: (float(dist_root[node]), node))
+
+    def junction_key_for_node(node: int) -> str:
+        node = int(node)
+        if node in branch_node_to_cluster:
+            return f"B{branch_node_to_cluster[node]}"
+        if node in endpoints:
+            return f"E{node}"
+        return f"N{node}"
+
+    vox_to_idx = {
+        tuple(int(v) for v in row): int(i) for i, row in enumerate(pts)
+    }
+    edges = unique_skeleton_edge_polylines(
+        pts,
+        min_points=2,
+        prune_short_spurs=False,
+    )
+
+    segments: List[dict] = []
+    for edge in edges:
+        chain = []
+        for row in np.asarray(edge, dtype=float):
+            key = tuple(int(round(v)) for v in row[:3])
+            idx = vox_to_idx.get(key)
+            if idx is None:
+                # Fallback: nearest skeleton node (handles float rounding).
+                d2 = np.sum((pts - np.asarray(key, dtype=np.float32)) ** 2, axis=1)
+                idx = int(np.argmin(d2))
+            if not chain or int(chain[-1]) != int(idx):
+                chain.append(int(idx))
+        if len(chain) < 2:
+            continue
+        if float(dist_root[chain[0]]) > float(dist_root[chain[-1]]):
+            chain = list(reversed(chain))
+
+        start_node = int(chain[0])
+        end_node = int(chain[-1])
+        start_junction = junction_key_for_node(start_node)
+        end_junction = junction_key_for_node(end_node)
+        # Skip intra-junction micro-edges.
+        if start_junction == end_junction and start_junction.startswith("B"):
+            continue
+
+        seg_id = len(segments) + 1
+        segment_name = f"S.{seg_id}"
+        branch_path = branch_path_from_segment_name(segment_name)
+        branch_parts = [int(p) for p in branch_path.split(".") if p.isdigit()]
+        parent_branch_path = ".".join(str(p) for p in branch_parts[:-1])
+        branch_index = branch_parts[-1] if branch_parts else 0
+        branch_depth = len(branch_parts)
+        region_label = branch_label_from_path(branch_path)
+        pts_mm = pts[chain].astype(float) * spacing
+        segments.append({
+            "segment_id": int(seg_id),
+            "segment_name": segment_name,
+            "region_label": region_label,
+            "tree_region_role": "branch",
+            "tree_region_role_code": TREE_REGION_ROLE_CODES["branch"],
+            "tree_branch_path": branch_path,
+            "parent_tree_branch_path": parent_branch_path,
+            "tree_branch_index": int(branch_index),
+            "tree_branch_depth": int(branch_depth),
+            "depth": int(branch_depth),
+            "start_node": start_node,
+            "end_node": end_node,
+            "start_junction": start_junction,
+            "end_junction": end_junction,
+            "node_indices": [int(x) for x in chain],
+            "points": pts_mm,
+            "length_mm": float(arc_length(pts_mm)),
+            "is_terminal": bool(end_node in endpoints and end_node != tree.root),
+        })
 
     return segments
 
@@ -488,41 +686,50 @@ def save_anatomic_split_tree_centerlines(
     centerline_radius_dir: Optional[str],
     spacing,
     root_idx: Optional[int] = None,
+    mask_cc: Optional[np.ndarray] = None,
 ) -> List[str]:
+    """Export unique skeleton-edge centerlines that stay connected at bifurcations.
+
+    Geometry comes from the recursive skeleton segments (exact shared junction
+    voxels). Caliber / stenosis attributes are transferred from the measured
+    root→terminal paths by nearest-neighbor lookup so junctions are never
+    dropped by overlap pruning or path-assignment gaps.
+    """
     if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results or not segments:
         return []
 
     spacing = np.asarray(spacing, dtype=float)
-    assign_tol = TREE_SEGMENT_ASSIGN_TOL_MM if TREE_SEGMENT_ASSIGN_TOL_MM is not None else max(0.75, 2.0 * float(np.min(spacing)))
+    assign_tol = (
+        TREE_SEGMENT_ASSIGN_TOL_MM
+        if TREE_SEGMENT_ASSIGN_TOL_MM is not None
+        else max(0.75, 2.0 * float(np.min(spacing)))
+    )
     segment_by_id = {int(seg["segment_id"]): seg for seg in segments}
+
+    # Authoritative geometry: skeleton edges (connected at junctions).
     best_chunks: Dict[int, dict] = {}
-
-    for res in path_results:
-        pts = centerline_points_from_result(res)
-        if len(pts) < 2:
+    for seg in segments:
+        seg_id = int(seg["segment_id"])
+        skel_pts = np.asarray(seg.get("points", []), dtype=float)
+        if len(skel_pts) < 2:
             continue
-        assigned = assign_points_to_recursive_segments(pts, segments, assign_tol)
-        segment_ids = np.asarray(assigned["tree_segment_id"], dtype=float)
-        for seg_id in sorted(segment_by_id):
-            for start, end in contiguous_true_runs(segment_ids == float(seg_id)):
-                if end - start < 2:
-                    continue
-                chunk_pts = pts[start:end]
-                chunk_len = arc_length(chunk_pts)
-                previous = best_chunks.get(seg_id)
-                if previous is None or chunk_len > previous["length_mm"]:
-                    best_chunks[seg_id] = {
-                        "res": res,
-                        "start": int(start),
-                        "end": int(end),
-                        "points": chunk_pts,
-                        "length_mm": float(chunk_len),
-                    }
+        best_chunks[seg_id] = {
+            "res": path_results[0],
+            "start": 0,
+            "end": int(len(skel_pts)),
+            "points": skel_pts,
+            "length_mm": float(seg.get("length_mm", arc_length(skel_pts))),
+        }
+        seg["_anatomic_centerline_points_for_z"] = skel_pts
 
-    for seg_id, chunk in best_chunks.items():
-        if seg_id in segment_by_id:
-            segment_by_id[seg_id]["_anatomic_centerline_points_for_z"] = np.asarray(chunk["points"], dtype=float)
+    cloud_pts, cloud_vals = _path_results_attribute_cloud(path_results)
+
+    # Export unique skeleton edges as-is. Unary collapse can restitch long
+    # corridors for naming, but never drop an edge that has geometry — missing
+    # roots previously came from collapsing/skipping unsupported segments.
     export_segments = collapse_unary_supported_anatomic_segments(segments, best_chunks, root_idx)
+    if not export_segments:
+        export_segments = [seg for seg in segments if int(seg["segment_id"]) in best_chunks]
     if not export_segments:
         print("    [anatomic segments] Warning: no final supported tree segments to export.")
         return []
@@ -536,127 +743,99 @@ def save_anatomic_split_tree_centerlines(
         source_segment_ids = [int(x) for x in seg.get("source_segment_ids", [seg_id])]
 
         source_parts = []
-        value_parts: Dict[str, List[np.ndarray]] = {
-            "is_stenotic": [],
-            "is_enlarged": [],
-            "is_enlarged_cs": [],
-            "is_enlarged_mis": [],
-            "radius_mm": [],
-            "maximum_inscribed_sphere_radius_mm": [],
-            "stenosis_detection_radius_mm": [],
-            "stenosis_reference_radius_point": [],
-            "stenosis_threshold_radius_point": [],
-            "stenosis_raw_percent_point": [],
-            "stenosis_core_candidate_point": [],
-            "stenosis_support_candidate_point": [],
-            "stenosis_percent_point": [],
-            "enlargement_reference_radius_point": [],
-            "enlargement_threshold_radius_point": [],
-            "enlargement_percent_point": [],
-        }
         for source_seg_id in source_segment_ids:
-            chunk = best_chunks.get(source_seg_id)
-            if chunk is None:
-                continue
-            part_pts = np.asarray(chunk["points"], dtype=float)
+            src = segment_by_id.get(source_seg_id) or {}
+            part_pts = np.asarray(src.get("points", []), dtype=float)
+            if len(part_pts) == 0:
+                chunk = best_chunks.get(source_seg_id)
+                part_pts = np.asarray(chunk["points"], dtype=float) if chunk else np.empty((0, 3))
             if len(part_pts) == 0:
                 continue
-            drop_first = bool(source_parts and np.linalg.norm(source_parts[-1][-1] - part_pts[0]) <= 1e-6)
+            # Skeleton edges share exact junction voxels — drop duplicate endpoint.
+            drop_first = bool(
+                source_parts and np.linalg.norm(source_parts[-1][-1] - part_pts[0]) <= 1e-6
+            )
             if drop_first:
                 part_pts = part_pts[1:]
             if len(part_pts) == 0:
                 continue
             source_parts.append(part_pts)
 
-            res = chunk["res"]
-            start = int(chunk["start"])
-            end = int(chunk["end"])
-            defaults = {
-                "is_stenotic": np.zeros(len(res["s_mm"])),
-                "is_enlarged": np.zeros(len(res["s_mm"])),
-                "is_enlarged_cs": np.zeros(len(res["s_mm"])),
-                "is_enlarged_mis": np.zeros(len(res["s_mm"])),
-                "radius_mm": np.full(len(res["s_mm"]), np.nan),
-                "maximum_inscribed_sphere_radius_mm": np.full(len(res["s_mm"]), np.nan),
-                "stenosis_detection_radius_mm": np.asarray(res.get("radius_mm", np.full(len(res["s_mm"]), np.nan)), dtype=float),
-                "stenosis_reference_radius_point": np.full(len(res["s_mm"]), np.nan),
-                "stenosis_threshold_radius_point": np.full(len(res["s_mm"]), np.nan),
-                "stenosis_raw_percent_point": np.full(len(res["s_mm"]), np.nan),
-                "stenosis_core_candidate_point": np.zeros(len(res["s_mm"]), dtype=float),
-                "stenosis_support_candidate_point": np.zeros(len(res["s_mm"]), dtype=float),
-                "stenosis_percent_point": np.full(len(res["s_mm"]), np.nan),
-                "enlargement_reference_radius_point": np.full(len(res["s_mm"]), np.nan),
-                "enlargement_threshold_radius_point": np.full(len(res["s_mm"]), np.nan),
-                "enlargement_percent_point": np.full(len(res["s_mm"]), np.nan),
-            }
-            for key in value_parts:
-                values = np.asarray(res.get(key, defaults[key]), dtype=float)[start:end]
-                if drop_first:
-                    values = values[1:]
-                value_parts[key].append(values)
-
         if not source_parts:
             print(
-                f"    [anatomic segments] Warning: no centerline points assigned to "
+                f"    [anatomic segments] Warning: no skeleton points for "
                 f"{seg.get('anatomic_segment_path', seg_id)} (segment {seg_id})."
             )
             continue
 
         source_pts = np.vstack(source_parts)
-        source_s = cumulative_s(source_pts)
         pts = resample_generated_centerline_points(source_pts)
         n = len(pts)
-        target_s = cumulative_s(pts)
-        raw_segment_path = str(seg.get("anatomic_segment_path", seg.get("region_label", f"segment{seg_id:02d}")))
+        if n < 2:
+            continue
+
+        transferred = _transfer_attrs_to_points(
+            pts, cloud_pts, cloud_vals, max_dist_mm=float(assign_tol) * 2.0
+        )
+
+        # Prefer transferred radius; fill gaps with EDT on the vessel mask.
+        radius = np.asarray(transferred["radius_mm"], dtype=float)
+        if mask_cc is not None and ((~np.isfinite(radius)).any() or len(radius) == 0):
+            path_vox = [
+                tuple(
+                    np.clip(
+                        np.round(p / spacing).astype(int),
+                        0,
+                        np.asarray(mask_cc.shape) - 1,
+                    )
+                )
+                for p in pts
+            ]
+            edt_r = radius_from_edt(np.asarray(mask_cc, dtype=bool), spacing, path_vox)
+            radius = np.where(np.isfinite(radius), radius, edt_r)
+
+        def arr(key: str, default: float = np.nan, binary: bool = False) -> np.ndarray:
+            vals = np.asarray(transferred.get(key, np.full(n, default)), dtype=float)
+            if binary:
+                vals = np.where(np.isfinite(vals), vals, 0.0)
+                return (vals >= 0.5).astype(np.float64)
+            return vals
+
+        stenosis_binary = arr("is_stenotic", default=0.0, binary=True)
+        enlargement_binary = arr("is_enlarged", default=0.0, binary=True)
+        enlargement_binary_cs = arr("is_enlarged_cs", default=0.0, binary=True)
+        enlargement_binary_mis = arr("is_enlarged_mis", default=0.0, binary=True)
+        maximum_inscribed_sphere_radius = arr("maximum_inscribed_sphere_radius_mm")
+        stenosis_detection_radius = arr("stenosis_detection_radius_mm")
+        if not np.isfinite(stenosis_detection_radius).any():
+            stenosis_detection_radius = radius.copy()
+        stenosis_reference = arr("stenosis_reference_radius_point")
+        stenosis_threshold = arr("stenosis_threshold_radius_point")
+        stenosis_raw_percent = arr("stenosis_raw_percent_point")
+        stenosis_core_candidate = arr("stenosis_core_candidate_point", default=0.0, binary=True)
+        stenosis_support_candidate = arr("stenosis_support_candidate_point", default=0.0, binary=True)
+        stenosis_percent = arr("stenosis_percent_point")
+        enlargement_reference = arr("enlargement_reference_radius_point")
+        enlargement_threshold = arr("enlargement_threshold_radius_point")
+        enlargement_percent = arr("enlargement_percent_point")
+        curvature = discrete_curvature(pts)
+        torsion = discrete_torsion(pts)
+        tree_depth = np.full(n, float(seg.get("anatomic_generation", seg.get("tree_branch_depth", 0))), dtype=float)
+
+        raw_segment_path = str(
+            seg.get("anatomic_segment_path", seg.get("region_label", f"segment{seg_id:02d}"))
+        )
         segment_path = safe_filename(display_anatomic_segment_path(raw_segment_path))
         path_id = safe_filename(f"{vessel_token}_{segment_path}")
         if component_id != 1:
             path_id = safe_filename(f"{path_id}_comp{component_id:02d}")
-
-        def chain_array(key: str, default=np.nan, binary: bool = False) -> np.ndarray:
-            if not value_parts.get(key):
-                return np.full(n, default, dtype=float)
-            sliced = np.concatenate(value_parts[key]).astype(float)
-            if len(sliced) != len(source_pts):
-                return np.full(n, default, dtype=float)
-            unchanged_points = n == len(source_pts) and (n == 0 or np.allclose(pts, source_pts))
-            if len(source_s) < 2 or source_s[-1] <= 1e-12 or unchanged_points:
-                out = sliced.copy()
-            else:
-                valid = np.isfinite(sliced)
-                if valid.sum() < 2:
-                    out = np.full(n, default, dtype=float)
-                else:
-                    out = np.interp(target_s, source_s[valid], sliced[valid])
-            if binary:
-                return (out >= 0.5).astype(np.float64)
-            return out
-
-        stenosis_binary = chain_array("is_stenotic", default=0.0, binary=True)
-        enlargement_binary = chain_array("is_enlarged", default=0.0, binary=True)
-        enlargement_binary_cs = chain_array("is_enlarged_cs", default=0.0, binary=True)
-        enlargement_binary_mis = chain_array("is_enlarged_mis", default=0.0, binary=True)
-        radius = chain_array("radius_mm")
-        maximum_inscribed_sphere_radius = chain_array("maximum_inscribed_sphere_radius_mm")
-        stenosis_detection_radius = chain_array("stenosis_detection_radius_mm")
-        stenosis_reference = chain_array("stenosis_reference_radius_point")
-        stenosis_threshold = chain_array("stenosis_threshold_radius_point")
-        stenosis_raw_percent = chain_array("stenosis_raw_percent_point")
-        stenosis_core_candidate = chain_array("stenosis_core_candidate_point", default=0.0, binary=True)
-        stenosis_support_candidate = chain_array("stenosis_support_candidate_point", default=0.0, binary=True)
-        stenosis_percent = chain_array("stenosis_percent_point")
-        enlargement_reference = chain_array("enlargement_reference_radius_point")
-        enlargement_threshold = chain_array("enlargement_threshold_radius_point")
-        curvature = discrete_curvature(pts)
-        torsion = discrete_torsion(pts)
-        enlargement_percent = chain_array("enlargement_percent_point")
-        tree_depth = np.full(n, float(seg.get("anatomic_generation", seg.get("tree_branch_depth", 0))), dtype=float)
 
         poly = build_polyline_polydata(points=pts, arrays=[
             (curvature, "Curvature"),
             (torsion, "Torsion"),
             (radius, "EffectiveRadius"),
             (radius, "CrossSectionRadius"),
+            (np.pi * np.asarray(radius, dtype=float) ** 2, "CrossSectionArea"),
             (maximum_inscribed_sphere_radius, "MaximumInscribedSphereRadius"),
             (stenosis_detection_radius, "StenosisDetectionRadius"),
             (stenosis_reference, "StenosisReferenceRadius"),
@@ -678,7 +857,11 @@ def save_anatomic_split_tree_centerlines(
         ])
         add_string_point_array(poly, [str(seg.get("anatomic_segment_name", segment_path))] * n, "TreeLabel")
         add_string_point_array(poly, [segment_path] * n, "TreePath")
-        add_string_point_array(poly, [display_anatomic_segment_path(str(seg.get("anatomic_parent_path", "")))] * n, "ParentTreePath")
+        add_string_point_array(
+            poly,
+            [display_anatomic_segment_path(str(seg.get("anatomic_parent_path", "")))] * n,
+            "ParentTreePath",
+        )
         save_vtp(poly, os.path.join(centerline_dir, path_id + ".vtp"))
         saved.append(path_id)
 
@@ -689,7 +872,10 @@ def save_anatomic_split_tree_centerlines(
         keep_path_ids=set(saved),
     )
     if saved:
-        print(f"    [anatomic segments] Saved {len(saved)} split centerline VTP(s): {', '.join(saved)}")
+        print(
+            f"    [anatomic segments] Saved {len(saved)} connected skeleton-edge "
+            f"centerline VTP(s): {', '.join(saved)}"
+        )
     return saved
 
 

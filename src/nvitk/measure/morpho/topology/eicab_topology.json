@@ -35,96 +35,14 @@
     "territory": "posterior",
     "flow_from": "systemic",
     "flow_to": [
-      "LPCA",
-      "RPCA"
+      "LPCA_P1",
+      "RPCA_P1",
+      "LSCA",
+      "RSCA"
     ],
     "no_upstream_start": "inferior"
   },
   "4": {
-    "name": "LACA",
-    "full_name": "LACA",
-    "side": "L",
-    "pair": "ACA",
-    "territory": "anterior",
-    "flow_from": "LICA",
-    "flow_to": [],
-    "no_upstream_start": "anterior"
-  },
-  "5": {
-    "name": "RACA",
-    "full_name": "RACA",
-    "side": "R",
-    "pair": "ACA",
-    "territory": "anterior",
-    "flow_from": "RICA",
-    "flow_to": [],
-    "no_upstream_start": "anterior"
-  },
-  "6": {
-    "name": "LMCA",
-    "full_name": "LMCA",
-    "side": "L",
-    "pair": "MCA",
-    "territory": "anterior",
-    "flow_from": "LICA",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "7": {
-    "name": "RMCA",
-    "full_name": "RMCA",
-    "side": "R",
-    "pair": "MCA",
-    "territory": "anterior",
-    "flow_from": "RICA",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "8": {
-    "name": "LPCA",
-    "full_name": "LPCA",
-    "side": "L",
-    "pair": "PCA",
-    "territory": "posterior",
-    "flow_from": "BASILAR",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "9": {
-    "name": "RPCA",
-    "full_name": "RPCA",
-    "side": "R",
-    "pair": "PCA",
-    "territory": "posterior",
-    "flow_from": "BASILAR",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "10": {
-    "name": "LPCOMM",
-    "full_name": "LPCOMM",
-    "side": "L",
-    "pair": "PCOMM",
-    "territory": "anterior",
-    "flow_from": "LICA",
-    "flow_to": [
-      "LPCA"
-    ],
-    "no_upstream_start": null
-  },
-  "11": {
-    "name": "RPCOMM",
-    "full_name": "RPCOMM",
-    "side": "R",
-    "pair": "PCOMM",
-    "territory": "anterior",
-    "flow_from": "RICA",
-    "flow_to": [
-      "RPCA"
-    ],
-    "no_upstream_start": null
-  },
-  "12": {
     "name": "ACOMM",
     "full_name": "ACOMM",
     "side": "",
@@ -137,66 +55,150 @@
     ],
     "no_upstream_start": null
   },
-  "13": {
-    "name": "LVA",
-    "full_name": "LVA",
+  "5": {
+    "name": "LACA",
+    "full_name": "LACA",
     "side": "L",
-    "pair": "VA",
-    "territory": "posterior",
-    "flow_from": "systemic",
+    "pair": "ACA",
+    "territory": "anterior",
+    "flow_from": "LICA",
+    "flow_to": [],
+    "no_upstream_start": "anterior"
+  },
+  "6": {
+    "name": "RACA",
+    "full_name": "RACA",
+    "side": "R",
+    "pair": "ACA",
+    "territory": "anterior",
+    "flow_from": "RICA",
+    "flow_to": [],
+    "no_upstream_start": "anterior"
+  },
+  "7": {
+    "name": "LMCA",
+    "full_name": "LMCA",
+    "side": "L",
+    "pair": "MCA",
+    "territory": "anterior",
+    "flow_from": "LICA",
+    "flow_to": [],
+    "no_upstream_start": null
+  },
+  "8": {
+    "name": "RMCA",
+    "full_name": "RMCA",
+    "side": "R",
+    "pair": "MCA",
+    "territory": "anterior",
+    "flow_from": "RICA",
+    "flow_to": [],
+    "no_upstream_start": null
+  },
+  "9": {
+    "name": "LPCOMM",
+    "full_name": "LPCOMM",
+    "side": "L",
+    "pair": "PCOMM",
+    "territory": "anterior",
+    "flow_from": "LICA",
     "flow_to": [
-      "BASILAR"
+      "LPCA_P1"
     ],
-    "no_upstream_start": "inferior"
+    "no_upstream_start": null
+  },
+  "10": {
+    "name": "RPCOMM",
+    "full_name": "RPCOMM",
+    "side": "R",
+    "pair": "PCOMM",
+    "territory": "anterior",
+    "flow_from": "RICA",
+    "flow_to": [
+      "RPCA_P1"
+    ],
+    "no_upstream_start": null
+  },
+  "11": {
+    "name": "LPCA_P1",
+    "full_name": "LPCA_P1",
+    "side": "L",
+    "pair": "PCA",
+    "territory": "posterior",
+    "flow_from": "BASILAR",
+    "flow_to": [
+      "LPCA_P2"
+    ],
+    "no_upstream_start": null
+  },
+  "12": {
+    "name": "RPCA_P1",
+    "full_name": "RPCA_P1",
+    "side": "R",
+    "pair": "PCA",
+    "territory": "posterior",
+    "flow_from": "BASILAR",
+    "flow_to": [
+      "RPCA_P2"
+    ],
+    "no_upstream_start": null
+  },
+  "13": {
+    "name": "LPCA_P2",
+    "full_name": "LPCA_P2",
+    "side": "L",
+    "pair": "PCA",
+    "territory": "posterior",
+    "flow_from": "LPCA_P1",
+    "flow_to": [],
+    "no_upstream_start": null
   },
   "14": {
-    "name": "RVA",
-    "full_name": "RVA",
+    "name": "RPCA_P2",
+    "full_name": "RPCA_P2",
     "side": "R",
-    "pair": "VA",
+    "pair": "PCA",
     "territory": "posterior",
-    "flow_from": "systemic",
-    "flow_to": [
-      "BASILAR"
-    ],
-    "no_upstream_start": "inferior"
-  },
-  "31": {
-    "name": "SSSV",
-    "full_name": "SSSV",
-    "side": "",
-    "pair": null,
-    "territory": "venous",
-    "flow_from": "",
+    "flow_from": "RPCA_P1",
     "flow_to": [],
     "no_upstream_start": null
   },
-  "32": {
-    "name": "STRV",
-    "full_name": "STRV",
-    "side": "",
-    "pair": null,
-    "territory": "venous",
-    "flow_from": "",
-    "flow_to": [],
-    "no_upstream_start": null
-  },
-  "33": {
-    "name": "LTSV",
-    "full_name": "LTSV",
+  "15": {
+    "name": "LSCA",
+    "full_name": "LSCA",
     "side": "L",
-    "pair": "TSV",
-    "territory": "venous",
+    "pair": "SCA",
+    "territory": "posterior",
+    "flow_from": "BASILAR",
+    "flow_to": [],
+    "no_upstream_start": null
+  },
+  "16": {
+    "name": "RSCA",
+    "full_name": "RSCA",
+    "side": "R",
+    "pair": "SCA",
+    "territory": "posterior",
+    "flow_from": "BASILAR",
+    "flow_to": [],
+    "no_upstream_start": null
+  },
+  "17": {
+    "name": "LACHA",
+    "full_name": "LACHA",
+    "side": "L",
+    "pair": "ACHA",
+    "territory": "",
     "flow_from": "",
     "flow_to": [],
     "no_upstream_start": null
   },
-  "34": {
-    "name": "RTSV",
-    "full_name": "RTSV",
+  "18": {
+    "name": "RACHA",
+    "full_name": "RACHA",
     "side": "R",
-    "pair": "TSV",
-    "territory": "venous",
+    "pair": "ACHA",
+    "territory": "",
     "flow_from": "",
     "flow_to": [],
     "no_upstream_start": null

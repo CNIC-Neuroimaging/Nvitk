@@ -295,6 +295,10 @@ def run_gui_tool(
         _run_centerline_detect_junctions(viewer, layer, label_ids, params)
         return None
 
+    if tool_id == "centerline_to_polyline":
+        _run_centerline_to_polyline(viewer, layer, label_ids, params)
+        return None
+
     if tool_id == "viz_vessel_cross_sections":
         _run_viz_vessel_cross_sections(viewer, layer, params)
         return None
@@ -1926,6 +1930,67 @@ def _run_centerline_detect_junctions(
         notify("No skeleton junctions found (try lowering min degree).", error=True)
         return
     notify(f"Marked {junctions.shape[0]} junction(s) on '{JUNCTION_POINTS_LAYER}'.")
+
+
+def _run_centerline_to_polyline(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    from nvitk.gui.viz.centerline import (
+        DEFAULT_POLYLINE_LAYER,
+        add_centerline_polylines_shapes,
+        centerline_mask_to_polylines,
+    )
+
+    arr = to_numpy(layer.data)
+    if arr.ndim != 3:
+        raise ValueError("To polyline expects a 3D centerline mask layer.")
+    if not bool((arr > 0).any()):
+        raise ValueError("Centerline layer has no foreground voxels.")
+
+    labs = [int(x) for x in (label_ids or []) if int(x) != 0]
+    if not labs:
+        labs = sorted(int(v) for v in np.unique(arr) if int(v) != 0)
+    if not labs:
+        raise ValueError("No non-zero labels in the centerline mask.")
+
+    raw_min = params.get("min_branch_points", 0)
+    try:
+        min_bp = int(raw_min) if raw_min is not None else 0
+    except (TypeError, ValueError):
+        min_bp = 0
+    # 0 / negative → keep all edges (None semantics).
+    min_branch_points = None if min_bp <= 0 else min_bp
+
+    polylines = centerline_mask_to_polylines(
+        arr,
+        labels=labs,
+        min_branch_points=min_branch_points,
+        reskeletonize=bool(params.get("reskeletonize", False)),
+        smooth=True,
+    )
+    if not polylines:
+        notify("No centerline polylines extracted (empty or too short).", error=True)
+        return
+
+    src = str(getattr(layer, "name", "centerline") or "centerline")
+    layer_name = f"{src} polylines"
+    shapes = add_centerline_polylines_shapes(
+        viewer,
+        polylines,
+        reference_layer=layer,
+        layer_name=layer_name or DEFAULT_POLYLINE_LAYER,
+        edge_width=float(params.get("edge_width") or 0.35),
+    )
+    n_labels = len({int(p["label"]) for p in polylines})
+    n_main = sum(1 for p in polylines if p.get("role") == "main")
+    n_branch = len(polylines) - n_main
+    notify(
+        f"To polyline: {len(polylines)} path(s) from {n_labels} label(s) "
+        f"({n_main} main, {n_branch} branch) → '{getattr(shapes, 'name', layer_name)}'."
+    )
 
 
 def _resolve_centerline_mask_layer(viewer: Any) -> Any:

@@ -61,7 +61,13 @@ VMTK_MAX_CENTERLINE_ENDPOINT_SEED_DIST_MM = None
 VMTK_REFERENCE_CONNECTION_TOL_MM = None
 
 ENABLE_TREE_MODE = True
-PROCESS_ALL_CONNECTED_COMPONENTS = False
+# Keep every same-label CC so proximal roots that are briefly disconnected from
+# the main trunk still get centerlines (MST bridging reconnects small gaps first).
+PROCESS_ALL_CONNECTED_COMPONENTS = True
+# Reconnect nearby same-label fragments before centerline extraction.
+BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES = True
+BRIDGE_LABEL_MAX_GAP_VOXELS = 12
+BRIDGE_LABEL_CLOSE_RADIUS = 0
 MIN_TREE_ENDPOINTS_FOR_TREE_MODE = 3
 
 ENABLE_DONUT_LOOP_MODE = True
@@ -82,10 +88,12 @@ DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM = 3
 
 DISCARD_SHORT_CENTERLINE_PATHS = True
 MIN_CENTERLINE_PATH_LENGTH_MM = 7.5
-# Trim duplicated shared trunks on later tree arms, but keep a short junction
-# neighborhood so bifurcations are not erased from the exported polylines.
-PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES = True
-# Keep this much shared-prefix arc length (mm) on each arm after overlap prune.
+# Trim duplicated shared trunks on later tree arms. Keep disabled so every
+# root→terminal path retains the full bifurcation neighborhood; VTP export uses
+# unique skeleton edges (connected at junctions) to avoid duplicate trunks.
+PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES = False
+# Keep this much shared-prefix arc length (mm) on each arm after overlap prune
+# when PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES is enabled.
 KEEP_SHARED_PREFIX_AT_BIFURCATION_MM = 2.0
 FINAL_CENTERLINE_OVERLAP_TOL_MM = None
 FINAL_CENTERLINE_MIN_POINTS_AFTER_OVERLAP_PRUNE = 10
@@ -226,6 +234,9 @@ class MorphometricsConfig:
     radius_source_for_caliber_detection: str = RADIUS_SOURCE_FOR_CALIBER_DETECTION
     enable_tree_mode: bool = ENABLE_TREE_MODE
     process_all_connected_components: bool = PROCESS_ALL_CONNECTED_COMPONENTS
+    bridge_label_gaps_before_centerlines: bool = BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES
+    bridge_label_max_gap_voxels: int = BRIDGE_LABEL_MAX_GAP_VOXELS
+    bridge_label_close_radius: int = BRIDGE_LABEL_CLOSE_RADIUS
     enable_donut_loop_mode: bool = ENABLE_DONUT_LOOP_MODE
     discard_short_centerline_paths: bool = DISCARD_SHORT_CENTERLINE_PATHS
     min_centerline_path_length_mm: float = MIN_CENTERLINE_PATH_LENGTH_MM

@@ -1,10 +1,13 @@
 """Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
 
 **eICAB (input)** — integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0–18).
+Morphometrics topology for these ids: ``measure/morpho/topology/eicab_topology.json``.
 
 **qvtpy (pipeline)** — integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
 measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy`
 (merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31–34.
+Reference morphometrics topology (unused by stage-7):
+``measure/morpho/topology/qvtpy_topology.json``.
 
 **Outputs**
 
