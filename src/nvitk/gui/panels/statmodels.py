@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -39,63 +38,49 @@ from nvitk.db.repo import DataRepo, get_repo_from_settings
 from nvitk.gui.tools.runner import notify
 from nvitk.pipes.qvtpy.common.db_publish import QVTPY_PIPELINE_ID
 from nvitk.stats import (
-    aggregate_territory_measurements,
-    build_analysis_df_from_repo_frames,
+    build_long_analysis_frame,
+    features_for_kind,
     fit_or_load_mixedlm,
-    melt_imaging_territories,
+    grouping_choices_for,
     plot_mixedlm_params,
     print_mixedlm_info,
+    resolve_feature_id,
 )
 
 log = Logger()
 
 PIPELINE_KIND_QVTPY = "qvtpy"
 PIPELINE_KIND_ASL = "asl"
+PIPELINE_KIND_T1 = "t1"
+PIPELINE_KIND_FLAIR = "flair"
+PIPELINE_KIND_TOF = "tof"
 
-_MODALITY_BY_KIND = {
-    PIPELINE_KIND_QVTPY: "4dflow",
-    PIPELINE_KIND_ASL: "asl",
-}
-
-_GROUPING_MODES = (
-    ("Territory (melted)", "territory"),
-    ("Region L/R (region_id)", "region_lr"),
-    ("Region merged L/R", "region_merged_lr"),
+_PIPELINE_KIND_ITEMS = (
+    ("qvtpy — 4D flow hemodynamics", PIPELINE_KIND_QVTPY),
+    ("ASL — perfusion (CBF / ATT)", PIPELINE_KIND_ASL),
+    ("T1 — volumetry", PIPELINE_KIND_T1),
+    ("FLAIR — WMH", PIPELINE_KIND_FLAIR),
+    ("TOF — morphometrics (eICAB)", PIPELINE_KIND_TOF),
 )
 
 _ASL_ATLASES = (
-    ("vascular-0", "vascular-0"),
-    ("vascular-8", "vascular-8"),
-    ("vascular-12", "vascular-12"),
-    ("desikan", "desikan"),
+    ("Desikan (cortical parcels)", "desikan"),
+    ("Vascular atlas · smooth 0", "vascular-0"),
+    ("Vascular atlas · smooth 8", "vascular-8"),
+    ("Vascular atlas · smooth 12", "vascular-12"),
 )
 
 _FILTER_OPS = (">", ">=", "<", "<=", "==", "!=", "contains", "equals")
 
-_FEATURE_ALIASES: dict[str, str] = {
-    "flow": "flow_mean",
-    "pwv": "pwv",
-    "pi": "pi",
-    "ri": "ri",
-    "pitc": "pitc_slope",
-    "mean_cbf": "mean_cbf",
-    "att_mean": "att_mean",
-    "att_median": "att_median",
-    "cov_cbf": "cov_cbf",
-    "att_cov": "att_cov",
-}
-
 _DEFAULT_FORMULA = (
-    "flow ~ C(tacsctot_group, Treatment('None')) "
-    "* C(group_key, Treatment('MCA')) + age_c + sex + Hematocrit"
+    "flow_mean ~ C(tacsctot_group, Treatment('None')) "
+    "* C(group_key) + age_c + sex + Hematocrit"
 )
 _DEFAULT_GROUPS = "group_key"
 _DEFAULT_RE = "0"
 _DEFAULT_VC = '{"patient": "0 + C(subject_uid)"}'
 
 _TABLE_ROW_CAP = 500
-
-_LR_PREFIX_RE = re.compile(r"^(left_|right_|l_|r_)", re.IGNORECASE)
 
 _DARK_STYLESHEET = """
 QWidget {
@@ -189,92 +174,6 @@ def _parse_vc_formula(text: str) -> dict[str, str] | None:
     return {str(k): str(v) for k, v in value.items()}
 
 
-def _strip_lr_prefix(region_id: str) -> str:
-    return _LR_PREFIX_RE.sub("", str(region_id))
-
-
-def _resolve_feature_id(feature: str) -> str:
-    text = str(feature).strip() or "flow_mean"
-    return _FEATURE_ALIASES.get(text, text)
-
-
-def _attach_group_key(territory_df: pd.DataFrame, grouping: str) -> pd.DataFrame:
-    out = territory_df.copy()
-    if grouping == "region_lr":
-        out["group_key"] = out["region_id"].astype(str)
-    elif grouping == "region_merged_lr":
-        out["group_key"] = out["region_id"].astype(str).map(_strip_lr_prefix)
-    else:
-        out["group_key"] = out["territory"].astype(str)
-    return out
-
-
-def _merge_covariate_frames(
-    repo: DataRepo,
-    clinical_vars: list[str],
-    cognitive_vars: list[str],
-) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
-    if clinical_vars:
-        try:
-            clinical = repo.clinical(variables=clinical_vars, wide=True)
-            if clinical is not None and not clinical.empty:
-                frames.append(clinical)
-        except Exception as exc:
-            log.warning("Could not load clinical covariates: %s", exc)
-    if cognitive_vars:
-        try:
-            cognitive = repo.cognitive(variables=cognitive_vars, wide=True)
-            if cognitive is not None and not cognitive.empty:
-                frames.append(cognitive)
-        except Exception as exc:
-            log.warning("Could not load cognitive covariates: %s", exc)
-
-    if not frames:
-        return pd.DataFrame()
-    if len(frames) == 1:
-        return frames[0]
-
-    out = frames[0]
-    for frame in frames[1:]:
-        if "subject_uid" not in frame.columns or "subject_uid" not in out.columns:
-            continue
-        overlap = set(out.columns) & set(frame.columns) - {"subject_uid"}
-        frame_use = frame.drop(columns=[c for c in overlap if c in frame.columns], errors="ignore")
-        out = out.merge(frame_use, on="subject_uid", how="outer")
-    return out
-
-
-def _postprocess_analysis_df(
-    analysis: pd.DataFrame,
-    *,
-    feature: str,
-    variable_id: str,
-) -> pd.DataFrame:
-    rename: dict[str, str] = {}
-    if "territory_base" in analysis.columns and "territory" not in analysis.columns:
-        rename["territory_base"] = "territory"
-    if "Hematocrit" not in analysis.columns and "hematocrit" in analysis.columns:
-        rename["hematocrit"] = "Hematocrit"
-    if rename:
-        analysis = analysis.rename(columns=rename)
-
-    if "patient_id" not in analysis.columns and "subject_uid" in analysis.columns:
-        analysis["patient_id"] = analysis["subject_uid"]
-
-    if "age" in analysis.columns and "age_c" not in analysis.columns:
-        age = pd.to_numeric(analysis["age"], errors="coerce")
-        analysis["age_c"] = age - age.mean(skipna=True)
-    elif "age_at_mri" in analysis.columns and "age_c" not in analysis.columns:
-        age = pd.to_numeric(analysis["age_at_mri"], errors="coerce")
-        analysis["age_c"] = age - age.mean(skipna=True)
-
-    if variable_id in analysis.columns and feature not in analysis.columns:
-        if feature in _FEATURE_ALIASES or variable_id == "flow_mean":
-            analysis[feature] = analysis[variable_id]
-    return analysis
-
-
 def _load_analysis_frame(
     repo: DataRepo,
     *,
@@ -287,56 +186,16 @@ def _load_analysis_frame(
     cognitive_vars: list[str],
 ) -> pd.DataFrame:
     """Build a long analysis frame for image measurements + clinical/cognitive covariates."""
-    modality = _MODALITY_BY_KIND.get(pipeline_kind, "4dflow")
-    variable_id = _resolve_feature_id(feature)
-    pipeline_sel = (pipeline or "latest").strip() or "latest"
-
-    image_kwargs: dict[str, Any] = {
-        "modality": modality,
-        "pipeline": pipeline_sel,
-        "variables": [variable_id],
-        "wide": True,
-    }
-    if pipeline_kind == PIPELINE_KIND_ASL and atlas:
-        image_kwargs["atlas"] = str(atlas).strip()
-
-    image = repo.image(**image_kwargs)
-    if image.empty:
-        raise ValueError(
-            f"No {modality!r} image measurements for variable={variable_id!r} "
-            f"(pipeline={pipeline_sel!r})."
-        )
-
-    if modality == "4dflow":
-        melt_kwargs: dict[str, Any] = {"flow_vars": [variable_id], "asl_vars": []}
-    else:
-        melt_kwargs = {"flow_vars": [], "asl_vars": [variable_id]}
-
-    territory_df = melt_imaging_territories(image, **melt_kwargs)
-    if territory_df.empty:
-        raise ValueError("melt_imaging_territories returned no rows.")
-
-    territory_df = _attach_group_key(territory_df, grouping)
-    if grouping != "territory":
-        territory_df = territory_df.copy()
-        territory_df["territory"] = territory_df["group_key"]
-
-    covariate_vars = list(dict.fromkeys([*clinical_vars, *cognitive_vars]))
-    covariates = _merge_covariate_frames(repo, clinical_vars, cognitive_vars)
-    present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
-
-    if covariates.empty or not present:
-        wide = aggregate_territory_measurements(territory_df, [variable_id])
-    else:
-        wide = build_analysis_df_from_repo_frames(
-            territory_df,
-            covariates,
-            imaging_variable_ids=[variable_id],
-            covariate_cols=present,
-        )
-    wide["group_key"] = wide["territory"]
-
-    return _postprocess_analysis_df(wide, feature=feature, variable_id=variable_id)
+    return build_long_analysis_frame(
+        repo,
+        pipeline_kind=pipeline_kind,
+        pipeline=pipeline,
+        feature=feature,
+        grouping=grouping,
+        atlas=atlas,
+        clinical_vars=clinical_vars,
+        cognitive_vars=cognitive_vars,
+    )
 
 
 def _apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.DataFrame:
@@ -370,26 +229,6 @@ def _apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.
     if op == "!=":
         return df.loc[series.astype(str) != raw]
     return df.loc[series.astype(str) == raw]
-
-
-def _catalog_image_features(repo: DataRepo) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for alias in _FEATURE_ALIASES:
-        if alias not in seen:
-            seen.add(alias)
-            out.append(alias)
-    for entry in repo.catalog.variable_entries(domain="image"):
-        vid = str(entry.get("variable_id", "")).strip()
-        if vid and vid not in seen:
-            seen.add(vid)
-            out.append(vid)
-        for alias in entry.get("aliases") or []:
-            text = str(alias).strip()
-            if text and text not in seen:
-                seen.add(text)
-                out.append(text)
-    return out
 
 
 def _populate_checklist(widget: QListWidget, entries: list[dict[str, Any]]) -> None:
@@ -470,6 +309,8 @@ class StatmodelsWindow(QMainWindow):
         root.addWidget(self._status)
 
         self._pipeline_kind.currentIndexChanged.connect(self._on_pipeline_kind_changed)
+        self._feature.currentIndexChanged.connect(self._on_feature_changed)
+        self._feature.editTextChanged.connect(self._on_feature_changed)
         self._btn_reload.clicked.connect(self._on_reload)
         self._btn_apply_filter.clicked.connect(self._on_apply_filter)
         self._btn_clear_filter.clicked.connect(self._on_clear_filter)
@@ -482,24 +323,22 @@ class StatmodelsWindow(QMainWindow):
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
 
         self._on_pipeline_kind_changed()
-        self._populate_feature_combo()
 
     def _build_data_controls(self) -> QGroupBox:
         box = QGroupBox("Data selection")
         lay = QFormLayout(box)
 
         self._pipeline_kind = QComboBox()
-        self._pipeline_kind.addItem("qvtpy (4D flow hemodynamics)", PIPELINE_KIND_QVTPY)
-        self._pipeline_kind.addItem("ASL", PIPELINE_KIND_ASL)
+        for label, key in _PIPELINE_KIND_ITEMS:
+            self._pipeline_kind.addItem(label, key)
         idx = self._pipeline_kind.findData(self._initial_pipeline_kind)
         if idx >= 0:
             self._pipeline_kind.setCurrentIndex(idx)
 
         self._pipeline = QComboBox()
+        self._feature = QComboBox()
+        self._feature.setEditable(True)
         self._grouping = QComboBox()
-        for label, key in _GROUPING_MODES:
-            self._grouping.addItem(label, key)
-
         self._atlas = QComboBox()
         for label, key in _ASL_ATLASES:
             self._atlas.addItem(label, key)
@@ -507,16 +346,20 @@ class StatmodelsWindow(QMainWindow):
         if atlas_idx >= 0:
             self._atlas.setCurrentIndex(atlas_idx)
 
-        self._feature = QComboBox()
-        self._feature.setEditable(True)
+        self._atlas_label = QLabel("ASL atlas / smoothing")
+        self._grouping_label = QLabel("Grouping")
+        self._hint = QLabel("")
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet("color: #a0a0a0; font-weight: normal;")
 
         self._btn_reload = QPushButton("Reload data")
 
         lay.addRow("Pipeline kind", self._pipeline_kind)
         lay.addRow("Measurement pipeline", self._pipeline)
-        lay.addRow("Vessel / territory grouping", self._grouping)
-        lay.addRow("ASL atlas", self._atlas)
         lay.addRow("Image feature", self._feature)
+        lay.addRow(self._atlas_label, self._atlas)
+        lay.addRow(self._grouping_label, self._grouping)
+        lay.addRow("", self._hint)
         lay.addRow("", self._btn_reload)
         return box
 
@@ -652,7 +495,9 @@ class StatmodelsWindow(QMainWindow):
         return str(self._pipeline_kind.currentData() or PIPELINE_KIND_QVTPY)
 
     def _current_modality(self) -> str:
-        return _MODALITY_BY_KIND.get(self._current_pipeline_kind(), "4dflow")
+        from nvitk.stats import KIND_MODALITY
+
+        return KIND_MODALITY.get(self._current_pipeline_kind(), "4dflow")
 
     def _populate_pipeline_combo(self) -> None:
         current = str(self._pipeline.currentData() or "latest")
@@ -670,18 +515,82 @@ class StatmodelsWindow(QMainWindow):
         self._pipeline.blockSignals(False)
 
     def _populate_feature_combo(self) -> None:
-        current = self._feature.currentText().strip() or "flow"
+        kind = self._current_pipeline_kind()
+        feats = features_for_kind(kind)
+        current = self._feature.currentText().strip()
         self._feature.blockSignals(True)
         self._feature.clear()
-        for feat in _catalog_image_features(self._repo):
+        for feat in feats:
             self._feature.addItem(feat)
-        self._feature.setCurrentText(current)
+        if current and current in feats:
+            self._feature.setCurrentText(current)
+        elif feats:
+            self._feature.setCurrentIndex(0)
         self._feature.blockSignals(False)
 
-    def _on_pipeline_kind_changed(self) -> None:
+    def _populate_grouping_combo(self) -> None:
+        kind = self._current_pipeline_kind()
+        feature = self._current_feature()
+        choices = grouping_choices_for(kind, feature)
+        current = str(self._grouping.currentData() or "")
+        self._grouping.blockSignals(True)
+        self._grouping.clear()
+        for label, key in choices:
+            self._grouping.addItem(label, key)
+        idx = self._grouping.findData(current)
+        self._grouping.setCurrentIndex(idx if idx >= 0 else 0)
+        self._grouping.blockSignals(False)
+
+    def _sync_atlas_visibility(self) -> None:
         is_asl = self._current_pipeline_kind() == PIPELINE_KIND_ASL
         self._atlas.setEnabled(is_asl)
+        self._atlas_label.setEnabled(is_asl)
+        self._atlas.setVisible(is_asl)
+        self._atlas_label.setVisible(is_asl)
+
+    def _sync_hint(self) -> None:
+        kind = self._current_pipeline_kind()
+        vid = resolve_feature_id(self._current_feature())
+        if kind == PIPELINE_KIND_QVTPY:
+            if vid in {"pwv", "pwv_fielding_xcor", "pitc_slope", "pitc_intercept"}:
+                self._hint.setText(
+                    "Tree metrics: one value per arterial root (L_ICA / R_ICA / Basilar). "
+                    "Hemisphere grouping averages L/R ICA and keeps Basilar."
+                )
+            else:
+                self._hint.setText(
+                    "Vessel-wise LOC metrics (flow_mean / pi / ri). "
+                    "Hemisphere grouping averages left/right pairs (e.g. LMCA+RMCA → MCA)."
+                )
+        elif kind == PIPELINE_KIND_ASL:
+            self._hint.setText(
+                "Pick Desikan or one vascular-atlas smoothing (0 / 8 / 12). "
+                "Only that atlas’s regions are loaded."
+            )
+        elif kind == PIPELINE_KIND_T1:
+            self._hint.setText(
+                "T1 cortical vs subcortical volume — regions come from the matching atlas."
+            )
+        elif kind == PIPELINE_KIND_FLAIR:
+            self._hint.setText("FLAIR WMH metrics by published region_id.")
+        elif kind == PIPELINE_KIND_TOF:
+            self._hint.setText(
+                "TOF morphometrics by eICAB vessel. "
+                "Hemisphere grouping averages L/R pairs (e.g. LICA+RICA → ICA)."
+            )
+        else:
+            self._hint.setText("")
+
+    def _on_pipeline_kind_changed(self) -> None:
         self._populate_pipeline_combo()
+        self._populate_feature_combo()
+        self._populate_grouping_combo()
+        self._sync_atlas_visibility()
+        self._sync_hint()
+
+    def _on_feature_changed(self, *_args: Any) -> None:
+        self._populate_grouping_combo()
+        self._sync_hint()
 
     def _clinical_vars(self) -> list[str]:
         return _checked_variable_ids(self._clinical_list)
@@ -690,7 +599,11 @@ class StatmodelsWindow(QMainWindow):
         return _checked_variable_ids(self._cognitive_list)
 
     def _current_feature(self) -> str:
-        return self._feature.currentText().strip() or "flow"
+        text = self._feature.currentText().strip()
+        if text:
+            return text
+        feats = features_for_kind(self._current_pipeline_kind())
+        return feats[0] if feats else "flow_mean"
 
     def _working_df(self) -> pd.DataFrame | None:
         if self._filtered_df is not None:
@@ -740,13 +653,17 @@ class StatmodelsWindow(QMainWindow):
         atlas = None
         if self._current_pipeline_kind() == PIPELINE_KIND_ASL:
             atlas = str(self._atlas.currentData() or "vascular-8")
+        choices = grouping_choices_for(
+            self._current_pipeline_kind(), self._current_feature()
+        )
+        default_grouping = choices[0][1] if choices else "vessel"
         return _load_analysis_frame(
             self._repo,
             pipeline_kind=self._current_pipeline_kind(),
             pipeline=str(self._pipeline.currentData() or "latest"),
             feature=self._current_feature(),
             atlas=atlas,
-            grouping=str(self._grouping.currentData() or "territory"),
+            grouping=str(self._grouping.currentData() or default_grouping),
             clinical_vars=self._clinical_vars(),
             cognitive_vars=self._cognitive_vars(),
         )
@@ -1030,16 +947,16 @@ class StatmodelsPanel(QWidget):
         self._window: StatmodelsWindow | None = None
 
         self._pipeline_kind = QComboBox()
-        self._pipeline_kind.addItem("qvtpy (4D flow hemodynamics)", PIPELINE_KIND_QVTPY)
-        self._pipeline_kind.addItem("ASL", PIPELINE_KIND_ASL)
+        for label, key in _PIPELINE_KIND_ITEMS:
+            self._pipeline_kind.addItem(label, key)
 
         self._btn = QPushButton("Open Statmodels window")
         self._btn.clicked.connect(self._open_window)
 
         hint = QLabel(
-            "Explore MixedLM formulas over image / clinical / cognitive measurements "
-            "from the dataset catalog. Models are saved under "
-            "<dataset>/nvitk-statmodels/."
+            "Explore MixedLM formulas over 4D-flow, ASL, T1, FLAIR WMH, or TOF "
+            "morphometrics plus clinical / cognitive covariates from the dataset "
+            "catalog. Models are saved under <dataset>/nvitk-statmodels/."
         )
         hint.setWordWrap(True)
 

@@ -254,12 +254,29 @@ def _build_region_to_territory_flow(
     return out
 
 
-# Longest suffix first so ``mean_cbf`` wins over embedded shorter tokens.
+# Longest suffix first so ``mean_cbf`` / ``pwv_fielding_xcor`` win over shorter tokens.
 _WIDE_IMAGE_VARIABLE_SUFFIXES: tuple[str, ...] = tuple(
     sorted(
         {
             "t1_subcortical_volume",
             "t1_cortical_volume",
+            "pwv_fielding_xcor",
+            "pitc_intercept",
+            "curvature_mean_1_per_mm",
+            "curvature_p95_1_per_mm",
+            "stenosis_length_total_mm",
+            "enlargement_length_total_mm",
+            "radius_min_stenotic_mm",
+            "radius_max_enlarged_mm",
+            "stenosis_percent_max",
+            "enlargement_percent_max",
+            "stenosis_segments_n",
+            "enlargement_segments_n",
+            "radius_mean_mm",
+            "radius_max_mm",
+            "tortuosity_dm",
+            "damping_index",
+            "pitc_slope",
             "flow_tseries",
             "att_median",
             "mean_cbf",
@@ -267,11 +284,14 @@ _WIDE_IMAGE_VARIABLE_SUFFIXES: tuple[str, ...] = tuple(
             "cov_cbf",
             "att_cov",
             "flow_mean",
+            "length_mm",
             "wmh_reg",
             "wmh_les",
             "wmh_freq",
             "wmh_dist",
+            "pwv",
             "pi",
+            "ri",
             "psf",
             "tcbf",
         },
@@ -307,29 +327,44 @@ def _strip_known_prefix(col: str) -> str:
     Drop repeated leading ``{modality}_`` / ``{4dflow_vN}_`` segments produced by
     multi-modality / multi-pipeline wide pivots (see ``_compose_image_wide_keys``).
 
-    Only ``4dflow``, ``4dflow_v{n}``, ``asl``, ``t1``, and ``flair`` are removed,
-    so tokens like ``left_`` in ``left_mca_8_mean_cbf`` are never stripped.
+    Only ``4dflow``, ``4dflow_v{n}``, ``asl``, ``t1``, ``flair``, and ``tof`` are
+    removed, so tokens like ``left_`` in ``left_mca_8_mean_cbf`` are never stripped.
     """
     body = str(col)
     for _ in range(8):
-        m = re.match(r"^(4dflow_v\d+|4dflow|asl|t1|flair)_(.+)$", body, flags=re.IGNORECASE)
+        m = re.match(
+            r"^(4dflow_v\d+|4dflow|tof_morpho_v\d+|tof|asl|t1|flair)_(.+)$",
+            body,
+            flags=re.IGNORECASE,
+        )
         if not m:
             break
         body = m.group(2)
     return body
 
 
-def parse_wide_image_column(column: str) -> ParsedWideColumn | None:
+def parse_wide_image_column(
+    column: str,
+    *,
+    default_variable_id: str | None = None,
+) -> ParsedWideColumn | None:
     """
     Parse a wide image column name into region, variable, and optional frame
     index suffix (``f1``, ``f2``, … for ``flow_tseries``).
+
+    When ``DataRepo.image`` is queried with a single variable, wide columns are
+    region-only (no ``_{variable}`` suffix). Pass ``default_variable_id`` so those
+    columns still parse.
     """
     body = _strip_known_prefix(str(column))
     got = _extract_region_var_frame(body)
-    if got is None:
-        return None
-    region_id, variable_id, frame_suffix = got
-    return ParsedWideColumn(region_id, variable_id, frame_suffix)
+    if got is not None:
+        region_id, variable_id, frame_suffix = got
+        return ParsedWideColumn(region_id, variable_id, frame_suffix)
+    if default_variable_id and body and body not in {"subject_uid", "session_id", "visit_id"}:
+        # Single-variable wide: column name is the region_id only.
+        return ParsedWideColumn(body, str(default_variable_id), None)
+    return None
 
 
 def asl_vascular_parcel_to_territory(region_id: str) -> str | None:
@@ -384,6 +419,7 @@ def melt_imaging_territories(
     territory_asl_v8_regions: dict[str, tuple[str, ...]] | None = None,
     unmapped_label: str = "Unmapped",
     include_frame_index: bool = False,
+    default_variable_id: str | None = None,
 ) -> pd.DataFrame:
     """
     Long table: one row per ``id_cols`` × wide imaging column, with ``territory``
@@ -404,7 +440,16 @@ def melt_imaging_territories(
     if missing:
         raise KeyError(f"id_cols not in df: {missing}")
 
-    _flow = ("flow_mean", "pi") if flow_vars is None else tuple(flow_vars)
+    _flow = (
+        "flow_mean",
+        "pi",
+        "ri",
+        "pwv",
+        "pwv_fielding_xcor",
+        "pitc_slope",
+        "pitc_intercept",
+        "damping_index",
+    ) if flow_vars is None else tuple(flow_vars)
     _asl = (
         "mean_cbf",
         "att_mean",
@@ -413,14 +458,20 @@ def melt_imaging_territories(
         "att_cov",
     ) if asl_vars is None else tuple(asl_vars)
 
+    # When a single variable was requested, invent a default for region-only columns.
+    _default = default_variable_id
+    if _default is None:
+        if len(_flow) == 1 and not _asl:
+            _default = _flow[0]
+        elif len(_asl) == 1 and not _flow:
+            _default = _asl[0]
+
     id_list = list(_id)
     image_cols: list[str] = []
-    parsed_meta: list[ParsedWideColumn | None] = []
     for col in df.columns:
         if col in _id:
             continue
-        pw = parse_wide_image_column(col)
-        parsed_meta.append(pw)
+        pw = parse_wide_image_column(col, default_variable_id=_default)
         if pw is None:
             continue
         if pw.variable_id in _flow or pw.variable_id in _asl:
@@ -439,7 +490,7 @@ def melt_imaging_territories(
     rows: list[dict] = []
     for _, row in long.iterrows():
         col = str(row["_column"])
-        pw = parse_wide_image_column(col)
+        pw = parse_wide_image_column(col, default_variable_id=_default)
         if pw is None:
             continue
         var = pw.variable_id
