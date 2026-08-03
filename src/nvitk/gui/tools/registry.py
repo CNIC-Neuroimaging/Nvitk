@@ -70,6 +70,7 @@ _CATEGORY_ORDER = (
     "Visualization",
     "Transform",
     "Measure",
+    "Lab",
     "Pipelines",
 )
 
@@ -265,8 +266,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
     GuiToolSpec(
         "morph_biggest_cc",
         "Morphology",
-        "Largest connected component",
-        (ParamSpec("connectivity", "Connectivity", "int", 1, min=1, max=3),),
+        "Connected components",
+        (
+            ParamSpec("n_largest", "Keep N largest", "int", 1, min=1, max=1000),
+            ParamSpec("connectivity", "Connectivity", "int", 1, min=1, max=3),
+        ),
         needs_3d=True,
     ),
     GuiToolSpec(
@@ -443,8 +447,8 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
     GuiToolSpec(
         "seg_biggest_cc",
         "Segmentation",
-        "Largest connected component",
-        (),
+        "Connected components",
+        (ParamSpec("n_largest", "Keep N largest", "int", 1, min=1, max=1000),),
     ),
     GuiToolSpec(
         "seg_split_lr_cc",
@@ -1346,6 +1350,19 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         needs_reference_layer=True,
         run_mode="notify",
     ),
+    GuiToolSpec(
+        "lab_mouse_tof_cow",
+        "Lab",
+        "Mouse TOF CoW",
+        (),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Stage 1: N4 → blood flood from-scratch → label CCs on the active TOF volume. "
+            "Stage 2: click CCs on the labeled layer; Add CC to tree / Tree done for "
+            "Left ICA → Right ICA → Basilar (output labels 1/2/3)."
+        ),
+    ),
 )
 
 _PIPELINE_GUI: tuple[GuiToolSpec, ...] = tuple(
@@ -1454,6 +1471,7 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "seg_split_lr_cc",
     "seg_split_lr_midline",
     "seg_adjust_masks",
+    "lab_mouse_tof_cow",
     "reg_flirt_rigid",
     "reg_flirt_apply",
     "siphon_correct",

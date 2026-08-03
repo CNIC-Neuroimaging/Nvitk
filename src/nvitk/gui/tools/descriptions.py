@@ -35,7 +35,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "fill_holes": "Fill enclosed background regions in a binary mask.",
     "label_cc": "Label connected components in a mask.",
     "remove_small_components": "Remove connected components below a minimum size.",
-    "morph_biggest_cc": "Keep only the largest connected component.",
+    "morph_biggest_cc": (
+        "Keep the N largest connected components of a binary mask (N=1 → single largest)."
+    ),
     "skeletonize": (
         "Reduce a mask to a 1-voxel-thick skeleton / centerline; "
         "multilabel masks keep each label id on its skeleton voxels."
@@ -68,7 +70,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_mask_subtract": "Subtract one mask from another.",
     "seg_mask_xor": "Voxel-wise XOR of two masks.",
     "seg_mask_complement": "Invert a binary mask.",
-    "seg_biggest_cc": "Keep largest connected component per label.",
+    "seg_biggest_cc": (
+        "Keep the N largest connected components (N=1 → single largest)."
+    ),
     "seg_split_lr_cc": "Split mask into left/right by connected components.",
     "seg_split_lr_midline": "Split mask at a sagittal midline plane.",
     "seg_region_grow": (
@@ -76,10 +80,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "mask and centerline layers use separate dilation radii."
     ),
     "seg_blood_flood": (
-        "Two modes. expand: active layer = seed/marker labels, intensity layer = CD/TOF "
-        "(qvtpy distal vessel expansion). from_scratch: active layer = intensity only; "
-        "builds a Frangi→hysteresis vessel tree and labels connected components "
-        "(optional ROI mask layer). Optional barrier punches hard walls out of the tree."
+        "Two modes. expand: active layer = seed/marker labels, intensity layer = CD/TOF. "
+        "With multiple selected seeds, grows each label via watershed (mutually exclusive) "
+        "and returns a multilabel segmentation; unselected labels act as barriers. "
+        "from_scratch: active layer = intensity only; Frangi→hysteresis tree + CC labels "
+        "(optional ROI mask). Optional barrier punches hard walls out of the tree."
     ),
     "seg_mouse_brain": (
         "ANTsPyNet mouse brain extraction or parcellation (T2w mouse MRI). "
@@ -192,6 +197,13 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "jaccard": "Jaccard index vs a reference mask.",
     "voxel_metrics": "Voxel-wise overlap metrics vs reference.",
     "surface_metrics": "Surface distance metrics vs reference.",
+    "lab_mouse_tof_cow": (
+        "Lab recipe for mouse TOF Circle of Willis. Stage 1 (Run): N4 (shrink 2, spline 6, "
+        "rescale on) → blood flood from-scratch → label CCs (connectivity 3); adds a labeled-CC "
+        "layer only. Stage 2: click CCs on that Labels layer, Add CC to tree / Tree done for "
+        "Left ICA → Right ICA → Basilar; then a final multilabel blood-flood expand "
+        "(labels 1/2/3) on the raw TOF volume."
+    ),
 }
 
 

@@ -269,6 +269,12 @@ def run_gui_tool(
         _run_viz_vessel_cross_sections(viewer, layer, params)
         return None
 
+    if tool_id == "lab_mouse_tof_cow":
+        from nvitk.gui.lab.mouse_tof_cow import start_mouse_tof_cow
+
+        start_mouse_tof_cow(viewer, layer)
+        return None
+
     if tool_id == "viz_flowshow":
         _run_viz_flowshow_napari(viewer, layer, params, label_ids=label_ids)
         return None
@@ -1048,7 +1054,8 @@ def run_gui_tool(
     if tool_id == "seg_biggest_cc":
         from nvitk.segmentation.labels import biggest_cc
 
-        return coerce_tool_output(biggest_cc(img))
+        n_keep = max(1, int(params.get("n_largest") or 1))
+        return coerce_tool_output(biggest_cc(img, n=n_keep))
 
     if tool_id == "morph_biggest_cc":
         from scipy.ndimage import generate_binary_structure
@@ -1056,9 +1063,10 @@ def run_gui_tool(
         from nvitk.segmentation.labels import biggest_cc
 
         conn = int(params.get("connectivity") or 1)
+        n_keep = max(1, int(params.get("n_largest") or 1))
         rank = min(3, int(proc_data.ndim))
         structure = generate_binary_structure(rank, conn)
-        return coerce_tool_output(biggest_cc(img, structure=structure))
+        return coerce_tool_output(biggest_cc(img, structure=structure, n=n_keep))
 
     if tool_id == "seg_split_lr_cc":
         from nvitk.segmentation.hemisphere import split_lr_by_cc
@@ -1239,6 +1247,8 @@ def run_gui_tool(
                 return coerce_tool_output(result.labels)
 
         # expand: active = markers; reference_layer = intensity (required).
+        # Keep distinct seed label ids (do not binarize) so watershed returns
+        # a multilabel segmentation; non-selected labels act as hard barriers.
         intensity_name = _layer_param(params, "reference_layer")
         if not intensity_name:
             raise ValueError(
@@ -1247,29 +1257,56 @@ def run_gui_tool(
             )
         intensity_layer = _resolve_layer(viewer, intensity_name)
         ref = layer_to_image(intensity_layer)
+
+        from nvitk.gui.labels.visibility import label_source_data, unique_layer_labels
+
+        src_markers = to_numpy(label_source_data(layer))
+        sel_ids = [int(x) for x in (label_ids or [])]
+        if not sel_ids:
+            sel_ids = unique_layer_labels(src_markers)
+        if not sel_ids:
+            raise ValueError("expand mode needs seed label(s) on the active layer.")
+        sel_arr = np.asarray(sel_ids, dtype=src_markers.dtype)
+        markers_ml = np.where(
+            np.isin(src_markers, sel_arr), src_markers, 0
+        ).astype(np.int32, copy=False)
+        other_labels = (src_markers != 0) & ~np.isin(src_markers, sel_arr)
+
         _, markers_img, markers_resampled = align_mask_to_reference_layer(
-            layer, intensity_layer, proc_data, order=0
+            layer, intensity_layer, markers_ml, order=0
         )
         if markers_resampled:
             gui_log(
                 f"Resampled markers '{layer.name}' onto intensity '{intensity_layer.name}' "
                 f"grid {tuple(ref.data.shape)}."
             )
+        markers_np = to_numpy(markers_img.data).astype(np.int32, copy=False)
+
         if bar_name:
             bar_layer = _resolve_layer(viewer, bar_name)
             _, bar_img, _ = align_mask_to_reference_layer(bar_layer, intensity_layer, order=0)
-            barrier_arr = to_numpy(bar_img.data)
+            barrier_arr = to_numpy(bar_img.data).astype(bool, copy=False)
+        if np.any(other_labels):
+            _, other_img, _ = align_mask_to_reference_layer(
+                layer, intensity_layer, other_labels.astype(np.uint8), order=0
+            )
+            other_np = to_numpy(other_img.data).astype(bool, copy=False)
+            barrier_arr = other_np if barrier_arr is None else (barrier_arr | other_np)
+
         with using(bk):
             result = blood_flood(
                 to_numpy(ref.data),
-                to_numpy(markers_img.data),
+                markers_np,
                 barrier=barrier_arr,
                 **common_kw,
             )
+            n_lab = int(len(np.unique(to_numpy(result.labels))) - (
+                1 if np.any(to_numpy(result.labels) == 0) else 0
+            ))
             gui_log(
                 f"Blood flood (expand): vesselness={result.vesselness_mode}, "
-                f"tree_voxels={int(np.count_nonzero(result.tree))}, "
-                f"labeled={int(np.count_nonzero(result.labels))}"
+                f"seeds={sel_ids}, tree_voxels={int(np.count_nonzero(result.tree))}, "
+                f"output_labels={n_lab}, labeled={int(np.count_nonzero(result.labels))}"
             )
             return coerce_tool_output(result.labels)
 

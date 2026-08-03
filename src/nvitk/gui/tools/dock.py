@@ -246,6 +246,7 @@ def build_tools_dock(
         if hasattr(tool_panel, "seed_from_label"):
             tool_panel.seed_from_label.visible = tid == "seg_region_grow"
         cursor_row.setVisible(tid == "seg_region_grow")
+        _sync_cow_row()
 
     cursor_row = QWidget()
     cursor_layout = QHBoxLayout()
@@ -271,6 +272,87 @@ def build_tools_dock(
                 w.value = val
 
     btn_cursor_seed.clicked.connect(_apply_cursor_seed)
+
+    # Mouse TOF CoW Stage-2 controls (visible while tool selected or session active).
+    cow_row = QWidget()
+    cow_layout = QVBoxLayout()
+    cow_layout.setContentsMargins(0, 0, 0, 0)
+    cow_layout.setSpacing(4)
+    from qtpy.QtWidgets import QLabel
+
+    cow_status = QLabel("Mouse TOF CoW Stage 2: idle")
+    cow_status.setWordWrap(True)
+    cow_btn_row = QWidget()
+    cow_btn_layout = QHBoxLayout()
+    cow_btn_layout.setContentsMargins(0, 0, 0, 0)
+    btn_cow_add = QPushButton("Add CC to tree")
+    btn_cow_done = QPushButton("Tree done")
+    btn_cow_cancel = QPushButton("Cancel")
+    cow_btn_layout.addWidget(btn_cow_add)
+    cow_btn_layout.addWidget(btn_cow_done)
+    cow_btn_layout.addWidget(btn_cow_cancel)
+    cow_btn_row.setLayout(cow_btn_layout)
+    cow_layout.addWidget(cow_status)
+    cow_layout.addWidget(cow_btn_row)
+    cow_row.setLayout(cow_layout)
+    cow_row.setVisible(False)
+
+    def _sync_cow_row() -> None:
+        from nvitk.gui.lab.mouse_tof_cow import get_session, session_active
+
+        tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
+        active = session_active(viewer)
+        show = tid == "lab_mouse_tof_cow" or active
+        cow_row.setVisible(show)
+        sess = get_session(viewer)
+        if sess is not None:
+            cow_status.setText(sess.status_text())
+            enabled = True
+        else:
+            cow_status.setText(
+                "Mouse TOF CoW: Run the tool on a TOF Image to start Stage 1, "
+                "then click CCs on the labeled layer."
+            )
+            enabled = False
+        btn_cow_add.setEnabled(enabled)
+        btn_cow_done.setEnabled(enabled)
+        btn_cow_cancel.setEnabled(active)
+
+    def _cow_add() -> None:
+        from nvitk.gui.lab.mouse_tof_cow import get_session
+        from nvitk.gui.tools.runner import notify
+
+        sess = get_session(viewer)
+        if sess is None:
+            notify("No active Mouse TOF CoW session. Run the tool first.", error=True)
+            return
+        sess.add_highlighted_cc()
+        _sync_cow_row()
+
+    def _cow_done() -> None:
+        from nvitk.gui.lab.mouse_tof_cow import get_session
+        from nvitk.gui.tools.runner import notify
+
+        sess = get_session(viewer)
+        if sess is None:
+            notify("No active Mouse TOF CoW session. Run the tool first.", error=True)
+            return
+        sess.finish_current_tree()
+        _sync_cow_row()
+
+    def _cow_cancel() -> None:
+        from nvitk.gui.lab.mouse_tof_cow import cancel_session
+
+        cancel_session(viewer)
+        _sync_cow_row()
+
+    btn_cow_add.clicked.connect(_cow_add)
+    btn_cow_done.clicked.connect(_cow_done)
+    btn_cow_cancel.clicked.connect(_cow_cancel)
+
+    from nvitk.gui.lab.mouse_tof_cow import set_ui_hooks
+
+    set_ui_hooks(status=lambda text: cow_status.setText(text), visibility=_sync_cow_row)
 
     _compact_magicgui_panel(tool_panel.native)
     tool_scroll = QScrollArea()
@@ -313,6 +395,7 @@ def build_tools_dock(
     layout.addWidget(btn_run_sge, 0)
     layout.addWidget(tool_scroll, 0)
     layout.addWidget(cursor_row, 0)
+    layout.addWidget(cow_row, 0)
     layout.addWidget(label_selector, 0)
     layout.addWidget(totalseg_roi, 0)
     layout.addWidget(pipeline_form, 0)

@@ -34,6 +34,7 @@ from nvitk.gui.labels.visibility import (
     is_label_like_layer,
     label_source_data,
     set_label_color,
+    supports_per_label_color,
     unique_layer_labels,
 )
 
@@ -200,13 +201,13 @@ class LabelSelectorWidget(QGroupBox):
     def _supports_color_edit(self, layer: Any) -> bool:
         if layer is None:
             return False
-        if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+        if supports_per_label_color(layer):
             return True
         # Discrete Image masks (e.g. QC segs) can be promoted to Labels.
         return bool(self._viewer is not None and is_label_like_layer(layer))
 
     def _ensure_colorable_layer(self, layer: Any) -> Any:
-        if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+        if supports_per_label_color(layer):
             return layer
         if self._viewer is None:
             raise TypeError("No viewer available to convert the mask to a Labels layer.")

@@ -59,6 +59,46 @@ def remove_small_components(
     return _wrap_like(mask, as_backend_array(out.astype(bool, copy=False)))
 
 
+def keep_largest_components(
+    mask: Image | Any,
+    *,
+    n: int = 1,
+    connectivity: int = 1,
+    structure: Any = None,
+) -> Any:
+    """Keep the *n* largest connected components of a binary *mask* (by voxel count).
+
+    Components are ranked by size; ties keep lower label ids first after the
+    size sort. If fewer than *n* components exist, all are kept.
+    """
+    arr = _coerce_to_current_backend(_as_array(mask).astype(bool, copy=False))
+    if int(np.count_nonzero(arr)) == 0:
+        return _wrap_like(mask, arr)
+
+    n_keep = max(1, int(n))
+    if structure is None:
+        labeled, num = label_connected(arr, connectivity=connectivity)
+    else:
+        labeled, num = ndi.label(arr, structure=structure)
+        num = int(num)
+    if num == 0:
+        out = np.zeros_like(arr, dtype=bool)
+        return _wrap_like(mask, out)
+
+    counts = np.bincount(labeled.ravel())
+    if int(len(counts)) <= 1:
+        out = np.zeros_like(arr, dtype=bool)
+        return _wrap_like(mask, out)
+
+    # Rank component ids 1..N by size (descending); background id 0 excluded.
+    comp_ids = np.arange(1, int(len(counts)))
+    sizes = counts[1:]
+    order = np.argsort(-sizes, kind="stable")
+    keep = comp_ids[order[: min(n_keep, int(order.size))]].astype(labeled.dtype, copy=False)
+    out = np.isin(labeled, keep)
+    return _wrap_like(mask, as_backend_array(out.astype(bool, copy=False)))
+
+
 def remove_small_components_by_fraction(
     mask: Image | Any,
     *,
@@ -125,6 +165,7 @@ def keep_components_touching_seeds(
 __all__ = [
     "keep_component_closest_to_center",
     "keep_components_touching_seeds",
+    "keep_largest_components",
     "label_connected",
     "remove_small_components",
     "remove_small_components_by_fraction",

@@ -168,19 +168,21 @@ def append_labels(
     return _wrap_like(mask_target, out)
 
 
-def biggest_cc(mask: Image | Any, *, structure: Any = None) -> Image | Any:
-    """Return the largest connected component of a binary *mask* as uint8."""
-    arr = _as_array(mask)
-    arr = as_backend_array(arr)
-    labeled, _num = ndi.label(arr, structure=structure)
-    sizes = np.bincount(labeled.ravel())
-    sizes[0] = 0
-    if int(sizes.sum()) == 0:
-        out = np.zeros_like(arr, dtype=np.uint8)
-    else:
-        winner = int(as_backend_array(sizes).argmax())
-        out = (labeled == winner).astype(np.uint8)
-    return _wrap_like(mask, out)
+def biggest_cc(
+    mask: Image | Any,
+    *,
+    structure: Any = None,
+    n: int = 1,
+) -> Image | Any:
+    """Return the *n* largest connected component(s) of a binary *mask* as uint8.
+
+    ``n=1`` (default) keeps only the single largest component.
+    """
+    from nvitk.morphology.components import keep_largest_components
+
+    kept = keep_largest_components(mask, n=int(n), structure=structure)
+    arr = _as_array(kept).astype(np.uint8, copy=False)
+    return _wrap_like(mask, arr)
 
 
 def percentile_cc(

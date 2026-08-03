@@ -162,11 +162,91 @@ def _apply_image_data_visibility(layer: Any, selected_ids: list[int]) -> None:
     layer.data = np.asarray(filtered, dtype=current.dtype, copy=False)
 
 
+_TRANSPARENT = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+
+
+def _is_labels_layer(layer: Any) -> bool:
+    return type(layer).__name__ == "Labels"
+
+
+def supports_per_label_color(layer: Any | None) -> bool:
+    """True when *layer* can show / edit per-id colors (Napari Labels)."""
+    if layer is None or not _is_labels_layer(layer):
+        return False
+    return hasattr(layer, "get_color") or hasattr(layer, "color") or hasattr(layer, "colormap")
+
+
+def _normalize_rgba(rgba: Any) -> np.ndarray:
+    color = np.asarray(rgba, dtype=np.float32).reshape(-1)
+    if color.size == 3:
+        color = np.concatenate([color, np.array([1.0], dtype=np.float32)])
+    if color.size < 4:
+        raise ValueError("rgba must have 3 or 4 channels")
+    color = color[:4].astype(np.float32, copy=False)
+    if float(np.nanmax(color)) > 1.0:
+        color = color / 255.0
+    return color
+
+
+def _read_live_label_color(layer: Any, label_id: int) -> np.ndarray | None:
+    """Return the color Napari is currently using for *label_id*, or None."""
+    lid = int(label_id)
+    if hasattr(layer, "get_color"):
+        try:
+            col = layer.get_color(lid)
+        except Exception:
+            col = None
+        if col is not None:
+            arr = np.asarray(col, dtype=np.float32).reshape(-1)
+            if arr.size >= 3:
+                return _normalize_rgba(arr)
+    colors_dict = dict(getattr(layer, "color", {}) or {})
+    if lid in colors_dict:
+        return _normalize_rgba(colors_dict[lid])
+    return None
+
+
+def _snapshot_label_colors(layer: Any, all_ids: list[int]) -> dict[int, np.ndarray]:
+    """Capture opaque display colors for each id (Napari 0.6 ``color`` / 0.7 colormap)."""
+    backup: dict[int, np.ndarray] = {}
+    legacy = dict(getattr(layer, "color", {}) or {})
+    for lid in all_ids:
+        if lid in legacy:
+            rgba = _normalize_rgba(legacy[lid])
+            if float(rgba[3]) > 0:
+                backup[int(lid)] = rgba
+                continue
+        live = _read_live_label_color(layer, int(lid))
+        if live is not None and float(live[3]) > 0:
+            backup[int(lid)] = live
+    return backup
+
+
+def _apply_label_color_dict(layer: Any, color_dict: dict[int, np.ndarray]) -> None:
+    """Push per-label RGBA onto a Labels layer (0.7 DirectLabelColormap or 0.6 ``color``)."""
+    cleaned = {int(k): _normalize_rgba(v) for k, v in color_dict.items()}
+    # Napari ≥0.7: ``layer.color`` was removed; use DirectLabelColormap.
+    if hasattr(layer, "colormap") and (
+        hasattr(layer, "get_color") or not hasattr(layer, "color")
+    ):
+        try:
+            from napari.utils.colormaps import DirectLabelColormap
+        except Exception as exc:  # pragma: no cover
+            raise TypeError("Per-label colors require napari DirectLabelColormap.") from exc
+        cd: dict[Any, np.ndarray] = dict(cleaned)
+        cd[0] = _TRANSPARENT.copy()
+        cd[None] = _TRANSPARENT.copy()
+        layer.colormap = DirectLabelColormap(color_dict=cd)
+        return
+    if hasattr(layer, "color"):
+        layer.color = cleaned
+        return
+    raise TypeError("Per-label colors require a Napari Labels layer.")
+
+
 def _apply_labels_color_visibility(layer: Any, selected_ids: list[int]) -> None:
     """Hide unselected ids via transparent colors (no volume copy / re-texture)."""
-    try:
-        from napari.utils.colormaps import label_colormap
-    except Exception:
+    if not supports_per_label_color(layer):
         _apply_image_data_visibility(layer, selected_ids)
         return
 
@@ -176,52 +256,53 @@ def _apply_labels_color_visibility(layer: Any, selected_ids: list[int]) -> None:
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
     if backup is None:
-        backup = {int(k): np.asarray(v) for k, v in dict(getattr(layer, "color", {})).items()}
+        backup = _snapshot_label_colors(layer, all_ids)
         meta[_NVITK_COLOR_BACKUP_KEY] = backup
         layer.metadata = meta
+    else:
+        backup = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
 
-    palette = label_colormap(max(len(all_ids), 1))
-    colors = np.asarray(getattr(palette, "colors", None), dtype=np.float32)
-    if colors.ndim != 2 or colors.shape[0] == 0:
-        colors = np.array([[1.0, 1.0, 1.0, 1.0]], dtype=np.float32)
-    color_dict = {}
-    for i, lid in enumerate(sorted(all_ids)):
+    color_dict: dict[int, np.ndarray] = {}
+    for lid in all_ids:
         if lid in selected:
-            color_dict[lid] = backup.get(lid, colors[i % len(colors)])
+            stored = backup.get(lid)
+            if stored is None:
+                live = _read_live_label_color(layer, lid)
+                stored = live if live is not None and float(live[3]) > 0 else np.array(
+                    [1.0, 1.0, 1.0, 1.0], dtype=np.float32
+                )
+                backup[lid] = stored
+            color_dict[lid] = stored
         else:
-            color_dict[lid] = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    layer.color = color_dict
+            color_dict[lid] = _TRANSPARENT.copy()
+    meta[_NVITK_COLOR_BACKUP_KEY] = backup
+    layer.metadata = meta
+    _apply_label_color_dict(layer, color_dict)
 
 
 def get_label_color(layer: Any, label_id: int) -> np.ndarray:
-    """Return RGBA (float 0–1) for *label_id*, preferring the visibility backup."""
+    """Return RGBA (float 0–1) for *label_id*, matching Napari's displayed color."""
     lid = int(label_id)
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
     if isinstance(backup, dict) and lid in backup:
-        return np.asarray(backup[lid], dtype=np.float32)
+        return _normalize_rgba(backup[lid])
 
-    colors_dict = dict(getattr(layer, "color", {}) or {})
-    if lid in colors_dict:
-        rgba = np.asarray(colors_dict[lid], dtype=np.float32)
-        if rgba.shape[-1] >= 3 and float(rgba[-1] if rgba.shape[-1] > 3 else 1.0) > 0:
-            return rgba
+    live = _read_live_label_color(layer, lid)
+    if live is not None and float(live[3]) > 0:
+        return live
 
-    # Fall back to napari's default label palette index.
-    try:
-        from napari.utils.colormaps import label_colormap
-
-        all_ids = unique_layer_labels(label_source_data(layer))
-        palette = label_colormap(max(len(all_ids), 1))
-        colors = np.asarray(getattr(palette, "colors", None), dtype=np.float32)
-        if colors.ndim != 2 or colors.shape[0] == 0:
-            return np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
-        if lid in all_ids:
-            i = sorted(all_ids).index(lid)
-            return np.asarray(colors[i % len(colors)], dtype=np.float32)
-        return np.asarray(colors[0], dtype=np.float32)
-    except Exception:
-        return np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
+    # Hidden / missing: still try Napari's mapper (seeded cyclic colormap).
+    if hasattr(layer, "colormap") and hasattr(layer.colormap, "map"):
+        try:
+            mapped = layer.colormap.map(lid)
+            if mapped is not None:
+                rgba = _normalize_rgba(mapped)
+                if float(rgba[3]) > 0:
+                    return rgba
+        except Exception:
+            pass
+    return np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
 
 
 def set_label_color(
@@ -236,28 +317,21 @@ def set_label_color(
     Updates the color backup used by :func:`apply_label_visibility` so custom
     colors survive show/hide toggles in the label picker.
     """
-    if type(layer).__name__ != "Labels" or not hasattr(layer, "color"):
+    if not supports_per_label_color(layer):
         raise TypeError("Per-label colors require a Napari Labels layer.")
 
     lid = int(label_id)
-    color = np.asarray(rgba, dtype=np.float32).reshape(-1)
-    if color.size == 3:
-        color = np.concatenate([color, np.array([1.0], dtype=np.float32)])
-    if color.size < 4:
-        raise ValueError("rgba must have 3 or 4 channels")
-    color = color[:4].astype(np.float32, copy=False)
-    # Napari expects 0–1 floats.
-    if float(np.nanmax(color)) > 1.0:
-        color = color / 255.0
+    color = _normalize_rgba(rgba)
 
     meta = _layer_metadata(layer)
     backup = meta.get(_NVITK_COLOR_BACKUP_KEY)
     if backup is None:
-        backup = {int(k): np.asarray(v) for k, v in dict(getattr(layer, "color", {})).items()}
-    backup = {int(k): np.asarray(v, dtype=np.float32) for k, v in dict(backup).items()}
+        all_ids = unique_layer_labels(label_source_data(layer))
+        backup = _snapshot_label_colors(layer, all_ids)
+    backup = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
     backup[lid] = color
     meta[_NVITK_COLOR_BACKUP_KEY] = backup
-    # Force visibility re-apply so the live color dict picks up the backup.
+    # Force visibility re-apply so the live colormap picks up the backup.
     meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
     layer.metadata = meta
 
@@ -265,21 +339,21 @@ def set_label_color(
         apply_label_visibility(layer, list(selected_ids))
         return
 
-    live = dict(getattr(layer, "color", {}) or {})
+    live = dict(backup)
     live[lid] = color
-    layer.color = live
+    _apply_label_color_dict(layer, live)
 
 
 def ensure_labels_layer(viewer: Any, layer: Any) -> Any:
     """Return a Napari Labels layer for *layer*, converting Image masks in place.
 
     Discrete segmentation Image layers (e.g. QC ``seg_4dflow``) cannot use
-    per-label ``layer.color``; this replaces them with an equivalent Labels
-    layer at the same stack index so color editing works.
+    per-label colors; this replaces them with an equivalent Labels layer at the
+    same stack index so color editing works.
     """
     if layer is None:
         raise ValueError("No layer to convert.")
-    if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+    if supports_per_label_color(layer):
         return layer
     if viewer is None:
         raise TypeError("A Napari viewer is required to convert Image → Labels.")
@@ -350,7 +424,7 @@ def apply_label_visibility(layer: Any, selected_ids: list[int]) -> None:
     meta[_NVITK_VISIBLE_IDS_KEY] = key
     layer.metadata = meta
 
-    if type(layer).__name__ == "Labels" and hasattr(layer, "color"):
+    if supports_per_label_color(layer):
         _apply_labels_color_visibility(layer, selected_ids)
     else:
         _apply_image_data_visibility(layer, selected_ids)
@@ -380,8 +454,9 @@ def restore_label_visibility(
     meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
 
     backup = meta.pop(_NVITK_COLOR_BACKUP_KEY, None)
-    if backup is not None and hasattr(layer, "color"):
-        layer.color = backup
+    if backup is not None and supports_per_label_color(layer):
+        restored = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
+        _apply_label_color_dict(layer, restored)
         layer.metadata = meta
         return
 
@@ -407,5 +482,6 @@ __all__ = [
     "layer_in_viewer",
     "restore_label_visibility",
     "set_label_color",
+    "supports_per_label_color",
     "unique_layer_labels",
 ]

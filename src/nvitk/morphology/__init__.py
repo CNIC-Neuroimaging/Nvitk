@@ -29,9 +29,15 @@ from .centerline_siphon import (
 from .components import (
     keep_component_closest_to_center,
     keep_components_touching_seeds,
+    keep_largest_components,
     label_connected,
     remove_small_components,
     remove_small_components_by_fraction,
+)
+from .mst_bridge import (
+    bridge_binary_components_mst,
+    draw_tube_3d,
+    fill_multilabel_gaps_mst,
 )
 
 __all__ = [
@@ -49,8 +55,12 @@ __all__ = [
     "fill_holes",
     "keep_component_closest_to_center",
     "keep_components_touching_seeds",
+    "keep_largest_components",
     "label_connected",
     "make_ball_footprint",
+    "bridge_binary_components_mst",
+    "draw_tube_3d",
+    "fill_multilabel_gaps_mst",
     "open",
     "prune_skeleton_shortest_arc",
     "recover_lumen_thickness",

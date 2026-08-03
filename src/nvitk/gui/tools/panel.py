@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import numpy as np
 from magicgui import magicgui
 
 from nvitk.gui.labels.visibility import infer_target_mode
@@ -43,6 +44,7 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "iterations",
         "mode",
         "connectivity",
+        "n_largest",
         "sigma_spatial",
         "sigma_color",
         "do_3d",
@@ -325,6 +327,7 @@ def build_tool_panel(
         iterations={"label": "Iterations", "min": 1, "max": 20, "value": 1},
         mode={"choices": ["binary", "gray"], "label": "Morph mode", "value": "binary"},
         connectivity={"label": "Connectivity", "min": 1, "max": 3, "value": 2},
+        n_largest={"label": "Keep N largest CCs", "min": 1, "max": 1000, "value": 1},
         sigma_spatial={"label": "Sigma spatial (0=auto)", "value": 0.0},
         sigma_color={"label": "Sigma color (0=auto)", "value": 0.0},
         do_3d={"label": "Bilateral 3D", "value": False},
@@ -738,6 +741,7 @@ def build_tool_panel(
         iterations: int,
         mode: str,
         connectivity: int,
+        n_largest: int,
         sigma_spatial: float,
         sigma_color: float,
         do_3d: bool,
@@ -996,10 +1000,36 @@ def build_tool_panel(
             overlay_mode == "replace_active"
             and tuple(result.shape) == tuple(layer.data.shape)
         )
-        if can_replace:
+        result_arr = np.asarray(result)
+        as_labels = tool_id == "seg_blood_flood" and (
+            np.issubdtype(result_arr.dtype, np.integer)
+            and int(result_arr.max(initial=0)) > 1
+        )
+        if can_replace and not as_labels:
             try:
                 layer.data = result
                 layer.name = name
+            except Exception:
+                viewer.add_image(result, **out_kwargs)
+        elif as_labels:
+            from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+            spatial_src = layer
+            ref_name = str(params.get("reference_layer") or "").strip()
+            if ref_name and ref_name not in ("", "(none)"):
+                try:
+                    spatial_src = next(ly for ly in viewer.layers if ly.name == ref_name)
+                except StopIteration:
+                    pass
+            spatial = layer_spatial_kwargs(spatial_src)
+            try:
+                lab = viewer.add_labels(
+                    result_arr.astype(np.int32, copy=False),
+                    name=name,
+                    opacity=0.7,
+                    **spatial,
+                )
+                lab._nvitk_label_like = True
             except Exception:
                 viewer.add_image(result, **out_kwargs)
         else:
