@@ -26,7 +26,10 @@ def cmd_resample(
     input_path, output_path, reference, backend, submit, emit_script,
     direct_submit, no_remote, dry_run, order,
 ):
+    """Resample a volume onto the grid of a reference image."""
+
     def runner(image, *, reference_path, order):
+        """Resample *image* onto the grid of the volume at *reference_path*."""
         target = imread(reference_path, backend="numpy")
         return resample_to(image, target, order=order)
     dispatch_tool(
@@ -43,6 +46,7 @@ def cmd_resample(
 @backend_option(True)
 @submit_options
 def cmd_isotropy(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run):
+    """Resample a volume to isotropic voxel spacing."""
     dispatch_tool(
         tool="transform", subcommand="isotropy", module_file="transform.py",
         input_path=input_path, output_path=output_path, submit=submit, backend=backend,
@@ -65,6 +69,7 @@ def cmd_rotate(
 ):
     """Rotate a 2D/3D volume around a spatial axis."""
     def runner(image, *, angle, axis, order, reshape):
+        """Rotate *image* by *angle* degrees around *axis* with the given interpolation order."""
         return rotate_volume(
             image, angle, axis=axis, order=order, reshape=reshape
         )
@@ -102,6 +107,7 @@ def cmd_swap_axes(
     from nvitk.transform import permute_axes, swap_axes
 
     def runner(image, *, axis0, axis1, perm_order):
+        """Apply a full axis permutation if *perm_order* is given, else swap *axis0*/*axis1* pairwise."""
         if perm_order:
             parts = [int(p.strip()) for p in str(perm_order).replace(";", ",").split(",") if p.strip()]
             return permute_axes(image, parts)
@@ -123,7 +129,10 @@ def cmd_swap_axes(
 @click.option("--point", nargs=3, type=float, required=True)
 @click.option("--normal", nargs=3, type=float, required=True)
 def cmd_oblique(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, point, normal):
+    """Sample an oblique 2D slice through a volume defined by a point and normal vector."""
+
     def runner(image, *, point, normal):
+        """Sample the oblique slice of *image* through *point* with orientation *normal*."""
         return oblique_slice(image, point=point, normal=normal)
     dispatch_tool(
         tool="transform", subcommand="oblique-slice", module_file="transform.py",

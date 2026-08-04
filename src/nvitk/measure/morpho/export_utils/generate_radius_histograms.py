@@ -37,11 +37,13 @@ SUMMARY_SHEET_RE = re.compile(r"^\d{2}_")
 
 
 def safe_filename(name: str) -> str:
+    """Sanitize *name* into a filesystem-safe filename fragment (falls back to ``\"centerline\"``)."""
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name))
     return name.strip("_") or "centerline"
 
 
 def vessel_sheet_sort_key(sheet_name: str) -> Tuple[int, str]:
+    """Sort key ordering workbook sheets by their leading label id, then name."""
     match = re.match(r"^(\d+)(?:\D|$)", sheet_name)
     if not match:
         match = re.search(r"(?:^|_)label[_-]?(\d+)(?:\D|$)", sheet_name, flags=re.IGNORECASE)
@@ -51,12 +53,14 @@ def vessel_sheet_sort_key(sheet_name: str) -> Tuple[int, str]:
 
 
 def is_candidate_centerline_sheet(sheet_name: str, columns: List[str], radius_column: str) -> bool:
+    """True for a per-centerline data sheet (not a numbered summary sheet) that has the radius column."""
     if SUMMARY_SHEET_RE.match(sheet_name):
         return False
     return radius_column in columns
 
 
 def read_radius_sheets(excel_path: str, radius_column: str) -> Dict[str, np.ndarray]:
+    """Read the positive, finite radius values from every per-centerline sheet of the morphometrics workbook."""
     xls = pd.ExcelFile(excel_path)
     radii_by_sheet: Dict[str, np.ndarray] = {}
     for sheet_name in sorted(xls.sheet_names, key=vessel_sheet_sort_key):
@@ -72,6 +76,12 @@ def read_radius_sheets(excel_path: str, radius_column: str) -> Dict[str, np.ndar
 
 
 def choose_bin_edges(all_radii: np.ndarray, bin_method: str, min_bins: int, max_bins: int) -> np.ndarray:
+    """Pick shared histogram bin edges across all vessels, so every sheet's plot uses the same x-axis.
+
+    *bin_method* is either an explicit bin count or a NumPy binning strategy
+    name (e.g. ``\"auto\"``); the resulting bin count is clamped to
+    ``[min_bins, max_bins]``. A small padding is added around the data range.
+    """
     r_min = float(np.min(all_radii))
     r_max = float(np.max(all_radii))
     if not np.isfinite(r_min) or not np.isfinite(r_max):
@@ -92,6 +102,7 @@ def choose_bin_edges(all_radii: np.ndarray, bin_method: str, min_bins: int, max_
 
 
 def histogram_plan(radii_by_sheet: Dict[str, np.ndarray], bin_edges: np.ndarray) -> Tuple[int, pd.DataFrame]:
+    """Compute each sheet's histogram counts/summary stats and the shared peak count (for a common y-axis)."""
     rows = []
     y_max = 0
     for sheet_name, radii in radii_by_sheet.items():
@@ -116,6 +127,7 @@ def plot_histograms(
     y_max: int,
     output_dir: str,
 ) -> None:
+    """Render and save one radius-histogram PNG per sheet, using shared x/y limits across all plots."""
     import matplotlib
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -141,6 +153,7 @@ def plot_histograms(
 
 
 def run(excel_path: str, output_dir: str) -> None:
+    """Full pipeline: read radii from the morphometrics workbook, plot per-vessel histograms, and write a CSV summary."""
     excel_path = os.path.abspath(excel_path)
     if not os.path.isfile(excel_path):
         raise FileNotFoundError(f"Workbook not found: {excel_path}")
@@ -167,6 +180,7 @@ def run(excel_path: str, output_dir: str) -> None:
 
 
 def main() -> None:
+    """Direct-run entry point: run the histogram pipeline per the module-level ``EXCEL_PATH``/``OUTPUT_DIR`` config."""
     if not EXCEL_PATH:
         raise SystemExit("Set EXCEL_PATH or call run() with excel_path from stage7 outputs.")
     excel_path = os.path.abspath(EXCEL_PATH)

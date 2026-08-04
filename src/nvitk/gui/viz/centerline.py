@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy
+from nvitk.core.backend import using
+from nvitk.morphology.components import label_connected
 from nvitk.morphology.polyline_graph import detect_junctions_from_centerline
 from nvitk.pipes.qvtpy.util.centerline.venous_flexion import rasterize_polylines_to_volume, split_polyline_at_indices
 
@@ -16,6 +18,8 @@ JUNCTION_META_KEY = "nvitk_junction_source"
 
 
 def _require_centerline_volume(layer: Any) -> np.ndarray:
+    """Return *layer*'s data as a host 3D array with at least one foreground voxel; raises
+    ``ValueError`` if the layer isn't 3D or is entirely empty."""
     arr = to_numpy(layer.data)
     if arr.ndim != 3:
         raise ValueError("Centerline tools expect a 3D centerline mask layer.")
@@ -184,9 +188,10 @@ def split_label_at_junctions(
             i, j, k = int(row[0]), int(row[1]), int(row[2])
             if 0 <= i < work.shape[0] and 0 <= j < work.shape[1] and 0 <= k < work.shape[2]:
                 work[i, j, k] = False
-        from scipy import ndimage as ndi
-
-        labeled, n = ndi.label(work, structure=np.ones((3, 3, 3), dtype=np.int32))
+        # 26-connectivity CC labeling (base tool); ``work`` is host-side here.
+        with using("numpy"):
+            labeled, n = label_connected(work, connectivity=3)
+        labeled = to_numpy(labeled)
         if n < 1:
             return vol, [int(source_label_id)]
         existing = [int(x) for x in np.unique(vol) if int(x) != 0]

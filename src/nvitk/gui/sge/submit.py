@@ -30,6 +30,7 @@ def _resolve_remote_job_root(user_root: str, job_id: str) -> str:
 
 
 def _require_paramiko() -> None:
+    """Raise ``ImportError`` with an install hint if the ``paramiko`` SSH library is missing."""
     try:
         import paramiko  # noqa: F401
     except ImportError as exc:
@@ -39,10 +40,13 @@ def _require_paramiko() -> None:
 
 
 def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
+    """Register the SGE job-status monitor on *app_state* once (a no-op on subsequent calls), wiring
+    finished jobs to auto-import their results and failed jobs to notify the user."""
     if app_state.get("_sge_monitor_registered"):
         return
 
     def _on_finished(job_id: str, done: Any) -> None:
+        """Mark *job_id* done in the pending-job store and auto-import its results into the viewer."""
         from nvitk.gui.sge.poll import update_pending_job_status
         from nvitk.gui.sge.retrieve import import_sge_job
 
@@ -61,6 +65,7 @@ def _ensure_sge_monitor(app_state: dict[str, Any]) -> None:
         )
 
     def _on_failed(job_id: str, done: Any) -> None:
+        """Mark *job_id* failed in the pending-job store and notify the user with the error detail."""
         from nvitk.gui.sge.poll import update_pending_job_status
 
         payload = done.to_dict() if hasattr(done, "to_dict") else done

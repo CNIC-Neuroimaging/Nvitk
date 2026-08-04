@@ -101,6 +101,9 @@ class DerivedVariableRegistration:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_catalog_entry(self) -> dict[str, Any]:
+        """Build the ``{variable_id, domain, table, ...}`` dict for
+        :meth:`~nvitk.db.repo.DataRepo.register_variables`, including only the optional fields that
+        are set plus anything in ``extra``."""
         entry: dict[str, Any] = {
             "variable_id": self.variable_id,
             "domain": self.domain,
@@ -149,10 +152,13 @@ class DerivedVariableRegistration:
 
 
 def _series_na_string(n: int) -> pd.Series:
+    """An all-``pd.NA`` string ``Series`` of length *n*, for padding missing optional columns."""
     return pd.Series([pd.NA] * n, dtype="string")
 
 
 def _optional_string_col(agg: pd.DataFrame, name: str, n: int) -> pd.Series:
+    """Column *name* from *agg* as a string ``Series``, or an all-NA string ``Series`` of length *n*
+    if the column is absent."""
     if name in agg.columns:
         return agg[name].astype("string")
     return _series_na_string(n)

@@ -219,6 +219,8 @@ def _spatial_xyz_from_phase(ap: Image) -> tuple[int, int, int]:
 
 
 def _parse_speed_clim(value: str | None) -> tuple[float, float] | None:
+    """Parse a ``"min,max"`` speed color-limit string into a ``(min, max)`` tuple, or ``None`` if
+    blank; raises ``click.ClickException`` if malformed."""
     if not value or not value.strip():
         return None
     parts = [p.strip() for p in value.split(",")]
@@ -434,6 +436,9 @@ def main(
     no_show: bool,
     list_inputs: bool,
 ) -> None:
+    """CLI entry point: discover a subject's 4D-flow phase/vessel/centerline volumes and launch the
+    interactive PyVista (desktop or notebook) flow viewer with the requested glyph/streamline/cross-
+    section options."""
     patient = _patient_dir(
         nifti_root=Path(nifti_root),
         subject=subject,

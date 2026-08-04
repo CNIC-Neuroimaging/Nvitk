@@ -65,6 +65,8 @@ def cmd_sliding_threshold(
     from nvitk.types import Image
 
     def runner(image, *, step, up_thresh, dim):
+        """Apply 2D or 3D sliding-threshold binary segmentation to *image*, wrapping the result back
+        into an :class:`~nvitk.types.Image` when the input was one."""
         data = image.data if isinstance(image, Image) else image
         if dim == "2d":
             mask, _ = binary_mask_sliding_threshold_2d(data, step=step, up_thresh=up_thresh)
@@ -138,6 +140,7 @@ def cmd_hessian(
     """Hybrid Hessian ridge / vessel filter (skimage)."""
 
     def runner(image, *, sigmas, black_ridges, alpha, beta, gamma, mode):
+        """Apply the Hessian ridge/vessel filter to *image* with the parsed CLI parameters."""
         return hessian_filter(
             image,
             sigmas=parse_sigmas(sigmas),
@@ -221,6 +224,7 @@ def cmd_jerman(
     """Jerman vesselness / ridge filter (IEEE TMI 2016)."""
 
     def runner(image, *, sigmas, tau, black_ridges, mode):
+        """Apply the Jerman vesselness/ridge filter to *image* with the parsed CLI parameters."""
         return jerman_filter(
             image,
             sigmas=parse_sigmas(sigmas),
@@ -307,6 +311,8 @@ def cmd_snakes(
         raise click.ClickException("snakes requires --mask (initial contour / seed mask).")
 
     def runner(image, mask, *, alpha, beta, w_line, w_edge, gamma, max_iter, sigma, n_points, axis, boundary):
+        """Run Kass active-contour (snakes) evolution on *image* seeded from the initial *mask*
+        contour, using the parsed CLI parameters."""
         return snakes_filter(
             image,
             mask,

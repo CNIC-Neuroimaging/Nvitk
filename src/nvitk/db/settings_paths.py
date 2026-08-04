@@ -9,6 +9,8 @@ from typing import Any
 
 
 def _find_repo_root() -> Path | None:
+    """Walk up from this file to find the repo root (the ancestor with ``pyproject.toml`` and
+    ``src/nvitk/``); ``None`` if not found (e.g. an installed, non-editable package)."""
     here = Path(__file__).resolve()
     for anc in [here.parent, *here.parents]:
         if (anc / "pyproject.toml").is_file() and (anc / "src" / "nvitk").is_dir():

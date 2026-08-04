@@ -30,6 +30,7 @@ _SGE_RUN_STAGE_PAIRS: tuple[tuple[str, str], ...] = (
 
 
 def _enabled_stage_ids(stage_runs: dict[str, bool]) -> list[str]:
+    """Canonical stage ids for every ``run_*`` flag set True in *stage_runs*, in pipeline order."""
     return [stage_id for flag, stage_id in _SGE_RUN_STAGE_PAIRS if stage_runs.get(flag, False)]
 
 

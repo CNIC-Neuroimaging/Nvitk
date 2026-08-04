@@ -53,6 +53,7 @@ class ClusterPaths:
     """Relative path under *src* of the helper wrapping the ``TotalSegmentator`` CLI."""
 
     def ensure_dirs(self) -> None:
+        """Create the SGE stdout/stderr log directories for this run if they don't exist."""
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.err_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,6 +182,7 @@ def submit_jobs(
     binds: SingularityBinds | None = None,
     dry_run: bool = False,
 ) -> list[str]:
+    """Submit each :class:`SegmentationJob` to SGE; returns the list of job ids (or scripts if *dry_run*)."""
     return [submit_job(j, paths, resources=resources, binds=binds, dry_run=dry_run) for j in jobs]
 
 

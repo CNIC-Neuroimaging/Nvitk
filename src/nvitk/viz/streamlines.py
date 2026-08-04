@@ -35,6 +35,7 @@ class FlowTraceParams:
 
 
 def _mask_roi(mask: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarray:
+    """Boolean ROI from *mask*: union of the given label ids, or any nonzero voxel if *label_ids* is empty/None."""
     m = to_numpy(mask)
     if label_ids:
         roi = np.zeros(m.shape, dtype=bool)
@@ -60,6 +61,7 @@ def _mask_velocity_to_roi(
 
 
 def _points_inside_roi(points: np.ndarray, roi: np.ndarray) -> np.ndarray:
+    """Boolean mask: per-point whether its nearest voxel (rounded) falls inside *roi*."""
     pts = to_numpy(points).astype(np.float64)
     if pts.ndim != 2 or pts.shape[0] == 0:
         return np.zeros((0,), dtype=bool)
@@ -70,6 +72,7 @@ def _points_inside_roi(points: np.ndarray, roi: np.ndarray) -> np.ndarray:
 
 
 def _clip_polyline_to_roi(poly: np.ndarray, roi: np.ndarray) -> np.ndarray | None:
+    """Trim a polyline to its longest contiguous run of points inside *roi* (``None`` if that run is <2 points)."""
     pts = to_numpy(poly).astype(np.float32, copy=False)
     if pts.ndim != 2 or pts.shape[0] < 2:
         return None
@@ -101,6 +104,7 @@ def clip_polylines_to_roi(
     *,
     label_ids: Sequence[int] | None = None,
 ) -> list[np.ndarray]:
+    """Clip each polyline in *polylines* to its longest contiguous run inside the mask ROI (dropping empties)."""
     roi = _mask_roi(mask, label_ids)
     out: list[np.ndarray] = []
     for poly in polylines:
@@ -147,6 +151,7 @@ def _planar_seed_candidates(
     axis: int,
     side: str,
 ) -> np.ndarray:
+    """Restrict seed voxel coordinates to a thin slab at the min/max face along *axis* (widening the slab if too sparse)."""
     ax = int(axis) % 3
     if side == "max":
         plane_val = int(np.max(coords[:, ax]))
@@ -197,6 +202,7 @@ def resample_polylines(
     *,
     spacing_vox: float,
 ) -> list[np.ndarray]:
+    """Apply :func:`resample_polyline` to every polyline with ≥2 points, dropping ``None``/too-short ones."""
     return [
         resample_polyline(poly, spacing_vox=spacing_vox)
         for poly in polylines
@@ -237,6 +243,7 @@ def sample_vel_trilinear(frame: np.ndarray, pos: np.ndarray) -> np.ndarray:
 
 
 def _polylines_from_polydata(points: np.ndarray, lines: np.ndarray) -> list[np.ndarray]:
+    """Split a VTK-style flat points/lines connectivity array into a list of per-polyline point arrays."""
     pts = to_numpy(points).astype(np.float64)
     conn = to_numpy(lines).astype(np.int64).ravel()
     if pts.size == 0 or conn.size == 0:
@@ -373,10 +380,12 @@ def compute_pathlines(
 
 
 def _speed_field(velocity_xyz: np.ndarray) -> np.ndarray:
+    """Voxelwise speed ``|v|`` from a vector velocity field (last axis = xyz components)."""
     return np.linalg.norm(to_numpy(velocity_xyz).astype(np.float64), axis=-1)
 
 
 def _sample_speed_at_points(points: np.ndarray, speed: np.ndarray) -> np.ndarray:
+    """Nearest-voxel lookup of a scalar speed field at each point."""
     pts = to_numpy(points).astype(np.float64)
     if pts.ndim != 2 or pts.shape[0] == 0:
         return np.zeros((0,), dtype=np.float64)
@@ -387,6 +396,7 @@ def _sample_speed_at_points(points: np.ndarray, speed: np.ndarray) -> np.ndarray
 
 
 def _arc_length_from_start(points: np.ndarray) -> np.ndarray:
+    """Cumulative arc length at each point along a polyline, starting at 0."""
     pts = to_numpy(points).astype(np.float64)
     if pts.shape[0] == 0:
         return np.zeros((0,), dtype=np.float64)

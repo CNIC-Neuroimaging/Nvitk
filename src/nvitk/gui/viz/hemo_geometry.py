@@ -160,6 +160,7 @@ def _feature_rgba(
 
 
 def _overlay_metadata() -> dict[str, Any]:
+    """Layer metadata tag marking a layer as a hemodynamics geometry overlay (for cleanup)."""
     return {HEMO_OVERLAY_META: True}
 
 
@@ -188,6 +189,8 @@ def _add_paths_layer(
     reference_layer: Any | None,
     edge_width: float = 0.35,
 ) -> None:
+    """Add a non-editable Napari Shapes (path) layer for *paths* with per-path *edge_colors*, tagged as
+    a hemo overlay and aligned to *reference_layer*'s affine if given."""
     if not paths:
         return
     kwargs: dict[str, Any] = {
@@ -212,6 +215,9 @@ def _stack_features(
     rows: Iterable[dict[str, Any]],
     feature_names: tuple[str, ...],
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Stack per-row ``(centerline_x, centerline_y, centerline_z)`` coordinates and requested
+    *feature_names* columns from *rows* into arrays suitable for a Napari Points layer, typing each
+    feature column appropriately (string, bool, int, or float)."""
     rows_list = list(rows)
     if not rows_list:
         return np.zeros((0, 3), dtype=np.float64), {
@@ -252,6 +258,8 @@ def _add_points_layer(
     face_contrast_limits: tuple[float, float] | None = None,
     sync_face_color: bool = True,
 ) -> Any:
+    """Add a Napari Points layer for *coords*/*features*, tagged as a hemo overlay, with either a solid
+    *face_color* or a feature-driven colormap; returns ``(layer, disconnect_callback)``."""
     kwargs: dict[str, Any] = {
         "name": name,
         "features": features,
@@ -312,6 +320,7 @@ def _add_points_layer(
 
 
 def _finite_limits(features: dict[str, np.ndarray], key: str) -> tuple[float, float] | None:
+    """Min/max of the finite values in ``features[key]``, or ``None`` if there are none."""
     vals = to_numpy(features.get(key, np.asarray([], dtype=np.float64))).astype(np.float64)
     vals = vals[np.isfinite(vals)]
     if vals.size == 0:

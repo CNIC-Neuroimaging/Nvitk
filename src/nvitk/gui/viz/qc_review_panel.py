@@ -39,6 +39,8 @@ _HEMO_TERRITORY_LABEL: dict[str, str] = {
 
 
 def _fmt(value: Any) -> str:
+    """Format *value* for table display: 4 significant figures for numeric values, ``""`` for
+    ``None``/NaN, else ``str()``."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     try:
@@ -48,6 +50,7 @@ def _fmt(value: Any) -> str:
 
 
 def _fmt_parts(parts: list[str]) -> str:
+    """Join non-empty *parts* with ``"; "``, for compact multi-value table cells."""
     return "; ".join(p for p in parts if p)
 
 
@@ -243,6 +246,8 @@ class QcMeasurementsPanel(QWidget):
         *,
         on_revised: Callable[[], None] | None = None,
     ) -> None:
+        """Build the QC review table (region/metric/value/status/comment columns) and the
+        mark-as-revised button."""
         super().__init__(parent)
         self._on_revised = on_revised
         self._subject_uid = ""
@@ -296,6 +301,7 @@ class QcMeasurementsPanel(QWidget):
         self.setLayout(root)
 
     def clear(self) -> None:
+        """Reset the panel to its empty state (no subject, empty table, disabled revise button)."""
         self._subject_uid = ""
         self._rows = []
         self._table.setRowCount(0)
@@ -303,6 +309,8 @@ class QcMeasurementsPanel(QWidget):
         self._status.setText("Load a qvtpy subject to review measurements.")
 
     def load_from_stage6(self, subject_uid: str, stage6_dir: Path) -> int:
+        """Load and populate the review table for *subject_uid* from *stage6_dir* (and its sibling
+        stage-7 morphometrics directory). Returns the number of rows loaded."""
         self._subject_uid = str(subject_uid).strip()
         stage7_dir = Path(stage6_dir).parent / "stage7_morphometrics"
         self._rows = load_qc_measurement_rows(stage6_dir, stage7_dir=stage7_dir)
@@ -347,6 +355,7 @@ class QcMeasurementsPanel(QWidget):
         return len(self._rows)
 
     def _all_marked(self) -> bool:
+        """True if every non-optional row has an OK/FAIL status selected (and there's at least one)."""
         if self._table.rowCount() == 0:
             return False
         required = False
@@ -363,6 +372,7 @@ class QcMeasurementsPanel(QWidget):
         return required
 
     def _refresh_revise_enabled(self, *_args: Any) -> None:
+        """Enable the mark-as-revised button only once every required row is marked."""
         self._btn_revise.setEnabled(self._all_marked())
 
     def _collect_decisions(self) -> list[QcReviewDecision]:
@@ -398,6 +408,7 @@ class QcMeasurementsPanel(QWidget):
         return decisions
 
     def _on_mark_revised(self) -> None:
+        """Publish the collected OK/FAIL decisions for the loaded subject, notifying on success/failure."""
         if not self._all_marked():
             notify("Mark every measurement as OK or FAIL first.", error=True)
             return
@@ -422,6 +433,7 @@ class QcMeasurementsPanel(QWidget):
 
 
 def attach_qc_measurements_dock(viewer: Any, panel: QcMeasurementsPanel) -> Any:
+    """Dock *panel* on Napari's left edge, tabbed with the vessel cross-section dock."""
     return attach_left_inspection_dock(
         viewer,
         panel,
@@ -439,6 +451,7 @@ def show_qc_measurements(
     stage6_dir: Path,
     on_revised: Callable[[], None] | None = None,
 ) -> QcMeasurementsPanel:
+    """Create, dock, and populate a :class:`QcMeasurementsPanel` for *subject_uid*'s stage-6 results."""
     panel = QcMeasurementsPanel(on_revised=on_revised)
     attach_qc_measurements_dock(viewer, panel)
     n = panel.load_from_stage6(subject_uid, stage6_dir)

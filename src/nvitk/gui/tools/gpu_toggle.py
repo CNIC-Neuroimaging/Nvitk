@@ -52,12 +52,14 @@ def build_gpu_toggle_button(*, on_changed: Callable[[], None] | None = None):
     )
 
     def _sync_checked() -> None:
+        """Sync the button's checked state and label to the current global backend."""
         btn.blockSignals(True)
         btn.setChecked(get_global_backend() == "cupy")
         btn.setText(f"GPU computing: {'ON' if btn.isChecked() else 'OFF'}")
         btn.blockSignals(False)
 
     def _on_toggled(checked: bool) -> None:
+        """Apply the toggled backend, resync the button, and notify *on_changed* if given."""
         set_gpu_backend(checked)
         _sync_checked()
         if on_changed is not None:

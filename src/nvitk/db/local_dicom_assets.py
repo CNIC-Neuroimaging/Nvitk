@@ -58,6 +58,8 @@ _JUNK_NAMES = frozenset(
 
 
 def _is_probably_dicom_file(path: Path) -> bool:
+    """Heuristic DICOM detection by name: excludes hidden/junk files, accepts known DICOM extensions
+    and extensionless files (common for raw exports)."""
     if not path.is_file():
         return False
     name = path.name
@@ -73,6 +75,8 @@ def _is_probably_dicom_file(path: Path) -> bool:
 
 
 def _iter_dicoms_under(folder: Path) -> Iterable[Path]:
+    """Yield every file under *folder* that looks like a DICOM slice, sorted; nothing if *folder*
+    isn't a directory."""
     if not folder.is_dir():
         return
     for p in sorted(folder.rglob("*")):
@@ -177,7 +181,10 @@ def upsert_dicom_assets(
 
 
 def _cli_decorator(*args: Any, **kwargs: Any):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func: Any) -> Any:
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -216,6 +223,8 @@ def main(
     dry_run: bool,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point: scaffold/open the dataset at ``dataset_root`` and register the DICOM tree at
+    ``dicom_root`` into the ``assets`` table."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

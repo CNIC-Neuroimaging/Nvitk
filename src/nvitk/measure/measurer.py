@@ -77,21 +77,25 @@ class Measurer:
         return Measurer(image=self.image, mask=new_mask)
 
     def with_mask(self, mask: Image) -> "Measurer":
+        """Return a new :class:`Measurer` with *mask* swapped in (same image)."""
         return Measurer(image=self.image, mask=mask)
 
     def with_image(self, image: Image) -> "Measurer":
+        """Return a new :class:`Measurer` with *image* swapped in (same mask)."""
         return Measurer(image=image, mask=self.mask)
 
     # -----------------------------------------------------------------
     # Measurements
     # -----------------------------------------------------------------
     def volume(self) -> dict[str, float]:
+        """Physical volume of the mask in mm³ and cc."""
         return {
             "volume_mm3": volume_mm3(self.mask),
             "volume_cc": volume_cc(self.mask),
         }
 
     def intensity(self, *, stats: Iterable[str] = ("mean", "median", "max", "p95", "std", "sum")) -> dict[str, float]:
+        """Requested intensity statistics of the image within the mask."""
         return masked_stats(self.image, self.mask, stats=stats)
 
     def suv(
@@ -103,6 +107,7 @@ class Measurer:
         revert_scaling: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, float]:
+        """SUV statistics within the mask (BW/BSA/LBM kinds), from the image's PET metadata."""
         return suv_stats(
             self.image, self.mask,
             metadata=metadata,
@@ -119,15 +124,19 @@ class Measurer:
         return out
 
     def integrated_intensity(self) -> float:
+        """Sum of intensity × voxel-volume over the mask (e.g. total lesion glycolysis)."""
         return integrated_intensity(self.image, self.mask)
 
     def voxel_metrics(self, reference: Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]:
+        """Overlap metrics (dice/jaccard/…) of this mask against a *reference* mask."""
         return voxel_metrics(reference, self.mask, metrics=metrics)
 
     def surface_metrics(self, reference: Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]:
+        """Surface-distance metrics (hausdorff/msd/…) of this mask against a *reference* mask."""
         return surface_metrics(reference, self.mask, metrics=metrics)
 
     def radiomics(self, *, feature_classes: Iterable[str] | None = None) -> dict[str, float]:
+        """PyRadiomics feature values for the image within the mask."""
         return compute_radiomics(self.image, self.mask, feature_classes=feature_classes)
 
     def correlation(self, other: Image) -> dict[str, float]:

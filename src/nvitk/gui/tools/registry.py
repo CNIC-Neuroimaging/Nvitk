@@ -20,6 +20,9 @@ ParamKind = Literal[
 
 @dataclass(frozen=True)
 class ParamSpec:
+    """One tool parameter's GUI widget spec: name, label, kind, default, and (for numeric/choice
+    kinds) bounds or allowed values."""
+
     name: str
     label: str
     kind: ParamKind = "float"
@@ -34,6 +37,9 @@ RunMode = Literal["layer", "notify", "pipeline"]
 
 @dataclass(frozen=True)
 class GuiToolSpec:
+    """Registry entry for one GUI tool: id, category, label, its parameters, layer/3D requirements,
+    and how running it should behave (``run_mode``)."""
+
     id: str
     category: str
     label: str
@@ -84,6 +90,8 @@ _WORKING_DIR = ParamSpec("working_dir", "Working directory", "str", "")
 
 
 def _totalseg_task_choices() -> tuple[str, ...]:
+    """Available TotalSegmentator task names, falling back to a small hardcoded set if the class-map
+    registry can't be imported."""
     try:
         from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
 
@@ -1442,14 +1450,17 @@ _TOOLS = _TOOLS + _PIPELINE_GUI
 
 
 def categories() -> list[str]:
+    """Display order of tool categories."""
     return list(_CATEGORY_ORDER)
 
 
 def tools_for_category(category: str) -> list[GuiToolSpec]:
+    """All registered tool specs belonging to *category*."""
     return [t for t in _TOOLS if t.category == category]
 
 
 def tool_by_id(tool_id: str) -> GuiToolSpec | None:
+    """Look up a registered :class:`GuiToolSpec` by its id, or ``None`` if unregistered."""
     for t in _TOOLS:
         if t.id == tool_id:
             return t
@@ -1457,10 +1468,12 @@ def tool_by_id(tool_id: str) -> GuiToolSpec | None:
 
 
 def operations_for_category(category: str) -> list[str]:
+    """Display labels of every tool in *category*, for populating the operation dropdown."""
     return [t.label for t in tools_for_category(category)]
 
 
 def tool_id_from_label(category: str, label: str) -> str | None:
+    """Resolve a category/label combination back to its tool id, or ``None`` if unmatched."""
     for t in tools_for_category(category):
         if t.label == label:
             return t.id
@@ -1468,15 +1481,18 @@ def tool_id_from_label(category: str, label: str) -> str | None:
 
 
 def default_category() -> str:
+    """The category selected by default when the Tools panel first loads."""
     return _CATEGORY_ORDER[0]
 
 
 def default_operation(category: str) -> str:
+    """The operation label selected by default for *category* (its first tool, or ``""`` if empty)."""
     ops = operations_for_category(category)
     return ops[0] if ops else ""
 
 
 def params_for_tool(tool_id: str) -> tuple[ParamSpec, ...]:
+    """Parameter specs registered for *tool_id*, empty if the tool is unknown or has none."""
     t = tool_by_id(tool_id)
     return t.params if t else ()
 
@@ -1561,6 +1577,7 @@ def is_sge_capable(tool_id: str | None) -> bool:
 
 
 def sge_block_reason(tool_id: str | None) -> str:
+    """Human-readable reason *tool_id* can't run via remote SGE, or ``""`` if it can."""
     if is_sge_capable(tool_id):
         return ""
     if not tool_id:

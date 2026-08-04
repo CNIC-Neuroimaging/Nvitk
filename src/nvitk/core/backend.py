@@ -143,6 +143,7 @@ _backend_dependent_modules: set[str] = set()
 
 
 def _update_backend_proxies() -> None:
+    """Refresh every module's ``np``/``scipy``/``ndi`` globals after a backend switch."""
     # Late import avoids circular dependency with proxy module.
     try:
         from .proxy import refresh_all_proxies
@@ -254,11 +255,13 @@ class using:
     """
 
     def __init__(self, backend_name: str, allow_fallback: bool = True) -> None:
+        """Configure the target backend; *allow_fallback* permits CPU when GPU is missing."""
         self.backend_name = backend_name
         self.allow_fallback = allow_fallback
         self._token: object | None = None
 
     def __enter__(self) -> "using":
+        """Switch the context-local backend and refresh proxied module globals."""
         resolved = _resolve_backend(self.backend_name, allow_fallback=self.allow_fallback)
         if resolved not in _BACKENDS:
             raise BackendUnavailableError(
@@ -269,11 +272,13 @@ class using:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Restore the previous backend on block exit."""
         if self._token is not None:
             _backend_context.reset(self._token)
             _update_backend_proxies()
 
     def __repr__(self) -> str:
+        """Developer-friendly representation echoing the requested backend."""
         return f"using('{self.backend_name}')"
 
 
@@ -410,6 +415,7 @@ def map_in_thread_pool(func, iterable, *, max_workers: int):
     backend = get_current_backend()
 
     def _worker_init() -> None:
+        """Pool initializer: inherit the parent thread's backend in each worker."""
         set_thread_backend(backend, allow_fallback=True)
 
     with ThreadPoolExecutor(max_workers=max_workers, initializer=_worker_init) as pool:

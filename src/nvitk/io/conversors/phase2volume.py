@@ -36,7 +36,9 @@ log = Logger()
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when click isn't installed."""
     def decorator(func):
+        """Return *func* unmodified (click is unavailable, so no CLI wiring is applied)."""
         return func
 
     return decorator
@@ -48,6 +50,8 @@ _click_option = click.option if click is not None else _cli_decorator
 
 @dataclass(frozen=True)
 class PhaseInputs:
+    """Resolved paths to a 4D-flow patient's angio and per-direction (AP/RL/FH) phase DICOM folders/files."""
+
     patient_dir: Path
     flow_dir: Path
     ap_dir: Path
@@ -60,6 +64,7 @@ class PhaseInputs:
 
 
 def _first_match(directory: Path, *patterns: str) -> Path | None:
+    """First path in *directory* matching any of the glob *patterns*, tried in order."""
     for pattern in patterns:
         matches = sorted(directory.glob(pattern))
         if matches:
@@ -68,6 +73,7 @@ def _first_match(directory: Path, *patterns: str) -> Path | None:
 
 
 def _find_direction_dirs(flow_dir: Path) -> tuple[Path, Path, Path]:
+    """Identify the AP/RL/FH phase-direction subfolders under a 4DFlow directory by name matching."""
     ap_dir = rl_dir = fh_dir = None
     for subdir in sorted(flow_dir.iterdir()):
         if not subdir.is_dir():
@@ -94,6 +100,7 @@ def _find_direction_dirs(flow_dir: Path) -> tuple[Path, Path, Path]:
 
 
 def discover_phase_inputs(patient_dir: str | Path) -> PhaseInputs:
+    """Locate a patient's angio and AP/RL/FH phase DICOM inputs under their ``4DFlow`` folder."""
     patient_path = Path(patient_dir)
     flow_dir = patient_path / "4DFlow"
     if not flow_dir.exists():
@@ -163,6 +170,7 @@ def _scalar_venc_from_raw(raw: Any, *, source_hint: str = "") -> float | None:
 
 
 def _venc_from_json_payload(payload: dict[str, Any]) -> float | None:
+    """Extract a VENC value (mm/s) from a JSON sidecar dict: explicit VENC/Philips tag first, then legacy cm/s fields."""
     # Prefer explicit VENC / Philips private tag, then legacy cm/s fields.
     for key in ("VENC", "(2001,101A)", "(2001,101a)"):
         if key in payload:
@@ -180,6 +188,7 @@ def _venc_from_json_payload(payload: dict[str, Any]) -> float | None:
 
 
 def _venc_from_json_dir(ap_dir: Path) -> tuple[float | None, str | None]:
+    """Find a VENC value in any JSON sidecar under *ap_dir*; returns ``(value_mm_s, source_label)``."""
     for json_path in sorted(ap_dir.glob("*.json")):
         try:
             with json_path.open("r", encoding="utf-8") as handle:
@@ -195,6 +204,7 @@ def _venc_from_json_dir(ap_dir: Path) -> tuple[float | None, str | None]:
 
 
 def _venc_from_nifti_metadata(meta: dict[str, Any] | None) -> tuple[float | None, str | None]:
+    """Find a VENC value in a NIfTI image's metadata dict; returns ``(value_mm_s, source_label)``."""
     if not meta:
         return None, None
     candidates = (
@@ -225,6 +235,7 @@ def _venc_from_nifti_metadata(meta: dict[str, Any] | None) -> tuple[float | None
 
 
 def _venc_from_single_dicom(path: Path) -> float | None:
+    """Extract a VENC value (mm/s) from one DICOM file, trying Philips/standard/GE private tags in turn."""
     try:
         import pydicom
     except Exception:
@@ -257,6 +268,7 @@ def _venc_from_single_dicom(path: Path) -> float | None:
 
 
 def _venc_from_dicom_directory(dicom_dir: Path, *, max_files: int = 100) -> tuple[float | None, str | None]:
+    """Scan up to *max_files* DICOMs under *dicom_dir* for a VENC value; returns ``(value_mm_s, source_label)``."""
     if not dicom_dir.is_dir():
         return None, None
     n = 0
@@ -431,6 +443,7 @@ def compute_phase_derivatives(
 
 
 def _write_outputs(flow_dir: Path, outputs: dict[str, np.ndarray | None], metadata: dict[str, Any]) -> list[Path]:
+    """Write each non-``None`` output array as ``<flow_dir>/<name>.nii.gz`` with shape/axes metadata."""
     written: list[Path] = []
     for name, array in outputs.items():
         if array is None:
@@ -448,6 +461,7 @@ def _write_outputs(flow_dir: Path, outputs: dict[str, np.ndarray | None], metada
 
 
 def utc_now() -> str:
+    """Current UTC timestamp as an ISO-8601 string (for provenance metadata)."""
     from nvitk.db.storage import utc_now_iso
 
     return utc_now_iso()
@@ -467,6 +481,13 @@ def process_patient(
     dicom_search_dir: Path | None = None,
     backend: str = None,
 ) -> list[Path]:
+    """Convert one patient's 4D-flow phase DICOMs into velocity/CD/angio NIfTI volumes with VENC scaling and QC.
+
+    Discovers the AP/RL/FH direction folders (:func:`discover_phase_inputs`),
+    resolves VENC (explicit arg, else JSON sidecar, else NIfTI metadata, else
+    DICOM tags), converts phase to velocity, optionally applies background
+    phase correction, and writes the resulting volumes next to the input.
+    """
     backend = backend or get_current_backend()
     with using(backend):
         inputs = discover_phase_inputs(patient_dir)
@@ -478,7 +499,7 @@ def process_patient(
                 inputs.rl_phase_path,
                 inputs.fh_phase_path,
             ]
-
+        
         angio_image = imread(inputs.angio_path)
         ap_image = imread(inputs.ap_phase_path)
         rl_image = imread(inputs.rl_phase_path)
@@ -524,6 +545,9 @@ def phase2volume(
     dicom_search_dir: Path | None = None,
     backend: str = 'gpu',
 ) -> list[Path]:
+    """Library entry point behind the ``phase2volume`` CLI: convert one patient, or every patient under *input_path*
+    when *multifile* is set.
+    """
     try:
         source = Path(input_path)
         if multifile:
@@ -628,6 +652,7 @@ def main(
     pipeline_version_legacy: str | None,
     backend: str,
 ) -> None:
+    """CLI entry point: convert one (or, with ``--multifile``, every) 4D-flow patient's phase DICOMs to NIfTI volumes."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

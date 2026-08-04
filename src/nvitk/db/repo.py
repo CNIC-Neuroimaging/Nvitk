@@ -47,6 +47,7 @@ log = Logger()
 
 
 def _default_dataset_root() -> Path:
+    """Resolve the dataset root: ``NVITK_DATASET_ROOT`` if set, else ``<repo>/dataset/nvitk-dataset``."""
     env_root = os.getenv("NVITK_DATASET_ROOT")
     if env_root:
         return Path(env_root).expanduser().resolve()
@@ -54,6 +55,8 @@ def _default_dataset_root() -> Path:
 
 
 def _local_dataset_root_from_settings(db: dict[str, Any]) -> str | Path:
+    """Pick the dataset root from a settings ``db`` block: ``local_fallback_root`` first, then ``root``,
+    then :func:`_default_dataset_root`."""
     fallback = db.get("local_fallback_root")
     if fallback is not None and str(fallback).strip():
         log.info("Using local root: %s", fallback)
@@ -187,6 +190,7 @@ def _nifti_files_in_dir(directory: Path) -> list[Path]:
 
 
 def _nifti_cache_dir_has_files(directory: Path) -> bool:
+    """True if *directory* contains at least one cached ``.nii``/``.nii.gz`` file."""
     return bool(_nifti_files_in_dir(directory))
 
 
@@ -209,6 +213,8 @@ def _imread_jobs_for_scan_path(raw: str | Path, *, asset_type: str) -> list[tupl
 
 
 def _dedupe_imread_jobs(jobs: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
+    """Drop duplicate ``(path, force_type)`` jobs, keyed on resolved absolute path and lower-cased type,
+    preserving first-seen order."""
     seen: set[tuple[str, str]] = set()
     out: list[tuple[Path, str]] = []
     for p, ft in jobs:
@@ -238,6 +244,8 @@ def _imread_kwargs_with_nifti_sidecar(path: Path, force_type: str, base: dict[st
 
 
 def _imread_stack_from_jobs(jobs: list[tuple[Path, str]], **imread_kwargs: Any) -> Any:
+    """Read every ``(path, force_type)`` job with :func:`nvitk.io.imageio.imread`, attaching a NIfTI
+    sidecar's ``metadata_json`` when present. Returns a single image for one job, otherwise a list."""
     from nvitk.io.imageio import imread
 
     if not jobs:
@@ -254,6 +262,8 @@ def _imread_stack_from_jobs(jobs: list[tuple[Path, str]], **imread_kwargs: Any) 
 
 
 def _dicom_cache_dir_has_files(directory: Path) -> bool:
+    """True if *directory* contains at least one non-hidden file that looks like a DICOM slice
+    (``.dcm``/``.dicom``/``.ima``/``.img`` extension, or no extension at all)."""
     if not directory.is_dir():
         return False
     for child in directory.iterdir():
@@ -274,6 +284,8 @@ def _dicom_cache_dir_has_files(directory: Path) -> bool:
 
 
 def _pick_value_column_for_spec(spec: Any) -> str:
+    """Choose which measurement value column a filter *spec* should be applied against: ``value_text``
+    for string specs or a ``$contains``-style operator, ``value_num`` otherwise."""
     if isinstance(spec, Mapping):
         for raw_op in spec:
             op = str(raw_op).strip().lower().lstrip("$")
@@ -296,6 +308,8 @@ def _normalize_visit_like_for_key(series: pd.Series) -> pd.Series:
 
 
 def _normalize_frame_index_for_key(series: pd.Series, *, index: pd.Index) -> pd.Series:
+    """Format ``frame_index`` as a string for entity-key composition; non-zero values become their
+    rounded integer string, missing/zero values become ``""`` (frame 0 is treated as "no frame")."""
     fi = pd.to_numeric(series, errors="coerce")
     fr = pd.Series("", index=index, dtype="string")
     mask = fi.notna() & (fi != 0)
@@ -328,6 +342,7 @@ def _measurement_entity_tuple_series(df: pd.DataFrame) -> pd.Series:
 
 
 def _entity_keys_from_frame(df: pd.DataFrame) -> set[tuple[str, ...] | str]:
+    """Set of distinct entity keys (see :func:`_measurement_entity_tuple_series`) present in *df*."""
     if df.empty:
         return set()
     s = _measurement_entity_tuple_series(df)
@@ -335,6 +350,7 @@ def _entity_keys_from_frame(df: pd.DataFrame) -> set[tuple[str, ...] | str]:
 
 
 def _frame_matches_entity_keys(df: pd.DataFrame, keys: set[tuple[str, ...] | str]) -> pd.Series:
+    """Boolean mask over *df* rows whose entity key is in *keys*."""
     s = _measurement_entity_tuple_series(df)
     return s.isin(keys)
 
@@ -352,6 +368,7 @@ def _image_wide_single_variable_from_request(variables: str | Iterable[str] | No
 
 
 def _ordered_unique(values: Iterable[str]) -> list[str]:
+    """De-duplicate *values*, keeping first-seen order."""
     out: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -367,6 +384,8 @@ def _resolve_requested_variables_with_alias_map(
     *,
     domain: str,
 ) -> tuple[list[str], dict[str, str]]:
+    """Resolve *requested* variable names/aliases to canonical ids via ``catalog``. Returns the ordered,
+    de-duplicated canonical ids plus a ``{canonical: originally_requested_alias}`` map."""
     if requested is None:
         return [], {}
     raw_values = [requested] if isinstance(requested, str) else list(requested)
@@ -400,6 +419,7 @@ def _resolve_variable_id_filter_spec(
     alias_map: dict[str, str] = {}
 
     def resolve_tokens(values: list[Any]) -> list[str]:
+        """Resolve a list of raw variable tokens to canonical ids, recording aliases as a side effect."""
         cleaned = [str(v).strip() for v in values if str(v).strip()]
         if not cleaned:
             return []
@@ -435,6 +455,8 @@ def _resolve_variable_id_filter_spec(
 
 
 def _rename_image_wide_column_with_alias(name: str, canonical_to_alias: dict[str, str]) -> str:
+    """Rewrite a wide-pivot image-measurement column name so its trailing canonical variable id
+    (optionally followed by a ``_f<frame>`` suffix) is replaced by the requested alias."""
     if not canonical_to_alias:
         return name
     ordered = sorted(canonical_to_alias.items(), key=lambda item: len(item[0]), reverse=True)
@@ -504,6 +526,9 @@ def _compose_image_wide_keys(df: pd.DataFrame, *, single_variable: bool) -> pd.S
 
 
 def _apply_variable_value_filters(df: pd.DataFrame, specs: list[tuple[str, Any]]) -> pd.DataFrame:
+    """Restrict *df* to entities (subject/visit/... tuples) whose measurement value satisfies every
+    ``(variable_id, filter_spec)`` in *specs*, evaluating each variable's filter against its own rows
+    before intersecting entity keys back onto the full frame."""
     if df.empty or not specs:
         return df
     key_sets: list[set[tuple[str, ...] | str]] = []
@@ -606,6 +631,8 @@ class DataRepo:
         return set(cm["subject_uid"].astype("string").str.strip())
 
     def _filter_dataframe_by_cohort(self, df: pd.DataFrame, cohort_id: str) -> pd.DataFrame:
+        """Restrict *df* to rows whose ``subject_uid`` belongs to *cohort_id*; no-op if cohort membership
+        is unavailable or *df* has no ``subject_uid`` column."""
         if df.empty or "subject_uid" not in df.columns:
             return df
         uids = self._cohort_subject_uid_set(cohort_id)
@@ -615,6 +642,7 @@ class DataRepo:
         return df.loc[s.isin(uids)].copy()
 
     def _measurement_column_names(self, table_name: str) -> set[str]:
+        """Column names declared in the catalog manifest for *table_name*."""
         return set(self.catalog.get_table(table_name).columns.keys())
 
     def _split_measurement_filters(
@@ -624,6 +652,10 @@ class DataRepo:
         domain: str,
         table_name: str,
     ) -> tuple[dict[str, Any], list[tuple[str, Any]], dict[str, str]]:
+        """Split a user-supplied ``filters`` dict into structural column filters (applied directly to the
+        measurement table) and per-variable value filters (applied against ``value_num``/``value_text``
+        rows for a specific ``variable_id``), resolving any variable aliases along the way. Returns
+        ``(structural_filters, [(variable_id, spec), ...], canonical_to_alias)``."""
         if not filters:
             return {}, [], {}
         columns = self._measurement_column_names(table_name)
@@ -675,6 +707,8 @@ class DataRepo:
         table_name: str,
         canonical_to_alias: dict[str, str],
     ) -> pd.DataFrame:
+        """Rename wide-pivot columns from canonical variable ids back to the aliases the caller requested
+        (image-measurement columns via suffix rewriting, other tables via a direct column rename)."""
         if df.empty or not canonical_to_alias:
             return df
         out = df.copy()
@@ -701,6 +735,8 @@ class DataRepo:
         use_sqlite: bool | None = True,
         force_parquet: bool = False,
     ) -> pd.DataFrame:
+        """Load *table* via SQLite (if enabled/available) with a Parquet fallback on query failure,
+        coercing the result to the manifest's declared column dtypes."""
         definition = self.catalog.get_table(table)
         effective_sqlite = (self.use_sqlite if use_sqlite is None else use_sqlite) and not force_parquet
 
@@ -960,6 +996,7 @@ class DataRepo:
             defaults[str(e["modality"]).strip().lower()] = str(e["pipeline_id"])
 
         def row_ok(row: pd.Series) -> bool:
+            """Keep the row unless its modality has a catalog default pipeline that it doesn't match."""
             m = str(row.get("modality", "")).strip().lower() if pd.notna(row.get("modality")) else ""
             if m not in defaults:
                 return True
@@ -1329,6 +1366,8 @@ class DataRepo:
         return result
 
     def _enforce_measurement_columns(self, table: str, df: pd.DataFrame) -> pd.DataFrame:
+        """Restrict *df* to the columns allowed for a known measurement *table*; pass through unchanged
+        for tables not listed in ``MEASUREMENT_TABLE_COLUMNS``."""
         allowed = MEASUREMENT_TABLE_COLUMNS.get(table)
         if allowed is None:
             return df
@@ -1417,6 +1456,8 @@ class DataRepo:
         columns: list[str] | None = None,
         filters: dict[str, Any] | None = None,
     ) -> pd.DataFrame:
+        """Read *definition*'s Parquet file (an empty typed frame if it doesn't exist yet), coerce to the
+        manifest schema, and apply *filters*."""
         if not definition.path.exists():
             manifest_columns = definition.columns
             selected_columns = {
@@ -1438,6 +1479,8 @@ class DataRepo:
         table_name: str,
         image_wide_single_variable: bool | None = None,
     ) -> pd.DataFrame:
+        """Resolve ``value_num``/``value_text`` into a unified ``value`` column and, if ``wide``, pivot to
+        one column per variable via :meth:`_to_wide`; otherwise return the long frame with a fresh index."""
         df = self._resolve_measurement_values(df)
         if wide:
             definition = self.catalog.get_table(table_name)
@@ -1450,6 +1493,8 @@ class DataRepo:
         return df.reset_index(drop=True)
 
     def _resolve_measurement_values(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add a unified ``value`` column, preferring ``value_num`` and falling back to ``value_text``
+        row-wise where the numeric value is missing."""
         if df.empty:
             return df.copy()
         out = df.copy()
@@ -1470,6 +1515,9 @@ class DataRepo:
         *,
         image_wide_single_variable: bool | None = None,
     ) -> pd.DataFrame:
+        """Pivot a long measurement frame to wide form: one row per entity (``wide_index_columns``) and
+        one column per composed key (region/variable/frame, see :func:`_compose_image_wide_keys` for
+        ``image_measurements`` or :meth:`_compose_wide_keys` otherwise), values from the ``value`` column."""
         if df.empty:
             return df.copy()
 
@@ -1499,6 +1547,7 @@ class DataRepo:
         return wide.reset_index()
 
     def _compose_wide_keys(self, df: pd.DataFrame, key_columns: list[str]) -> pd.Series:
+        """Join *key_columns* per row with ``__`` (skipping empty parts) to form wide-pivot column keys."""
         return (
             df[key_columns]
             .astype("string")
@@ -1508,4 +1557,5 @@ class DataRepo:
         )
 
     def _relative_path(self, path: Path) -> str:
+        """*path* expressed relative to the dataset root, as a POSIX-style string for catalog storage."""
         return str(path.relative_to(self.root).as_posix())

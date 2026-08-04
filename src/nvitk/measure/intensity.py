@@ -55,6 +55,7 @@ def masked_stats(
     out: dict[str, float] = {}
 
     def _f(x: Any) -> float:
+        """Convert a 0-d or single-element backend array to a plain Python float."""
         # Final per-scalar conversion to Python float.
         from nvitk.core.array import to_numpy
 

@@ -59,6 +59,7 @@ _KIDNEY_ERODE = 1
 
 
 def _imread_opt(parent: Path, stem: str, axes: str = "XYZ") -> Image | None:
+    """Read the ``<stem>.nii[.gz]`` file resolved under *parent*, or ``None`` if it doesn't exist."""
     path = resolve_nii_optional(parent, stem)
     if path is None:
         return None
@@ -66,6 +67,8 @@ def _imread_opt(parent: Path, stem: str, axes: str = "XYZ") -> Image | None:
 
 
 def _vertebra_narrow(vertebra: Image, radius: int = _BN_ERODE) -> Image:
+    """Erode the vertebra mask by *radius* voxels and keep only its largest connected component
+    (empty mask if erosion removes everything)."""
     binary = (vertebra.data > 0).astype(np.uint8)
     eroded = erode(vertebra.with_data(binary), footprint=radius)
     if not bool(eroded.data.any()):
@@ -74,6 +77,8 @@ def _vertebra_narrow(vertebra: Image, radius: int = _BN_ERODE) -> Image:
 
 
 def _biggest_cc_or_empty(label_img: Image, label_id: int) -> Image:
+    """Extract *label_id* from *label_img* and keep only its largest connected component (empty mask
+    if the label is absent)."""
     m = get_label(label_img, label_id, missing="empty")
     if not bool(m.data.any()):
         return m
@@ -93,6 +98,8 @@ def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Im
 
 
 def _kidney_erode(kidney: Image, iterations: int = _KIDNEY_ERODE) -> Image:
+    """Erode the kidney mask by *iterations*, falling back to the original (unwarned-empty) mask if
+    erosion removes everything."""
     binary = (kidney.data > 0).astype(np.uint8)
     eroded = erode(kidney.with_data(binary), iterations=iterations)
     if not bool(eroded.data.any()):
@@ -216,6 +223,8 @@ def build_legs_mask(legs_muscles_mr: Image) -> Image:
 
 
 def _process(segmentation_dir: Path, output_dir: Path) -> None:
+    """Build and write the per-region (HEAD/THORAX/LEGS) post-processed Dixon masks for one subject
+    from its TotalSegmentator outputs, skipping any region whose inputs are missing."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # HEAD

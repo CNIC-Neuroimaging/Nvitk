@@ -18,6 +18,7 @@ _TRAME_WARNED = False
 
 
 def _headless_mode() -> bool:
+    """True if ``NVITK_HEADLESS`` is set truthy, or (by default) no ``DISPLAY`` is available."""
     if os.environ.get("NVITK_HEADLESS", "").lower() in ("1", "true", "yes"):
         return True
     return not bool(os.environ.get("DISPLAY"))
@@ -82,6 +83,8 @@ def trame_export_available() -> bool:
 
 
 def warn_if_trame_missing() -> None:
+    """Log a one-time warning (via :data:`_TRAME_WARNED`) if trame-vtk isn't available for interactive
+    HTML export."""
     global _TRAME_WARNED
     if _TRAME_WARNED or trame_export_available():
         return
@@ -155,6 +158,7 @@ def export_plotter_html(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _screenshot_or_text(note: str) -> bool:
+        """Write a static screenshot HTML page, falling back to a plain-text notice page on failure."""
         if _write_plotter_screenshot_html(pl, path, note=note):
             return True
         return write_export_fallback_html(path, note)

@@ -31,6 +31,7 @@ log = Logger()
 
 
 def _load_stage1_meta(output_root: Path, subject: str) -> dict:
+    """Load *subject*'s stage-1 ``registration_meta.json``; raises ``FileNotFoundError`` if missing."""
     meta_path = paths.registration_meta_path(output_root, subject)
     if not meta_path.is_file():
         raise FileNotFoundError(

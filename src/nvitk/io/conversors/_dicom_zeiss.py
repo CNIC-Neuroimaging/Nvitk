@@ -61,6 +61,7 @@ def _extract_zeiss_raw_oct(
     from collections import Counter, defaultdict
 
     def _find_tag_value_anywhere_local(ds: Any, group: int, element: int):
+        """Search a dataset (including nested sequences) for a tag's value by group/element."""
         if Tag is None:
             return None
         wanted = Tag(group, element)
@@ -70,6 +71,7 @@ def _extract_zeiss_raw_oct(
         return None
 
     def _collect_private_blocks_local(ds: Any):
+        """Collect every non-empty private OB/OW/OF byte-string element from a dataset (candidate raw-image blocks)."""
         out: list[tuple[Any, str, int, bytes]] = []
         for elem in ds.iterall():
             try:
@@ -195,6 +197,7 @@ def _extract_zeiss_raw_oct(
         )
 
     def try_decode_image_block(payload: bytes):
+        """Attempt to decode a private-block payload as a raw Zeiss OCT image, guessing dtype/shape from its size."""
         if not isinstance(payload, (bytes, bytearray)) or len(payload) < 16:
             return None
         is_jp2_file = len(payload) >= 12 and payload[4:8] == b"jP  "
@@ -310,6 +313,7 @@ def _extract_zeiss_raw_oct(
             tw = candidate_width or w
 
             def normalize(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+                """Center-crop/pad a 2-D array to exactly ``(target_h, target_w)``."""
                 ah, aw = arr.shape
                 if ah > target_h:
                     sh = (ah - target_h) // 2
@@ -343,6 +347,7 @@ def _extract_zeiss_raw_oct(
         return vol, affine, meta
 
     def _factor_pairs(n: int):
+        """Enumerate integer ``(rows, cols)`` factor pairs of *n*, for tile-grid guessing."""
         pairs = []
         for rows in range(1, int(np.sqrt(n)) + 1):
             if n % rows == 0:
@@ -419,6 +424,7 @@ def _extract_zeiss_raw_oct(
             tw = candidate_width or assembled.shape[1]
 
             def normalize(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+                """Center-crop/pad a 2-D array to exactly ``(target_h, target_w)``."""
                 ah, aw = arr.shape
                 if ah > target_h:
                     sh = (ah - target_h) // 2
@@ -492,6 +498,7 @@ def _extract_zeiss_raw_oct(
         target_dtype = np.uint8 if max_val <= 255 else np.uint16
 
         def normalize_to(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+            """Center-crop/pad a 2-D array to ``(target_h, target_w)`` and cast to the chosen output dtype."""
             ah, aw = arr.shape
             if arr.dtype != target_dtype:
                 arr = arr.astype(target_dtype)
@@ -633,6 +640,7 @@ def _extract_zeiss_raw_oct(
 
 
 def is_zeiss_raw_storage(ds: Any) -> bool:
+    """Public alias of :func:`_is_zeiss_raw_storage` — True when *ds* is a Zeiss private raw-OCT storage object."""
     return _is_zeiss_raw_storage(ds)
 
 
@@ -641,4 +649,5 @@ def extract_zeiss_raw_oct(
     md: dict[str, Any],
     debug_mode: bool = False,
 ):
+    """Public alias of :func:`_extract_zeiss_raw_oct` — decode a Zeiss raw-OCT series into a volume."""
     return _extract_zeiss_raw_oct(ds_list, md, debug_mode=debug_mode)

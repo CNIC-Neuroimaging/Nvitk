@@ -60,6 +60,7 @@ def _reference_and_mask_images(
 
 
 def _resolve_layer(viewer: Any, name: str) -> Any:
+    """Look up the layer named *name* in *viewer*; raises ``ValueError`` if blank or not found."""
     name = str(name or "").strip()
     if not name:
         raise ValueError("Select a reference layer.")
@@ -78,6 +79,7 @@ def _layer_param(params: dict[str, Any], key: str) -> str:
 
 
 def _format_metrics(metrics: dict[str, Any]) -> str:
+    """Render a ``{name: value}`` metrics dict as ``"name: value"`` lines for a notification."""
     lines = [f"{k}: {v}" for k, v in metrics.items()]
     return "\n".join(lines)
 
@@ -92,6 +94,8 @@ def _suv_stats_kwargs(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _layer_source_path(layer: Any) -> Path | None:
+    """*layer*'s original source file path (from nvitk metadata), or ``None`` if unrecorded or the
+    file no longer exists."""
     meta = nvitk_metadata_from_layer(layer)
     src = meta.get("source")
     if not src:
@@ -146,6 +150,8 @@ def _bridge_same_label_components(seg: Any, *, max_gap: int = 24) -> Any:
 
 
 def _run_pipeline_cli(spec: Any, params: dict[str, Any]) -> None:
+    """Run a registered pipeline's CLI command as a subprocess (streaming output to the log panel),
+    building argv from ``params["pipeline_argv"]`` if given, else a raw ``extra_args`` string."""
     cmd = str(spec.cli_command or "").strip()
     if not cmd:
         notify("Pipeline command not configured.", error=True)
@@ -172,6 +178,7 @@ def _run_pipeline_cli(spec: Any, params: dict[str, Any]) -> None:
 
 
 def _unique_labels(data: np.ndarray) -> list[int]:
+    """Sorted distinct non-zero integer values in *data* (backend array, so CuPy inputs stay on-device)."""
     flat = as_backend_array(data).ravel()
     if flat.size == 0:
         return []
@@ -216,6 +223,9 @@ def prepare_layer_data(
     target_mode: str,
     label_ids: list[int] | None,
 ) -> tuple[np.ndarray, str]:
+    """Reduce layer *data* to the array a tool should actually operate on given *target_mode*
+    (``"raw"``, ``"binary_mask"``, ``"label"``, or ``"all_labels"``), returning ``(array, mode_tag)``;
+    raises ``ValueError`` for missing label ids or an unknown mode."""
     mode = target_mode.strip().lower()
     arr = as_backend_array(data)
 
@@ -250,6 +260,8 @@ def coerce_tool_output(out: Any) -> np.ndarray:
 
 
 def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
+    """Apply the base morphology op named *op* (dilate/erode/open/close/fill_holes) to *img* with GUI
+    parameters (footprint, iterations, mode, connectivity)."""
     from nvitk.morphology.binary import close, dilate, erode, fill_holes, open as morph_open
 
     fn = {
@@ -281,6 +293,10 @@ def run_gui_tool(
     label_ids: list[int] | None,
     params = None,
 ) -> np.ndarray | None:
+    """Central GUI tool dispatcher: resolve *tool_id* in the registry and route to its implementation
+    (pipeline CLI subprocess, a dedicated viz/measure handler, or a generic array-in/array-out tool
+    call on *layer*'s prepared data). Returns the new layer data, or ``None`` for tools that manage
+    their own output (pipelines, viewer overlays, notifications)."""
     spec = tool_by_id(tool_id)
     if spec is None:
         raise ValueError(f"Unknown tool id: {tool_id}")
@@ -699,10 +715,12 @@ def run_gui_tool(
             )
         with using("numpy"):
             def _f(key: str, default: float) -> float:
+                """Read ``params[key]`` as a float, falling back to *default* when unset."""
                 v = params.get(key)
                 return float(default if v is None else v)
 
             def _i(key: str, default: int) -> int:
+                """Read ``params[key]`` as an int, falling back to *default* when unset."""
                 v = params.get(key)
                 return int(default if v is None else v)
 
@@ -1096,14 +1114,14 @@ def run_gui_tool(
         return coerce_tool_output(biggest_cc(img, n=n_keep))
 
     if tool_id == "morph_biggest_cc":
-        from scipy.ndimage import generate_binary_structure
-
+        from nvitk.morphology import make_ball_footprint
         from nvitk.segmentation.labels import biggest_cc
 
         conn = int(params.get("connectivity") or 1)
         n_keep = max(1, int(params.get("n_largest") or 1))
         rank = min(3, int(proc_data.ndim))
-        structure = generate_binary_structure(rank, conn)
+        # Base-tool structuring element (equals generate_binary_structure at r=1).
+        structure = make_ball_footprint(rank, connectivity=conn)
         return coerce_tool_output(biggest_cc(img, structure=structure, n=n_keep))
 
     if tool_id == "seg_split_lr_cc":
@@ -1166,6 +1184,7 @@ def run_gui_tool(
         exclude = [int(x) for x in seed_ids]
 
         def _layer_name(raw: str) -> str:
+            """Normalize a layer-dropdown value, treating ``"(none)"`` and blank as unset."""
             name = str(raw or "").strip()
             return "" if name in ("", "(none)") else name
 
@@ -1698,16 +1717,22 @@ def _image_to_mock_layer(img: Image, name: str) -> Any:
 
 
 def _build_headless_viewer(primary_layer: Any, aux_layers: list[Any]) -> Any:
+    """Build a minimal object mimicking a Napari viewer's ``.layers`` API (iteration + active-layer
+    selection), for running GUI tools outside Napari on a cluster worker."""
     from types import SimpleNamespace
 
     layers_list = [primary_layer, *aux_layers]
 
     class _Layers:
+        """Minimal stand-in for Napari's ``LayerList``: iterable with an active-selection namespace."""
+
         def __init__(self, items: list[Any]) -> None:
+            """Store *items* and select the first one (if any) as active."""
             self._items = items
             self.selection = SimpleNamespace(active=items[0] if items else None)
 
         def __iter__(self):
+            """Iterate over the mock layers."""
             return iter(self._items)
 
     return SimpleNamespace(layers=_Layers(layers_list))
@@ -1742,6 +1767,7 @@ def run_gui_tool_headless(
 
 
 def _layer_spacing(layer: Any) -> tuple[float, float, float]:
+    """*layer*'s (x, y, z) voxel spacing, or ``(1.0, 1.0, 1.0)`` if unavailable."""
     from nvitk.gui.core.spatial import layer_spacing
 
     sp = layer_spacing(layer)
@@ -1754,6 +1780,9 @@ def _phase_arrays_from_layers_or_disk(
     viewer: Any,
     params: dict[str, Any],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[float, float, float]]:
+    """Load AP/RL/FH phase volumes and voxel spacing, from the three named layers if all are set, else
+    by discovering and reading them from ``nifti_root/subject``; raises ``ValueError`` if neither
+    source is fully specified."""
     ap_name = str(params.get("ap_layer") or "").strip()
     rl_name = str(params.get("rl_layer") or "").strip()
     fh_name = str(params.get("fh_layer") or "").strip()
@@ -1787,6 +1816,9 @@ def _phase_arrays_from_layers_or_disk(
 
 
 def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load *subject*'s 4D-flow contrast volumes from disk: ``(magnitude, complex_difference,
+    velocity_magnitude)``, falling back to derived values (CD as magnitude, ``abs(CD)`` as velocity)
+    when the dedicated Angiography/VelocityMagnitude files aren't present."""
     from nvitk.io.imageio import imread
 
     sub = nifti_root / subject / "4DFlow"
@@ -1812,9 +1844,12 @@ def _run_mask_binary_op(
     params: dict[str, Any],
     op_name: str,
 ) -> np.ndarray:
+    """Apply a binary mask op (``and``/``or``/``subtract``/etc., named by *op_name*) between *layer*'s
+    label-derived mask and *mask_data*'s mask (both converted from label ids if needed)."""
     from nvitk.segmentation import mask_ops
 
     def _as_bool_mask_from_labels(data: np.ndarray, ids: list[int] | None) -> np.ndarray:
+        """Coerce label/mask *data* to a boolean array, restricted to *ids* if given (else non-zero)."""
         arr = np.asarray(data)
         if not ids:
             return (arr != 0)
@@ -1851,6 +1886,8 @@ def _run_mask_binary_op(
 
 
 def _run_seg_pet_ureter(viewer: Any, layer: Any, params: dict[str, Any]) -> np.ndarray:
+    """Run MCP-path PET ureter segmentation from the PET/organ/body layers named in *params*, using
+    the kidney/bladder label ids to seed the search."""
     from nvitk.measure.suv import suv_image
     from nvitk.segmentation.labels import get_label
     from nvitk.segmentation.pet.ureter_segmentation import segment_ureter
@@ -1906,6 +1943,8 @@ def _run_centerline_detect_junctions(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> None:
+    """Detect skeleton junctions in *layer*'s centerline mask and add them as a Points overlay,
+    notifying with the count found."""
     from nvitk.gui.viz.centerline import (
         JUNCTION_POINTS_LAYER,
         add_junction_points_layer,
@@ -1938,6 +1977,8 @@ def _run_centerline_to_polyline(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> None:
+    """Extract polyline (main + branch) representations from *layer*'s 3D centerline mask for the
+    given/all label ids and add them as a Shapes overlay, notifying with a summary count."""
     from nvitk.gui.viz.centerline import (
         DEFAULT_POLYLINE_LAYER,
         add_centerline_polylines_shapes,
@@ -2020,6 +2061,8 @@ def _run_centerline_cut_junctions(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> np.ndarray:
+    """Split the selected label at previously detected skeleton junctions, returning the updated
+    label volume with new label ids for each severed branch."""
     from nvitk.gui.viz.centerline import (
         centerline_polyline_for_label,
         read_junction_coords,
@@ -2056,6 +2099,8 @@ def _run_centerline_cut_junctions(
 
 
 def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Load LOC points into the viewer, either from an existing CSV or by first running QVTpy stage-5
+    LOC generation as a subprocess and loading its output."""
     from nvitk.gui.viz.loc_points import add_locs_layer, load_locs_csv
     from nvitk.pipes.qvtpy import config as qcfg
 
@@ -2101,6 +2146,8 @@ def _run_qvtpy_locs(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
 
 
 def _run_qvtpy_stage(tool_id: str, params: dict[str, Any]) -> None:
+    """Run a single QVTpy pipeline stage (identified by *tool_id*) as a subprocess, notifying on
+    success/failure."""
     from nvitk.gui.pipeline.qvtpy_stages import build_qvtpy_stage_argv
 
     argv = build_qvtpy_stage_argv(tool_id, params)
@@ -2118,6 +2165,8 @@ def _run_measure_centerline_arc_length(
     label_ids: list[int] | None,
     params: dict[str, Any],
 ) -> None:
+    """Compute and notify per-branch/per-label centerline arc lengths (voxel and mm units) for *layer*'s
+    3D centerline mask, either for the selected labels or every connected-component branch (label 0)."""
     from nvitk.gui.viz.centerline import centerline_polyline_for_label
     from nvitk.morphology.polyline_graph import extract_polylines_from_centerline
     from nvitk.pipes.qvtpy.util.loc.loc_selection import polyline_cumulative_arc_length
@@ -2187,6 +2236,8 @@ def _run_measure_centerline_arc_length(
 
 
 def _run_measure_loc_hemodynamics(viewer: Any, layer: Any, params: dict[str, Any]) -> None:
+    """Compute per-LOC hemodynamic indices (PI/RI/flow) from AP/RL/FH phase volumes and a LOC CSV,
+    writing ``loc_measurements.csv`` next to the input and notifying with a summary."""
     from nvitk.gui.viz.loc_points import load_locs_csv
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
     from nvitk.pipes.qvtpy import config as qcfg
@@ -2270,6 +2321,8 @@ def _run_measure_mask_hemodynamics(
     *,
     label_ids: list[int] | None,
 ) -> None:
+    """Compute PI/RI (and flow, per *method*) hemodynamic indices for each selected label id from the
+    active mask and AP/RL/FH phase volumes, notifying with the per-label results."""
     from nvitk.measure.mask_hemodynamics import measure_mask_hemodynamics
 
     lids = list(label_ids or []) or [int(params.get("label_id") or 1)]
@@ -2328,6 +2381,9 @@ def _prepare_vessel_hemo_for_viz(
     layer: Any,
     params: dict[str, Any],
 ):
+    """Gather everything needed to visualize per-vessel hemodynamics (velocity field, resampled
+    segmentation, magnitude/CD reference, temporal resolution) from the AP/RL/FH/reference layers
+    named in *params*, ready to hand off to :func:`~nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics.compute_vessel_hemodynamics`."""
     from nvitk.measure.hemodynamics import velocity_mm_s_from_phases
     from nvitk.pipes.qvtpy.stage6_measure import _cardiac_frame_duration_s
     from nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics import compute_vessel_hemodynamics
@@ -2674,6 +2730,8 @@ def _run_viz_pet_hotspots(
     *,
     label_ids: list[int] | None,
 ) -> None:
+    """Find SUV hotspots in the selected ROI of the reference PET layer and add them as a color-coded
+    Points overlay."""
     from nvitk.gui.viz.layers import add_hotspot_points_layer, hotspot_points_from_volumes
     from nvitk.viz.pet_hotspots import HotspotMode
 
@@ -2711,6 +2769,10 @@ def _run_viz_vessel_cross_sections(
     centerline_layer: Any,
     params: dict[str, Any],
 ) -> None:
+    """Set up the interactive vessel cross-section tool: resolve/align the CD, segmentation, and phase
+    layers, load named arterial/venous branch geometry from nearby pipeline output if available, and
+    install the pick-and-inspect session via
+    :func:`~nvitk.gui.viz.vessel_cross_sections.install_vessel_cross_sections`."""
     from nvitk.gui.viz.vessel_cross_sections import install_vessel_cross_sections
     from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
         CENTERLINE_SEG_BRANCHES_JSON,
@@ -2877,6 +2939,8 @@ def _run_viz_flowshow_napari(
     *,
     label_ids: list[int] | None,
 ) -> None:
+    """Add an animated, dims-synced flow-vector overlay for the mask/label ids over all cardiac phases,
+    computed from the AP/RL/FH phase layers."""
     from nvitk.gui.viz.layers import add_animated_flow_vectors_layer, flow_vectors_all_times
 
     ap_name = str(params.get("ap_layer") or "").strip()
@@ -2948,6 +3012,8 @@ def _run_viz_flow_streamlines_napari(
     *,
     label_ids: list[int] | None,
 ) -> None:
+    """Add an animated, dims-synced streamline/pathline overlay for the mask/label ids, precomputing
+    every cardiac phase up front so scrubbing is instant."""
     from nvitk.gui.viz.flow_streamlines import (
         add_animated_flow_streamlines_layer,
         build_flow_streamline_cache,
@@ -3049,6 +3115,7 @@ def _run_viz_flow_streamlines_napari(
 
 
 def _layer_kwargs_from(layer: Any, name: str) -> dict[str, Any]:
+    """Build ``add_*`` kwargs (name suffixed with *name*, plus spatial metadata) derived from *layer*."""
     from nvitk.gui.core.spatial import layer_spatial_kwargs
 
     return {"name": f"{layer.name}_{name}", **layer_spatial_kwargs(layer)}
@@ -3082,6 +3149,8 @@ def _measure_line(
     viewer: Any,
     params: dict[str, Any],
 ) -> str:
+    """Run the measurement tool named *tool_id* on *img* and format its result as a single summary
+    line for notification (volume, masked stats, similarity metrics, etc.)."""
     if tool_id == "volume_mm3":
         from nvitk.measure.volume import volume_mm3
 
@@ -3151,6 +3220,7 @@ def _measure_line(
 
 
 def parse_label_ids(text: str) -> list[int]:
+    """Parse a comma/semicolon/whitespace-separated label-id string into a list of ints."""
     if not text or not str(text).strip():
         return []
     parts = re.split(r"[,;\s]+", str(text).strip())
@@ -3166,6 +3236,8 @@ def log_tool_failure(exc: BaseException) -> None:
 
 
 def notify(message: str, *, error: bool = False) -> None:
+    """Log *message* to the GUI log panel and show it as a Napari notification (error or info),
+    silently ignoring failures if Napari's notification API is unavailable."""
     gui_log(message, error=error)
     try:
         if error:

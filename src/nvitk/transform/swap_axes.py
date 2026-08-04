@@ -14,6 +14,7 @@ setup(globals())
 
 
 def _permute_axes_string(axes: str | None, order: Sequence[int]) -> str | None:
+    """Reorder an axis-label string by *order* (same permutation applied to the data axes)."""
     if axes is None or len(axes) != len(order):
         return None
     return "".join(axes[i] for i in order)

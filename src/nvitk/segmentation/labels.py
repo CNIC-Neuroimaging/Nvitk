@@ -19,12 +19,14 @@ setup(globals())
 
 
 def _as_array(img: Image | Any) -> Any:
+    """Backend array view of an :class:`Image` or raw array."""
     if isinstance(img, Image):
         return as_backend_array(img.data)
     return as_backend_array(img)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:
+    """Re-wrap *data* as an :class:`Image` when *original* was one; else return *data*."""
     if isinstance(original, Image):
         return original.with_data(data)
     return data

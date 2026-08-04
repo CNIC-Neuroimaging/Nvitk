@@ -24,6 +24,8 @@ def _write_done_marker(
     output_files: list[str],
     error = None,
 ) -> None:
+    """Write a ``.done`` JSON marker in *output_dir* recording job id, exit code, produced output
+    files, finish timestamp, and any error — signals the GUI that the job finished."""
     payload = {
         "job_id": job_id,
         "exit_code": int(exit_code),

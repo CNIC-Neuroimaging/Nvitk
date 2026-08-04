@@ -22,6 +22,7 @@ def _build_affine(
     origin: tuple[float, ...],
     direction: tuple[float, ...],
 ) -> np.ndarray:
+    """Build a voxel→world affine from MHA/MHD spacing, origin, and (row-major) direction cosines."""
     dim = len(spacing)
     affine = np.eye(4, dtype=float)
     if dim == 0:

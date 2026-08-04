@@ -63,11 +63,13 @@ _TREE_BASILAR = frozenset({"BASILAR", "BASI"})
 
 
 def resolve_feature_id(feature: str) -> str:
+    """Resolve a friendly feature alias (e.g. ``\"flow\"``) to its canonical ``variable_id`` (e.g. ``\"flow_mean\"``)."""
     text = str(feature).strip()
     return FEATURE_ALIASES.get(text, text)
 
 
 def features_for_kind(kind: str) -> list[str]:
+    """List the available feature ``variable_id``s for a pipeline kind (qvtpy/asl/t1/flair/tof)."""
     kind = str(kind).strip().lower()
     if kind == "qvtpy":
         return [*QVTPY_VESSEL_FEATURES, *QVTPY_TREE_FEATURES]

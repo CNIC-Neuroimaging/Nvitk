@@ -34,6 +34,10 @@ def project_along_axis(volume: np.ndarray, axis: int, method: str) -> np.ndarray
 
 
 def _project_affine(affine: np.ndarray | None, axis: int, out_ndim: int) -> np.ndarray | None:
+    """Drop the projected *axis* from a 4x4 affine, keeping the surviving spatial columns.
+
+    Returns ``None`` when the geometry cannot be represented (bad shape / too few axes).
+    """
     if affine is None:
         return None
     aff = np.asarray(affine, dtype=float)
@@ -50,6 +54,7 @@ def _project_affine(affine: np.ndarray | None, axis: int, out_ndim: int) -> np.n
 
 
 def _permute_axes_string(axes: str | None, axis: int) -> str | None:
+    """Drop the character at *axis* from an axis-label string (the projected-out axis)."""
     if axes is None or len(axes) <= axis:
         return None
     return axes[:axis] + axes[axis + 1 :]

@@ -10,6 +10,7 @@ from .storage import normalize_variable_id
 
 
 def _norm_region_token(value: str) -> str:
+    """Normalize a single T1 atlas region name via :func:`~nvitk.db.storage.normalize_variable_id`."""
     return normalize_variable_id(str(value).strip())
 
 

@@ -134,6 +134,7 @@ QScrollArea {
 
 
 def _repo() -> DataRepo:
+    """Open the configured dataset repo, unwrapping the ``(repo, ...)`` tuple form if returned."""
     got = get_repo_from_settings()
     if isinstance(got, tuple):
         return got[0]
@@ -141,12 +142,15 @@ def _repo() -> DataRepo:
 
 
 def _statmodels_root(repo: DataRepo) -> Path:
+    """Ensure and return the ``nvitk-statmodels`` scratch directory under the dataset root, for cached
+    fits and saved configs."""
     root = Path(repo.root) / "nvitk-statmodels"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def _apply_dark_theme(widget: QWidget) -> None:
+    """Apply the explorer's dark Qt palette and stylesheet to *widget*."""
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(43, 43, 43))
     palette.setColor(QPalette.WindowText, QColor(224, 224, 224))
@@ -162,6 +166,9 @@ def _apply_dark_theme(widget: QWidget) -> None:
 
 
 def _parse_vc_formula(text: str) -> dict[str, str] | None:
+    """Parse the variance-components formula field (a Python dict literal, e.g.
+    ``{"patient": "0 + C(subject_uid)"}``) into a ``{group: formula}`` dict, or ``None`` if blank;
+    raises ``ValueError`` if it isn't a dict literal."""
     raw = (text or "").strip()
     if not raw:
         return None
@@ -199,6 +206,9 @@ def _load_analysis_frame(
 
 
 def _apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.DataFrame:
+    """Filter *df* to rows where *column* satisfies *op* against *value* (numeric comparisons,
+    substring/exact string match, or equality/inequality); returns *df* unchanged if *column* is
+    missing or blank."""
     if df.empty or not column or column not in df.columns:
         return df
     series = df[column]
@@ -232,6 +242,8 @@ def _apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.
 
 
 def _populate_checklist(widget: QListWidget, entries: list[dict[str, Any]]) -> None:
+    """Fill *widget* with one unchecked, checkable item per variable *entries*, labeled
+    ``"<label> (<variable_id>)"``."""
     widget.clear()
     for entry in entries:
         vid = str(entry.get("variable_id", "")).strip()
@@ -246,6 +258,7 @@ def _populate_checklist(widget: QListWidget, entries: list[dict[str, Any]]) -> N
 
 
 def _checked_variable_ids(widget: QListWidget) -> list[str]:
+    """Variable ids of every checked item in *widget*."""
     out: list[str] = []
     for i in range(widget.count()):
         item = widget.item(i)
@@ -257,6 +270,7 @@ def _checked_variable_ids(widget: QListWidget) -> list[str]:
 
 
 def _set_checked_variable_ids(widget: QListWidget, ids: list[str]) -> None:
+    """Check the items in *widget* whose variable id is in *ids*, uncheck the rest."""
     want = {str(v).strip() for v in ids if str(v).strip()}
     for i in range(widget.count()):
         item = widget.item(i)
@@ -273,6 +287,8 @@ class StatmodelsWindow(QMainWindow):
         *,
         initial_pipeline_kind: str = PIPELINE_KIND_QVTPY,
     ) -> None:
+        """Build the data-selection controls, filter row, covariate/formula panels, and wire up all
+        button/combo signal handlers."""
         super().__init__(parent)
         self.setWindowTitle("nvitk Statmodels")
         self.setWindowFlags(self.windowFlags() | Qt.Window)
@@ -325,6 +341,7 @@ class StatmodelsWindow(QMainWindow):
         self._on_pipeline_kind_changed()
 
     def _build_data_controls(self) -> QGroupBox:
+        """Build the pipeline-kind/pipeline/feature/atlas/grouping selector form."""
         box = QGroupBox("Data selection")
         lay = QFormLayout(box)
 
@@ -364,6 +381,7 @@ class StatmodelsWindow(QMainWindow):
         return box
 
     def _build_filter_row(self) -> QGroupBox:
+        """Build the column/operator/value row for filtering the analysis frame before fitting."""
         box = QGroupBox("Pre-fit filter")
         row = QHBoxLayout(box)
         self._filter_col = QComboBox()
@@ -384,6 +402,7 @@ class StatmodelsWindow(QMainWindow):
         return box
 
     def _build_left_panel(self) -> QWidget:
+        """Build the clinical/cognitive covariate checklists and the analysis-dataframe preview table."""
         panel = QWidget()
         lay = QVBoxLayout(panel)
 
@@ -422,6 +441,7 @@ class StatmodelsWindow(QMainWindow):
         return panel
 
     def _build_right_panel(self) -> QWidget:
+        """Build the formula/fit/save/load controls, plot options, and the summary/plot panes."""
         panel = QWidget()
         lay = QVBoxLayout(panel)
 
@@ -486,20 +506,25 @@ class StatmodelsWindow(QMainWindow):
         return panel
 
     def show_maximized_floating(self) -> None:
+        """Show, maximize, raise, and focus this window."""
         self.show()
         self.showMaximized()
         self.raise_()
         self.activateWindow()
 
     def _current_pipeline_kind(self) -> str:
+        """The currently selected pipeline kind (``"qvtpy"``, ``"asl"``, ``"t1"``, etc.)."""
         return str(self._pipeline_kind.currentData() or PIPELINE_KIND_QVTPY)
 
     def _current_modality(self) -> str:
+        """Imaging modality string corresponding to the currently selected pipeline kind."""
         from nvitk.stats import KIND_MODALITY
 
         return KIND_MODALITY.get(self._current_pipeline_kind(), "4dflow")
 
     def _populate_pipeline_combo(self) -> None:
+        """Repopulate the measurement-pipeline combo with entries registered for the current modality,
+        preserving the current selection if still valid."""
         current = str(self._pipeline.currentData() or "latest")
         self._pipeline.blockSignals(True)
         self._pipeline.clear()
@@ -515,6 +540,8 @@ class StatmodelsWindow(QMainWindow):
         self._pipeline.blockSignals(False)
 
     def _populate_feature_combo(self) -> None:
+        """Repopulate the image-feature combo with features for the current pipeline kind, preserving
+        the current text if still valid."""
         kind = self._current_pipeline_kind()
         feats = features_for_kind(kind)
         current = self._feature.currentText().strip()
@@ -529,6 +556,7 @@ class StatmodelsWindow(QMainWindow):
         self._feature.blockSignals(False)
 
     def _populate_grouping_combo(self) -> None:
+        """Repopulate the grouping combo with choices valid for the current pipeline kind/feature."""
         kind = self._current_pipeline_kind()
         feature = self._current_feature()
         choices = grouping_choices_for(kind, feature)
@@ -542,6 +570,7 @@ class StatmodelsWindow(QMainWindow):
         self._grouping.blockSignals(False)
 
     def _sync_atlas_visibility(self) -> None:
+        """Show the ASL-atlas picker only when the current pipeline kind is ASL."""
         is_asl = self._current_pipeline_kind() == PIPELINE_KIND_ASL
         self._atlas.setEnabled(is_asl)
         self._atlas_label.setEnabled(is_asl)
@@ -549,6 +578,7 @@ class StatmodelsWindow(QMainWindow):
         self._atlas_label.setVisible(is_asl)
 
     def _sync_hint(self) -> None:
+        """Update the explanatory hint text for the currently selected pipeline kind/feature."""
         kind = self._current_pipeline_kind()
         vid = resolve_feature_id(self._current_feature())
         if kind == PIPELINE_KIND_QVTPY:
@@ -582,6 +612,8 @@ class StatmodelsWindow(QMainWindow):
             self._hint.setText("")
 
     def _on_pipeline_kind_changed(self) -> None:
+        """Repopulate every dependent combo (pipeline/feature/grouping) and sync visibility/hints for
+        the newly selected pipeline kind."""
         self._populate_pipeline_combo()
         self._populate_feature_combo()
         self._populate_grouping_combo()
@@ -589,16 +621,21 @@ class StatmodelsWindow(QMainWindow):
         self._sync_hint()
 
     def _on_feature_changed(self, *_args: Any) -> None:
+        """Repopulate the grouping combo and refresh the hint for the newly selected feature."""
         self._populate_grouping_combo()
         self._sync_hint()
 
     def _clinical_vars(self) -> list[str]:
+        """Checked clinical covariate variable ids."""
         return _checked_variable_ids(self._clinical_list)
 
     def _cognitive_vars(self) -> list[str]:
+        """Checked cognitive covariate variable ids."""
         return _checked_variable_ids(self._cognitive_list)
 
     def _current_feature(self) -> str:
+        """Currently entered/selected image feature name, falling back to the first available feature
+        for the current pipeline kind."""
         text = self._feature.currentText().strip()
         if text:
             return text
@@ -606,11 +643,14 @@ class StatmodelsWindow(QMainWindow):
         return feats[0] if feats else "flow_mean"
 
     def _working_df(self) -> pd.DataFrame | None:
+        """The filtered analysis frame if a filter is active, else the raw loaded frame."""
         if self._filtered_df is not None:
             return self._filtered_df
         return self._analysis_df
 
     def _refresh_table(self, df: pd.DataFrame | None) -> None:
+        """Repopulate the preview table (capped at ``_TABLE_ROW_CAP`` rows) and the filter/plot-x
+        column combos from *df*'s columns."""
         self._table.clear()
         if df is None or df.empty:
             self._table.setRowCount(0)
@@ -650,6 +690,8 @@ class StatmodelsWindow(QMainWindow):
         self._plot_x.blockSignals(False)
 
     def _load_data(self) -> pd.DataFrame:
+        """Build the long analysis frame for the currently selected pipeline/feature/grouping/atlas
+        and checked covariates."""
         atlas = None
         if self._current_pipeline_kind() == PIPELINE_KIND_ASL:
             atlas = str(self._atlas.currentData() or "vascular-8")
@@ -669,6 +711,7 @@ class StatmodelsWindow(QMainWindow):
         )
 
     def _on_reload(self) -> None:
+        """Reload the analysis frame, clear any active filter, and refresh the preview table/status."""
         try:
             df = self._load_data()
         except Exception as exc:
@@ -685,6 +728,7 @@ class StatmodelsWindow(QMainWindow):
         notify(f"Reloaded analysis frame ({len(df)} rows).")
 
     def _on_apply_filter(self) -> None:
+        """Apply the filter row's column/op/value to the loaded analysis frame and refresh the preview."""
         if self._analysis_df is None:
             notify("Reload data before applying a filter.", error=True)
             return
@@ -696,12 +740,15 @@ class StatmodelsWindow(QMainWindow):
         notify(f"Filter applied: {len(self._filtered_df)} rows.")
 
     def _on_clear_filter(self) -> None:
+        """Clear the active row filter and restore the full analysis frame in the preview table."""
         self._filtered_df = None
         self._filter_val.clear()
         self._refresh_table(self._analysis_df)
         notify("Filter cleared.")
 
     def _on_fit(self) -> None:
+        """Fit (or reload a cached) MixedLM model from the formula/groups/random-effects fields on the
+        current working frame, then display the summary and refresh the plot."""
         feature = self._current_feature()
         formula = self._formula.toPlainText().strip()
         groups = self._groups.text().strip() or "group_key"
@@ -746,6 +793,7 @@ class StatmodelsWindow(QMainWindow):
         notify("MixedLM fit complete.")
 
     def _clear_plot(self) -> None:
+        """Remove any existing plot widget from the plot host."""
         while self._plot_layout.count():
             item = self._plot_layout.takeAt(0)
             w = item.widget()
@@ -754,6 +802,8 @@ class StatmodelsWindow(QMainWindow):
         self._plot_canvas = None
 
     def _on_plot(self) -> None:
+        """Redraw the parameter/EMM plot for the last fitted model using the current x/y/group/mode
+        selections, embedding it as a Matplotlib canvas (or an error label on failure)."""
         if self._last_result is None or self._last_df is None:
             return
         self._clear_plot()
@@ -805,6 +855,8 @@ class StatmodelsWindow(QMainWindow):
             self._plot_layout.addWidget(err)
 
     def _config_dict(self) -> dict[str, Any]:
+        """Serialize the current data-selection, covariate, formula, and plot settings to a plain dict
+        (for saving alongside a fitted model)."""
         return {
             "pipeline_kind": self._current_pipeline_kind(),
             "pipeline": str(self._pipeline.currentData() or "latest"),
@@ -825,6 +877,8 @@ class StatmodelsWindow(QMainWindow):
         }
 
     def _apply_config(self, cfg: dict[str, Any]) -> None:
+        """Restore the panel's controls (pipeline kind/pipeline/feature/atlas/grouping, covariates,
+        formula fields, plot options) from a previously saved config dict."""
         kind = str(cfg.get("pipeline_kind") or PIPELINE_KIND_QVTPY)
         idx = self._pipeline_kind.findData(kind)
         if idx >= 0:
@@ -882,6 +936,8 @@ class StatmodelsWindow(QMainWindow):
             self._include_points.setChecked(bool(cfg["include_points"]))
 
     def _on_save(self) -> None:
+        """Save the last fitted model (pickle), its config, and its summary text under
+        ``nvitk-statmodels/<model_name>/``."""
         if self._last_result is None:
             notify("Fit a model before saving.", error=True)
             return
@@ -902,6 +958,8 @@ class StatmodelsWindow(QMainWindow):
         self._status.setText(f"Saved {out_dir}")
 
     def _on_load(self) -> None:
+        """Prompt for a saved model directory and restore its config/fitted model/summary, reloading
+        the analysis frame and refreshing the plot."""
         start = str(_statmodels_root(self._repo))
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -943,6 +1001,7 @@ class StatmodelsPanel(QWidget):
     """Right-tab launcher for the floating Statmodels window."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the pipeline-kind selector and the button that opens the floating explorer window."""
         super().__init__(parent)
         self._window: StatmodelsWindow | None = None
 
@@ -969,6 +1028,8 @@ class StatmodelsPanel(QWidget):
         self.setLayout(lay)
 
     def _open_window(self) -> None:
+        """Open (creating once, then reusing) the floating :class:`StatmodelsWindow`, selecting the
+        chosen pipeline kind."""
         kind = str(self._pipeline_kind.currentData() or PIPELINE_KIND_QVTPY)
         if self._window is None:
             self._window = StatmodelsWindow(initial_pipeline_kind=kind)

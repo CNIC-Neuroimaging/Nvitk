@@ -25,6 +25,8 @@ def copy_layer_metadata_for_output(metadata: dict[str, Any] | None) -> dict[str,
 
 
 def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]:
+    """Sorted distinct non-zero integer label ids present in *data* (rounding float labels), capped at
+    *max_labels*."""
     flat = to_numpy(data).ravel()
     if flat.size == 0:
         return []
@@ -41,6 +43,7 @@ def unique_layer_labels(data: np.ndarray, *, max_labels: int = 500) -> list[int]
 
 
 def _layer_metadata(layer: Any) -> dict[str, Any]:
+    """A copy of *layer*'s metadata dict, or ``{}`` if it has none / isn't a dict."""
     meta = getattr(layer, "metadata", None)
     return dict(meta) if isinstance(meta, dict) else {}
 
@@ -58,6 +61,8 @@ def label_source_data(layer: Any) -> np.ndarray:
 
 
 def _compute_is_label_like(layer: Any) -> bool:
+    """Determine (uncached) whether *layer* looks like a discrete label/mask layer: a napari Labels
+    layer, or an Image layer whose data is small-integer-valued with a modest number of distinct ids."""
     if type(layer).__name__ in ("Shapes", "Points", "Vectors", "Tracks", "Surface"):
         return False
     if type(layer).__name__ == "Labels":
@@ -145,10 +150,13 @@ def ensure_label_source(layer: Any) -> np.ndarray:
 
 
 def _visibility_key(selected_ids: list[int]) -> tuple[int, ...]:
+    """Order-independent, hashable key for a set of selected label ids (sorted tuple)."""
     return tuple(sorted(int(x) for x in selected_ids))
 
 
 def _apply_image_data_visibility(layer: Any, selected_ids: list[int]) -> None:
+    """Zero out every voxel in an Image-layer mask whose value isn't in *selected_ids*, updating
+    ``layer.data`` only if the filtered result actually differs from the current display."""
     src = ensure_label_source(layer)
     if not selected_ids:
         filtered = np.zeros_like(src)
@@ -166,6 +174,7 @@ _TRANSPARENT = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
 
 def _is_labels_layer(layer: Any) -> bool:
+    """True if *layer* is a napari ``Labels`` layer (by type name)."""
     return type(layer).__name__ == "Labels"
 
 
@@ -177,6 +186,8 @@ def supports_per_label_color(layer: Any | None) -> bool:
 
 
 def _normalize_rgba(rgba: Any) -> np.ndarray:
+    """Coerce *rgba* to a 4-channel float32 color in ``[0, 1]``, adding full alpha to RGB triples and
+    rescaling 0-255 inputs; raises ``ValueError`` if it has fewer than 3 channels."""
     color = np.asarray(rgba, dtype=np.float32).reshape(-1)
     if color.size == 3:
         color = np.concatenate([color, np.array([1.0], dtype=np.float32)])

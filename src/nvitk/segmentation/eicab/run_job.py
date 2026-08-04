@@ -20,6 +20,7 @@ from .runner import run_eicab
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for a single eICAB job (parse args, run, return an exit code)."""
     Logger(level="INFO")
     log = Logger()
     p = argparse.ArgumentParser(description="Run eICAB (inside cluster container).")

@@ -85,6 +85,7 @@ STAGE_MODULES: dict[str, str] = {
 
 
 def _local_runner(stage: str) -> Callable[..., Any]:
+    """Return the local ``run_subject`` callable for *stage*; raises ``ValueError`` for unknown stages."""
     if stage == "stage1":
         return stage1_segment.run_subject
     if stage == "stage2":
@@ -128,6 +129,8 @@ def _run_local(
     overwrite: bool,
     exclude_ureter: bool = True,
 ) -> None:
+    """Run the requested CT-PET v5 stages for every subject sequentially in-process, publishing stage-3
+    results to the DB and aggregating the batch summary once stage-3 has run for any subject."""
     for subj in subjects:
         log.info(f"=== CT-PET v5 LOCAL | subject={subj} | stages={stages_sel} ===")
         for s in stages_sel:
@@ -226,6 +229,8 @@ def _build_python_cmd(
 
 
 def _cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) -> ClusterPaths:
+    """Build the :class:`~nvitk.cluster.sge.ClusterPaths` (container/model/data/output roots) for
+    submitting CT-PET v5 SGE jobs from *lay*."""
     return ClusterPaths(
         src=src_dir,
         container=container,
@@ -356,6 +361,8 @@ def _run_sge(
     emit: TextIO | None = None,
     exclude_ureter: bool = True,
 ) -> dict[str, list[str]]:
+    """Submit an SGE job chain (or array) for the requested stages for every subject; returns
+    ``{subject: [job_id, ...]}``."""
     all_jids: dict[str, list[str]] = {}
     for subj in subjects:
         all_jids[subj] = submit_subject_chain(

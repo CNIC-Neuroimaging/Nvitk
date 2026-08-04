@@ -1,4 +1,9 @@
+"""ANSI escape-code color constants for terminal output."""
+
+
 class bcolors:
+    """Named ANSI color/style escape codes for use in console print statements."""
+
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'

@@ -16,6 +16,7 @@ log = Logger()
 
 
 def _safe_col(name: str) -> str:
+    """Sanitize a name into a valid patsy/statsmodels column identifier (non-alphanumeric chars → underscore)."""
     return re.sub(r"[^0-9a-zA-Z_]+", "_", str(name))
 
 
@@ -41,6 +42,7 @@ def _match_grid_columns_to_df_dtypes(
 
 
 def _map_sex_to_numeric(series: pd.Series) -> pd.Series:
+    """Coerce a sex column (numeric, or text like ``\"M\"``/``\"female\"``) to ``1``=male / ``0``=female."""
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
     s = series.astype(str).str.strip().str.lower()
@@ -64,6 +66,7 @@ def _default_fit_function(
     vc_formula: dict[str, str] | None = None,
     fit_kwargs: dict[str, Any] | None = None,
 ):
+    """Default mixed-effects model fitter: ``statsmodels`` MixedLM via a formula/groups/random-effects spec."""
     import warnings
 
     # from statsmodels.regression.mixed_linear_model import MixedLM

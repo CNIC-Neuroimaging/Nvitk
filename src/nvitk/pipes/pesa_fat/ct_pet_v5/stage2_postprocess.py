@@ -40,7 +40,7 @@ from nvitk.core.backend import (
 )
 from nvitk.core.logger import Logger
 from nvitk.io import imread, imsave
-from nvitk.morphology import dilate, erode, fill_holes
+from nvitk.morphology import dilate, erode, fill_holes, label_connected
 from nvitk.pipes.pesa_fat.common.paths import BatchLayout, layout, resolve_nii
 from nvitk.pipes.pesa_fat.ct_pet_v5 import config as cfg
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
@@ -101,6 +101,8 @@ _ORGANS_TO_DILATE = {
 
 
 def _spacing(img: Image) -> tuple[float, float, float]:
+    """*img*'s (x, y, z) voxel spacing from its ``spacing`` metadata, or from ``x_res``/``y_res``/
+    ``z_res`` as a fallback (defaulting to 1.0)."""
     sp = img.metadata.get("spacing") if img.metadata else None
     if sp is None:
         sp = (
@@ -125,7 +127,8 @@ def _process_bladder(bladder: Image, pet: Image) -> Image:
         thr = max(float(filters.threshold_otsu(pet_host)), 2.5)
 
     potential = (pet_to_mask.data >= thr).astype(np.uint8)
-    labeled, _ = ndi.label(potential, structure=np.ones((3, 3, 3)))
+    # 26-connectivity CC labeling (base tool).
+    labeled, _ = label_connected(potential, connectivity=3)
     overlap_ids = np.unique(labeled[bladder.data > 0])
     overlap_ids = overlap_ids[overlap_ids != 0]
     expanded = np.isin(labeled, overlap_ids).astype(np.uint8)
@@ -462,10 +465,13 @@ def build_muscles_mask(total: Image, muscles: Image) -> Image:
 
 
 def _imread(path_parent: Path, stem: str, axes: str = "XYZ") -> Image:
+    """Read the ``<stem>.nii[.gz]`` file resolved under *path_parent* as an Image with axis order *axes*."""
     return imread(str(resolve_nii(path_parent, stem)), axes=axes)
 
 
 def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = True) -> None:
+    """Build and write the MO/FAT/FAT_BATCH/BODY/ORGANS/MUSCLES post-processed masks for one subject
+    from its TotalSegmentator outputs and PET volume."""
     total = _imread(segmentation_dir, "total")
     tissue_types = _imread(segmentation_dir, "tissue_types")
     muscles = _imread(segmentation_dir, "thigh_shoulder_muscles")

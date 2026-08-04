@@ -22,6 +22,8 @@ Threshold = tuple[float | None, float | None, float | None]
 
 
 def _ctpet_measurement_columns() -> list[str]:
+    """All CT-PET stage-3 measurement column names (SUV stats per ROI, plus volume/slice-count
+    columns), for building the expected-range placeholder map."""
     cols: list[str] = []
     for spec in ct_cfg.SUV_SPECS:
         for suffix, _ in ct_cfg.SUV_STATS:
@@ -33,6 +35,8 @@ def _ctpet_measurement_columns() -> list[str]:
 
 
 def _dixon_measurement_columns() -> list[str]:
+    """All Dixon stage-3 measurement column names (metric per ROI spec), for building the expected-
+    range placeholder map."""
     cols: list[str] = []
     for spec in dx_cfg.MEASURE_SPECS:
         for metric in spec.metrics:
@@ -41,6 +45,7 @@ def _dixon_measurement_columns() -> list[str]:
 
 
 def _placeholder_map(columns: list[str]) -> dict[str, Threshold]:
+    """Build a ``{column: (None, None, None)}`` map (disabled thresholds) for every column."""
     return {c: (None, None, None) for c in columns}
 
 
@@ -87,6 +92,7 @@ def cell_level(
     floor, warn_high, bad_high = ranges[column]
 
     def _finite(x: float | None) -> bool:
+        """True if *x* is a set, finite threshold value."""
         return x is not None and math.isfinite(float(x))
 
     if _finite(floor) and v < float(floor):

@@ -38,6 +38,7 @@ class ResolvedAtlas:
 
 
 def _require_nilearn():
+    """Raise a clear install hint unless the optional ``nilearn`` dependency is available."""
     try:
         import nilearn  # noqa: F401
     except ImportError as exc:
@@ -48,6 +49,7 @@ def _require_nilearn():
 
 
 def _norm_label_key(name: str) -> str:
+    """Normalize an atlas region label for case-insensitive lookup (strip + casefold)."""
     return name.strip().casefold()
 
 
@@ -55,6 +57,7 @@ def _effective_region_order(
     region_order: Sequence[Any] | None,
     labels: Sequence[Any] | None,
 ) -> list[Any] | None:
+    """Resolve the region ordering to use: explicit *region_order*, else *labels*, else ``None``."""
     if region_order is not None:
         return list(region_order)
     if labels is not None:
@@ -63,6 +66,7 @@ def _effective_region_order(
 
 
 def _invert_label_map(index_to_label: Mapping[int, str]) -> dict[str, int]:
+    """Invert an atlas ``index → label`` map to ``normalized_label → index``; raises on duplicate labels."""
     rev: dict[str, int] = {}
     for idx, raw in index_to_label.items():
         key = _norm_label_key(str(raw))
@@ -79,6 +83,7 @@ def _sequence_to_mapping(
     region_order: Sequence[Any],
     label_to_index: Mapping[str, int],
 ) -> dict[int, float]:
+    """Zip parallel *values* and *region_order* (label names or atlas indices) into an ``index → value`` map."""
     if len(values) != len(region_order):
         raise ValidationError(
             f"values length {len(values)} does not match region_order length {len(region_order)}."
@@ -106,6 +111,7 @@ def _mapping_to_index_values(
     values: Mapping[Any, float],
     label_to_index: Mapping[str, int],
 ) -> dict[int, float]:
+    """Normalize a ``{region_label_or_index: value}`` dict to ``{atlas_index: value}``."""
     out: dict[int, float] = {}
     for key, v in values.items():
         if isinstance(key, bool):
@@ -160,6 +166,7 @@ def build_index_to_value(
 
 
 def _load_nifti_image(maps: Any) -> Nifti1Image:
+    """Load an atlas volume from a Nifti1Image, path string, or Path (raises on any other type)."""
     if isinstance(maps, Nifti1Image):
         return maps
     if isinstance(maps, (str, Path)):
@@ -218,6 +225,7 @@ def resolve_atlas_volume_custom(
 
 
 def resolve_atlas_preset_destrieux_vol(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas:
+    """Fetch (via nilearn) and resolve the volumetric Destrieux 2009 atlas."""
     _require_nilearn()
     from nilearn import datasets
 
@@ -234,6 +242,7 @@ def resolve_atlas_preset_destrieux_vol(atlas_kwargs: dict[str, Any] | None) -> R
 
 
 def resolve_atlas_preset_surf_destrieux(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas:
+    """Fetch (via nilearn) and resolve the surface-based (fsaverage) Destrieux atlas."""
     _require_nilearn()
     from nilearn import datasets
 
@@ -367,6 +376,7 @@ def _vertex_texture_from_maps(
     map_arr: np.ndarray,
     index_to_value: Mapping[int, float],
 ) -> np.ndarray:
+    """Paint a per-vertex scalar texture by mapping each region-index vertex to its value (NaN elsewhere)."""
     tex = np.full(map_arr.shape, np.nan, dtype=float)
     for idx, val in index_to_value.items():
         tex[map_arr == int(idx)] = float(val)

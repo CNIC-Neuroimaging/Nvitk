@@ -21,6 +21,8 @@ _UPLOAD_IGNORE_SUFFIXES = (".tmp", ".pyc", ".pyo")
 
 
 def _resolve_subject(project: Any, label: str) -> Any | None:
+    """Look up an XNAT subject object in *project* by *label* (direct key match, then a scan of
+    label/id/name attributes); ``None`` if not found."""
     subjects_map = getattr(project, "subjects", None) or {}
     if label in subjects_map:
         return subjects_map[label]
@@ -32,10 +34,12 @@ def _resolve_subject(project: Any, label: str) -> Any | None:
 
 
 def _experiment_label(experiment: Any) -> str:
+    """XNAT experiment label (falling back to id), stripped."""
     return str(_coalesce_attr(experiment, "label", "id") or "").strip()
 
 
 def _experiment_date(experiment: Any) -> Any:
+    """*experiment*'s acquisition date as a ``pandas.Timestamp`` (``NaT`` if missing/unparseable)."""
     import pandas as pd
 
     return pd.to_datetime(_coalesce_attr(experiment, "date"), errors="coerce")
@@ -46,6 +50,8 @@ def _classify_experiment_sequences(
     *,
     prefer_sequences: Iterable[str],
 ) -> set[str]:
+    """Classify every scan in *experiment* and return the subset of *prefer_sequences* (sequence keys)
+    that were found among them."""
     seq_set = {str(s).strip().upper() for s in prefer_sequences if str(s).strip()}
     found: set[str] = set()
     for scan in getattr(experiment, "scans", {}).values():
@@ -149,6 +155,7 @@ def _resource_has_files(resource: Any) -> bool:
 
 
 def _experiment_session(experiment: Any) -> Any:
+    """*experiment*'s underlying ``xnat_session`` object, or raise ``RuntimeError`` if unavailable."""
     session = getattr(experiment, "xnat_session", None)
     if session is None:
         raise RuntimeError(
@@ -158,6 +165,8 @@ def _experiment_session(experiment: Any) -> Any:
 
 
 def _experiment_base_uri(experiment: Any) -> str:
+    """REST base URI for *experiment* (``fulluri``/``uri`` attribute, else ``/data/experiments/<id>``);
+    raises ``RuntimeError`` if none can be determined."""
     for attr in ("fulluri", "uri"):
         value = getattr(experiment, attr, None)
         if value:
@@ -171,6 +180,8 @@ def _experiment_base_uri(experiment: Any) -> str:
 
 
 def _clear_experiment_resource_cache(experiment: Any) -> None:
+    """Invalidate xnatpy's cached ``resources`` listing on *experiment* (and the resources object
+    itself) so a subsequent access reflects a just-created resource."""
     for obj in (experiment, getattr(experiment, "resources", None)):
         if obj is None:
             continue

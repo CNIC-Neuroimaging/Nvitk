@@ -94,18 +94,22 @@ class BatchLayout:
 
     @property
     def dicom_dir(self) -> Path:
+        """This batch's DICOM directory."""
         return self.dicom_root / self.batch
 
     @property
     def nifti_dir(self) -> Path:
+        """This batch's NIfTI directory."""
         return self.nifti_root / self.batch
 
     @property
     def results_dir(self) -> Path:
+        """This batch's results directory."""
         return self.results_root / self.batch
 
     @property
     def model_dir(self) -> Path:
+        """The TotalSegmentator model root (not batch-scoped)."""
         return self.model_root
 
     def stage_dir(self, stage_name: str) -> Path:
@@ -113,9 +117,11 @@ class BatchLayout:
         return self.results_dir / f"res_{stage_name}"
 
     def subject_nifti_dir(self, subject: str) -> Path:
+        """*subject*'s NIfTI directory within this batch."""
         return self.nifti_dir / subject
 
     def subject_dicom_dir(self, subject: str) -> Path:
+        """*subject*'s DICOM directory within this batch."""
         return self.dicom_dir / subject
 
     def subject_nifti_dirs(self) -> list[Path]:
@@ -210,6 +216,8 @@ def layout_local(
 
 
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
+    """Resolve a cluster path setting *key*: the raw ``sge.json`` value if set, else *fallback*, else
+    the hardcoded cluster default."""
     raw = _ppipe_paths.get(key)
     if raw is not None and str(raw).strip():
         return Path(os.path.expanduser(str(raw).strip()))

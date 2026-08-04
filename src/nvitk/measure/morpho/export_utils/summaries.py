@@ -76,6 +76,7 @@ BRANCHPOINT_EXPORT_DROP_COLUMNS = [
 ]
 
 def compute_vessel_summary_row(case_id: str, label: int, vessel_info: VesselInfo, res: dict) -> dict:
+    """Flatten one path result's metrics + vessel identity into a single export-ready summary row."""
     return {
         "case_id": case_id,
         "label": label,
@@ -136,18 +137,21 @@ def compute_vessel_summary_row(case_id: str, label: int, vessel_info: VesselInfo
 
 
 def path_summary_export_dataframe(path_summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop internal-only columns from the path summary table before writing to Excel."""
     if path_summary_df.empty:
         return path_summary_df
     return path_summary_df.drop(columns=PATH_SUMMARY_EXPORT_DROP_COLUMNS, errors="ignore")
 
 
 def tree_summary_export_dataframe(tree_summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop internal-only columns from the tree summary table before writing to Excel."""
     if tree_summary_df.empty:
         return tree_summary_df
     return tree_summary_df.drop(columns=TREE_SUMMARY_EXPORT_DROP_COLUMNS, errors="ignore")
 
 
 def branchpoint_export_dataframe(branchpoints_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop internal-only columns from the branchpoint table before writing to Excel."""
     if branchpoints_df.empty:
         return branchpoints_df
     return branchpoints_df.drop(columns=BRANCHPOINT_EXPORT_DROP_COLUMNS, errors="ignore")
@@ -170,6 +174,7 @@ def build_tree_region_points_dataframe(
     source_point_indices_2: Optional[np.ndarray] = None,
     tree_metadata: Optional[dict] = None,
 ) -> pd.DataFrame:
+    """Build the per-point export table for one tree-region region (points + geometry + tree metadata)."""
     points = np.asarray(points, dtype=float)
     n = len(points)
     s = cumulative_s(points)
@@ -227,6 +232,7 @@ def tree_region_summary_from_points(
     source_path_id_2: str = "",
     tree_metadata: Optional[dict] = None,
 ) -> dict:
+    """Summarize one tree-region's geometry (length, chord, tortuosity) as a single export row."""
     points = np.asarray(points, dtype=float)
     tree_metadata = tree_metadata or tree_region_metadata(tree_region)
     return {
@@ -261,6 +267,7 @@ def recursive_tree_segment_summary_rows(
     vessel_info: VesselInfo,
     segments: List[dict],
 ) -> List[dict]:
+    """Flatten recursive tree segments into export rows (identity, anatomic naming, geometry)."""
     rows = []
     for seg in segments:
         rows.append({
@@ -300,6 +307,7 @@ def recursive_tree_segment_summary_rows(
 
 
 def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselInfo, res: dict) -> pd.DataFrame:
+    """Per-point export table for one path: geometry, radius, curvature/torsion, and stenosis/enlargement flags."""
     is_stenotic = np.asarray(res["is_stenotic"], dtype=int)
     stenosis_percent_point = np.asarray(res["stenosis_percent_point"], dtype=float)
     stenosis_raw_percent_point = np.asarray(
@@ -338,6 +346,12 @@ def build_vessel_points_dataframe(case_id: str, label: int, vessel_info: VesselI
 
 
 def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-vessel-pair left/right metrics, asymmetry index (``(L-R)/mean``), and L/R ratio.
+
+    Groups the path summary by ``pair``, aggregates each side's paths (length-
+    weighted mean for most metrics; sum/min/max for length/radius-min/degree
+    metrics), and reports paired L/R values plus derived asymmetry columns.
+    """
     if summary_df.empty or "pair" not in summary_df.columns:
         return pd.DataFrame()
     metrics = [
@@ -353,6 +367,7 @@ def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     def _join_unique(values) -> str:
+        """Comma-join the distinct non-null string values in *values*, preserving first-seen order."""
         clean = []
         for value in values:
             if pd.isna(value):
@@ -363,10 +378,12 @@ def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
         return ", ".join(clean)
 
     def _first_int(values) -> float:
+        """First numeric value in *values* as an int, or NaN if none are numeric."""
         vals = pd.to_numeric(values, errors="coerce").dropna()
         return int(vals.iloc[0]) if len(vals) else np.nan
 
     def _weighted_mean(group: pd.DataFrame, metric: str) -> float:
+        """Length-weighted mean of *metric* over *group* (unweighted mean if lengths are unusable)."""
         vals = pd.to_numeric(group.get(metric), errors="coerce")
         valid = vals.notna()
         if not valid.any():
@@ -378,6 +395,7 @@ def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
         return float(vals[valid].mean())
 
     def _aggregate_metric(group: pd.DataFrame, metric: str) -> float:
+        """Combine a metric across a side's paths with the appropriate reducer (sum/min/max/weighted-mean)."""
         if metric not in group.columns:
             return np.nan
         vals = pd.to_numeric(group[metric], errors="coerce").dropna()
@@ -392,6 +410,7 @@ def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
         return _weighted_mean(group, metric)
 
     def _aggregate_side(group: pd.DataFrame) -> dict:
+        """Aggregate one side's (L or R) paths for a vessel pair into a single metric dict."""
         side = {
             "label": _first_int(group.get("label", pd.Series(dtype=float))),
             "name": _join_unique(group.get("vessel_name", pd.Series(dtype=object))),
@@ -432,6 +451,11 @@ def compute_lr_asymmetry(summary_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-hemisphere (L/R) rollup: total length, length-weighted tortuosity/radius, and lesion counts.
+
+    One row per side, aggregating across every vessel/path on that side rather
+    than pairing left against right (see :func:`compute_lr_asymmetry` for that).
+    """
     if summary_df.empty:
         return pd.DataFrame()
     if "side" not in summary_df.columns:
@@ -441,11 +465,13 @@ def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     def _numeric(group: pd.DataFrame, column: str) -> pd.Series:
+        """Coerce *column* of *group* to numeric, dropping non-numeric/missing entries."""
         if column not in group.columns:
             return pd.Series(dtype=float)
         return pd.to_numeric(group[column], errors="coerce").dropna()
 
     def _length_weights(group: pd.DataFrame, valid_index: pd.Index) -> pd.Series:
+        """Per-row path-length weights aligned to *valid_index* (falls back to equal weighting)."""
         if "length_mm" not in group.columns:
             return pd.Series(np.ones(len(valid_index)), index=valid_index, dtype=float)
         weights = pd.to_numeric(group.loc[valid_index, "length_mm"], errors="coerce")
@@ -455,6 +481,7 @@ def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
         return pd.Series(np.ones(len(valid_index)), index=valid_index, dtype=float)
 
     def _weighted_mean(group: pd.DataFrame, column: str) -> float:
+        """Length-weighted mean of *column* over *group*."""
         values = _numeric(group, column)
         if values.empty:
             return np.nan
@@ -465,6 +492,7 @@ def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
         return float(values.mean())
 
     def _weighted_percentile(group: pd.DataFrame, column: str, percentile: float) -> float:
+        """Length-weighted percentile of *column* over *group* (falls back to an unweighted percentile)."""
         values = _numeric(group, column)
         if values.empty:
             return np.nan
@@ -482,10 +510,12 @@ def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
         return float(sorted_values[idx])
 
     def _sum(group: pd.DataFrame, column: str) -> float:
+        """Sum of *column* over *group* (0.0 if empty)."""
         values = _numeric(group, column)
         return float(values.sum()) if len(values) else 0.0
 
     def _max(group: pd.DataFrame, column: str) -> float:
+        """Max of *column* over *group* (NaN if empty)."""
         values = _numeric(group, column)
         return float(values.max()) if len(values) else np.nan
 

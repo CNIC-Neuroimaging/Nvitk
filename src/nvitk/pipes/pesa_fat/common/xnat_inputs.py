@@ -27,6 +27,8 @@ log = Logger()
 
 @dataclass(frozen=True)
 class XnatPesaFatRequest:
+    """Parameters for downloading one PESA-Fat session's DICOM scans from XNAT."""
+
     project_id: str = "IA_PET_V5"
     session_label: str | None = None
     requested_sequences: tuple[str, ...] | None = None
@@ -34,6 +36,7 @@ class XnatPesaFatRequest:
 
 
 def _coalesce_attr(obj: Any, *names: str) -> Any:
+    """Return the first non-``None`` attribute among *names* on *obj*, or ``None``."""
     for name in names:
         if hasattr(obj, name):
             v = getattr(obj, name)
@@ -43,10 +46,12 @@ def _coalesce_attr(obj: Any, *names: str) -> Any:
 
 
 def _experiment_label(experiment: Any) -> str:
+    """XNAT experiment label (falling back to id), stripped."""
     return str(_coalesce_attr(experiment, "label", "id") or "").strip()
 
 
 def _experiment_date(experiment: Any) -> Any:
+    """*experiment*'s raw ``date`` attribute, or ``None`` if unset."""
     return _coalesce_attr(experiment, "date")
 
 
@@ -73,6 +78,8 @@ def batch_from_session_date(value: Any) -> str:
 
 
 def _classify_scans_for_experiment(project_id: str, experiment: Any) -> dict[str, Any]:
+    """Classify every scan in *experiment* and return ``{sequence_key: first_matching_scan}``, using
+    the project's dedicated classifier (e.g. ``ia_pet_v5``) when registered."""
     scans = list(getattr(experiment, "scans", {}).values())
     exp_label = _experiment_label(experiment)
     if get_xnat_project(project_id).classifier == "ia_pet_v5":
@@ -158,6 +165,9 @@ def _pick_experiment_for_subject(
     session_label: str | None,
     required_sequences: set[str],
 ) -> Any:
+    """Select *subject*'s XNAT experiment: the one named *session_label* if given, else the newest
+    experiment whose classified scans cover every required sequence; raises ``LookupError`` (with a
+    detailed per-experiment diagnostic) if none match."""
     experiments = list(getattr(subject, "experiments", {}).values())
     if session_label:
         for exp in experiments:
@@ -208,6 +218,8 @@ def _pick_experiment_for_subject(
 
 
 def _required_sequences(project_id: str, requested: Iterable[str] | None) -> set[str]:
+    """Resolve the set of required sequence keys: *requested* if non-empty, else *project_id*'s
+    default sequences."""
     seqs = [str(s).strip() for s in (requested or []) if str(s).strip()]
     if not seqs:
         seqs = list(default_sequences_for_project(project_id))

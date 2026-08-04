@@ -25,6 +25,7 @@ def remote_subject_dicom_dir(
 
 
 def local_subject_has_dicoms(local_subject_dir: Path) -> bool:
+    """True if *local_subject_dir* exists and contains at least one entry."""
     if not local_subject_dir.is_dir():
         return False
     try:
@@ -34,6 +35,7 @@ def local_subject_has_dicoms(local_subject_dir: Path) -> bool:
 
 
 def remote_subject_has_dicoms(sftp, remote_subject_dir: str) -> bool:
+    """True if *remote_subject_dir* exists on the SFTP connection and is non-empty."""
     if not remote_path_exists(sftp, remote_subject_dir):
         return False
     try:

@@ -25,6 +25,7 @@ from .runner import (
 
 
 def _require_under(child: Path, root: Path, label: str) -> Path:
+    """Resolve *child* and assert it lives under *root* (path-traversal guard); return it."""
     c = child.resolve()
     r = root.resolve()
     try:

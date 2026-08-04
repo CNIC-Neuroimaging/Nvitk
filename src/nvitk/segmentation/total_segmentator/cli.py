@@ -30,6 +30,7 @@ log = Logger()
 
 
 def _default_emit_script(task: str) -> Path:
+    """Default, timestamped SGE submit-script path for a TotalSegmentator *task*."""
     ts_cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return ts_cfg.DEFAULT_SGE_SCRIPTS_DIR / f"submit_totalseg_{task}_{ts}.sh"

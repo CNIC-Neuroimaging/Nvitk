@@ -110,6 +110,7 @@ def load_manual2(path):
     data.columns = range(len(data.columns))
 
     def g(row, col):
+        """Read row[col] as a finite float, or NaN if missing/non-numeric/non-finite."""
         try:
             v = float(row[col])
             return v if np.isfinite(v) else np.nan
@@ -117,11 +118,13 @@ def load_manual2(path):
             return np.nan
 
     def mean2(row, c1, c2):
+        """Mean of the finite values at columns c1/c2 (ignoring NaNs), or NaN if both are missing."""
         a, b = g(row, c1), g(row, c2)
         valid = [x for x in [a, b] if not np.isnan(x)]
         return float(np.mean(valid)) if valid else np.nan
 
     def sum2(row, c1, c2):
+        """Sum of the finite values at columns c1/c2 (ignoring NaNs), or NaN if both are missing."""
         a, b = g(row, c1), g(row, c2)
         if np.isnan(a) and np.isnan(b):
             return np.nan

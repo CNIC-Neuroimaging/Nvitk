@@ -20,6 +20,7 @@ _NEI26 = [
 ]
 
 def skeleton_graph(skel: np.ndarray):
+    """Build the 26-connected voxel graph of a binary skeleton: ``(points, neighbor lists, degree)``."""
     pts = np.argwhere(skel > 0)
     idx_map = {tuple(p): i for i, p in enumerate(map(tuple, pts))}
     n = len(pts)
@@ -34,10 +35,12 @@ def skeleton_graph(skel: np.ndarray):
 
 
 def skeletonize_mask(mask_bool: np.ndarray) -> np.ndarray:
+    """Thin a binary mask to its 1-voxel-wide skeleton (skimage medial-axis skeletonize)."""
     return skeletonize(mask_bool.astype(bool)).astype(np.uint8)
 
 
 def skeleton_tree_from_mask(mask_bool: np.ndarray, spacing=None) -> SkeletonTree:
+    """Skeletonize *mask_bool*, optionally prune short terminal spurs, and build a :class:`SkeletonTree`."""
     skel = skeletonize_mask(mask_bool)
     if PRUNE_TERMINAL_SPURS:
         skel = prune_short_terminal_spurs(skel, PRUNE_SPUR_LENGTH_MM, spacing=spacing)
@@ -48,6 +51,12 @@ def skeleton_tree_from_mask(mask_bool: np.ndarray, spacing=None) -> SkeletonTree
 
 
 def prune_short_terminal_spurs(skel: np.ndarray, max_len_mm: float, spacing=None) -> np.ndarray:
+    """Erase terminal spur branches shorter than *max_len_mm* that end at a real branchpoint.
+
+    Iterates to convergence since removing one spur can expose another; spurs that
+    connect two true endpoints (not a branchpoint) are left alone so short vessels
+    aren't deleted.
+    """
     sk = skel.copy().astype(bool)
     if spacing is None:
         spacing = np.ones(3, dtype=float)
@@ -92,6 +101,7 @@ def prune_short_terminal_spurs(skel: np.ndarray, max_len_mm: float, spacing=None
 
 
 def skeleton_total_graph_length_mm(tree: SkeletonTree, spacing) -> float:
+    """Sum of all edge lengths (mm) in the skeleton graph (each edge counted once)."""
     spacing = np.asarray(spacing, dtype=float)
     total = 0.0
     for i, nbrs in enumerate(tree.neighbors):
@@ -105,6 +115,7 @@ def skeleton_total_graph_length_mm(tree: SkeletonTree, spacing) -> float:
 
 
 def bfs_path_indices(neighbors: List[List[int]], src: int, dst: int) -> List[int]:
+    """Breadth-first shortest (fewest-edges) path from *src* to *dst* in the skeleton graph."""
     n = len(neighbors)
     parent = -np.ones(n, dtype=int)
     seen = np.zeros(n, dtype=bool)
@@ -171,6 +182,7 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
     )
 
     def bfs_subgraph(src: int, dst: int, allowed) -> List[int]:
+        """BFS shortest path from *src* to *dst*, restricted to nodes in *allowed*."""
         allowed = set(int(x) for x in allowed)
         if src not in allowed or dst not in allowed:
             return []
@@ -199,6 +211,7 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
         return path[::-1]
 
     def connected_components_nodes(nodes) -> List[List[int]]:
+        """Split *nodes* into connected components using the full skeleton adjacency."""
         remaining = set(int(x) for x in nodes)
         comps = []
         while remaining:
@@ -218,6 +231,7 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
         return comps
 
     def fundamental_cycles_for_component(component_nodes: List[int]) -> List[set]:
+        """DFS spanning-tree cycle detection: each non-tree edge closes one fundamental cycle."""
         allowed = set(int(x) for x in component_nodes)
         seen = set()
         parent = {}
@@ -283,6 +297,7 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
         return unique
 
     def farthest_node_from(src: int, allowed) -> int:
+        """BFS-farthest node from *src* within the *allowed* node set (unweighted hop distance)."""
         allowed = set(int(x) for x in allowed)
         d = {int(src): 0}
         q = deque([int(src)])
@@ -346,7 +361,11 @@ def find_loop_branches(pts: np.ndarray, neighbors: List[List[int]], degree: np.n
 
 
 def dijkstra_dist_from_root(tree: SkeletonTree, root: int, spacing) -> np.ndarray:
-    # Small graph; simple Dijkstra without heap is sufficient for skeleton sizes usually encountered here.
+    """Physical (mm) shortest-path distance from *root* to every skeleton node.
+
+    Plain O(n²) Dijkstra without a heap — skeleton graphs here are small enough
+    that this is simpler and fast enough than a priority-queue implementation.
+    """
     spacing = np.asarray(spacing, dtype=float)
     n = len(tree.pts_vox)
     dist = np.full(n, np.inf, dtype=float)

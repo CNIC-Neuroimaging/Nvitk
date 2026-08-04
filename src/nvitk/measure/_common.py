@@ -41,6 +41,7 @@ def bool_mask(mask: Image | Any) -> Any:
 
 
 def ensure_same_shape(a: Image | Any, b: Image | Any) -> None:
+    """Raise ``ValueError`` unless *a* and *b* (Image or array) have the same shape."""
     sa = resolve_array(a).shape
     sb = resolve_array(b).shape
     if tuple(sa) != tuple(sb):

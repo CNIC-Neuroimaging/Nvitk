@@ -100,6 +100,8 @@ class LocRecord:
 
 
 def split_into_parts(points: np.ndarray, n_parts: int) -> list[np.ndarray]:
+    """Split *points* (N,3) into up to *n_parts* contiguous, roughly equal-length chunks
+    by index (empty chunks dropped)."""
     pts = to_numpy(points)
     n = pts.shape[0]
     if n == 0:
@@ -163,6 +165,7 @@ def pick_index_arc_midpoint_between(points: np.ndarray, i0: int, i1: int) -> int
 
 
 def _voxel_tuple(row: np.ndarray) -> tuple[int, int, int]:
+    """Round *row* (a 3-vector) to the nearest integer voxel index tuple."""
     return (
         int(round(float(row[0]))),
         int(round(float(row[1]))),
@@ -176,6 +179,7 @@ def _nearest_polyline_index(
     *,
     max_dist_vox: float = 3.0,
 ) -> int | None:
+    """Index of the *points* row closest to *xyz*, or None if beyond *max_dist_vox*."""
     pts = to_numpy(points).astype(np.float64)
     if pts.shape[0] < 1:
         return None
@@ -187,6 +191,7 @@ def _nearest_polyline_index(
 
 
 def _skeleton_coords_from_seg(seg: np.ndarray, label_id: int) -> np.ndarray:
+    """Skeleton voxel coordinates (N,3) of the *label_id* region in *seg*."""
     from nvitk.morphology.centerline import skeletonize_binary
 
     roi = to_numpy(seg) == int(label_id)
@@ -197,6 +202,7 @@ def _skeleton_coords_from_seg(seg: np.ndarray, label_id: int) -> np.ndarray:
 
 
 def _chain_arc_length(path: list[tuple[int, int, int]]) -> float:
+    """Total Euclidean arc length of a voxel-index chain."""
     if len(path) < 2:
         return 0.0
     pts = np.asarray(path, dtype=np.float64)
@@ -209,6 +215,8 @@ def _longest_downstream_chain_from_junction(
     deg: dict[tuple[int, int, int], int],
     proximal_neighbor: tuple[int, int, int],
 ) -> list[tuple[int, int, int]]:
+    """Longest degree-2 chain leading away from junction *j1* (excluding the proximal side),
+    walked to the next junction/endpoint in the skeleton graph *adj*/*deg*."""
     branches: list[list[tuple[int, int, int]]] = []
     for n in adj.get(j1, []):
         if n == proximal_neighbor:
@@ -234,6 +242,7 @@ def _first_junction_or_endpoint_on_chain(
     *,
     min_degree: int = 3,
 ) -> tuple[int, int, int]:
+    """First voxel in *chain* (after the start) with degree >= *min_degree*, else the chain end."""
     md = int(min_degree)
     for v in chain[1:]:
         if deg.get(v, 0) >= md:
@@ -247,6 +256,8 @@ def _proximal_neighbor_at_junction(
     j1_voxel: tuple[int, int, int],
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
 ) -> tuple[int, int, int] | None:
+    """The neighbor of junction *j1_voxel* closest to the point just proximal of it on
+    *points* (i.e. the branch leading back toward the vessel origin)."""
     neighbors = adj.get(j1_voxel, [])
     if not neighbors:
         return None
@@ -279,6 +290,7 @@ def _side_branch_attach_index_on_trunk(
     max_d = float(max_dist_vox)
 
     def _nearest(xyz: np.ndarray) -> tuple[int, float]:
+        """(index, distance) of the trunk point closest to *xyz*."""
         d = np.linalg.norm(trunk_pts - xyz.reshape(1, 3), axis=1)
         i = int(np.argmin(d))
         return i, float(d[i])
@@ -488,6 +500,7 @@ def _nearest_polyline_index_unbounded(
     points: np.ndarray,
     target: np.ndarray,
 ) -> int:
+    """Index of the *points* row closest to *target* (no distance cutoff)."""
     pts = to_numpy(points).astype(np.float64)
     t = np.asarray(target, dtype=np.float64).reshape(3)
     d2 = np.sum((pts - t) ** 2, axis=1)
@@ -573,6 +586,7 @@ def pick_aca_loc_indices(
     pts = pts_orig if proximal_low else pts_orig[::-1].copy()
 
     def _to_orig(i: int) -> int:
+        """Map a proximal-first-order index *i* back to the original polyline order."""
         return int(i) if proximal_low else int(n - 1 - i)
 
     j_work: int | None = None
@@ -754,6 +768,7 @@ def pick_endpoint_indices(
 
 
 def _vertex_in_mask(row: np.ndarray, mask: np.ndarray) -> bool:
+    """True if the rounded voxel index of 3-vector *row* falls inside *mask*."""
     i, j, k = int(round(float(row[0]))), int(round(float(row[1]))), int(round(float(row[2])))
     return (
         0 <= i < mask.shape[0]
@@ -821,6 +836,7 @@ def local_direction_alignment(points: np.ndarray, idx: int, *, window: int = 5) 
 
 
 def _z_std(points: np.ndarray) -> float:
+    """Standard deviation of the Z coordinate across *points*."""
     return float(np.std(to_numpy(points)[:, 2]))
 
 
@@ -839,6 +855,8 @@ def _record_from_polyline(
     loc_role: str = "mid",
     xs: CrossSectionResult | None = None,
 ) -> LocRecord:
+    """Build a :class:`LocRecord` for polyline index *idx* (position, tangent, optional
+    cross-section area/circularity)."""
     pts = to_numpy(points)
     idx = int(np.clip(idx, 0, pts.shape[0] - 1))
     tangents = centerline_tangents(pts, k_half=2)
@@ -874,6 +892,8 @@ def _cross_section_at(
     voxel_spacing: tuple[float, float, float],
     radius_vox: float,
 ) -> CrossSectionResult | None:
+    """Cross-section measurement at polyline index *idx*, or None if any contrast volume
+    is missing."""
     if mag is None or cd is None or vel_mag is None:
         return None
     pts = to_numpy(points)
@@ -943,6 +963,8 @@ def validate_sssv_strv_swap(
     sssv_idx: int,
     strv_idx: int,
 ) -> tuple[int, int]:
+    """Swap (sssv_idx, strv_idx) if the STRV station aligns better with the SSSV direction
+    prior than the SSSV station does (geometry-based mislabel guard)."""
     d_sssv = local_direction_alignment(sssv_pts, sssv_idx)
     d_strv = local_direction_alignment(strv_pts, strv_idx)
     ref = _STRV_REF / (float(np.linalg.norm(_STRV_REF)) + 1e-12)
@@ -1056,6 +1078,8 @@ def _arterial_loc_at_index(
     voxel_spacing: tuple[float, float, float],
     radius_vox: float,
 ) -> LocRecord:
+    """Build an arterial :class:`LocRecord` at polyline index *idx*, including its cross-section
+    measurement."""
     xs = _cross_section_at(
         pts,
         idx,

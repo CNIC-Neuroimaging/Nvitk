@@ -15,13 +15,18 @@ except Exception:
     QTimer = None
 
     class Signal:
+        """No-op stand-in for ``qtpy.QtCore.Signal`` when Qt isn't installed."""
+
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            """Accept and discard any Signal type arguments."""
             pass
 
         def emit(self, *args: Any, **kwargs: Any) -> None:
+            """No-op emit."""
             pass
 
         def connect(self, *args: Any, **kwargs: Any) -> None:
+            """No-op connect."""
             pass
 
 
@@ -52,6 +57,7 @@ class SgeJobMonitor(QObject):
     job_failed = Signal(str, object)
 
     def __init__(self, parent: QObject | None = None, interval_ms: int = 5000) -> None:
+        """Set up the (initially stopped) polling timer at *interval_ms* (min 5000ms)."""
         super().__init__(parent)
         self._jobs: dict[str, SgePendingJob] = {}
         self._timer = QTimer(self) if QTimer is not None else None
@@ -60,14 +66,18 @@ class SgeJobMonitor(QObject):
             self._timer.timeout.connect(self._poll)
 
     def track(self, job: SgePendingJob) -> None:
+        """Start tracking *job* for completion, starting the poll timer if it's idle."""
         self._jobs[job.job_id] = job
         if self._timer is not None and not self._timer.isActive():
             self._timer.start()
 
     def pending_jobs(self) -> list[SgePendingJob]:
+        """Currently tracked, not-yet-finished jobs."""
         return list(self._jobs.values())
 
     def _poll(self) -> None:
+        """Check each tracked job's remote ``.done`` marker; emit ``job_finished``/``job_failed`` and
+        stop tracking any job that has completed, stopping the timer once none remain."""
         if not self._jobs:
             if self._timer is not None:
                 self._timer.stop()
@@ -129,6 +139,8 @@ def shutdown_sge_monitor(app_state: dict[str, Any]) -> None:
 
 
 def store_pending_job(app_state: dict[str, Any], job: SgePendingJob) -> None:
+    """Persist a serialized snapshot of *job* into ``app_state["sge_pending_jobs"]`` (replacing any
+    prior entry with the same job id) and remember the connection used, for session recovery."""
     bucket = app_state.setdefault("sge_pending_jobs", [])
     if not isinstance(bucket, list):
         bucket = []
@@ -162,6 +174,8 @@ def update_pending_job_status(
     done_payload = None,
     local_download_dir = None,
 ) -> None:
+    """Update the stored status (and optionally done payload / local download dir) for the pending job
+    matching *job_id* in ``app_state["sge_pending_jobs"]``."""
     bucket = app_state.get("sge_pending_jobs") or []
     if not isinstance(bucket, list):
         return

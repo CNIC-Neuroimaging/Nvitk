@@ -33,6 +33,8 @@ _URETER_OVERLAY_OPACITY = 0.5
 
 
 def _safe_name(s: str) -> str:
+    """Replace every character in *s* that isn't alphanumeric, ``-``, or ``_`` with ``_``, for
+    filesystem-safe filenames."""
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
 
 
@@ -294,6 +296,7 @@ def hotspot_gallery_control_srcdoc(
 
 
 def _esc(s: str) -> str:
+    """Escape ``&``, ``"``, and ``<`` in *s* for safe inclusion in HTML attributes/text."""
     return (
         str(s)
         .replace("&", "&amp;")

@@ -171,6 +171,7 @@ def swapaxes(
 
 
 def _parse_index_token(index: Any, axis: int) -> str | None:
+    """Extract a lower-cased string token (e.g. ``\"max\"``, ``\"rgb\"``) from *index* for the given *axis*, if present."""
     if isinstance(index, str):
         return index.strip().lower()
     if isinstance(index, (tuple, list)) and len(index) > axis and isinstance(index[axis], str):
@@ -179,10 +180,12 @@ def _parse_index_token(index: Any, axis: int) -> str | None:
 
 
 def _is_projection_token(tok: str | None) -> bool:
+    """True when *tok* names a supported intensity projection (max/mean/avg/median)."""
     return tok is not None and tok in ("max", "mean", "avg", "median")
 
 
 def _project_along_axis(vol: np.ndarray, axis: int, how: str) -> np.ndarray:
+    """Collapse *vol* along *axis* with the named projection (max/mean/avg/median)."""
     how = how.lower()
     if how == "max":
         return np.max(vol, axis=axis)
@@ -194,6 +197,7 @@ def _project_along_axis(vol: np.ndarray, axis: int, how: str) -> np.ndarray:
 
 
 def _rgb_along_axis(vol: np.ndarray, axis: int) -> np.ndarray:
+    """Move a length-3 *axis* to the end so it can be shown as RGB by matplotlib."""
     if vol.shape[axis] != 3:
         raise ValueError(
             f"index='rgb' requires length 3 along axis {axis}, got shape {vol.shape[axis]}"
@@ -202,6 +206,7 @@ def _rgb_along_axis(vol: np.ndarray, axis: int) -> np.ndarray:
 
 
 def _kwargs_imshow_rgb(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Drop ``cmap`` from imshow kwargs (invalid/ignored for RGB data)."""
     return {k: v for k, v in kwargs.items() if k != "cmap"}
 
 
@@ -338,6 +343,7 @@ def imshow(
         kwargs["cmap"] = "gray"
 
     def resolve_index(idx, max_len):
+        """Resolve an index token: ``\"mid\"`` → the middle slice, else pass *idx* through unchanged."""
         if idx == "mid": return max_len // 2
         return idx
 
@@ -389,6 +395,7 @@ def imshow(
         axis_top, axis_right = rem[0], rem[1]
 
         def get_orth_slices(vol):
+            """Extract the (top, main, right) orthogonal slice views of *vol* for the current axis layout."""
             if axis == 2:
                 return vol[indices[axis_top], :, :].T, vol[:, :, indices[axis]], vol[:, indices[axis_right], :]
             elif axis == 1:
@@ -420,6 +427,7 @@ def imshow(
     # --- BLOCK: ANIMATION EXECUTION ---
     if display == "animation":
         def update(frame):
+            """Matplotlib ``FuncAnimation`` callback: redraw the view(s) for the given time *frame*."""
             if arr.ndim == 4:
                 vol = arr.take(indices=frame, axis=t_axis)
             else:

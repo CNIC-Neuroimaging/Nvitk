@@ -57,6 +57,7 @@ RES_QC_DIR = "res_qc"
 
 
 def _index_html(batch: str, links: list[tuple[str, str, str]]) -> str:
+    """Build the batch-level QC index page linking each subject's CT-PET and Dixon reports."""
     items = "\n".join(
         f"<li><code>{subj}</code> · <a href='{href_ct}'>CT-PET</a> · <a href='{href_dx}'>Dixon</a></li>"
         for subj, href_ct, href_dx in links

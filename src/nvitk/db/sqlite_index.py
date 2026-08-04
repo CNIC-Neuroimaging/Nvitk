@@ -25,7 +25,10 @@ from .storage import coerce_dataframe_to_manifest, read_parquet_table
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func):
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -39,12 +42,18 @@ class SQLiteIndex:
     """Path to ``catalog.sqlite`` (or configured index); :meth:`build` refreshes from Parquet."""
 
     def __init__(self, db_path: str | Path):
+        """Point this index at the SQLite database file *db_path* (need not exist yet)."""
         self.db_path = Path(db_path)
 
     def exists(self) -> bool:
+        """True if the SQLite database file has been built."""
         return self.db_path.exists()
 
     def build(self, catalog: DatasetCatalog, *, tables: list[str] | None = None) -> Path:
+        """Rebuild the SQLite database from *catalog*'s Parquet tables (all tables, or just *tables*):
+        replaces each table wholesale, indexes its key/index columns, and records
+        ``schema_version``/``dataset_name`` in a ``_dataset_meta`` table. Tables whose Parquet file
+        doesn't exist yet are skipped."""
         selected_tables = tables or catalog.list_tables()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -86,6 +95,8 @@ class SQLiteIndex:
         columns: list[str] | None = None,
         filters: dict[str, Any] | None = None,
     ) -> pd.DataFrame:
+        """Run a filtered ``SELECT`` against *table_name* in the SQLite index, projecting *columns*
+        (all if unset) and translating *filters* via :func:`~nvitk.db.filters.build_sql_where`."""
         select_clause = ", ".join(escape_identifier(column) for column in columns) if columns else "*"
         sql = f"SELECT {select_clause} FROM {escape_identifier(table_name)}"
         where_clause, params = build_sql_where(filters)
@@ -111,6 +122,8 @@ class SQLiteIndex:
     help="Comma-separated subset of tables to index. Defaults to all tables.",
 )
 def main(dataset_root: Path, tables: str | None) -> None:
+    """CLI entry point: rebuild the SQLite index for the dataset at ``dataset_root`` (optionally
+    limited to ``--tables``) and print the resulting database path."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

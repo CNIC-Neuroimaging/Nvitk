@@ -63,7 +63,10 @@ DERIVED_SLOT_BY_STEM: dict[str, str] = {
 
 
 def _cli_decorator(*args: Any, **kwargs: Any):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func: Any) -> Any:
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -74,15 +77,19 @@ _click_option = click.option if click is not None else _cli_decorator
 
 
 def _is_nifti_filename(name: str) -> bool:
+    """True if *name* has a ``.nii`` or ``.nii.gz`` extension."""
     lower = name.lower()
     return lower.endswith(".nii.gz") or lower.endswith(".nii")
 
 
 def _is_json_filename(name: str) -> bool:
+    """True if *name* has a ``.json`` extension."""
     return name.lower().endswith(".json")
 
 
 def _strip_known_suffixes(name: str) -> str:
+    """Remove a trailing ``.nii``/``.nii.gz``/``.json`` extension from *name* (else fall back to
+    ``Path.stem``)."""
     lower = name.lower()
     if lower.endswith(".nii.gz"):
         return name[:-7]
@@ -94,12 +101,15 @@ def _strip_known_suffixes(name: str) -> str:
 
 
 def _normalize_token(text: str) -> str:
+    """Lower-case *text* and strip everything but alphanumerics, for loose filename/stem matching."""
     import re
 
     return re.sub(r"[^0-9a-z]+", "", str(text).strip().lower())
 
 
 def _sequence_direction(sequence_label: str) -> str | None:
+    """Map a ``4DFLOW_AP``/``4DFLOW_RL``/``4DFLOW_FH`` sequence label to its short direction code
+    (``ap``/``rl``/``fh``), or ``None`` for any other sequence."""
     upper = str(sequence_label).strip().upper()
     if upper == "4DFLOW_AP":
         return "ap"
@@ -162,6 +172,8 @@ def _experiment_session_uid(
     subject_uid: str,
     experiment_label: str,
 ) -> Any:
+    """Look up the ``session_uid`` in the ``sessions`` table matching *project_id*/*subject_uid*/
+    *experiment_label*; returns ``pd.NA`` if the table is missing or no row matches."""
     if not repo.catalog.table_exists("sessions"):
         return pd.NA
     sessions = repo._load_table_frame(
@@ -180,6 +192,7 @@ def _experiment_session_uid(
 
 
 def _resource_files_collection(resource: Any) -> list[Any]:
+    """Normalize an XNAT resource's ``files`` (attribute, callable, or dict/iterable) into a plain list."""
     files = getattr(resource, "files", None)
     if files is None:
         return []
@@ -197,6 +210,7 @@ def _resource_files_collection(resource: Any) -> list[Any]:
 
 
 def _resource_file_name(file_obj: Any) -> str:
+    """Basename of an XNAT resource file object, checking ``name``/``label``/``path``/``id`` in order."""
     for attr in ("name", "label", "path", "id"):
         value = _coalesce_attr(file_obj, attr)
         if value:
@@ -205,10 +219,13 @@ def _resource_file_name(file_obj: Any) -> str:
 
 
 def _resource_file_uri(file_obj: Any) -> str:
+    """URI (or path) for an XNAT resource file object, checking ``uri``/``fulluri``/``path`` in order."""
     return str(_coalesce_attr(file_obj, "uri", "fulluri", "path") or "").strip()
 
 
 def _list_scan_nifti_resource_files(scan: Any, *, resource_label: str = NIFTI_RESOURCE_LABEL) -> list[dict[str, str]]:
+    """List NIfTI/JSON files under *scan*'s *resource_label* resource as ``{name, uri, xnat_path}`` dicts;
+    empty if the scan has no such resource."""
     resources = getattr(scan, "resources", None) or {}
     if resource_label not in resources:
         return []
@@ -231,6 +248,10 @@ def _list_scan_nifti_resource_files(scan: Any, *, resource_label: str = NIFTI_RE
 
 
 def _classified_scan_items(project_id: str, experiment: Any, experiment_label: str) -> list[tuple[Any, str, str, str, dict[str, Any]]]:
+    """Classify every scan under *experiment* for *project_id* into ``(scan, scan_id,
+    series_description, quality, classification)`` tuples, using the project's dedicated classifier
+    (e.g. ``ia_pet_v5``) when registered, else the generic :func:`classify_scan_for_project`. Scans that
+    don't classify to a known sequence are omitted."""
     scans = list(getattr(experiment, "scans", {}).values())
     try:
         project_spec = get_xnat_project(project_id)
@@ -259,10 +280,14 @@ def _classified_scan_items(project_id: str, experiment: Any, experiment_label: s
 
 
 def _local_download_dir(download_root: Path, subject_uid: str, sequence_label: str, scan_id: str, resource_label: str) -> Path:
+    """Local cache directory layout for a downloaded scan resource:
+    ``<download_root>/<subject_uid>/<sequence_label>/<scan_id>/<resource_label>``."""
     return download_root / subject_uid / sequence_label / scan_id / resource_label
 
 
 def _match_downloaded_local_file(download_dir: Path, basename: str) -> Path | None:
+    """Return the local file path for *basename* under *download_dir* if it was already downloaded,
+    else ``None``."""
     candidate = download_dir / Path(basename).name
     if candidate.is_file():
         return candidate
@@ -467,6 +492,8 @@ def main(
     overwrite_downloads: bool,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point: resolve the XNAT connection profile from CLI flags/config file, then run
+    :func:`sync_xnat_scan_nifti_assets` against the dataset at ``dataset_root``."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     if download and download_root is None:

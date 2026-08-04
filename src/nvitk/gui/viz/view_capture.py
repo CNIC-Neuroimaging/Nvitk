@@ -22,6 +22,7 @@ def _dims_slot_for_array_axis(viewer: Any, array_axis: int) -> int:
 
 
 def _array_axis_for_dims_slot(viewer: Any, dims_slot: int) -> int:
+    """Inverse of :func:`_dims_slot_for_array_axis`: map a Napari dims slot back to an array axis."""
     order = tuple(int(x) for x in viewer.dims.order)
     slot = int(dims_slot)
     if 0 <= slot < len(order):
@@ -41,6 +42,8 @@ class GifAnimationSpec:
 
 @dataclass(frozen=True)
 class _ViewerViewState:
+    """Snapshot of a Napari viewer's dims/camera state, for save-and-restore around screenshot/GIF export."""
+
     ndisplay: int
     order: tuple[int, ...]
     point: tuple[float, ...]
@@ -52,6 +55,7 @@ class _ViewerViewState:
 
 
 def _process_events() -> None:
+    """Flush pending Qt events so the viewer redraws before a screenshot is captured."""
     try:
         from qtpy.QtWidgets import QApplication
 
@@ -63,6 +67,7 @@ def _process_events() -> None:
 
 
 def _capture_viewer_state(viewer: Any) -> _ViewerViewState:
+    """Snapshot *viewer*'s current dims/camera state into a :class:`_ViewerViewState`."""
     cam = viewer.camera
     angles = tuple(float(a) for a in cam.angles) if hasattr(cam, "angles") else None
     center = tuple(float(c) for c in cam.center) if hasattr(cam, "center") else None
@@ -83,6 +88,7 @@ def _capture_viewer_state(viewer: Any) -> _ViewerViewState:
 
 
 def _restore_viewer_state(viewer: Any, state: _ViewerViewState) -> None:
+    """Restore *viewer*'s dims/camera to a previously captured *state*."""
     viewer.dims.ndisplay = state.ndisplay
     viewer.dims.order = state.order
     viewer.dims.point = state.point
@@ -132,6 +138,7 @@ def _gif_spec(
     n_frames: int,
     phase_layer: Any | None,
 ) -> GifAnimationSpec:
+    """Build a :class:`GifAnimationSpec` from an array-space time axis, resolving its Napari dims slot."""
     slot = _dims_slot_for_array_axis(viewer, array_time_axis)
     return GifAnimationSpec(
         time_axis=int(array_time_axis),
@@ -147,6 +154,8 @@ def _frame_count_for_array_time_axis(
     *,
     phase_layer: Any | None = None,
 ) -> int:
+    """Number of frames along *array_time_axis*, preferring *phase_layer*'s own time axis length when
+    given, else the viewer dims range for that axis."""
     if phase_layer is not None:
         from nvitk.gui.viz.layers import _time_axis_index_from_layer
 
@@ -298,6 +307,7 @@ def _set_gif_frame(viewer: Any, spec: GifAnimationSpec, frame: int) -> None:
 
 
 def _ensure_3d_view(viewer: Any) -> None:
+    """Switch *viewer* to 3D display mode if it isn't already, then flush pending Qt events."""
     if int(viewer.dims.ndisplay) != 3:
         viewer.dims.ndisplay = 3
     _process_events()

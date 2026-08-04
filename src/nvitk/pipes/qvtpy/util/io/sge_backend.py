@@ -10,14 +10,18 @@ from nvitk.core.click_backend import sge_backend_env
 
 
 def sge_backend_cli_args(backend: str = "gpu") -> list[str]:
+    """Shell-quoted ``--backend <backend>`` CLI argv fragment for a worker command."""
     return ["--backend", shlex.quote(str(backend).strip().lower())]
 
 
 def sge_stage_extra_env(src_bind: str, backend: str = "gpu") -> dict[str, str]:
+    """Extra environment variables to set for an SGE worker running with *backend* (delegates to
+    :func:`~nvitk.core.click_backend.sge_backend_env`)."""
     return sge_backend_env(src_bind, backend)
 
 
 def sge_backend_is_gpu(backend: str) -> bool:
+    """True if *backend* (case-insensitive) is ``"gpu"``."""
     return str(backend).strip().lower() == "gpu"
 
 
@@ -59,6 +63,7 @@ _VMEM_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*([KMG]?)B?$", re.IGNORECASE)
 
 
 def _vmem_to_mib(value: str) -> float:
+    """Parse an SGE ``h_vmem`` string (e.g. ``"32G"``) into a MiB float; 0.0 if unparseable."""
     raw = str(value).strip()
     m = _VMEM_RE.match(raw)
     if not m:

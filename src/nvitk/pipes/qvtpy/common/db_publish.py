@@ -78,6 +78,7 @@ def resolve_repo(repo: DataRepo | None = None, *, prefer_sge: bool | None = None
 
 
 def _sge_db_publish_enabled() -> bool:
+    """True if running under SGE (``NVITK_SGE`` truthy) with a reachable cluster dataset root."""
     if os.environ.get("NVITK_SGE", "").lower() not in ("1", "true", "yes"):
         return False
     return sge_dataset_root_path(must_exist=True) is not None
@@ -94,6 +95,7 @@ def _measurement_row(
     source_file: str,
     updated_at: str,
 ) -> dict[str, Any]:
+    """Build one ``image_measurements`` row dict for a qvtpy measurement value."""
     return {
         "subject_uid": str(subject_uid),
         "session_id": pd.NA,
@@ -121,6 +123,7 @@ def _measurement_row(
 
 
 def _finite(value: Any) -> float | None:
+    """Coerce *value* to a float, or ``None`` if it's missing/non-numeric."""
     v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     if pd.isna(v):
         return None
@@ -162,6 +165,8 @@ def _select_init_loc_rows(df: pd.DataFrame) -> pd.DataFrame:
 def _rows_from_loc_measurements(
     subject_uid: str, loc_csv: Path, updated_at: str
 ) -> list[dict[str, Any]]:
+    """Build ``image_measurements`` rows (PI/RI/mean-flow scalars and per-frame flow time series) from
+    a subject's ``loc_measurements.csv``, keeping one init-role row per vessel."""
     if not loc_csv.is_file():
         return []
     df = pd.read_csv(loc_csv)
@@ -223,6 +228,8 @@ def _rows_from_loc_measurements(
 def _rows_from_vessel_hemodynamics(
     subject_uid: str, vessel_csv: Path, updated_at: str
 ) -> list[dict[str, Any]]:
+    """Build ``image_measurements`` rows from a subject's ``vessel_hemodynamics.csv`` (PITC/PWV and
+    related per-vessel indices)."""
     if not vessel_csv.is_file():
         return []
     df = pd.read_csv(vessel_csv)

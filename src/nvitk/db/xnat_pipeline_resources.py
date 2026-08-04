@@ -73,6 +73,7 @@ def _resource_key_ci(resources: Any, resource_label: str) -> str | None:
 
 
 def _resource_file_count(resource: Any) -> int:
+    """Number of files exposed by an XNAT *resource* (attribute or callable ``files``), 0 if unavailable."""
     files = getattr(resource, "files", None)
     if files is None:
         return 0
@@ -97,6 +98,8 @@ def _experiment_session_uid(
     subject_uid: str,
     experiment_label: str,
 ) -> Any:
+    """Look up the ``session_uid`` in the ``sessions`` table matching *project_id*/*subject_uid*/
+    *experiment_label*; returns ``pd.NA`` if the table is missing or no row matches."""
     if not repo.catalog.table_exists("sessions"):
         return pd.NA
     sessions = repo._load_table_frame(
@@ -270,6 +273,8 @@ def download_experiment_resource(
     return unwrap_xnat_resource_download(dest, label)
 
 def _describe_downloaded_resource(resource_dir: Path, resource_label: str) -> dict[str, Any]:
+    """Summarize a downloaded XNAT experiment resource: dispatch to the ``eicab``/``qvtpy``-specific
+    describer, or fall back to a generic file-count summary for other resource labels."""
     label = str(resource_label).strip().lower()
     if label == XNAT_RESOURCE_EICAB:
         return describe_local_eicab_resource(resource_dir)
@@ -551,7 +556,10 @@ def list_pipeline_assets_for_subject(
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func):
+        """Return *func* unchanged."""
         return func
 
     return decorator

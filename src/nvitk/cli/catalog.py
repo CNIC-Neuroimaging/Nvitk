@@ -21,6 +21,7 @@ class ToolEntry:
 
     @property
     def display_label(self) -> str:
+        """Human-facing label: explicit ``label``, else the command, else the trailing module segment."""
         return self.label or self.command or self.module.rsplit(".", 1)[-1]
 
 
@@ -35,6 +36,7 @@ class CatalogNode:
     expanded: bool = False
 
     def is_branch(self) -> bool:
+        """True if this node has children nodes or tools to display (as opposed to being empty)."""
         return bool(self.children) or bool(self.tools)
 
 
@@ -52,6 +54,8 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.morphology.components", label="label-cc, remove-small-components", supports_gpu=True, requires_mask=True, library_only=True),
         ToolEntry("", "nvitk.morphology.centerline", label="centerline / skeletonize", requires_mask=True, library_only=True),
         ToolEntry("", "nvitk.morphology.centerline_siphon", label="ICA siphon correction", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.morphology.polyline_graph", label="skeleton → polyline / junction graph", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.morphology.mst_bridge", label="MST bridge of nearby components", supports_gpu=True, requires_mask=True, library_only=True),
     ],
     "restoration": [
         ToolEntry("", "nvitk.restoration.bilateral", label="bilateral 2d/3d", supports_gpu=True, library_only=True),
@@ -69,6 +73,12 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
             label="blood flood (expand + from-scratch vessel tree)",
             library_only=True,
         ),
+        ToolEntry("", "nvitk.segmentation.region_growing", label="6-connected intensity region growing", supports_gpu=True, requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.segmentation.mask_ops", label="mask logical ops / apply intensity", supports_gpu=True, requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.segmentation.labels", label="label-map primitives (get / largest-cc / combine)", supports_gpu=True, requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.segmentation.hemisphere", label="split bilateral mask into L/R", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.segmentation.hull_edt", label="convex hull / distance transform", supports_gpu=True, requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.segmentation.protrusion_filter", label="curvature protrusion (wart) removal", requires_mask=True, library_only=True),
     ],
     "measure": [
         ToolEntry("", "nvitk.measure.volume", label="volume", library_only=True),
@@ -76,6 +86,12 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.measure.voxel", label="dice / jaccard / overlap", library_only=True),
         ToolEntry("", "nvitk.measure.surface", label="surface metrics", library_only=True),
         ToolEntry("", "nvitk.measure.measurer", label="Measurer chain", library_only=True),
+        ToolEntry("", "nvitk.measure.intensity", label="masked intensity statistics", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.measure.hemodynamics", label="4D-flow hemodynamic indices", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.measure.cross_section", label="oblique cross-section sampling", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.measure.morphometrics", label="CoW TOF morphometrics", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.measure.radiomics", label="PyRadiomics wrapper", requires_mask=True, library_only=True),
+        ToolEntry("", "nvitk.measure.compare", label="intensity correlation (Pearson / Spearman / RMSE)", library_only=True),
     ],
     "transform": [
         ToolEntry("", "nvitk.transform.resampling", label="resample-to", library_only=True),
@@ -84,6 +100,20 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.transform.rotate", label="rotate volume", library_only=True),
         ToolEntry("", "nvitk.transform.swap_axes", label="swap / permute axes", library_only=True),
         ToolEntry("", "nvitk.transform.rotation", label="z-rotation correction", library_only=True),
+        ToolEntry("", "nvitk.transform.reorient", label="reorient (axis permute / flips / codes)", library_only=True),
+        ToolEntry("", "nvitk.transform.projection", label="intensity projection along an axis", library_only=True),
+    ],
+    "stats": [
+        ToolEntry("", "nvitk.stats.mixedlm", label="mixed-effects models (statsmodels)", library_only=True),
+        ToolEntry("", "nvitk.stats.mediation", label="mediation analysis", library_only=True),
+        ToolEntry("", "nvitk.stats.violin_hemodynamics", label="cohort hemodynamics violin / strip plots", library_only=True),
+    ],
+    "viz": [
+        ToolEntry("", "nvitk.viz.flowshow", label="4D-flow visualization (PyVista)", library_only=True),
+        ToolEntry("", "nvitk.viz.streamlines", label="headless streamlines / pathlines", library_only=True),
+        ToolEntry("", "nvitk.viz.brainshow", label="atlas brain views (Nilearn)", library_only=True),
+        ToolEntry("", "nvitk.viz.pet_hotspots", label="SUV hotspot 3D visualization", library_only=True),
+        ToolEntry("", "nvitk.viz.centerline_pick", label="centerline picking / plane frames", requires_mask=True, library_only=True),
     ],
 }
 
@@ -119,6 +149,8 @@ _MASK_COMMANDS = frozenset({"nvitk-morph", "nvitk-measure"})
 
 
 def find_pyproject_toml() -> Path | None:
+    """Locate ``pyproject.toml`` by walking up from the current working directory, then from this
+    file's own directory; ``None`` if neither search finds it."""
     current = Path.cwd()
     for candidate in [current, *current.parents]:
         p = candidate / "pyproject.toml"
@@ -133,6 +165,8 @@ def find_pyproject_toml() -> Path | None:
 
 
 def parse_pyproject_scripts(pyproject_path: Path | None = None) -> list[tuple[str, str]]:
+    """Parse the ``[project.scripts]`` table of *pyproject_path* (or the discovered pyproject.toml)
+    into a list of ``(command, module)`` pairs, via a regex scan rather than a full TOML parse."""
     path = pyproject_path or find_pyproject_toml()
     if path is None:
         return []
@@ -150,6 +184,8 @@ def parse_pyproject_scripts(pyproject_path: Path | None = None) -> list[tuple[st
 
 
 def _tool_from_script(cmd: str, module: str) -> ToolEntry:
+    """Build a :class:`ToolEntry` for an installed pyproject script, inferring GPU/mask support from
+    the known ``_GPU_COMMANDS``/``_MASK_COMMANDS`` sets."""
     return ToolEntry(
         command=cmd,
         module=module,
@@ -159,6 +195,8 @@ def _tool_from_script(cmd: str, module: str) -> ToolEntry:
 
 
 def _pipeline_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
+    """Tool entries for scripts belonging to a research pipeline (``nvitk-pesa-fat``/``nvitk-qvtpy``/
+    ``nvitk-bbtpy``/``nvitk-gpetpy`` prefixes), sorted by command."""
     tools: list[ToolEntry] = []
     for cmd, module in scripts:
         if cmd.startswith("nvitk-pesa-fat") or cmd.startswith("nvitk-qvtpy") or cmd.startswith("nvitk-bbtpy") or cmd.startswith("nvitk-gpetpy"):
@@ -167,6 +205,8 @@ def _pipeline_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
 
 
 def _general_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
+    """Tool entries for scripts not claimed by an image-processing submodule or a pipeline prefix,
+    sorted by command."""
     known = set(_CMD_TO_SUBMODULE) | {
         c for c, _ in scripts
         if c.startswith("nvitk-pesa-fat") or c.startswith("nvitk-qvtpy")
@@ -193,6 +233,8 @@ def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[Cat
         "restoration": CatalogNode("restoration", "restoration"),
         "measure": CatalogNode("measure", "measure"),
         "transform": CatalogNode("transform", "transform"),
+        "stats": CatalogNode("stats", "stats"),
+        "viz": CatalogNode("viz", "viz"),
     }
 
     for cmd, module in scripts:
@@ -221,6 +263,8 @@ def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[Cat
             "restoration",
             "measure",
             "transform",
+            "stats",
+            "viz",
         )
     ]
 
@@ -248,9 +292,11 @@ def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[Cat
 
 
 def total_tool_count(roots: list[CatalogNode]) -> int:
+    """Total number of tools across *roots* and all their descendant nodes."""
     count = 0
 
     def walk(node: CatalogNode) -> None:
+        """Add *node*'s own tool count to the running total, then recurse into its children."""
         nonlocal count
         count += len(node.tools)
         for child in node.children:

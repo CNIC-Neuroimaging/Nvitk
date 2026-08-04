@@ -14,11 +14,13 @@ from .models import SkeletonTree, VesselInfo
 from .skeleton import dijkstra_dist_from_root
 
 def tortuosity_dm(pts: np.ndarray) -> float:
+    """Distance-metric tortuosity: arc length / chord length (≥1; 1 = straight)."""
     L = arc_length(pts); C = chord_length(pts)
     return float(L / C) if np.isfinite(L) and np.isfinite(C) and C > 1e-8 else np.nan
 
 
 def discrete_curvature(pts: np.ndarray) -> np.ndarray:
+    """Menger curvature at each interior point of a 3-D polyline (NaN at the two endpoints)."""
     n = len(pts)
     kappa = np.full(n, np.nan)
     for i in range(1, n - 1):
@@ -32,6 +34,7 @@ def discrete_curvature(pts: np.ndarray) -> np.ndarray:
 
 
 def discrete_torsion(pts: np.ndarray) -> np.ndarray:
+    """Torsion of a 3-D polyline via arc-length derivatives (Frenet-frame formula, NaN where ill-conditioned)."""
     pts = np.asarray(pts, dtype=float)
     n = len(pts)
     torsion = np.full(n, np.nan)
@@ -59,6 +62,10 @@ def discrete_torsion(pts: np.ndarray) -> np.ndarray:
 
 
 def signed_turn_proxy(pts: np.ndarray) -> np.ndarray:
+    """Per-point sign (+1/-1) of the local binormal relative to a median reference direction.
+
+    Used to detect inflection points (sign flips) along a tortuous path.
+    """
     n = len(pts); out = np.zeros(n)
     if n < 4:
         return out
@@ -77,6 +84,7 @@ def signed_turn_proxy(pts: np.ndarray) -> np.ndarray:
 
 
 def smooth_1d(x: np.ndarray, win: int = 7) -> np.ndarray:
+    """Reflect-padded moving-average smoothing of a 1-D signal with an odd window."""
     if win < 3:
         return x.copy()
     win = int(win) | 1
@@ -85,6 +93,7 @@ def smooth_1d(x: np.ndarray, win: int = 7) -> np.ndarray:
 
 
 def inflection_count(kappa, turn_proxy, kappa_min, smooth_win) -> int:
+    """Count sign changes of :func:`signed_turn_proxy` at points with curvature ≥ *kappa_min*."""
     k = smooth_1d(np.where(np.isfinite(kappa), kappa, 0.0), win=smooth_win)
     tp = np.where(np.isfinite(turn_proxy), turn_proxy, 0.0)
     valid = (k >= kappa_min) & (tp != 0)
@@ -99,6 +108,7 @@ def inflection_count(kappa, turn_proxy, kappa_min, smooth_win) -> int:
 
 
 def bend_peak_count(kappa, kappa_peak, smooth_win) -> int:
+    """Count local curvature maxima at or above *kappa_peak* (smoothed curvature signal)."""
     k = smooth_1d(np.where(np.isfinite(kappa), kappa, 0.0), win=smooth_win)
     if len(k) < 3:
         return 0
@@ -106,11 +116,13 @@ def bend_peak_count(kappa, kappa_peak, smooth_win) -> int:
 
 
 def radius_from_edt(mask_bool, spacing, path_vox) -> np.ndarray:
+    """Vessel radius (mm) at each path voxel, sampled from a spacing-aware distance transform."""
     dist = ndi.distance_transform_edt(mask_bool, sampling=spacing)
     return np.array([dist[i, j, k] for (i, j, k) in path_vox], dtype=float)
 
 
 def radius_stats(r: np.ndarray) -> dict:
+    """Summary radius statistics (mean/std/CV/min/percentiles) over finite values of *r*."""
     rr = r[np.isfinite(r)]
     if len(rr) == 0:
         return {"radius_mean_mm": np.nan, "radius_std_mm": np.nan, "radius_cv": np.nan, "radius_min_mm": np.nan, "radius_p05_mm": np.nan, "radius_p50_mm": np.nan, "radius_p95_mm": np.nan}
@@ -127,6 +139,7 @@ def radius_stats(r: np.ndarray) -> dict:
 
 
 def taper_slope(s, r) -> float:
+    """Linear-fit slope of radius *r* vs arc length *s* (mm radius change per mm length)."""
     mask = np.isfinite(s) & np.isfinite(r)
     if mask.sum() < 3:
         return np.nan
@@ -151,6 +164,7 @@ def vector_from_node_along_neighbor(tree: SkeletonTree, node: int, nbr: int, spa
 
 
 def compute_branchpoint_metrics(label: int, component_id: int, tree: SkeletonTree, mask_bool: np.ndarray, spacing, vessel_info: VesselInfo) -> pd.DataFrame:
+    """Per-branchpoint table: parent/daughter EDT radii, area-conservation ratio, and daughter-pair angles."""
     if tree.root is None:
         return pd.DataFrame()
     spacing = np.asarray(spacing, dtype=float)

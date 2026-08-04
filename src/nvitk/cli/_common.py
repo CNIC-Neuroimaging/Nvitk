@@ -23,10 +23,12 @@ def backend_option(supports_gpu: bool = True):
     _ = supports_gpu  # legacy arg; backend is always exposed on tool CLIs
 
     def decorator(f):
+        """Wrap *f* with a ``--backend`` Click option that activates the chosen backend before calling it."""
         from functools import wraps
 
         @wraps(f)
         def wrapper(*args, **kwargs):
+            """Apply the requested backend, then call the wrapped Click command function."""
             apply_cli_backend(kwargs.get("backend", "gpu"))
             return f(*args, **kwargs)
 
@@ -45,6 +47,7 @@ def backend_option(supports_gpu: bool = True):
 
 
 def io_options(f):
+    """Attach the shared ``-i/--input`` and ``-o/--output`` Click options to *f*."""
     f = click.option(
         "-i",
         "--input",
@@ -65,6 +68,7 @@ def io_options(f):
 
 
 def mask_option(f):
+    """Attach an optional ``--mask`` Click option to *f*."""
     return click.option(
         "--mask",
         "mask_path",
@@ -75,6 +79,8 @@ def mask_option(f):
 
 
 def submit_options(f):
+    """Attach the shared local/SGE submission Click options (``--submit``, ``--emit-script``,
+    ``--direct-submit``, ``--no-remote``, ``--dry-run``) to *f*."""
     f = click.option(
         "--submit",
         type=click.Choice(["local", "sge"], case_sensitive=False),
@@ -136,6 +142,11 @@ def run_sge(
     dry_run: bool = False,
     extra_cli_args: list[str] | None = None,
 ) -> None:
+    """Emit (and optionally submit) an SGE job script that runs *tool*'s *subcommand* worker on the
+    cluster: builds the containerized worker command, writes the qsub script via
+    :func:`~nvitk.cli._sge.emit_submit_script` (unless ``direct_submit`` skips straight to
+    :func:`~nvitk.cli._sge.submit_tool_job`), and — unless ``no_remote``/``direct_submit`` — runs it
+    over SSH on the configured cluster host if ``NVITK_SGE_SSH_*`` env vars are set."""
     from nvitk.cli._sge import build_worker_command, default_emit_path, emit_submit_script, submit_tool_job
     from nvitk.cluster.remote_submit import run_sge_script_ssh
 
@@ -221,6 +232,8 @@ def dispatch_tool(
     runner: Callable[..., Any],
     runner_kwargs: dict[str, Any] | None = None,
 ) -> None:
+    """Route a tool invocation to either local execution (:func:`run_local`) or SGE submission
+    (:func:`run_sge`) based on ``submit``, after activating the requested backend."""
     apply_cli_backend(backend)
     if submit.lower() == "local":
         run_local(

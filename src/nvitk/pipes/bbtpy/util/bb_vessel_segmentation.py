@@ -42,6 +42,7 @@ class BbSegResult:
 
 
 def _dilate_label_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
+    """Binary-dilate *mask* by *radius* voxels (connectivity 1); no-op for radius <= 0 or an empty mask."""
     m = as_backend_array(mask).astype(bool, copy=False)
     if radius <= 0 or not np.any(m):
         return m

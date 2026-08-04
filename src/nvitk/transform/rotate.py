@@ -25,6 +25,7 @@ def _plane_axes(axis: int) -> tuple[int, int]:
 
 
 def _rotation_matrix_3d(axis: int, degrees: float) -> _host_np.ndarray:
+    """3x3 right-handed rotation of *degrees* about the given spatial *axis* (0=X, 1=Y, 2=Z)."""
     th = float(_host_np.radians(degrees))
     c = float(_host_np.cos(th))
     s = float(_host_np.sin(th))

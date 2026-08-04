@@ -25,6 +25,12 @@ from typing import Any, Iterator
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
+from nvitk.morphology import (
+    dilate,
+    erode,
+    label_connected,
+    remove_small_components,
+)
 
 setup(globals())
 
@@ -143,8 +149,9 @@ def apply_hysteresis_threshold_3d(
     low = float(min(low, high))
     mask_low = img > low
     mask_high = img > high
-    structure = np.ones((3, 3, 3), dtype=np.uint8)
-    labels_low, n_lab = ndi.label(mask_low, structure=structure)
+    # 26-connectivity labeling of the low mask (base tool); a CC survives if it
+    # holds at least one high-threshold voxel (vectorized touch test below).
+    labels_low, n_lab = label_connected(mask_low, connectivity=3)
     if n_lab == 0:
         return np.zeros(img.shape, dtype=bool)
     sums = ndi.sum(mask_high, labels_low, index=np.arange(1, n_lab + 1))
@@ -253,13 +260,10 @@ def hysteresis_vessel_tree(
             tree &= m
 
         min_cc = max(1, int(min_cc_voxels))
-        keep = np.zeros(1, dtype=bool)
-        lab, n_lab = ndi.label(tree, structure=np.ones((3, 3, 3), dtype=np.uint8))
-        if n_lab > 0:
-            counts = np.bincount(lab.ravel())
-            keep = np.zeros(n_lab + 1, dtype=bool)
-            keep[1:] = counts[1:] >= min_cc
-            tree = keep[lab]
+        # Drop connected components below the voxel floor (base tool), then
+        # recount the survivors for the diagnostics recorded below.
+        tree = remove_small_components(tree, min_size=min_cc, connectivity=3)
+        _, n_cc_kept = label_connected(tree, connectivity=3)
 
         meta.update(
             {
@@ -268,7 +272,7 @@ def hysteresis_vessel_tree(
                 "lowt": float(lowt),
                 "hight": float(hight),
                 "n_tree_voxels": int(np.count_nonzero(tree)),
-                "n_cc_kept": int(np.count_nonzero(keep[1:])) if n_lab > 0 else 0,
+                "n_cc_kept": int(n_cc_kept),
             }
         )
         log.info(
@@ -288,8 +292,9 @@ def keep_tree_components_touching_markers(
     marks = as_backend_array(markers) != 0
     if not np.any(vessels):
         return vessels, {"n_before": 0, "n_after": 0, "n_cc_kept": 0}
-    structure = np.ones((3, 3, 3), dtype=np.uint8)
-    lab, n_lab = ndi.label(vessels, structure=structure)
+    # 26-connectivity CC labeling (base tool); marker overlap is measured with a
+    # vectorized per-label sum so component diagnostics stay cheap.
+    lab, n_lab = label_connected(vessels, connectivity=3)
     if n_lab == 0:
         return vessels, {"n_before": 0, "n_after": 0, "n_cc_kept": 0}
     touch = ndi.sum(marks, lab, index=np.arange(1, n_lab + 1))
@@ -330,10 +335,11 @@ def thicken_tree_in_intensity(
         }
     thr = float(np.percentile(pos, float(gate_percentile)))
     gate = vol >= thr
-    structure = np.ones((3, 3, 3), dtype=bool)
     thick = cores.copy()
     for _ in range(n_iter):
-        thick = ndi.binary_dilation(thick, structure=structure) & gate
+        # 26-connected lumen dilation (base tool), gated to bright voxels only.
+        grown = as_backend_array(dilate(thick, connectivity=3)).astype(bool)
+        thick = grown & gate
         thick |= cores
     meta = {
         "iterations": n_iter,
@@ -409,7 +415,8 @@ def watershed_labels_into_vessels(
 
     if erode_markers:
         binary = marks != 0
-        eroded = ndi.binary_erosion(binary, structure=np.ones((3, 3, 3), dtype=bool))
+        # 26-connected erosion of the marker mask (base tool).
+        eroded = as_backend_array(erode(binary, connectivity=3)).astype(bool)
         if np.any(eroded):
             marks = marks * eroded.astype(np.int32)
         if not np.any(marks):
@@ -640,12 +647,8 @@ def blood_flood_from_scratch(
             tree = tree & ~as_backend_array(barrier).astype(bool)
         info["tree_thin"] = thin_meta
 
-    # 26-connectivity for CCs when connectivity>=3; else face connectivity.
-    if int(connectivity) >= 3:
-        structure = np.ones((3, 3, 3), dtype=np.uint8)
-    else:
-        structure = ndi.generate_binary_structure(3, int(connectivity))
-    labels, n_lab = ndi.label(tree, structure=structure)
+    # Connected components of the tree (base tool); connectivity>=3 → 26-conn.
+    labels, n_lab = label_connected(tree, connectivity=int(connectivity))
     labels = as_backend_array(labels).astype(np.int32, copy=False)
     info["n_tree_voxels"] = int(np.count_nonzero(tree))
     info["n_labeled"] = int(np.count_nonzero(labels))

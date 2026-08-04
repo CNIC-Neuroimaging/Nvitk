@@ -64,6 +64,7 @@ SUV_KIND_ALIASES = {
 
 
 def _normalize_kind(kind: str) -> str:
+    """Map an SUV kind alias (``bw``/``lbm``/``bsa``/``ibw`` or ``SUVxxx``) to its canonical ``SUVxxx`` name."""
     try:
         return SUV_KIND_ALIASES[kind]
     except KeyError as exc:
@@ -79,6 +80,11 @@ def _get_dicom_value(
     required: bool = False,
     name: str = "DICOM tag",
 ) -> Any:
+    """Look up the first present tag among *keys* (name or numeric-tuple form) in *metadata*.
+
+    Unwraps pydicom ``DataElement``-like values via their ``.value`` attribute.
+    Raises if *required* and none of the keys are found; otherwise returns *default*.
+    """
     if not isinstance(keys, list):
         keys = [keys]
     for key in keys:
@@ -96,6 +102,7 @@ def _get_dicom_value(
 
 
 def _activity2bq(dose: float, units: str) -> float:
+    """Convert an injected-dose value to Becquerels, given a DICOM units string (MBq/kBq/Bq/mCi/µCi/Ci/...)."""
     u = str(units).upper()
     if "MBQ" in u:
         return dose * 1e6
@@ -116,6 +123,11 @@ def _activity2bq(dose: float, units: str) -> float:
 
 
 def _parse_datetime(value: Any, series_date: str | None = None) -> datetime:
+    """Parse a DICOM time/datetime value (str, timestamp, or datetime) into a :class:`datetime`.
+
+    Bare time strings are combined with *series_date* (defaulting to today) since
+    DICOM often stores acquisition/injection time separately from the series date.
+    """
     if isinstance(value, datetime):
         return value
     if isinstance(value, (int, float)):
@@ -141,6 +153,7 @@ def _parse_datetime(value: Any, series_date: str | None = None) -> datetime:
 
 
 def _suv_factor(metadata: Dict[str, Any], kind: str = "SUVbw") -> float:
+    """Compute the decay-corrected SUV normalization factor from PET DICOM dose/timing metadata."""
     half_life = float(_get_dicom_value(metadata, RADIONUCLIDE_HALF_LIFE_TAGS, required=True))
     total_dose = float(_get_dicom_value(metadata, RADIONUCLIDE_TOTAL_DOSE_TAGS, required=True))
     dose_units = _get_dicom_value(metadata, DOSE_UNITS_TAGS, "Bq")
@@ -207,6 +220,7 @@ def _suv_factor(metadata: Dict[str, Any], kind: str = "SUVbw") -> float:
 
 
 def _apply_per_slice_rescale(raw: Any, metadata: Dict[str, Any], z_dim: int = 2) -> Any:
+    """Apply DICOM RescaleSlope/RescaleIntercept, per-slice when values vary by slice along *z_dim*."""
     slopes = metadata.get("RescaleSlope", [])
     intercepts = metadata.get("RescaleIntercept", [])
     if not slopes or not intercepts:
@@ -306,6 +320,7 @@ def _f(x: Any) -> float:
 
 
 def _stats_from_values(values: Any, kind: str, stats: Iterable[str]) -> Dict[str, float]:
+    """Compute the requested summary statistics over a flat SUV value array, keyed as ``<kind>_<stat>``."""
     out: Dict[str, float] = {}
     requested = [s.lower() for s in stats]
     if "mean" in requested:

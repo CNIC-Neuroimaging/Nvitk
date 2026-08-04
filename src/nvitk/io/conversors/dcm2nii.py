@@ -11,7 +11,9 @@ except Exception:
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when click isn't installed."""
     def decorator(func):
+        """Return *func* unmodified (click is unavailable, so no CLI wiring is applied)."""
         return func
 
     return decorator
@@ -29,6 +31,7 @@ __all__ = [
 
 
 def _is_nifti_file_path(path: Path) -> bool:
+    """True when *path*'s name ends in ``.nii`` or ``.nii.gz``."""
     lower = path.name.lower()
     return lower.endswith(".nii") or lower.endswith(".nii.gz")
 
@@ -52,6 +55,7 @@ def dcm2nii(
     skip_existing: bool = False,
     tmp_dir: Path | None = None,
 ) -> str | list[str]:
+    """Convert a DICOM series (or directory of series) to NIfTI; library entry point behind the ``dcm2nii`` CLI."""
     output_path = Path(output_folder)
     explicit_output_path = str(output_path) if _is_nifti_file_path(output_path) else None
     output_root = str(output_path.parent if explicit_output_path else output_path)
@@ -124,6 +128,7 @@ def main(
     rescale_type: str,
     tmp_dir: Path | None,
 ) -> None:
+    """CLI entry point: convert one series (or, with ``--multifile``, every immediate subdirectory as a separate case)."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     _ = (log_level, log_path)

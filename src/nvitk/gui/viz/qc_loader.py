@@ -17,6 +17,8 @@ log = Logger()
 
 
 def _find_first(root: Path, patterns: tuple[str, ...]) -> Path | None:
+    """First file under *root* matching any of *patterns* (in order), via recursive glob; ``None`` if
+    *root* isn't a directory or nothing matches."""
     if not root.is_dir():
         return None
     for pattern in patterns:
@@ -27,6 +29,8 @@ def _find_first(root: Path, patterns: tuple[str, ...]) -> Path | None:
 
 
 def _set_layer_visible(viewer: Any, name: str, visible: bool) -> Any | None:
+    """Set the visibility of the layer named *name* in *viewer*; returns the layer, or ``None`` if
+    not found."""
     for layer in viewer.layers:
         if layer.name == name:
             layer.visible = bool(visible)
@@ -35,6 +39,7 @@ def _set_layer_visible(viewer: Any, name: str, visible: bool) -> Any | None:
 
 
 def _layer_by_name(viewer: Any, name: str) -> Any | None:
+    """Return the layer named *name* in *viewer*, or ``None`` if not found."""
     for layer in viewer.layers:
         if layer.name == name:
             return layer
@@ -42,6 +47,8 @@ def _layer_by_name(viewer: Any, name: str) -> Any | None:
 
 
 def _open_nifti(viewer: Any, path: Path, *, name: str, visible: bool) -> Any | None:
+    """Open *path* into *viewer*, rename the newly added layer to *name* (falling back to a filename-
+    stem match if the new-layer diff is ambiguous), and set its visibility."""
     before = {lyr.name for lyr in viewer.layers}
     open_paths_with_nvitk(viewer, path)
     # Prefer rename of newly added layer(s).
@@ -116,6 +123,8 @@ def resolve_stage6_dir(resource_root: Path) -> Path | None:
 
 
 def resolve_eicab_tree(resource_root: Path) -> Path:
+    """Locate the ``eicab`` output directory under *resource_root* (direct child, the root itself, or
+    found by recursive search); falls back to *resource_root* if nothing matches."""
     root = Path(resource_root)
     if (root / cfg.STAGE1_EICAB_DIR).is_dir():
         return root / cfg.STAGE1_EICAB_DIR
@@ -164,6 +173,7 @@ def find_phase_paths(search_roots: list[Path]) -> dict[str, Path]:
 
 
 def find_cd_path(search_roots: list[Path]) -> Path | None:
+    """Find a 3D complex-difference NIfTI under any of *search_roots*; ``None`` if none is found."""
     for root in search_roots:
         hit = _find_first(
             root,

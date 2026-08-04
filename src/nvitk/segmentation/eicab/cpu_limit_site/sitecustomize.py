@@ -9,12 +9,14 @@ import os
 
 
 def _apply_cpu_limit():
+    """Import-time CPU cap: applied automatically via ``sitecustomize`` inside the container."""
     raw = os.environ.get("NVITK_CPU_LIMIT", "").strip()
     if not raw:
         return
     limit = max(1, int(raw))
 
     def _limited():
+        """Patched ``os.cpu_count`` reporting the capped thread count."""
         return limit
 
     if hasattr(os, "cpu_count"):

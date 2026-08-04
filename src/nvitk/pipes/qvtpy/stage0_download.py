@@ -88,10 +88,12 @@ _SUBJECT_COLUMN_CANDIDATES: tuple[str, ...] = (
 
 
 def _normalize_header(value: str) -> str:
+    """Lowercase *value* with non-alphanumeric characters stripped, for header matching."""
     return re.sub(r"[^0-9a-z]+", "", str(value).lower())
 
 
 def _detect_subject_column(columns: Iterable[str]) -> str | None:
+    """Name of the column in *columns* matching a known subject-id header, or None."""
     norm = {_normalize_header(c): c for c in columns}
     for candidate in _SUBJECT_COLUMN_CANDIDATES:
         key = _normalize_header(candidate)
@@ -101,6 +103,8 @@ def _detect_subject_column(columns: Iterable[str]) -> str | None:
 
 
 def _read_subjects_dataframe(path: Path) -> list[str]:
+    """Sorted unique subject IDs read from a CSV/XLSX *path*, using the auto-detected
+    subject column (or the first non-empty column as a fallback)."""
     suffix = path.suffix.lower()
     if suffix == ".csv":
         df = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -237,6 +241,7 @@ def resolve_subjects_for_xnat_pipeline(
 
 
 def _coalesce_attr(obj: Any, *names: str) -> Any:
+    """First non-None value among *names* on *obj* (calling it if it's a method)."""
     for name in names:
         if hasattr(obj, name):
             value = getattr(obj, name)
@@ -251,6 +256,7 @@ def _coalesce_attr(obj: Any, *names: str) -> Any:
 
 
 def _resolve_subject(project: Any, label: str) -> Any | None:
+    """XNAT subject object in *project* matching *label* (by dict key or label/id/name), or None."""
     subjects_map = getattr(project, "subjects", None) or {}
     if label in subjects_map:
         return subjects_map[label]
@@ -262,6 +268,7 @@ def _resolve_subject(project: Any, label: str) -> Any | None:
 
 
 def _dir_has_files(directory: Path) -> bool:
+    """True if *directory* exists and contains at least one regular file, recursively."""
     if not directory.is_dir():
         return False
     for child in directory.iterdir():
@@ -685,6 +692,8 @@ def main(
     report: bool,
     database_root: Path | None,
 ) -> None:
+    """CLI entry point (``qvtpy-stage0-download``): resolve subjects and XNAT connection, then
+    download the requested DICOM sequences for each subject into the local layout."""
     Logger()
 
     from nvitk.pipes.qvtpy.util.io.paths import layout_local

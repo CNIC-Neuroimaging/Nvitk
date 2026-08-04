@@ -13,6 +13,8 @@ def escape_srcdoc(text: str) -> str:
 
 
 def iframe_srcdoc(html_text: str, *, height_px: int = 420, title: str = "embedded") -> str:
+    """Embed *html_text* as a self-contained ``<iframe srcdoc="...">`` at the given height, for
+    portable single-file QC reports."""
     esc = escape_srcdoc(html_text)
     return (
         f'<div class="iframe-wrap"><iframe title="{html.escape(title)}" '

@@ -41,6 +41,8 @@ def _merge_ica_masks_into_labels(
     ica_masks: dict[int, np.ndarray],
     ica_ids: Sequence[int],
 ) -> None:
+    """Replace each ICA label id's voxels in *labels* (in place) with its re-segmented mask from
+    *ica_masks*, skipping any id with no (or an empty) replacement."""
     for lid in ica_ids:
         rep = ica_masks.get(int(lid))
         if rep is None:
@@ -58,6 +60,7 @@ def _seed_centerline_mask(
     *,
     min_points: int = 5,
 ) -> np.ndarray:
+    """Rasterize centerlines through the ICA label ids into a seed mask for genus/siphon analysis."""
     shape = tuple(int(s) for s in labels.shape[:3])
     seed_cls = compute_centerlines(
         labels.astype(np.int32, copy=False),

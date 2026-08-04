@@ -69,6 +69,8 @@ def napari_dim_order_3d(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, 
 
 
 def _axes_string_from_layer(layer: Any) -> str | None:
+    """Recover *layer*'s axis-order string (e.g. ``"XYZT"``) from its ``axis_labels`` or nvitk
+    metadata; ``None`` if unavailable."""
     labels = getattr(layer, "axis_labels", None)
     if labels is not None and len(labels) == int(getattr(layer.data, "ndim", 0)):
         return "".join(str(l) for l in labels)
@@ -112,6 +114,8 @@ def napari_dim_order(
 
 
 def _resolution_from_metadata(metadata: dict[str, Any] | None, axis_char: str) -> float | None:
+    """Voxel/frame resolution for *axis_char* (``X``/``Y``/``Z``/``T``/``C``) from nvitk *metadata*,
+    or ``None`` if not recorded."""
     md = metadata or {}
     key = {
         "X": "x_res",
@@ -344,6 +348,7 @@ def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
 
 
 def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
+    """*layer*'s per-axis display scale for the first *ndim* axes, or all-ones if unset/too short."""
     scale = getattr(layer, "scale", None)
     if scale is not None and len(scale) >= ndim:
         return tuple(float(scale[i]) for i in range(ndim))
@@ -351,6 +356,7 @@ def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
 
 
 def _metadata_for_layer(layer: Any) -> dict[str, Any]:
+    """*layer*'s nvitk metadata dict, unwrapping the ``nvitk_metadata`` sub-key when present."""
     meta = getattr(layer, "metadata", None) or {}
     if not isinstance(meta, dict):
         return {}

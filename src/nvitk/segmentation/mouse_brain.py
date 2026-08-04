@@ -25,6 +25,7 @@ MouseParcellation = Literal["nick", "tct", "jay"]
 
 
 def _fmt_tuple(values: Any, *, nd: int = 4) -> str:
+    """Format a numeric tuple for logging with *nd* significant digits."""
     try:
         seq = tuple(float(x) for x in values)
     except Exception:
@@ -33,6 +34,7 @@ def _fmt_tuple(values: Any, *, nd: int = 4) -> str:
 
 
 def _intensity_stats(arr: np.ndarray) -> str:
+    """One-line min/max/mean/std/p01/p99 summary of finite voxels (for QC logging)."""
     a = np.asarray(arr, dtype=np.float64)
     finite = a[np.isfinite(a)]
     if finite.size == 0:
@@ -45,6 +47,7 @@ def _intensity_stats(arr: np.ndarray) -> str:
 
 
 def _bbox_and_counts(mask: np.ndarray) -> str:
+    """Log summary: foreground voxel count, percentage, and tight bounding box."""
     fg = np.asarray(mask) > 0
     n = int(fg.sum())
     if n == 0:
@@ -59,6 +62,7 @@ def _bbox_and_counts(mask: np.ndarray) -> str:
 
 
 def _label_histogram(seg: np.ndarray, *, max_labels: int = 20) -> str:
+    """Log summary: per-label voxel counts (largest first), truncated to *max_labels*."""
     vals, counts = np.unique(np.asarray(seg), return_counts=True)
     # Drop background 0 from the headline if present.
     pairs = sorted(zip(vals.tolist(), counts.tolist()), key=lambda x: (-x[1], x[0]))
@@ -68,6 +72,7 @@ def _label_histogram(seg: np.ndarray, *, max_labels: int = 20) -> str:
 
 
 def _log_ants_geometry(tag: str, ants_img: Any, *, data: np.ndarray | None = None) -> None:
+    """Log an ANTs image's geometry (shape, spacing, origin, direction) under *tag* for QC."""
     shape = tuple(int(s) for s in ants_img.shape)
     sp = tuple(float(x) for x in ants_img.spacing)
     origin = tuple(float(x) for x in ants_img.origin)

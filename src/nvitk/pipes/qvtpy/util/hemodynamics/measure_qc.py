@@ -31,6 +31,8 @@ def _plot_cross_section_panel(
     title: str,
     is_loc: bool,
 ) -> None:
+    """Draw one QC panel: the complex-difference slice with the mask contour/overlay, marking the
+    center with a red X when *is_loc* is the active LOC."""
     cd_np = as_backend_array(cd_sl).astype(np.float64)
     m = as_backend_array(mask).astype(bool)
     ax.imshow(to_numpy(cd_np), cmap="gray", origin="lower")

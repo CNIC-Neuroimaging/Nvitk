@@ -13,6 +13,7 @@ from nvitk.core.array import to_numpy
 
 
 def _event_view_direction(event: Any, viewer: Any | None) -> Any | None:
+    """Resolve the current 3D view direction: from *event*, else the viewer's dims, else its camera."""
     view_dir = getattr(event, "view_direction", None)
     if view_dir is not None:
         return view_dir
@@ -25,6 +26,8 @@ def _event_view_direction(event: Any, viewer: Any | None) -> Any | None:
 
 
 def _dims_displayed(layer: Any, viewer: Any | None) -> list[int] | None:
+    """Currently displayed dimension indices, preferring *layer*'s own slice input over the viewer's
+    dims; ``None`` if neither is available."""
     try:
         displayed = getattr(getattr(layer, "_slice_input", None), "displayed", None)
         if displayed is not None:
@@ -40,6 +43,8 @@ def _dims_displayed(layer: Any, viewer: Any | None) -> list[int] | None:
 
 
 def _as_positive_label(value: Any) -> int | None:
+    """Coerce a picked label *value* (scalar, array, or single-item sequence) to a positive int label
+    id, or ``None`` if it's missing, unparseable, or non-positive (background)."""
     if value is None:
         return None
     if isinstance(value, (tuple, list)) and value:

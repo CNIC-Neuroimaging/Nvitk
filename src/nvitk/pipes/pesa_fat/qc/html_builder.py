@@ -86,6 +86,8 @@ section > h2 { margin: 14px 0 10px; font-size: 18px; color: #fca311; }
 
 
 def _join_iframes(parts: list[str]) -> str:
+    """Join HTML *parts* (raw ``<iframe>`` snippets or bare src URLs) into an iframe gallery block, or
+    a placeholder message if empty."""
     if not parts:
         return "<p><em>No mask overview exports.</em></p>"
     out: list[str] = []
@@ -98,6 +100,7 @@ def _join_iframes(parts: list[str]) -> str:
 
 
 def _measurements_card(measurements_table: str, measurements_download: str = "") -> str:
+    """Build the "Measurements" report card wrapping the pre-rendered table and download button HTML."""
     return f"""
 <div class="card">
   <div class="card-h"><h3>Measurements</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">{measurements_download}<span class="muted">out-of-range highlighted</span></div></div>
@@ -115,6 +118,8 @@ def _base_doc(
     header_toolbar: str = "",
     footer_toolbar: str = "",
 ) -> str:
+    """Wrap *body_html* in the shared single-file QC report page shell (title, header/footer toolbars,
+    embedded CSS, and an unload hook that clears image/iframe sources to free memory)."""
     toolbar = header_toolbar.strip()
     footer = footer_toolbar.strip()
     header_inner = f"""
@@ -164,6 +169,8 @@ def build_ctpet_report_html(
     measurements_table: str,
     measurements_download: str = "",
 ) -> str:
+    """Assemble the full single-file CT-PET v5 QC report page (mask overviews, hotspot gallery, CT and
+    PET axial slice viewers, and the measurements table)."""
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
     pet_ax_parts = pet_axial_html or []
@@ -223,6 +230,8 @@ def build_dixon_report_html(
     measurements_download: str = "",
     extra_sections_html: str = "",
 ) -> str:
+    """Assemble the full single-file Dixon v5 QC report page (mask overviews, hotspot gallery, axial
+    slice viewers, measurements table, and any extra sections)."""
     masks = _join_iframes(masks_html)
     ax = "\n".join(axial_html) if axial_html else "<p><em>No slice QC.</em></p>"
     measurements = _measurements_card(measurements_table, measurements_download)

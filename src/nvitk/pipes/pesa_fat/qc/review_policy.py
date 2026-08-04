@@ -50,6 +50,7 @@ def is_reviewable_structure(name: str, *, reviewable_structures: Iterable[str] |
 
 
 def is_reviewable_aspect(aspect: str) -> bool:
+    """True if *aspect* is one of the recognized review aspects (``SEGMENTATION``/``MEASUREMENT``)."""
     a = str(aspect).strip().upper()
     return a in REVIEW_ASPECTS
 
@@ -100,6 +101,7 @@ def _entry_status(
     structure: str,
     aspect: str,
 ) -> str:
+    """QC status recorded for *(structure, aspect)*, defaulting to ``"PENDING"`` if unreviewed."""
     return reviews_by_entry.get((structure, aspect), "PENDING")
 
 

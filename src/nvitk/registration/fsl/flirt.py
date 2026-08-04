@@ -43,6 +43,7 @@ class FlirtRigidResult:
 
 
 def _require_paths(*paths: Path) -> None:
+    """Assert every path exists as a file, raising ``FileNotFoundError`` for the first that doesn't."""
     for p in paths:
         if not p.is_file():
             raise FileNotFoundError(f"Required file not found: {p}")

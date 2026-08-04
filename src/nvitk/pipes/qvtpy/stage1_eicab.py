@@ -99,6 +99,7 @@ def find_tof_volume(subject_nifti_dir: Path) -> Path | None:
 
 
 def _output_has_segmentation(out_dir: Path) -> bool:
+    """True if *out_dir* contains at least one NIfTI file anywhere under it (eICAB has produced output)."""
     if not out_dir.is_dir():
         return False
     for p in out_dir.rglob("*"):
@@ -114,6 +115,7 @@ def _eicab_out_dir(
     subject: str,
     eicab_subdir: str | None,
 ) -> Path:
+    """eICAB output directory for *subject* under *output_root*, using *eicab_subdir* if given."""
     subdir = (eicab_subdir or cfg.STAGE1_EICAB_DIR).strip() or "eicab"
     return output_root / subject / subdir
 
@@ -737,6 +739,8 @@ def main(
     remote_user: str | None,
     dry_run: bool,
 ) -> None:
+    """CLI entry point: run eICAB (and optional post-processing) for one or every subject under
+    ``nifti_root``, either locally or by submitting SGE jobs."""
     Logger()
 
     subjects = [subject] if subject else _iter_subjects_nifti(nifti_root)

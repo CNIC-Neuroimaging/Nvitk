@@ -102,6 +102,7 @@ def dataframe_to_html_table(
 
 
 def _esc(s: str) -> str:
+    """Escape ``&``, ``<``, ``>``, and ``"`` in *s* for safe inclusion in HTML."""
     return (
         str(s)
         .replace("&", "&amp;")
@@ -112,6 +113,7 @@ def _esc(s: str) -> str:
 
 
 def _format_cell(val: object) -> str:
+    """Format a table cell value: 6 significant figures for floats, else ``str()``."""
     if isinstance(val, float):
         return f"{val:.6g}"
     return str(val)

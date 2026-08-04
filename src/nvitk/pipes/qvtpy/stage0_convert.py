@@ -62,12 +62,14 @@ def _iter_subjects(dicom_root: Path) -> list[str]:
 
 
 def _iter_nifti(folder: Path) -> Iterable[Path]:
+    """Sorted list of ``.nii``/``.nii.gz`` files directly under *folder* (empty if it doesn't exist)."""
     if not folder.exists():
         return []
     return sorted([*folder.glob("*.nii"), *folder.glob("*.nii.gz")])
 
 
 def _nifti_stem(path: Path) -> str:
+    """*path*'s filename without a trailing ``.nii``/``.nii.gz`` extension."""
     name = path.name
     if name.endswith(".nii.gz"):
         return name[: -len(".nii.gz")]
@@ -118,6 +120,9 @@ def _classify_flow_stem(stem: str) -> tuple[str, str] | None:
 
 
 def _flow_dest_nifti_name(stem: str, kind: str) -> str:
+    """Destination NIfTI base name for a 4D-flow magnitude (``"m"``) or phase (``"ph"``) *stem*,
+    stripping the dcm2nii ``_M_FFE``/``_PHASE`` suffix; raises ``ValueError`` if *stem* doesn't match
+    *kind*."""
     su = stem.upper()
     if kind == "m":
         if not su.endswith("_M_FFE"):
@@ -485,6 +490,8 @@ def main(
     report: bool,
     report_derived: bool,
 ) -> None:
+    """CLI entry point: run stage-0 DICOM-to-NIfTI conversion (and derived phase/CD processing) for
+    one subject or every subject under ``dicom_root``."""
     Logger()
     cd_4d_bpc = False if no_cd_4d_background_correction else None
     if subject:

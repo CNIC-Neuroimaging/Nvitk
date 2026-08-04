@@ -19,6 +19,7 @@ from nvitk.measure.morphometrics_config import (
 )
 
 def unit_vector(v: np.ndarray) -> Optional[np.ndarray]:
+    """Normalize *v* to unit length; ``None`` if it is (near) zero."""
     v = np.asarray(v, dtype=float)
     n = np.linalg.norm(v)
     if n < 1e-12:
@@ -27,6 +28,7 @@ def unit_vector(v: np.ndarray) -> Optional[np.ndarray]:
 
 
 def point_inside_mask_mm(pt_mm: np.ndarray, mask_bool: np.ndarray, spacing) -> bool:
+    """True when world point *pt_mm* falls on a foreground voxel of *mask_bool*."""
     spacing = np.asarray(spacing, dtype=float)
     ijk = np.round(np.asarray(pt_mm, dtype=float) / spacing).astype(int)
     shape = np.array(mask_bool.shape, dtype=int)
@@ -36,6 +38,7 @@ def point_inside_mask_mm(pt_mm: np.ndarray, mask_bool: np.ndarray, spacing) -> b
 
 
 def sample_edt_mm(dist_mm: np.ndarray, pt_mm: np.ndarray, spacing) -> float:
+    """Nearest-voxel lookup of a precomputed distance-transform volume at world point *pt_mm*."""
     spacing = np.asarray(spacing, dtype=float)
     ijk = np.round(np.asarray(pt_mm, dtype=float) / spacing).astype(int)
     ijk = np.clip(ijk, 0, np.array(dist_mm.shape) - 1)
@@ -43,6 +46,7 @@ def sample_edt_mm(dist_mm: np.ndarray, pt_mm: np.ndarray, spacing) -> float:
 
 
 def estimate_path_endpoint_tangent(path_mm: np.ndarray, at_start: bool = True, n_pts: int = 5):
+    """Outward-pointing unit tangent at a path endpoint, averaged over its first/last *n_pts* points."""
     pts = np.asarray(path_mm, dtype=float)
     if len(pts) < 2:
         return None
@@ -57,6 +61,10 @@ def estimate_path_endpoint_tangent(path_mm: np.ndarray, at_start: bool = True, n
 
 
 def march_endpoint_to_wall(start_pt_mm, tangent_out, mask_bool, spacing, step_mm=None, wall_tol_mm=0.35, max_steps=200):
+    """Step outward from *start_pt_mm* along *tangent_out* until near the mask wall or leaving the mask.
+
+    Returns the marched-through points (extending the centerline endpoint to the vessel wall).
+    """
     spacing = np.asarray(spacing, dtype=float)
     if step_mm is None:
         step_mm = float(np.min(spacing)) * 0.5
@@ -81,6 +89,7 @@ def march_endpoint_to_wall(start_pt_mm, tangent_out, mask_bool, spacing, step_mm
 
 
 def extend_path_to_walls(path_mm, mask_bool, spacing, tangent_pts=5, step_mm=None, wall_tol_mm=0.35, max_steps=200):
+    """Extend both ends of a centerline path outward to the mask wall (:func:`march_endpoint_to_wall`)."""
     pts = np.asarray(path_mm, dtype=float)
     if len(pts) < 2:
         return pts
@@ -96,12 +105,19 @@ def extend_path_to_walls(path_mm, mask_bool, spacing, tangent_pts=5, step_mm=Non
 
 
 def arc_length(pts: np.ndarray) -> float:
+    """Total polyline length (sum of consecutive-point distances); NaN for <2 points."""
     if len(pts) < 2:
         return np.nan
     return float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
 
 
 def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float]) -> np.ndarray:
+    """Resample a polyline to near-equal arc-length steps of *step_mm* via binary-search chord fitting.
+
+    Drops NaN/duplicate-adjacent points first, then walks the path picking points
+    at (approximately) constant chord length, adjusting the chord by bisection so
+    the last segment isn't badly under/oversized.
+    """
     pts_mm = np.asarray(pts_mm, dtype=float)
     if step_mm is None or step_mm <= 0 or len(pts_mm) < 2:
         return pts_mm
@@ -129,6 +145,7 @@ def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float])
         return np.vstack([pts_mm[0], pts_mm[-1]])
 
     def walk_equal_chords(chord_mm: float) -> Tuple[np.ndarray, bool]:
+        """March along the polyline placing points spaced *chord_mm* apart; ``ok=False`` if it runs out early."""
         out = [pts_mm[0].copy()]
         seg_i = 0
         cursor = pts_mm[0].copy()
@@ -170,6 +187,7 @@ def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float])
         return np.vstack(out), True
 
     def final_delta(chord_mm: float) -> Tuple[float, np.ndarray, bool]:
+        """Error between the last segment's actual length and the target chord, for bisection."""
         candidate, ok = walk_equal_chords(chord_mm)
         if len(candidate) < n_segments + 1:
             return -chord_mm, candidate, False
@@ -198,18 +216,21 @@ def resample_polyline_by_arclength(pts_mm: np.ndarray, step_mm: Optional[float])
 
 
 def resample_generated_centerline_points(pts_mm: np.ndarray) -> np.ndarray:
+    """Apply the configured arc-length resampling (:func:`resample_polyline_by_arclength`) if enabled."""
     if not RESAMPLE_CENTERLINES_BY_ARCLENGTH:
         return np.asarray(pts_mm, dtype=float)
     return resample_polyline_by_arclength(pts_mm, CENTERLINE_RESAMPLE_STEP_MM)
 
 
 def chord_length(pts: np.ndarray) -> float:
+    """Straight-line distance from the first to the last point; NaN for <2 points."""
     if len(pts) < 2:
         return np.nan
     return float(np.linalg.norm(pts[-1] - pts[0]))
 
 
 def cumulative_s(pts: np.ndarray) -> np.ndarray:
+    """Cumulative arc length at each point along the polyline, starting at 0."""
     if len(pts) == 0:
         return np.array([])
     if len(pts) == 1:
@@ -218,6 +239,7 @@ def cumulative_s(pts: np.ndarray) -> np.ndarray:
 
 
 def point_at_arc_length(pts: np.ndarray, target_s: float) -> np.ndarray:
+    """Linearly interpolate the polyline point at arc-length *target_s* (clamped to the path extent)."""
     pts = np.asarray(pts, dtype=float)
     if len(pts) == 0:
         return np.full(3, np.nan)
@@ -239,6 +261,10 @@ def point_at_arc_length(pts: np.ndarray, target_s: float) -> np.ndarray:
 
 
 def trimmed_seed_pair_from_path(path_mm: np.ndarray, trim_start_mm: float, trim_end_mm: Optional[float] = None) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """New (start, end) seed points trimmed inward from the path ends by the given mm amounts.
+
+    ``None`` if the remaining span would be shorter than the minimum retry separation.
+    """
     pts = np.asarray(path_mm, dtype=float)
     if len(pts) < 2:
         return None
@@ -254,6 +280,7 @@ def trimmed_seed_pair_from_path(path_mm: np.ndarray, trim_start_mm: float, trim_
 
 
 def mean_distance_to_polyline_points(query_pts: np.ndarray, ref_pts: np.ndarray) -> float:
+    """Mean nearest-neighbor distance from each of *query_pts* to the point set *ref_pts* (KD-tree)."""
     query_pts = np.asarray(query_pts, dtype=float)
     ref_pts = np.asarray(ref_pts, dtype=float)
     if len(query_pts) == 0 or len(ref_pts) == 0:
@@ -269,6 +296,12 @@ def trim_polyline_overlap_with_reference_ends(
     min_points_after_trim: Optional[int] = None,
     keep_original_if_too_short: bool = True,
 ) -> Tuple[np.ndarray, int, int, int, float]:
+    """Trim leading/trailing points of a donut-loop arm that overlap the main reference centerline(s).
+
+    Returns ``(trimmed_points, n_trimmed_start, n_trimmed_end, n_kept, overlap_tol_mm)``.
+    If the trim would leave fewer than *min_points_after_trim* points, keeps the
+    original path (or empties it) per *keep_original_if_too_short*.
+    """
     pts = np.asarray(pts, dtype=float)
     min_points = int(min_points_after_trim) if min_points_after_trim is not None else int(DONUT_ARM_MIN_POINTS_AFTER_MAIN_OVERLAP_TRIM)
     refs = [np.asarray(x, dtype=float) for x in (reference_centerline_points or []) if len(x)]
@@ -307,6 +340,7 @@ def trim_polyline_overlap_with_reference_ends(
 
 
 def splice_skeleton_end_connectors(pts: np.ndarray, arm_pts_mm: np.ndarray, blend_mm: float) -> np.ndarray:
+    """Reconnect a trimmed path's ends to the nearest points on the raw skeleton arm when the gap exceeds *blend_mm*."""
     pts = np.asarray(pts, dtype=float)
     arm_pts_mm = np.asarray(arm_pts_mm, dtype=float)
     if len(pts) < 2 or len(arm_pts_mm) < 2:
@@ -333,6 +367,7 @@ def splice_skeleton_end_connectors(pts: np.ndarray, arm_pts_mm: np.ndarray, blen
 
 
 def trim_polyline_ends_by_length(pts: np.ndarray, trim_start_mm: float, trim_end_mm: Optional[float] = None) -> np.ndarray:
+    """Trim a fixed arc-length amount off each end of a polyline (no-op if that would remove ≥80% of it)."""
     pts = np.asarray(pts, dtype=float)
     if len(pts) < 3:
         return pts
@@ -352,6 +387,7 @@ def trim_polyline_ends_by_length(pts: np.ndarray, trim_start_mm: float, trim_end
     end_target = total - trim_end_mm
 
     def interp_at(target_s: float) -> np.ndarray:
+        """Linear interpolation of the (outer) polyline at arc-length *target_s*."""
         j = int(np.searchsorted(s, target_s))
         if j <= 0:
             return pts[0]
@@ -373,6 +409,7 @@ def trim_polyline_ends_by_length(pts: np.ndarray, trim_start_mm: float, trim_end
 
 
 def contiguous_true_runs(mask: np.ndarray) -> List[Tuple[int, int]]:
+    """List of ``[start, stop)`` index ranges covering each contiguous run of ``True`` in *mask*."""
     mask = np.asarray(mask, dtype=bool)
     if len(mask) == 0 or not mask.any():
         return []

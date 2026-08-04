@@ -22,6 +22,8 @@ from typing import Any, Mapping
 
 
 def _coerce_xnat_identifier(value: Any, field: str) -> str:
+    """Coerce *value* to a non-empty string for a required identifier *field* (``server``/``project``),
+    unwrapping a single-element set/list/tuple; raises ``ValueError``/``TypeError`` otherwise."""
     if value is None:
         raise ValueError(f"{field} is required")
     if isinstance(value, str):
@@ -40,6 +42,10 @@ def _coerce_xnat_identifier(value: Any, field: str) -> str:
 
 @dataclass(frozen=True)
 class XnatConnectionConfig:
+    """Resolved XNAT connection settings (server, project, credentials, TLS/timeout options) ready to
+    pass to :func:`~nvitk.db.xnat.connect_xnat`. Build via :func:`resolve_xnat_connection` rather than
+    constructing directly."""
+
     server: str
     project: str
     user: str | None = None
@@ -49,6 +55,7 @@ class XnatConnectionConfig:
     default_timeout: int = 600
 
     def __post_init__(self) -> None:
+        """Normalize ``server``/``project`` to non-empty strings via :func:`_coerce_xnat_identifier`."""
         object.__setattr__(self, "server", _coerce_xnat_identifier(self.server, "server"))
         object.__setattr__(self, "project", _coerce_xnat_identifier(self.project, "project"))
 
@@ -56,6 +63,7 @@ KEYRING_SERVICE = "nvitk"
 
 
 def _default_config_paths() -> list[Path]:
+    """Candidate default XNAT config file paths under ``~/.config/nvitk/``, in lookup order."""
     base = Path.home() / ".config" / "nvitk"
     return [base / "xnat.yaml", base / "xnat.yml", base / "xnat.json"]
 
@@ -83,6 +91,9 @@ def load_xnat_profile(path: Path | None = None) -> dict[str, Any]:
 
 
 def _load_file(path: Path) -> dict[str, Any]:
+    """Read *path* as a JSON or YAML config mapping (by extension); raises ``ImportError`` if YAML is
+    requested without PyYAML installed, or ``ValueError`` for an unsupported extension or non-mapping
+    root."""
     path = path.expanduser().resolve()
     text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
@@ -107,6 +118,8 @@ def _load_file(path: Path) -> dict[str, Any]:
 
 
 def _password_from_keyring(server: str) -> str | None:
+    """Look up the stored XNAT password for *server* via the system keyring; ``None`` if ``keyring``
+    isn't installed or no entry is stored."""
     try:
         import keyring
     except ImportError:
@@ -137,6 +150,8 @@ def resolve_xnat_connection(
     p = dict(profile or {})
 
     def pick_str(key: str, override: str | None, env_key: str) -> str | None:
+        """Resolve one string setting with precedence: explicit *override* > profile[*key*] >
+        ``os.environ[*env_key*]``."""
         if override is not None and str(override).strip():
             return str(override).strip()
         v = p.get(key)
@@ -259,6 +274,7 @@ def keyring_set_main() -> None:
     @click.command("nvitk-xnat-keyring-set")
     @click.option("--server", type=str, required=True, help="XNAT server URL (same as in config).")
     def cli(server: str) -> None:
+        """Prompt for a password and store it in the system keyring under ``xnat:<server>``."""
         pw = getpass.getpass("Password: ")
         keyring.set_password(KEYRING_SERVICE, f"xnat:{server}", pw)
         click.echo(f"Stored password for {KEYRING_SERVICE} / xnat:{server}")

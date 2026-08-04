@@ -65,18 +65,22 @@ log = Logger()
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _stage3_dir(output_root: Path, subject: str) -> Path:
+    """Stage 3 (centerline) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _stage5_out(output_root: Path, subject: str) -> Path:
+    """Stage 5 (LOC generation) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE5_LOC_DIR
 
 
 def _cd_path(nifti_root: Path, subject: str) -> Path:
+    """Path to *subject*'s ``ComplexDifference_3D`` NIfTI (``.nii.gz`` preferred over ``.nii``)."""
     p = nifti_root / subject / "4DFlow" / "ComplexDifference_3D.nii.gz"
     if p.is_file():
         return p
@@ -84,6 +88,7 @@ def _cd_path(nifti_root: Path, subject: str) -> Path:
 
 
 def _voxel_spacing_from_meta(meta: dict) -> tuple[float, float, float]:
+    """Voxel spacing (x, y, z) from image metadata, defaulting to isotropic 1.0 if absent."""
     sp = meta.get("spacing")
     if sp and len(sp) >= 3:
         return (float(sp[0]), float(sp[1]), float(sp[2]))
@@ -91,6 +96,8 @@ def _voxel_spacing_from_meta(meta: dict) -> tuple[float, float, float]:
 
 
 def _load_contrast_volumes(nifti_root: Path, subject: str) -> tuple[Any, Any, Any, tuple[float, float, float]]:
+    """Load (magnitude, complex-difference, velocity-magnitude, voxel_spacing) for *subject*,
+    falling back to CD itself when ``Angiography_3D``/``VelocityMagnitude_3D`` are missing."""
     sub = nifti_root / subject / "4DFlow"
     cd_p = _cd_path(nifti_root, subject)
     cd_img = imread(cd_p)
@@ -273,6 +280,7 @@ def _subject_sge_spec(
     distal_locs: bool = False,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 5 LOC task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -422,6 +430,7 @@ def main(
     loc_endpoint_inset_frac: float,
     distal_locs: bool,
 ) -> None:
+    """CLI entry point (``qvtpy-stage5-loc``): generate arterial and venous LOCs for one subject."""
     Logger()
     run_subject(
         subject,

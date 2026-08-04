@@ -85,9 +85,11 @@ class VisibleRow:
 
 
 def flatten_visible(roots: list[CatalogNode]) -> list[VisibleRow]:
+    """Flatten the catalog tree into the ordered list of currently-visible rows (branches, and tools of expanded branches)."""
     rows: list[VisibleRow] = []
 
     def walk(node: CatalogNode, depth: int) -> None:
+        """Depth-first visit: append *node*'s row, then its tools/children if it's expanded."""
         rows.append(VisibleRow("branch", node=node, depth=depth, label=node.label))
         if not node.expanded:
             return
@@ -109,22 +111,27 @@ def flatten_visible(roots: list[CatalogNode]) -> list[VisibleRow]:
 
 
 def _tool_label(tool: ToolEntry) -> str:
+    """Display label for a tool row: its command name, or its library display label if it has no command."""
     return tool.command or tool.display_label
 
 
 def _prefix(expanded: bool) -> str:
+    """Rich-markup expand/collapse glyph (``[-]``/``[+]``) for a branch row."""
     return "[bright_white][-][/]" if expanded else "[bright_white][+][/]"
 
 
 def _indent(depth: int) -> str:
+    """Two-space indent string for tree depth *depth*."""
     return "  " * depth
 
 
 def _branch_style(node: CatalogNode) -> str:
+    """Rich style string for a branch node, from ``_BRANCH_STYLES`` (falls back to bold white)."""
     return _BRANCH_STYLES.get(node.id, "bold white")
 
 
 def _format_branch_row(node: CatalogNode, depth: int) -> str:
+    """Render one catalog branch as a Rich-markup tree row."""
     style = _branch_style(node)
     icon = "▸ " if depth == 0 else "├ "
     return (
@@ -134,6 +141,7 @@ def _format_branch_row(node: CatalogNode, depth: int) -> str:
 
 
 def _format_tool_row(tool: ToolEntry, depth: int) -> str:
+    """Render one tool as a Rich-markup row: an installable command (with gpu/mask tags) or a library-only reference."""
     indent = _indent(depth)
     if tool.library_only or not tool.command:
         name = f"[italic dim]{tool.display_label}[/]"
@@ -156,6 +164,7 @@ def _format_tool_row(tool: ToolEntry, depth: int) -> str:
 
 
 def _build_table(roots: list[CatalogNode], cursor: int) -> Table:
+    """Build the Rich table of visible tree rows, highlighting the row at *cursor*."""
     table = Table(
         show_header=False,
         box=None,
@@ -179,6 +188,7 @@ def _build_table(roots: list[CatalogNode], cursor: int) -> Table:
 
 
 def _footer_text(*, interactive: bool = True) -> str:
+    """Rich-markup footer text: keybinding hints, backend flags, and (if interactive) the shell-integration hint."""
     keys = (
         "[bold bright_white]↑/↓[/] move  "
         "[bold bright_white]→/+[/] expand  "
@@ -200,7 +210,9 @@ def _footer_text(*, interactive: bool = True) -> str:
 
 
 def _set_all_expanded(roots: list[CatalogNode], expanded: bool) -> None:
+    """Recursively set ``expanded`` on every branch node under *roots*."""
     def walk(node: CatalogNode) -> None:
+        """Set *node*'s expanded flag and recurse into its children."""
         node.expanded = expanded
         for child in node.children:
             walk(child)
@@ -210,6 +222,7 @@ def _set_all_expanded(roots: list[CatalogNode], expanded: bool) -> None:
 
 
 def _collapse_all(roots: list[CatalogNode]) -> None:
+    """Collapse every branch, then re-expand the top-level "Image Processing" root as the default view."""
     for root in roots:
         root.expanded = False
     if roots and roots[0].id == "image_processing":
@@ -217,6 +230,7 @@ def _collapse_all(roots: list[CatalogNode]) -> None:
 
 
 def _expand_all(roots: list[CatalogNode]) -> None:
+    """Expand every branch node under *roots*."""
     _set_all_expanded(roots, True)
 
 
@@ -229,20 +243,24 @@ class _KeyReader:
     """Single-key reader with arrow-key decoding (Unix)."""
 
     def __init__(self) -> None:
+        """Capture stdin's file descriptor; terminal mode is saved/restored on enter/exit."""
         self._fd = sys.stdin.fileno()
         self._old: list | None = None
 
     def __enter__(self) -> _KeyReader:
+        """Switch the terminal to cbreak mode (unbuffered single-key reads) if stdin is a TTY."""
         if sys.stdin.isatty():
             self._old = termios.tcgetattr(self._fd)
             tty.setcbreak(self._fd)
         return self
 
     def __exit__(self, *args: object) -> None:
+        """Restore the terminal's original mode."""
         if self._old is not None:
             termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old)
 
     def read_key(self) -> str:
+        """Read and decode one keypress: arrow keys, ENTER, SPACE, ESC, or the raw character."""
         ch = sys.stdin.read(1)
         if ch == "\x1b":
             rest = sys.stdin.read(2)
@@ -263,6 +281,7 @@ class _KeyReader:
 
 
 def _panel_border(roots: list[CatalogNode]) -> str:
+    """Border color for the panel: themed per single top-level root, else a neutral blue for the full tree."""
     if len(roots) == 1:
         return _TOP_LEVEL_BORDER.get(roots[0].id, "blue")
     return "bright_blue"
@@ -276,6 +295,7 @@ def _render_panel(
     interactive: bool,
     console: Console,
 ) -> Panel:
+    """Assemble the full Rich panel: header, install count, tree table, and footer hints."""
     table = _build_table(roots, cursor)
     header = Text("Nvitk CLI Commands", style="bold bright_cyan")
     count = Text.assemble(
@@ -401,6 +421,7 @@ def run_interactive_pyhelp(
         return None
 
     def _run_live(*, use_screen: bool) -> None:
+        """Run the interactive Rich ``Live`` key-read loop until a command is selected or the user quits."""
         nonlocal selected
         with Live(
             console=ui_console,
@@ -456,6 +477,7 @@ def run_interactive_pyhelp(
 
 
 def _theme_for_root(node_id: str) -> dict[str, str]:
+    """Color theme (border/header/rule) for a top-level catalog root, from ``_SECTION_THEME`` (with a default fallback)."""
     return _SECTION_THEME.get(node_id, {
         "border": "blue",
         "header": "bold white",
@@ -464,6 +486,7 @@ def _theme_for_root(node_id: str) -> dict[str, str]:
 
 
 def _theme_for_submodule(node_id: str) -> dict[str, str]:
+    """Color theme (header/cmd/rule) for a submodule section, from ``_SUBMODULE_THEME`` (with a default fallback)."""
     return _SUBMODULE_THEME.get(node_id, {
         "header": "bold white",
         "cmd": "bright_white",
@@ -514,6 +537,7 @@ def _render_static_pipeline_tools(tools: list[ToolEntry]) -> Group:
     other = [t for t in tools if t not in pesa and t not in brain]
 
     def block(label: str, items: list[ToolEntry], cmd_style: str) -> list[RenderableType]:
+        """Render a labeled sub-block of pipeline commands (empty list if *items* is empty)."""
         if not items:
             return []
         out: list[RenderableType] = [
@@ -563,6 +587,7 @@ def _render_static_root_section(node: CatalogNode) -> Panel:
 
 
 def _static_footer() -> Group:
+    """Footer block (backend/device flags + interactive-picker hint) for the non-interactive static catalog print."""
     return Group(
         Rule(style="dim"),
         Text.from_markup(

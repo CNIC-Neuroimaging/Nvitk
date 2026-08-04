@@ -12,10 +12,12 @@ from nvitk.measure.morphometrics_config import LABELS, PROCESS_SELECTED_TAGS_ONL
 from .models import VesselInfo
 
 def normalized_vessel_token(value: Any) -> str:
+    """Lowercase *value* and strip non-alphanumeric characters, for fuzzy vessel-name matching."""
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
 def is_acoa_vessel(vessel_info: VesselInfo) -> bool:
+    """True when *vessel_info* names the anterior communicating artery (ACoA), by any known alias."""
     tokens = {
         normalized_vessel_token(vessel_info.name),
         normalized_vessel_token(vessel_info.full_name),
@@ -25,6 +27,7 @@ def is_acoa_vessel(vessel_info: VesselInfo) -> bool:
 
 
 def empty_vessel_info(label: int) -> VesselInfo:
+    """Placeholder :class:`VesselInfo` for a label id with no anatomical metadata."""
     return VesselInfo(
         name=f"label_{label}", full_name="", side="", pair=None, territory="",
         flow_from="", flow_to=[], no_upstream_start=None,
@@ -32,6 +35,11 @@ def empty_vessel_info(label: int) -> VesselInfo:
 
 
 def resolve_labels_to_process(labels_all: List[int]) -> List[int]:
+    """Intersect the requested label set (config ``SELECTED_TAGS``/``LABELS``) with what's present.
+
+    Warns (prints) about requested labels missing from the segmentation and raises
+    if the resulting intersection is empty.
+    """
     labels_present = set(int(x) for x in labels_all)
     requested = [int(x) for x in SELECTED_TAGS] if PROCESS_SELECTED_TAGS_ONLY else (labels_all if LABELS == "auto" else [int(x) for x in LABELS])
     missing = [label for label in requested if label not in labels_present]
@@ -44,6 +52,7 @@ def resolve_labels_to_process(labels_all: List[int]) -> List[int]:
 
 
 def keep_largest_component(mask: np.ndarray) -> np.ndarray:
+    """Boolean mask of only the largest 26-connected component of *mask*."""
     labels, n = ndi.label(mask.astype(bool), structure=np.ones((3, 3, 3), dtype=np.uint8))
     if n <= 1:
         return mask.astype(bool)
@@ -53,6 +62,7 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
 
 
 def connected_components(mask: np.ndarray) -> List[np.ndarray]:
+    """26-connected components of *mask* as separate boolean masks, largest first."""
     labels, n = ndi.label(mask.astype(bool), structure=np.ones((3, 3, 3), dtype=np.uint8))
     comps = []
     for i in range(1, n + 1):
@@ -62,6 +72,7 @@ def connected_components(mask: np.ndarray) -> List[np.ndarray]:
 
 
 def keep_largest_component_per_label(multilabel: np.ndarray) -> np.ndarray:
+    """Per label id, keep only its largest connected component; drop stray islands."""
     result = np.zeros_like(multilabel)
     for lv in np.unique(multilabel):
         if lv == 0:

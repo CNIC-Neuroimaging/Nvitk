@@ -19,7 +19,11 @@ _SUBSET_TASKS = frozenset({"total", "total_mr"})
 
 
 class TotalSegRoiWidget(QGroupBox):
+    """Checkbox list of ROI names for a TotalSegmentator subset task (``total``/``total_mr``), with
+    All/None select buttons; hidden for tasks that don't support ROI subsetting."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the All/None buttons and the scrollable checkbox list container."""
         super().__init__("TotalSegmentator ROIs (subset)", parent)
         self._checks: list[QCheckBox] = []
         btn_row = QHBoxLayout()
@@ -45,9 +49,12 @@ class TotalSegRoiWidget(QGroupBox):
 
     @staticmethod
     def available_tasks() -> tuple[str, ...]:
+        """Every registered TotalSegmentator task name."""
         return AVAILABLE_TASKS
 
     def set_task(self, task: str) -> None:
+        """Rebuild the checkbox list for *task*'s ROI class map, hiding this widget entirely for
+        tasks that don't support ROI subsetting."""
         while self._inner_layout.count():
             item = self._inner_layout.takeAt(0)
             w = item.widget()
@@ -67,14 +74,17 @@ class TotalSegRoiWidget(QGroupBox):
             self._checks.append(cb)
 
     def select_all(self) -> None:
+        """Check every ROI checkbox."""
         for cb in self._checks:
             cb.setChecked(True)
 
     def select_none(self) -> None:
+        """Uncheck every ROI checkbox."""
         for cb in self._checks:
             cb.setChecked(False)
 
     def selected_roi_names(self) -> list[str] | None:
+        """Names of the checked ROIs, or ``None`` if none are checked (meaning "all ROIs")."""
         names = [str(cb.property("roi_name")) for cb in self._checks if cb.isChecked()]
         if not names:
             return None

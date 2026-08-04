@@ -124,18 +124,22 @@ def _load_wb_arterial_labels_for_venous_exclusion(
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _stage2_dir(output_root: Path, subject: str) -> Path:
+    """Stage 2 (registration) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE2_REGISTRATION_DIR
 
 
 def _stage3_out(output_root: Path, subject: str) -> Path:
+    """Stage 3 (centerline) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _load_stage2_meta(output_root: Path, subject: str) -> dict[str, Any]:
+    """Load *subject*'s ``registration_meta.json`` written by stage 2; raises if missing."""
     p = _stage2_dir(output_root, subject) / "registration_meta.json"
     if not p.is_file():
         raise FileNotFoundError(f"Missing stage2 meta: {p}")
@@ -179,6 +183,7 @@ def _rasterize_centerlines_mask(
 
 
 def _cd_path(nifti_root: Path, subject: str) -> Path:
+    """Path to *subject*'s ``ComplexDifference_3D`` NIfTI (``.nii.gz`` preferred over ``.nii``)."""
     p = nifti_root / subject / "4DFlow" / "ComplexDifference_3D.nii.gz"
     if p.is_file():
         return p
@@ -462,6 +467,8 @@ def run_subject(
 
 
 def _stage3_cli_options(func):
+    """Decorator applying all shared stage-3 click options (subject/paths, eICAB/CD/venous
+    tuning, TotalSegmentator brain-mask settings) to *func*."""
     func = click.option("--subject", required=True)(func)
     func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
     func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
@@ -547,6 +554,7 @@ def _subject_sge_spec(
     totalseg_model_dir: Path | None = None,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 3 centerline task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts: list[str] = [
@@ -740,6 +748,8 @@ def main(
     totalseg_device: str,
     totalseg_model_dir: Path | None,
 ) -> None:
+    """CLI entry point (``qvtpy-stage3-centerline``): run stage 3 centerline extraction
+    for one subject."""
     Logger()
     run_subject(
         subject,

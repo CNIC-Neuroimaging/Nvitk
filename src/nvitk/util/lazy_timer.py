@@ -1,3 +1,5 @@
+"""Console loading-bar and function-timing helpers."""
+
 import sys
 import time
 from nvitk.core.logger import Logger
@@ -12,6 +14,7 @@ class LoadingBar:
     :param length: length of the loading bar
     """
     def __init__(self, n_iters, length=50):
+        """Initialize the bar for *n_iters* expected updates, drawn *length* characters wide."""
         self.iter = 0
         self.n_iters = n_iters
         self.length = length
@@ -45,6 +48,7 @@ def timed(fun):
     :return: wrapper function
     """
     def wrapper(*args, **kwargs):
+        """Call the wrapped function, timing it and logging the elapsed seconds."""
         start = time.time()
         res = fun(*args, **kwargs)
         end = time.time()

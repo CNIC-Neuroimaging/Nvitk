@@ -30,22 +30,26 @@ TAUBIN_MU = -0.65
 
 
 def ensure_dir(path: str) -> None:
+    """Create *path* (and parents) if missing; no-op otherwise."""
     os.makedirs(path, exist_ok=True)
 
 
 def load_segmentation(path: str):
+    """Load a NIfTI label volume; returns ``(int32 data, affine, header)``."""
     img = nib.load(path)
     data = img.get_fdata().astype(np.int32)
     return data, img.affine, img.header
 
 
 def save_segmentation(path: str, data: np.ndarray, affine, header) -> None:
+    """Write *data* as an int16 NIfTI label volume, reusing *affine*/*header*."""
     out = nib.Nifti1Image(data.astype(np.int16), affine=affine, header=header)
     out.set_data_dtype(np.int16)
     nib.save(out, path)
 
 
 def keep_largest_component(mask: np.ndarray) -> np.ndarray:
+    """Boolean mask of only the largest 26-connected component of *mask*."""
     labels, n = ndi.label(mask.astype(bool), structure=np.ones((3, 3, 3), dtype=np.uint8))
     if n <= 1:
         return mask.astype(bool)
@@ -55,12 +59,14 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
 
 
 def signed_distance(mask: np.ndarray) -> np.ndarray:
+    """Signed Euclidean distance field: negative inside *mask*, positive outside."""
     inside = ndi.distance_transform_edt(mask)
     outside = ndi.distance_transform_edt(~mask)
     return inside - outside
 
 
 def crop_with_padding(mask: np.ndarray, pad: int) -> Tuple[np.ndarray, Tuple[slice, slice, slice]]:
+    """Tight bounding-box crop of *mask* with *pad* voxels of margin; returns ``(cropped, bbox_slices)``."""
     coords = np.where(mask)
     if coords[0].size == 0:
         empty = (slice(0, 0), slice(0, 0), slice(0, 0))
@@ -75,6 +81,7 @@ def crop_with_padding(mask: np.ndarray, pad: int) -> Tuple[np.ndarray, Tuple[sli
 
 
 def _laplacian(field: np.ndarray) -> np.ndarray:
+    """Discrete Laplacian of an n-d field (sum of second differences along each axis, normalized)."""
     lap = np.zeros_like(field, dtype=np.float32)
     for axis in range(field.ndim):
         lap += ndi.convolve1d(field, [1.0, -2.0, 1.0], axis=axis, mode="nearest")
@@ -82,6 +89,7 @@ def _laplacian(field: np.ndarray) -> np.ndarray:
 
 
 def taubin_smooth_field(field: np.ndarray, iterations: int, lam: float, mu: float) -> np.ndarray:
+    """Taubin (λ/μ) smoothing of a scalar field: alternating Laplacian steps that resist shrinkage."""
     out = field.astype(np.float32, copy=True)
     for _ in range(int(iterations)):
         out = out + float(lam) * _laplacian(out)
@@ -98,6 +106,11 @@ def build_taubin_scores(
     taubin_mu: float,
     skip_smoothing: Iterable[int] = (),
 ) -> Dict[int, np.ndarray]:
+    """Per-label Taubin-smoothed signed-distance score map (cropped, then padded back to full shape).
+
+    Each label's SDF is used as a competing "fitness" score for :func:`fuse_from_scores`.
+    Labels in *skip_smoothing* keep their raw (unsmoothed) SDF.
+    """
     scores: Dict[int, np.ndarray] = {}
     skip_set = set(skip_smoothing)
     pad = max(2, int(np.ceil(max(taubin_iters, 1) / 2)))
@@ -118,6 +131,7 @@ def build_taubin_scores(
 
 
 def fuse_from_scores(score_maps: Dict[int, np.ndarray], shape: Tuple[int, int, int]) -> np.ndarray:
+    """Re-fuse per-label score maps into one label volume: argmax label wins, 0 where all scores ≤ 0."""
     if not score_maps:
         return np.zeros(shape, dtype=np.int32)
     labels = sorted(score_maps)
@@ -137,6 +151,7 @@ def preprocess_segmentation(
     taubin_mu: float,
     skip_smoothing: Iterable[int] = (17, 18),
 ) -> np.ndarray:
+    """Full Taubin-smoothing pipeline: score each label, then fuse back to one label volume."""
     labels = [int(x) for x in np.unique(seg) if x != 0]
     scores = build_taubin_scores(
         seg=seg, labels=labels, keep_largest=keep_largest,
@@ -147,6 +162,7 @@ def preprocess_segmentation(
 
 
 def main() -> None:
+    """Direct-run entry point: smooth ``INPUT_PATH`` per the CONFIG block and write output + JSON report."""
     if not INPUT_PATH:
         raise SystemExit("Set INPUT_PATH or call preprocess_segmentation() from stage7 / run_morphometrics_case.")
     if not os.path.exists(INPUT_PATH):

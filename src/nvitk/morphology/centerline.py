@@ -72,6 +72,7 @@ def skeletonize_labeled(
 
 
 def _require_skeletonize():
+    """Import and return ``skimage.morphology.skeletonize`` or raise a helpful ImportError."""
     try:
         from skimage.morphology import skeletonize
     except Exception as exc:
@@ -85,6 +86,7 @@ def _require_skeletonize():
 
 
 def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
+    """The 26 face/edge/corner neighbours of voxel *p* (self excluded)."""
     x, y, z = p
     out: list[tuple[int, int, int]] = []
     for dx in (-1, 0, 1):
@@ -103,6 +105,7 @@ def _skeleton_graph(
     dict[tuple[int, int, int], list[tuple[int, int, int]]],
     dict[tuple[int, int, int], int],
 ]:
+    """Build the 26-connected skeleton graph: ``(nodes, adjacency, degree)`` from voxel coords."""
     nodes = [tuple(int(v) for v in row) for row in coords_xyz]
     node_set = set(nodes)
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
@@ -151,6 +154,7 @@ def _bfs_from(
     dict[tuple[int, int, int], int],
     dict[tuple[int, int, int], tuple[int, int, int] | None],
 ]:
+    """Breadth-first search from *src*; returns ``(distances, parents)`` over the graph."""
     from collections import deque
 
     dist: dict[tuple[int, int, int], int] = {src: 0}
@@ -171,6 +175,7 @@ def _reconstruct_path(
     end: tuple[int, int, int],
     parent: dict[tuple[int, int, int], tuple[int, int, int] | None],
 ) -> list[tuple[int, int, int]]:
+    """Walk *parent* pointers back from *end* to the BFS source, returned source→end."""
     path: list[tuple[int, int, int]] = []
     cur: tuple[int, int, int] | None = end
     while cur is not None:
@@ -184,6 +189,7 @@ def _nearest_node(
     nodes: list[tuple[int, int, int]],
     point_xyz: np.ndarray,
 ) -> tuple[int, int, int]:
+    """Graph node closest (squared Euclidean) to *point_xyz*."""
     p = to_numpy(point_xyz).astype(np.float64).ravel()[:3]
     best = nodes[0]
     best_d = float("inf")
@@ -199,6 +205,7 @@ def _path_from_node_to_farthest(
     start: tuple[int, int, int],
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
 ) -> list[tuple[int, int, int]]:
+    """Longest shortest-path from *start*: path to the graph node farthest from it."""
     dist, parent = _bfs_from(start, adj)
     if not dist:
         return [start]
@@ -211,6 +218,7 @@ def _classical_diameter_path(
     adj: dict[tuple[int, int, int], list[tuple[int, int, int]]],
     endpoints: list[tuple[int, int, int]],
 ) -> list[tuple[int, int, int]]:
+    """Graph diameter via double-BFS: farthest node ``a``, then its farthest node ``b``, path a→b."""
     start = endpoints[0] if endpoints else nodes[0]
     d1, _ = _bfs_from(start, adj)
     a = max(d1, key=d1.get)
@@ -507,6 +515,7 @@ def compute_connected_centerline_tree(
     bridge_gap = max(0, int(bridge_max_gap))
 
     def _edges_for_coords(coords: _np.ndarray) -> list[_np.ndarray]:
+        """Per-label worker: skeleton coords → list of polyline edge point-arrays."""
         if coords.shape[0] < int(min_points):
             return []
         comps = (
@@ -609,6 +618,7 @@ def compute_centerline_branches(
     bridge_gap = max(0, int(bridge_max_gap))
 
     def _branches_for(coords: _np.ndarray, lbl: int) -> None:
+        """Per-label worker: accumulate branch polylines for label *lbl* into ``out``."""
         if coords.shape[0] < int(min_points):
             return
         out[int(lbl)] = _branch_paths_from_skeleton(
@@ -695,6 +705,7 @@ def compute_centerlines(
     bridge_gap = max(0, int(bridge_max_gap))
 
     def _path_for(coords: _np.ndarray, lbl: int) -> _np.ndarray | None:
+        """Per-label worker: single main centerline path for label *lbl* (or ``None``)."""
         if coords.shape[0] < int(min_points):
             return None
         if keep_all_components:

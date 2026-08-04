@@ -9,6 +9,8 @@ import numpy as np
 
 @dataclass
 class VesselInfo:
+    """Static vessel metadata (naming, laterality, territory, flow topology) from the label map."""
+
     name: str
     full_name: str
     side: str
@@ -21,6 +23,8 @@ class VesselInfo:
 
 @dataclass
 class StenosisResult:
+    """Per-vessel stenosis detection: reference/minimum radius and flagged segments."""
+
     r_ref: float
     r_min: float
     percent_stenosis_max: float
@@ -31,6 +35,8 @@ class StenosisResult:
 
 @dataclass
 class EnlargementResult:
+    """Per-vessel enlargement (aneurysm-like) detection: reference/max radius and flagged segments."""
+
     r_ref: float
     r_max: float
     percent_enlargement_max: float
@@ -41,6 +47,8 @@ class EnlargementResult:
 
 @dataclass
 class SkeletonTree:
+    """Skeleton graph: voxel points, adjacency/degree, endpoints/branchpoints, and root distances."""
+
     pts_vox: np.ndarray
     neighbors: List[List[int]]
     degree: np.ndarray

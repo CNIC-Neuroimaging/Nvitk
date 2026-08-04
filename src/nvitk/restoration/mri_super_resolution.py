@@ -32,6 +32,7 @@ _MRI_SR_UNAVAILABLE: frozenset[tuple[tuple[int, int, int], str]] = frozenset({
 def _normalize_expansion_factor(
     expansion_factor: Sequence[float | int],
 ) -> tuple[int, int, int]:
+    """Validate and coerce a per-axis super-resolution expansion factor to a 3-int tuple."""
     if len(expansion_factor) != 3:
         raise ValueError(
             "expansion_factor must have three values (ix, iy, iz); "

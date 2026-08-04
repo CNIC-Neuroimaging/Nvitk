@@ -38,38 +38,45 @@ def confusion_counts(label_true: Any, label_pred: Any) -> dict[str, int]:
 
 
 def dice(label_true: Any, label_pred: Any) -> float:
+    """Dice overlap ``2·TP / (2·TP + FP + FN)`` in ``[0, 1]`` (``0.0`` when both masks are empty)."""
     c = confusion_counts(label_true, label_pred)
     denom = 2 * c["TP"] + c["FP"] + c["FN"]
     return (2 * c["TP"]) / denom if denom > 0 else 0.0
 
 
 def jaccard(label_true: Any, label_pred: Any) -> float:
+    """Jaccard / IoU ``TP / (TP + FP + FN)`` in ``[0, 1]``."""
     c = confusion_counts(label_true, label_pred)
     denom = c["TP"] + c["FP"] + c["FN"]
     return c["TP"] / denom if denom > 0 else 0.0
 
 
 def precision(label_true: Any, label_pred: Any) -> float:
+    """Fraction of predicted-positive voxels that are correct ``TP / (TP + FP)``."""
     c = confusion_counts(label_true, label_pred)
     return c["TP"] / (c["TP"] + c["FP"]) if (c["TP"] + c["FP"]) > 0 else 0.0
 
 
 def recall(label_true: Any, label_pred: Any) -> float:
+    """Fraction of true-positive voxels that were recovered ``TP / (TP + FN)`` (sensitivity)."""
     c = confusion_counts(label_true, label_pred)
     return c["TP"] / (c["TP"] + c["FN"]) if (c["TP"] + c["FN"]) > 0 else 0.0
 
 
 def fpr(label_true: Any, label_pred: Any) -> float:
+    """False-positive rate ``FP / (FP + TN)``."""
     c = confusion_counts(label_true, label_pred)
     return c["FP"] / (c["FP"] + c["TN"]) if (c["FP"] + c["TN"]) > 0 else 0.0
 
 
 def fnr(label_true: Any, label_pred: Any) -> float:
+    """False-negative rate ``FN / (FN + TP)``."""
     c = confusion_counts(label_true, label_pred)
     return c["FN"] / (c["FN"] + c["TP"]) if (c["FN"] + c["TP"]) > 0 else 0.0
 
 
 def volume_similarity(label_true: Any, label_pred: Any) -> float:
+    """Relative volume difference ``|n_pred − n_true| / n_true`` (0 = identical volumes)."""
     c = confusion_counts(label_true, label_pred)
     n_true = c["TP"] + c["FN"]
     n_pred = c["TP"] + c["FP"]

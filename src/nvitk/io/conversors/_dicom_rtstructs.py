@@ -52,23 +52,28 @@ log = Logger()
 
 
 def _sanitize_filename(value: str) -> str:
+    """Sanitize an RTStruct ROI name into a filesystem-safe filename fragment (falls back to ``\"roi\"``)."""
     safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in str(value))
     return safe.strip("_") or "roi"
 
 
 def _warn(message: str) -> None:
+    """Log a warning through the module logger."""
     log.warning(message)
 
 
 def _err(message: str) -> None:
+    """Log an error through the module logger."""
     log.error(message)
 
 
 def _info(message: str) -> None:
+    """Log an info message through the module logger."""
     log.info(message)
 
 
 def _debug(message: str) -> None:
+    """No-op placeholder (debug logging is disabled for this module)."""
     return
 
 

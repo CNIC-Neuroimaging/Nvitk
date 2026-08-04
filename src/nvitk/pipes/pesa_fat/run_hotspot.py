@@ -58,6 +58,7 @@ log = Logger()
 
 
 def _stem_from_mask_file(filename: str) -> str:
+    """*filename* with a trailing ``.nii.gz``/``.nii`` suffix stripped."""
     stem = filename
     for suffix in (".nii.gz", ".nii"):
         if stem.endswith(suffix):
@@ -95,17 +96,22 @@ def _detect_batches_for_subject(
 
 @dataclass(frozen=True)
 class CtPetResolved:
+    """Resolved CT-PET hotspot measure: ROI spec plus fixed ``"SUV"`` metric."""
+
     spec: ct_cfg.SuvSpec
     metric: str  # always "SUV" for voxelwise hotspot visualization
 
 
 @dataclass(frozen=True)
 class DixonResolved:
+    """Resolved Dixon hotspot measure: ROI spec plus the requested voxelwise metric."""
+
     spec: dx_cfg.DixonMeasureSpec
     metric: str  # FF | T2 | R2
 
 
 def _resolve_measure_ctpet(measure: str) -> CtPetResolved | None:
+    """Resolve a CLI *measure* string to a CT-PET SUV ROI spec, or None if not a CT-PET measure."""
     # Preferred: <ROI>_SUV
     if measure.endswith("_SUV"):
         prefix = measure[: -len("_SUV")]
@@ -134,6 +140,7 @@ def _resolve_measure_ctpet(measure: str) -> CtPetResolved | None:
 
 
 def _resolve_measure_dixon(measure: str) -> DixonResolved | None:
+    """Resolve a CLI *measure* string (``<ROI>_<FF|T2|R2>``) to a Dixon measure spec, or None."""
     if "_" not in measure:
         return None
     prefix, metric = measure.rsplit("_", 1)
@@ -162,6 +169,7 @@ def _resolve_measure_dixon(measure: str) -> DixonResolved | None:
 
 
 def _list_valid_measures() -> list[str]:
+    """All valid ``--measure`` values (CT-PET ``<ROI>_SUV`` and Dixon ``<ROI>_<metric>``), sorted."""
     out: list[str] = []
     # CT-PET voxelwise measure is always SUV
     for spec in ct_cfg.SUV_SPECS:
@@ -176,6 +184,8 @@ def _list_valid_measures() -> list[str]:
     return sorted(set(out))
 
 def _require_pyvista():
+    """Configure headless rendering and import/return the ``pyvista`` module, or raise with an
+    install hint if it's missing."""
     from nvitk.pipes.pesa_fat.qc.headless import configure_headless_viz
 
     configure_headless_viz()
@@ -189,6 +199,7 @@ def _require_pyvista():
 
 
 def _surface_from_binary(pv, binary: np.ndarray):
+    """PyVista contour surface (isovalue 0.5) extracted from a binary voxel mask."""
     binary_u8 = (binary > 0).astype(np.uint8, copy=False)
     grid = pv.ImageData(
         dimensions=binary_u8.shape,
@@ -200,6 +211,7 @@ def _surface_from_binary(pv, binary: np.ndarray):
 
 
 def _parse_extra_masks(value: str | None) -> list[str]:
+    """Split a comma-separated ``--extra-masks`` CLI value into a stripped, non-empty list."""
     if not value:
         return []
     return [v.strip() for v in value.split(",") if v.strip()]
@@ -287,6 +299,7 @@ def _dixon_load_extra_mask_on_map_grid(
 def _load_ctpet_inputs(
     lay: BatchLayout, subject: str, resolved: CtPetResolved
 ) -> tuple[Image, Image, Sequence[int], Image]:
+    """Load (SUV image, ROI mask on PET grid, label ids, raw PET image) for a CT-PET hotspot view."""
     subj_nifti = lay.subject_nifti_dir(subject)
     pet = imread(str(resolve_nii(subj_nifti, ct_cfg.PET_STEM)), axes="XYZ")
     suv = suv_image(pet, pet.metadata)
@@ -298,6 +311,7 @@ def _load_ctpet_inputs(
 
 
 def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) -> tuple[Image, Image, Sequence[int]]:
+    """Load (voxelwise metric image, ROI mask, label ids) for a Dixon hotspot view (FF/T2/R2)."""
     subj_nifti = lay.subject_nifti_dir(subject)
     region = resolved.spec.region
 
@@ -378,6 +392,8 @@ def main(
     extra_masks: str | None,
     extra_mask_opacity: float,
 ) -> None:
+    """CLI entry point (``nvitk-pesa-fat-hotspot``): load the SUV/Dixon voxelwise image and ROI
+    mask for one subject/measure and launch the 3D hotspot viewer."""
     Logger()
 
     if list_measures:

@@ -46,6 +46,7 @@ def _smooth_taubin(
     taubin_mu: float,
     keep_largest: bool,
 ) -> Path:
+    """Run Taubin smoothing (:mod:`measure.morpho.preprocess_taubin`) on one segmentation and write the result."""
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = seg_path.name.replace(".nii.gz", "").replace(".nii", "")
     output_path = out_dir / f"{stem}_taubin.nii.gz"

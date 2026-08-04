@@ -39,6 +39,8 @@ def find_angio_volume(nifti_root: Path, subject: str) -> Path:
 
 
 def _resolve_totalseg_output(path: Path) -> Path:
+    """Locate the actual TotalSegmentator output NIfTI near *path*, trying the exact file, a
+    ``total_mr.nii[.gz]`` sibling, and suffix variants; raises ``FileNotFoundError`` if none exist."""
     if path.is_file():
         return path
     for name in (f"{TOTAL_MR_TASK}.nii.gz", f"{TOTAL_MR_TASK}.nii"):

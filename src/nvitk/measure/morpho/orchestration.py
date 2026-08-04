@@ -105,6 +105,21 @@ def process_component_tree_vmtk(
     region_centerline_dir: Optional[str],
     surface_dir: Optional[str],
 ) -> Tuple[List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict], Dict[str, pd.DataFrame], List[dict], pd.DataFrame]:
+    """Full per-component morphometrics pipeline: skeletonize → VMTK centerlines → metrics/export.
+
+    Drives, for one connected component of one label: skeleton extraction and
+    root selection, surface reconstruction, VMTK centerline generation between
+    root and each terminal (with donut-loop handling and retry logic), stenosis/
+    enlargement detection, recursive tree-segment splitting, and every VTP/point
+    export. This is the single entry point :mod:`run_case` dispatches to workers.
+
+    Returns
+    -------
+    tuple
+        ``(path_results, point_sheets, tree_summary, branch_df, region_summaries,
+        region_sheets, recursive_segments, donut_loop_df)`` — see the call sites in
+        :mod:`run_case` for how each piece feeds the exported workbook.
+    """
     if not VMTK_AVAILABLE:
         raise RuntimeError("Morphometrics centerline backend unavailable.")
     spacing = np.asarray(spacing, dtype=float)

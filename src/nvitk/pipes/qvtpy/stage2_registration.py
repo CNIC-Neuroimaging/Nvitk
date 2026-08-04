@@ -54,14 +54,17 @@ ReferenceKind = Literal["angio", "cd"]
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _flow_dir(nifti_root: Path, subject: str) -> Path:
+    """*subject*'s 4D-flow NIfTI directory under *nifti_root*."""
     return nifti_root / subject / "4DFlow"
 
 
 def _reference_volume(flow_dir: Path, kind: ReferenceKind) -> Path:
+    """Fixed registration reference volume of *kind* (``"angio"`` or ``"cd"``) under *flow_dir*."""
     if kind == "angio":
         for name in ("Angiography_3D.nii.gz", "Angiography_3D.nii"):
             p = flow_dir / name
@@ -76,10 +79,12 @@ def _reference_volume(flow_dir: Path, kind: ReferenceKind) -> Path:
 
 
 def _stage2_out(output_root: Path, subject: str) -> Path:
+    """Stage 2 output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE2_REGISTRATION_DIR
 
 
 def _done_marker(out_dir: Path) -> Path:
+    """Path to the stage 2 completion marker (``registration_meta.json``) in *out_dir*."""
     return out_dir / "registration_meta.json"
 
 
@@ -166,6 +171,7 @@ def _subject_sge_spec(
     eicab_subdir: str | None = None,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 2 registration task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts: list[str] = [
@@ -301,6 +307,7 @@ def main(
     cost: str,
     eicab_subdir: str | None,
 ) -> None:
+    """CLI entry point (``qvtpy-stage2-registration``): run FLIRT rigid registration for one subject."""
     Logger()
     run_subject(
         subject,

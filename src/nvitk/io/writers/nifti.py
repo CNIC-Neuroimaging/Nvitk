@@ -28,6 +28,7 @@ _NIFTI_RESERVED_KEYS = {
 
 
 def _jsonable(value: Any) -> Any:
+    """Recursively coerce a metadata value to a JSON-serializable type (arrays → lists, bytes → str, else ``str()``)."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, bytes):
@@ -46,6 +47,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _extract_zooms(metadata: dict[str, Any], ndim: int) -> tuple[float, ...]:
+    """Per-axis voxel sizes for the NIfTI header, from metadata spacing keys (defaults to 1.0 when absent)."""
     defaults = [1.0, 1.0, 1.0, 1.0]
     values = [
         metadata.get("x_res", metadata.get("dx")),

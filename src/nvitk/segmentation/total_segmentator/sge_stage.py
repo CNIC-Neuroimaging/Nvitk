@@ -18,6 +18,7 @@ from .cluster import ClusterPaths, SegmentationJob
 
 
 def _require_under(path: Path, root: Path, label: str) -> Path:
+    """Resolve *path* and assert it lives under *root* (path-traversal guard); return it."""
     p = path.resolve()
     r = root.resolve()
     try:
@@ -50,6 +51,7 @@ def build_inference_python_cmd(
 
 
 def to_pesa_cluster_paths(paths: ClusterPaths) -> PesaClusterPaths:
+    """Adapt TotalSegmentator :class:`ClusterPaths` to the PESA pipeline's path bundle."""
     return PesaClusterPaths(
         src=paths.src,
         container=paths.container,

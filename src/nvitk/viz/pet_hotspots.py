@@ -81,8 +81,9 @@ def _add_orientation_axes(pl: Any) -> None:
 
 
 def _require_pyvista() -> Any:
+    """Import and return the ``pyvista`` module, or raise a clear install hint."""
     try:
-        import pyvista as pv  
+        import pyvista as pv
     except ImportError as exc:
         raise ImportError(
             "show_suv_hotspots requires the optional dependency 'pyvista' (VTK). "
@@ -92,6 +93,7 @@ def _require_pyvista() -> Any:
 
 
 def _as_numpy_3d(x: Image | np.ndarray, *, name: str) -> np.ndarray:
+    """Backend-array view of a 3-D Image or array; raises if it isn't 3-D."""
     arr = to_numpy(x.data) if isinstance(x, Image) else to_numpy(x)
     if arr.ndim != 3:
         raise ValidationError(f"{name} must be a 3D array; got shape {arr.shape}.")
@@ -99,6 +101,7 @@ def _as_numpy_3d(x: Image | np.ndarray, *, name: str) -> np.ndarray:
 
 
 def _roi_mask(mask_arr: np.ndarray, label_ids: Sequence[int] | None) -> np.ndarray:
+    """Boolean ROI from *mask_arr*: any nonzero voxel if *label_ids* is ``None``, else the union of those label ids."""
     if label_ids is None:
         return mask_arr > 0
     if len(label_ids) == 0:

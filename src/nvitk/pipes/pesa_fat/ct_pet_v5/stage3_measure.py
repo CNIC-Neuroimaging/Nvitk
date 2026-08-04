@@ -49,6 +49,8 @@ _SUV_STATS = cfg.SUV_STATS
 
 
 def column_order() -> list[str]:
+    """Full stage-3 output column order: ``pesa_id``, SUV stat columns per ROI, then volume/slice-
+    count columns per ROI."""
     cols = ["pesa_id"]
     for spec in SUV_SPECS:
         for suffix, _ in _SUV_STATS:
@@ -63,9 +65,11 @@ def column_order() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _nslices_axial_xyz(mask: Image) -> int:
+    """Number of axial (Z) slices in *mask* containing at least one foreground voxel."""
     return int(np.any(mask.data > 0, axis=(0, 1)).sum())
 
 def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
+    """Union of *label_ids* in *label_img* as a binary mask image."""
     if len(label_ids) == 1:
         return get_label(label_img, label_ids[0], missing="empty")
     first = get_label(label_img, label_ids[0], missing="empty").data.copy()
@@ -76,6 +80,7 @@ def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
 
 
 def _load_mask(subject_stage2_dir: Path, filename: str) -> Image:
+    """Read a stage-2 mask NIfTI named *filename* (extension optional) from *subject_stage2_dir*."""
     stem = filename
     for suffix in (".nii.gz", ".nii"):
         if stem.endswith(suffix):
@@ -85,6 +90,7 @@ def _load_mask(subject_stage2_dir: Path, filename: str) -> Image:
 
 
 def _load_pet(subject_nifti_dir: Path) -> Image:
+    """Read the subject's PET NIfTI from *subject_nifti_dir*."""
     return imread(str(resolve_nii(subject_nifti_dir, cfg.PET_STEM)), axes="XYZ")
 
 # ---------------------------------------------------------------------------
@@ -102,6 +108,7 @@ def process_subject(
     cache: dict[str, Image] = {}
 
     def _mask_file(name: str) -> Image:
+        """Load and cache the stage-2 mask named *name* for this subject."""
         if name not in cache:
             cache[name] = _load_mask(stage2_dir, name)
         return cache[name]

@@ -30,6 +30,11 @@ _AXCODE_TO_RAS = {
 
 
 def _parse_permute(order: str | Sequence[int] | None) -> tuple[int, ...] | None:
+    """Parse an axis permutation (``\"2,0,1\"``, ``\"201\"`` or a sequence) into a 3-tuple.
+
+    Returns ``None`` for an empty/absent order; raises when it is not a permutation
+    of ``0,1,2``.
+    """
     if order is None:
         return None
     if isinstance(order, str):
@@ -50,6 +55,7 @@ def _parse_permute(order: str | Sequence[int] | None) -> tuple[int, ...] | None:
 
 
 def _validate_axcodes(codes: str) -> str:
+    """Normalize/validate 3-letter orientation codes (e.g. ``\"RAS\"``); reject repeated axis pairs."""
     target = str(codes).strip().upper()
     if len(target) != 3:
         raise ValidationError(f"orientation must have length 3; got {codes!r}")
@@ -69,6 +75,7 @@ def _validate_axcodes(codes: str) -> str:
 
 
 def _spacing_from_image(image: Image) -> tuple[float, float, float]:
+    """Voxel spacing (mm) for the first 3 axes: from ``spacing``, else affine column norms, else 1s."""
     sp = image.spacing
     if sp is not None and len(sp) >= 3:
         return (float(sp[0]), float(sp[1]), float(sp[2]))
@@ -105,6 +112,7 @@ def canonical_affine_for_axcodes(
 
 
 def _apply_flips(image: Image, flip_axes: Sequence[bool] | None) -> Image:
+    """Flip the marked spatial axes and update the affine so world geometry is preserved."""
     if not flip_axes:
         return image
     flags = [bool(x) for x in flip_axes[:3]]

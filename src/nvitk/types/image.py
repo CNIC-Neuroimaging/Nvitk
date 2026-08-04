@@ -18,6 +18,11 @@ from nvitk.core.exceptions import ValidationError
 
 
 def _is_array_like(value: Any) -> bool:
+    """True for objects that quack like an ndarray (shape/dtype/positive ndim).
+
+    Used to decide whether an indexing/ufunc result should be re-wrapped as an
+    :class:`Image` or returned as a plain scalar.
+    """
     if not (hasattr(value, "shape") and hasattr(value, "dtype")):
         return False
     ndim = getattr(value, "ndim", None)
@@ -162,10 +167,12 @@ class Image:
 
     @property
     def modality(self) -> str | None:
+        """DICOM Modality (tag ``(0008,0060)``), e.g. ``\"PT\"``, ``\"CT\"``, ``\"MR\"``."""
         return self.metadata.get("Modality") or self.metadata.get("(0008,0060)")
 
     @property
     def submodality(self) -> str | None:
+        """Series-level descriptor (series description / submodality), if recorded."""
         return (
             self.metadata.get("submodality")
             or self.metadata.get("SeriesDescription")
@@ -175,11 +182,13 @@ class Image:
 
     @property
     def rescale_type(self) -> str:
+        """Intensity units tag (default ``\"DV\"``), upper-cased; e.g. ``\"BQML\"`` for PET."""
         value = self.metadata.get("rescale_type", "DV")
         return str(value).upper()
 
     @property
     def is_pet(self) -> bool:
+        """True when :attr:`modality` is a PET code (``PT`` / ``PET``)."""
         mod = self.modality
         if mod is None:
             return False
@@ -187,26 +196,32 @@ class Image:
 
     @property
     def is_3d(self) -> bool:
+        """True for a 3-D volume (no time axis)."""
         return self.ndim == 3
 
     @property
     def is_4d(self) -> bool:
+        """True for a 4-D volume (e.g. a time series or 4D-flow stack)."""
         return self.ndim == 4
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Voxel-array shape as a plain tuple of ints."""
         return tuple(self.data.shape)
 
     @property
     def ndim(self) -> int:
+        """Number of array dimensions."""
         return int(self.data.ndim)
 
     @property
     def dtype(self) -> Any:
+        """Voxel dtype of the underlying array."""
         return self.data.dtype
 
     @property
     def affine(self) -> np.ndarray | None:
+        """4x4 world affine from ``metadata['affine']`` (float), or ``None`` if unset."""
         value = self.metadata.get("affine")
         if value is None:
             return None
@@ -214,6 +229,7 @@ class Image:
 
     @affine.setter
     def affine(self, value: Any) -> None:
+        """Store a 4x4 world affine; rejects any other shape."""
         arr = np.asarray(value, dtype=float)
         if arr.shape != (4, 4):
             raise ValidationError(f"Affine matrix must be shape (4, 4), got {arr.shape}")
@@ -221,6 +237,12 @@ class Image:
 
     @property
     def spacing(self) -> tuple[float, ...] | None:
+        """Physical voxel size in mm per axis.
+
+        Prefers an explicit ``metadata['spacing']``; otherwise assembles it from
+        the per-axis ``x_res``/``y_res``/``z_res``/``t_res`` keys. ``None`` when no
+        spacing information is available.
+        """
         if "spacing" in self.metadata and self.metadata["spacing"] is not None:
             spacing = self.metadata["spacing"]
             try:
@@ -236,6 +258,7 @@ class Image:
 
     @spacing.setter
     def spacing(self, values: Any) -> None:
+        """Set spacing and mirror the first four entries into ``x/y/z/t_res``."""
         if values is None:
             self.metadata.pop("spacing", None)
             return
@@ -253,6 +276,7 @@ class Image:
 
     @property
     def temporal_resolution(self) -> float | None:
+        """Time between frames of a 4-D series (``t_res``), or ``None``."""
         val = self.metadata.get("t_res", self.metadata.get("temporal_resolution"))
         if val is None:
             return None
@@ -260,6 +284,7 @@ class Image:
 
     @property
     def dicom_tags(self) -> dict[str, Any]:
+        """Metadata entries that look like DICOM tags (excludes nvitk housekeeping keys)."""
         out: dict[str, Any] = {}
         for key, value in self.metadata.items():
             if not isinstance(key, str):
@@ -269,6 +294,7 @@ class Image:
         return out
 
     def __repr__(self) -> str:
+        """Compact one-line summary (shape, dtype, backend, axes, modality, …)."""
         return (
             f"Image(shape={self.shape}, dtype={self.dtype}, backend={self.backend}, "
             f"axes={self.axes!r}, orientation={self.orientation!r}, name={self.name!r}, "
@@ -276,13 +302,16 @@ class Image:
         )
 
     def __len__(self) -> int:
+        """Length of the leading axis (number of slices/frames)."""
         return len(self.data)
 
     def __iter__(self):
+        """Iterate the leading axis, yielding an :class:`Image` per slice."""
         for i in range(len(self)):
             yield self[i]
 
     def __array__(self, dtype: Any | None = None) -> np.ndarray:
+        """NumPy view for ``np.asarray(image)`` — always copies GPU data to host."""
         arr = to_numpy(self.data)
         if dtype is not None:
             arr = np.asarray(arr, dtype=dtype)
@@ -290,11 +319,13 @@ class Image:
 
     @property
     def __cuda_array_interface__(self):
+        """Expose the CUDA array interface so CuPy-backed images interop zero-copy."""
         if is_cupy_array(self.data):
             return self.data.__cuda_array_interface__
         raise AttributeError("__cuda_array_interface__ is only available for CuPy-backed images.")
 
     def _clone(self, data: Any, *, axes: str | None = None) -> "Image":
+        """Wrap *data* in a new Image, carrying metadata/name/orientation forward."""
         md = dict(self.metadata or {})
         if axes is None:
             axes = self.axes
@@ -305,6 +336,12 @@ class Image:
         return Image(data=data, metadata=md, axes=axes, name=self.name, orientation=ori)
 
     def _axes_after_indexing(self, key: Any) -> str | None:
+        """Recompute the ``axes`` label string after ``__getitem__``.
+
+        Integer indices drop their axis; slices keep it. Returns ``None`` (i.e.
+        forget axis labels) whenever ``newaxis``/``None`` makes the mapping
+        ambiguous, so we never carry a wrong axis convention forward.
+        """
         if self.axes is None:
             return None
 
@@ -354,6 +391,7 @@ class Image:
         return None
 
     def __getitem__(self, key: Any) -> Any:
+        """Index the voxel array; array results stay :class:`Image`, scalars unwrap."""
         out = self.data[key]
         if _is_array_like(out):
             return self._clone(out, axes=self._axes_after_indexing(key))
@@ -365,6 +403,7 @@ class Image:
         return out
 
     def __setitem__(self, key: Any, value: Any) -> None:
+        """Assign into the voxel array, unwrapping an :class:`Image` right-hand side."""
         self.data[key] = value.data if isinstance(value, Image) else value
 
     def copy(self, deep_data: bool = True) -> "Image":
@@ -534,45 +573,66 @@ class Image:
     # Arithmetic
     # ──────────────────────────────────────────────────────────────────────────────
 
+    # Every operator below routes through ``_binary`` / ``_clone`` so the result
+    # keeps this image's metadata and axis labels (another Image is unwrapped to
+    # its array first). Array results stay Image; reduced scalars pass through.
+
     def _binary(self, other: Any, op) -> Any:
+        """Apply elementwise *op* against *other* (Image or array), re-wrapping arrays."""
         rhs = other.data if isinstance(other, Image) else other
         out = op(self.data, rhs)
         return self._clone(out) if _is_array_like(out) else out
 
     def __add__(self, other: Any) -> Any:
+        """Elementwise ``self + other``."""
         return self._binary(other, lambda a, b: a + b)
 
     def __radd__(self, other: Any) -> Any:
+        """Elementwise ``other + self`` (reflected)."""
         return self._binary(other, lambda a, b: b + a)
 
     def __sub__(self, other: Any) -> Any:
+        """Elementwise ``self - other``."""
         return self._binary(other, lambda a, b: a - b)
 
     def __rsub__(self, other: Any) -> Any:
+        """Elementwise ``other - self`` (reflected)."""
         return self._binary(other, lambda a, b: b - a)
 
     def __mul__(self, other: Any) -> Any:
+        """Elementwise ``self * other``."""
         return self._binary(other, lambda a, b: a * b)
 
     def __rmul__(self, other: Any) -> Any:
+        """Elementwise ``other * self`` (reflected)."""
         return self._binary(other, lambda a, b: b * a)
 
     def __truediv__(self, other: Any) -> Any:
+        """Elementwise ``self / other``."""
         return self._binary(other, lambda a, b: a / b)
 
     def __rtruediv__(self, other: Any) -> Any:
+        """Elementwise ``other / self`` (reflected)."""
         return self._binary(other, lambda a, b: b / a)
 
     def __pow__(self, other: Any) -> Any:
+        """Elementwise ``self ** other``."""
         return self._binary(other, lambda a, b: a**b)
 
     def __neg__(self) -> "Image":
+        """Elementwise negation."""
         return self._clone(-self.data)
 
     def __abs__(self) -> "Image":
+        """Elementwise absolute value."""
         return self._clone(abs(self.data))
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        """NumPy/CuPy ufunc hook so ``np.*`` calls on an Image return an Image.
+
+        Image inputs are unwrapped to their arrays before dispatch; array outputs
+        (including each element of a multi-output ufunc) are re-wrapped.
+        """
         prepared = [x.data if isinstance(x, Image) else x for x in inputs]
         result = getattr(ufunc, method)(*prepared, **kwargs)
         if _is_array_like(result):

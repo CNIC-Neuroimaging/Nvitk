@@ -57,6 +57,7 @@ plt.rcParams.update({
 })
 
 def darken_hex(hex_color, factor=0.8):
+    """Darken a ``#rrggbb`` hex color by scaling its HLS lightness by *factor*."""
     hex_color = hex_color.lstrip('#')
     
     # HEX → RGB (0-255)
@@ -284,6 +285,7 @@ PAIR_COLS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_ccc(x, y):
+    """Lin's concordance correlation coefficient for *x* vs *y*, with a 95% Fisher-z CI."""
     n = len(x)
     mx, my = np.mean(x), np.mean(y)
     sx2 = np.var(x, ddof=1); sy2 = np.var(y, ddof=1)
@@ -303,6 +305,8 @@ _NAN_DICT = {k: np.nan for k in [
 
 
 def compute_metrics(manual_vals, auto_vals):
+    """Concordance metrics (Pearson r, Spearman rho, CCC, ICC(A,1), Bland-Altman bias/LoA,
+    RMSE, MAE) between manual and automatic measurements; all-NaN dict if n < 4."""
     df_pair = pd.DataFrame({"m": manual_vals, "a": auto_vals}).dropna()
     n = len(df_pair)
     out = {**_NAN_DICT, "n": n}
@@ -335,10 +339,12 @@ def compute_metrics(manual_vals, auto_vals):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fmt(v):
+    """Format *v* to 3 decimals, or ``"n/d"`` if None/NaN."""
     return f"{float(v):.3f}" if (v is not None and not np.isnan(float(v))) else "n/d"
 
 
 def _best_legend_loc(xv, yv, lim):
+    """Legend corner (of the 4 quadrants) with the fewest scatter points, to avoid overlap."""
     mid = (lim[0] + lim[1]) / 2
     counts = {
         "upper left":  np.sum((xv < mid) & (yv >= mid)),
@@ -351,6 +357,8 @@ def _best_legend_loc(xv, yv, lim):
 
 def scatter_panel(ax, x, y, label, units, metrics, note=False,
                   xlabel=None, ylabel=None, point_labels=None):
+    """Draw a manual-vs-automatic scatter panel on *ax* with identity/regression lines and a
+    concordance-metrics text box (handles n=0/1 edge cases separately)."""
     from matplotlib.lines import Line2D
     mask = ~(np.isnan(x) | np.isnan(y))
     xv, yv = x[mask], y[mask]
@@ -428,6 +436,8 @@ def scatter_panel(ax, x, y, label, units, metrics, note=False,
 
 
 def bland_altman_panel(ax, x, y, label, units, metrics, note=False, point_labels=None):
+    """Draw a Bland-Altman panel on *ax* (mean vs. difference) with bias/LoA lines annotated
+    (handles n=0/1 edge cases separately)."""
     mask = ~(np.isnan(x) | np.isnan(y))
     xv, yv = x[mask], y[mask]
     lv = np.array(point_labels)[mask] if point_labels is not None else None
@@ -495,6 +505,7 @@ def bland_altman_panel(ax, x, y, label, units, metrics, note=False, point_labels
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_heatmap(summary_df, title, out_path):
+    """Save a combined correlation/concordance heatmap + Bland-Altman summary table figure."""
     metric_cols = ["r (Pearson)", "rho (Spearman)", "CCC", "ICC (2,1)"]
     heat_labels = ["Pearson r", "Spearman \u03c1", "CCC", "ICC(2,1)"]
     heat_data   = summary_df.set_index("Variable")[metric_cols].astype(float)
@@ -552,6 +563,8 @@ def make_heatmap(summary_df, title, out_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def export_excel(summary, comp_table, out_path):
+    """Write the formatted metrics + comparative-data Excel workbook (colored headers,
+    zebra rows, conditional formatting on Diff% columns)."""
     thin   = Side(style="thin", color="CCCCCC")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
@@ -566,6 +579,7 @@ def export_excel(summary, comp_table, out_path):
     }
 
     def _header_color(col_name):
+        """Fill color for a comparative-table header whose name contains a known group keyword."""
         for kw, color in _GRP_COLORS.items():
             if kw in col_name:
                 return color
@@ -645,11 +659,15 @@ def export_excel(summary, comp_table, out_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_html(summary, comp_table, all_fig_paths, out_sum_suv, out_sum_dix, out_path):
+    """Assemble and write the interactive HTML report (embedded figures, metrics table,
+    heatmaps) to *out_path*."""
     def fig_to_b64(path):
+        """Base64-encode the image file at *path* for inline embedding in the HTML report."""
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode()
 
     def color_metric(v):
+        """Inline HTML cell style tiering *v* into good/moderate/poor color bands."""
         try:
             v = float(v)
             if v >= 0.90: return "style='background:#d5f5e3;font-weight:bold'"
@@ -882,6 +900,7 @@ if __name__ == "__main__":
     all_ids = np.array(df.index.astype(str))
 
     def _draw_group(gkey, ginfo, pairs, with_labels):
+        """Render one comparison group's scatter + Bland-Altman figure grid and save it to disk."""
         n_pairs = len(pairs)
         fig, axes = plt.subplots(n_pairs, 2, figsize=(13, n_pairs * 3.8), squeeze=False)
         fig.suptitle(ginfo["title"], fontsize=13, fontweight="bold", y=1.01)
@@ -974,7 +993,9 @@ if __name__ == "__main__":
     log.info("=" * 95)
     fmt = "{:<40s} {:>4s}  {:>7s}  {:>7s}  {:>7s}  {:>7s}  {:>8s}  {:>8s}"
     log.info(fmt.format("Variable", "n", "r", "rho", "CCC", "ICC", "Bias", "RMSE"))
-    def _f(v): return f"{v:.3f}" if isinstance(v, float) and not np.isnan(v) else "-"
+    def _f(v):
+        """Format *v* to 3 decimals, or ``"-"`` if not a finite float."""
+        return f"{v:.3f}" if isinstance(v, float) and not np.isnan(v) else "-"
     prev_grp = None
     for _, row in summary.iterrows():
         if row["Grupo"] != prev_grp:

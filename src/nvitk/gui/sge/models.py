@@ -8,6 +8,8 @@ from typing import Any
 
 @dataclass
 class SgeConnection:
+    """SSH host/username/password for one SGE cluster connection."""
+
     host: str
     user: str
     password: str
@@ -15,6 +17,8 @@ class SgeConnection:
 
 @dataclass
 class SgePendingJob:
+    """A submitted GUI SGE job being tracked for completion (id, connection, status, results)."""
+
     job_id: str
     tool_id: str
     remote_job_root: str
@@ -27,6 +31,8 @@ class SgePendingJob:
 
 @dataclass
 class SgeDoneMarker:
+    """Parsed contents of a worker's ``.done`` marker file (exit code, output files, error)."""
+
     job_id: str
     exit_code: int
     output_files: list[str] = field(default_factory=list)
@@ -35,6 +41,7 @@ class SgeDoneMarker:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SgeDoneMarker:
+        """Parse a JSON-decoded ``.done`` payload into an :class:`SgeDoneMarker`."""
         files = data.get("output_files") or []
         if isinstance(files, str):
             files = [files]
@@ -47,6 +54,7 @@ class SgeDoneMarker:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize this marker back to a plain dict (inverse of :meth:`from_dict`)."""
         return {
             "job_id": self.job_id,
             "exit_code": self.exit_code,
@@ -57,10 +65,12 @@ class SgeDoneMarker:
 
 
 def remote_done_path(remote_job_root: str) -> str:
+    """Remote path of the ``.done`` marker file for a job rooted at *remote_job_root*."""
     return f"{remote_job_root.rstrip('/')}/output/.done"
 
 
 def remote_output_dir(remote_job_root: str) -> str:
+    """Remote output directory for a job rooted at *remote_job_root*."""
     return f"{remote_job_root.rstrip('/')}/output"
 
 

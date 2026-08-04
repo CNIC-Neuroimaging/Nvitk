@@ -32,6 +32,7 @@ _NINF_TAG = "__ninf__"
 
 
 def _encode_scalar(x: Any) -> Any:
+    """JSON-safe encoding of one scalar: numpy bool/int/float to native types, NaN/±inf tagged."""
     if isinstance(x, (np.bool_, bool)):
         return bool(x)
     if isinstance(x, (np.integer, int)) and not isinstance(x, bool):
@@ -49,6 +50,7 @@ def _encode_scalar(x: Any) -> Any:
 
 
 def _decode_scalar(obj: Any) -> Any:
+    """Inverse of :func:`_encode_scalar`/array encoding: restore NaN/±inf tags and ndarray dicts."""
     if obj is None:
         return float("nan")
     if isinstance(obj, dict):
@@ -71,6 +73,7 @@ def _decode_scalar(obj: Any) -> Any:
 
 
 def _to_jsonable(obj: Any) -> Any:
+    """Recursively convert *obj* (ndarrays, dicts, lists, scalars) into a JSON-serializable tree."""
     if isinstance(obj, np.ndarray):
         arr = to_numpy(obj)
         flat = arr.reshape(-1)
@@ -103,6 +106,7 @@ def _to_jsonable(obj: Any) -> Any:
 
 
 def _from_jsonable(obj: Any) -> Any:
+    """Inverse of :func:`_to_jsonable`: restore ndarrays and tagged scalars from a JSON tree."""
     if isinstance(obj, dict):
         if _ARRAY_TAG in obj or any(t in obj for t in (_NAN_TAG, _INF_TAG, _NINF_TAG)):
             return _decode_scalar(obj)
@@ -113,6 +117,7 @@ def _from_jsonable(obj: Any) -> Any:
 
 
 def _station_to_dict(st: StationGeometryViz) -> dict[str, Any]:
+    """JSON-serializable dict view of one PWV cross-section station."""
     return {
         "vessel_id": int(st.vessel_id),
         "vessel_name": str(st.vessel_name),
@@ -136,6 +141,7 @@ def _station_to_dict(st: StationGeometryViz) -> dict[str, Any]:
 
 
 def _station_from_dict(d: dict[str, Any]) -> StationGeometryViz:
+    """Inverse of :func:`_station_to_dict`."""
     return StationGeometryViz(
         vessel_id=int(d["vessel_id"]),
         vessel_name=str(d["vessel_name"]),
@@ -165,6 +171,7 @@ def _station_from_dict(d: dict[str, Any]) -> StationGeometryViz:
 
 
 def _geometry_to_dict(region: RegionGeometryViz) -> dict[str, Any]:
+    """JSON-serializable dict view of one region's PITC/PWV geometry viz data."""
     vessels = {}
     for name, ves in region.vessels.items():
         vessels[str(name)] = {
@@ -197,6 +204,7 @@ def _geometry_to_dict(region: RegionGeometryViz) -> dict[str, Any]:
 
 
 def _geometry_from_dict(d: dict[str, Any]) -> RegionGeometryViz:
+    """Inverse of :func:`_geometry_to_dict`."""
     vessels: dict[str, VesselGeometryViz] = {}
     for name, vd in (d.get("vessels") or {}).items():
         poly = _from_jsonable(vd["polyline_oriented"])
@@ -334,6 +342,7 @@ def reconstruct_region_plot_data_from_csvs(
                 continue
 
             def _f(key: str, default: float = float("nan")) -> float:
+                """Parse *row[key]* as a float, or *default* if blank/unparseable."""
                 raw = row.get(key, "")
                 if raw is None or str(raw).strip() == "":
                     return default
@@ -343,6 +352,7 @@ def reconstruct_region_plot_data_from_csvs(
                     return default
 
             def _opt(key: str) -> Any:
+                """*row[key]* as a float if parseable, else the raw string (``""`` if blank)."""
                 raw = row.get(key, "")
                 if raw is None or str(raw).strip() == "":
                     return ""
@@ -457,6 +467,7 @@ def load_saved_root_summaries(stage6_dir: Path) -> dict[str, dict[str, Any]]:
         return {}
 
     def _opt_float(raw: Any) -> Any:
+        """*raw* as a float if parseable, else the raw string (``""`` if blank)."""
         if raw is None or str(raw).strip() == "":
             return ""
         try:
@@ -465,6 +476,7 @@ def load_saved_root_summaries(stage6_dir: Path) -> dict[str, dict[str, Any]]:
             return str(raw)
 
     def _float_or(raw: Any, default: float = float("nan")) -> float:
+        """Parse *raw* as a float, or *default* if blank/unparseable."""
         if raw is None or str(raw).strip() == "":
             return default
         try:

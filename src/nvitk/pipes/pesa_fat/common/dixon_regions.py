@@ -88,6 +88,8 @@ def slice_centroid_from_datasets(datasets: list[Any]) -> float | None:
 
 
 def _read_dicom_header(path: str | Path) -> Any | None:
+    """Read the header-only (no pixel data) DICOM dataset at *path*, or ``None`` if pydicom is
+    unavailable or the file can't be parsed."""
     if pydicom is None:
         return None
     try:
@@ -102,6 +104,8 @@ def _read_dicom_header(path: str | Path) -> Any | None:
 
 
 def _read_dicom_header_bytes(data: bytes) -> Any | None:
+    """Read the header-only DICOM dataset from in-memory *data*, or ``None`` if pydicom is unavailable
+    or the bytes can't be parsed."""
     if pydicom is None:
         return None
     try:
@@ -116,6 +120,7 @@ def _read_dicom_header_bytes(data: bytes) -> Any | None:
 
 
 def _normalize_series_number(value: Any) -> str | None:
+    """Coerce a DICOM SeriesNumber tag value to a stripped string, or ``None`` if empty/missing."""
     if value is None:
         return None
     text = str(value).strip()
@@ -245,6 +250,8 @@ def build_series_region_map(
 
 
 def _is_dicom_zip_member(name: str) -> bool:
+    """True if *name* (a zip archive member path) looks like a DICOM slice rather than a NIfTI/JSON/
+    sidecar/preview file."""
     base = Path(name).name.lower()
     if base.endswith(".nii") or base.endswith(".nii.gz"):
         return False

@@ -56,6 +56,10 @@ def _intensity_passes_gate(
     *,
     polarity: IntensityPolarity,
 ) -> bool:
+    """True when *value* is on the admitted side of *threshold* for the given polarity.
+
+    ``hyperintense`` admits values above the threshold; ``hypointense`` below it.
+    """
     if polarity == "hypointense":
         return value <= threshold
     return value >= threshold
@@ -149,9 +153,11 @@ def region_grow_binary_mask(
     )
 
     def can_grow(ni: int, nj: int, nk: int) -> bool:
+        """Growth predicate: this variant grows into any in-bounds neighbour."""
         return True
 
     def claim(ni: int, nj: int, nk: int) -> bool:
+        """Mark a voxel as grown; returns ``False`` if it was already claimed."""
         if mask[ni, nj, nk]:
             return False
         mask[ni, nj, nk] = True
@@ -197,9 +203,11 @@ def region_grow_into_label_volume(
     )
 
     def can_grow(ni: int, nj: int, nk: int) -> bool:
+        """Growth predicate: only grow into currently-unlabeled voxels of the segmentation."""
         return int(seg_np[ni, nj, nk]) == 0
 
     def claim(ni: int, nj: int, nk: int) -> bool:
+        """Assign label *lid* to a voxel (into the shared segmentation array)."""
         seg_np[ni, nj, nk] = lid
         return True
 

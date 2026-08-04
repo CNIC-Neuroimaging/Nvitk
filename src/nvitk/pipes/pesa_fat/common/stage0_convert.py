@@ -70,6 +70,9 @@ def _plan_rename(
     *,
     series_region_map: dict[str, str] | None = None,
 ) -> RenameResult:
+    """Decide the target filename for a converted DICOM-to-NIfTI *src*: normalize CT/PT files, and for
+    MR files resolve the Dixon region from *series_region_map* to build ``DIXON_<region>_<suffix>``;
+    returns a no-rename result if the naming convention or series mapping is unrecognized."""
     name = src.name
     if name.startswith("CT_") and (name.endswith(".nii") or name.endswith(".nii.gz")):
         ext = ".nii.gz" if name.endswith(".nii.gz") else ".nii"
@@ -95,12 +98,14 @@ def _plan_rename(
 
 
 def _iter_nifti_files(folder: Path) -> Iterable[Path]:
+    """Sorted list of ``.nii``/``.nii.gz`` files directly under *folder* (empty if it doesn't exist)."""
     if not folder.exists():
         return []
     return sorted([*folder.glob("*.nii"), *folder.glob("*.nii.gz")])
 
 
 def _mr_series_numbers_from_folder(folder: Path) -> set[str]:
+    """Distinct MR series numbers parsed from ``MR_<series>_<suffix>`` NIfTI filenames in *folder*."""
     series: set[str] = set()
     for src in _iter_nifti_files(folder):
         name = src.name
@@ -153,6 +158,7 @@ def rename_subject_folder(
 
 
 def _subject_has_nifti_outputs(folder: Path) -> bool:
+    """True if *folder* exists and directly contains at least one ``.nii``/``.nii.gz`` file."""
     if not folder.exists():
         return False
     for p in folder.iterdir():

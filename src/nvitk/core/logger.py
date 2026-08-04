@@ -79,6 +79,7 @@ class _AnsiLevelFormatter(logging.Formatter):
     }
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render a record as ``HH:MM:SS | LEVEL | message`` with ANSI on the level column."""
         asctime = self.formatTime(record, self.datefmt)
         levelname = record.levelname
         msg = record.getMessage()
@@ -367,6 +368,7 @@ class Logger(metaclass=Singleton):
         """Internal: extend DEBUG ``record.msg`` with ``f_locals`` of the direct caller."""
 
         def filter(self, record: logging.LogRecord) -> bool:
+            """Attach caller local variables to DEBUG records (opt-in verbose tracing)."""
             if record.levelno == logging.DEBUG:
                 stack = inspect.stack()
                 if len(stack) > 2:
@@ -547,6 +549,7 @@ class Logger(metaclass=Singleton):
         return f"Logger(name='{self._name}', level='{self._logger.level}', file_handlers={len(self._file_handlers)})"
 
     def __str__(self) -> str:
+        """Same as :meth:`__repr__`."""
         return self.__repr__()
 
 
@@ -585,6 +588,7 @@ class PipelineRunTracker:
     _done: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
+        """Split stages into cohort-wide vs per-subject and precompute the total step count."""
         self._cohort_stages = [s for s in self.stages if s in _COHORT_STAGES]
         self._per_subject_stages = [s for s in self.stages if s not in _COHORT_STAGES]
         self._total = len(self._cohort_stages) + len(self.subjects) * len(
@@ -592,9 +596,11 @@ class PipelineRunTracker:
         )
 
     def _label(self, stage: str) -> str:
+        """Human-friendly label for *stage* (falls back to the raw stage id)."""
         return self.stage_labels.get(stage, stage)
 
     def __enter__(self) -> PipelineRunTracker:
+        """Log the run header (subjects, stage list) and start tracking."""
         self.logger.info(
             f"▶ {self.pipeline}: {len(self.subjects)} subject(s), "
             f"stages=[{', '.join(self._label(s) for s in self.stages)}], "
@@ -603,6 +609,7 @@ class PipelineRunTracker:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Log a success summary, or an abort line if the block raised."""
         if exc_type is None:
             self.logger.ok(
                 f"✓ {self.pipeline} finished ({self._done}/{self._total} steps)"
@@ -612,6 +619,7 @@ class PipelineRunTracker:
         return False
 
     def _tick(self, caption: str, *, ok: bool = True) -> None:
+        """Advance the completed-step counter and emit a ``[done/total]`` progress line."""
         self._done += 1
         prefix = f"[{self._done}/{self._total}]"
         if ok:

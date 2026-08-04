@@ -30,6 +30,7 @@ setup(globals())
 
 
 def _contour(mask_bool: Any, structure: Any | None = None) -> Any:
+    """Surface voxels of a binary mask = mask minus its erosion (the boundary shell)."""
     eroded = ndi.binary_erosion(mask_bool, structure=structure)
     return mask_bool & ~eroded
 
@@ -78,6 +79,7 @@ def hausdorff(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
+    """Hausdorff distance (mm): the worst-case surface-to-surface distance between two masks."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)
@@ -90,6 +92,7 @@ def hausdorff95(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
+    """95th-percentile Hausdorff distance (mm): robust to a few outlier surface voxels."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)
@@ -102,6 +105,7 @@ def msd(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
+    """Mean surface distance (mm) between the two mask boundaries."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)
@@ -114,6 +118,7 @@ def mdsd(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
+    """Median surface distance (mm) between the two mask boundaries."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)
@@ -126,6 +131,7 @@ def stdsd(
     *,
     spacing: tuple[float, ...] | None = None,
 ) -> float:
+    """Standard deviation of surface distances (mm) — boundary agreement spread."""
     ensure_same_shape(label_true, label_pred)
     sp = resolve_spacing(label_true, spacing)
     d = _distances(label_true, label_pred, sp)

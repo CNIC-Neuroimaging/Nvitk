@@ -28,16 +28,19 @@ __all__ = [
 
 
 def _require_vtk() -> None:
+    """Raise a clear install hint unless the VTK bindings are available."""
     if vtk is None or numpy_support is None:
         raise BackendUnavailableError('vtk is not installed. Please install it with "pip install vtk".')
 
 
 def _update(filter_obj):
+    """Call ``.Update()`` on a VTK filter/reader/writer and return it (for chaining)."""
     filter_obj.Update()
     return filter_obj
 
 
 def read_stl(stl_path: str | Path):
+    """Read an STL mesh file into a VTK STL reader (already updated)."""
     _require_vtk()
     reader = vtk.vtkSTLReader()
     reader.SetFileName(str(stl_path))
@@ -45,6 +48,7 @@ def read_stl(stl_path: str | Path):
 
 
 def read_nifti(nifti_path: str | Path):
+    """Read a NIfTI volume into a VTK NIfTI image reader (already updated)."""
     _require_vtk()
     reader = vtk.vtkNIFTIImageReader()
     reader.SetFileName(str(nifti_path))
@@ -57,6 +61,7 @@ def write_nifti(
     transform_matrix,
     qfac: float,
 ) -> None:
+    """Write a VTK image to NIfTI, setting the qform/sform matrix and q-factor for correct orientation."""
     _require_vtk()
     writer = vtk.vtkNIFTIImageWriter()
     writer.SetFileName(str(nifti_path))
@@ -74,6 +79,7 @@ def _get_surface_origin(
     bounds: Tuple[float, ...],
     spacing: Tuple[float, float, float],
 ) -> Tuple[float, float, float]:
+    """Voxel-grid origin (half-voxel inset from the mesh's min bounds, per axis)."""
     # Center voxels by half-voxel from min bounds.
     return tuple(bounds[2 * i] + (s / 2.0) for i, s in enumerate(spacing))
 
@@ -82,6 +88,7 @@ def _get_surface_dimensions(
     bounds: Tuple[float, ...],
     spacing: Tuple[float, float, float],
 ) -> Tuple[int, int, int]:
+    """Voxel-grid dimensions covering the mesh's bounding box at the given spacing."""
     dims = [int((bounds[2 * i + 1] - bounds[2 * i]) // spacing[i]) for i in range(3)]
     return tuple(dims)
 
@@ -93,6 +100,7 @@ def _init_vtk_image(
     direction,
     constant_value: int = 1,
 ):
+    """Allocate a uint8 VTK image of the given geometry, filled with *constant_value*."""
     _require_vtk()
     image = vtk.vtkImageData()
     image.SetSpacing(spacing)
@@ -112,6 +120,7 @@ def _init_vtk_image(
 
 
 def _matrix_to_rotation_and_spacing(m) -> Tuple[object, Tuple[float, float, float]]:
+    """Placeholder: returns an identity rotation and unit spacing (rotation extraction not yet implemented)."""
     _require_vtk()
     rot = vtk.vtkMatrix3x3()
     rot.Identity()
@@ -124,6 +133,7 @@ def _polydata_to_image_stencil(
     spacing: Tuple[float, float, float],
     extent: Tuple[int, int, int, int, int, int],
 ):
+    """Convert a closed surface mesh into a VTK image stencil (defines inside/outside for rasterization)."""
     _require_vtk()
     poly_to_stencil = vtk.vtkPolyDataToImageStencil()
     poly_to_stencil.SetInputData(polydata)
@@ -138,6 +148,7 @@ def _apply_image_stencil(
     poly2stencil=None,
     background_value: int = 0,
 ):
+    """Apply a stencil to *vtk_image*, zeroing (or setting to *background_value*) voxels outside the mesh."""
     _require_vtk()
     image_stencil = vtk.vtkImageStencil()
     image_stencil.SetInputData(vtk_image)
@@ -153,6 +164,7 @@ def _translate_image(
     offset: Tuple[float, float, float],
     background_level: int = 0,
 ):
+    """Reslice *image* by a rigid translation (nearest-neighbor), keeping its original grid geometry."""
     _require_vtk()
     transform = vtk.vtkTransform()
     transform.Translate(*offset)
@@ -171,6 +183,7 @@ def _set_image_origin(
     image,
     origin: Tuple[float, float, float],
 ):
+    """Overwrite a VTK image's origin metadata without resampling its voxel data."""
     _require_vtk()
     changer = vtk.vtkImageChangeInformation()
     changer.SetInputData(image)
@@ -179,6 +192,7 @@ def _set_image_origin(
 
 
 def _get_origin_from_matrix(matrix) -> Tuple[float, float, float]:
+    """Extract a world origin from a 4x4 transform matrix, sign-corrected by its diagonal (legacy convention)."""
     if matrix is None:
         return (0.0, 0.0, 0.0)
     # Match legacy behavior: apply diagonal sign to the translation terms.
@@ -246,6 +260,11 @@ def stl_to_numpy_binary(
     stl_path: str | Path,
     reference_nifti_path: str | Path,
 ) -> Tuple[np.ndarray, Dict]:
+    """Rasterize an STL mesh to a binary uint16 label array matched to a reference NIfTI's geometry.
+
+    Returns ``(array, metadata)`` where *metadata* carries the voxel-grid
+    geometry (dims/spacing/origin/direction/qform/qfac) for writing back out.
+    """
     _require_vtk()
     image, qform, qfac = stl_to_vtk_binary(stl_path, reference_nifti_path)
     dims = image.GetDimensions()
@@ -324,6 +343,7 @@ def multilabel_from_stls(
 
 
 def list_stl_files(input_path: str | Path) -> List[Path]:
+    """Sorted list of ``.stl`` files under *input_path* (a single file, or every STL in a directory)."""
     p = Path(input_path)
     if p.is_file() and p.suffix.lower() == ".stl":
         return [p]

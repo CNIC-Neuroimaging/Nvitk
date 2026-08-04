@@ -13,11 +13,13 @@ setup(globals())
 
 
 def _as_bool_mask(mask: Image | Any) -> np.ndarray:
+    """Backend boolean foreground (``> 0``) from an :class:`Image` or array."""
     arr = mask.data if isinstance(mask, Image) else mask
     return as_backend_array(arr > 0).astype(bool)
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:
+    """Re-wrap *data* as an :class:`Image` when *original* was one; else return *data*."""
     if isinstance(original, Image):
         return original.with_data(data)
     return data

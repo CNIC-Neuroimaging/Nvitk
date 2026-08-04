@@ -31,12 +31,17 @@ SNAKES_N_POINTS_DEFAULT: int = 400
 
 
 def _as_numpy_image(image: Image | np.ndarray) -> tuple[np.ndarray, Image | None]:
+    """Host NumPy view of *image* plus the original :class:`Image` (or ``None`` for a raw array).
+
+    scikit-image active contours are CPU-only, so we always move to host here.
+    """
     if isinstance(image, Image):
         return np.asarray(to_numpy(image.data)), image
     return np.asarray(to_numpy(image)), None
 
 
 def _mask_array(mask: Image | np.ndarray | None) -> np.ndarray | None:
+    """Host NumPy view of an optional mask (``None`` passes through)."""
     if mask is None:
         return None
     if isinstance(mask, Image):
@@ -149,6 +154,7 @@ def _snakes_slice(
     n_points: int,
     kwargs: dict,
 ) -> np.ndarray:
+    """Evolve one 2-D slice: seed a snake from *mask2d*, run active contours, re-rasterize to a mask."""
     snake0 = snake_from_mask(mask2d, n_points=n_points)
     snake1 = active_contour_2d(image2d, snake0, **kwargs)
     return mask_from_snake(snake1, image2d.shape[:2]).astype(np.uint8)

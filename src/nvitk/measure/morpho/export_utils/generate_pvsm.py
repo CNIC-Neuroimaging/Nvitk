@@ -35,6 +35,7 @@ OUTPUT_PVSM = os.environ.get("GENERATE_PVSM_OUTPUT_PVSM", OUTPUT_PVSM) or None
 
 @contextlib.contextmanager
 def suppress_console_output(enabled=True):
+    """Context manager: redirect stdout/stderr to ``/dev/null`` while active (silences noisy ParaView calls)."""
     if not enabled:
         yield
         return
@@ -57,17 +58,20 @@ def suppress_console_output(enabled=True):
 
 
 def log(message):
+    """Print *message* unless the module-level ``QUIET`` flag is set."""
     if not QUIET:
         print(message)
 
 
 def find_vtps(folder):
+    """Sorted list of ``.vtp`` file paths directly under *folder* (empty if it doesn't exist)."""
     if not os.path.isdir(folder):
         return []
     return sorted(glob.glob(os.path.join(folder, "*.vtp")))
 
 
 def extract_vessel_name(filename):
+    """Derive a vessel display name from a centerline VTP filename (strips ``_radius`` and old numeric prefixes)."""
     name = os.path.splitext(filename)[0]
     name = re.sub(r"_radius$", "", name)
     old_style = re.match(r"^\d+_(.+)$", name)
@@ -75,6 +79,7 @@ def extract_vessel_name(filename):
 
 
 def _show_surface(pv, src, view):
+    """Display a surface source in a ParaView view as a translucent shaded surface."""
     try:
         with suppress_console_output(QUIET):
             display = pv.Show(src, view)
@@ -89,6 +94,7 @@ def _show_surface(pv, src, view):
 
 
 def _show_centerline(pv, src, view, color_array):
+    """Display a centerline source in a ParaView view, colored by *color_array* with a visible scalar bar."""
     try:
         with suppress_console_output(QUIET):
             display = pv.Show(src, view)
@@ -115,6 +121,7 @@ def _show_centerline(pv, src, view, color_array):
 
 
 def main():
+    """Direct-run entry point: build and save a ParaView ``.pvsm`` scene for a stage7 case folder."""
     if not CASE_DIR:
         raise SystemExit(
             "Set GENERATE_PVSM_CASE_DIR or CASE_DIR to a stage7 output folder "

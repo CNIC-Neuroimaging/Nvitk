@@ -28,10 +28,13 @@ log = Logger()
 
 
 def _find_input(subject_nifti_dir: Path, region: str, suffix: str) -> Path | None:
+    """Resolve the Dixon contrast NIfTI ``<INPUT_PREFIX>_<region>_<suffix>[.nii(.gz)]`` under
+    *subject_nifti_dir*, or ``None`` if missing."""
     return resolve_nii_optional(subject_nifti_dir, f"{cfg.INPUT_PREFIX}_{region}_{suffix}")
 
 
 def _subject_region_output_dir(lay: BatchLayout, subject: str, region: str) -> Path:
+    """Stage-1 output directory for *subject*'s *region* Dixon segmentation."""
     return (
         lay.results_dir
         / cfg.STAGE1_DIR

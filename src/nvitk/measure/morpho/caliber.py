@@ -39,6 +39,7 @@ from .metrics import discrete_curvature, smooth_1d
 from .models import EnlargementResult, StenosisResult
 
 def stenosis_valid_mask_from_ends(s, exclude_end_mm) -> np.ndarray:
+    """Boolean mask excluding the first/last *exclude_end_mm* of arc length *s* (avoid end-effect false positives)."""
     if len(s) == 0:
         return np.zeros(0, dtype=bool)
     s = np.asarray(s, dtype=float); length = float(s[-1]) if len(s) else 0.0
@@ -224,6 +225,7 @@ def _compute_vessel_taper(
         fit_mask = fit_mask & ~np.asarray(exclude_mask, dtype=bool)
 
     def _constant_ref() -> np.ndarray:
+        """Fallback reference radius when too few points are usable for a taper fit: flat median."""
         vals = r[valid_mask & np.isfinite(r)]
         med = float(np.nanmedian(vals)) if vals.size else np.nan
         return np.where(valid_mask, np.clip(med, 1e-6, None), np.nan).astype(float)
@@ -357,6 +359,16 @@ def detect_stenosis_segments(
     taper_fit_exclude_end_mm: Optional[float] = None,
     **_ignored,
 ) -> StenosisResult:
+    """Detect stenosis segments along a vessel by comparing local radius to a fitted taper reference.
+
+    Builds a per-point reference radius (excluding a wider end-zone and, if
+    curvature points are given, siphon regions), then flags points whose radius
+    drops *threshold_pct* below that reference. When ``TAPER_TWO_PASS`` is set,
+    iteratively excludes detected lesion points from the reference fit and
+    re-detects until the lesion mask stabilizes. Segments are merged via
+    hysteresis (:func:`hysteresis_segments_from_min_length`) using a lower
+    support threshold so a strict core lesion can extend into a softer halo.
+    """
     s = np.asarray(s, dtype=float)
     r = np.asarray(r, dtype=float)
     valid_core = stenosis_valid_mask_from_ends(s, exclude_end_mm)
@@ -447,6 +459,12 @@ def stenosis_pointwise(
     max_internal_gap_mm: Optional[float] = None,
     **_ignored,
 ):
+    """Per-point stenosis percentage and flag against an already-computed reference radius.
+
+    Lighter-weight sibling of :func:`detect_stenosis_segments` for cases (e.g.
+    interactive review) where the taper reference was already fit and just needs
+    re-evaluating; optionally re-applies hysteresis segment merging.
+    """
     s = np.asarray(s, dtype=float)
     r = np.asarray(r, dtype=float)
     r_ref_per_point = np.asarray(r_ref_per_point, dtype=float)
@@ -487,6 +505,14 @@ def detect_enlargement_segments(
     taper_fit_exclude_end_mm: Optional[float] = None,
     **_ignored,
 ) -> EnlargementResult:
+    """Detect enlargement (aneurysm-like) segments: mirror of :func:`detect_stenosis_segments`.
+
+    Same taper-reference-fit + iterative-refit + hysteresis-merge strategy, but
+    flags points *above* the reference by *threshold_pct* instead of below it.
+    Siphon (high-curvature) regions can optionally be excluded from detection
+    (not just the reference fit) via ``SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION``,
+    since curvature can locally widen the apparent radius without true enlargement.
+    """
     s = np.asarray(s, dtype=float)
     r = np.asarray(r, dtype=float)
     valid_core = stenosis_valid_mask_from_ends(s, exclude_end_mm)
@@ -586,6 +612,10 @@ def enlargement_pointwise(
     pts=None,
     **_ignored,
 ):
+    """Per-point enlargement percentage and flag against an already-computed reference radius.
+
+    Mirror of :func:`stenosis_pointwise` for the enlargement (aneurysm) direction.
+    """
     s = np.asarray(s, dtype=float)
     r = np.asarray(r, dtype=float)
     r_ref_per_point = np.asarray(r_ref_per_point, dtype=float)
@@ -638,6 +668,7 @@ def resolve_stenosis_enlargement_overlap(
     enlargement_pct: np.ndarray,
     is_enlarged: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Clear both flags at points where stenosis and enlargement detections coincide (an ambiguous fit, not a real lesion)."""
     stenosis_pct = np.asarray(stenosis_pct, dtype=float).copy()
     enlargement_pct = np.asarray(enlargement_pct, dtype=float).copy()
     is_stenotic = np.asarray(is_stenotic, dtype=int).copy()
@@ -654,6 +685,7 @@ def resolve_stenosis_enlargement_overlap(
 
 
 def stenosis_total_length(s, flag) -> float:
+    """Total arc length (mm) covered by consecutive-flagged point pairs."""
     if len(s) < 2:
         return 0.0
     return float(np.sum(np.diff(s)[(flag[:-1] & flag[1:]).astype(bool)]))
@@ -666,6 +698,11 @@ def flag_segments_from_min_length(
     max_gap_mm: float = 0.0,
     min_points: Optional[int] = None,
 ) -> List[Tuple[int, int]]:
+    """Group flagged points into ``(start, end)`` index segments, merging runs separated by ≤*max_gap_mm*.
+
+    A merged segment survives if it spans ≥*min_segment_mm* of arc length OR
+    (when given) has at least *min_points* points.
+    """
     s = np.asarray(s, dtype=float)
     flag = np.asarray(flag, dtype=bool)
     if len(s) == 0 or len(flag) != len(s) or not flag.any():
@@ -711,6 +748,9 @@ def hysteresis_segments_from_min_length(
     max_gap_mm: float = 0.0,
     min_points: Optional[int] = None,
 ) -> List[Tuple[int, int]]:
+    """Hysteresis segment merging: build segments from the looser *support_flag*, keep only those
+    that contain at least one point from the stricter *core_flag*.
+    """
     support_segments = flag_segments_from_min_length(
         s, support_flag, min_segment_mm, max_gap_mm=max_gap_mm, min_points=min_points,
     )
@@ -723,6 +763,7 @@ def hysteresis_segments_from_min_length(
 
 
 def mask_from_segments(n_points: int, segments: List[Tuple[int, int]]) -> np.ndarray:
+    """Boolean point mask of length *n_points* that is ``True`` inside each ``(start, end)`` segment."""
     keep = np.zeros(int(n_points), dtype=bool)
     for start, end in segments:
         keep[int(start):int(end) + 1] = True
@@ -735,12 +776,14 @@ def filter_flag_by_min_length(
     min_segment_mm: float,
     max_gap_mm: float = 0.0,
 ) -> np.ndarray:
+    """Drop flagged runs shorter than *min_segment_mm* (single-threshold version of the hysteresis merge)."""
     flag = np.asarray(flag, dtype=bool)
     segments = flag_segments_from_min_length(s, flag, min_segment_mm, max_gap_mm=max_gap_mm)
     return flag & mask_from_segments(len(flag), segments)
 
 
 def segment_detail_json(s: np.ndarray, percent_point: np.ndarray, segments_point_idx: List[Tuple[int, int]]) -> str:
+    """JSON list of per-segment detail (index range, arc-length span, peak percent) for export columns."""
     s = np.asarray(s, dtype=float)
     percent_point = np.asarray(percent_point, dtype=float)
     details = []
@@ -762,6 +805,11 @@ def segment_detail_json(s: np.ndarray, percent_point: np.ndarray, segments_point
 
 
 def select_caliber_detection_radius(cross_section_radius: np.ndarray, mis_radius: Optional[np.ndarray] = None) -> np.ndarray:
+    """Pick the radius signal used for stenosis/enlargement detection, per ``RADIUS_SOURCE_FOR_CALIBER_DETECTION``.
+
+    Falls back to *cross_section_radius* wherever the maximum-inscribed-sphere
+    (VMTK MIS) radius is unavailable or non-finite.
+    """
     cross_section_radius = np.asarray(cross_section_radius, dtype=float)
     if str(RADIUS_SOURCE_FOR_CALIBER_DETECTION).lower() in {"maximum_inscribed_sphere", "mis", "vmtk"}:
         if mis_radius is not None:
@@ -775,6 +823,7 @@ def select_caliber_detection_radius(cross_section_radius: np.ndarray, mis_radius
 
 
 def refresh_enlargement_summary_from_flags(res: dict) -> None:
+    """In-place: recompute a path result's summary enlargement fields from its per-point flags/percent arrays."""
     s = np.asarray(res.get("s_mm", []), dtype=float)
     radius = np.asarray(res.get("radius_mm", []), dtype=float)
     pct = np.asarray(res.get("enlargement_percent_point", np.full(len(s), np.nan)), dtype=float)

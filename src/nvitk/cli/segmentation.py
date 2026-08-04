@@ -60,6 +60,7 @@ def _mouse_brain_runner(
     fix_spacing: bool,
     verbose: bool,
 ):
+    """Run ANTsPyNet mouse-brain extraction or parcellation on *image* with the parsed CLI parameters."""
     return mouse_brain_segmentation(
         image,
         mode=mode,  # type: ignore[arg-type]
@@ -170,6 +171,8 @@ def _brain_extraction_runner(
     image2_path: str | None,
     verbose: bool,
 ):
+    """Run ANTsPyNet brain extraction on *image*, using a second co-registered volume from
+    *image2_path* when the modality requires it (e.g. ``t1t2infant``); *mask* is unused."""
     _ = mask
     if image2_path:
         image2 = imread(image2_path)
@@ -242,6 +245,7 @@ def _mra_runner(
     patch_stride_length: int,
     verbose: bool,
 ):
+    """Run ANTsPyNet MRA-TOF vessel segmentation on *image* with the parsed CLI parameters."""
     return mra_vessel_segmentation(
         image,
         mask=mask,
@@ -306,6 +310,7 @@ def _dkt_runner(
     version: int,
     verbose: bool,
 ):
+    """Run ANTsPyNet Desikan-Killiany-Tourville cortical parcellation on *image*; *mask* is unused."""
     _ = mask
     return desikan_killiany_tourville_labeling(
         image,
@@ -367,6 +372,7 @@ def cmd_dkt(
 
 
 def _parse_sigmas(text: str | None) -> tuple[float, ...]:
+    """Parse a comma/semicolon-separated Frangi sigma list from *text*, or the default sigmas if unset."""
     if text is None or not str(text).strip():
         return tuple(FRANGI_SIGMAS_DEFAULT)
     return tuple(float(x) for x in str(text).replace(";", ",").split(",") if x.strip())

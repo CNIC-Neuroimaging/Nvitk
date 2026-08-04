@@ -37,6 +37,8 @@ from nvitk.gui.tools.runner import log_tool_failure, notify
 
 @dataclass(frozen=True)
 class SgeRetrieveResult:
+    """Outcome of downloading (and optionally importing/cleaning up) a completed SGE job's results."""
+
     remote_job_root: str
     local_dir: Path
     downloaded_files: list[Path]
@@ -57,6 +59,7 @@ class SgeManualImportDialog(QDialog):
         password = "",
         remote_job_root = "",
     ) -> None:
+        """Build the host/username/password/remote-job-root form, prefilled with any given defaults."""
         super().__init__(parent)
         self.setWindowTitle("Import SGE results (manual)")
         self.setMinimumWidth(420)
@@ -89,6 +92,7 @@ class SgeManualImportDialog(QDialog):
         self.setLayout(layout)
 
     def _try_accept(self) -> None:
+        """Validate that host/username/remote job root are filled in before accepting the dialog."""
         if not self.host.text().strip() or not self.user.text().strip():
             notify("Host and username are required.", error=True)
             return
@@ -98,6 +102,7 @@ class SgeManualImportDialog(QDialog):
         self.accept()
 
     def connection(self) -> SgeConnection:
+        """Build an :class:`~nvitk.gui.sge.models.SgeConnection` from the current form fields."""
         return SgeConnection(
             host=self.host.text().strip(),
             user=self.user.text().strip(),
@@ -105,6 +110,7 @@ class SgeManualImportDialog(QDialog):
         )
 
     def remote_root(self) -> str:
+        """The entered remote job root, stripped and without a trailing slash."""
         return self.remote_job_root.text().strip().rstrip("/")
 
 
@@ -161,6 +167,8 @@ def import_sge_results_to_viewer(
     *,
     on_layers_changed = None,
 ) -> SgeRetrieveResult:
+    """Open every file in *result.downloaded_files* into *viewer*, then return a copy of *result* with
+    ``imported_layers`` updated; calls *on_layers_changed* afterward if given."""
     count = 0
     for path in result.downloaded_files:
         layers = open_paths_with_nvitk(viewer, path)
@@ -183,6 +191,8 @@ def _apply_remote_cleanup(
     remote_job_root: str,
     result: SgeRetrieveResult,
 ) -> SgeRetrieveResult:
+    """Delete the remote job tree at *remote_job_root* (only if it's under the configured
+    ``gui_sge_job_root``) and return a copy of *result* with ``remote_deleted`` set accordingly."""
     root = remote_job_root.rstrip("/")
     if not is_safe_gui_job_root(root):
         notify(

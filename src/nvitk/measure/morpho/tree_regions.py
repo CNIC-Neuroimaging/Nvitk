@@ -31,6 +31,7 @@ from .export_utils.summaries import build_tree_region_points_dataframe, tree_reg
 from .surface import add_string_point_array, build_polyline_polydata, save_vtp
 
 def discarded_source_path_ids_from_regions(regions: List[dict]) -> set:
+    """Union of all ``discarded_source_path_ids`` recorded across tree-region rows."""
     discarded = set()
     for region in regions:
         discarded.update(str(path_id) for path_id in region.get("discarded_source_path_ids", []))
@@ -38,6 +39,7 @@ def discarded_source_path_ids_from_regions(regions: List[dict]) -> set:
 
 
 def remove_discarded_tree_path_outputs(discarded_path_ids: set, centerline_dir: Optional[str], centerline_radius_dir: Optional[str]) -> None:
+    """Delete any previously-exported VTP files for paths that were merged/discarded during tree-region splitting."""
     for path_id in sorted(discarded_path_ids):
         candidates = []
         if centerline_dir:
@@ -54,6 +56,7 @@ def remove_discarded_tree_path_outputs(discarded_path_ids: set, centerline_dir: 
 
 
 def min_tree_arm_length_for_vessel(vessel_info: VesselInfo) -> float:
+    """Minimum tree-arm length (mm) for this vessel: per-vessel/pair override, else the global default."""
     name = str(getattr(vessel_info, "name", "") or "")
     pair = str(getattr(vessel_info, "pair", "") or "")
     candidates = [name, pair]
@@ -64,6 +67,7 @@ def min_tree_arm_length_for_vessel(vessel_info: VesselInfo) -> float:
 
 
 def ordered_terminal_path_records(tree: SkeletonTree, root_idx: int, terminal_indices: List[int], spacing) -> List[dict]:
+    """Root-to-terminal path for each terminal, sorted longest-first (path processing order)."""
     spacing = np.asarray(spacing, dtype=float)
     records = []
     for term in terminal_indices:
@@ -82,6 +86,7 @@ def ordered_terminal_path_records(tree: SkeletonTree, root_idx: int, terminal_in
 
 
 def tree_label_from_path_parts(parts: List[int]) -> str:
+    """Render a branch-index path (e.g. ``[2, 1]``) as ``arm02_subarm01``-style text."""
     if not parts:
         return "trunk"
     label = f"arm{int(parts[0]):02d}"
@@ -91,6 +96,12 @@ def tree_label_from_path_parts(parts: List[int]) -> str:
 
 
 def tree_path_label_for_terminal(tree: SkeletonTree, root_idx: int, terminal_idx: int, spacing) -> Tuple[str, str]:
+    """Branch label and numeric branch-path for the root→terminal path, ranking siblings by subtree extent.
+
+    At each bifurcation along the path, downstream children are ranked by how far
+    their farthest descendant endpoint reaches (longer subtree = lower branch index),
+    so branch numbering is stable and reflects vessel size, not traversal order.
+    """
     path = bfs_path_indices(tree.neighbors, int(root_idx), int(terminal_idx))
     if not path:
         return "arm00", ""
@@ -99,6 +110,7 @@ def tree_path_label_for_terminal(tree: SkeletonTree, root_idx: int, terminal_idx
     parts = []
 
     def child_extent(parent: int, child: int) -> float:
+        """Farthest root-distance (mm) reachable among *child*'s downstream endpoints."""
         seen = {int(parent)}
         queue = deque([int(child)])
         best = float(dist_root[child])
@@ -129,11 +141,13 @@ def tree_path_label_for_terminal(tree: SkeletonTree, root_idx: int, terminal_idx
 
 
 def branch_path_from_segment_name(segment_name: str) -> str:
+    """Extract the dotted branch-index path from a recursive segment name (drops the leading ``S`` root marker)."""
     parts = [p for p in str(segment_name).split(".") if p and p != "S"]
     return ".".join(parts)
 
 
 def branch_label_from_path(branch_path: str) -> str:
+    """Inverse of :func:`branch_path_from_segment_name`: dotted path → ``arm00_subarm00``-style label."""
     parts = [int(p) for p in str(branch_path).split(".") if str(p).isdigit()]
     return tree_label_from_path_parts(parts)
 
@@ -147,6 +161,13 @@ def split_bifurcating_tree_centerlines(
     spacing,
     region_centerline_dir: Optional[str] = None,
 ) -> Tuple[List[dict], Dict[str, pd.DataFrame], List[dict]]:
+    """Split a simple 2-terminal bifurcation into a shared trunk region plus two arm regions.
+
+    Finds where the two root-to-terminal centerlines overlap (a common proximal
+    trunk) using nearest-neighbor point matching, then exports the trunk and each
+    arm as separate labeled regions. Only applies to exactly 2 paths — non-bifurcating
+    trees (>2 terminals) are left to the recursive tree-segment splitter instead.
+    """
     if not SPLIT_BIFURCATING_TREE_REGIONS or len(path_results) != 2:
         if SPLIT_BIFURCATING_TREE_REGIONS and len(path_results) > 2:
             print(f"    [tree regions] Expected 2 paths, found {len(path_results)}; skipping base/arm split.")
@@ -165,6 +186,7 @@ def split_bifurcating_tree_centerlines(
     dist21, idx21 = tree1.query(pts2, k=1)
 
     def overlapping_prefix_len(distances: np.ndarray, tol: float, max_gap_points: int) -> int:
+        """Length of the leading run of *distances* within *tol*, tolerating gaps up to *max_gap_points*."""
         last_overlap = -1
         gap = 0
         for i, d in enumerate(distances):
@@ -388,6 +410,7 @@ def split_bifurcating_tree_centerlines(
 
 
 def save_labeled_tree_path_centerlines(path_results: List[dict], regions: List[dict], centerline_dir: Optional[str]) -> None:
+    """Overwrite each original path's centerline VTP with per-point trunk/arm region labels/codes."""
     if not centerline_dir or not path_results or not regions:
         return
 

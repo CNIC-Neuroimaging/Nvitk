@@ -45,6 +45,7 @@ class QcReviewDecision:
 
 
 def normalize_qc_status(value: str) -> str:
+    """Upper-case and validate *value* against ``QC_STATUS_VALUES``; raises ``ValueError`` if unknown."""
     status = str(value or "").strip().upper()
     if status not in QC_STATUS_VALUES:
         raise ValueError(f"qc_status must be one of {sorted(QC_STATUS_VALUES)}, got {value!r}")

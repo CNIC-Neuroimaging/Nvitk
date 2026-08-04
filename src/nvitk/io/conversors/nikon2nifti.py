@@ -12,7 +12,9 @@ except Exception:
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when click isn't installed."""
     def decorator(func):
+        """Return *func* unmodified (click is unavailable, so no CLI wiring is applied)."""
         return func
     return decorator
 
@@ -34,6 +36,7 @@ def nikon2nifti(
     axes: str | None = None,
     **kwargs: Any,
 ) -> str:
+    """Convert a Nikon ND2 file to NIfTI; library entry point behind the ``nikon2nifti`` CLI."""
     data, metadata = read_nd2(nikon_path, axes=axes, **kwargs)
     write_nifti(nifti_path, data, metadata=metadata, axes=axes)
     return nifti_path
@@ -58,6 +61,7 @@ def nikon2nifti(
 )
 @_click_option("--axes", type=str, default=None, help="Optional axis order for ND2 read.")
 def main(input_path: Path, output_path: Path, axes: str | None) -> None:
+    """CLI entry point: convert one Nikon ND2 file to NIfTI."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     output_path.parent.mkdir(parents=True, exist_ok=True)

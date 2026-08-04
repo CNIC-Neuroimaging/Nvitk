@@ -29,6 +29,8 @@ MaskMethod = Literal["pseudo_loc", "voxel_avg", "both"]
 
 @dataclass(frozen=True)
 class MaskHemodynamicsResult:
+    """PI/RI (and optional flow) result for one label, from a mask-based hemodynamics computation."""
+
     method: str
     label_id: int
     pi: float

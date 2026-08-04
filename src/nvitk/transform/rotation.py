@@ -26,6 +26,7 @@ class RotationAnalysis:
 
 
 def _rotate_affine_z(affine: _host_np.ndarray, degrees: float) -> _host_np.ndarray:
+    """Compose *affine* with an in-plane (Z) rotation so world geometry follows the pixel rotation."""
     angle_rad = float(_host_np.radians(-degrees))
     cos_a = float(_host_np.cos(angle_rad))
     sin_a = float(_host_np.sin(angle_rad))

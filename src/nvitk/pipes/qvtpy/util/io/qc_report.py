@@ -70,6 +70,7 @@ def parse_stages(spec: str) -> list[str]:
 
 
 def _glob_first(directory: Path, *patterns: str) -> Path | None:
+    """First file in *directory* matching any of *patterns* (patterns tried in order)."""
     for pat in patterns:
         hits = sorted(directory.glob(pat))
         if hits:
@@ -78,14 +79,17 @@ def _glob_first(directory: Path, *patterns: str) -> Path | None:
 
 
 def _eicab_dir(results_root: Path, subject: str) -> Path:
+    """Stage 1 (eICAB) output directory for *subject* under *results_root*."""
     return results_root / subject / cfg.STAGE1_EICAB_DIR
 
 
 def _qvt_stage_dir(results_root: Path, subject: str, stage_dir: str) -> Path:
+    """qvtpy *stage_dir* output directory for *subject* under *results_root*."""
     return results_root / subject / cfg.QVT_SUBDIR / stage_dir
 
 
 def _nifti_convert_complete(nifti_root: Path, subject: str) -> bool:
+    """True if *subject*'s stage-0 NIfTI conversion outputs are all present."""
     return _check_stage0_c(nifti_root, subject).complete
 
 
@@ -137,6 +141,7 @@ def _check_stage0_d(
     *,
     sequences: Iterable[str],
 ) -> StageCheck:
+    """Stage 0 (download) completion: all requested DICOM sequences present on disk."""
     seq_list = list(sequences)
     if local_subject_dicoms_complete(dicom_root, subject, seq_list):
         return StageCheck(STAGE_DOWNLOAD, True, "ok")
@@ -153,6 +158,7 @@ def _check_stage0_d(
 
 
 def _check_stage0_c(nifti_root: Path, subject: str) -> StageCheck:
+    """Stage 0 (convert) completion: required 4D-flow/TOF/derived NIfTI files all present."""
     subj_dir = nifti_root / subject
     missing: list[str] = []
 
@@ -186,6 +192,7 @@ def _check_stage0_c(nifti_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage1(results_root: Path, subject: str) -> StageCheck:
+    """Stage 1 (eICAB) completion: an eICAB segmentation NIfTI exists."""
     out_dir = _eicab_dir(results_root, subject)
     if _output_has_segmentation(out_dir):
         return StageCheck(STAGE_EICAB, True, "ok")
@@ -193,6 +200,7 @@ def _check_stage1(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage2(results_root: Path, subject: str) -> StageCheck:
+    """Stage 2 (registration) completion: ``registration_meta.json`` exists."""
     marker = _qvt_stage_dir(results_root, subject, cfg.STAGE2_REGISTRATION_DIR) / "registration_meta.json"
     if marker.is_file():
         return StageCheck(STAGE_REG, True, "ok")
@@ -200,6 +208,7 @@ def _check_stage2(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage3(results_root: Path, subject: str) -> StageCheck:
+    """Stage 3 (centerline) completion: ``centerline_meta.json`` exists."""
     marker = _qvt_stage_dir(results_root, subject, cfg.STAGE3_CENTERLINE_DIR) / "centerline_meta.json"
     if marker.is_file():
         return StageCheck(STAGE_CENTERLINE, True, "ok")
@@ -207,6 +216,7 @@ def _check_stage3(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage4(results_root: Path, subject: str) -> StageCheck:
+    """Stage 4 (segmentation) completion: segmentation NIfTI and metadata JSON both exist."""
     out_dir = _qvt_stage_dir(results_root, subject, cfg.STAGE4_SEG_DIR)
     seg = out_dir / "seg_4dflow.nii.gz"
     meta = out_dir / "segmentation_meta.json"
@@ -221,6 +231,8 @@ def _check_stage4(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage4t(results_root: Path, subject: str) -> StageCheck:
+    """Stage 4t (temporal segmentation) completion: 4D seg volume, temporal summary, and every
+    per-timepoint metadata JSON all exist."""
     out_dir = _qvt_stage_dir(results_root, subject, cfg.STAGE4T_SEG_DIR)
     seg = out_dir / "seg_4dflow_4d.nii.gz"
     summary = out_dir / "temporal_seg_summary.json"
@@ -246,6 +258,7 @@ def _check_stage4t(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage5(results_root: Path, subject: str) -> StageCheck:
+    """Stage 5 (LOC generation) completion: ``locs.csv`` exists."""
     marker = _qvt_stage_dir(results_root, subject, cfg.STAGE5_LOC_DIR) / "locs.csv"
     if marker.is_file():
         return StageCheck(STAGE_LOC, True, "ok")
@@ -253,6 +266,7 @@ def _check_stage5(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage6(results_root: Path, subject: str) -> StageCheck:
+    """Stage 6 (measure) completion: ``loc_measurements.csv`` exists."""
     marker = _qvt_stage_dir(results_root, subject, cfg.STAGE6_MEASURE_DIR) / "loc_measurements.csv"
     if marker.is_file():
         return StageCheck(STAGE_MEASURE, True, "ok")
@@ -260,6 +274,7 @@ def _check_stage6(results_root: Path, subject: str) -> StageCheck:
 
 
 def _check_stage7(results_root: Path, subject: str) -> StageCheck:
+    """Stage 7 (morphometrics) completion: the stage-7 skip/done marker exists."""
     marker = _qvt_stage_dir(results_root, subject, cfg.STAGE7_MORPHOMETRICS_DIR) / STAGE7_SKIP_MARKER
     if marker.is_file():
         return StageCheck(STAGE_MORPHOMETRICS, True, "ok")
@@ -311,10 +326,12 @@ def check_subject_stages(
 
 
 def _stage_short_label(stage: str) -> str:
+    """Compact label for *stage* (``"stage1"`` -> ``"s1"``) used in table headers."""
     return stage.replace("stage", "s")
 
 
 def _compact_subject_list(subjects: Iterable[str], *, max_show: int = _DEFAULT_SUBJECT_PREVIEW) -> str:
+    """Comma-joined subject list, truncated to *max_show* names with a ``"(+N more)"`` suffix."""
     names = sorted(subjects)
     if not names:
         return "(none)"
@@ -325,6 +342,7 @@ def _compact_subject_list(subjects: Iterable[str], *, max_show: int = _DEFAULT_S
 
 
 def _pct(numerator: int, denominator: int) -> str:
+    """Format ``numerator/denominator`` as a right-aligned percentage string (``"n/a"`` if 0/0)."""
     if denominator == 0:
         return "n/a"
     return f"{100 * numerator / denominator:5.1f}%"
@@ -406,6 +424,7 @@ def _failed_stages_for_subject(
     checks: list[StageCheck],
     stage_list: list[str],
 ) -> tuple[str, ...]:
+    """Ordered tuple of *stage_list* stage ids that are incomplete for this subject's *checks*."""
     by_stage = {c.stage: c for c in checks}
     return tuple(stage for stage in stage_list if not by_stage[stage].complete)
 

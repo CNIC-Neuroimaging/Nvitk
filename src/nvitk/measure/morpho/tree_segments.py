@@ -92,6 +92,10 @@ def _transfer_attrs_to_points(
     *,
     max_dist_mm: float,
 ) -> dict[str, np.ndarray]:
+    """Nearest-neighbor transfer of point attributes from *cloud_pts* to *query_pts* within *max_dist_mm*.
+
+    Query points with no cloud point closer than *max_dist_mm* get NaN for every attribute.
+    """
     n = len(query_pts)
     out = {k: np.full(n, np.nan, dtype=float) for k in cloud_vals}
     if n == 0 or len(cloud_pts) == 0:
@@ -104,6 +108,16 @@ def _transfer_attrs_to_points(
     return out
 
 def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
+    """Recursively split a skeleton tree into branch segments at every branchpoint cluster.
+
+    Nearby branchpoints (directly adjacent in the graph) are merged into a single
+    "junction" so a cluster of skeleton voxels at one anatomical bifurcation
+    doesn't get split into spurious micro-segments. Segments are numbered
+    hierarchically (``S.1``, ``S.1.2``, ...) breadth-first from the root, with
+    siblings at each junction ordered by their subtree's reach. Each segment
+    dict carries its chain of node indices, world points, length, and tree
+    role/depth/path metadata consumed by the export layer.
+    """
     if tree.root is None:
         return []
     spacing = np.asarray(spacing, dtype=float)
@@ -134,6 +148,7 @@ def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
         cluster_members[cluster_id] = sorted(members, key=lambda node: (dist_root[node], node))
 
     def junction_key_for_node(node: int) -> str:
+        """Tag *node* as a branchpoint cluster (``B<id>``), true endpoint (``E<id>``), or plain node (``N<id>``)."""
         node = int(node)
         if node in branch_node_to_cluster:
             return f"B{branch_node_to_cluster[node]}"
@@ -142,11 +157,13 @@ def build_recursive_tree_segments(tree: SkeletonTree, spacing) -> List[dict]:
         return f"N{node}"
 
     def junction_members(junction_key: str) -> List[int]:
+        """Skeleton node indices belonging to a junction key (its full cluster, or the single node)."""
         if junction_key.startswith("B"):
             return cluster_members.get(int(junction_key[1:]), [])
         return [int(junction_key[1:])]
 
     def outgoing_edges(junction_key: str, parent_junction_key: Optional[str]) -> List[Tuple[int, int]]:
+        """Downstream (away-from-root) edges leaving a junction, excluding the edge back to the parent junction."""
         junction_nodes = set(junction_members(junction_key))
         parent_nodes = set(junction_members(parent_junction_key)) if parent_junction_key else set()
         edges = []
@@ -276,6 +293,7 @@ def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[
         cluster_members[cluster_id] = sorted(members, key=lambda node: (float(dist_root[node]), node))
 
     def junction_key_for_node(node: int) -> str:
+        """Tag *node* as a branchpoint cluster (``B<id>``), true endpoint (``E<id>``), or plain node (``N<id>``)."""
         node = int(node)
         if node in branch_node_to_cluster:
             return f"B{branch_node_to_cluster[node]}"
@@ -351,6 +369,7 @@ def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[
 
 
 def segment_child_z_score(segment: dict, lookahead_points: int = ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS) -> float:
+    """Mean Z (superior-inferior) coordinate over the segment's first few points, for sibling ordering."""
     pts = np.asarray(segment.get("_anatomic_centerline_points_for_z", segment.get("points", [])), dtype=float)
     if len(pts) == 0:
         return np.nan
@@ -362,6 +381,11 @@ def segment_child_z_score(segment: dict, lookahead_points: int = ANATOMIC_BRANCH
 
 
 def branch_suffixes_by_superior_inferior(child_segments: List[dict]) -> Dict[int, str]:
+    """Assign anatomic suffixes (``i``/``s``/``b01``, ``b02``, ...) to sibling branches by Z ordering.
+
+    The most inferior sibling gets ``i``, the most superior gets ``s``, and any
+    in between get numbered ``bNN`` — matching conventional M2 branch naming.
+    """
     children = [seg for seg in child_segments if seg is not None]
     if not children:
         return {}
@@ -463,6 +487,7 @@ def annotate_anatomic_tree_segments(tree: SkeletonTree, segments: List[dict]) ->
 
 
 def assign_points_to_recursive_segments(points: np.ndarray, segments: List[dict], assign_tol_mm: float) -> dict:
+    """Label each centerline point with the recursive tree segment it belongs to (nearest within *assign_tol_mm*)."""
     n = len(points)
     assigned = {
         "tree_segment_label": np.array(["unassigned"] * n, dtype=object),
@@ -514,6 +539,7 @@ def save_recursive_labeled_tree_path_centerlines(
     spacing,
     skip_path_ids: Optional[set] = None,
 ) -> None:
+    """Overwrite each path's centerline VTP with per-point recursive tree-segment id/name labels."""
     if not centerline_dir or not path_results or not segments:
         return
     skip_path_ids = skip_path_ids or set()
@@ -565,6 +591,7 @@ def remove_root_to_terminal_centerline_outputs(
     centerline_radius_dir: Optional[str],
     keep_path_ids: Optional[set] = None,
 ) -> None:
+    """Delete the original root-to-terminal centerline VTPs once their content is superseded by tree-segment exports."""
     if not REMOVE_ROOT_TO_TERMINAL_CENTERLINE_VTPS_AFTER_SPLIT:
         return
     keep_path_ids = set(str(x) for x in (keep_path_ids or set()))
@@ -613,6 +640,7 @@ def collapse_unary_supported_anatomic_segments(
     visited = set()
 
     def stitched_chain_points(chain: List[dict]) -> np.ndarray:
+        """Concatenate a chain of segments' points into one polyline, dropping duplicated junction points."""
         parts = []
         for seg in chain:
             pts = np.asarray(best_chunks[int(seg["segment_id"])]["points"], dtype=float)
@@ -625,6 +653,7 @@ def collapse_unary_supported_anatomic_segments(
         return np.vstack(parts) if parts else np.empty((0, 3), dtype=float)
 
     def add_chain(start_seg: dict) -> None:
+        """Walk single-child segment runs from *start_seg*, exporting the stitched chain as one fallback centerline."""
         chain = []
         cur = start_seg
         while int(cur["segment_id"]) not in visited:
@@ -795,6 +824,7 @@ def save_anatomic_split_tree_centerlines(
             radius = np.where(np.isfinite(radius), radius, edt_r)
 
         def arr(key: str, default: float = np.nan, binary: bool = False) -> np.ndarray:
+            """Fetch a transferred per-point attribute array, optionally thresholded to a 0/1 binary flag."""
             vals = np.asarray(transferred.get(key, np.full(n, default)), dtype=float)
             if binary:
                 vals = np.where(np.isfinite(vals), vals, 0.0)
@@ -886,6 +916,10 @@ def save_anatomic_fallback_centerlines(
     centerline_dir: Optional[str],
     centerline_radius_dir: Optional[str],
 ) -> List[str]:
+    """Export M1/M2-style anatomic-named centerlines when the recursive tree-segment split doesn't apply
+    (e.g. a simple single- or few-terminal vessel). Longest path becomes M1; remaining paths are named
+    by superior/inferior ordering. Returns the list of saved path ids.
+    """
     if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results:
         return []
 

@@ -38,6 +38,7 @@ from nvitk.pipes.qvtpy.util.io.sge_backend import (
 )
 from nvitk.core.logger import Logger
 from nvitk.io.imageio import imread, imsave
+from nvitk.measure import dice as measure_dice
 from nvitk.pipes.qvtpy import config as cfg
 from nvitk.pipes.qvtpy.stage4_4dflow_segmentation import EICAB_IN_4DFLOW_NIFTI
 from nvitk.pipes.qvtpy.util.centerline.centerline_io import (
@@ -68,18 +69,22 @@ log = Logger()
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _stage3_dir(output_root: Path, subject: str) -> Path:
+    """Stage 3 (centerline) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _stage4t_out(output_root: Path, subject: str) -> Path:
+    """Stage 4t (temporal 4D-flow segmentation) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4T_SEG_DIR
 
 
 def _cd4d_path(nifti_root: Path, subject: str) -> Path:
+    """Path to *subject*'s ``ComplexDifference_4D`` NIfTI (``.nii.gz`` preferred over ``.nii``)."""
     p = nifti_root / subject / "4DFlow" / "ComplexDifference_4D.nii.gz"
     if p.is_file():
         return p
@@ -92,10 +97,12 @@ def _cd4d_path(nifti_root: Path, subject: str) -> Path:
 
 
 def _meta_path_for_timepoint(out_dir: Path, t: int) -> Path:
+    """Path to the per-timepoint segmentation metadata JSON for timepoint *t* in *out_dir*."""
     return out_dir / f"segmentation_meta_t{t:02d}.json"
 
 
 def _outputs_complete(out_dir: Path, n_timepoints: int) -> bool:
+    """True if the 4D segmentation, temporal summary, and every per-timepoint meta file exist."""
     if not (out_dir / "seg_4dflow_4d.nii.gz").is_file():
         return False
     if not (out_dir / "temporal_seg_summary.json").is_file():
@@ -109,17 +116,17 @@ def _outputs_complete(out_dir: Path, n_timepoints: int) -> bool:
 
 
 def dice_binary(mask_a: np.ndarray, mask_b: np.ndarray) -> float | None:
-    """Dice coefficient for two boolean masks; ``None`` if both empty."""
+    """Dice coefficient for two boolean masks; ``None`` if both are empty.
+
+    The ratio is delegated to :func:`nvitk.measure.dice`; the only thing kept
+    local is the temporal-QC convention that two empty masks score ``None``
+    (undefined) rather than ``0.0``.
+    """
     a = as_backend_array(mask_a).astype(bool)
     b = as_backend_array(mask_b).astype(bool)
-    inter = int(np.count_nonzero(a & b))
-    sa = int(np.count_nonzero(a))
-    sb = int(np.count_nonzero(b))
-    if sa == 0 and sb == 0:
+    if not bool(np.any(a)) and not bool(np.any(b)):
         return None
-    if sa + sb == 0:
-        return None
-    return float(2.0 * inter / (sa + sb))
+    return float(measure_dice(a, b))
 
 
 def multilabel_dice(seg_a: np.ndarray, seg_b: np.ndarray) -> float | None:
@@ -429,6 +436,8 @@ def run_subject(
 
 
 def _stage4t_cli_options(func):
+    """Decorator applying all shared stage-4t click options (subject/paths, threshold/region-growing
+    and ACA/AComm tuning) to *func*."""
     func = click.option("--subject", required=True)(func)
     func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
     func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
@@ -505,6 +514,7 @@ def _subject_sge_spec(
     acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 4t task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -673,6 +683,8 @@ def main(
     aca_overlap_min_voxels: int,
     acomm_junction_radius: int,
 ) -> None:
+    """CLI entry point (``qvtpy-stage4t-seg``): run stage 4t temporal 4D-flow segmentation
+    for one subject."""
     Logger()
     run_subject(
         subject,

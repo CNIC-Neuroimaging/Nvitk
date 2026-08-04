@@ -18,6 +18,7 @@ class CrossSectionPanel(QWidget):
     """Dock widget showing intensity + mask overlay and optional flow waveforms."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the pick-toggle checkbox and the slice/waveform Matplotlib canvases."""
         super().__init__(parent)
         self._title = QLabel("Click a centerline in 3D to view cross-section")
         self._title.setWordWrap(True)
@@ -60,9 +61,11 @@ class CrossSectionPanel(QWidget):
         return bool(self._pick_toggle.isChecked())
 
     def set_picking_enabled(self, enabled: bool) -> None:
+        """Check/uncheck the pick-toggle checkbox."""
         self._pick_toggle.setChecked(bool(enabled))
 
     def clear(self, message: str = "") -> None:
+        """Clear both the slice and waveform canvases, optionally updating the title to *message*."""
         if message:
             self._title.setText(message)
         if self._slice_ax is not None and self._slice_canvas is not None:
@@ -82,6 +85,8 @@ class CrossSectionPanel(QWidget):
         title: str,
         waveforms: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Render *intensity* as grayscale, overlay *mask* in translucent red if given, and draw any
+        *waveforms* underneath."""
         self._title.setText(title)
         if self._slice_ax is None or self._slice_canvas is None:
             return
@@ -112,6 +117,8 @@ class CrossSectionPanel(QWidget):
         self._draw_waveforms(waveforms)
 
     def _draw_waveforms(self, waveforms: list[dict[str, Any]] | None) -> None:
+        """Plot each flow waveform in *waveforms* on the waveform axes, color-coding by offset from
+        the selected cross-section (blue = selected, red = upstream, green = downstream)."""
         if self._wave_ax is None or self._wave_canvas is None:
             return
         self._wave_ax.clear()

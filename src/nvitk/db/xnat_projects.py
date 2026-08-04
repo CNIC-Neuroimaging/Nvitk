@@ -79,10 +79,12 @@ XNAT_PROJECTS: dict[str, XnatProjectSpec] = {
 
 
 def list_xnat_project_ids() -> list[str]:
+    """Sorted ids of every registered :data:`XNAT_PROJECTS` entry."""
     return sorted(XNAT_PROJECTS.keys())
 
 
 def _normalize_cohort_token(token: str) -> str:
+    """Lower-case *token* and strip everything but alphanumerics, for loose project/cohort matching."""
     return re.sub(r"[^0-9a-z]+", "", str(token).strip().lower())
 
 
@@ -114,6 +116,8 @@ def resolve_xnat_project_cohort_token(subjects: str | None) -> str | None:
 
 
 def get_xnat_project(project_id: str) -> XnatProjectSpec:
+    """Return the registered :class:`XnatProjectSpec` for *project_id*; raises ``KeyError`` (listing
+    known ids) if unregistered."""
     key = str(project_id).strip()
     if key not in XNAT_PROJECTS:
         known = ", ".join(list_xnat_project_ids())
@@ -122,6 +126,7 @@ def get_xnat_project(project_id: str) -> XnatProjectSpec:
 
 
 def default_sequences_for_project(project_id: str) -> tuple[str, ...]:
+    """Default sequence keys to sync for *project_id* (from its registered :class:`XnatProjectSpec`)."""
     return get_xnat_project(project_id).default_sequences
 
 
@@ -142,6 +147,7 @@ def build_default_xnat_sequences_csv() -> str:
 
 
 def _scan_attr(scan: Any, *names: str) -> str:
+    """Return the first non-``None`` attribute among *names* on *scan* as a stripped string, or ``""``."""
     for name in names:
         if hasattr(scan, name):
             value = getattr(scan, name)
@@ -273,6 +279,8 @@ def session_modality_from_classifications(classifications: list[dict[str, Any]])
 
 
 def get_scan_classifier(project_id: str) -> Callable[..., dict[str, Any] | None]:
+    """Return the scan-classification function registered for *project_id*'s ``classifier`` (currently
+    :func:`classify_scan_ia_pet_v5` or a PESA-Brain wrapper around :func:`~nvitk.db.xnat.classify_scan`)."""
     spec = get_xnat_project(project_id)
     if spec.classifier == "ia_pet_v5":
         return classify_scan_ia_pet_v5
@@ -285,6 +293,8 @@ def get_scan_classifier(project_id: str) -> Callable[..., dict[str, Any] | None]
         scan_id: str | None = None,
         experiment_label: str | None = None,
     ) -> dict[str, Any] | None:
+        """Classify a PESA-Brain scan by series description/quality (ignoring scan_id/experiment_label,
+        which the ia_pet_v5 classifier needs but this project's classifier does not)."""
         del scan_id, experiment_label
         return classify_scan(series_description, quality)
 

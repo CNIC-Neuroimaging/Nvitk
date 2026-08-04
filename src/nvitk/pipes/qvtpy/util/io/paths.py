@@ -39,13 +39,17 @@ class QvtpyPaths:
     results_root: Path
 
     def subject_dicom_dir(self, subject: str) -> Path:
+        """*subject*'s DICOM directory under this context's DICOM root."""
         return self.dicom_root / subject
 
     def subject_nifti_dir(self, subject: str) -> Path:
+        """*subject*'s NIfTI directory under this context's NIfTI root."""
         return self.nifti_root / subject
 
 
 def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
+    """Resolve a local-workstation path setting *key* (e.g. ``"nifti_root"``): *fallback* if given,
+    else the ``local_<key>`` value from ``sge.json``, else the hardcoded local default."""
     config_key = f"local_{key}"
     raw = _ppipe_paths.get(config_key)
     if fallback is not None:
@@ -61,6 +65,8 @@ def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
 
 
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
+    """Resolve a cluster path setting *key*: the ``cluster_<key>`` value from ``sge.json`` if set,
+    else *fallback*, else the hardcoded cluster default."""
     config_key = f"cluster_{key}"
     raw = _ppipe_paths.get(config_key)
     if raw is not None and str(raw).strip():
@@ -76,10 +82,12 @@ def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
 
 
 def _local_totalseg_model_from_config(*, fallback: Path | None) -> Path:
+    """Resolve the local-workstation TotalSegmentator model root."""
     return _local_path_from_config("model_root", fallback=fallback)
 
 
 def _cluster_totalseg_model_from_config(*, fallback: Path | None) -> Path:
+    """Resolve the cluster TotalSegmentator model root."""
     return _cluster_path_from_config("model_root", fallback=fallback)
 
 

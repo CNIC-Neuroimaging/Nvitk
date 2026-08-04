@@ -35,6 +35,7 @@ _CMAP = "viridis"
 
 
 def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> np.ndarray:
+    """Union of *label_ids* in *label_img* as a boolean array."""
     if len(label_ids) == 1:
         m = get_label(label_img, label_ids[0], missing="empty").data
         return to_numpy(m) > 0
@@ -46,6 +47,7 @@ def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> np.ndarr
 
 
 def _metric_suffix(metric: str) -> str:
+    """NIfTI filename suffix for *metric* (``"FF"`` → ``"FAT_FRACTION"``, else ``"T2STAR"``)."""
     metric = str(metric).strip().upper()
     if metric not in _METRICS:
         metric = "FF"
@@ -76,6 +78,8 @@ def _render_heatmap_slice_png(
     metric_vmax: float,
     cmap: str,
 ) -> bytes:
+    """Render one axial slice as PNG bytes: a grayscale WATER-sequence underlay with the metric
+    heatmap composited only inside the ROI mask."""
     base = _flip_lr_2d(np.asarray(base_2d, dtype=np.float64))
     val = _flip_lr_2d(np.asarray(value_2d, dtype=np.float64))
     mask = _flip_lr_2d(np.asarray(mask_2d, dtype=bool))
@@ -111,6 +115,8 @@ def _heatmap_viewer_html(
     default_roi: str | None = None,
     slice_viewer_dom_id: str = "",
 ) -> str:
+    """Build the self-contained HTML/JS heatmap slice viewer widget (ROI + metric selectors, slice
+    range slider, synced with the plain slice viewer if *slice_viewer_dom_id* is given)."""
     roi_opts = "".join(f"<option value='{_safe_stem(r)}'>{r}</option>" for r in roi_names)
     key_map = {_safe_stem(r): r for r in roi_names}
     key_js = json.dumps(key_map)

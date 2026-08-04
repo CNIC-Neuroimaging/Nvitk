@@ -21,6 +21,8 @@ def main() -> None:
 
 
 def _write_metrics(output_path: Path, data: dict) -> None:
+    """Write *data* to *output_path* as pretty JSON (``.json`` suffix) or plain ``key: value`` lines
+    otherwise."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.suffix.lower() in (".json",):
         output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")

@@ -43,10 +43,13 @@ class FilterCondition:
 
 
 def _is_multi_value(value: Any) -> bool:
+    """True if *value* is a sequence type (list/tuple/set/...) rather than a scalar filter value."""
     return isinstance(value, _SEQUENCE_TYPES)
 
 
 def _normalize_op(op: str) -> str:
+    """Normalize a filter operator string/alias (``$gte``, ``>=``, ``isnull``, ...) to its canonical
+    name; raises ``FilterError`` if it doesn't resolve to a supported op."""
     normalized = op.strip().lower().lstrip("$")
     aliases = {
         "gte": "ge",
@@ -113,6 +116,8 @@ def normalize_filters(filters: Mapping[str, Any] | None) -> dict[str, list[Filte
 
 
 def _mask_for_condition(series: pd.Series, condition: FilterCondition) -> pd.Series:
+    """Boolean mask over *series* selecting rows that satisfy *condition* (equality, comparison,
+    membership, null checks, or substring containment)."""
     op = condition.op
     value = condition.value
 

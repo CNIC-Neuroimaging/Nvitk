@@ -60,6 +60,9 @@ SOURCE_LOCAL = 1
 
 
 class _QcLoadWorker(QThread):
+    """Background thread that downloads (or reuses cached) pipeline resources and phase NIfTIs for a
+    QC subject, so the GUI stays responsive during network I/O."""
+
     finished_ok = Signal(object)
     failed = Signal(str)
     progress = Signal(str)
@@ -76,6 +79,7 @@ class _QcLoadWorker(QThread):
         app_state: dict[str, Any],
         download_root: Path,
     ) -> None:
+        """Store the parameters needed to resolve/download the subject's pipeline resources."""
         super().__init__()
         self._pipeline = pipeline
         self._subject_uid = subject_uid
@@ -87,6 +91,9 @@ class _QcLoadWorker(QThread):
         self._download_root = download_root
 
     def run(self) -> None:
+        """Resolve the primary pipeline resource (cached locally or downloaded from XNAT), then best-
+        effort fetch companion ``4dflows`` and AP/RL/FH phase NIfTI resources; emits ``finished_ok``
+        with the collected roots or ``failed`` on error."""
         try:
             resource = (
                 XNAT_RESOURCE_QVTPY
@@ -171,6 +178,7 @@ def _default_local_roots() -> tuple[Path, Path]:
 
 
 def _list_subject_dirs(root: Path, prefix: str = "PESA") -> list[str]:
+    """Names of subdirectories under *root* whose name starts with *prefix* (case-insensitive)."""
     if not root.is_dir():
         return []
     out: list[str] = []
@@ -181,6 +189,8 @@ def _list_subject_dirs(root: Path, prefix: str = "PESA") -> list[str]:
 
 
 def _subject_has_pipeline_results(results_root: Path, subject: str, pipeline: str) -> bool:
+    """True if *subject* has *pipeline* (qvtpy or eicab) output under *results_root*, recognizing
+    bundled, unpacked-stage, and flat-export layouts."""
     subj = results_root / subject
     if not subj.is_dir():
         return False
@@ -217,6 +227,7 @@ class QcPanel(QWidget):
         on_inputs_opened: Callable[[list[str]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
+        """Build the source/pipeline pickers, XNAT/local stacked pages, subject list, and Load button."""
         super().__init__(parent)
         self._viewer = viewer
         self._app_state = app_state
@@ -288,6 +299,7 @@ class QcPanel(QWidget):
         self._on_source_changed()
 
     def _build_xnat_page(self) -> QWidget:
+        """Build the XNAT-source page: project picker and config-file path with browse button."""
         page = QWidget()
         self._project = QComboBox()
         for pid in list_xnat_project_ids():
@@ -327,6 +339,7 @@ class QcPanel(QWidget):
         return page
 
     def _build_local_page(self) -> QWidget:
+        """Build the local-source page: NIfTI root and results root path fields with browse buttons."""
         page = QWidget()
         default_nifti, default_results = _default_local_roots()
 
@@ -360,6 +373,7 @@ class QcPanel(QWidget):
         return page
 
     def _path_row(self, edit: QLineEdit) -> QWidget:
+        """Wrap *edit* with a "…" browse button that fills it from a directory picker."""
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
@@ -372,6 +386,7 @@ class QcPanel(QWidget):
         return row
 
     def _browse_into(self, edit: QLineEdit) -> None:
+        """Open a directory picker and set *edit*'s text to the chosen path, then reload subjects."""
         path = QFileDialog.getExistingDirectory(
             self, "Select directory", edit.text() or str(Path.home())
         )
@@ -380,6 +395,7 @@ class QcPanel(QWidget):
             self._reload_subjects()
 
     def _browse_xnat_config(self) -> None:
+        """Open a file picker for the XNAT config file and set the config-path field."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select XNAT config",
@@ -390,21 +406,27 @@ class QcPanel(QWidget):
             self._config_path.setText(path)
 
     def _is_xnat(self) -> bool:
+        """True if the currently selected QC source is XNAT (vs. local disk)."""
         return int(self._source.currentData() or SOURCE_XNAT) == SOURCE_XNAT
 
     def _on_source_changed(self) -> None:
+        """Switch the stacked page and Load button label for the newly selected source, then reload
+        the subject list."""
         is_xnat = self._is_xnat()
         self._stack.setCurrentIndex(SOURCE_XNAT if is_xnat else SOURCE_LOCAL)
         self._btn_load.setText("Load" if is_xnat else "Load from disk")
         self._reload_subjects()
 
     def _current_pipeline(self) -> str:
+        """The currently selected pipeline id (``"qvtpy"`` or ``"eicab"``)."""
         return str(self._pipeline.currentData() or PIPELINE_QVTPY)
 
     def _current_project(self) -> str:
+        """The currently selected XNAT project id."""
         return str(self._project.currentData() or "")
 
     def _required_slot(self) -> str:
+        """The catalog ``asset_slot`` corresponding to the currently selected pipeline's resource."""
         label = (
             XNAT_RESOURCE_QVTPY
             if self._current_pipeline() == PIPELINE_QVTPY
@@ -420,6 +442,7 @@ class QcPanel(QWidget):
             self._qc_statuses = {}
 
     def _reload_subjects(self) -> None:
+        """Refresh QC statuses and reload the subject list from the currently selected source."""
         self._refresh_qc_statuses()
         if self._is_xnat():
             self._reload_xnat_subjects()
@@ -427,6 +450,8 @@ class QcPanel(QWidget):
             self._reload_local_subjects()
 
     def _reload_xnat_subjects(self) -> None:
+        """Populate the subject list from the catalog's ``assets`` table, filtered to the required
+        pipeline resource slot and (if available) the currently selected XNAT project."""
         project_id = self._current_project()
         slot = self._required_slot()
         self._all_subjects = []
@@ -498,6 +523,8 @@ class QcPanel(QWidget):
         self._filter_subjects()
 
     def _reload_local_subjects(self) -> None:
+        """Populate the subject list by scanning the configured NIfTI/results root directories,
+        ordering subjects that already have the selected pipeline's results first."""
         pipeline = self._current_pipeline()
         nifti_root = Path(self._nifti_root.text().strip()).expanduser()
         results_root = Path(self._results_root.text().strip()).expanduser()
@@ -554,6 +581,8 @@ class QcPanel(QWidget):
     }
 
     def _filter_subjects(self) -> None:
+        """Rebuild the subject list widget from ``_all_subjects``, applying the search filter and
+        QC-status tags/colors."""
         needle = self._subject_search.text().strip().lower()
         self._subjects.clear()
         for row in self._all_subjects:
@@ -585,9 +614,11 @@ class QcPanel(QWidget):
         current: QListWidgetItem | None,
         _previous: QListWidgetItem | None,
     ) -> None:
+        """Enable the Load button once a subject is selected."""
         self._btn_load.setEnabled(current is not None)
 
     def _on_load(self) -> None:
+        """Dispatch the Load button to the XNAT or local subject loader based on the current source."""
         if self._worker is not None and self._worker.isRunning():
             notify("QC load already in progress.", error=True)
             return
@@ -602,6 +633,8 @@ class QcPanel(QWidget):
             self._on_load_local(row, item)
 
     def _on_load_xnat(self, row: dict[str, Any], item: QListWidgetItem) -> None:
+        """Prompt for the XNAT password and start a :class:`_QcLoadWorker` to download/cache the
+        selected subject's pipeline resources in the background."""
         subject_uid = str(row.get("subject_uid") or item.text())
         config_text = self._config_path.text().strip()
         if not config_text:
@@ -645,6 +678,8 @@ class QcPanel(QWidget):
         self._worker.start()
 
     def _on_load_local(self, row: dict[str, Any], item: QListWidgetItem) -> None:
+        """Resolve the selected subject's local results/NIfTI directories and load them directly
+        (synchronously, no background worker needed)."""
         subject_uid = str(row.get("subject_uid") or item.text().split()[0])
         results_path = Path(str(row.get("results_path") or "")).expanduser()
         nifti_path = Path(str(row.get("nifti_path") or "")).expanduser()
@@ -692,10 +727,13 @@ class QcPanel(QWidget):
             self._btn_load.setEnabled(self._subjects.currentItem() is not None)
 
     def _on_progress(self, message: str) -> None:
+        """Show a background-worker progress *message* in the status label and log panel."""
         self._status.setText(message)
         gui_log(message)
 
     def _on_load_ok(self, payload: object) -> None:
+        """Open the resolved pipeline layers into Napari and (for qvtpy) attach the QC review and
+        cohort violin docks."""
         assert isinstance(payload, dict)
         pipeline = str(payload["pipeline"])
         subject_uid = str(payload["subject_uid"])
@@ -748,15 +786,19 @@ class QcPanel(QWidget):
         self._filter_subjects()
 
     def _on_load_failed(self, message: str) -> None:
+        """Show the background worker's failure *message* in the status label and as a notification."""
         self._status.setText(message)
         notify(f"QC load failed: {message}", error=True)
 
     def _on_worker_finished(self) -> None:
+        """Re-enable the Load button and drop the finished worker reference."""
         self._btn_load.setEnabled(self._subjects.currentItem() is not None)
         self._worker = None
 
 
 def pd_concat_unique(a: Any, b: Any) -> Any:
+    """Concatenate two DataFrames and drop exact-duplicate rows, short-circuiting when either is
+    empty/``None``."""
     import pandas as pd
 
     if a is None or getattr(a, "empty", True):

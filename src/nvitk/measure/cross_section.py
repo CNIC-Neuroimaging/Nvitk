@@ -84,6 +84,7 @@ def tilt_corrected_spacing_mm(
 
 
 def _normalize_slice(sl: Any) -> Any:
+    """Scale a 2-D intensity slice to ``[0, 1]`` by its max value (all-zero if the max is non-positive)."""
     sl = as_backend_array(sl).astype(np.float64)
     hi = float(np.max(sl))
     if hi <= 0.0:
@@ -332,6 +333,7 @@ def _circularity_proxy(mask: np.ndarray) -> float:
 
 
 def _plane_res(radius_vox: float, interp_vals: int, cross_section_res: int) -> int:
+    """Supersampled oblique-plane grid size covering the vessel disk at *interp_vals* samples per voxel."""
     if cross_section_res > 0:
         return int(cross_section_res)
     r = float(radius_vox)
@@ -391,6 +393,7 @@ def _cross_section_area_mm2(
     plane_res: int,
     radius_vox: float,
 ) -> float:
+    """Physical cross-section area (mm²) of an oblique-plane mask, correcting per-pixel spacing for the cut angle."""
     px, py = tilt_corrected_spacing_mm(voxel_spacing, tangent)
     native_span = 2.0 * float(radius_vox) + 1.0
     scale = native_span / float(max(1, int(plane_res)))
@@ -579,6 +582,7 @@ def _through_plane_frame_mean(
     t_hat: np.ndarray,
     mask: np.ndarray,
 ) -> float:
+    """Masked mean through-plane velocity at time index *ti* (worker for parallel frame processing)."""
     vxsl = oblique_slice_with_coords(vx[..., ti], plane, order=order)
     vysl = oblique_slice_with_coords(vy[..., ti], plane, order=order)
     vzsl = oblique_slice_with_coords(vz[..., ti], plane, order=order)
@@ -633,6 +637,7 @@ def masked_plane_velocity_series(
         return out
 
     def _frame_task(ti: int) -> float:
+        """Thread-pool task closure binding the shared plane/mask/velocity args to one frame index."""
         return _through_plane_frame_mean(
             ti,
             vx=vx,

@@ -20,6 +20,7 @@ from nvitk.types.image import _is_dicom_tag_key
 
 
 def _nvitk_metadata(layer: Any | None) -> dict[str, Any]:
+    """*layer*'s nvitk metadata dict (the ``nvitk_metadata`` sub-key), or ``{}`` if unavailable."""
     if layer is None:
         return {}
     meta = getattr(layer, "metadata", None) or {}
@@ -42,6 +43,7 @@ def dicom_tags_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def layer_has_dicom_tags(layer: Any | None) -> bool:
+    """True if *layer* was loaded from DICOM or carries any DICOM tag metadata."""
     if layer is None:
         return False
     nv = _nvitk_metadata(layer)
@@ -51,6 +53,8 @@ def layer_has_dicom_tags(layer: Any | None) -> bool:
 
 
 def _format_tag_value(value: Any) -> str:
+    """Format a DICOM tag *value* for table display: joins sequences (truncated at 32 items) and
+    decodes bytes as UTF-8, else falls back to ``str()``."""
     if isinstance(value, (list, tuple)):
         parts = [_format_tag_value(v) for v in value[:32]]
         if len(value) > 32:
@@ -68,6 +72,7 @@ class DicomTagsPanel(QWidget):
     """Scrollable table of DICOM tags for the selected layer."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the search box, sortable tag/value table, and refresh button."""
         super().__init__(parent)
         self._status = QLabel("Select a layer loaded from DICOM to view tags.")
         self._status.setWordWrap(True)
@@ -125,6 +130,7 @@ class DicomTagsPanel(QWidget):
         self._last_layer: Any | None = None
 
     def _apply_search_filter(self, text: str = "") -> None:
+        """Hide table rows whose tag/value don't contain the (case-insensitive) search *text*."""
         query = (text or self._search.text() or "").strip().lower()
         for row in range(self._table.rowCount()):
             if not query:
@@ -137,9 +143,12 @@ class DicomTagsPanel(QWidget):
             self._table.setRowHidden(row, query not in tag and query not in val)
 
     def _refresh_last_layer(self) -> None:
+        """Re-render the DICOM tag table for whichever layer was last shown."""
         self.refresh_from_layer(self._last_layer)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
+        """Populate the tag table from *layer*'s DICOM metadata, or show a placeholder if *layer* is
+        ``None`` or has no DICOM tags."""
         self._last_layer = layer
         tags = dicom_tags_from_metadata(_nvitk_metadata(layer))
         self._table.setSortingEnabled(False)

@@ -39,6 +39,7 @@ from .storage import utc_now_iso
 
 
 def _is_nifti_path(path: Path) -> bool:
+    """True if *path* has a ``.nii`` or ``.nii.gz`` extension."""
     name = path.name.lower()
     return name.endswith(".nii.gz") or name.endswith(".nii")
 
@@ -54,6 +55,8 @@ def _nifti_stem(filename: str) -> str:
 
 
 def _normalize_slot_token(text: str) -> str:
+    """Lower-case *text* and collapse runs of non-alphanumeric characters into single underscores, for
+    building ``asset_slot`` names."""
     return re.sub(r"[^0-9a-z]+", "_", text.lower()).strip("_")
 
 
@@ -108,12 +111,15 @@ def _classify_4dflow_path(rel_posix: str, filename: str) -> tuple[str | None, st
 
 
 def _tof_slot_name(stem: str, *, multi: bool) -> str:
+    """``"tof"`` when there's a single TOF NIfTI per subject, else ``"tof_<normalized stem>"`` to keep
+    multiple TOF files distinct."""
     if multi:
         return f"tof_{_normalize_slot_token(stem)}"
     return "tof"
 
 
 def _iter_niftis_under(root: Path) -> Iterable[Path]:
+    """Yield every NIfTI file found anywhere under *root*, sorted; nothing if *root* isn't a directory."""
     if not root.is_dir():
         return
     for p in sorted(root.rglob("*")):
@@ -255,7 +261,10 @@ def upsert_nifti_assets(
 
 
 def _cli_decorator(*args: Any, **kwargs: Any):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func: Any) -> Any:
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -294,6 +303,8 @@ def main(
     dry_run: bool,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point: scaffold/open the dataset at ``dataset_root`` and register the reorganized
+    NIfTI tree at ``nifti_root`` into the ``assets`` table."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

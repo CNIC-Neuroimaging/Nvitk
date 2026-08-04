@@ -48,6 +48,7 @@ log = Logger()
 
 
 def _default_nvitk_src_dir() -> Path:
+    """The nvitk package's ``src`` directory (parent of the ``nvitk`` module), for container mounts."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
@@ -117,6 +118,7 @@ def _subject_sge_spec(
     n_workers: int | None = None,
     backend: str = "cpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE stage spec and cluster paths for running stage-7 morphometrics on *subject*."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -256,6 +258,7 @@ def main(
     input_already_smoothed: bool,
     n_workers: int | None,
 ) -> None:
+    """CLI entry point: run stage-7 TOF morphometrics for a single subject."""
     del backend
     run_subject(
         subject,

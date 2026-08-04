@@ -167,6 +167,7 @@ def _direction_anatomical(
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
+    """Unit-normalize 3-vector *v* (falls back to +SI if near-zero)."""
     x = to_numpy(v).astype(np.float64).ravel()[:3]
     n = float(np.linalg.norm(x))
     return x / n if n > 1e-9 else np.array([0.0, 0.0, 1.0], dtype=np.float64)
@@ -178,6 +179,7 @@ def _unit(v: np.ndarray) -> np.ndarray:
 
 
 def _principal_direction(points: np.ndarray) -> np.ndarray:
+    """Unit vector along the first principal component (SVD) of voxel *points*."""
     pts = to_numpy(points).astype(np.float64)
     if pts.shape[0] < 3:
         return np.array([0.0, 0.0, 1.0], dtype=np.float64)
@@ -189,6 +191,7 @@ def _principal_direction(points: np.ndarray) -> np.ndarray:
 
 
 def _alignment_score(direction: np.ndarray, reference: np.ndarray) -> float:
+    """Absolute cosine similarity between *direction* and *reference* (axis-agnostic, in [0, 1])."""
     d = _unit(direction)
     r = _unit(reference)
     return float(abs(np.dot(d, r)))
@@ -631,11 +634,13 @@ def _score_branch(
 
 
 def _mean_ap(points: np.ndarray, axes: RasAxes) -> float:
+    """Mean anatomical AP coordinate of *points*."""
     lr, ap, si = _anatomical_coords(to_numpy(points).astype(np.float64), axes)
     return float(np.mean(ap))
 
 
 def _mean_lr(points: np.ndarray, axes: RasAxes) -> float:
+    """Mean anatomical LR coordinate of *points*."""
     lr, ap, si = _anatomical_coords(to_numpy(points).astype(np.float64), axes)
     return float(np.mean(lr))
 
@@ -733,6 +738,7 @@ def _resolve_sssv_strv_ap_order(
 
 
 def _lr_abs_dev(points: np.ndarray, axes: RasAxes, confluence_lr: float) -> float:
+    """Absolute LR distance from *points*' mean position to *confluence_lr*."""
     return abs(_mean_lr(points, axes) - float(confluence_lr))
 
 
@@ -754,6 +760,8 @@ def _resolve_sssv_vs_transverse_x(
         return
 
     def _maybe_swap(trans_name: str) -> bool:
+        """Swap SSSV with the *trans_name* transverse sinus if that transverse sits closer to
+        midline than SSSV does; returns True if a swap was made."""
         if trans_name not in assigned:
             return False
         other = assigned[trans_name]

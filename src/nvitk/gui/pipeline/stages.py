@@ -22,6 +22,9 @@ class StageInputSpec:
 
 @dataclass(frozen=True)
 class PipelineStageSpec:
+    """One selectable stage in a GUI pipeline (id, display label, description, default on/off, and
+    required inputs)."""
+
     id: str
     label: str
     description: str = ""
@@ -31,6 +34,8 @@ class PipelineStageSpec:
 
 @dataclass(frozen=True)
 class PipelineStageDef:
+    """A whole GUI pipeline: its CLI command, display title, and ordered stage specs."""
+
     cli_command: str
     title: str
     stages: tuple[PipelineStageSpec, ...]
@@ -39,6 +44,8 @@ class PipelineStageDef:
 
 @dataclass
 class StageInputBinding:
+    """A user's chosen source (Napari layer or on-disk) for one stage input slot."""
+
     stage_id: str
     input_name: str
     source: str
@@ -56,6 +63,7 @@ CONVERT_STAGE_IDS: frozenset[str] = frozenset(
 
 
 def _default_enabled(stage_id: str, defaults: str) -> bool:
+    """True if *stage_id* is listed in a comma-separated *defaults* string."""
     default_ids = {s.strip() for s in defaults.split(",") if s.strip()}
     return stage_id in default_ids
 
@@ -63,11 +71,13 @@ def _default_enabled(stage_id: str, defaults: str) -> bool:
 def _exclude_setup_stages(
     specs: tuple[PipelineStageSpec, ...],
 ) -> tuple[PipelineStageSpec, ...]:
+    """Drop download/convert setup stages from *specs* (the GUI runs those separately)."""
     skip = DOWNLOAD_STAGE_IDS | CONVERT_STAGE_IDS
     return tuple(s for s in specs if s.id not in skip)
 
 
 def _qvtpy_stages() -> tuple[PipelineStageSpec, ...]:
+    """Build the GUI stage list for the QVTpy pipeline (excluding download/convert setup stages)."""
     from nvitk.pipes.qvtpy.stages import DEFAULT_STAGES, STAGE_LABELS, STAGES_ORDERED
 
     return _exclude_setup_stages(
@@ -85,6 +95,7 @@ def _qvtpy_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _bbtpy_stages() -> tuple[PipelineStageSpec, ...]:
+    """Build the GUI stage list for the BBTpy black-blood pipeline."""
     from nvitk.pipes.bbtpy.run import _DEFAULT_STAGES, _STAGE_LABELS
 
     order = ("stage1", "stage2")
@@ -101,6 +112,7 @@ def _bbtpy_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _gpetpy_stages() -> tuple[PipelineStageSpec, ...]:
+    """Build the GUI stage list for the GPETpy PET-brain-crop pipeline."""
     defaults = "stage1"
     order = ("stage1",)
     labels = {"stage1": "PET brain crop"}
@@ -117,6 +129,7 @@ def _gpetpy_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _pesa_ctpet_stages() -> tuple[PipelineStageSpec, ...]:
+    """Build the GUI stage list for the PESA-Fat CT-PET pipeline (segment, post-process, measure)."""
     labels = {
         "stage1": "Segment (TotalSegmentator)",
         "stage2": "Post-process masks",
@@ -137,6 +150,7 @@ def _pesa_ctpet_stages() -> tuple[PipelineStageSpec, ...]:
 
 
 def _pesa_dixon_stages() -> tuple[PipelineStageSpec, ...]:
+    """Build the GUI stage list for the PESA-Fat Dixon pipeline (segment, post-process, measure)."""
     labels = {
         "stage1": "Segment (Dixon fat)",
         "stage2": "Post-process masks",
@@ -301,10 +315,12 @@ PIPELINE_STAGE_DEFS: dict[str, PipelineStageDef] = {
 
 
 def pipeline_def_for_script(script_name: str) -> PipelineStageDef | None:
+    """Look up the registered :class:`PipelineStageDef` for a CLI *script_name*, or ``None``."""
     return PIPELINE_STAGE_DEFS.get(script_name)
 
 
 def _input_key(stage_id: str, slot: str) -> str:
+    """Composite UI key identifying one stage's input slot: ``"<stage_id>:<slot>"``."""
     return f"{stage_id}:{slot}"
 
 

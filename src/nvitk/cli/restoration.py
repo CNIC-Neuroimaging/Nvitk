@@ -29,6 +29,8 @@ def main() -> None:
 
 
 def _bilateral_runner(image, *, sigma_spatial: float | None, sigma_color: float | None, mode: str):
+    """Run bilateral denoising on *image*, estimating any unset ``sigma_spatial``/``sigma_color`` from
+    the data, and dispatching to the 2D/3D/auto variant per ``mode``."""
     if sigma_spatial is None or sigma_color is None:
         ss, sc = estimate_bilateral_parameters(image)
         sigma_spatial = sigma_spatial if sigma_spatial is not None else ss
@@ -92,6 +94,7 @@ def _n4_runner(
     rescale_intensities: bool,
     verbose: bool,
 ):
+    """Apply ANTs N4 bias-field correction to *image* with the parsed CLI parameters."""
     return n4_bias_field_correction(
         image,
         mask=mask,
@@ -156,6 +159,8 @@ def cmd_n4(
 
 
 def _parse_expansion(text: str) -> tuple[int, ...]:
+    """Parse ``--expansion-factor`` as either one integer (broadcast to all 3 axes) or three
+    comma/semicolon-separated integers; raises ``click.ClickException`` for any other shape."""
     parts = [p.strip() for p in str(text).replace(";", ",").split(",") if p.strip()]
     if len(parts) == 1:
         v = int(round(float(parts[0])))
@@ -169,6 +174,7 @@ def _parse_expansion(text: str) -> tuple[int, ...]:
 
 
 def _mri_sr_runner(image, *, expansion_factor: tuple[int, ...], feature: str, verbose: bool):
+    """Run ANTsPyNet MRI super-resolution on *image* with the parsed CLI parameters."""
     return mri_super_resolution(
         image,
         expansion_factor=expansion_factor,

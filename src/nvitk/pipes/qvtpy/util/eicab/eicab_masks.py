@@ -45,6 +45,7 @@ class EicabMaskResolution:
 
 
 def _stem_without_suffix(p: Path) -> str:
+    """*p*'s filename without a trailing ``.nii``/``.nii.gz`` extension."""
     if p.name.lower().endswith(".nii.gz"):
         return p.name[: -len(".nii.gz")]
     if p.name.lower().endswith(".nii"):
@@ -88,6 +89,7 @@ def find_tof_resampled_volume(eicab_output_dir: Path) -> Path | None:
 
 
 def _glob_first(eicab_dir: Path, patterns: tuple[str, ...]) -> Path | None:
+    """First file under *eicab_dir* matching any of *patterns* (in order), or ``None``."""
     for pat in patterns:
         hits = sorted(eicab_dir.glob(pat))
         if hits:

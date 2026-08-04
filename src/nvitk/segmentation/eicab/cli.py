@@ -32,6 +32,7 @@ def _default_nvitk_src_dir() -> Path:
 
 
 def _default_emit_script(input_path: Path) -> Path:
+    """Build a default, timestamped SGE submit-script path derived from the input filename."""
     stem = _SAFE.sub("_", input_path.stem.replace(".nii", ""))[:60]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg.DEFAULT_SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)

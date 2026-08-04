@@ -28,11 +28,13 @@ from nvitk.util.pyhelp_tree import (  # noqa: E402
 
 
 def _get_log():
+    """Lazily import and return the process-wide :class:`Logger` singleton."""
     from nvitk.core.logger import Logger
     return Logger()
 
 
 def categorize_command(cmd: str, module: str) -> str:
+    """Classify a CLI command name into a display category (Image Conversion, Segmentation, ...)."""
     if any(conv in cmd.lower() for conv in ("dcm2nii", "stl2nifti", "nikon2nifti", "phase2volume")):
         return "Image Conversion"
     if any(seg in cmd for seg in ("nvitk-totalseg", "nvitk-eicab")):
@@ -49,6 +51,7 @@ def categorize_command(cmd: str, module: str) -> str:
 
 
 def get_command_color(category: str) -> str:
+    """ANSI color code for a display category (falls back to white for unknown categories)."""
     color_map = {
         "Image Conversion": Colors.OKCYAN,
         "Segmentation": Colors.OKGREEN,
@@ -62,6 +65,7 @@ def get_command_color(category: str) -> str:
 
 
 def list_cli_commands_flat() -> None:
+    """Print every registered CLI command, grouped by category, in a flat (non-tree) console listing."""
     log = _get_log()
     pyproject_path = find_pyproject_toml()
     if not pyproject_path:

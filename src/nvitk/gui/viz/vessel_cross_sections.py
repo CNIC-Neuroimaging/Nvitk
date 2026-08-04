@@ -58,12 +58,14 @@ _TAB10 = (
 
 
 def _remove_layers_named(viewer: Any, names: set[str]) -> None:
+    """Remove every layer in *viewer* whose name is in *names*."""
     for lyr in list(viewer.layers):
         if lyr.name in names:
             viewer.layers.remove(lyr)
 
 
 def _intensity_volume(layer: Any) -> np.ndarray:
+    """*layer*'s data as a float64 host array, taking the magnitude of complex data."""
     data = to_numpy(layer.data)
     if np.iscomplexobj(data):
         data = np.abs(data)
@@ -71,14 +73,17 @@ def _intensity_volume(layer: Any) -> np.ndarray:
 
 
 def _overlay_metadata() -> dict[str, Any]:
+    """Layer metadata tag marking a layer as a vessel cross-section overlay (for cleanup)."""
     return {XS_OVERLAY_META: True}
 
 
 def _overlay_spatial_kwargs(reference_layer: Any) -> dict[str, Any]:
+    """Spatial (scale/affine) kwargs to align an overlay layer with *reference_layer*."""
     return layer_spatial_kwargs(reference_layer)
 
 
 def _configure_overlay_points_layer(layer: Any) -> None:
+    """Make a Points overlay layer non-editable and lock its interaction mode to pan/zoom."""
     try:
         layer.editable = False
     except Exception:
@@ -90,6 +95,7 @@ def _configure_overlay_points_layer(layer: Any) -> None:
 
 
 def _configure_overlay_shapes_layer(layer: Any) -> None:
+    """Make a Shapes overlay layer non-editable."""
     try:
         layer.editable = False
     except Exception:
@@ -97,6 +103,7 @@ def _configure_overlay_shapes_layer(layer: Any) -> None:
 
 
 def _is_left_mouse_button(event: Any) -> bool:
+    """True if the mouse *event* was triggered by the left button (or its identity is unknown)."""
     btn = getattr(event, "button", None)
     if btn in (0, 1, None):
         return True
@@ -105,6 +112,7 @@ def _is_left_mouse_button(event: Any) -> bool:
 
 
 def _overlay_edge_width(layer: Any) -> float:
+    """Line-overlay edge width scaled to *layer*'s finest voxel spacing (or a default if unavailable)."""
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
         return max(0.12, float(min(sp)) * 0.35)
@@ -112,6 +120,7 @@ def _overlay_edge_width(layer: Any) -> float:
 
 
 def _overlay_point_size(layer: Any) -> float:
+    """Point-overlay marker size scaled to *layer*'s finest voxel spacing (or 1.0 if unavailable)."""
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
         return max(0.4, float(min(sp)) * 1.2)
@@ -119,6 +128,7 @@ def _overlay_point_size(layer: Any) -> float:
 
 
 def _connect_pick_callback(target: Any, callback: Any) -> None:
+    """Register *callback* as the first mouse-drag handler on *target* (viewer or layer)."""
     try:
         target.mouse_drag_callbacks.insert(0, callback)
     except Exception:
@@ -126,6 +136,7 @@ def _connect_pick_callback(target: Any, callback: Any) -> None:
 
 
 def _disconnect_pick_callback(target: Any, callback: Any) -> None:
+    """Remove *callback* from *target*'s mouse-drag handlers, if present."""
     if target is None or callback is None:
         return
     try:
@@ -140,6 +151,8 @@ def _plane_square_corners(
     tangent: np.ndarray,
     radius_vox: float,
 ) -> np.ndarray:
+    """Four corner points of a square patch centered at *center*, spanning the plane perpendicular to
+    *tangent* with half-width *radius_vox*, for drawing the cross-section plane overlay."""
     from nvitk.measure.cross_section import plane_basis_from_tangent
 
     u, v = plane_basis_from_tangent(tangent)
@@ -167,6 +180,7 @@ def _pick_max_anchor_distance_vox(params: dict[str, Any]) -> float:
 
 
 def _normal_display_half_length_vox(layer: Any, radius_vox: float) -> float:
+    """Half-length (voxels) of the drawn normal-direction segment, scaled to *layer*'s spacing."""
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
         return max(0.8, float(min(sp)) * 1.8)
@@ -174,6 +188,7 @@ def _normal_display_half_length_vox(layer: Any, radius_vox: float) -> float:
 
 
 def _tangent_display_half_length_vox(layer: Any, radius_vox: float) -> float:
+    """Half-length (voxels) of the drawn tangent-direction segment (longer than the normal segment)."""
     return max(2.5, _normal_display_half_length_vox(layer, radius_vox) * 2.5)
 
 
@@ -232,12 +247,14 @@ def _tangent_display_paths_data(
 
 
 def _centerlines_layer_visible(centerlines_layer: Any | None) -> bool:
+    """True if *centerlines_layer* exists and is currently visible."""
     if centerlines_layer is None:
         return False
     return bool(getattr(centerlines_layer, "visible", True))
 
 
 def _voxel_spacing(layer: Any) -> tuple[float, float, float]:
+    """*layer*'s (x, y, z) voxel spacing, or ``(1.0, 1.0, 1.0)`` if unavailable."""
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
         return (float(sp[0]), float(sp[1]), float(sp[2]))
@@ -245,6 +262,8 @@ def _voxel_spacing(layer: Any) -> tuple[float, float, float]:
 
 
 def _params_from_dict(params: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw tool-panel *params* dict into the typed cross-section computation parameters
+    (radius, resolution, interpolation, resegment/supersampling flags, threshold algorithm)."""
     resegment = bool(params.get("measure_resegment", False))
     supersampling = bool(params.get("cs_supersampling", True))
     interp = bool(params.get("interpolate_plane", True)) and resegment
@@ -265,6 +284,7 @@ def _params_from_dict(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _label_color_map(centerlines: dict[int, np.ndarray]) -> dict[int, str]:
+    """Assign a stable Tab10 hex color to each centerline label id, in sorted-id order."""
     return {
         int(lbl): _TAB10[i % len(_TAB10)]
         for i, lbl in enumerate(sorted(centerlines.keys()))
@@ -399,6 +419,7 @@ def _default_centerline_point_colors(
     point_labels: np.ndarray,
     label_colors: dict[int, str],
 ) -> list[str]:
+    """Per-point face colors from each point's centerline label id."""
     return [label_colors[int(lbl)] for lbl in point_labels]
 
 
@@ -410,6 +431,8 @@ def _centerline_point_colors_for_pick(
     window: int,
     label_colors: dict[int, str],
 ) -> list[str]:
+    """Per-point colors highlighting the picked point and its tangent-window neighbors on top of the
+    default per-label coloring."""
     colors = _default_centerline_point_colors(point_labels, label_colors)
     pts = centerlines.get(int(pick.label))
     if pts is None:
@@ -433,6 +456,8 @@ def _add_centerline_points_layer(
     *,
     reference_layer: Any,
 ) -> tuple[Any, np.ndarray, dict[int, str]] | tuple[None, np.ndarray, dict[int, str]]:
+    """Add a non-editable Points overlay for every centerline point, colored by vessel label; returns
+    ``(layer_or_None, point_labels, label_colors)``."""
     stacked, point_labels = _stack_centerline_points(centerlines)
     label_colors = _label_color_map(centerlines)
     if stacked.shape[0] == 0:
@@ -457,6 +482,8 @@ def _add_centerline_paths(
     reference_layer: Any,
     smooth_display: bool = True,
 ) -> Any:
+    """Add a non-editable Shapes path overlay for every centerline (one path per label, color-coded),
+    optionally smoothing the display polyline; returns the layer or ``None`` if there's nothing to draw."""
     paths = []
     colors = []
     for i, lbl in enumerate(sorted(centerlines.keys())):
@@ -499,6 +526,7 @@ def _add_seg_labels(
     *,
     reference_layer: Any,
 ) -> Any:
+    """Add *seg* as a translucent Labels overlay, aligned to *reference_layer*'s spatial metadata."""
     kwargs = {"name": XS_SEG, "opacity": 0.25}
     kwargs.update(layer_spatial_kwargs(reference_layer))
     return viewer.add_labels(seg.astype(np.int32), **kwargs)
@@ -715,6 +743,8 @@ def install_vessel_cross_sections(
     }
 
     def _update_plane_and_normal(pick: CenterlinePick, tangent: np.ndarray) -> None:
+        """Create (once) or update the cross-section plane square and normal-direction line overlays
+        for the current *pick*/*tangent*."""
         nonlocal plane_layer, normal_layer
         corners = _plane_square_corners(pick.point, tangent, p["radius_vox"])
         normal_data = _normal_half_line_data(
@@ -761,6 +791,8 @@ def install_vessel_cross_sections(
             normal_layer.data = [normal_data]
 
     def _update_tangent_visual(pick: CenterlinePick, tangent: np.ndarray) -> None:
+        """Highlight the picked centerline point and its tangent-window neighbors, and create/update
+        the arrowed tangent-line overlay for the current *pick*/*tangent*."""
         nonlocal tangent_layer
         cl_layer = state.get("cl_points_layer")
         point_labels = state.get("cl_point_labels")
@@ -805,6 +837,8 @@ def install_vessel_cross_sections(
             tangent_layer.edge_width = tang_edge_w
 
     def _apply_pick(pick: CenterlinePick, click_xyz: np.ndarray) -> None:
+        """Compute the oblique cross-section at *pick*, update all overlay layers (pick marker, plane,
+        normal, tangent, highlighted centerline points), and render the slice/waveforms in the dock."""
         pts = centerlines[pick.label]
         tang = tangent_from_centerline(
             pts,
@@ -881,6 +915,8 @@ def install_vessel_cross_sections(
         return view_ray_via_layer(intensity_layer, event, viewer=viewer)
 
     def _try_pick_from_event(event: Any, *, ndisplay: int) -> CenterlinePick | None:
+        """Attempt to pick the nearest centerline point/segment from a mouse *event*, using the 3D
+        view-ray when in 3D display mode, else a direct data-coordinate distance search."""
         pos = getattr(event, "position", None)
         if pos is None:
             pos = getattr(getattr(viewer, "cursor", None), "position", None)
@@ -906,6 +942,8 @@ def install_vessel_cross_sections(
         )
 
     def _on_mouse_pick(viewer_obj: Any, event: Any) -> None:
+        """Left-click handler in 3D view: pick the nearest centerline point/segment near the click and
+        apply the cross-section pick, when picking is enabled and centerlines are visible."""
         if getattr(event, "type", None) != "mouse_press":
             return
         if not _is_left_mouse_button(event):

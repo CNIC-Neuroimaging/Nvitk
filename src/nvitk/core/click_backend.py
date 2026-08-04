@@ -22,6 +22,7 @@ def backend_click_option(*, default: str = "gpu") -> Callable[[F], F]:
     """Decorator: add ``--backend cpu|gpu`` and call :func:`set_default_backend` before the command."""
 
     def decorator(f: F) -> F:
+        """Attach the ``--backend`` option and the backend-applying wrapper to *f*."""
         f = click.option(
             "--backend",
             type=click.Choice(["cpu", "gpu"], case_sensitive=False),
@@ -34,6 +35,7 @@ def backend_click_option(*, default: str = "gpu") -> Callable[[F], F]:
 
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Apply the chosen backend, then invoke the command (forwarding ``backend`` if it accepts it)."""
             backend_val = kwargs.pop("backend", default)
             apply_cli_backend(backend_val)
             if accepts_backend:

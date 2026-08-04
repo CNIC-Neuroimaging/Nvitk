@@ -18,6 +18,8 @@ log = Logger()
 
 
 def _require_pyvista():
+    """Configure headless rendering and import PyVista, raising ``ImportError`` with an install hint
+    if it's not installed."""
     configure_headless_viz()
     try:
         import pyvista as pv
@@ -29,6 +31,7 @@ def _require_pyvista():
 
 
 def _distinct_colors(n: int, *, sat: float = 0.65, val: float = 0.95) -> list[tuple[float, float, float]]:
+    """*n* RGB colors evenly spaced around the hue wheel at fixed saturation/value."""
     if n <= 0:
         return []
     return [colorsys.hsv_to_rgb(i / max(n, 1), sat, val) for i in range(n)]
@@ -78,6 +81,8 @@ def _high_contrast_colors(n: int) -> list[tuple[float, float, float]]:
 
 
 def _spacing_origin_direction(metadata: dict | None) -> tuple[tuple[float, float, float], tuple[float, float, float], np.ndarray | None]:
+    """Derive ``(spacing, origin, direction_matrix)`` for a PyVista ``ImageData`` grid from nvitk image
+    metadata's ``spacing``/``affine`` (or ``x_res``/``y_res``/``z_res`` as a fallback)."""
     md = metadata or {}
     sp = md.get("spacing")
     if sp is None:
@@ -100,6 +105,7 @@ def _spacing_origin_direction(metadata: dict | None) -> tuple[tuple[float, float
 
 
 def _grid_from_binary(pv, bin_u8: np.ndarray, *, spacing: tuple[float, float, float], origin: tuple[float, float, float], direction: np.ndarray | None):
+    """Build a PyVista ``ImageData`` grid from a binary/label volume with the given spatial metadata."""
     grid = pv.ImageData(
         dimensions=bin_u8.shape,
         spacing=spacing,

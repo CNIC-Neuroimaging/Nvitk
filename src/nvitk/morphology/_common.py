@@ -11,10 +11,12 @@ setup(globals())
 
 
 def _as_array(obj: Image | Any) -> Any:
+    """Unwrap an :class:`Image` to its voxel array; pass raw arrays through."""
     return obj.data if isinstance(obj, Image) else obj
 
 
 def _wrap_like(original: Image | Any, data: Any) -> Image | Any:
+    """Re-wrap *data* as an :class:`Image` when *original* was one; else return *data*."""
     if isinstance(original, Image):
         return original.with_data(data)
     return data

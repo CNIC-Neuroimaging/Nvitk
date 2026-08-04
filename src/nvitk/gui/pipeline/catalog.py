@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PipelineGuiSpec:
+    """GUI-facing metadata for one installed pipeline CLI command (id, label, command, description)."""
+
     id: str
     label: str
     cli_command: str

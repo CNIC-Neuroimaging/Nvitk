@@ -8,10 +8,14 @@ from typing import Any
 import numpy as np
 
 from nvitk.core.array import to_numpy
+from nvitk.core.backend import using
+from nvitk.morphology import keep_largest_components
 
 
 @dataclass(frozen=True)
 class ToolPreset:
+    """A named set of default parameter values for a GUI tool (key, display title, params, hint text)."""
+
     key: str
     title: str
     params: dict[str, Any]
@@ -48,14 +52,17 @@ _PRESETS: dict[str, dict[str, ToolPreset]] = {
 
 
 def presets_for_tool(tool_id: str) -> tuple[ToolPreset, ...]:
+    """All registered presets for *tool_id*, empty if the tool has none."""
     return tuple(_PRESETS.get(tool_id, {}).values())
 
 
 def preset_choices_for_tool(tool_id: str) -> tuple[str, ...]:
+    """Display titles of *tool_id*'s presets, for populating a combo box."""
     return tuple(p.title for p in presets_for_tool(tool_id))
 
 
 def preset_key_from_title(tool_id: str, title: str) -> str:
+    """Resolve a preset's display *title* back to its key for *tool_id*; ``"custom"`` if unmatched."""
     for p in presets_for_tool(tool_id):
         if p.title == title:
             return p.key
@@ -63,6 +70,7 @@ def preset_key_from_title(tool_id: str, title: str) -> str:
 
 
 def get_preset(tool_id: str, key: str) -> ToolPreset | None:
+    """Look up the preset registered under *key* for *tool_id*, or ``None``."""
     return _PRESETS.get(tool_id, {}).get(key)
 
 
@@ -83,14 +91,11 @@ def label_centroid_voxel(mask: np.ndarray, label_id: int) -> tuple[int, int, int
     comp = arr == int(label_id)
     if not np.any(comp):
         raise ValueError(f"Label {label_id} not found in the active mask.")
+    # Reduce to the largest connected component (base tool) so the seed centroid
+    # is not dragged toward a stray island. ``comp`` is already host-side.
     try:
-        from scipy import ndimage as ndi
-
-        labeled, n = ndi.label(comp)
-        if n > 1:
-            sizes = ndi.sum(comp, labeled, range(1, n + 1))
-            keep = int(1 + int(np.argmax(sizes[1:])))
-            comp = labeled == keep
+        with using("numpy"):
+            comp = to_numpy(keep_largest_components(comp, n=1)).astype(bool)
     except Exception:
         pass
     coords = np.argwhere(comp)

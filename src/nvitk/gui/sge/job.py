@@ -25,6 +25,7 @@ JOB_JSON = "job.json"
 
 
 def _resolve_layer(viewer: Any, name: str) -> Any:
+    """Look up the layer named *name* in *viewer*; raises ``ValueError`` if blank or not found."""
     name = str(name or "").strip()
     if not name:
         raise ValueError("Select a reference layer.")
@@ -35,12 +36,15 @@ def _resolve_layer(viewer: Any, name: str) -> Any:
 
 
 def _export_layer(layer: Any, path: Path) -> None:
+    """Write *layer* to *path* as a NIfTI image, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     imsave(path, layer_to_image(layer))
 
 
 @dataclass
 class AuxLayerSpec:
+    """One auxiliary input layer (e.g. a mask or reference) staged alongside a job's main input."""
+
     param: str
     file: str
     layer_name: str
@@ -48,6 +52,8 @@ class AuxLayerSpec:
 
 @dataclass
 class GuiSgeJob:
+    """A GUI-staged tool invocation ready for local export and remote SGE submission."""
+
     job_id: str
     tool_id: str
     params: dict[str, Any]
@@ -59,12 +65,15 @@ class GuiSgeJob:
     gpu: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize this job to a JSON-safe dict (``job.json`` payload), keying ``aux_layers`` by
+        parameter name."""
         d = asdict(self)
         d["aux_layers"] = {a.param: {"file": a.file, "layer_name": a.layer_name} for a in self.aux_layers}
         return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GuiSgeJob:
+        """Parse a ``job.json`` payload back into a :class:`GuiSgeJob` (inverse of :meth:`to_dict`)."""
         aux_raw = data.get("aux_layers") or {}
         aux = []
         if isinstance(aux_raw, dict):
@@ -99,6 +108,8 @@ def build_remote_paths(remote_job_root: str) -> tuple[str, str, str]:
 
 
 def _json_safe(value: Any) -> Any:
+    """Recursively coerce *value* into something ``json.dumps`` can serialize, stringifying any type
+    it doesn't otherwise recognize."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (list, tuple)):
@@ -109,11 +120,14 @@ def _json_safe(value: Any) -> Any:
 
 
 def _new_job_id(tool_id: str) -> str:
+    """Generate a unique job id: ``<timestamp>_<tool_id>_<short uuid>``."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{tool_id}_{uuid.uuid4().hex[:8]}"
 
 
 def _staging_root() -> Path:
+    """Create and return a fresh temp directory for local job staging, under ``NVITK_SGE_STAGING`` if
+    set, else the system temp directory."""
     base = os.environ.get("NVITK_SGE_STAGING", "").strip()
     if base:
         root = Path(base)

@@ -221,6 +221,8 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
 
 
 def tool_description_text(tool_id: str, *, fallback_label: str = "") -> str:
+    """Human-readable description for *tool_id* from ``TOOL_DESCRIPTIONS``, falling back to
+    *fallback_label* (or a generic prompt) when no description or tool id is available."""
     if not tool_id:
         return "Select a category and operation."
     text = TOOL_DESCRIPTIONS.get(tool_id, "").strip()

@@ -25,6 +25,8 @@ from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
 
 
 def _collect_params(widget: Any, tool_id: str) -> dict[str, Any]:
+    """Read the current values of *tool_id*'s parameter widgets off *widget* into a plain dict
+    (layer-picker params are coerced to their layer-name string)."""
     out = {}
     for pspec in params_for_tool(tool_id):
         w = getattr(widget, pspec.name, None)
@@ -39,6 +41,8 @@ def _collect_params(widget: Any, tool_id: str) -> dict[str, Any]:
 
 
 def _set_param_visibility(widget: Any, tool_id: str) -> None:
+    """Show only the parameter widgets on *widget* that *tool_id* actually uses; hide the rest of the
+    shared parameter pool."""
     visible = {p.name for p in params_for_tool(tool_id)}
     all_names = (
         "footprint",
@@ -244,6 +248,9 @@ _LAYER_NONE = "(none)"
 
 
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
+    """Refresh every reference/barrier/mask layer-picker widget on *widget* with the viewer's current
+    layer names, adding a "(none)" option for the optional pickers and re-validating each widget's
+    current selection against the new choice list."""
     names = [lyr.name for lyr in viewer.layers]
     optional_choices = [_LAYER_NONE, *names]
     _optional_layer_attrs = (
@@ -293,6 +300,8 @@ def _prefill_vessel_cross_section_layers(widget: Any, viewer: Any) -> None:
 
 
 def _update_phase_layers(widget: Any, viewer: Any) -> None:
+    """Alias for :func:`_update_reference_layers`, kept for call sites conceptually refreshing
+    per-phase layer pickers."""
     _update_reference_layers(widget, viewer)
 
 
@@ -939,6 +948,8 @@ def build_tool_panel(
         flip_z: bool,
         reset_affine: bool,
     ) -> None:
+        """Run the tool selected by ``category``/``operation`` on the active (or last) layer with the
+        collected parameters, then add or replace a layer with the result and record the step."""
         if not viewer.layers:
             notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)
             return
@@ -1071,9 +1082,11 @@ def build_tool_panel(
         on_layers_changed()
 
     def _signal_value(event: Any) -> Any:
+        """Extract the new value from a magicgui change *event* (or pass through a raw value)."""
         return event.value if hasattr(event, "value") else event
 
     def _sync_operation_help() -> None:
+        """Refresh the read-only operation-help text box for the current category/operation selection."""
         cat = tool_panel.category.value
         op = tool_panel.operation.value
         tid = tool_id_from_label(cat, op)
@@ -1081,6 +1094,8 @@ def build_tool_panel(
 
     @tool_panel.category.changed.connect
     def _on_category_changed(event) -> None:
+        """Repopulate the operation dropdown for the newly selected category and resync parameter
+        visibility and help text."""
         cat = _signal_value(event)
         ops = operations_for_category(cat)
         tool_panel.operation.choices = ops
@@ -1093,6 +1108,8 @@ def build_tool_panel(
 
     @tool_panel.operation.changed.connect
     def _on_operation_changed(event) -> None:
+        """Resync parameter visibility, reference-layer choices, and help text for the newly selected
+        operation."""
         tid = tool_id_from_label(tool_panel.category.value, _signal_value(event))
         if tid:
             _set_param_visibility(tool_panel, tid)
@@ -1110,6 +1127,7 @@ def build_tool_panel(
 
     @tool_panel.pipeline_preset.changed.connect
     def _on_preset_changed(event) -> None:
+        """Apply the newly selected pipeline preset's parameter values (region-grow tool only)."""
         tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value)
         if tid != "seg_region_grow":
             return

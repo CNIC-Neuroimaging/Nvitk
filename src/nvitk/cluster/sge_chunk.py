@@ -40,6 +40,7 @@ def warn_if_chunk_exceeds_sge_limit(
     max_jobs: int = 1000,
     margin: int = 10,
 ) -> None:
+    """Log a warning if a chunk's total job count (chunk_size × jobs_per_subject) would approach the SGE array-job cap."""
     need = int(chunk_size) * int(jobs_per_subject)
     cap = int(max_jobs) - int(margin)
     if jobs_per_subject > 0 and need > cap:

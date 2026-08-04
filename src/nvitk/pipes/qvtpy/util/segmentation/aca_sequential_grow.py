@@ -75,6 +75,8 @@ _NEI26: tuple[tuple[int, int, int], ...] = tuple(
 
 
 def _dilate_seed_mask(seed_mask: np.ndarray, *, radius: int) -> np.ndarray:
+    """Binary-dilate *seed_mask* by *radius* voxels (connectivity 1); no-op for radius <= 0 or an empty
+    mask."""
     seeds = as_backend_array(seed_mask).astype(bool)
     if int(radius) <= 0 or not np.any(seeds):
         return seeds
@@ -276,6 +278,7 @@ def _aca_neighbour_label_ids(label_id: int) -> frozenset[int]:
 
 
 def _parent_ica_id(label_id: int) -> int:
+    """The parent ICA label id (L or R) for an ACA *label_id*."""
     return int(QVTPY_LICA) if int(label_id) == int(QVTPY_LACA) else int(QVTPY_RICA)
 
 
@@ -598,6 +601,9 @@ def _geodesic_voronoi_aca_masks(
 
 @dataclass(frozen=True)
 class _AcaPlaneSplitResult:
+    """Result of splitting a combined ACA mask into left/right components along a plane through the
+    AComm junction."""
+
     laca_mask: np.ndarray
     raca_mask: np.ndarray
     junction: tuple[int, int, int] | None

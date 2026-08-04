@@ -26,6 +26,7 @@ class CohortViolinPanel(QWidget):
     """Interactive cohort violin plot with IQR rem + selected-subject highlight."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the metric selector, status label, and Matplotlib canvas/toolbar for the panel."""
         super().__init__(parent)
         self._title = QLabel()
         self._title.setWordWrap(True)
@@ -104,6 +105,8 @@ class CohortViolinPanel(QWidget):
         self._render_current()
 
     def _render_current(self, _index: int | None = None) -> None:
+        """Redraw the violin plot for the currently selected metric, or a placeholder message if no
+        cohort data is loaded."""
         if self._fig is None or self._canvas is None:
             return
         key = self._metric_selector.currentData() or "flow"

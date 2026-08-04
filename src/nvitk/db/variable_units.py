@@ -118,6 +118,8 @@ CURATED_VARIABLE_UNITS: list[dict[str, Any]] = [
 
 
 def _harvest_units_from_table(repo: DataRepo, table: str) -> dict[str, str]:
+    """Derive a ``{variable_id: unit}`` map from *table*'s recorded ``unit`` values, taking the most
+    common non-empty unit per variable; empty if the table is missing or has no ``unit`` data."""
     if not repo.catalog.table_exists(table):
         return {}
     df = repo.get(table, columns=["variable_id", "unit"], cohort_id=False, wide=False)
@@ -132,6 +134,7 @@ def _harvest_units_from_table(repo: DataRepo, table: str) -> dict[str, str]:
 
 
 def _catalog_variable_lookup(repo: DataRepo) -> dict[str, dict[str, Any]]:
+    """Build a ``{variable_id: entry}`` map from the catalog's registered variable entries."""
     lookup: dict[str, dict[str, Any]] = {}
     for entry in repo.catalog.variables_manifest.get("variables", []):
         variable_id = str(entry.get("variable_id", "")).strip()

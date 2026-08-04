@@ -67,6 +67,7 @@ class CenterlinePick:
 
 
 def _segment_vertex_index(i: int, n_pts: int, t: float) -> int:
+    """Round a fractional pick position along segment *i* to its nearer endpoint vertex index."""
     if t >= 0.5:
         return min(i + 1, n_pts - 1)
     return i

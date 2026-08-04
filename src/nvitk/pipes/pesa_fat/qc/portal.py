@@ -25,6 +25,8 @@ def review_widget_html(
     structures: Iterable[str],
     report_relpath: str,
 ) -> str:
+    """Self-contained HTML/JS review widget (per-structure QC status/comment rows, Excel
+    autosave, DB sync button) embedded into a subject's QC report."""
     from nvitk.pipes.pesa_fat.qc.review_policy import REVIEW_ASPECTS, REVIEW_ASPECT_LABELS
 
     structs = [str(s).strip() for s in structures if str(s).strip()]
@@ -166,21 +168,26 @@ def review_widget_html(
 
 
 def _safe(s: str) -> str:
+    """*s* with any character outside ``[A-Za-z0-9_-]`` replaced by ``_``, for DOM-safe ids."""
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
 
 
 def _reviewable_entry(structure: str, aspect: str, *, pipeline: str) -> bool:
+    """Delegate to :func:`nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry`."""
     from nvitk.pipes.pesa_fat.qc.review_policy import is_reviewable_entry
 
     return is_reviewable_entry(structure, aspect, pipeline=pipeline)
 
 
 def _utc_now_iso() -> str:
+    """Current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
 class ReviewRow:
+    """One QC review entry (structure/aspect status + reviewer metadata) for the reviews sheet."""
+
     batch: str
     subject: str
     pipeline: str
@@ -208,6 +215,8 @@ _HEADERS = [
 
 
 def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
+    """Insert or update *row* in the ``reviews.xlsx`` workbook at *path*, keyed on
+    (batch, subject, pipeline, structure, review_aspect)."""
     try:
         import openpyxl
     except Exception as exc:
@@ -234,6 +243,8 @@ def upsert_review_row_excel(path: Path, row: ReviewRow) -> None:
             ws.cell(row=1, column=i, value=h)
 
     def key_match(r: int) -> bool:
+        """True if worksheet row *r* has the same (batch, subject, pipeline, structure,
+        review_aspect) key as *row*."""
         vals = tuple(ws.cell(row=r, column=i).value for i in range(1, 6))
         want = (row.batch, row.subject, row.pipeline, row.structure, row.review_aspect)
         return vals == want
@@ -295,6 +306,7 @@ def create_qc_portal_app(
 
     @app.middleware("http")
     async def _no_cache_html(request, call_next):
+        """Middleware: disable caching on HTML responses so reviewers always see live state."""
         response = await call_next(request)
         ctype = response.headers.get("content-type", "")
         if "text/html" in ctype or request.url.path.endswith(".html"):
@@ -313,6 +325,7 @@ def create_qc_portal_app(
 
         @app.get("/", response_class=HTMLResponse)
         async def dashboard():
+            """``GET /``: render the batch-listing dashboard (with a default-batch link if set)."""
             html = _dashboard_html(results_root=results_root_eff, reviews_xlsx=reviews_xlsx)
             if default_batch:
                 # Offer a prominent link to the default batch when provided.
@@ -327,6 +340,7 @@ def create_qc_portal_app(
 
         @app.get("/batch/{batch}")
         async def go_batch(batch: str):
+            """``GET /batch/{batch}``: redirect to that batch's QC index HTML."""
             batch = str(batch).strip()
             if not batch:
                 return RedirectResponse(url="/")
@@ -335,6 +349,7 @@ def create_qc_portal_app(
         # No results root context: default to qc_root index.
         @app.get("/")
         async def root_redirect():
+            """``GET /`` (no results-root context): redirect to the single mounted QC index."""
             return RedirectResponse(url="/qc/index.html")
 
     @app.get("/review/state")
@@ -343,6 +358,8 @@ def create_qc_portal_app(
         subject: str,
         pipeline: str,
     ):
+        """``GET /review/state``: saved review rows (status/reviewer/comment per structure/aspect)
+        for one batch/subject/pipeline."""
         batch = str(batch).strip()
         subject = str(subject).strip()
         pipeline = str(pipeline).strip()
@@ -366,6 +383,7 @@ def create_qc_portal_app(
 
     @app.post("/review")
     async def post_review(payload: dict[str, Any]):
+        """``POST /review``: validate and upsert one review row into ``reviews.xlsx``."""
         from nvitk.pipes.pesa_fat.qc.review_policy import DEFAULT_REVIEW_ASPECT
 
         try:
@@ -400,6 +418,8 @@ def create_qc_portal_app(
 
     @app.post("/review/sync-db")
     async def sync_review_db(payload: dict[str, Any]):
+        """``POST /review/sync-db``: publish this batch/subject/pipeline's reviewed structures
+        and measurements to the NVITK DB + SQLite index."""
         batch = str(payload.get("batch", "")).strip()
         subject = str(payload.get("subject", "")).strip()
         pipeline = str(payload.get("pipeline", "")).strip()
@@ -528,6 +548,7 @@ def _portal_status(rows: list[ReviewRow], *, pipeline: str) -> tuple[str, str]:
 
 
 def _discover_batches(results_root: Path) -> list[str]:
+    """Batch names under *results_root* that have a ``res_qc/index.html`` report."""
     root = Path(results_root)
     if not root.is_dir():
         return []
@@ -562,6 +583,7 @@ def _discover_processed_subjects(results_root: Path) -> list[dict[str, str]]:
 
 
 def _esc(s: str) -> str:
+    """HTML-escape *s* (``&<>"``)."""
     return (
         str(s)
         .replace("&", "&amp;")
@@ -572,6 +594,7 @@ def _esc(s: str) -> str:
 
 
 def _dashboard_html(*, results_root: Path, reviews_xlsx: Path) -> str:
+    """Render the portal's batch-listing dashboard page (batches, subjects, review status)."""
     batches = _discover_batches(results_root)
     review_rows = _read_reviews_xlsx(reviews_xlsx)
 

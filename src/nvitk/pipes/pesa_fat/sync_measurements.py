@@ -46,6 +46,8 @@ FromSource = Literal["local", "sge"]
 
 @dataclass
 class SyncResult:
+    """Running tally of a measurement-sync operation: published/skipped/downloaded counts and errors."""
+
     published: int = 0
     skipped: int = 0
     downloaded: int = 0
@@ -53,6 +55,8 @@ class SyncResult:
 
 
 def _normalize_pipelines(pipelines: str) -> list[PesaFatQcPipeline]:
+    """Parse a comma-separated ``--pipelines`` string into validated pipeline names; raises
+    ``click.BadParameter`` for any unknown pipeline."""
     pipes = [p.strip().lower() for p in pipelines.split(",") if p.strip()]
     bad = set(pipes) - set(PIPELINE_CHOICES)
     if bad:
@@ -65,6 +69,8 @@ def _resolve_ssh_credentials(
     remote_host: str | None,
     remote_user: str | None,
 ) -> tuple[str, str, str]:
+    """Resolve SSH ``(host, user, password)`` for cluster download: from args, then env vars, then
+    interactive prompts (resolving *host* through the cluster alias map)."""
     host = (remote_host or os.environ.get("NVITK_SGE_SSH_HOST", "")).strip()
     user = (remote_user or os.environ.get("NVITK_SGE_SSH_USER", "")).strip()
     password = os.environ.get("NVITK_SGE_SSH_PASSWORD", "")
@@ -83,6 +89,8 @@ def _measurement_pairs(
     subjects: list[str],
     pipelines: list[PesaFatQcPipeline],
 ) -> list[tuple[str, PesaFatQcPipeline, Path]]:
+    """Build ``(subject, pipeline, xlsx_path)`` triples for every subject/pipeline combination under
+    *lay*."""
     pairs: list[tuple[str, PesaFatQcPipeline, Path]] = []
     for subject in subjects:
         for pipeline in pipelines:
@@ -149,6 +157,8 @@ def _publish_measurements(
     dry_run: bool,
     skip_db: bool,
 ) -> SyncResult:
+    """Publish each ready measurement workbook to the database (or, with *skip_db*, just verify the
+    local file exists), tracking published/skipped counts and errors."""
     result = SyncResult()
     if skip_db:
         for subject, pipeline, path in pairs:

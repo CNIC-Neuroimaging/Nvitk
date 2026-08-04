@@ -80,6 +80,8 @@ ANTSPY_TYPE_OF_TRANSFORM: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class AntsRegistrationResult:
+    """Paths produced by an ANTs registration: warped moving image and forward/inverse transforms."""
+
     warped_moving_path: Path
     fwd_transforms: tuple[Path, ...]
     inv_transforms: tuple[Path, ...]
@@ -87,6 +89,7 @@ class AntsRegistrationResult:
 
 
 def _require_ants() -> Any:
+    """Import and return the ``ants`` module, or raise a clear install hint."""
     try:
         import ants
     except Exception as exc:

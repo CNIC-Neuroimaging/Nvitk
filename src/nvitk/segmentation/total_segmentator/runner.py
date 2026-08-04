@@ -21,6 +21,7 @@ log = Logger()
 
 
 def _which_totalseg() -> str:
+    """Resolve the ``TotalSegmentator`` executable on ``PATH`` or raise a clear error."""
     exe = shutil.which("TotalSegmentator")
     if exe is None:
         raise RuntimeError(

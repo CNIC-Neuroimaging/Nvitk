@@ -19,6 +19,7 @@ __all__ = [
 
 
 def _map_sex_to_numeric(series: pd.Series) -> pd.Series:
+    """Coerce a sex column (numeric, or text like ``\"M\"``/``\"female\"``) to ``1``=male / ``0``=female."""
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce")
     s = series.astype(str).str.strip().str.lower()
@@ -135,6 +136,7 @@ def _rowwise_agg_across_columns(
     *,
     agg: str,
 ) -> pd.Series:
+    """Row-wise aggregate (mean/median/sum/min/max) of *df*'s numeric *cols*, coercing non-numeric to NaN."""
     if not cols:
         return pd.Series(np.nan, index=df.index)
     num = df.loc[:, list(cols)].apply(pd.to_numeric, errors="coerce")

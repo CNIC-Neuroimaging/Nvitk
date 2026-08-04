@@ -26,6 +26,7 @@ class FireAntsResult:
 
 
 def _which(exe: str) -> str:
+    """Resolve *exe* on ``PATH``, raising a FireANTs install hint if it is missing."""
     path = shutil.which(exe)
     if path is None:
         raise BackendUnavailableError(

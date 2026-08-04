@@ -41,6 +41,7 @@ PIPELINE_FORM_SCROLL_MIN = 120
 
 
 def _cli_long_option(param: click.Parameter) -> str:
+    """The longest ``--flag`` name registered for a Click *param* (or a derived ``--param-name``)."""
     if isinstance(param, click.Option):
         long_opts = [
             o for o in param.opts if o.startswith("--") and not o.startswith("---")
@@ -51,6 +52,7 @@ def _cli_long_option(param: click.Parameter) -> str:
 
 
 def _load_click_command(script_name: str) -> click.Command | None:
+    """Resolve an installed console-script's underlying Click command/group by its entry-point name."""
     for ep in entry_points(group="console_scripts"):
         if ep.name != script_name:
             continue
@@ -65,11 +67,16 @@ def _load_click_command(script_name: str) -> click.Command | None:
 
 
 class _ParamField:
+    """Pairs a Click CLI parameter with the Qt widget collecting its value in the pipeline form."""
+
     def __init__(self, param: click.Parameter, widget: QWidget) -> None:
+        """Bind *param* to its input *widget*."""
         self.param = param
         self.widget = widget
 
     def value(self) -> Any:
+        """Read and type-coerce the widget's current value per the Click parameter's type; raises
+        ``ValueError`` if a required text field is empty."""
         p = self.param
         w = self.widget
         if isinstance(w, QCheckBox):
@@ -92,6 +99,9 @@ class _ParamField:
 
 
 class _StageRow:
+    """One pipeline stage's row in the form: its enable checkbox, input-widget container, and the
+    per-slot input widgets themselves."""
+
     def __init__(
         self,
         stage: PipelineStageSpec,
@@ -100,6 +110,7 @@ class _StageRow:
         inputs_form: QFormLayout,
         input_widgets: dict[str, QWidget],
     ) -> None:
+        """Bind *stage* to its checkbox, inputs container/layout, and (initially empty) widget map."""
         self.stage = stage
         self.checkbox = checkbox
         self.inputs_host = inputs_host
@@ -111,6 +122,7 @@ class PipelineStageForm(QGroupBox):
     """Pipeline stages, layer inputs, and global CLI options."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the scrollable stage-checkbox and CLI-parameter form containers."""
         super().__init__("Pipeline", parent)
         self._viewer: Any | None = None
         self._script = ""
@@ -144,10 +156,12 @@ class PipelineStageForm(QGroupBox):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
     def set_viewer(self, viewer: Any | None) -> None:
+        """Bind the Napari viewer used to populate layer-selection combo boxes."""
         self._viewer = viewer
         self.refresh_layer_combos()
 
     def set_expanded(self, expanded: bool) -> None:
+        """Fill remaining dock height when visible; collapse when hidden."""
         if expanded:
             expanding = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
             self.setSizePolicy(expanding)
@@ -162,6 +176,7 @@ class PipelineStageForm(QGroupBox):
             self._scroll.setMaximumHeight(200)
 
     def set_script(self, script_name: str) -> None:
+        """Rebuild the form for *script_name*'s registered pipeline stages and CLI parameters."""
         if script_name == self._script:
             return
         self._script = script_name
@@ -181,6 +196,7 @@ class PipelineStageForm(QGroupBox):
         self._refresh_stage_inputs()
 
     def _clear_form(self) -> None:
+        """Remove every stage-row and parameter widget from the form."""
         self._stage_rows.clear()
         self._param_fields.clear()
         self._pipeline_def = None
@@ -193,6 +209,7 @@ class PipelineStageForm(QGroupBox):
             self._params_form.removeRow(0)
 
     def _build_stage_rows(self, stages: tuple[PipelineStageSpec, ...]) -> None:
+        """Add one enable-checkbox group box (with an empty inputs sub-form) per stage in *stages*."""
         for stage in stages:
             box = QGroupBox(stage.label)
             box_layout = QVBoxLayout()
@@ -217,6 +234,8 @@ class PipelineStageForm(QGroupBox):
             )
 
     def _build_param_fields(self, script_name: str, pipeline_def: PipelineStageDef) -> None:
+        """Build a form row (checkbox for flags, line edit with optional file/dir browse button
+        otherwise) for every visible CLI parameter of *script_name*'s Click command."""
         cmd = _load_click_command(script_name)
         if cmd is None:
             return
@@ -248,6 +267,7 @@ class PipelineStageForm(QGroupBox):
                 browse.setFixedWidth(28)
 
                 def _pick(le=edit, prm=param) -> None:
+                    """Open a file/directory browser (per *prm*'s Path type) and fill *le* with the choice."""
                     if getattr(prm.type, "dir_okay", True) and not getattr(
                         prm.type, "exists", False
                     ):
@@ -264,15 +284,19 @@ class PipelineStageForm(QGroupBox):
             self._param_fields.append(_ParamField(param, edit))
 
     def _enabled_stages(self) -> dict[str, bool]:
+        """``{stage_id: is_checked}`` for every stage row in the form."""
         return {row.stage.id: row.checkbox.isChecked() for row in self._stage_rows}
 
     def _layer_names(self) -> list[str]:
+        """Names of every layer in the bound viewer, or ``[]`` if no viewer is bound."""
         viewer = self._viewer
         if viewer is None or not getattr(viewer, "layers", None):
             return []
         return [str(layer.name) for layer in viewer.layers]
 
     def refresh_layer_combos(self) -> None:
+        """Repopulate every layer-selection combo box (and active-layer labels) with the current
+        viewer layer names, preserving each combo's selection where still valid."""
         names = self._layer_names()
         active = self._active_layer_name()
         for row in self._stage_rows:
@@ -298,6 +322,7 @@ class PipelineStageForm(QGroupBox):
                 widget.blockSignals(False)
 
     def _active_layer_name(self) -> str | None:
+        """Name of the viewer's active (or last) layer, or ``None`` if there are no layers/viewer."""
         viewer = self._viewer
         if viewer is None or not viewer.layers:
             return None
@@ -305,6 +330,8 @@ class PipelineStageForm(QGroupBox):
         return str(layer.name) if layer is not None else None
 
     def _refresh_stage_inputs(self) -> None:
+        """Rebuild each stage row's input-slot widgets (layer combo boxes or an active-layer label)
+        based on which stages are currently enabled."""
         if self._pipeline_def is None:
             return
         enabled = self._enabled_stages()
@@ -343,6 +370,7 @@ class PipelineStageForm(QGroupBox):
                 row.input_widgets[key] = combo
 
     def _layer_selections(self) -> dict[tuple[str, str], str | None]:
+        """Current ``{(stage_id, slot): selected_layer_name}`` mapping from every layer combo box."""
         out = {}
         for row in self._stage_rows:
             for key, widget in row.input_widgets.items():
@@ -359,6 +387,8 @@ class PipelineStageForm(QGroupBox):
         *,
         active_layer = None,
     ) -> list[StageInputBinding]:
+        """Resolve every stage's input slot to a concrete layer-name binding, given the current form
+        selections and the viewer's active layer."""
         if self._pipeline_def is None:
             return []
         active_name = str(active_layer.name) if active_layer is not None else self._active_layer_name()
@@ -375,6 +405,8 @@ class PipelineStageForm(QGroupBox):
         *,
         active_layer = None,
     ) -> list[str]:
+        """Build the full CLI argv for *exe*: enabled ``--stages``, every filled CLI parameter, and
+        resolved layer-input bindings."""
         if self._pipeline_def is None:
             raise ValueError("Select a pipeline operation.")
 

@@ -36,6 +36,7 @@ from typing import Any, Dict, Tuple
 
 from nvitk.core import setup
 from nvitk.core import as_backend_array, to_numpy
+from nvitk.morphology import keep_largest_components
 from nvitk.types import Image
 
 setup(globals())
@@ -87,15 +88,13 @@ def anchor_kidney_pelvis_concavity(
     if midline_x_index is not None and medial_half_width_vox is not None:
         xs = np.arange(m.shape[0], dtype=np.float32)[:, None, None]
         cavity &= np.abs(xs - midline_x_index) <= medial_half_width_vox
-    if structure is None:
-        structure = np.ones((3, 3, 3), dtype=bool)
-    lab, n = ndi.label(cavity, structure=structure)
-    if n < 1:
+    # Largest connected component of the pelvis cavity (base tool). ``structure``
+    # defaults to full 26-connectivity to match the historical np.ones((3,3,3)).
+    largest = keep_largest_components(cavity, n=1, connectivity=3, structure=structure)
+    largest = as_backend_array(largest).astype(bool)
+    if not np.any(largest):
         raise ValueError("no cavity voxels after hull − mask")
-    sizes    = np.bincount(lab.ravel())
-    sizes[0] = 0
-    lid      = int(sizes.argmax())
-    coords   = np.argwhere(lab == lid).astype(np.float64)
+    coords = np.argwhere(largest).astype(np.float64)
     return as_backend_array(coords.mean(axis=0))
 
 
@@ -196,16 +195,12 @@ def anchor_bladder_entry_per_side(
         )
         region = cand
 
-    # ---- 4. Largest CC centroid ----
-    if structure is None:
-        structure = np.ones((3, 3, 3), dtype=bool)
-    lab, n = ndi.label(region, structure=structure)
-    if n < 1:
+    # ---- 4. Largest CC centroid (base tool; 26-conn default) --------------------
+    largest = keep_largest_components(region, n=1, connectivity=3, structure=structure)
+    largest = as_backend_array(largest).astype(bool)
+    if not np.any(largest):
         raise ValueError("no bladder voxels found in ipsilateral superior region")
-    sizes    = np.bincount(lab.ravel())
-    sizes[0] = 0
-    lid      = int(sizes.argmax())
-    coords   = np.argwhere(lab == lid).astype(np.float64)
+    coords = np.argwhere(largest).astype(np.float64)
     return coords.mean(axis=0)
 
 
@@ -309,6 +304,11 @@ def minimum_cost_path_zyx(
     start_zyx: Tuple[int, int, int],
     end_zyx: Tuple[int, int, int],
 ) -> Any:
+    """Least-cost voxel path from *start_zyx* to *end_zyx* through a cost volume.
+
+    Uses skimage's ``route_through_array`` (26-connected, geometric step weights).
+    Returns the path as an ``(N, 3)`` int array of ``(z, y, x)`` indices.
+    """
     c_np   = to_numpy(cost, copy=False)
     path, _ = route_through_array(
         c_np, start_zyx, end_zyx, fully_connected=True, geometric=True
@@ -323,6 +323,11 @@ def spline_resample_zyx(
     bounds_lo: Any,
     bounds_hi: Any,
 ) -> Any:
+    """Fit a smoothing cubic B-spline to a ``(z, y, x)`` path and resample to *n_points*.
+
+    Points are clipped to ``[bounds_lo, bounds_hi]`` so the smoothed curve cannot
+    leave the volume. Short paths (<4 points) are padded before the fit.
+    """
     p = to_numpy(path_zyx, copy=True)
     if p.shape[0] < 4:
         rep = 4 - p.shape[0]
@@ -338,6 +343,7 @@ def spline_resample_zyx(
 
 
 def line_mask_from_path(shape: Tuple[int, ...], path_zyx_float: Any) -> Any:
+    """Rasterize a float ``(z, y, x)`` path to a 1-voxel-wide binary line mask of *shape*."""
     mask = np.zeros(shape, dtype=np.uint8)
     pi   = np.round(as_backend_array(path_zyx_float)).astype(np.int32)
     for i in range(pi.shape[0]):
@@ -353,6 +359,7 @@ def edt_tube_mm(
     spacing_xyz_mm: Tuple[float, float, float],
     radius_mm: float,
 ) -> Any:
+    """Dilate a line mask into a tube of physical *radius_mm* using a spacing-aware EDT."""
     inv     = as_backend_array(line_mask == 0)
     dist_mm = ndi.distance_transform_edt(inv, sampling=spacing_xyz_mm)
     return (dist_mm <= radius_mm).astype(np.uint8)

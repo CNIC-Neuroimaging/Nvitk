@@ -41,7 +41,10 @@ except Exception:
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func):
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -52,10 +55,12 @@ _click_option = click.option if click is not None else _cli_decorator
 
 
 def _normalize_header(value: str) -> str:
+    """Lower-case *value* and strip everything but alphanumerics, for loose CSV header matching."""
     return re.sub(r"[^0-9a-z]+", "", value.lower())
 
 
 def _detect_catalog_column(fieldnames: list[str], candidates: Iterable[str]) -> str | None:
+    """Return the first entry in *fieldnames* that normalizes to match one of *candidates*, or ``None``."""
     normalized = {_normalize_header(name): name for name in fieldnames}
     for candidate in candidates:
         key = _normalize_header(candidate)
@@ -65,12 +70,15 @@ def _detect_catalog_column(fieldnames: list[str], candidates: Iterable[str]) -> 
 
 
 def load_subject_catalog_rows(path: str | Path) -> list[dict[str, str]]:
+    """Read a subject-catalog CSV at *path* into a list of ``{column: value}`` row dicts."""
     with Path(path).open("r", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         return [dict(row) for row in reader]
 
 
 def parse_subject_tokens(subjects: str | Iterable[str] | None) -> list[str]:
+    """Split a comma/whitespace-separated *subjects* string (or pass through an iterable) into a
+    flat list of non-empty tokens."""
     if subjects is None:
         return []
     if isinstance(subjects, str):
@@ -86,6 +94,10 @@ def resolve_subject_labels(
     subjects_file: str | Path | None = None,
     id_type: str = "subject",
 ) -> list[str]:
+    """Resolve the requested subject labels from (in priority order) a *subjects_file*, an inline
+    *subjects* string/iterable, or a *catalog_path* CSV. When reading from the catalog with
+    ``id_type="mrid"``, MR IDs are looked up and translated back to subject labels via the same CSV.
+    Returns a sorted, de-duplicated list; empty if none of the three sources is given."""
     if subjects_file is not None:
         with Path(subjects_file).open("r", encoding="utf-8") as handle:
             values = [line.strip() for line in handle if line.strip()]
@@ -204,6 +216,8 @@ def select_preferred_vwi_bb_scan(
 
 
 def infer_flow_orientation(description: str) -> str:
+    """Classify a 4D-flow scan's series *description* as ``AP``/``RL``/``FH`` orientation tokens, or
+    ``GENERIC`` if none match."""
     desc = description.upper()
     if any(token in desc for token in ("AP", "PA", "FA")):
         return "AP"
@@ -215,6 +229,11 @@ def infer_flow_orientation(description: str) -> str:
 
 
 def classify_scan(series_description: str | None, quality: str | None = None) -> dict[str, Any] | None:
+    """Classify a scan by its *series_description* (and optional QC *quality*) into a
+    ``{modality, orientation, sequence, ...}`` dict, matching BrainVIEW/VWI_BB, TOF/MRA, 4D-flow, resting-
+    state fMRI, carotid QF, QSM/SWI, and other known sequence patterns in priority order. Returns
+    ``None`` when the description matches nothing, or when *quality* is present and not ``"usable"``
+    (except for the BrainVIEW/VWI_BB case, which is quality-independent)."""
     description = series_description or ""
     brainview_variant = parse_brainview_variant(description, quality)
     if brainview_variant is not None:
@@ -453,6 +472,7 @@ def requested_sequence_set(requested: str | Iterable[str] | None) -> set[str]:
 
 
 def _coalesce_attr(obj: Any, *names: str) -> Any:
+    """Return the first non-``None`` value among *obj*'s *names* attributes, calling zero-arg callables."""
     for name in names:
         if hasattr(obj, name):
             value = getattr(obj, name)
@@ -498,6 +518,7 @@ def _netrc_machine_candidates(server: str) -> list[str]:
     out: list[str] = []
 
     def add(x: str) -> None:
+        """Append *x* to the enclosing ``out`` list if non-empty and not already present."""
         if x and x not in out:
             out.append(x)
 
@@ -570,6 +591,7 @@ def _credentials_from_netrc(
     target_hosts = {_normalize_netrc_machine(m) for m in machines}
 
     def _try_machine(machine: str) -> tuple[str | None, str | None]:
+        """Look up (login, password) for a single netrc *machine* name, honoring ``preferred_user``."""
         try:
             login, _account, password = n.authenticators(machine)
         except (KeyError, TypeError):
@@ -595,6 +617,8 @@ def _credentials_from_netrc(
 
 
 def _xnat_auth_help_message(config: XnatConnectionConfig, *, netrc_path: Path | None = None) -> str:
+    """Build a human-readable message listing the supported ways to supply XNAT credentials, for use in
+    the authentication error raised when none of them resolved."""
     netrc_hint = str(netrc_path) if netrc_path is not None else (config.netrc_file or "~/.netrc")
     return (
         f"XNAT credentials missing for {config.server!r} (project {config.project!r}).\n"
@@ -608,6 +632,8 @@ def _xnat_auth_help_message(config: XnatConnectionConfig, *, netrc_path: Path | 
 
 
 def _resolve_xnat_login(config: XnatConnectionConfig) -> tuple[str | None, str | None, Path | None]:
+    """Resolve (user, password, netrc_path_used) for *config*, filling in any missing credential from
+    ``config.netrc_file`` if set, else from ``~/.netrc`` when a user is known but the password isn't."""
     user = config.user
     password = config.password
     netrc_path: Path | None = None
@@ -631,6 +657,9 @@ def _resolve_xnat_login(config: XnatConnectionConfig) -> tuple[str | None, str |
 
 
 def connect_xnat(config: XnatConnectionConfig):
+    """Open an ``xnat`` session for *config*, resolving credentials via :func:`_resolve_xnat_login`.
+    Raises ``BackendUnavailableError`` if the ``xnat`` package isn't installed, or an XNAT auth error
+    (with a help message) if no usable credentials were found."""
     if xnat is None:
         raise BackendUnavailableError('xnat is not installed. Please install it with "pip install xnat".')
 
@@ -708,11 +737,13 @@ def _download_resource_bundle(scan: Any, zip_path: Path, resource_label: str) ->
 
 
 def _is_nifti_filename(name: str) -> bool:
+    """True if *name* has a ``.nii`` or ``.nii.gz`` extension."""
     lower = name.lower()
     return lower.endswith(".nii.gz") or lower.endswith(".nii")
 
 
 def _is_json_sidecar_filename(name: str) -> bool:
+    """True if *name* has a ``.json`` extension."""
     return name.lower().endswith(".json")
 
 
@@ -772,6 +803,7 @@ def download_scan_niftis(
 
 
 def _list_local_nifti_files(directory: Path) -> list[Path]:
+    """Sorted list of ``.nii``/``.nii.gz`` files directly under *directory* (empty if it doesn't exist)."""
     if not directory.is_dir():
         return []
     return sorted(p for p in directory.iterdir() if p.is_file() and _is_nifti_filename(p.name))
@@ -1050,6 +1082,12 @@ def sync_xnat_project(
     cohort_id: str | None = None,
     source_batch_id: str | None = None,
 ) -> dict[str, pd.DataFrame]:
+    """Sync an XNAT project's subjects, sessions, scans, and (optionally) DICOM/NIfTI downloads into the
+    dataset catalog tables. Resolves which subjects/sequences to pull via *catalog_path*/*subjects*/
+    *subjects_file* and *requested_sequences* (falling back to the project's default sequence list),
+    classifies each scan with :mod:`nvitk.db.xnat_projects` helpers, writes ``subjects``/``sessions``/
+    ``scans``/``assets``/``subject_ids`` rows, enrolls synced subjects into *cohort_id*, and optionally
+    downloads DICOM/NIfTI resources and rebuilds the SQLite index. Returns the written catalog frames."""
     if download_niftis:
         base = nifti_download_root if nifti_download_root is not None else download_root
         if base is None:
@@ -1378,6 +1416,8 @@ def main(
     skip_existing: bool,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point: resolve the XNAT connection profile from CLI flags/config file, then run
+    :func:`sync_xnat_project` against the dataset at ``dataset_root``."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

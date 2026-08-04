@@ -10,6 +10,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class QvtpyStageSpec:
+    """One QVTpy pipeline stage: its tool id/label/module and which CLI arguments it requires."""
+
     tool_id: str
     label: str
     module: str
@@ -75,6 +77,8 @@ STAGE_BY_ID: dict[str, QvtpyStageSpec] = {s.tool_id: s for s in STAGE_SPECS}
 
 
 def _req(params: dict[str, Any], key: str) -> str:
+    """Return the stripped string value of required parameter *key* in *params*; raises ``ValueError``
+    if missing or blank."""
     val = str(params.get(key) or "").strip()
     if not val:
         raise ValueError(f"Missing required parameter: {key}")
@@ -124,6 +128,7 @@ def build_qvtpy_stage_argv(tool_id: str, params: dict[str, Any]) -> list[str]:
 
 
 def default_dicom_root() -> str:
+    """Default DICOM root directory from the QVTpy pipeline config, or ``""`` if unavailable."""
     try:
         from nvitk.pipes.qvtpy import config as cfg
 

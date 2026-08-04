@@ -41,6 +41,7 @@ def _as_binary_brain_mask(mask: Image | np.ndarray, *, threshold: float = 0.5):
 
 
 def _stride_tuple(stride: int | tuple[int, ...] | list[int]) -> tuple[int, int, int]:
+    """Normalize a patch stride (scalar or length-3) to a 3-tuple of ints ≥ 1."""
     if isinstance(stride, (tuple, list)):
         if len(stride) != 3:
             raise ValueError("patch_stride_length must be an int or length-3 tuple.")

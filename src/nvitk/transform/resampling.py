@@ -12,6 +12,7 @@ setup(globals())
 
 
 def _require_affine(image: Image, name: str) -> np.ndarray:
+    """Return the image's 4x4 float affine, raising a clear error if missing or malformed."""
     affine = image.affine
     if affine is None:
         raise ValueError(f"Image '{name}' has no affine in its metadata.")

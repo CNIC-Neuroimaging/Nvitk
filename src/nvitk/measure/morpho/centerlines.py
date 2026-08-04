@@ -113,6 +113,7 @@ def _centerline_poly_from_path_mm(path_mm: np.ndarray) -> object:
 
 
 def centerline_poly_length_mm(centerline_poly) -> float:
+    """Arc length (mm) of a VTK centerline polydata's points; NaN if fewer than 2 points."""
     if centerline_poly is None or centerline_poly.GetNumberOfPoints() < 2:
         return np.nan
     pts = numpy_support.vtk_to_numpy(centerline_poly.GetPoints().GetData())
@@ -120,10 +121,12 @@ def centerline_poly_length_mm(centerline_poly) -> float:
 
 
 def centerline_points_from_result(res: dict) -> np.ndarray:
+    """Stack a path result's ``x_mm``/``y_mm``/``z_mm`` columns into an ``(N, 3)`` point array."""
     return np.column_stack([res["x_mm"], res["y_mm"], res["z_mm"]]).astype(float)
 
 
 def run_vmtk_centerline_between_seeds(surface, seed_start_mm, seed_end_mm, spacing):
+    """Build a straight-line centerline polydata between two seed points (native, non-VMTK fallback path)."""
     _ = surface
     _ = spacing
     pts = np.vstack(
@@ -134,6 +137,7 @@ def run_vmtk_centerline_between_seeds(surface, seed_start_mm, seed_end_mm, spaci
 
 
 def centerline_points_from_polydata(centerline_poly) -> np.ndarray:
+    """Extract the point coordinates of a VTK centerline polydata as an ``(N, 3)`` array."""
     if centerline_poly is None or centerline_poly.GetNumberOfPoints() == 0:
         return np.empty((0, 3), dtype=float)
     return numpy_support.vtk_to_numpy(centerline_poly.GetPoints().GetData()).astype(float)
@@ -148,6 +152,13 @@ def validate_vmtk_centerline_attempt(
     reference_centerline_points: Optional[List[np.ndarray]] = None,
     require_both_reference_endpoints_connected: bool = False,
 ) -> Tuple[bool, str]:
+    """Sanity-check a VMTK centerline attempt: ``(is_valid, reason_if_rejected)``.
+
+    Rejects centerlines that are too short (few points or too short relative to
+    the seed path length), whose endpoints land far from the requested seeds, or
+    that fail to connect back to already-accepted reference centerlines. Each
+    check is individually toggleable via config flags.
+    """
     if not VALIDATE_VMTK_CENTERLINE_GEOMETRY:
         return True, ""
 
@@ -211,6 +222,7 @@ def validate_vmtk_centerline_attempt(
 
 
 def reference_centerline_points_from_results(path_results: List[dict]) -> List[np.ndarray]:
+    """Collect the point arrays of every already-computed path result, for reference-connection checks."""
     refs = []
     for res in path_results:
         try:
@@ -223,6 +235,10 @@ def reference_centerline_points_from_results(path_results: List[dict]) -> List[n
 
 
 def refresh_centerline_result_metrics(res: dict) -> None:
+    """In-place: (re)compute every derived metric for a path result — geometry, curvature/torsion
+    summaries, taper slope, and stenosis/enlargement detection (both MIS- and cross-section-radius
+    based), writing all fields the export layer expects back into *res*.
+    """
     pts = centerline_points_from_result(res)
     s = cumulative_s(pts)
     radius = np.asarray(res.get("stenosis_detection_radius_mm", res["radius_mm"]), dtype=float)
@@ -327,6 +343,9 @@ def refresh_centerline_result_metrics(res: dict) -> None:
 
 
 def slice_centerline_result(res: dict, start_idx: int) -> dict:
+    """Truncate a path result to points ``[start_idx:]`` (drop an overlapping proximal prefix) and
+    recompute all derived metrics on the shortened path.
+    """
     n = len(res["x_mm"])
     start_idx = int(np.clip(start_idx, 0, max(0, n - 1)))
     sliced = dict(res)
@@ -354,6 +373,7 @@ def slice_centerline_result(res: dict, start_idx: int) -> dict:
 
 
 def save_centerline_result_vtps(res: dict, centerline_dir: Optional[str], centerline_radius_dir: Optional[str]) -> None:
+    """Write a path result's full metric set as point-data arrays on a polyline VTP (and a radius-tube VTP)."""
     pts = centerline_points_from_result(res)
     if len(pts) < 2:
         return
@@ -453,6 +473,11 @@ def suppress_enlargements_near_centerline_starts(
     centerline_dir: Optional[str],
     centerline_radius_dir: Optional[str],
 ) -> int:
+    """Clear enlargement flags near where another vessel's centerline starts (a bifurcation, not a true aneurysm).
+
+    Re-exports the VTPs of any path whose flags changed. Returns the number of
+    paths modified.
+    """
     if not SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS or len(path_results) <= 1:
         return 0
     spacing = np.asarray(spacing, dtype=float)
@@ -504,6 +529,14 @@ def prune_overlapping_final_centerlines(
     centerline_dir: Optional[str],
     centerline_radius_dir: Optional[str],
 ) -> Tuple[List[dict], set, int]:
+    """Trim the shared proximal prefix off each finalized centerline that overlaps an earlier one.
+
+    Processes paths in index order, growing a reference point cloud as it goes;
+    a path whose leading run of points lies within *overlap_tol* of that
+    reference is trimmed back (keeping a short shared segment at the bifurcation
+    per ``KEEP_SHARED_PREFIX_AT_BIFURCATION_MM``), or discarded entirely if too
+    few points would remain. Returns ``(kept_results, discarded_path_ids, n_trimmed)``.
+    """
     if not PRUNE_OVERLAPPING_FINAL_CENTERLINE_PREFIXES or len(path_results) <= 1:
         return path_results, set(), 0
 
@@ -599,6 +632,15 @@ def run_vmtk_centerline_for_path_with_tip_retries(
     reference_centerline_points: Optional[List[np.ndarray]] = None,
     require_both_reference_endpoints_connected: bool = False,
 ):
+    """Run VMTK centerline extraction with retry-by-trimmed-seeds when validation fails.
+
+    First tries the full seed path; if the result fails
+    :func:`validate_vmtk_centerline_attempt` and ``RETRY_VMTK_WITH_TRIMMED_SEEDS``
+    is set, retries with seeds trimmed inward by each amount in
+    ``VMTK_SEED_TRIM_RETRY_MM`` (helps when a noisy tip/branch confuses VMTK's
+    seed-to-surface projection). Raises with the collected failure reasons if
+    every attempt fails.
+    """
     pts = np.asarray(path_mm, dtype=float)
     if len(pts) < 2:
         raise RuntimeError("Cannot run VMTK: seed path has fewer than 2 points.")
@@ -660,6 +702,13 @@ def analyze_centerline_poly(
     save_centerline_vtp: Optional[str] = None,
     save_centerline_radius_vtp: Optional[str] = None,
 ) -> dict:
+    """Turn a raw VMTK centerline polydata into a fully-populated path result dict.
+
+    Orients the points (flow direction / preferred start), samples curvature,
+    torsion, and cross-section radius along the path, computes every derived
+    metric via :func:`refresh_centerline_result_metrics`, and optionally writes
+    the annotated VTPs.
+    """
     spacing = np.asarray(spacing, dtype=float)
     pts = numpy_support.vtk_to_numpy(centerline_poly.GetPoints().GetData())
     kappa_vmtk = extract_point_data_array(centerline_poly, "Curvature", len(pts))

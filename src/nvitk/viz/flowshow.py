@@ -111,6 +111,7 @@ class _GlyphCacheAll:
 
 
 def _require_pyvista() -> Any:
+    """Import and return the ``pyvista`` module, or raise a clear install hint."""
     try:
         import pyvista as pv
     except ImportError as exc:
@@ -126,6 +127,7 @@ def _unwrap_vtk_interactor(plotter: Any) -> Any | None:
     candidates: list[Any] = []
 
     def _add(obj: Any) -> None:
+        """Append *obj* to the interactor candidate list, deduped by identity."""
         if obj is None:
             return
         oid = id(obj)
@@ -182,6 +184,7 @@ def _install_repeating_timer_observer(vtk_iren: Any, timer_ms: int, callback: Ca
 
 
 def _require_widgets() -> Any:
+    """Import and return the ``ipywidgets`` module, or raise a clear install hint."""
     try:
         import ipywidgets as widgets
     except ImportError as exc:
@@ -193,6 +196,7 @@ def _require_widgets() -> Any:
 
 
 def _as_4d(arr: np.ndarray, name: str) -> np.ndarray:
+    """Add a trailing singleton time axis to a 3-D array, or pass a 4-D array through unchanged."""
     if arr.ndim == 3:
         return arr[..., None]
     if arr.ndim == 4:
@@ -201,6 +205,7 @@ def _as_4d(arr: np.ndarray, name: str) -> np.ndarray:
 
 
 def _velocity_from_phases(ap: np.ndarray, rl: np.ndarray, fh: np.ndarray) -> np.ndarray:
+    """Combine AP/RL/FH phase volumes into a single ``(..., 3)`` XYZ velocity field (cm/s → mm/s, sign-corrected)."""
     ap4 = _as_4d(ap, "ap_phase")
     rl4 = _as_4d(rl, "rl_phase")
     fh4 = _as_4d(fh, "fh_phase")
@@ -213,6 +218,7 @@ def _velocity_from_phases(ap: np.ndarray, rl: np.ndarray, fh: np.ndarray) -> np.
 
 
 def _mask_surface(pv: Any, roi: np.ndarray) -> Any | None:
+    """Build a PyVista contour surface from a binary ROI mask (``None`` if the contour is empty or extraction fails)."""
     try:
         grid = pv.ImageData(dimensions=roi.shape, spacing=(1, 1, 1), origin=(0, 0, 0))
         grid.point_data["roi"] = roi.astype(np.uint8).flatten(order="F")
@@ -227,6 +233,7 @@ def _mask_surface(pv: Any, roi: np.ndarray) -> Any | None:
 
 
 def _vtk_rgb(hex_color: str) -> tuple[float, float, float]:
+    """Convert a ``#RRGGBB`` hex color string to a VTK-style ``(r, g, b)`` float triple in ``[0, 1]``."""
     hc = hex_color.lstrip("#")
     if len(hc) != 6:
         return (1.0, 1.0, 1.0)
@@ -253,6 +260,7 @@ class _VtkGlyphPipeline:
         speed_clim_eff: tuple[float, float],
         tt0: int,
     ) -> None:
+        """Build the fixed-points VTK glyph pipeline (arrows at *coords*) and render its state at frame *tt0*."""
         import vtk
         from vtk.util import numpy_support
 
@@ -310,6 +318,7 @@ class _VtkGlyphPipeline:
         self.update_time(tt0)
 
     def set_opacity(self, opacity: float) -> None:
+        """Set the glyph actor's opacity."""
         self.actor.GetProperty().SetOpacity(float(opacity))
 
     def set_color_by_speed(self, enabled: bool) -> None:
@@ -364,6 +373,7 @@ class _VtkGlyphPipeline:
                 pass
 
     def set_scale_by_magnitude(self, enabled: bool, scale_factor: float) -> None:
+        """Toggle glyph-length scaling by the ``mag_scale`` point array (else glyphs render at a fixed size)."""
         import vtk
 
         if enabled:
@@ -381,6 +391,7 @@ class _VtkGlyphPipeline:
             self._glyph.SetScaleFactor(1.0)
 
     def update_time(self, tt: int) -> None:
+        """Refresh the glyph vector/magnitude arrays in place for frame *tt* (no mesh rebuild, just array updates)."""
         from vtk.util import numpy_support
 
         v = self.vel[
@@ -414,6 +425,7 @@ class _VtkGlyphPipeline:
 
 
 def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
+    """The 26 face/edge/corner neighbours of voxel *p* (self excluded)."""
     x, y, z = p
     out: list[tuple[int, int, int]] = []
     for dx in (-1, 0, 1):
@@ -446,6 +458,7 @@ def _centerline_longest_path(coords_zyx: np.ndarray) -> np.ndarray:
     start = endpoints[0] if endpoints else nodes[0]
 
     def _bfs(src: tuple[int, int, int]) -> tuple[dict[tuple[int, int, int], int], dict[tuple[int, int, int], tuple[int, int, int] | None]]:
+        """Breadth-first search from *src*; returns ``(distances, parents)`` over the skeleton graph."""
         from collections import deque
 
         dist: dict[tuple[int, int, int], int] = {src: 0}
@@ -477,6 +490,7 @@ def _centerline_longest_path(coords_zyx: np.ndarray) -> np.ndarray:
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
+    """Normalize *v* to unit length; a zero vector if it is (near) zero."""
     v = to_numpy(v, dtype=np.float32)
     n = float(np.linalg.norm(v))
     if n <= 1e-6:
@@ -520,6 +534,7 @@ def _oblique_slice(
     res: int,
     order: int,
 ) -> np.ndarray:
+    """Host-array wrapper around the shared :func:`oblique_slice` helper for the interactive viewer's call sites."""
     # Keep a local wrapper so existing call sites stay readable.
     sl = oblique_slice(
         vol,
@@ -597,6 +612,7 @@ def _precompute_coords_all_labels(
     max_glyphs: int,
     stream_seed: int | None,
 ) -> _GlyphCacheAll:
+    """Precompute (and subsample) glyph voxel coordinates for every label at once, split across a shared glyph budget."""
     st = max(int(stride), 1)
     nlab = len(labels)
     per_label = max(max_glyphs // max(nlab, 1), 32)
@@ -622,6 +638,7 @@ def _precompute_coords_single_label(
     max_glyphs: int,
     stream_seed: int | None,
 ) -> np.ndarray:
+    """Precompute (and subsample) glyph voxel coordinates for a single label, capped at *max_glyphs*."""
     st = max(int(stride), 1)
     roi = mask == int(lbl)
     coords = np.argwhere(roi)
@@ -690,6 +707,7 @@ def _build_glyphs_mesh(
 
 
 def _add_glyph_actor(plotter: Any, built: tuple[Any, dict[str, Any]] | None) -> Any | None:
+    """Add a prebuilt glyph mesh (from :func:`_build_glyphs_mesh`) to the plotter; ``None`` if nothing was built."""
     if built is None:
         return None
     mesh, kw = built
@@ -715,6 +733,10 @@ def _add_flow_scene_single(
     cache_coords: np.ndarray | None,
     use_cache: bool,
 ) -> list[Any]:
+    """Build and add the mask surface, velocity glyphs, and/or streamlines for a single label at frame *tt*.
+
+    Returns the list of added plotter actors.
+    """
     actors: list[Any] = []
     x, y, z, nt, _ = vel.shape
     roi = mask == int(lbl)
@@ -790,6 +812,7 @@ def _add_flow_scene_all_labels(
     cache: _GlyphCacheAll | None,
     use_cache: bool,
 ) -> list[Any]:
+    """Build and add the mask surface, velocity glyphs, and/or streamlines for every label at once (color-coded per label)."""
     actors: list[Any] = []
     x, y, z, nt, _ = vel.shape
     labels = list(labels)
@@ -885,6 +908,7 @@ def _flowshow_notebook(
     anim: FlowshowAnimationOptions,
     stream_seed: int | None,
 ) -> Any:
+    """Build the Jupyter-notebook 4D-flow viewer: an embedded PyVista scene driven by ipywidgets controls."""
     _ = centerline_mask
     pv = _require_pyvista()
     widgets = _require_widgets()
@@ -941,14 +965,17 @@ def _flowshow_notebook(
         plotter.enable_depth_peeling()
 
     def _clear_dynamic():
+        """Clear all actors from the plotter before a full re-render."""
         plotter.clear()
 
     def _single_cache_for(lbl: int) -> np.ndarray:
+        """Precomputed glyph coordinates for one label (empty if precomputation is disabled)."""
         if anim.precompute_glyph_indices:
             return _precompute_coords_single_label(mask, int(lbl), stride, max_glyphs, stream_seed)
         return np.empty((0, 3), dtype=np.int64)
 
     def _render():
+        """Redraw the full scene for the current widget state (label, frame, and visibility toggles)."""
         _clear_dynamic()
         lbl_now = int(w_label.value)
         sc = _single_cache_for(lbl_now) if (not show_all_labels and anim.precompute_glyph_indices) else None
@@ -1034,6 +1061,9 @@ def _flowshow_desktop(
     loc_records: Sequence[Mapping[str, Any]] | None,
     voxel_spacing_mm: tuple[float, float, float] | None,
 ) -> Any:
+    """Build the desktop (native VTK window) 4D-flow viewer: full interactive scene with cross-sections, centerline
+    picking, LOC markers, and time-series metric plots, driven by mouse/keyboard callbacks.
+    """
     pv = _require_pyvista()
 
     vel = _velocity_from_phases(ap, rl, fh)
@@ -1144,13 +1174,19 @@ def _flowshow_desktop(
         if vtk_iren is not None and hasattr(vtk_iren, "SetInteractorStyle"):
 
             class _RightPanelWheelOnlyStyle(vtk.vtkInteractorStyleTrackballCamera):
+                """Trackball camera style that disables drag/click in the right (cross-section) viewport,
+                allowing only mouse-wheel zoom there via a delegated image-style handler.
+                """
+
                 def __init__(self, *, left_renderer: Any, right_renderer: Any) -> None:
+                    """Wrap the two split-view renderers so wheel events can be routed by viewport."""
                     super().__init__()
                     self._left_renderer = left_renderer
                     self._right_renderer = right_renderer
                     self._img_style = vtk.vtkInteractorStyleImage()
 
                 def _in_right_viewport(self) -> bool:
+                    """True when the current event position falls inside the right-hand viewport (x ≥ 80%)."""
                     try:
                         x, y = self.GetInteractor().GetEventPosition()
                         rw = self.GetInteractor().GetRenderWindow()
@@ -1165,42 +1201,50 @@ def _flowshow_desktop(
 
                 # Disable drag/click interactions on right panel.
                 def OnLeftButtonDown(self) -> None:  # noqa: N802
+                    """Trackball left-drag, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnLeftButtonDown()
 
                 def OnLeftButtonUp(self) -> None:  # noqa: N802
+                    """Trackball left-drag release, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnLeftButtonUp()
 
                 def OnMiddleButtonDown(self) -> None:  # noqa: N802
+                    """Trackball pan, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnMiddleButtonDown()
 
                 def OnMiddleButtonUp(self) -> None:  # noqa: N802
+                    """Trackball pan release, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnMiddleButtonUp()
 
                 def OnRightButtonDown(self) -> None:  # noqa: N802
+                    """Trackball right-drag, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnRightButtonDown()
 
                 def OnRightButtonUp(self) -> None:  # noqa: N802
+                    """Trackball right-drag release, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnRightButtonUp()
 
                 def OnMouseMove(self) -> None:  # noqa: N802
+                    """Trackball camera motion, suppressed inside the right viewport."""
                     if self._in_right_viewport():
                         return
                     super().OnMouseMove()
 
                 # Allow wheel zoom in right panel using an Image-style zoom handler.
                 def OnMouseWheelForward(self) -> None:  # noqa: N802
+                    """Zoom in; routed through the image-style zoom handler inside the right viewport."""
                     if self._in_right_viewport():
                         try:
                             self._img_style.SetInteractor(self.GetInteractor())
@@ -1212,6 +1256,7 @@ def _flowshow_desktop(
                     super().OnMouseWheelForward()
 
                 def OnMouseWheelBackward(self) -> None:  # noqa: N802
+                    """Zoom out; routed through the image-style zoom handler inside the right viewport."""
                     if self._in_right_viewport():
                         try:
                             self._img_style.SetInteractor(self.GetInteractor())
@@ -1291,6 +1336,7 @@ def _flowshow_desktop(
             loc_actor = None
 
     def _set_centerlines_visible(on: bool) -> None:
+        """Toggle visibility of every centerline actor in the 3-D scene."""
         for a in centerline_actors:
             try:
                 a.SetVisibility(bool(on))
@@ -1300,6 +1346,7 @@ def _flowshow_desktop(
                 pass
 
     def _set_loc_dots_visible(on: bool) -> None:
+        """Toggle visibility of the LOC (location-of-interest) marker point cloud, if it was built."""
         if loc_actor is None:
             return
         try:
@@ -1321,6 +1368,7 @@ def _flowshow_desktop(
     pick_marker = None
 
     def _set_right_panel_text(text: str) -> None:
+        """Replace the right (cross-section) panel's content with a plain status/instruction message."""
         try:
             plotter.subplot(0, 1)
             # Never call plotter.clear(): it clears the whole plotter and can wipe the 3D renderer.
@@ -1345,6 +1393,7 @@ def _flowshow_desktop(
     overlay_actors: list[Any] = []
 
     def _clear_right_planes() -> None:
+        """Remove every actor currently drawn in the right (cross-section) panel."""
         nonlocal right_plane_actors
         for a in right_plane_actors:
             try:
@@ -1368,6 +1417,7 @@ def _flowshow_desktop(
     ts_ui: dict[str, Any] = {"fig": None, "ax": None, "radio": None}
 
     def _ensure_ts_metric_figure() -> None:
+        """Lazily create the matplotlib LOC-metrics time-series figure (with its metric-choice radio buttons)."""
         if ts_ui["fig"] is not None:
             return
         try:
@@ -1382,6 +1432,7 @@ def _flowshow_desktop(
         radio = RadioButtons(rax, list(ts_metric_labels), active=0)
 
         def _on_radio_clicked(label: str) -> None:
+            """Radio-button callback: switch the plotted metric and redraw the time-series axes."""
             state["ts_metric"] = str(label)
             _draw_ts_metric_axes()
             try:
@@ -1401,6 +1452,7 @@ def _flowshow_desktop(
             pass
 
     def _draw_ts_metric_axes() -> None:
+        """Plot the currently-selected metric's full time series at the picked voxel/tangent onto the metrics figure."""
         ax = ts_ui["ax"]
         if ax is None or selection.get("tangent_eff") is None or selection.get("voxel_ijk") is None:
             return
@@ -1449,6 +1501,7 @@ def _flowshow_desktop(
         ax.set_title(f"LOC voxel ({cx},{cy},{cz}) label={selection.get('label')}")
 
     def _update_metric_ts_figure() -> None:
+        """Ensure the metrics figure exists and refresh its plot for the current selection."""
         if selection.get("tangent_eff") is None:
             return
         _ensure_ts_metric_figure()
@@ -1606,6 +1659,7 @@ def _flowshow_desktop(
             from vtk.util import numpy_support
 
             def _vtk_image_from_2d(img2d: np.ndarray) -> Any:
+                """Wrap a 2-D array as a single-slice ``vtkImageData`` for display."""
                 arr = to_numpy(img2d, dtype=np.float32)
                 # VTK expects x-fastest; keep a consistent orientation for display.
                 flat = arr.T.reshape(-1, order="C").astype(np.float32, copy=False)
@@ -1617,6 +1671,7 @@ def _flowshow_desktop(
                 return img
 
             def _make_lut_gray(lo: float, hi: float) -> Any:
+                """Build a linear grayscale VTK lookup table windowed to ``[lo, hi]``."""
                 lut = vtk.vtkLookupTable()
                 lut.SetNumberOfTableValues(256)
                 lut.SetRange(float(lo), float(hi))
@@ -1628,6 +1683,7 @@ def _flowshow_desktop(
                 return lut
 
             def _make_lut_mask() -> Any:
+                """Build a 2-entry VTK lookup table: transparent for background, translucent red for mask."""
                 lut = vtk.vtkLookupTable()
                 lut.SetNumberOfTableValues(2)
                 lut.SetRange(0.0, 1.0)
@@ -1641,6 +1697,7 @@ def _flowshow_desktop(
             mask_lut = _make_lut_mask()
 
             def _add_image_pair(img2d: np.ndarray, yoff: float) -> None:
+                """Add a windowed grayscale slice image plus its translucent mask overlay at vertical offset *yoff*."""
                 base_img = _vtk_image_from_2d(img2d)
                 # intensity windowing
                 vmin = float(np.percentile(img2d, 2))
@@ -1748,6 +1805,7 @@ def _flowshow_desktop(
             pass
 
     def _set_pick_marker(pt: np.ndarray | None) -> None:
+        """Replace the red pick-marker sphere at world point *pt* (removes it if *pt* is ``None``)."""
         nonlocal pick_marker
         try:
             if pick_marker is not None:
@@ -1769,6 +1827,7 @@ def _flowshow_desktop(
             pick_marker = None
 
     def _snap_to_loc_for_current_label() -> None:
+        """Select the LOC marker closest to the current label's mask centroid (or clear selection if none exist)."""
         if loc_pts.shape[0] == 0:
             return
         lbl = int(labels[int(state["label_idx"])])
@@ -1803,6 +1862,7 @@ def _flowshow_desktop(
         plotter.render()
 
     def _select_nearest_centerline(picked_xyz: Any) -> None:
+        """Select the LOC marker or centerline point closest to a picked world coordinate, across all labels."""
         arr = to_numpy(picked_xyz, dtype=np.float32)
         if arr.ndim == 2 and arr.shape[1] == 3 and arr.shape[0] >= 1:
             arr = arr[0]
@@ -1853,6 +1913,7 @@ def _flowshow_desktop(
     # Enable point picking (click in 3D view). We map picks to the nearest centerline point.
     try:
         def _on_pick(*args: Any) -> None:
+            """PyVista point-pick callback (signature varies by version); selects the nearest centerline/LOC point."""
             # PyVista callback signatures vary:
             # - callback(point)
             # - callback(picker, event)
@@ -1912,6 +1973,7 @@ def _flowshow_desktop(
                 pass
 
             def _is_in_left_viewport(xy: tuple[int, int]) -> bool:
+                """True when screen position *xy* falls inside the left (3-D scene) viewport (x ≤ 80%)."""
                 x, y = int(xy[0]), int(xy[1])
                 try:
                     rw = vtk_iren.GetRenderWindow()
@@ -1929,6 +1991,7 @@ def _flowshow_desktop(
                 return (0.0 <= xn <= 0.80) and (0.0 <= yn <= 1.0)
 
             def _vtk_pick_cb(_obj: Any, _evt: Any) -> None:
+                """Fallback VTK left-click observer: cell-pick in the left viewport and select the nearest point."""
                 try:
                     x, y = vtk_iren.GetEventPosition()
                 except Exception:
@@ -2041,6 +2104,7 @@ def _flowshow_desktop(
     stream_cache_max = 8
 
     def _clear_streamlines() -> None:
+        """Remove every streamline tube actor from the scene."""
         for a in stream_actors:
             try:
                 plotter.remove_actor(a)
@@ -2069,6 +2133,7 @@ def _flowshow_desktop(
         return seed_cloud
 
     def _cache_put_stream(key: tuple[int, int, float, float, int | None], tube: Any) -> None:
+        """Insert a built streamline tube mesh into the FIFO-capped cache."""
         stream_cache[key] = tube
         stream_cache_order.append(key)
         # simple FIFO cap
@@ -2077,6 +2142,7 @@ def _flowshow_desktop(
             stream_cache.pop(old, None)
 
     def _build_streamlines(tt0: int) -> None:
+        """Compute (or fetch from cache) and add streamline tubes for frame *tt0*, using a stable seed cloud."""
         _clear_streamlines()
         if not state["stream"]:
             return
@@ -2133,6 +2199,7 @@ def _flowshow_desktop(
             pass
 
     def _clear_glyphs() -> None:
+        """Remove every velocity-glyph actor and drop the associated VTK glyph pipelines."""
         for h in glyph_handles:
             try:
                 plotter.remove_actor(h)
@@ -2144,6 +2211,7 @@ def _flowshow_desktop(
         glyph_pipes.clear()
 
     def _build_glyphs(tt0: int) -> None:
+        """Build the fast VTK glyph pipeline(s) (single- or all-label) for frame *tt0*."""
         _clear_glyphs()
         if not state["glyphs"]:
             return
@@ -2185,6 +2253,7 @@ def _flowshow_desktop(
     hud = plotter.add_text("", position="upper_left", font_size=12)
 
     def _set_mask_visible(on: bool) -> None:
+        """Toggle visibility of every mask surface actor."""
         for a in mask_actors:
             try:
                 a.SetVisibility(bool(on))
@@ -2205,6 +2274,7 @@ def _flowshow_desktop(
     interior_actor = {"actor": None}
 
     def _clear_interior() -> None:
+        """Remove the interior scalar-field point-cloud actor, if present."""
         a = interior_actor.get("actor")
         if a is None:
             return
@@ -2279,6 +2349,7 @@ def _flowshow_desktop(
         )
 
     def _rebuild_mask_actors() -> None:
+        """Remove and re-add mask surface actors for the current label selection and field-coloring options."""
         # Remove current actors
         for a in mask_actors:
             try:
@@ -2363,6 +2434,7 @@ def _flowshow_desktop(
         _render_interior_field()
 
     def _update_frame() -> None:
+        """Refresh glyphs, streamlines, and pathlines for the current time/label state, then re-render and update the HUD."""
         tt_now = int(state["tt"])
         if state["glyphs"] and not glyph_pipes:
             _build_glyphs(tt_now)
@@ -2443,6 +2515,7 @@ def _flowshow_desktop(
         plotter.render()
 
     def _on_time(value: float):
+        """Slider callback: update the current frame index and refresh the scene."""
         state["tt"] = int(round(value))
         if mask_field["speed"] or mask_field["radial"]:
             _rebuild_mask_actors()
@@ -2455,6 +2528,7 @@ def _flowshow_desktop(
                 _render_cross_sections()
 
     def _on_label(value: float):
+        """Slider callback: update the current label index and rebuild the mask surface (single-label mode)."""
         state["label_idx"] = int(round(value))
         state["label_idx"] = int(np.clip(state["label_idx"], 0, len(labels) - 1))
         if not show_all_labels:
@@ -2511,6 +2585,7 @@ def _flowshow_desktop(
         on_commit: Callable[[str], None],
         vtk_iren: Any,
     ) -> Any | None:
+        """Create an editable VTK text-box widget (with a static label) at a screen position, committing on blur."""
         if vtk is None:
             return None
         try:
@@ -2535,6 +2610,7 @@ def _flowshow_desktop(
             plotter.add_text(label, position=(x, y + h + 2), font_size=9)
 
             def _cb(_obj: Any, _evt: Any) -> None:
+                """Commit the text box's current content when interaction ends."""
                 try:
                     txt = str(box.GetText())
                 except Exception as e:
@@ -2570,6 +2646,7 @@ def _flowshow_desktop(
         initial: str,
         on_commit: Callable[[str], None],
     ) -> None:
+        """Queue a text-box spec to be built once a live VTK interactor is available."""
         pending_boxes.append(
             {
                 "label": label,
@@ -2583,6 +2660,7 @@ def _flowshow_desktop(
         )
 
     def _build_queued_num_boxes() -> None:
+        """Build every queued text-box widget once the VTK interactor becomes available (no-op if already built)."""
         if ui_box_built[0]:
             return
         if vtk is None:
@@ -2631,16 +2709,19 @@ def _flowshow_desktop(
     # the panel now displays all available volumes simultaneously.
 
     def _cb_mask(val: bool):
+        """Checkbox callback: toggle mask surface visibility."""
         state["mask"] = val
         _set_mask_visible(bool(val))
         _update_frame()
 
     def _cb_glyphs(val: bool):
+        """Checkbox callback: toggle velocity-glyph visibility and rebuild the glyph pipeline."""
         state["glyphs"] = val
         _build_glyphs(int(state["tt"]))
         _update_frame()
 
     def _cb_stream(val: bool):
+        """Checkbox callback: toggle streamline visibility and rebuild them for the current frame."""
         state["stream"] = val
         _build_streamlines(int(state["tt"]))
         _update_frame()
@@ -2651,6 +2732,7 @@ def _flowshow_desktop(
     path_last_key: dict[str, Any] = {"key": None}
 
     def _clear_pathlines() -> None:
+        """Remove every pathline tube actor from the scene."""
         for a in path_actors:
             try:
                 plotter.remove_actor(a)
@@ -2744,17 +2826,20 @@ def _flowshow_desktop(
             return None
 
     def _cb_pathlines(val: bool):
+        """Checkbox callback: toggle pathline (particle trajectory) visibility."""
         state["pathlines"] = bool(val)
         # Lazy build handled in _update_frame.
         _update_frame()
 
     def _cb_centerlines(val: bool):
+        """Checkbox callback: toggle centerline visibility."""
         state["centerlines"] = bool(val)
         _set_centerlines_visible(bool(val))
         _update_frame()
 
     # Place buttons in the same left-middle control strip (no resize forcing).
     def _win_h() -> int:
+        """Current render-window height in pixels (for laying out the button strip)."""
         try:
             rw = getattr(plotter, "render_window", None)
             if rw is not None:
@@ -2774,6 +2859,7 @@ def _flowshow_desktop(
             return 800
 
     def _set_btn_pos(btn: Any, x: int, y: int) -> None:
+        """Position a VTK button widget at pixel display coordinates ``(x, y)``."""
         try:
             rep = btn.GetRepresentation()
             # Use display coordinates (pixels) to avoid normalized viewport confusion.
@@ -2802,6 +2888,7 @@ def _flowshow_desktop(
     if loc_actor is not None:
 
         def _cb_loc_dots(val: bool) -> None:
+            """Checkbox callback: toggle LOC marker point visibility."""
             state["loc_dots"] = bool(val)
             _set_loc_dots_visible(bool(val))
             plotter.render()
@@ -2829,18 +2916,21 @@ def _flowshow_desktop(
 
     # Live vector tuning widgets (desktop only).
     def _on_opacity(v: float) -> None:
+        """Text-box callback: update glyph opacity on all live glyph pipelines."""
         vec.glyph_opacity = float(v)
         for gp in glyph_pipes:
             gp.set_opacity(vec.glyph_opacity)
         plotter.render()
 
     def _on_scale_factor(v: float) -> None:
+        """Text-box callback: update glyph scale factor on all live glyph pipelines."""
         vec.scale_factor = float(v)
         for gp in glyph_pipes:
             gp.set_scale_by_magnitude(vec.scale_by_magnitude, vec.scale_factor)
         plotter.render()
 
     def _on_scale_mag(v: bool) -> None:
+        """Checkbox callback: toggle magnitude-based glyph scaling and speed coloring."""
         vec.scale_by_magnitude = bool(v)
         for gp in glyph_pipes:
             gp.set_scale_by_magnitude(vec.scale_by_magnitude, vec.scale_factor)
@@ -2878,6 +2968,7 @@ def _flowshow_desktop(
 
     # Mask field modes.
     def _on_mask_speed(val: bool) -> None:
+        """Checkbox callback: toggle speed-field coloring of the mask surface or interior points."""
         mask_field["speed"] = bool(val)
         # If interior points are enabled, these toggles should update the point scalars.
         if interior_field["enabled"]:
@@ -2896,6 +2987,7 @@ def _flowshow_desktop(
         plotter.render()
 
     def _on_mask_radial(val: bool) -> None:
+        """Checkbox callback: toggle radial-distance-field coloring of the mask surface or interior points."""
         mask_field["radial"] = bool(val)
         if interior_field["enabled"]:
             if mask_field["speed"] and mask_field["radial"]:
@@ -2932,6 +3024,7 @@ def _flowshow_desktop(
 
     # Interior field (dense point cloud).
     def _on_interior(val: bool) -> None:
+        """Checkbox callback: toggle the dense interior scalar-field point cloud."""
         interior_field["enabled"] = bool(val)
         _render_interior_field()
         plotter.render()
@@ -2946,6 +3039,7 @@ def _flowshow_desktop(
     t_interior = plotter.add_text("Show interior points", position=(42, y0 - 142), font_size=9)
 
     def _toggle_play():
+        """Spacebar key-event handler: flip the play/pause animation state."""
         state["playing"] = not state["playing"]
 
     plotter.add_key_event("space", _toggle_play)
@@ -2953,6 +3047,7 @@ def _flowshow_desktop(
     timer_ms = max(int(round(1000.0 / max(anim.animation_fps, 0.25))), 30)
 
     def _on_timer(_obj: Any, _event: Any) -> None:
+        """VTK repeating-timer callback: advance the frame index (looping or stopping at the end) while playing."""
         if not state["playing"]:
             return
         if anim.loop:
@@ -2967,6 +3062,7 @@ def _flowshow_desktop(
     timer_warned = [False]
 
     def _try_install_animation_timer() -> bool:
+        """Attempt to install the repeating animation timer once a live VTK interactor exists; idempotent."""
         if timer_installed[0]:
             return True
         vtk_iren = _unwrap_vtk_interactor(plotter)
@@ -2978,6 +3074,7 @@ def _flowshow_desktop(
         return ok
 
     def _on_first_render(*_args: Any) -> None:
+        """First-render event handler: build queued numeric widgets and install the animation timer."""
         # Build numeric input widgets once the interactor exists.
         try:
             _build_queued_num_boxes()

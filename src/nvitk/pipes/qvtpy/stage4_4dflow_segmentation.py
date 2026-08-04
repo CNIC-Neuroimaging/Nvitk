@@ -73,18 +73,22 @@ EICAB_IN_4DFLOW_EICAB_IDS_NIFTI = "eicab_in_4dflow_eicab_ids.nii.gz"
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _stage3_dir(output_root: Path, subject: str) -> Path:
+    """Stage 3 (centerline) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _stage4_out(output_root: Path, subject: str) -> Path:
+    """Stage 4 (4D-flow segmentation) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
 
 
 def _cd_path(nifti_root: Path, subject: str) -> Path:
+    """Path to *subject*'s ``ComplexDifference_3D`` NIfTI (``.nii.gz`` preferred over ``.nii``)."""
     p = nifti_root / subject / "4DFlow" / "ComplexDifference_3D.nii.gz"
     if p.is_file():
         return p
@@ -119,6 +123,8 @@ def _segmentation_meta(
     aca_sequential_grow_info: dict[str, Any] | None,
     vessels: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    """Assemble the stage-4 ``segmentation_meta.json`` payload documenting inputs, thresholds,
+    region-growing/ACA/AComm parameters, and per-vessel results."""
     return {
         "subject": subject,
         "complex_difference": str(_cd_path(nifti_root, subject)),
@@ -382,6 +388,8 @@ def run_subject(
 
 
 def _stage4_cli_options(func):
+    """Decorator applying all shared stage-4 click options (subject/paths, threshold/region-growing
+    and ACA/AComm tuning) to *func*."""
     func = click.option("--subject", required=True)(func)
     func = click.option("--nifti-root", type=click.Path(path_type=Path), required=True)(func)
     func = click.option("--output-root", type=click.Path(path_type=Path), required=True)(func)
@@ -564,6 +572,7 @@ def _subject_sge_spec(
     pp_distal: bool = False,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 4 segmentation task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -828,6 +837,8 @@ def main(
     distal_lr_halfspace_slack: int,
     pp_distal: bool,
 ) -> None:
+    """CLI entry point (``qvtpy-stage4-seg``): run stage 4 4D-flow vessel segmentation
+    for one subject."""
     Logger()
     run_subject(
         subject,

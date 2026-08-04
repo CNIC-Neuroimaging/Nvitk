@@ -122,21 +122,26 @@ def install_points_style_sync(
     Without this, the GUI sliders only affect the next added or selected points.
     """
     def _sync_size(_event: Any = None) -> None:
+        """Broadcast the layer-panel's current size to every existing point."""
         if len(layer.data) == 0:
             return
         layer.size = float(layer.current_size)
 
     def _sync_symbol(_event: Any = None) -> None:
+        """Broadcast the layer-panel's current symbol to every existing point."""
         if len(layer.data) == 0:
             return
         layer.symbol = layer.current_symbol
 
     def _sync_border(_event: Any = None) -> None:
+        """Broadcast the layer-panel's current border width to every existing point."""
         if len(layer.data) == 0:
             return
         layer.border_width = float(layer.current_border_width)
 
     def _sync_face_color(_event: Any = None) -> None:
+        """Broadcast the layer-panel's current face color to every existing point, unless it names a
+        feature column (in which case colormap-driven coloring should be left alone)."""
         if len(layer.data) == 0:
             return
         val = layer.current_face_color
@@ -157,6 +162,7 @@ def install_points_style_sync(
         callbacks.append((layer.events.current_face_color, _sync_face_color))
 
     def disconnect() -> None:
+        """Detach all the style-sync callbacks installed above."""
         for evt, cb in callbacks:
             try:
                 evt.disconnect(cb)
@@ -195,6 +201,8 @@ def add_hotspot_points_layer(
     point_size = DEFAULT_HOTSPOT_POINT_SIZE,
     colormap = DEFAULT_HOTSPOT_COLORMAP,
 ) -> Any:
+    """Add (replacing any prior) a Points layer for PET hotspot *coords*, colored by SUV via
+    *colormap* (or plain red if there are no points), and install style-sync callbacks."""
     stop_hotspot_points_sync(viewer)
     for lyr in list(viewer.layers):
         if lyr.name == name:
@@ -226,6 +234,8 @@ def add_hotspot_points_layer(
 
 
 def _subsample_mask_indices(mask: np.ndarray, max_points: int, label_ids: list[int] | None) -> np.ndarray:
+    """Voxel indices inside the ROI defined by *mask*/*label_ids*, evenly subsampled down to at most
+    *max_points*."""
     roi = _roi_mask(mask, label_ids)
     idx = np.argwhere(roi)
     if idx.shape[0] <= max_points:
@@ -423,6 +433,8 @@ def add_flow_vectors_layer(
     speed_limits = None,
     colormap = "turbo",
 ) -> Any:
+    """Add (replacing any prior) a Vectors layer for the given arrow *positions*/*vectors*, colored by
+    speed via *colormap* if a ``"speed"`` feature is supplied."""
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)
@@ -557,6 +569,7 @@ def repair_time_dim_for_viewer(viewer: Any) -> None:
 
 
 def _global_speed_limits(cache: FlowVectorCache) -> tuple[float, float]:
+    """2nd/98th percentile speed magnitude across all cached cardiac phases, for fixed-range coloring."""
     if cache.magnitudes.size == 0:
         return (0.0, 1.0)
     lo = float(np.percentile(cache.magnitudes, 2.0))
@@ -594,6 +607,8 @@ def _update_flow_vector_layer(
     viewer = None,
     phase_layer = None,
 ) -> None:
+    """Recompute and push the flow-vector geometry/features for *time_index* onto *layer*, repairing
+    the viewer's time-dim range against *phase_layer* if both are given."""
     data, features = flow_vector_frame(cache, time_index)
     layer.data = data
     layer.features = features
@@ -646,6 +661,7 @@ def add_animated_flow_vectors_layer(
         pass
 
     def _on_dims(_event: Any = None) -> None:
+        """Refresh the flow-vector layer for the viewer's current cardiac phase, when visible."""
         if not getattr(layer, "visible", True):
             return
         _repair_time_dim_range(viewer, phase_layer)
@@ -666,6 +682,7 @@ def add_animated_flow_vectors_layer(
 
 
 def voxel_spacing_from_layer(layer: Any) -> tuple[float, float, float]:
+    """*layer*'s (x, y, z) voxel spacing, or ``(1.0, 1.0, 1.0)`` if unavailable."""
     sp = layer_spacing(layer)
     if sp is not None and len(sp) >= 3:
         return (float(sp[0]), float(sp[1]), float(sp[2]))

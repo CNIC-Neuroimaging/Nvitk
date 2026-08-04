@@ -37,7 +37,9 @@ def _resolve_import_pipeline_id(repo: DataRepo, modality: str) -> str | None:
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when click isn't installed."""
     def decorator(func):
+        """Return *func* unmodified (click is unavailable, so no CLI wiring is applied)."""
         return func
 
     return decorator
@@ -98,6 +100,7 @@ def _column_name_is_timeseries_frame_index(name: object) -> bool:
 
 
 def _timeseries_wide_frame_columns(all_columns: list, *, reserved: set[str]) -> list:
+    """Frame-index columns (e.g. per-timepoint ``0``, ``1``, ...) among *all_columns*, excluding *reserved* names."""
     out: list = []
     for column in all_columns:
         if column in reserved:
@@ -181,6 +184,8 @@ CLINICAL_METADATA_COLUMNS = {
 
 @dataclass(frozen=True)
 class SourceSpec:
+    """One importable (filename, sheet) unit: its layout, domain, and default cohort/pipeline/visit metadata."""
+
     filename: str
     sheet: str
     source_kind: str
@@ -286,6 +291,7 @@ PESABRAIN_DB_SPECS: dict[str, list[SourceSpec]] = {
 
 
 def list_pesabrain_sources() -> list[dict[str, Any]]:
+    """Flatten the ``PESABRAIN_DB_SPECS`` registry into a list of source-metadata dicts, for listing/CLI display."""
     rows: list[dict[str, Any]] = []
     for filename, specs in sorted(PESABRAIN_DB_SPECS.items()):
         for spec in specs:
@@ -311,6 +317,7 @@ def _matching_pesabrain_specs(
     sheet: str | None = None,
     source_kind: str | None = None,
 ) -> list[SourceSpec]:
+    """Look up registered :class:`SourceSpec` entries for *filename*, optionally filtered by sheet/kind."""
     matches = list(PESABRAIN_DB_SPECS.get(filename, []))
     if sheet is not None:
         matches = [spec for spec in matches if spec.sheet == sheet]
@@ -320,10 +327,12 @@ def _matching_pesabrain_specs(
 
 
 def _default_pesabrain_batch_id() -> str:
+    """Generate a timestamped default batch id (``pesabrain_<UTC timestamp>``)."""
     return f"pesabrain_{utc_now_iso().replace(':', '').replace('-', '').replace('+00:00', 'z')}"
 
 
 def _is_identifier_column(column: str) -> bool:
+    """True when a column name looks like a subject/session identifier (by suffix or known prefix)."""
     normalized = normalize_variable_id(str(column))
     if normalized in ID_NAMESPACE_EXACT:
         return True
@@ -355,15 +364,18 @@ def _measurement_skip_columns(raw: pd.DataFrame, *, domain: str) -> set[Any]:
 
 
 def _membership_source_for_spec(spec: SourceSpec) -> str:
+    """Cohort-membership source label for a spec (``pesabrain:<batch_id>``)."""
     batch = spec.batch_id or "All"
     return f"pesabrain:{batch}"
 
 
 def _local_session_uid(subject_uid: str, session_label: str) -> str:
+    """Build a synthetic (non-XNAT) session uid from a subject and visit label."""
     return f"local:{subject_uid}:{session_label}"
 
 
 def _region_id(value: str | None) -> str | None:
+    """Normalize a raw region/vessel name into a canonical variable-id-style region id."""
     text = normalize_string(value)
     if text is None:
         return None
@@ -371,6 +383,7 @@ def _region_id(value: str | None) -> str | None:
 
 
 def read_tabular_source(path: str | Path, *, sheet_name: str | int = 0, header: int = 0) -> pd.DataFrame:
+    """Read a tabular source file (Excel or CSV) by extension into a DataFrame."""
     source = Path(path)
     suffix = source.suffix.lower()
     if suffix in {".xlsx", ".xls"}:
@@ -381,15 +394,18 @@ def read_tabular_source(path: str | Path, *, sheet_name: str | int = 0, header: 
 
 
 def list_excel_sources(base_path: str | Path) -> list[Path]:
+    """Sorted list of Excel files directly under *base_path*."""
     base = Path(base_path)
     return sorted([path for path in base.iterdir() if path.suffix.lower() in {".xlsx", ".xls"}])
 
 
 def _normalized_column_map(columns: list[str]) -> dict[str, str]:
+    """Map alphanumeric-only lowercased column names back to their original names."""
     return {re.sub(r"[^0-9a-z]+", "", str(column).lower()): str(column) for column in columns}
 
 
 def _first_matching_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """First column in *df* matching any of *candidates* by normalized (alphanumeric, lowercased) name."""
     normalized = _normalized_column_map(list(df.columns))
     for candidate in candidates:
         key = re.sub(r"[^0-9a-z]+", "", candidate.lower())
@@ -399,6 +415,7 @@ def _first_matching_column(df: pd.DataFrame, candidates: list[str]) -> str | Non
 
 
 def _parse_datetime_series(series: pd.Series) -> pd.Series:
+    """Parse a column as datetimes, auto-detecting Excel serial date numbers (values in the 20000-60000 range)."""
     numeric = pd.to_numeric(series, errors="coerce")
     if numeric.notna().sum() > 0:
         sample = numeric.dropna()
@@ -408,6 +425,7 @@ def _parse_datetime_series(series: pd.Series) -> pd.Series:
 
 
 def _coerce_numeric(series: pd.Series) -> pd.Series:
+    """Coerce a column to float64, retrying with comma-decimal normalization if the first pass finds no numbers."""
     numeric = pd.to_numeric(series, errors="coerce")
     if numeric.notna().sum() == 0:
         numeric = pd.to_numeric(series.astype("string").str.replace(",", ".", regex=False), errors="coerce")
@@ -415,6 +433,7 @@ def _coerce_numeric(series: pd.Series) -> pd.Series:
 
 
 def _series_value_payload(series: pd.Series) -> tuple[pd.Series, pd.Series, str]:
+    """Split a column into ``(numeric_values, text_values, value_kind)``, classifying it numeric if ≥70% parses as a number."""
     numeric = _coerce_numeric(series)
     observed = int(series.notna().sum())
     numeric_ratio = float(numeric.notna().sum()) / float(observed) if observed else 0.0
@@ -429,6 +448,9 @@ def _series_value_payload(series: pd.Series) -> tuple[pd.Series, pd.Series, str]
 
 
 def ensure_subject_uid(df: pd.DataFrame, *, candidates: list[str] | None = None) -> pd.DataFrame:
+    """Ensure *df* has a ``subject_uid`` column: reuse it if present, else derive it from a matching id column,
+    else synthesize row-index placeholder ids.
+    """
     out = df.copy()
     if "subject_uid" in out.columns:
         out["subject_uid"] = out["subject_uid"].astype("string")
@@ -443,10 +465,12 @@ def ensure_subject_uid(df: pd.DataFrame, *, candidates: list[str] | None = None)
 
 
 def _source_table_name(source_path: Path, sheet_name: str) -> str:
+    """Build a stable ``<file stem>::<sheet>`` table identifier."""
     return f"{source_path.stem}::{sheet_name}"
 
 
 def _inventory_row(source_path: Path, sheet_name: str, df: pd.DataFrame, spec: SourceSpec, source_batch_id: str) -> dict[str, Any]:
+    """Build one ``source_tables`` inventory row describing an imported sheet."""
     return {
         "source_uid": f"{source_path.name}:{sheet_name}:{spec.source_kind}",
         "source_file": source_path.name,
@@ -464,6 +488,7 @@ def _inventory_row(source_path: Path, sheet_name: str, df: pd.DataFrame, spec: S
 
 
 def _register_inventory_rows(repo: DataRepo, rows: list[dict[str, Any]]) -> pd.DataFrame:
+    """Upsert a batch of ``source_tables`` inventory rows into the repo."""
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
@@ -488,6 +513,7 @@ def _variable_entry(
     source_sheet: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
+    """Build one ``variables`` dictionary row for a single imported column."""
     aliases = [source_column]
     return {
         "variable_id": variable_id,
@@ -505,6 +531,7 @@ def _variable_entry(
 
 
 def _upsert_subject_ids(repo: DataRepo, df: pd.DataFrame) -> pd.DataFrame:
+    """Upsert a ``subject_ids`` frame into the repo (no-op for an empty frame)."""
     if df.empty:
         return df
     repo.upsert_table(
@@ -516,6 +543,7 @@ def _upsert_subject_ids(repo: DataRepo, df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _upsert_sessions(repo: DataRepo, df: pd.DataFrame) -> pd.DataFrame:
+    """Upsert a ``sessions`` frame into the repo (no-op for an empty frame)."""
     if df.empty:
         return df
     repo.upsert_table(
@@ -535,6 +563,7 @@ def harvest_subject_ids_from_frame(
     source_batch_id: str,
     id_source: str | None = None,
 ) -> pd.DataFrame:
+    """Extract every identifier-like column from *raw* into ``subject_ids`` rows and upsert them."""
     rows: list[dict[str, Any]] = []
     now = utc_now_iso()
     for _, row in raw.iterrows():
@@ -574,6 +603,7 @@ def import_subject_ids_from_source(
     id_source: str | None = None,
     sheet_name: str = "Sheet1",
 ) -> pd.DataFrame:
+    """Load a tabular source and harvest its identifier columns into ``subject_ids``."""
     raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name))
     return harvest_subject_ids_from_frame(
         repo,
@@ -593,6 +623,7 @@ def import_cohort_membership_from_source(
     source_batch_id: str,
     sheet_name: str = "Sheet1",
 ) -> pd.DataFrame:
+    """Load a tabular source and register every row's subject as a member of *cohort_id*."""
     raw = ensure_subject_uid(read_tabular_source(source_path, sheet_name=sheet_name))
     df = pd.DataFrame(
         {
@@ -641,6 +672,7 @@ def upsert_cohort_membership_for_subjects(
 
 
 def _collect_subject_uids_from_import_result(result: Any) -> set[str]:
+    """Recursively collect every non-empty ``subject_uid`` value out of a (possibly nested) import result."""
     out: set[str] = set()
     if isinstance(result, pd.DataFrame):
         if "subject_uid" in result.columns:
@@ -666,6 +698,7 @@ def import_measurements_from_source(
     modality: str | None = None,
     sheet_name: str | int = 0,
 ) -> pd.DataFrame:
+    """Load a tabular source and import it as clinical or image measurements, per *kind*."""
     source = Path(source_path)
     raw = read_tabular_source(source, sheet_name=sheet_name)
     resolved_sheet = str(sheet_name)
@@ -699,6 +732,7 @@ def harvest_sessions_from_frame(
     modality: str | None,
     default_visit_label: str | None = None,
 ) -> pd.DataFrame:
+    """Extract session rows (uid, visit, scanner, acquisition date) from *raw* and upsert into ``sessions``."""
     session_column = _first_matching_column(raw, SESSION_CANDIDATES)
     if session_column is None:
         return pd.DataFrame()
@@ -740,6 +774,7 @@ def harvest_sessions_from_frame(
 
 
 def _upsert_measurements(repo: DataRepo, table_name: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Upsert a measurements frame into *table_name* (no-op for an empty frame)."""
     if df.empty:
         return df
     repo.upsert_table(
@@ -751,6 +786,7 @@ def _upsert_measurements(repo: DataRepo, table_name: str, df: pd.DataFrame) -> p
 
 
 def _register_variables(repo: DataRepo, entries: list[dict[str, Any]]) -> None:
+    """Register a batch of variable-dictionary entries with the repo (no-op if empty)."""
     if entries:
         repo.register_variables(entries)
 
@@ -768,6 +804,7 @@ def _clinical_frame(
     unit: str | None = None,
     default_visit_label: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
+    """Build one ``clinical_measurements`` long-form frame (and its variable-dictionary entry) for a single wide column."""
     value_num, value_text, value_kind = _series_value_payload(raw[column])
     variable = _variable_entry(
         variable_id=variable_id or normalize_variable_id(column),
@@ -821,6 +858,7 @@ def _image_frame(
     unit: str | None = None,
     pipeline_id: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
+    """Build one ``image_measurements`` long-form frame (and its variable-dictionary entry) for a single wide column."""
     value_num, value_text, value_kind = _series_value_payload(raw[column])
     variable = _variable_entry(
         variable_id=variable_id,
@@ -877,6 +915,9 @@ def _parse_generic_clinical_wide(
     default_visit_label: str | None = None,
     harvest_sessions: bool = False,
 ) -> pd.DataFrame:
+    """Import a generic wide clinical sheet: harvest subject ids (and optionally sessions), then melt every
+    non-identifier column into ``clinical_measurements`` rows and register their variable-dictionary entries.
+    """
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
     if harvest_sessions:
@@ -920,6 +961,7 @@ def _parse_generic_clinical_wide(
 
 
 def _parse_image_wide_column(source_name: str, column: str) -> tuple[str, str | None, str | None]:
+    """File-specific mapping from a wide image column to ``(variable_id, region_id, region_label)``, by known PESA-Brain source name."""
     if source_name in ["PESABrain_4DFlow_LocalizedPI_20260216.xlsx", "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx"]:
         region = column.replace("_PI", "")
         return "pi", _region_id(region), region
@@ -949,6 +991,9 @@ def _parse_generic_image_wide(
     pipeline_id: str | None = None,
     harvest_sessions: bool = False,
 ) -> pd.DataFrame:
+    """Import a generic wide image sheet: harvest subject ids (and optionally sessions), then melt every
+    non-identifier column into ``image_measurements`` rows, mapping each column via :func:`_parse_image_wide_column`.
+    """
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
     if harvest_sessions:
@@ -1025,6 +1070,7 @@ def _parse_image_timeseries_long(
     source_batch_id: str,
     modality: str,
 ) -> pd.DataFrame:
+    """Import a long-form per-frame timeseries sheet (one row per subject×vessel×frame) into ``image_measurements``."""
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
 
@@ -1106,6 +1152,7 @@ def _parse_image_timeseries_wide(
     modality: str,
     pipeline_id: str | None = None,
 ) -> pd.DataFrame:
+    """Import a wide per-frame timeseries sheet (one column per frame index) into ``image_measurements``, melting frame columns to rows."""
     raw = ensure_subject_uid(raw)
     harvest_subject_ids_from_frame(repo, raw, source_path=source_path, sheet_name=sheet_name, source_batch_id=source_batch_id)
 
@@ -1189,6 +1236,7 @@ def _parse_image_timeseries_wide(
 
 
 def _resolve_metadata_columns(df: pd.DataFrame) -> dict[str, str | None]:
+    """Map canonical variable-dictionary field names to their matching (Spanish/English) column in *df*."""
     return {
         "name": _first_matching_column(df, ["Nombre", "Variable", "Glosario"]),
         "export_name": _first_matching_column(df, ["Nombre exportación", "Nombre exportacion", "Nombre exportación", "Nombre exportacion"]),
@@ -1209,6 +1257,7 @@ def _resolve_metadata_columns(df: pd.DataFrame) -> dict[str, str | None]:
 
 
 def _metadata_type_to_value_kind(value: Any) -> str | None:
+    """Map a free-text variable-dictionary type string (Spanish/English) to a canonical value kind."""
     text = normalize_string(value)
     if text is None:
         return None
@@ -1225,6 +1274,7 @@ def _metadata_type_to_value_kind(value: Any) -> str | None:
 
 
 def _split_allowed_values(value: Any) -> list[str]:
+    """Split a semicolon/pipe-separated allowed-values cell into a clean list of strings."""
     text = normalize_string(value)
     if text is None:
         return []
@@ -1241,6 +1291,7 @@ def _parse_variable_dictionary(
     domain: str,
     modality: str | None,
 ) -> pd.DataFrame:
+    """Parse a variable-dictionary sheet (one row per variable, with description/unit/range metadata) into variable entries."""
     columns = _resolve_metadata_columns(raw)
     entries: list[dict[str, Any]] = []
     for _, row in raw.iterrows():
@@ -1305,6 +1356,7 @@ def _parse_dropdown_dictionary(
     domain: str,
     modality: str | None,
 ) -> pd.DataFrame:
+    """Parse a dropdown-value sheet (one column per variable, header = name, rest = allowed values) into variable entries."""
     entries: list[dict[str, Any]] = []
     for column in raw.columns:
         values = [normalize_string(item) for item in raw[column].tolist()]
@@ -1363,6 +1415,7 @@ def enrich_sessions_available_scans(repo: DataRepo) -> pd.DataFrame:
         return sessions
 
     def _scan_token(row: pd.Series) -> str | None:
+        """Return the first non-empty asset label found in ``row``, checking columns in priority order."""
         for column in ("asset_slot", "scan_label", "series_description", "scan_id"):
             if column not in row.index:
                 continue
@@ -1453,6 +1506,10 @@ def prune_redundant_local_sessions(repo: DataRepo) -> pd.DataFrame:
 
 
 def rebuild_subjects_table(repo: DataRepo) -> pd.DataFrame:
+    """Recompute the ``subjects`` table by collecting every distinct ``subject_uid`` seen across
+    ``subject_ids``, ``clinical_measurements``, ``image_measurements`` and ``sessions``, then filling in
+    per-subject demographics (primary patient ID, sex, birth date) from ``subject_ids``/``clinical_measurements``.
+    Overwrites the existing ``subjects`` table."""
     frames: list[pd.DataFrame] = []
     for table_name in ("subject_ids", "clinical_measurements", "image_measurements", "sessions"):
         try:
@@ -1474,6 +1531,7 @@ def rebuild_subjects_table(repo: DataRepo) -> pd.DataFrame:
         subset = subject_ids[subject_ids["subject_uid"] == subject_uid] if not subject_ids.empty else pd.DataFrame()
 
         def pick_id(*names: str) -> str | None:
+            """Return the normalized ``id_value`` for the first matching ``id_namespace`` in ``names``, or ``None``."""
             for name in names:
                 matches = subset[subset["id_namespace"] == name]
                 if not matches.empty:
@@ -1528,6 +1586,9 @@ def import_source_spec(
     source_batch_id: str,
     pipeline_id: str | None = None,
 ) -> pd.DataFrame | dict[str, pd.DataFrame]:
+    """Import a single tabular source according to its ``SourceSpec``, logging it in the inventory and
+    dispatching to the parser matching ``spec.source_kind`` (subject IDs, cohort membership, subject
+    catalog, clinical/image wide tables, image time series, or variable/dropdown dictionaries)."""
     raw = read_tabular_source(source_path, sheet_name=spec.sheet)
     _register_inventory_rows(repo, [_inventory_row(source_path, spec.sheet, raw, spec, source_batch_id)])
 
@@ -1591,6 +1652,10 @@ def import_pesabrain_db_directory(
     build_sqlite_index: bool = False,
     cohort_id: str | None = None,
 ) -> dict[str, Any]:
+    """Import every Excel workbook under ``db_base_path`` that has a configured PESA-Brain source spec,
+    recording unmapped sheets in the inventory, rebuilding the ``subjects`` table, and enrolling any
+    subjects touched by the import into ``cohort_id`` (default cohort if unset). Optionally rebuilds the
+    SQLite query cache. Returns a dict of per-sheet import results plus the rebuilt ``subjects`` frame."""
     base = Path(db_base_path)
     if not base.exists():
         raise FileNotFoundError(base)
@@ -1660,6 +1725,11 @@ def import_pesabrain_source(
     pipeline_id: str | None = None,
     cohort_id: str | None = None,
 ) -> dict[str, Any]:
+    """Import a single named file from ``db_base_path``, resolving it against the configured PESA-Brain
+    source specs (optionally narrowed by ``sheet``/``source_kind`` when a filename maps to more than one
+    spec). Enrolls any resulting subjects into ``cohort_id`` and, unless ``rebuild_subjects`` is False,
+    refreshes the ``subjects`` table. Raises ``FileNotFoundError`` if the directory or file is missing, and
+    ``ValueError`` if the filename matches zero or multiple specs."""
     base = Path(db_base_path)
     if not base.exists():
         raise FileNotFoundError(base)
@@ -1713,6 +1783,8 @@ def import_pesabrain_curated_tables(
     build_sqlite_index: bool = False,
     cohort_id: str | None = None,
 ) -> dict[str, Any]:
+    """Alias for :func:`import_pesabrain_db_directory` kept for call sites that import the "curated"
+    (already-cleaned) PESA-Brain table set; the underlying directory-scan logic is identical."""
     return import_pesabrain_db_directory(
         repo,
         db_base_path,
@@ -1748,6 +1820,8 @@ def import_pesabrain_curated_tables(
     help="Set NVITK_PIPELINE_ID for this run (overrides catalog default for all modalities unless NVITK_PIPELINE_ID_<MODALITY> is set).",
 )
 def main(dataset_root: Path, db_base_path: Path, build_sqlite_index: bool, pipeline_id: str | None) -> None:
+    """CLI entry point: scaffold/open the dataset at ``dataset_root`` and import every configured
+    PESA-Brain source found under ``db_base_path`` into it."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
 

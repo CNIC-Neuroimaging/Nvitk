@@ -372,6 +372,7 @@ def align_mask_to_reference_layer(
 
 
 def _axis_direction_label(code: str) -> str:
+    """Human-readable label for a single anatomical direction code (``R``/``L``/``A``/``P``/``S``/``I``)."""
     c = str(code).upper()
     pairs = {
         "R": "R+ = patient Right",
@@ -533,6 +534,7 @@ def attach_orientation_status(viewer: Any, label_widget: Any) -> None:
     """Keep *label_widget* (Qt QLabel) in sync with the active layer / dims."""
 
     def _refresh() -> None:
+        """Update *label_widget* with the orientation text for the current status layer."""
         if not viewer.layers:
             label_widget.setText("Orientation: —")
             return

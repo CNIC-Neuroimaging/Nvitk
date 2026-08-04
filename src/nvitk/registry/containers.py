@@ -13,6 +13,7 @@ _NVITK_PROJECT = "nvitk"
 
 
 def _find_repo_root() -> Path | None:
+    """Walk up from this file to the repo root (dir with ``pyproject.toml`` and ``src/nvitk``)."""
     here = Path(__file__).resolve()
     for anc in [here.parent, *here.parents]:
         if (anc / "pyproject.toml").is_file() and (anc / "src" / "nvitk").is_dir():
@@ -45,6 +46,7 @@ def registry_path() -> Path | None:
 
 
 def load_container_registry() -> dict[str, Any]:
+    """Load and parse ``containers.json``; returns an empty dict if it is missing or malformed."""
     path = registry_path()
     if path is None:
         return {}
@@ -54,6 +56,7 @@ def load_container_registry() -> dict[str, Any]:
 
 
 def _project_entry(registry: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """Return the ``containers.projects[name]`` sub-dict, or ``None`` if absent/mis-typed."""
     projects = registry.get("containers", {}).get("projects", {})
     if not isinstance(projects, dict):
         return None
@@ -62,6 +65,7 @@ def _project_entry(registry: dict[str, Any], name: str) -> dict[str, Any] | None
 
 
 def _version_entry(project: dict[str, Any], version: str | None) -> tuple[str, dict[str, Any]] | None:
+    """Resolve ``(version, entry)`` for *project*, defaulting to ``latest`` then the highest key."""
     versions = project.get("versions")
     if not isinstance(versions, dict) or not versions:
         return None
@@ -101,10 +105,12 @@ def resolve_cluster_sif_path(
 
 
 def resolve_nvitk_cluster_sif(*, version: str | None = None) -> Path | None:
+    """Cluster SIF path for the ``nvitk`` container itself (convenience wrapper)."""
     return resolve_cluster_sif_path(_NVITK_PROJECT, version=version)
 
 
 def _is_nvitk_container_path(value: str) -> bool:
+    """True when *value* names an ``nvitk_v<version>.sif`` container."""
     return bool(_NVITK_CONTAINER_RE.search(value))
 
 

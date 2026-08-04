@@ -12,6 +12,7 @@ from .io_utils import safe_filename
 from .models import SkeletonTree, VesselInfo
 
 def nearest_dist_to_vessel_names(vessel_names: List[str], pt_mm: np.ndarray, multilabel: np.ndarray, spacing, mapping: dict) -> float:
+    """Distance (mm) from *pt_mm* to the nearest voxel of any label named in *vessel_names*."""
     spacing = np.asarray(spacing, dtype=float)
     best = np.inf
     wanted = set(vessel_names or [])
@@ -29,6 +30,7 @@ def nearest_dist_to_vessel_names(vessel_names: List[str], pt_mm: np.ndarray, mul
 
 
 def anatomical_endpoint_score(pt_mm: np.ndarray, rule: Optional[str]) -> float:
+    """Ranking score for *pt_mm* under an anatomical direction *rule* (lower = more extreme in that direction)."""
     if rule == "inferior":
         return float(pt_mm[2])
     if rule == "superior":
@@ -100,6 +102,11 @@ def orient_centerline_points_by_flow(
     spacing,
     mapping: dict,
 ) -> Tuple[np.ndarray, bool]:
+    """Orient a centerline so it runs upstream→downstream per *vessel_info* flow topology.
+
+    Returns ``(points, was_reversed)``. Falls back through downstream-only, then
+    upstream-only proximity when one side of the topology is unavailable.
+    """
     spacing = np.asarray(spacing, dtype=float)
     downstream = [name for name in (vessel_info.flow_to or []) if name and not name.startswith("cortex") and name != "systemic"]
     upstream = vessel_info.flow_from if vessel_info.flow_from and vessel_info.flow_from != "systemic" else ""
@@ -125,6 +132,7 @@ def orient_centerline_points_by_flow(
 
 
 def make_path_id(label: int, vessel_name: str, component_id: int, path_i: int, terminal_i: int, tree_label: Optional[str] = None) -> str:
+    """Build the export filename stem for one centerline path (trunk/arm/anatomic-M1 naming)."""
     prefix = f"{label}_{vessel_name}_comp{component_id:02d}"
     if EXPORT_ANATOMIC_SPLIT_CENTERLINES and int(terminal_i) == 0:
         suffix = "M1"
@@ -139,11 +147,13 @@ def make_path_id(label: int, vessel_name: str, component_id: int, path_i: int, t
 
 
 def display_anatomic_segment_path(segment_path: str) -> str:
+    """Strip a redundant leading ``M1_`` prefix from a segment path for display."""
     segment_path = str(segment_path or "")
     return segment_path[3:] if segment_path.startswith("M1_M") else segment_path
 
 
 def make_loop_region_path_id(label: int, vessel_name: str, component_id: int, loop_i: int, region_name: str, region_i: int = 1) -> str:
+    """Build the export filename stem for a donut-loop region (selected/alternate arm)."""
     if str(region_name) == "alternate_arm":
         suffix = "loop_arm"
         if int(loop_i) != 1:
@@ -159,10 +169,12 @@ def make_loop_region_path_id(label: int, vessel_name: str, component_id: int, lo
 
 
 def make_tree_region_id(label: int, vessel_name: str, component_id: int, role: str) -> str:
+    """Build the export filename stem for a recursive tree-region segment."""
     return safe_filename(f"{label}_{vessel_name}_comp{component_id:02d}_{role}")
 
 
 def tree_region_metadata(region_name: str) -> dict:
+    """Classify a region name into its tree role, branch depth/index/path metadata."""
     name = str(region_name or "unassigned")
     if name in {"trunk", "common_base"}:
         return {

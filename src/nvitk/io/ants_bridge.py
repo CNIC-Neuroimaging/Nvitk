@@ -35,6 +35,7 @@ def require_antspynet():
 
 
 def _affine_matrix(image: Any) -> np.ndarray | None:
+    """Extract a 4x4 world affine from an Image-like object (attribute or metadata dict); ``None`` if unavailable."""
     aff = getattr(image, "affine", None)
     if aff is None:
         meta = getattr(image, "metadata", None) or {}
@@ -53,6 +54,7 @@ def _spacing_origin_direction(image: Any, ndim: int) -> tuple[
     tuple[float, ...] | None,
     np.ndarray | None,
 ]:
+    """Extract ``(spacing, origin, direction)`` for an ANTs image from an Image-like object's attributes/metadata."""
     spacing = None
     origin = None
     direction = None

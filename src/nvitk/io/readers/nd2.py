@@ -16,6 +16,7 @@ except Exception:
 
 
 def _infer_axes_from_sizes(sizes: Any, ndim: int) -> str:
+    """Derive an axis-label string from ND2 dimension sizes, falling back to a default order by ndim."""
     if sizes:
         try:
             return "".join(str(k).upper() for k in sizes.keys())

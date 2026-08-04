@@ -18,6 +18,8 @@ from nvitk.cluster import sge_json
 
 @dataclass(frozen=True)
 class SgeConnectionSettings:
+    """SSH connection details and remote job directory collected from :class:`SgeSubmitDialog`."""
+
     host: str
     user: str
     password: str
@@ -25,6 +27,7 @@ class SgeConnectionSettings:
 
 
 def _default_host() -> str:
+    """Default SSH host alias for the connection dialog (first known alias, else ``"samwise"``)."""
     paths = sge_json.paths_section()
     aliases = sge_json.merge_cluster_host_aliases({}, paths, {})
     for name in ("samwise", "login", "cluster"):
@@ -34,6 +37,7 @@ def _default_host() -> str:
 
 
 def _default_remote_job_root() -> str:
+    """Default remote job root directory for GUI SGE submissions."""
     return sge_json.gui_sge_job_root()
 
 
@@ -41,6 +45,7 @@ class SgeSubmitDialog(QDialog):
     """Collect SSH host, credentials, and remote job root."""
 
     def __init__(self, parent=None) -> None:
+        """Build the host/username/password/remote-job-directory form and OK/Cancel buttons."""
         super().__init__(parent)
         self.setWindowTitle("Run on SGE cluster")
         self.setMinimumWidth(420)
@@ -78,6 +83,7 @@ class SgeSubmitDialog(QDialog):
         self.setLayout(layout)
 
     def settings(self) -> SgeConnectionSettings:
+        """Read the current form field values into an :class:`SgeConnectionSettings`."""
         return SgeConnectionSettings(
             host=self.host.text().strip(),
             user=self.user.text().strip(),
@@ -86,6 +92,8 @@ class SgeSubmitDialog(QDialog):
         )
 
     def accept(self) -> None:
+        """Validate required fields (host, user, remote job root — falling back to the default root
+        when blank) before closing the dialog as accepted; focuses the first invalid field otherwise."""
         s = self.settings()
         if not s.host:
             self.host.setFocus()

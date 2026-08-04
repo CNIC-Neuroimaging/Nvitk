@@ -14,6 +14,7 @@ setup(globals())
 
 
 def _label_structure(ndim: int, connectivity: int) -> Any:
+    """Structuring element for ``ndi.label``, with *connectivity* clamped to ``[1, ndim]``."""
     conn = max(1, min(int(connectivity), ndim))
     return ndi.generate_binary_structure(ndim, conn)
 

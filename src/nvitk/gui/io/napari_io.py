@@ -30,12 +30,15 @@ ReaderFunc = Callable[[str], list[LayerData] | None]
 
 
 def _normalize_paths(path: str | Path | Sequence[str | Path]) -> list[Path]:
+    """Coerce a single path or a sequence of paths into a list of :class:`Path` objects."""
     if isinstance(path, (str, Path)):
         return [Path(path)]
     return [Path(p) for p in path]
 
 
 def _nvitk_can_open(path: Path) -> bool:
+    """True if *path* is a directory (assumed DICOM series) or a file nvitk's readers recognize by
+    extension or content sniffing."""
     if not path.exists():
         return False
     if path.is_dir():
@@ -52,6 +55,8 @@ def _nvitk_can_open(path: Path) -> bool:
 
 
 def _resolution_for_axis(md: dict[str, Any], axis_char: str) -> float | None:
+    """Voxel/frame resolution for *axis_char* (``X``/``Y``/``Z``/``T``/``C``) from image metadata
+    *md*, or ``None`` if not recorded."""
     key = {
         "X": "x_res",
         "Y": "y_res",
@@ -121,6 +126,7 @@ def _nvitk_layer_metadata(
 
 
 def _axis_labels_for_image(img: Image, ndim: int) -> tuple[str, ...]:
+    """*img*'s axis labels if they match *ndim*, else the default NIfTI axis order for *ndim*."""
     axes = img.axes or default_nifti_axes(ndim)
     if len(axes) == ndim:
         return tuple(axes)
@@ -128,6 +134,8 @@ def _axis_labels_for_image(img: Image, ndim: int) -> tuple[str, ...]:
 
 
 def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
+    """Build a napari-plugin-style ``(data, layer_kwargs, layer_type)`` tuple for *img*, reorienting
+    the array for display and computing scale/affine, axis labels, and nvitk metadata from *path*."""
     data = to_numpy(img.data)
     raw_affine = _napari_affine(img)
     axis_labels = _axis_labels_for_image(img, data.ndim)
@@ -198,6 +206,8 @@ def read_paths(path: str | list[str]) -> ReaderFunc | list[LayerData] | None:
 
 
 def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
+    """Add *img* to *viewer* as an Image layer using :func:`_prepare_layer_tuple`'s display kwargs,
+    then apply nvitk's viewer/dims configuration for the new layer."""
     data, layer_meta, _ = _prepare_layer_tuple(img, path)
     kwargs = {
         "name": layer_meta["name"],
@@ -256,6 +266,8 @@ def open_paths_with_nvitk(
 
 
 def _notify_error(message: str) -> None:
+    """Show *message* via Napari's error notification, falling back to printing it if Napari's UI
+    isn't available."""
     try:
         from napari.utils.notifications import show_error
         show_error(message)
@@ -264,6 +276,7 @@ def _notify_error(message: str) -> None:
 
 
 def _is_nvitk_layer(layer: Any) -> bool:
+    """True if *layer* was loaded through nvitk's reader (carries an ``nvitk_metadata`` entry)."""
     meta = getattr(layer, "metadata", None) or {}
     if isinstance(meta, dict) and "nvitk_metadata" in meta:
         return True
@@ -285,6 +298,8 @@ def _layer_from_list_event(event: Any) -> Any | None:
 
 
 def _on_nvitk_layer_inserted(viewer: Any, event: Any) -> None:
+    """Configure viewer dims/orientation for a newly inserted layer: repairs the time-dim range for
+    overlays and 4D+ layers, and applies nvitk's display setup for 4D+ or nvitk-sourced layers."""
     from nvitk.gui.core.orientation import configure_viewer_for_layer
     from nvitk.gui.viz.layers import repair_time_dim_for_viewer
 
@@ -342,6 +357,7 @@ def install_nvitk_layer_hooks(viewer: Any) -> None:
     events = viewer.layers.events
 
     def _callback(event: Any) -> None:
+        """Forward a layer-list event to :func:`_on_nvitk_layer_inserted`."""
         _on_nvitk_layer_inserted(viewer, event)
 
     if hasattr(events, "inserted"):
@@ -353,6 +369,7 @@ def install_nvitk_layer_hooks(viewer: Any) -> None:
 
     @viewer.layers.selection.events.active.connect
     def _active_layer_callback(event: Any) -> None:
+        """Forward an active-layer-selection event to :func:`_on_active_layer_sync_dims`."""
         _on_active_layer_sync_dims(viewer, event)
 
     viewer._nvitk_layer_hooks = True
@@ -388,6 +405,8 @@ def install_nvitk_io(viewer: Any) -> None:
         layer_type=None,
         **kwargs,
     ):
+        """Route file-open requests through nvitk's reader (falling back to the original Qt open
+        when the user explicitly picked a plugin or nvitk can't handle any of the files)."""
         if choose_plugin:
             return original_qt_open(
                 filenames,

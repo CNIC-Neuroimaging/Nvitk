@@ -37,6 +37,7 @@ class HemodynamicsPlotPanel(QWidget):
     """Interactive Matplotlib panel for PITC / PWV / Bjornfoot figures."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the plot-type selector, station coloring controls, and Matplotlib canvas/toolbar."""
         super().__init__(parent)
         self._title = QLabel()
         self._title.setWordWrap(True)
@@ -135,10 +136,13 @@ class HemodynamicsPlotPanel(QWidget):
         self.setLayout(layout)
 
     def _set_range_widgets_enabled(self, enabled: bool) -> None:
+        """Enable/disable the manual vmin/vmax spin boxes."""
         self._vmin.setEnabled(enabled)
         self._vmax.setEnabled(enabled)
 
     def _on_auto_range_toggled(self, checked: bool) -> None:
+        """When auto-range is enabled, disable the manual spin boxes and snap them to the last
+        computed auto limits; re-applies station coloring either way."""
         self._set_range_widgets_enabled(not checked)
         if checked and self._auto_limits is not None:
             self._vmin.blockSignals(True)
@@ -196,6 +200,8 @@ class HemodynamicsPlotPanel(QWidget):
             self._apply_station_colors()
 
     def _apply_station_colors(self, _index: int | None = None) -> None:
+        """Recolor the bound stations layer by the selected feature/colormap/range, updating the
+        auto-range limits and spin-box values from the result."""
         if self._station_layer is None or self._color_selector.count() == 0:
             return
         feature = self._color_selector.currentData() or self._color_selector.currentText()
@@ -269,6 +275,9 @@ class HemodynamicsPlotPanel(QWidget):
             return False
 
     def _has_interactive_arrays(self, kind: str) -> bool:
+        """True if any loaded region has the array data needed to draw *kind* (``"pitc"`` needs
+        ``distance_mm``; PWV/Bjornfoot need ``pwv_distance_mm``) interactively rather than from a
+        saved static figure."""
         if not self._region_plot_data:
             return False
         if kind == "pitc":

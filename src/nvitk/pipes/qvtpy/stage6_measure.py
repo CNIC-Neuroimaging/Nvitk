@@ -73,26 +73,32 @@ _DEFAULT_RADIUS_VOX = 10.0
 
 
 def _default_nvitk_src_dir() -> Path:
+    """Repo ``src/`` directory inferred from the installed ``nvitk`` package location."""
     return Path(nvitk.__file__).resolve().parent.parent
 
 
 def _stage3_dir(output_root: Path, subject: str) -> Path:
+    """Stage 3 (centerline) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE3_CENTERLINE_DIR
 
 
 def _stage5_dir(output_root: Path, subject: str) -> Path:
+    """Stage 5 (LOC generation) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE5_LOC_DIR
 
 
 def _stage4_dir(output_root: Path, subject: str) -> Path:
+    """Stage 4 (4D-flow segmentation) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE4_SEG_DIR
 
 
 def _stage6_out(output_root: Path, subject: str) -> Path:
+    """Stage 6 (measure) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR
 
 
 def _load_seg_4dflow(output_root: Path, subject: str) -> np.ndarray:
+    """Load *subject*'s stage-4 ``seg_4dflow.nii.gz`` label volume; raises if missing."""
     seg_p = _stage4_dir(output_root, subject) / "seg_4dflow.nii.gz"
     if not seg_p.is_file():
         raise FileNotFoundError(f"Missing {seg_p} (run stage4; required when --no-measure-resegment)")
@@ -100,6 +106,8 @@ def _load_seg_4dflow(output_root: Path, subject: str) -> np.ndarray:
 
 
 def _voxel_spacing(ap_img_path: Path) -> tuple[float, float, float]:
+    """Voxel spacing (x, y, z) for the image at *ap_img_path*, from header spacing or affine
+    column norms (defaults to isotropic 1.0)."""
     ap_img = imread(ap_img_path)
     sp = ap_img.spacing
     if sp is not None and len(sp) >= 3:
@@ -122,6 +130,7 @@ _CARDIAC_FRAME_MAX_S = 0.25
 
 
 def _plausible_cardiac_frame_s(tr: float) -> bool:
+    """True if *tr* (seconds) falls within the plausible cardiac cine frame-duration range."""
     return _CARDIAC_FRAME_MIN_S <= float(tr) <= _CARDIAC_FRAME_MAX_S
 
 
@@ -159,6 +168,7 @@ def _cardiac_frame_duration_s(
     Returns ``(duration_s, source)``; ``duration_s`` is ``None`` when unresolved.
     """
     def _pos(key: str, *, scale: float = 1.0) -> float | None:
+        """Positive float ``meta[key] * scale``, or None if missing/non-numeric/non-positive."""
         val = meta.get(key)
         if val is None:
             return None
@@ -243,6 +253,8 @@ def _phase_temporal_resolution_s(ap_phase_path: Path) -> float | None:
 
 
 def _load_contrast(nifti_root: Path, subject: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load (magnitude, complex-difference, velocity-magnitude) volumes for *subject*, falling
+    back to CD itself when ``Angiography_3D``/``VelocityMagnitude_3D`` are missing."""
     sub = nifti_root / subject / "4DFlow"
     cd_p = sub / "ComplexDifference_3D.nii.gz"
     if not cd_p.is_file():
@@ -733,6 +745,7 @@ def _subject_sge_spec(
     save_plots: bool = False,
     backend: str = "gpu",
 ) -> tuple[StageSpec, ClusterPaths]:
+    """Build the SGE ``StageSpec``/``ClusterPaths`` pair for one subject's stage 6 measure task."""
     src_p = Path(src_dir) if src_dir is not None else _default_nvitk_src_dir()
     binds = SingularityBinds()
     parts = [
@@ -984,6 +997,8 @@ def main(
     pitc_label_constrain: bool,
     save_plots: bool,
 ) -> None:
+    """CLI entry point (``qvtpy-stage6-measure``): run stage 6 vessel/hemodynamic measurement
+    for one subject."""
     Logger()
     run_subject(
         subject,

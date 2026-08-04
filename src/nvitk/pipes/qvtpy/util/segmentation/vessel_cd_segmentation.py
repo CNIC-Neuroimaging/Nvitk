@@ -25,9 +25,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from nvitk.core.array import as_backend_array, to_numpy
-from nvitk.core.backend import setup, using, get_current_backend
+from nvitk.core.backend import setup, using
 from nvitk.core.logger import Logger
-from nvitk.morphology import dilate
+from nvitk.morphology import dilate, make_ball_footprint
 from nvitk.morphology.centerline import skeletonize_binary
 from nvitk.morphology.components import label_connected, remove_small_components_by_fraction
 from nvitk.pipes.qvtpy.labels import (
@@ -144,6 +144,7 @@ class BboxFacePadding:
     pad_k_max: int
 
     def as_dict(self) -> dict[str, int]:
+        """Serialize the per-face bounding-box padding to a plain dict."""
         return {
             "pad_i_min": self.pad_i_min,
             "pad_i_max": self.pad_i_max,
@@ -190,6 +191,7 @@ class AcaSequentialGrowInfo:
     laca_on_low_side: bool | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        """Serialize the sequential ACA grow/AComm correction metadata to a JSON-safe dict."""
         return {
             "strategy": self.strategy,
             "grow_order": [int(x) for x in self.grow_order],
@@ -351,6 +353,7 @@ def _bbox_with_padding(
 
 
 def _dilate_bool_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
+    """Binary-dilate *mask* by *radius* voxels (connectivity 1); no-op for radius <= 0 or an empty mask."""
     m = as_backend_array(mask).astype(bool)
     if radius <= 0 or not np.any(m):
         return m
@@ -466,6 +469,8 @@ def _dilated_other_segmentation_barrier_excluding(
 
 
 def _merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None:
+    """Union every non-``None`` mask in *masks* into one boolean forbidden-region mask, or ``None`` if
+    all are ``None``."""
     merged: np.ndarray | None = None
     for m in masks:
         if m is None:
@@ -784,6 +789,7 @@ def _finalize_vessel_largest_cc(
 
 
 def _distal_label_name(label_id: int) -> str:
+    """Human vessel name for *label_id*, or ``"label-<id>"`` if unregistered."""
     return QVTPY_ARTERIAL_ID_TO_NAME.get(int(label_id), f"label-{int(label_id)}")
 
 
@@ -850,11 +856,14 @@ def _punch_lr_midline_barrier(
 
 
 def _dilate_bool(mask: np.ndarray, radius: int) -> np.ndarray:
+    """6-connected binary dilation of *mask* by *radius* iterations; no-op for radius <= 0 or an empty
+    mask."""
     m = as_backend_array(mask).astype(bool)
     r = max(0, int(radius))
     if r <= 0 or not np.any(m):
         return m
-    return ndi.binary_dilation(m, iterations=r, brute_force=True if get_current_backend() == "cupy" else False)
+    # 6-connected dilation (base tool; brute_force chosen internally for cupy).
+    return as_backend_array(dilate(m, iterations=r, connectivity=1)).astype(bool)
 
 
 def _aca_distal_corridor(
@@ -893,7 +902,8 @@ def _aca_distal_corridor(
         # Orphaned A2 Frangi islands near ACA seeds (dropped by marker-CC prune).
         gate |= as_backend_array(frangi_tree).astype(bool) & near & ~forb
     gate |= seeds
-    structure = np.ones((3, 3, 3), dtype=bool)
+    # 26-connectivity structuring element for the morphological reconstruction.
+    structure = make_ball_footprint(3, connectivity=3)
     corridor = ndi.binary_propagation(seeds, structure=structure, mask=gate)
     meta = {
         "n_seeds": int(np.count_nonzero(seeds)),

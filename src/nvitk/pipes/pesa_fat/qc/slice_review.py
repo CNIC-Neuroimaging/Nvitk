@@ -7,10 +7,13 @@ from typing import Iterable
 
 
 def _safe(s: str) -> str:
+    """Replace every character in *s* that isn't alphanumeric, ``-``, or ``_`` with ``_``, for
+    DOM-safe element ids."""
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
 
 
 def _review_ctx_dict(*, batch: str, subject: str, pipeline: str, report_relpath: str) -> dict:
+    """Build the review-context dict embedded as JSON in the report's revise/sync JS."""
     return {
         "batch": batch,
         "subject": subject,
@@ -20,6 +23,8 @@ def _review_ctx_dict(*, batch: str, subject: str, pipeline: str, report_relpath:
 
 
 def _revise_sync_js(*, dom: str, ctx_json: str, include_reviewer_setup: bool) -> str:
+    """Build the inline JS that wires a "Mark as revised" button to POST review status to
+    ``/review/sync-db``, optionally also fetching/tracking the reviewer name field."""
     reviewer_setup = ""
     if include_reviewer_setup:
         reviewer_setup = f"""
@@ -199,6 +204,7 @@ def embedded_review_panel_js(dom_id: str, review_ctx: dict) -> str:
 
 
 def _qc_select(dom_id: str, suffix: str) -> str:
+    """Build a PENDING/OK/FAIL ``<select>`` element for the *suffix* review aspect of *dom_id*."""
     return f"""<select id="{dom_id}_rv_qc_{suffix}" style="padding:6px 8px;border-radius:8px;border:1px solid rgba(229,229,229,0.18);background:rgba(0,0,0,0.25);color:#fff;">
           <option value="PENDING">PENDING</option>
           <option value="OK">OK</option>
@@ -207,6 +213,8 @@ def _qc_select(dom_id: str, suffix: str) -> str:
 
 
 def embedded_review_panel_html(dom_id: str) -> str:
+    """Build the ROI review panel HTML (segmentation/measurement QC selects, comment box, status
+    line) embedded next to the slice viewer identified by *dom_id*."""
     from nvitk.pipes.pesa_fat.qc.review_policy import REVIEW_ASPECT_LABELS
 
     seg_label = REVIEW_ASPECT_LABELS["SEGMENTATION"]
@@ -237,6 +245,8 @@ def review_context(
     report_relpath: str,
     structures: Iterable[str],
 ) -> dict:
+    """Build the review-context payload (batch/subject/pipeline, reviewable structures, aspects and
+    their labels) used to render the embedded review UI for a QC report."""
     from nvitk.pipes.pesa_fat.qc.review_policy import (
         REVIEW_ASPECTS,
         REVIEW_ASPECT_LABELS,

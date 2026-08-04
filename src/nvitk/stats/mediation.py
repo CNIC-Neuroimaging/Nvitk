@@ -1,5 +1,6 @@
 """General mediation analysis utilities."""
-"""TODO: GPU implementation Cupy + cuDF"""
+
+# TODO: GPU implementation Cupy + cuDF
 
 from __future__ import annotations
 

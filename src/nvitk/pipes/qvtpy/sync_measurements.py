@@ -43,14 +43,17 @@ _STAGE7_FILES: tuple[str, ...] = (STAGE7_SKIP_MARKER,)
 
 
 def _stage6_dir(output_root: Path, subject: str) -> Path:
+    """Stage 6 (measure) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE6_MEASURE_DIR
 
 
 def _stage7_dir(output_root: Path, subject: str) -> Path:
+    """Stage 7 (morphometrics) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR / cfg.STAGE7_MORPHOMETRICS_DIR
 
 
 def _subjects_with_stage6(output_root: Path) -> list[str]:
+    """Subjects under *output_root* with at least one stage-6 measurement CSV."""
     if not output_root.is_dir():
         return []
     out: list[str] = []
@@ -64,6 +67,7 @@ def _subjects_with_stage6(output_root: Path) -> list[str]:
 
 
 def _subjects_with_stage7(output_root: Path) -> list[str]:
+    """Subjects under *output_root* with a completed stage-7 skip marker."""
     if not output_root.is_dir():
         return []
     out: list[str] = []
@@ -74,6 +78,7 @@ def _subjects_with_stage7(output_root: Path) -> list[str]:
 
 
 def _subjects_with_stage6_or_stage7(output_root: Path) -> list[str]:
+    """Union of subjects with stage-6 measurements and/or a completed stage-7 marker."""
     return sorted(set(_subjects_with_stage6(output_root)) | set(_subjects_with_stage7(output_root)))
 
 
@@ -82,6 +87,8 @@ def _resolve_ssh_credentials(
     remote_host: str | None,
     remote_user: str | None,
 ) -> tuple[str, str, str]:
+    """Resolve (host, user, password) from args, env vars, or interactive prompts, resolving
+    *host* through :data:`~nvitk.pipes.qvtpy.util.io.paths.CLUSTER_HOST_ALIASES`."""
     host = (remote_host or os.environ.get("NVITK_SGE_SSH_HOST", "")).strip()
     user = (remote_user or os.environ.get("NVITK_SGE_SSH_USER", "")).strip()
     password = os.environ.get("NVITK_SGE_SSH_PASSWORD", "")
@@ -230,6 +237,8 @@ def main(
     cluster_results_root: Path | None,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point (``qvtpy-sync-measurements``): publish stage-6 measurement CSVs (optionally
+    fetched from the cluster over SFTP first) into ``image_measurements``."""
     Logger()
     subject_list = [s.strip() for s in subjects.split(",") if s.strip()]
     temp_root: Path | None = None

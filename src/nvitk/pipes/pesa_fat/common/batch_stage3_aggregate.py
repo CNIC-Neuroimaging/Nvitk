@@ -48,6 +48,8 @@ def main(
     model_dir: Path,
     log_level: str,
 ) -> None:
+    """CLI entry point: aggregate a batch's per-subject stage-3 Excel exports for each requested
+    pipeline into a single ``<batch>_SummaryCodebook.xlsx``."""
     Logger(level=log_level.upper())
     log.set_level(log_level.upper())
 

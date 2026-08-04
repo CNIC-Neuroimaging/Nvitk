@@ -21,6 +21,7 @@ class ImagePropertiesPanel(QWidget):
     """Show spacing, FOV, origin, orientation, and affine for the selected layer."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the status label, monospace read-only text area, and refresh button."""
         super().__init__(parent)
         self._status = QLabel("Select a layer to view spatial properties.")
         self._status.setWordWrap(True)
@@ -56,9 +57,12 @@ class ImagePropertiesPanel(QWidget):
         self._last_layer: Any | None = None
 
     def _refresh_last_layer(self) -> None:
+        """Re-render spatial properties for whichever layer was last shown."""
         self.refresh_from_layer(self._last_layer)
 
     def refresh_from_layer(self, layer: Any | None) -> None:
+        """Display *layer*'s spatial properties (spacing, FOV, origin, affine), or a placeholder
+        message if *layer* is ``None`` or its properties can't be read."""
         self._last_layer = layer
         if layer is None:
             self._status.setText("No layer selected.")

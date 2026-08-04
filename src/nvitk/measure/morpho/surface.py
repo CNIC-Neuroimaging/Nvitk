@@ -17,6 +17,13 @@ from .geometry import cumulative_s
 from .models import SkeletonTree
 
 def mask_to_surface(mask: np.ndarray, spacing, pre_refined_surface_path: Optional[str] = None):
+    """Binary mask → cleaned, smoothed, largest-region triangle surface (VTK marching cubes pipeline).
+
+    Pipeline: marching cubes → clean/triangulate → windowed-sinc smoothing →
+    fill holes → keep largest connected region → optional VMTK refinement
+    (:func:`refine_surface_for_vmtk`). If *pre_refined_surface_path* is given,
+    the pre-refinement surface is also saved there for QC.
+    """
     mask_u8 = mask.astype(np.uint8)
     image = vtk.vtkImageData()
     image.SetDimensions(mask_u8.shape)
@@ -52,6 +59,7 @@ def mask_to_surface(mask: np.ndarray, spacing, pre_refined_surface_path: Optiona
 
 
 def refine_surface_for_vmtk(surface):
+    """Subdivide + smooth a surface so VMTK centerline extraction has denser, more regular triangles."""
     if not REFINE_SURFACE_FOR_VMTK or int(SURFACE_SUBDIVISION_LEVELS) <= 0:
         return surface
 
@@ -90,6 +98,7 @@ def refine_surface_for_vmtk(surface):
 
 
 def snap_to_surface(pt_mm: np.ndarray, surface):
+    """Nearest surface-mesh point (world mm) to *pt_mm*, via a VTK point locator."""
     locator = vtk.vtkPointLocator()
     locator.SetDataSet(surface)
     locator.BuildLocator()
@@ -98,6 +107,7 @@ def snap_to_surface(pt_mm: np.ndarray, surface):
 
 
 def save_vtp(poly, path: str) -> None:
+    """Write a VTK polydata object to a ``.vtp`` file."""
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(path)
     writer.SetInputData(poly)
@@ -105,6 +115,7 @@ def save_vtp(poly, path: str) -> None:
 
 
 def build_polyline_polydata(points: np.ndarray, arrays: List[Tuple[np.ndarray, str]]):
+    """Build a single-polyline VTK polydata from *points*, attaching each ``(array, name)`` as point data."""
     poly = vtk.vtkPolyData()
     vtk_pts = vtk.vtkPoints()
     vtk_pts.SetNumberOfPoints(len(points))
@@ -126,6 +137,7 @@ def build_polyline_polydata(points: np.ndarray, arrays: List[Tuple[np.ndarray, s
 
 
 def add_string_point_array(poly, values: List[str], name: str) -> None:
+    """Attach a per-point string array *name* to a VTK polydata's point data."""
     arr = vtk.vtkStringArray()
     arr.SetName(name)
     arr.SetNumberOfValues(len(values))
@@ -135,6 +147,7 @@ def add_string_point_array(poly, values: List[str], name: str) -> None:
 
 
 def build_radius_tube_polydata(points: np.ndarray, radius: np.ndarray, arrays: List[Tuple[np.ndarray, str]]):
+    """Build a VTK tube mesh around a centerline, varying tube radius by the per-point *radius* array."""
     poly = build_polyline_polydata(points, arrays)
     radius_arr = numpy_support.numpy_to_vtk(np.asarray(radius, dtype=np.float64), deep=True)
     radius_arr.SetName("EffectiveRadius")
@@ -151,6 +164,7 @@ def build_radius_tube_polydata(points: np.ndarray, radius: np.ndarray, arrays: L
 
 
 def default_tree_point_metadata(n: int, label: str = "trunk", path: str = "") -> dict:
+    """Constant-valued per-point tree metadata (label/path/depth) for *n* centerline points."""
     path = str(path or "")
     return {
         "tree_label": np.array([label] * n, dtype=object),
@@ -160,6 +174,7 @@ def default_tree_point_metadata(n: int, label: str = "trunk", path: str = "") ->
 
 
 def add_tree_metadata_point_arrays(poly, metadata: dict) -> None:
+    """Attach tree label/path/depth arrays from *metadata* (see :func:`default_tree_point_metadata`) to a polydata."""
     if "tree_depth" in metadata:
         arr = numpy_support.numpy_to_vtk(np.asarray(metadata["tree_depth"], dtype=np.float64), deep=True)
         arr.SetName("TreeDepth")
@@ -171,6 +186,10 @@ def add_tree_metadata_point_arrays(poly, metadata: dict) -> None:
 
 
 def extract_point_data_array(poly, name: str, n_points: int) -> np.ndarray:
+    """Read a named point-data array from a VTK polydata as a 1-D float array (NaNs if absent).
+
+    Vector arrays (e.g. normals) are reduced to their magnitude.
+    """
     arr = poly.GetPointData().GetArray(name)
     if arr is None:
         return np.full(n_points, np.nan)
@@ -179,6 +198,7 @@ def extract_point_data_array(poly, name: str, n_points: int) -> np.ndarray:
 
 
 def resample_point_data_by_arclength(old_pts: np.ndarray, new_pts: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Interpolate a per-point scalar array from *old_pts* onto *new_pts*, matched by arc length."""
     values = np.asarray(values, dtype=float)
     if len(values) != len(old_pts):
         return np.full(len(new_pts), np.nan, dtype=float)
@@ -193,6 +213,7 @@ def resample_point_data_by_arclength(old_pts: np.ndarray, new_pts: np.ndarray, v
 
 
 def _polygon_area_3d(pts3d: np.ndarray, normal: np.ndarray) -> float:
+    """Area of a planar 3-D polygon: project onto its plane (given by *normal*) and shoelace it."""
     if len(pts3d) < 3:
         return 0.0
     n_hat = normal / (np.linalg.norm(normal) + 1e-15)
@@ -206,6 +227,9 @@ def _polygon_area_3d(pts3d: np.ndarray, normal: np.ndarray) -> float:
 
 
 def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Effective vessel radius at each centerline point: cut *surface* by the local normal plane,
+    take the largest closed cross-section loop's area, and convert area → equivalent-circle radius.
+    """
     n = len(pts)
     areas = np.full(n, np.nan)
     tangents = np.zeros((n, 3))
@@ -246,6 +270,7 @@ def compute_cross_section_radius(surface, pts: np.ndarray) -> Tuple[np.ndarray, 
 
 
 def build_donut_loop_debug_polydata(loop_rows: List[dict], tree: SkeletonTree, spacing):
+    """Build a multi-polyline VTK debug mesh of donut-loop arms, tagged with loop/arm index and endpoint role."""
     all_points = []
     loop_ids = []
     arm_ids = []

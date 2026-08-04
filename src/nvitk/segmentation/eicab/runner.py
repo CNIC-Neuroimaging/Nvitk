@@ -112,6 +112,7 @@ _NIFTI_SUFFIXES = (".nii.gz", ".nii")
 
 
 def _is_nifti(p: Path) -> bool:
+    """True when *p* is an existing ``.nii`` or ``.nii.gz`` file."""
     return p.is_file() and (p.suffix == ".gz" and p.name.endswith(".nii.gz") or p.suffix == ".nii")
 
 
@@ -263,6 +264,7 @@ def build_eicab_singularity_argv(
 
 
 def _eicab_container_input_path(input_p: Path) -> str:
+    """Bind-mount path the TOF volume takes inside the eICAB container (preserving compression)."""
     if input_p.name.endswith(".nii.gz") or input_p.suffix == ".gz":
         return "/TOF.nii.gz"
     if input_p.suffix == ".nii":
@@ -271,6 +273,7 @@ def _eicab_container_input_path(input_p: Path) -> str:
 
 
 def _eicab_device_arg(device: str) -> tuple[str, bool]:
+    """Map a device string to the eICAB ``--device`` value and a ``needs_gpu`` flag."""
     dev_l = device.lower()
     if dev_l in ("cuda", "gpu"):
         return "cuda", True
@@ -287,6 +290,7 @@ def _eicab_cli_args(
     simple_segmentation: bool,
     attention: bool,
 ) -> list[str]:
+    """Assemble the eICAB in-container command-line argument list."""
     args = [
         "-t",
         container_input,

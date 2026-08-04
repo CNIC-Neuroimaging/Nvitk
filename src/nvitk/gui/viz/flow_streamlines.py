@@ -73,6 +73,8 @@ class FlowStreamlineCache:
 
 
 def _global_speed_limits(velocity: np.ndarray, mask: np.ndarray) -> tuple[float, float]:
+    """2nd/98th percentile speed magnitude within *mask* across the whole *velocity* field, for
+    fixed-range speed coloring."""
     mag = np.linalg.norm(to_numpy(velocity).astype(np.float64), axis=-1)
     roi = to_numpy(mask) > 0
     if mag.ndim == 4:
@@ -87,6 +89,7 @@ def _global_speed_limits(velocity: np.ndarray, mask: np.ndarray) -> tuple[float,
 
 
 def _scalar_to_rgba(value: float, lo: float, hi: float, cmap_name: str) -> np.ndarray:
+    """Map a scalar *value* in ``[lo, hi]`` to an RGBA color via the named Matplotlib colormap."""
     import matplotlib.cm as cm
     import matplotlib.colors as mcolors
 
@@ -100,6 +103,8 @@ def _vertex_scalars_pathline_speed(
     velocity_xyzt: np.ndarray,
     time_start: int,
 ) -> list[np.ndarray]:
+    """Per-vertex flow speed along each pathline, sampling *velocity_xyzt* at the cardiac phase
+    each vertex was traced at (starting from *time_start* and advancing one phase per vertex)."""
     nt = int(velocity_xyzt.shape[3])
     t0 = int(np.clip(time_start, 0, nt - 1))
     out: list[np.ndarray] = []
@@ -117,6 +122,8 @@ def _scalar_limits(
     cache: FlowStreamlineCache,
     scalar_lists: list[np.ndarray],
 ) -> tuple[float, float]:
+    """Color-scale ``(lo, hi)`` for the current color metric: fixed ``(0, 1)`` for ``"fixed"``,
+    *cache*'s speed limits for ``"speed"``, else the 2nd/98th percentile of *scalar_lists*."""
     metric = str(cache.color_metric)
     if metric == "fixed":
         return (0.0, 1.0)
@@ -135,6 +142,8 @@ def _paths_and_colors(
     scalar_lists: list[np.ndarray],
     cache: FlowStreamlineCache,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Split *polylines* into per-segment (or per-polyline) display paths with matching RGBA edge
+    colors, either a fixed color or mapped from *scalar_lists* through *cache*'s colormap."""
     if not polylines:
         return [], []
     lo, hi = _scalar_limits(cache, scalar_lists)
@@ -307,6 +316,8 @@ def build_flow_streamline_cache(
 
 
 def _cache_key(cache: FlowStreamlineCache, time_index: int) -> tuple:
+    """Hashable key capturing every parameter that affects one cardiac phase's computed trace/coloring,
+    for the per-phase polyline cache."""
     p = cache.params
     return (
         int(time_index),
@@ -333,6 +344,7 @@ def _put_polyline_cache(
     key: tuple,
     value: tuple[list[np.ndarray], list],
 ) -> None:
+    """Store *value* under *key* in *cache*'s per-phase polyline cache, tracking insertion order."""
     cache._polyline_cache[key] = value
     if key not in cache._cache_order:
         cache._cache_order.append(key)
@@ -415,6 +427,8 @@ def _update_flow_streamline_layer(
     viewer: Any = None,
     phase_layer: Any = None,
 ) -> None:
+    """Recompute and push the streamline/pathline geometry and colors for *time_index* onto *layer*,
+    repairing the viewer's time-dim range against *phase_layer* if both are given."""
     paths, colors = flow_streamline_frame(cache, time_index)
     layer.data = _paths_to_vector_data(paths)
     if paths and colors:
@@ -484,6 +498,7 @@ def add_animated_flow_streamlines_layer(
         pass
 
     def _on_dims(_event: Any = None) -> None:
+        """Refresh the flow-trace layer for the viewer's current cardiac phase, when visible."""
         if not getattr(layer, "visible", True):
             return
         _repair_time_dim_range(viewer, phase_layer)

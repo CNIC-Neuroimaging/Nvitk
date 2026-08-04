@@ -71,6 +71,7 @@ class VertebralSplitResult:
     message: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        """JSON-serializable summary of this result (centerlines as nested lists)."""
         out: dict[str, Any] = {
             "split_applied": bool(self.split_applied),
             "bifurcation_ijk": (
@@ -96,6 +97,7 @@ class VertebralSplitResult:
 
 
 def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
+    """26-connected voxel-index neighbors of *p*."""
     i, j, k = p
     out: list[tuple[int, int, int]] = []
     for di in (-1, 0, 1):
@@ -148,16 +150,19 @@ def _flood_fill_from_seeds(
 
 
 def _mean_axis(points: set[tuple[int, int, int]], axis: int) -> float:
+    """Mean coordinate of *points* along array *axis*."""
     # with using("numpy"):
     return float(np.mean(as_backend_array([p[axis] for p in points])))
 
 
 def _pts_to_tuples(pts: np.ndarray) -> list[tuple[int, int, int]]:
+    """(N, 3) voxel coordinate array to a list of int ``(i, j, k)`` tuples."""
     arr = as_backend_array(pts).astype(np.int64).reshape(-1, 3)
     return [tuple(int(v) for v in row) for row in arr]
 
 
 def _pts_to_set(pts: np.ndarray) -> set[tuple[int, int, int]]:
+    """(N, 3) voxel coordinate array to a set of int ``(i, j, k)`` tuples."""
     return set(_pts_to_tuples(pts))
 
 
@@ -165,6 +170,7 @@ def _nearest_index(
     trunk: list[tuple[int, int, int]],
     query: tuple[int, int, int],
 ) -> int:
+    """Index into *trunk* of the point closest to *query* (squared Euclidean distance)."""
     best_i = 0
     best_d = None
     qx, qy, qz = query
@@ -181,6 +187,7 @@ def _arm_set_from_polyline(
     *,
     drop: tuple[int, int, int] | None = None,
 ) -> set[tuple[int, int, int]]:
+    """Set of *pts*, optionally excluding the *drop* voxel (typically the junction point)."""
     out = set(pts)
     if drop is not None:
         out.discard(drop)

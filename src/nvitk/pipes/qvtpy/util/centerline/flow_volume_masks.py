@@ -14,7 +14,8 @@
 from __future__ import annotations
 
 from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup, get_current_backend
+from nvitk.core.backend import setup
+from nvitk.morphology import dilate as morph_dilate
 from nvitk.morphology.components import remove_small_components_by_fraction
 from nvitk.pipes.qvtpy.labels import QVTPY_ARTERIAL_LABEL_IDS
 
@@ -54,7 +55,8 @@ def arterial_exclusion_mask(
         art |= arr == int(lid)
     dilate = max(0, int(dilate_vox))
     if dilate > 0 and bool(np.any(art)):
-        art = ndi.binary_dilation(art, iterations=dilate, brute_force=get_current_backend() == "cupy")
+        # 6-connected dilation via base tool (brute_force handled internally).
+        art = as_backend_array(morph_dilate(art, iterations=dilate, connectivity=1)).astype(bool)
     return as_backend_array(art.astype(bool, copy=False))
 
 

@@ -174,22 +174,27 @@ RT_SOP_CLASS_UIDS = {
 
 
 def _info(message: str) -> None:
+    """Log an info message through the module logger."""
     log.info(message)
 
 
 def _warn(message: str) -> None:
+    """Log a warning through the module logger."""
     log.warning(message)
 
 
 def _err(message: str) -> None:
+    """Log an error through the module logger."""
     log.error(message)
 
 
 def _debug(message: str) -> None:
+    """No-op placeholder (debug logging is disabled for this module)."""
     return
 
 
 def _require_deps() -> None:
+    """Raise a clear install hint unless pydicom and nibabel are both available."""
     if pydicom is None:
         raise BackendUnavailableError('pydicom is not installed. Please install it with "pip install pydicom".')
     if nib is None:
@@ -197,6 +202,7 @@ def _require_deps() -> None:
 
 
 def _sanitize_filename(filename: str) -> str:
+    """Strip control chars, replace filesystem-illegal characters, and collapse whitespace/underscores."""
     if not isinstance(filename, str):
         filename = str(filename)
     cleaned = re.sub(r"[\x00-\x1f\x7f]", "", filename)
@@ -209,6 +215,7 @@ def _sanitize_filename(filename: str) -> str:
 
 
 def _normalize_dicom_text(value: Any) -> str:
+    """Coerce a DICOM text/multivalue element to a clean, single-value string."""
     if value is None:
         return ""
     if pydicom is not None and isinstance(value, pydicom.multival.MultiValue):
@@ -217,12 +224,14 @@ def _normalize_dicom_text(value: Any) -> str:
 
 
 def _normalize_series_uid(uid: Any) -> str:
+    """Coerce a SeriesInstanceUID (possibly a MultiValue) to a clean string."""
     if pydicom is not None and isinstance(uid, pydicom.multival.MultiValue):
         uid = uid[0] if uid else ""
     return _normalize_dicom_text(uid)
 
 
 def _iter_candidate_file_paths(path: str) -> list[str]:
+    """List every file under *path* (recursively, if a directory) as candidate DICOM files."""
     if os.path.isdir(path):
         fpaths: list[str] = []
         for dp, _, fns in os.walk(path):
@@ -239,6 +248,7 @@ def _select_candidate_file_paths(
     *,
     series_number: str | None = None,
 ) -> list[str]:
+    """Filter candidate files to one DICOM series by SeriesNumber (header-only scan, no pixel data read)."""
     if series_number is None:
         return fpaths
 
@@ -281,6 +291,9 @@ def _ensure_output_metadata_fields(
     *,
     rescale_type: str | None = None,
 ) -> dict[str, Any]:
+    """In-place: normalize/duplicate series identity fields (UID, number, description, modality, rescale type)
+    into both their DICOM-tag and nvitk-convention metadata keys.
+    """
     series_uid = _normalize_series_uid(md.get("SeriesInstanceUID", md.get("series_uid")))
     if series_uid:
         md["series_uid"] = series_uid
@@ -309,6 +322,11 @@ def _ensure_output_metadata_fields(
 
 
 def _strip_array_values(value: Any, _seen: set[int] | None = None) -> tuple[bool, Any]:
+    """Recursively drop array/binary/dataset values from a metadata tree (they don't belong in a JSON sidecar).
+
+    Returns ``(keep, cleaned_value)``: ``keep=False`` tells the caller to omit
+    this value entirely.
+    """
     if _seen is None:
         _seen = set()
 
@@ -345,6 +363,10 @@ def _strip_array_values(value: Any, _seen: set[int] | None = None) -> tuple[bool
 
 
 def _create_ras_oriented_nifti(pixel_arrays: list[np.ndarray], output_path: str) -> bool:
+    """Stack raw pixel arrays into a volume and save as RAS-oriented NIfTI (fallback path with no true DICOM geometry).
+
+    Returns ``True`` on success, ``False`` (with a logged warning) on failure.
+    """
     try:
         if isinstance(pixel_arrays, list) and len(pixel_arrays) > 1:
             array = np.array(pixel_arrays)
@@ -393,6 +415,12 @@ def _reorient_pixel_array(
     original_orientation: np.ndarray,
     target_orientation: np.ndarray,
 ) -> np.ndarray:
+    """Reorient a 2-D slice from its original ImageOrientationPatient to a target orientation.
+
+    Detects pure 90°/180°/270° rotations and applies them with cheap flip/transpose
+    ops; falls back to a general affine resample (``scipy.ndimage.map_coordinates``)
+    for non-axis-aligned transforms. Returns the input unchanged on any failure.
+    """
     try:
         orig_orient = np.array(original_orientation)
         target_orient = np.array(target_orientation)
@@ -436,6 +464,7 @@ def _reorient_pixel_array(
 
 
 def _clean_nan_values(ds_list: list[Any]) -> list[Any]:
+    """Repair NaN/Inf values in each dataset's ImageOrientationPatient, re-normalizing the row/column direction vectors."""
     cleaned_ds_list = []
     nan_fixes = 0
     for idx, ds in enumerate(ds_list):
@@ -467,6 +496,13 @@ def _clean_nan_values(ds_list: list[Any]) -> list[Any]:
 
 
 def _fix_orientation_inconsistencies(ds_list: list[Any]) -> tuple[list[Any], int]:
+    """Detect and correct DICOM slices whose orientation/position deviates from the series' dominant geometry.
+
+    Clusters slice orientations (hierarchical clustering when scipy is available,
+    else a simple pairwise-distance heuristic) to find the reference orientation,
+    then reorients any outlier slice's pixel data and repositions it onto the
+    reference slice-normal plane. Returns ``(corrected_ds_list, n_corrections)``.
+    """
     if not ds_list or len(ds_list) < 2:
         return ds_list, 0
     try:
@@ -603,6 +639,7 @@ def _fix_orientation_inconsistencies(ds_list: list[Any]) -> tuple[list[Any], int
 
 
 def _is_dicom_file(path: str) -> bool:
+    """True when *path* can be read as a DICOM file by pydicom."""
     try:
         pydicom.dcmread(path, stop_before_pixels=False)
         return True
@@ -611,6 +648,10 @@ def _is_dicom_file(path: str) -> bool:
 
 
 def _collect_tags_from_nested(obj: Any, tags_to_save: set[str], collected: dict[str, Any], _seen=None) -> None:
+    """Recursively walk a metadata dict/dataset tree, collecting values for keys in *tags_to_save* into *collected*.
+
+    Cycle-safe via an object-id *_seen* set (metadata trees can self-reference through nested sequences).
+    """
     if _seen is None:
         _seen = set()
     obj_id = id(obj)
@@ -639,6 +680,7 @@ def _collect_tags_from_nested(obj: Any, tags_to_save: set[str], collected: dict[
 
 
 def _filter_metadata_for_nifti(metadata: dict[str, Any], additional_tags: list[str] | None = None) -> dict[str, Any]:
+    """Keep only the tags in ``METADATA_TO_SAVE`` (plus *additional_tags*) from a full DICOM metadata tree."""
     tags_to_save = set(METADATA_TO_SAVE)
     if additional_tags:
         tags_to_save.update(additional_tags)
@@ -688,10 +730,12 @@ def _enrich_venc_and_heartrate_aliases(md: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_nifti_extension(compress: bool = False) -> str:
+    """``.nii.gz`` when *compress* else ``.nii``."""
     return ".nii.gz" if compress else ".nii"
 
 
 def _save_metadata_json(nifti_path: str, metadata: dict[str, Any]) -> None:
+    """Write a NIfTI's metadata as a JSON sidecar (``<stem>.json``), stripping non-serializable array values."""
     try:
         json_path = nifti_path.replace(".nii.gz", ".json").replace(".nii", ".json")
         keep, clean_metadata = _strip_array_values(_enrich_venc_and_heartrate_aliases(metadata))
@@ -704,6 +748,7 @@ def _save_metadata_json(nifti_path: str, metadata: dict[str, Any]) -> None:
 
 
 def _extract_image_type_tokens(ds: Any) -> list[str]:
+    """Uppercased, cleaned ``ImageType`` tokens from a DICOM dataset (empty list if absent)."""
     try:
         image_type = ds.get("ImageType", None)
         if not image_type:
@@ -714,6 +759,7 @@ def _extract_image_type_tokens(ds: Any) -> list[str]:
 
 
 def _image_type_signature(tokens: list[str]) -> tuple[str, ...]:
+    """Reduce ImageType tokens to a stable signature: drop generic tokens, collapse known synonyms (PHASE→PCA, etc.)."""
     generic = {"ORIGINAL", "PRIMARY", "SECONDARY", "DERIVED", "UNSPECIFIED"}
     sig = [token for token in tokens if token not in generic]
     collapsed = []
@@ -733,6 +779,7 @@ def _image_type_signature(tokens: list[str]) -> tuple[str, ...]:
 
 
 def _image_type_label(sig: tuple[str, ...]) -> str:
+    """Human-readable label (e.g. ``\"PHASE\"``, ``\"FAT\"``) for an image-type signature, used to split multi-echo series."""
     sig_set = set(sig)
     if "OPPOSED" in sig_set and len(sig) <= 2:
         return "OPPOSED"
@@ -756,6 +803,7 @@ def _generate_custom_filename(
     custom_naming: str,
     fallback_name: str | None = None,
 ) -> str | None:
+    """Build a filename from underscore-separated DICOM tag names (e.g. ``\"AccessionNumber_Modality\"``), sanitized per part."""
     if not custom_naming:
         return fallback_name
     try:
@@ -792,6 +840,7 @@ def _generate_custom_filename(
 
 
 def _sanitize_dicom_dataset(ds: Any) -> Any:
+    """In-place: coerce malformed numeric-VR tags (e.g. stray text in an IS/US/DS field) to their proper types."""
     tags_to_clean = {
         "NumberOfFrames": "IS",
         "Rows": "US",
@@ -843,6 +892,9 @@ def _sanitize_dicom_dataset(ds: Any) -> Any:
 
 
 def _is_custom_imaging_dicom(ds: Any) -> bool:
+    """True when *ds* is a convertible imaging dataset: standard imaging, tissue segmentation, readable pixels,
+    or a known OP/OCT/RT/Zeiss SOP class (covers formats the standard pixel-data check would miss).
+    """
     if is_valid_imaging_dicom is not None:
         try:
             if is_valid_imaging_dicom(ds):
@@ -875,6 +927,7 @@ def _is_custom_imaging_dicom(ds: Any) -> bool:
 
 
 def _has_pixel_data(ds: Any) -> bool:
+    """True when *ds* has standard PixelData, or a sizeable private OB/OW/OF blob that looks like image data."""
     if "PixelData" in ds or "(07fe0,0010)" in ds:
         try:
             pixel_array = getattr(ds, "pixel_array", None)
@@ -896,6 +949,7 @@ def _convert_dicom_value(
     *,
     include_private_tags: bool = True,
 ) -> Any:
+    """Convert one pydicom element value to a JSON-friendly Python type (bytes become a hash+preview summary)."""
     if pydicom is not None and isinstance(value, (pydicom.dataset.Dataset, pydicom.sequence.Sequence)):
         return _pydicom_dataset_to_dict(value, include_private_tags=include_private_tags)
     if pydicom is not None and isinstance(value, pydicom.valuerep.DSfloat):
@@ -925,6 +979,7 @@ def _convert_dicom_value(
 
 
 def _pydicom_dataset_to_dict(ds: Any, *, include_private_tags: bool = True) -> dict[str, Any]:
+    """Recursively convert a pydicom Dataset to a plain dict, keyed by both keyword and ``(group,element)`` tag string."""
     metadata_dict: dict[str, Any] = {}
     for elem in ds:
         if elem.tag.is_private and not include_private_tags:
@@ -952,6 +1007,7 @@ def _save_image_with_metadata(
     md: dict[str, Any],
     additional_tags: list[str] | None = None,
 ) -> None:
+    """Embed filtered/cleaned metadata as a NIfTI extension and save the image."""
     try:
         md_enriched = _enrich_venc_and_heartrate_aliases(md)
         md_filtered = _filter_metadata_for_nifti(md_enriched, additional_tags)
@@ -969,6 +1025,7 @@ def _save_image_with_metadata(
 
 
 def _pixel_arrays_to_basic_volume(pixel_arrays: list[np.ndarray]) -> np.ndarray:
+    """Stack raw per-slice pixel arrays into a volume with axes transposed to NIfTI (x,y,z,...) order."""
     if not pixel_arrays:
         raise ValidationError("Series has no readable pixel arrays.")
     array = np.array(pixel_arrays)
@@ -997,6 +1054,11 @@ def _save_basic_fallback(
     md: dict[str, Any] | None,
     save_metadata: bool,
 ) -> str | None:
+    """Fallback conversion when full geometry-aware conversion fails: save raw pixel arrays as a basic NIfTI.
+
+    Prefers a RAS-oriented reconstruction (:func:`_create_ras_oriented_nifti`);
+    falls back further to an identity-affine volume if that also fails.
+    """
     pixel_arrays = []
     for ds in ds_list:
         try:
@@ -1031,6 +1093,7 @@ def _save_basic_fallback(
 
 
 def _collapse_4d_metadata_to_slices(metadata_list: list[Any], ds_list: list[Any] | None = None) -> list[Any]:
+    """Collapse a flat per-instance metadata list to one entry per spatial slice, for a 4-D (multi-timepoint) series."""
     if not metadata_list:
         return []
     if ds_list and len(ds_list) == len(metadata_list):
@@ -1068,6 +1131,12 @@ def _apply_fp_rescale_to_nifti(
     scale_slopes: list[float | None],
     ds_list: list[Any] | None = None,
 ) -> tuple[Any, bool]:
+    """Revert Philips 'FP' (floating-point) scaling on a NIfTI volume using per-slice RescaleSlope/Intercept/ScaleSlope.
+
+    Applies a single constant divisor when the factors are uniform across
+    slices, else a per-Z-slice divisor. Returns ``(image, applied)``; on any
+    failure or missing ScaleSlope, returns the input unchanged with ``applied=False``.
+    """
     try:
         data = nifti_image.get_fdata().copy()
         if data.ndim < 3:
@@ -1159,6 +1228,10 @@ def _apply_rescale_to_nifti(
     rescale_intercepts: list[float],
     ds_list: list[Any] | None = None,
 ) -> tuple[Any, bool]:
+    """Revert standard DICOM RescaleSlope/RescaleIntercept scaling on a NIfTI volume, per-slice if it varies.
+
+    Mirror of :func:`_apply_fp_rescale_to_nifti` for the 'DV' (non-floating-point) case.
+    """
     try:
         data = nifti_image.get_fdata().copy()
         if data.ndim < 3:
@@ -1235,6 +1308,7 @@ def _apply_rescale_to_nifti(
 
 
 def _collect_rescale_metadata(ds_list: list[Any]) -> dict[str, list[float]]:
+    """Per-slice RescaleIntercept/RescaleSlope values across a series (defaults 0.0/1.0 when a tag is missing/invalid)."""
     rescale_metadata = {"RescaleIntercept": [], "RescaleSlope": []}
     for ds in ds_list:
         intercept = getattr(ds, "RescaleIntercept", None)
@@ -1259,6 +1333,7 @@ def _collect_rescale_metadata(ds_list: list[Any]) -> dict[str, list[float]]:
 
 
 def _collect_scale_slope_metadata(ds_list: list[Any]) -> dict[str, list[float | None]]:
+    """Per-slice Philips ScaleSlope values (standard tag, else the private ``(2005,100E)`` fallback)."""
     scale_slope_metadata: dict[str, list[float | None]] = {"ScaleSlope": []}
     for ds in ds_list:
         scale_slope = None
@@ -1288,6 +1363,7 @@ def _read_dicom_conversion(
     series_number: str | None = None,
     include_private_tags: bool = True,
 ):
+    """Read all DICOM files under *path*, filter to convertible imaging datasets, and group them into per-series datasets/metadata."""
     assert pydicom is not None, "Pydicom is not installed."
 
     fpaths = _iter_candidate_file_paths(path)
@@ -1337,6 +1413,7 @@ def _read_dicom_conversion(
 
 
 def _force_ras_nifti(image: Any) -> Any:
+    """Reorient a NIfTI image to canonical RAS, updating both affine and voxel data."""
     ornt_from = nib.orientations.io_orientation(image.affine)
     ornt_to = nib.orientations.axcodes2ornt(("R", "A", "S"))
     xfm = nib.orientations.ornt_transform(ornt_from, ornt_to)
@@ -1364,6 +1441,7 @@ def _apply_nifti_reorient_flags(
     force_ras: bool = False,
     mouse_reorient: bool = False,
 ) -> Any:
+    """Apply the requested reorientation flag (mouse-gallery LAS takes precedence over plain RAS) to a NIfTI image."""
     if force_ras and not mouse_reorient:
         image = _force_ras_nifti(image)
     if mouse_reorient:
@@ -1453,6 +1531,7 @@ def _affine_from_dicom_series(ds_list: list[Any]) -> np.ndarray | None:
 
 
 def _basic_fallback_image(ds_list: list[Any]) -> Any | None:
+    """Build a NIfTI image from raw pixel arrays with a best-effort affine (identity if geometry can't be derived)."""
     ordered = _spatial_sort_ds_list(ds_list)
     pixel_arrays = []
     for ds in ordered:
@@ -1478,6 +1557,12 @@ def _apply_requested_rescale(
     revert_scaling: bool = False,
     rescale_type: str = "DV",
 ) -> tuple[Any, str]:
+    """Apply the requested scaling policy: revert to raw counts (*revert_scaling*), FP rescale, or leave as DV.
+
+    Returns ``(image, actual_rescale_type_applied)`` — the actual type can fall
+    back to ``\"DV\"`` if the requested correction couldn't be applied (e.g. no
+    ScaleSlope for FP).
+    """
     actual_rescale_type = "DV"
     if md is None:
         return image, actual_rescale_type
@@ -1535,6 +1620,15 @@ def _convert_ds_list_to_nifti_image(
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
 ) -> tuple[Any, str] | None:
+    """Convert one DICOM series (list of datasets) to a NIfTI image, with a cascade of fallbacks.
+
+    Prefers ``dicom2nifti`` (proper geometry from ImageOrientation/Position);
+    on known failure modes (too few slices/localizer, inconsistent orientation,
+    non-cubical/gantry-tilt, NaN geometry, non-imaging files) it retries with
+    orientation fixing, NaN cleaning, forced reorientation, or finally falls
+    back to :func:`_basic_fallback_image`. Applies the requested rescale policy
+    and reorientation flags before returning ``(image, actual_rescale_type)``.
+    """
     temp_nifti_path = None
     used_basic_fallback = False
     try:
@@ -1668,6 +1762,7 @@ def _prepare_array_output(
     rescale_type: str = "DV",
     extra_metadata: dict[str, Any] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
+    """Finalize an array + metadata dict for return: fill axes/shape/spacing (from an affine, if given) and rescale type."""
     arr = np.asarray(data)
     md_out = dict(md)
     if extra_metadata:
@@ -1715,6 +1810,7 @@ def _load_op_series_arrays(
     ds_list: list[Any],
     md: dict[str, Any],
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    """Load an Ophthalmic Photography (OP/OT) series as one 2-D(+color) array per instance, identity affine."""
     outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
     for idx, ds in enumerate(ds_list):
         pixel_array_yxc = ds.pixel_array
@@ -1744,6 +1840,7 @@ def _load_zeiss_series_arrays(
     *,
     force_ras: bool,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    """Load a Zeiss private raw-OCT series (:func:`extract_zeiss_raw_oct`), applying reorientation and returning one output array."""
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
@@ -1773,6 +1870,7 @@ def _load_standard_series_arrays(
     tmp_dir: Path | None = None,
     mouse_reorient: bool = False,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    """Load a standard cross-sectional series via :func:`_convert_ds_list_to_nifti_image` and prepare its output array."""
     converted = _convert_ds_list_to_nifti_image(
         ds_list,
         force_ras=force_ras,
@@ -1800,6 +1898,7 @@ def _load_one_series_arrays(
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
+    """Dispatch one series to the right loader by modality/format: OP photo, Zeiss raw-OCT, or standard cross-sectional."""
     if mod in ["OP", "OT"]:
         out = _load_op_series_arrays(ds_list, md)
         if out:
@@ -1844,6 +1943,14 @@ def load_dicom_series(
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
 ):
+    """Load DICOM series from *input_path* as ``(array, metadata)`` pairs — the public array-level entry point.
+
+    Reads and groups all series (:func:`_read_dicom_conversion`), narrows to a
+    specific series by uid/number/index when requested, then loads each via
+    :func:`_load_one_series_arrays` (auto-dispatched per modality/format).
+    Returns a single ``(array, metadata)`` tuple, or a list of them when
+    *return_all_series* is set or multiple series remain selected.
+    """
     _require_deps()
 
     series_all, metas = _read_dicom_conversion(
@@ -1974,6 +2081,7 @@ def _fallback_save_pixel_arrays(
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
 ) -> str | None:
+    """Convert one series to NIfTI (:func:`_convert_ds_list_to_nifti_image`) and save it with embedded/sidecar metadata."""
     converted = _convert_ds_list_to_nifti_image(
         ds_list,
         force_ras=force_ras,
@@ -2009,6 +2117,11 @@ def _build_output_filename(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
 ) -> tuple[str, bool]:
+    """Resolve the output NIfTI path for a series (custom naming, else PID/desc/accession-based), de-duplicating on collision.
+
+    Returns ``(path, should_write)`` — *should_write* is ``False`` when
+    *skip_existing* is set and the target already exists.
+    """
     if explicit_output_path:
         if skip_existing and os.path.exists(explicit_output_path):
             return explicit_output_path, False
@@ -2071,6 +2184,7 @@ def _process_op_series(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
 ) -> list[str] | None:
+    """Save an Ophthalmic Photography (OP/OT) series as one NIfTI file per image instance."""
     try:
         if explicit_output_path and len(ds_list) != 1:
             raise ValidationError("Explicit output file path cannot be used for multi-image OP/OT exports.")
@@ -2130,6 +2244,7 @@ def _process_tissue_series(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
 ) -> list[str] | None:
+    """Save a tissue-segmentation series (RTStruct-derived masks) as one label NIfTI per segmentation instance."""
     try:
         if explicit_output_path and len(ds_list) != 1:
             raise ValidationError("Explicit output file path cannot be used for multi-image TISSUE exports.")
@@ -2209,6 +2324,7 @@ def _process_zeiss_series(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
 ) -> list[str] | None:
+    """Save a Zeiss private raw-OCT series as a single NIfTI volume, with the extraction diagnostics merged into metadata."""
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
@@ -2290,6 +2406,9 @@ def _process_one_series(
     tmp_dir: Path | None = None,
     explicit_output_path: str | None = None,
 ) -> list[str]:
+    """Dispatch and save one DICOM series by modality/format: OP photo, tissue segmentation, Zeiss raw-OCT,
+    or the standard cross-sectional path (with output filename resolution and the requested rescale/reorient flags).
+    """
     if mod in ["OP", "OT"]:
         out = _process_op_series(
             ds_list,
@@ -2399,6 +2518,13 @@ def run_dicom2nifti(
     tmp_dir: Path | None = None,
     explicit_output_path: str | None = None,
 ) -> list[str]:
+    """Convert every DICOM series found at *input_path* to NIfTI files under *output_folder*.
+
+    The top-level library entry point behind the ``dcm2nii`` CLI: reads and
+    groups series (:func:`_read_dicom_conversion`), narrows by series number/
+    index if requested, then processes and saves each via
+    :func:`_process_one_series`. Returns the list of written file paths.
+    """
     _require_deps()
     os.makedirs(output_folder, exist_ok=True)
 

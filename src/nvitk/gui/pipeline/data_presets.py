@@ -46,17 +46,21 @@ class PipelineRoots:
     pesa_fat_layout: bool = False
 
     def subject_dicom_dir(self, subject: str) -> Path:
+        """*subject*'s DICOM directory under this preset's DICOM root."""
         return self._subject_base(self.dicom_root, subject)
 
     def subject_nifti_dir(self, subject: str) -> Path:
+        """*subject*'s NIfTI directory under this preset's NIfTI root."""
         return self._subject_base(self.nifti_root, subject)
 
     def subject_results_base(self, subject: str) -> Path:
+        """Base results directory for *subject* (the batch subfolder for batch layouts)."""
         if self.layout == "batch" and self.batch:
             return self.results_root / self.batch
         return self.results_root
 
     def _subject_base(self, root: Path, subject: str) -> Path:
+        """*subject*'s directory under *root*, nested under the current batch for batch layouts."""
         if self.layout == "batch" and self.batch:
             return root / self.batch / subject
         return root / subject
@@ -124,10 +128,13 @@ PRESET_REGISTRY: tuple[PipelinePresetSpec, ...] = (
 
 
 def list_pipeline_preset_ids() -> list[str]:
+    """Ids of every registered pipeline data-browser preset, in registry order."""
     return [p.preset_id for p in PRESET_REGISTRY]
 
 
 def get_pipeline_preset(preset_id: str) -> PipelinePresetSpec:
+    """Look up the registered :class:`PipelinePresetSpec` for *preset_id*; raises ``KeyError``
+    (listing known ids) if unregistered."""
     for spec in PRESET_REGISTRY:
         if spec.preset_id == preset_id:
             return spec
@@ -136,6 +143,7 @@ def get_pipeline_preset(preset_id: str) -> PipelinePresetSpec:
 
 
 def _path_from_config(mod: Any, name: str) -> Path | None:
+    """Read a path-valued attribute *name* off a pipeline config module *mod*, or ``None`` if unset."""
     val = getattr(mod, name, None)
     if val is None:
         return None
@@ -179,6 +187,7 @@ def list_local_cohorts(
 
 
 def _cohort_has_pesa_subjects(nifti_root: Path, cohort: str) -> bool:
+    """True if *cohort*'s NIfTI folder contains any PESA-Fat subject directories."""
     base = nifti_root / cohort
     return bool(_list_subject_dirs(base, PESA_FAT_SUBJECT_GLOBS))
 
@@ -262,6 +271,7 @@ def _is_subject_dir_name(name: str) -> bool:
 
 
 def _matches_subject_globs(name: str, globs: tuple[str, ...]) -> bool:
+    """True if *name* looks like a real subject directory (not junk) and matches any of *globs*."""
     if not _is_subject_dir_name(name):
         return False
     return any(Path(name).match(pattern) for pattern in globs)
@@ -280,6 +290,7 @@ def _list_subject_dirs(root: Path, globs: tuple[str, ...]) -> set[str]:
 
 
 def _batch_bases(roots: PipelineRoots) -> tuple[Path, Path, Path]:
+    """``(nifti, dicom, results)`` base directories, nested under the current batch for batch layouts."""
     if roots.layout == "batch" and roots.batch:
         return (
             roots.nifti_root / roots.batch,
@@ -330,11 +341,14 @@ def list_local_subjects(
 
 
 def _is_nifti_file(path: Path) -> bool:
+    """True if *path* has a ``.nii`` or ``.nii.gz`` extension."""
     name = path.name.lower()
     return name.endswith(".nii.gz") or name.endswith(".nii")
 
 
 def _discover_dicom_assets(subject_dir: Path) -> list[LocalAsset]:
+    """List DICOM assets under *subject_dir*: one per subdirectory (assumed one series each), or the
+    directory itself if it directly contains files."""
     if not subject_dir.is_dir():
         return []
     subdirs = sorted(d for d in subject_dir.iterdir() if d.is_dir())
@@ -346,6 +360,8 @@ def _discover_dicom_assets(subject_dir: Path) -> list[LocalAsset]:
 
 
 def _discover_nifti_assets(subject_dir: Path, *, max_files: int = 200) -> list[LocalAsset]:
+    """List every NIfTI file found anywhere under *subject_dir* (capped at *max_files*), labeled by
+    their path relative to *subject_dir*."""
     if not subject_dir.is_dir():
         return []
     assets = []
@@ -364,6 +380,8 @@ def _discover_nifti_assets(subject_dir: Path, *, max_files: int = 200) -> list[L
 
 
 def _discover_results_assets(roots: PipelineRoots, subject: str) -> list[LocalAsset]:
+    """List *subject*'s pipeline output files under *roots* (batch-layout ``res_*`` stage
+    subdirectories, including a ``per_subject`` fallback, or the flat results tree otherwise)."""
     assets = []
     base = roots.subject_results_base(subject)
 

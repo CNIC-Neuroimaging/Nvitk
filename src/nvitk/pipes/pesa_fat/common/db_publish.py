@@ -31,6 +31,9 @@ PesaFatPipelineId = Literal["pesa_fat_ct_pet_v5", "pesa_fat_dixon_v5"]
 
 @dataclass(frozen=True)
 class PublishContext:
+    """Resolved DB publish target for a PESA-Fat pipeline: canonical pipeline id, modality, and the
+    source file/sheet tag recorded on each measurement row."""
+
     pipeline_id: PesaFatPipelineId
     modality: str
     source_file: str = "pesa_fat_stage3"
@@ -38,6 +41,8 @@ class PublishContext:
 
 
 def _infer_publish_context(pipeline: str) -> PublishContext:
+    """Resolve a loosely-formatted *pipeline* name (``"ct-pet-v5"``, ``"dixon"``, etc.) to its
+    :class:`PublishContext`; raises ``ValueError`` for an unrecognized pipeline."""
     pl = str(pipeline).strip().lower()
     if pl in {"ct-pet-v5", "ct_pet_v5", "ctpet", "pesa_fat_ct_pet_v5"}:
         return PublishContext(pipeline_id="pesa_fat_ct_pet_v5", modality="ctpet")
@@ -47,6 +52,8 @@ def _infer_publish_context(pipeline: str) -> PublishContext:
 
 
 def resolve_repo(repo: DataRepo | None = None, *, prefer_sge: bool | None = None) -> DataRepo:
+    """Return *repo* if given, else open the cluster dataset repo when running under SGE with a
+    reachable cluster root, else the repo from local settings."""
     if repo is not None:
         return repo
     use_sge = prefer_sge
@@ -61,6 +68,7 @@ def resolve_repo(repo: DataRepo | None = None, *, prefer_sge: bool | None = None
 
 
 def _sge_db_publish_enabled() -> bool:
+    """True if running under SGE (``NVITK_SGE`` truthy) with a reachable cluster dataset root."""
     if os.environ.get("NVITK_SGE", "").lower() not in ("1", "true", "yes"):
         return False
     return sge_dataset_root_path(must_exist=True) is not None
@@ -115,6 +123,8 @@ def rebuild_sge_sqlite_index_if_configured() -> None:
 
 
 def _stable_region_id(column: str) -> str | None:
+    """Detect a stable Dixon region token (``HEAD``/``THORAX``/``LEGS``) embedded in a stage-3
+    *column* name, or ``None`` if not present."""
     # Dixon columns include a prefix like DIXON_<...>_HEAD/... in the variable name,
     # but we keep region_id empty for now unless an explicit token is present.
     c = str(column).upper()
@@ -503,6 +513,8 @@ def sync_qc_reviews_for_report(
 
 
 def try_sync_qc_reviews_for_report(**kwargs: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Best-effort :func:`sync_qc_reviews_for_report`; returns ``(result, error_message)``, catching
+    unconfigured/missing-table/unexpected errors instead of raising."""
     try:
         return sync_qc_reviews_for_report(**kwargs), None
     except SettingsError as exc:

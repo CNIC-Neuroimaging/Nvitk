@@ -73,27 +73,34 @@ _DEFAULT_QVTPY_QC_STAGES: tuple[str, ...] = (
 
 
 def resource_label_to_asset_slot(resource_label: str) -> str:
+    """Map an XNAT/local pipeline resource label (e.g. ``eicab``) to its ``asset_slot`` name, falling
+    back to ``pipeline_<label>`` for unregistered labels."""
     key = str(resource_label).strip().lower()
     return PIPELINE_RESOURCE_TO_SLOT.get(key, f"pipeline_{key}")
 
 
 def resource_label_to_pipeline_id(resource_label: str) -> str:
+    """Map a pipeline resource label to its canonical ``pipeline_id``, falling back to
+    ``pipeline_<label>`` for unregistered labels."""
     key = str(resource_label).strip().lower()
     return PIPELINE_RESOURCE_TO_PIPELINE_ID.get(key, f"pipeline_{key}")
 
 
 def _is_nifti(path: Path) -> bool:
+    """True if *path* has a ``.nii`` or ``.nii.gz`` extension."""
     name = path.name.lower()
     return name.endswith(".nii.gz") or name.endswith(".nii")
 
 
 def _count_tree_files(root: Path) -> int:
+    """Total number of files anywhere under *root* (0 if *root* isn't a directory)."""
     if not root.is_dir():
         return 0
     return sum(1 for p in root.rglob("*") if p.is_file())
 
 
 def _list_nifti_relpaths(root: Path, *, limit: int = 40) -> list[str]:
+    """Paths (relative to *root*) of up to *limit* NIfTI files found anywhere under *root*, sorted."""
     if not root.is_dir():
         return []
     out: list[str] = []
@@ -107,6 +114,8 @@ def _list_nifti_relpaths(root: Path, *, limit: int = 40) -> list[str]:
 
 
 def describe_local_eicab_resource(resource_dir: Path) -> dict[str, Any]:
+    """Summarize a local ``eicab`` output directory: completeness (has a segmentation), file count,
+    and a sample of NIfTI file paths."""
     complete = _output_has_segmentation(resource_dir)
     return {
         "resource_label": XNAT_RESOURCE_EICAB,
@@ -121,6 +130,9 @@ def describe_local_qvtpy_resource(
     *,
     required_stages: Iterable[str] = _DEFAULT_QVTPY_QC_STAGES,
 ) -> dict[str, Any]:
+    """Summarize a local ``qvtpy`` output directory: per-stage QC completeness (via
+    :func:`~nvitk.pipes.qvtpy.util.io.qc_report.check_subject_stages`), overall completeness, file
+    count, and a sample of NIfTI file paths."""
     subject = resource_dir.parent.name
     results_root = resource_dir.parent.parent
     checks = check_subject_stages(
@@ -147,6 +159,8 @@ def describe_local_pipeline_resource(
     *,
     required_qvtpy_stages: Iterable[str] = _DEFAULT_QVTPY_QC_STAGES,
 ) -> dict[str, Any]:
+    """Dispatch to the resource-specific describer for *resource_label* (``eicab``/``qvtpy``), or fall
+    back to a generic "does the directory have any files" summary for other pipeline resources."""
     label = str(resource_label).strip().lower()
     if label == XNAT_RESOURCE_EICAB:
         return describe_local_eicab_resource(resource_dir)
@@ -175,6 +189,9 @@ def _bundle_asset_row(
     source_batch_id: str,
     extra_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build one ``assets`` table row representing a whole pipeline-output bundle (not an individual
+    file) for *subject_uid*/*resource_label*, embedding *extra_meta* (e.g. from
+    :func:`describe_local_pipeline_resource`) as JSON metadata."""
     slot = resource_label_to_asset_slot(resource_label)
     pipeline_id = resource_label_to_pipeline_id(resource_label)
     pipeline_name = PIPELINE_RESOURCE_TO_NAME.get(resource_label, resource_label)
@@ -264,6 +281,8 @@ def upsert_local_pipeline_assets(
     dry_run: bool = False,
     build_sqlite_index: bool = False,
 ) -> pd.DataFrame:
+    """Build local pipeline-bundle asset rows via :func:`register_local_pipeline_tree` and upsert them
+    into the ``assets`` table (unless ``dry_run`` or the frame is empty)."""
     df = register_local_pipeline_tree(
         results_root,
         resources=resources,

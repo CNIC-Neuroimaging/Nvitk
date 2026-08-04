@@ -13,7 +13,10 @@ import numpy as np
 from scipy import ndimage as ndi
 
 from nvitk.core.array import as_backend_array, to_numpy
+from nvitk.core.backend import using
 from nvitk.core.logger import Logger
+from nvitk.morphology import dilate, erode, label_connected
+from nvitk.morphology import open as morph_open
 
 log = Logger()
 
@@ -25,7 +28,13 @@ PP_DISTAL_OPEN_RADIUS_DEFAULT: int = 1
 
 
 def _footprint_ball(radius: int) -> np.ndarray:
-    """Approximate ball structuring element of the given voxel radius."""
+    """Euclidean ball structuring element of the given voxel radius.
+
+    Kept local (not :func:`nvitk.morphology.make_ball_footprint`) on purpose: the
+    curvature/wart heuristics here were tuned against skimage's *spherical* ball,
+    whereas ``make_ball_footprint`` grows an iterated diamond (L1 ball). The two
+    shapes diverge for ``radius > 1`` and would change which bumps get removed.
+    """
     r = max(0, int(radius))
     if r <= 0:
         return np.ones((1, 1, 1), dtype=bool)
@@ -97,7 +106,13 @@ def filter_mask_protrusions(
         protect_b &= m
 
     fp = _footprint_ball(open_radius)
-    core = ndi.binary_opening(m, structure=fp) if int(open_radius) > 0 else m.copy()
+    # Tubular core = light opening with the Euclidean ball (base tool). This
+    # module is host-side, so pin the backend to numpy for the reused ops.
+    if int(open_radius) > 0:
+        with using("numpy"):
+            core = as_backend_array(morph_open(m, footprint=fp)).astype(bool)
+    else:
+        core = m.copy()
     if not np.any(core):
         # Opening wiped the mask — do not remove anything.
         info["n_after"] = int(m.sum())
@@ -113,7 +128,9 @@ def filter_mask_protrusions(
     # Mean-curvature proxy of the zero level-set (Laplace of SDF).
     curv = ndi.laplace(phi_s)
 
-    eroded = ndi.binary_erosion(m, structure=np.ones((3, 3, 3), dtype=bool))
+    # Inner erosion (26-connected) → surface shell = mask minus its core.
+    with using("numpy"):
+        eroded = as_backend_array(erode(m, connectivity=3)).astype(bool)
     surface = m & ~eroded
     candidates = stick.copy()
     thr = None
@@ -126,7 +143,9 @@ def filter_mask_protrusions(
 
     if int(surface_dilate) > 0 and np.any(candidates):
         dil_fp = _footprint_ball(int(surface_dilate))
-        candidates = ndi.binary_dilation(candidates, structure=dil_fp) & m
+        with using("numpy"):
+            grown = as_backend_array(dilate(candidates, footprint=dil_fp)).astype(bool)
+        candidates = grown & m
 
     # Never treat protected voxels as removable candidates.
     candidates &= ~protect_b
@@ -135,7 +154,10 @@ def filter_mask_protrusions(
         info["skipped"] = "no_candidates"
         return as_backend_array(m), info
 
-    labeled, n_lab = ndi.label(candidates, structure=ndi.generate_binary_structure(3, 3))
+    # 26-connectivity CC labeling of the candidate warts (base tool).
+    with using("numpy"):
+        labeled, n_lab = label_connected(candidates, connectivity=3)
+    labeled = as_backend_array(labeled)
     max_sz = max(1, int(max_cc_voxels))
     removed = np.zeros(m.shape, dtype=bool)
     n_cc = 0

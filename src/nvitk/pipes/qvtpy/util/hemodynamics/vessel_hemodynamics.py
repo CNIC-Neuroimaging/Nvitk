@@ -84,6 +84,8 @@ _DEFAULT_BRANCH_WORKERS = max(1, min(4, os.cpu_count() or 4))
 
 
 def _branch_sample_workers(n_branches: int) -> int:
+    """Worker-thread count for per-branch sampling: 1 for a single branch, else
+    ``NVITK_PITC_BRANCH_WORKERS`` if set, else the default capped at *n_branches*."""
     if n_branches <= 1:
         return 1
     env = os.environ.get("NVITK_PITC_BRANCH_WORKERS", "").strip()
@@ -687,6 +689,8 @@ def compute_vessel_hemodynamics(
         def _sample_named(
             job: tuple[int, str, np.ndarray],
         ) -> tuple[int, str, list[dict[str, Any]], np.ndarray, float]:
+            """Sample hemodynamic stations along one named branch job, tagging rows with the root's
+            region id; returns ``(label, name, rows, branch_points, distance_offset)``."""
             blabel, bname, bpts = job
             branch_pts, offset = _distance_offset_for_branch(
                 root_pts, bpts, voxel_spacing

@@ -56,6 +56,7 @@ N_WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
 
 
 def _headless() -> None:
+    """Force a non-interactive matplotlib backend in each worker (no display available)."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     try:
         import matplotlib
@@ -69,6 +70,13 @@ def _headless() -> None:
 # ---------------------------------------------------------------------------
 
 def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
+    """Subprocess entry point: run the full VMTK morphometrics pipeline for one label/component.
+
+    Must stay a top-level function (picklable) since workers are spawned, not
+    forked — VTK/VMTK are not reliably fork-safe. Catches all exceptions and
+    returns them as a result dict (``ok=False``) so one failed job doesn't kill
+    the pool.
+    """
     _headless()
     (
         label, component_id, mask_cc,
@@ -145,6 +153,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
+    """Compute the (unconditional) output subdirectory paths for one case, per config flags."""
     return {
         "centerline_dir": os.path.join(case_out_dir, "centerlines"),
         "centerline_radius_dir": (
@@ -157,6 +166,7 @@ def _output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
 
 
 def _setup_output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
+    """Create the enabled output subdirectories and clear any stale generated VTPs from a prior run."""
     dirs = _output_dirs(case_out_dir)
     ensure_dir(case_out_dir)
     if _config.SAVE_CENTERLINES:
@@ -179,6 +189,10 @@ def _make_jobs(
     case_id: str,
     spacing: np.ndarray,
 ) -> List[Tuple]:
+    """Build the per-(label, component) argument tuples that :func:`_worker` will process.
+
+    Components with fewer than 2 voxels are skipped (too small for a centerline).
+    """
     jobs = []
     for label in labels:
         if not (multilabel == label).any():
@@ -208,6 +222,7 @@ def _write_excel(
     donut_loop_dfs: List[pd.DataFrame],
     vessel_sheets: Dict[str, pd.DataFrame],
 ) -> str:
+    """Assemble every result table into the multi-sheet ``case_metrics_donut_tree.xlsx`` workbook."""
     path_summary_df = pd.DataFrame(path_summaries)
     tree_summary_df = pd.DataFrame(tree_summaries)
     branchpoints_df = pd.concat(branch_dfs, ignore_index=True) if branch_dfs else pd.DataFrame()

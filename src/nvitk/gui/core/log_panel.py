@@ -13,11 +13,13 @@ _log_widget: QPlainTextEdit | None = None
 
 
 def set_log_widget(widget: QPlainTextEdit | None) -> None:
+    """Register *widget* as the log panel that :func:`gui_log` appends to (module-level singleton)."""
     global _log_widget
     _log_widget = widget
 
 
 def gui_log(message: str, *, error: bool = False) -> None:
+    """Append a timestamped log line to the registered log widget (if any) and stdout."""
     stamp = datetime.now().strftime("%H:%M:%S")
     level = "ERROR" if error else "INFO"
     line = f"[{stamp}] {level}: {message}"

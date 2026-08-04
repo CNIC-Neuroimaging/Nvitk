@@ -128,6 +128,7 @@ def _stage0_python_cmd(subject: str, lay: BatchLayout, log_level: str) -> str:
 
 
 def _stage0_cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) -> ClusterPaths:
+    """Host paths for stage 0 (DICOM -> NIfTI conversion) SGE submission."""
     return ClusterPaths(
         src=src_dir,
         container=container,
@@ -158,6 +159,7 @@ def _stage4_qc_python_cmd(
     pipelines_csv: str,
     log_level: str,
 ) -> str:
+    """In-container CLI command for the stage-4 HTML QC report SGE job."""
     binds = SingularityBinds()
     return " ".join(
         [
@@ -184,6 +186,7 @@ def _aggregate_python_cmd(
     pipelines_csv: str,
     log_level: str,
 ) -> str:
+    """In-container CLI command for the batch stage-3 Excel aggregation SGE job."""
     binds = SingularityBinds()
     return " ".join(
         [
@@ -303,6 +306,7 @@ def _emit_stage4_qc_stage(
 
 
 def _require_paramiko() -> None:
+    """Raise a click error with an install hint if Paramiko is not available."""
     try:
         import paramiko  # noqa: F401
     except ImportError as exc:
@@ -316,6 +320,8 @@ def _prompt_ssh_credentials(
     remote_host: str | None,
     remote_user: str | None,
 ) -> tuple[str, str, str]:
+    """Resolve (host, user, password) from args or interactive prompts, resolving *host*
+    through :data:`~nvitk.pipes.pesa_fat.common.paths.CLUSTER_HOST_ALIASES`."""
     host_key = remote_host or click.prompt("SSH hostname (short name or IP)")
     host_resolved = resolve_cluster_host(CLUSTER_HOST_ALIASES.get(host_key, host_key))
     user = remote_user or click.prompt("SSH user")
@@ -354,6 +360,7 @@ def _write_sge_script(
     log_level: str,
     exclude_ureter: bool,
 ) -> Path:
+    """Write the full batch submission script (header + all SGE stages) to *script_path*."""
     script_path.parent.mkdir(parents=True, exist_ok=True)
     with open(script_path, "w", encoding="utf-8") as fh:
         write_script_header(
@@ -390,6 +397,7 @@ def _ssh_run_scripts(
     password: str,
     script_paths: list[Path],
 ) -> bool:
+    """Run one or more submission scripts on the cluster login node over SSH; True on success."""
     if not script_paths:
         return True
     if len(script_paths) == 1:
@@ -583,6 +591,8 @@ def _submit_stage0(
 
 
 def _subject_list(lay: BatchLayout, subjects_arg: str | None, source: str) -> list[str]:
+    """Resolve the batch subject list: parsed *subjects_arg* if given, else every subject
+    discovered under the DICOM or NIfTI batch directory (per *source*)."""
     parsed = parse_subjects(subjects_arg)
     if parsed:
         return parsed
@@ -619,6 +629,8 @@ def _run_local(
     compress: bool,
     exclude_ureter: bool = True,
 ) -> None:
+    """Run the batch in-process: optional stage 0 conversion, then each selected pipeline's
+    local stages, then optional stage-4 HTML QC report."""
     if "stage0" in stages_sel:
         log.info("=" * 78)
         log.info(f"STAGE 0 (local) | batch={lay.batch} | {len(subjects)} subject(s)")
@@ -694,6 +706,8 @@ def _run_sge(
     emit: TextIO | None = None,
     exclude_ureter: bool = True,
 ) -> None:
+    """Emit or submit the full batch SGE pipeline: per-subject stage 0, then each selected
+    pipeline's array job(s) held on stage 0, then optional aggregate/stage-4 QC jobs."""
     run_stage0 = "stage0" in stages_sel
     pipe_stages = [s for s in stages_sel if s not in ("stage0", "stage4")]
 

@@ -61,6 +61,7 @@ def tof_morpho_pipeline_catalog_spec() -> dict[str, Any]:
 
 
 def _sge_db_publish_enabled() -> bool:
+    """Delegate to :func:`nvitk.pipes.qvtpy.common.db_publish._sge_db_publish_enabled`."""
     from nvitk.pipes.qvtpy.common.db_publish import _sge_db_publish_enabled
 
     return _sge_db_publish_enabled()
@@ -76,6 +77,7 @@ def _measurement_row(
     source_file: str,
     updated_at: str,
 ) -> dict[str, Any]:
+    """Build one ``image_measurements`` row dict for a TOF-morphometrics scalar value."""
     return {
         "subject_uid": str(subject_uid),
         "session_id": pd.NA,
@@ -103,6 +105,7 @@ def _measurement_row(
 
 
 def _parse_segment_details(raw: Any) -> list[dict[str, Any]]:
+    """Parse a segment-detail JSON cell (list, JSON string, or NaN/None) into a list of dicts."""
     if raw is None or (isinstance(raw, float) and not np.isfinite(raw)):
         return []
     if isinstance(raw, list):
@@ -120,6 +123,7 @@ def _parse_segment_details(raw: Any) -> list[dict[str, Any]]:
 
 
 def _segment_degree_max(raw: Any) -> float | None:
+    """Maximum ``degree_pct`` across the segment-detail entries in *raw*, or None."""
     degrees = [
         float(d["degree_pct"])
         for d in _parse_segment_details(raw)
@@ -129,6 +133,7 @@ def _segment_degree_max(raw: Any) -> float | None:
 
 
 def _segment_length_sum(raw: Any) -> float | None:
+    """Sum of ``length_mm`` across the segment-detail entries in *raw*, or None."""
     lengths = [
         float(d["length_mm"])
         for d in _parse_segment_details(raw)
@@ -175,6 +180,8 @@ def _enrich_path_summary_from_segment_json(path_df: pd.DataFrame) -> pd.DataFram
 
 
 def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate per-path rows of the ``00_Path_Summary`` sheet into one length-weighted
+    scalar summary row per ``vessel_name``."""
     if path_df.empty or "vessel_name" not in path_df.columns:
         return pd.DataFrame()
 
@@ -187,6 +194,7 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         def _col(col: str) -> pd.Series:
+            """Numeric-coerced *col* from *group* (all-NaN series if the column is absent)."""
             if col not in group.columns:
                 return pd.Series(np.nan, index=group.index, dtype=float)
             return pd.to_numeric(group[col], errors="coerce")
@@ -197,6 +205,7 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         def _wmean(col: str) -> float | None:
+            """Length-weighted mean of *col* over valid-length rows, or None if none finite."""
             vals = _col(col)
             good = valid & vals.notna() & np.isfinite(vals)
             if not good.any():
@@ -204,6 +213,7 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             return float(np.average(vals[good], weights=lengths[good]))
 
         def _max(col: str) -> float | None:
+            """Max finite value of *col*, or None if none finite."""
             vals = _col(col)
             good = vals.notna() & np.isfinite(vals)
             if not good.any():
@@ -211,6 +221,7 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             return float(vals[good].max())
 
         def _min(col: str) -> float | None:
+            """Min finite value of *col*, or None if none finite."""
             vals = _col(col)
             good = vals.notna() & np.isfinite(vals)
             if not good.any():
@@ -218,6 +229,7 @@ def _aggregate_vessel_metrics(path_df: pd.DataFrame) -> pd.DataFrame:
             return float(vals[good].min())
 
         def _sum(col: str) -> float | None:
+            """Sum of finite values of *col*, or None if none finite."""
             vals = _col(col)
             good = vals.notna() & np.isfinite(vals)
             if not good.any():

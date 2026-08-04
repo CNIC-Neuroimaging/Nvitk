@@ -23,6 +23,7 @@ def resolve_cluster_host(host: str) -> str:
 
 
 def _require_paramiko():
+    """Raise a clear install hint unless ``paramiko`` is available (needed for remote SGE transfer)."""
     try:
         import paramiko  # noqa: F401
     except ImportError as exc:
@@ -81,6 +82,7 @@ def ensure_remote_dir(sftp: Any, remote_path: str) -> None:
 
 
 def remote_path_exists(sftp: Any, remote_path: str) -> bool:
+    """True if *remote_path* exists on the SFTP server."""
     try:
         sftp.stat(remote_path)
         return True
@@ -89,6 +91,7 @@ def remote_path_exists(sftp: Any, remote_path: str) -> bool:
 
 
 def read_remote_text(sftp: Any, remote_path: str) -> str:
+    """Read a remote text file's full contents (UTF-8, replacing undecodable bytes)."""
     with sftp.open(remote_path, "r") as fh:
         return fh.read().decode("utf-8", errors="replace")
 
@@ -98,6 +101,7 @@ def upload_file(
     local_path: Path,
     remote_path: str,
 ) -> None:
+    """Upload *local_path* to *remote_path*, creating the remote parent directory if needed."""
     parent = remote_path.rsplit("/", 1)[0]
     if parent:
         ensure_remote_dir(sftp, parent)
@@ -105,6 +109,7 @@ def upload_file(
 
 
 def download_remote_file(sftp: Any, remote_path: str, local_path: Path) -> None:
+    """Download *remote_path* to *local_path*, creating the local parent directory if needed."""
     local_path.parent.mkdir(parents=True, exist_ok=True)
     sftp.get(remote_path, str(local_path))
 
@@ -270,6 +275,7 @@ def ssh_exec(
 
 
 def _normalize_remote_path(path: str) -> str:
+    """Strip whitespace and any trailing slash from a POSIX remote path."""
     return str(path or "").strip().rstrip("/")
 
 

@@ -38,6 +38,8 @@ def _compact_magicgui_panel(native: QWidget) -> None:
 
 
 def _show_label_picker(category: str, tool_id: str, layer: Any | None) -> bool:
+    """True if the label-selector widget should be shown for *tool_id* given the active *layer* and
+    its category (label-picker tools always; certain categories when the layer is label-like)."""
     if not is_label_like_layer(layer):
         return False
     if tool_id in TOOL_IDS_USING_LABEL_PICKER:
@@ -90,11 +92,13 @@ def build_tools_dock(
     _active_sync_timer.setInterval(0)
 
     def _active_layer() -> Any | None:
+        """The viewer's active (or last) layer, or ``None`` if there are no layers."""
         if not viewer.layers:
             return None
         return viewer.layers.selection.active or viewer.layers[-1]
 
     def _restore_filtered_layer() -> None:
+        """Undo the live label-visibility filter on the currently filtered layer, if any."""
         nonlocal _filtered_layer
         if _filtered_layer is not None:
             restore_label_visibility(_filtered_layer, viewer=viewer)
@@ -107,6 +111,8 @@ def build_tools_dock(
             _filtered_layer = None
 
     def _apply_label_visibility() -> None:
+        """Filter the active label-like layer's display to only the checked label ids, restoring any
+        previously filtered layer first."""
         nonlocal _filtered_layer
         if not label_selector.isVisible():
             _restore_filtered_layer()
@@ -123,6 +129,7 @@ def build_tools_dock(
         _filtered_layer = layer
 
     def _schedule_label_visibility() -> None:
+        """Debounce a call to :func:`_apply_label_visibility` via the visibility timer."""
         _visibility_timer.start()
 
     def _sync_label_picker_for_layer(layer: Any | None) -> None:
@@ -165,6 +172,8 @@ def build_tools_dock(
         _update_aux_panel_layout(show_labels)
 
     def _get_label_ids() -> list[int]:
+        """Selected label ids from the picker if visible and non-empty, else every label present in
+        the active layer."""
         layer = _active_layer()
         if label_selector.isVisible():
             picked = label_selector.selected_ids()
@@ -177,6 +186,7 @@ def build_tools_dock(
         return []
 
     def _get_totalseg_roi() -> list[str] | None:
+        """Selected TotalSegmentator ROI names if the ROI widget is visible, else ``None``."""
         if totalseg_roi.isVisible():
             return totalseg_roi.selected_roi_names()
         return None
@@ -194,6 +204,8 @@ def build_tools_dock(
     )
 
     def _sync_aux_panels() -> None:
+        """Full resync of every auxiliary panel (label picker, pipeline form, TotalSeg ROI widget,
+        cursor/CoW rows, SGE button) for the currently selected category/operation."""
         cat = tool_panel.category.value
         op = tool_panel.operation.value
         tid = tool_id_from_label(cat, op) or ""
@@ -256,6 +268,7 @@ def build_tools_dock(
     cursor_row.setLayout(cursor_layout)
 
     def _apply_cursor_seed() -> None:
+        """Fill the region-grow seed coordinate widgets from the current cursor voxel position."""
         layer = _active_layer()
         if layer is None:
             return
@@ -300,6 +313,7 @@ def build_tools_dock(
     cow_row.setVisible(False)
 
     def _sync_cow_row() -> None:
+        """Show/hide and update the Mouse TOF CoW Stage-2 status row and buttons based on session state."""
         from nvitk.gui.lab.mouse_tof_cow import get_session, session_active
 
         tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
@@ -322,6 +336,7 @@ def build_tools_dock(
         btn_cow_cancel.setEnabled(active)
 
     def _cow_add() -> None:
+        """Assign the currently highlighted CC to the tree being built."""
         from nvitk.gui.lab.mouse_tof_cow import get_session
         from nvitk.gui.tools.runner import notify
 
@@ -333,6 +348,7 @@ def build_tools_dock(
         _sync_cow_row()
 
     def _cow_deselect() -> None:
+        """Clear the currently highlighted CC without assigning it."""
         from nvitk.gui.lab.mouse_tof_cow import get_session
         from nvitk.gui.tools.runner import notify
 
@@ -344,6 +360,7 @@ def build_tools_dock(
         _sync_cow_row()
 
     def _cow_done() -> None:
+        """Finish the current vessel tree and advance to the next (or finalize if this was the last)."""
         from nvitk.gui.lab.mouse_tof_cow import get_session
         from nvitk.gui.tools.runner import notify
 
@@ -355,6 +372,7 @@ def build_tools_dock(
         _sync_cow_row()
 
     def _cow_cancel() -> None:
+        """Cancel the active Mouse TOF CoW Stage-2 session without finalizing."""
         from nvitk.gui.lab.mouse_tof_cow import cancel_session
 
         cancel_session(viewer)
@@ -387,6 +405,7 @@ def build_tools_dock(
     btn_run_sge.setEnabled(False)
 
     def _sync_sge_button() -> None:
+        """Enable/disable the Run SGE button and set its tooltip for the currently selected tool."""
         tid = tool_id_from_label(tool_panel.category.value, tool_panel.operation.value) or ""
         capable = is_sge_capable(tid)
         btn_run_sge.setEnabled(capable)
@@ -397,6 +416,7 @@ def build_tools_dock(
         )
 
     def _on_run_sge() -> None:
+        """Handle the Run SGE button: submit the current tool invocation as a remote SGE job."""
         submit_gui_sge(
             viewer,
             tool_panel,
@@ -423,6 +443,8 @@ def build_tools_dock(
     _row_spacer = layout.count() - 1
 
     def _update_aux_panel_layout(show_labels: bool) -> None:
+        """Give the currently relevant auxiliary panel (label picker, pipeline form, or TotalSeg ROI
+        widget) the stretch factor in the dock layout, collapsing the others."""
         is_pipeline = pipeline_form.isVisible()
         is_ts = totalseg_roi.isVisible()
         label_selector.set_expanded(show_labels)
@@ -445,6 +467,7 @@ def build_tools_dock(
             layout.setStretch(_row_spacer, 0)
 
     def _signal_value(event: Any) -> Any:
+        """Extract the new value from a magicgui change *event* (or pass through a raw value)."""
         return event.value if hasattr(event, "value") else event
 
     _visibility_timer.timeout.connect(_apply_label_visibility)
@@ -456,9 +479,11 @@ def build_tools_dock(
     )
 
     def _schedule_active_layer_sync() -> None:
+        """Debounce a call to resync the label picker and pipeline form for the active layer."""
         _active_sync_timer.start()
 
     def _layer_from_removing_event(event: Any) -> Any | None:
+        """Layer instance about to be removed, from a Napari ``removing`` event's index."""
         idx = getattr(event, "index", None)
         if idx is None:
             return None
@@ -480,6 +505,7 @@ def build_tools_dock(
 
     @viewer.layers.events.removed.connect
     def _on_layer_removed_refresh_pipeline(_event: Any) -> None:
+        """Refresh layer-picker widgets across the dock after a layer is removed."""
         pipeline_form.refresh_layer_combos()
         from nvitk.gui.tools.panel import _update_reference_layers
 
@@ -488,6 +514,7 @@ def build_tools_dock(
 
     @viewer.layers.events.inserted.connect
     def _on_layer_inserted_refresh_pipeline(_event: Any) -> None:
+        """Refresh layer-picker widgets across the dock after a layer is added."""
         pipeline_form.refresh_layer_combos()
         from nvitk.gui.tools.panel import _update_reference_layers
 
@@ -500,11 +527,14 @@ def build_tools_dock(
 
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_for_labels(_event) -> None:
+        """Debounce a resync of the label picker/pipeline form when the active layer changes."""
         _schedule_active_layer_sync()
 
     label_selector.selection_changed.connect(_schedule_label_visibility)
 
     def _refresh_label_selector() -> None:
+        """Manually re-guess the schema (if still generic) and refresh the label picker for the
+        active layer."""
         layer = _active_layer()
         if label_selector.schema_key() == "generic":
             guessed = guess_schema_from_layer(layer)

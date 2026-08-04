@@ -49,16 +49,19 @@ SUMMARY_SHEET_RE = re.compile(r"^\d{2}_")
 
 
 def safe_sheet_name(name: str) -> str:
+    """Sanitize *name* for use as an Excel sheet name (illegal chars stripped, 31-char limit)."""
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_")
     return (cleaned or "centerline")[:31]
 
 
 def safe_filename(name: str) -> str:
+    """Sanitize *name* into a filesystem-safe filename fragment."""
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_")
     return cleaned or "centerline"
 
 
 def vessel_sort_key(path_or_name) -> Tuple[int, str]:
+    """Sort key ordering centerline files/sheets by their leading label id, then name."""
     name = Path(path_or_name).stem
     match = re.match(r"^(\d+)(?:\D|$)", name)
     if not match:
@@ -69,6 +72,7 @@ def vessel_sort_key(path_or_name) -> Tuple[int, str]:
 
 
 def remove_duplicate_points(points: np.ndarray, min_segment_length_mm: float) -> np.ndarray:
+    """Drop consecutive points closer together than *min_segment_length_mm* (keeps the first of each run)."""
     points = np.asarray(points, dtype=float)
     if len(points) <= 1:
         return points
@@ -80,6 +84,7 @@ def remove_duplicate_points(points: np.ndarray, min_segment_length_mm: float) ->
 
 
 def cumulative_s(points: np.ndarray) -> np.ndarray:
+    """Cumulative arc length at each point along the polyline, starting at 0."""
     if len(points) == 0:
         return np.array([], dtype=float)
     if len(points) == 1:
@@ -88,12 +93,14 @@ def cumulative_s(points: np.ndarray) -> np.ndarray:
 
 
 def arc_length(points: np.ndarray) -> float:
+    """Total polyline length (sum of consecutive-point distances); 0.0 for <2 points."""
     if len(points) < 2:
         return 0.0
     return float(np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1)))
 
 
 def median_segment_length(points: np.ndarray, fallback: float = 0.1) -> float:
+    """Median distance between consecutive points (a robust proxy for the local sampling resolution)."""
     if len(points) < 2:
         return float(fallback)
     lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
@@ -102,12 +109,14 @@ def median_segment_length(points: np.ndarray, fallback: float = 0.1) -> float:
 
 
 def chord_length(points: np.ndarray) -> float:
+    """Straight-line distance from the first to the last point; 0.0 for <2 points."""
     if len(points) < 2:
         return 0.0
     return float(np.linalg.norm(points[-1] - points[0]))
 
 
 def resample_polyline_by_arclength(points: np.ndarray, step_mm: Optional[float]) -> np.ndarray:
+    """Resample a polyline to (near-)equal arc-length steps of *step_mm* via linear interpolation."""
     points = np.asarray(points, dtype=float)
     if step_mm is None or step_mm <= 0 or len(points) < 2:
         return points
@@ -128,6 +137,7 @@ def resample_polyline_by_arclength(points: np.ndarray, step_mm: Optional[float])
 
 
 def local_turn_angles(points: np.ndarray) -> np.ndarray:
+    """Turn angle (degrees) at each interior point between its incoming and outgoing segment vectors."""
     n = len(points)
     angles = np.full(n, np.nan, dtype=float)
     if n < 3:
@@ -147,6 +157,7 @@ def local_turn_angles(points: np.ndarray) -> np.ndarray:
 
 
 def perpendicular_distance_to_chord(points: np.ndarray) -> np.ndarray:
+    """Perpendicular distance of every point from the straight chord joining the path's first and last point."""
     points = np.asarray(points, dtype=float)
     distances = np.full(len(points), np.nan, dtype=float)
     if len(points) == 0:
@@ -168,6 +179,7 @@ def perpendicular_distance_to_chord(points: np.ndarray) -> np.ndarray:
 
 
 def perpendicular_distance_to_line_segment(points: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """Perpendicular distance of every point from the finite segment ``[start, end]`` (clamped, not an infinite line)."""
     points = np.asarray(points, dtype=float)
     start = np.asarray(start, dtype=float)
     end = np.asarray(end, dtype=float)
@@ -181,6 +193,7 @@ def perpendicular_distance_to_line_segment(points: np.ndarray, start: np.ndarray
 
 
 def gaussian_smooth_1d(arr: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian smoothing of a 1-D signal that may contain NaNs (filled by interpolation before convolving, then re-masked)."""
     if sigma <= 0 or len(arr) < 3:
         return arr.copy()
     valid = np.isfinite(arr)
@@ -199,6 +212,15 @@ def gaussian_smooth_1d(arr: np.ndarray, sigma: float) -> np.ndarray:
 
 
 def signed_curvature_3d(points: np.ndarray, smooth_sigma_points: float = 20.0) -> np.ndarray:
+    """Signed curvature along a 3-D polyline, with a consistent sign convention picked via a global binormal reference.
+
+    Curvature magnitude comes from consecutive tangent turning (binormal
+    cross-products); since a 3-D curve's binormal direction is only defined up
+    to sign at each point, an SVD over all binormals picks one dominant plane
+    normal as the reference so the sign is stable along the whole path (a
+    genuine 3-D torsion reversal will still show as an actual sign flip).
+    Output is smoothed with :func:`gaussian_smooth_1d`.
+    """
     n = len(points)
     if n < 3:
         return np.full(n, np.nan)
@@ -231,6 +253,7 @@ def signed_curvature_3d(points: np.ndarray, smooth_sigma_points: float = 20.0) -
 
 
 def find_inflection_indices(points: np.ndarray, signed_curv: np.ndarray, min_lobe_length_mm: float = 2.0) -> List[int]:
+    """Point indices where signed curvature changes sign (real S-bends), merging inflections closer than *min_lobe_length_mm*."""
     n = len(points)
     if n < 3:
         return []
@@ -258,6 +281,7 @@ def find_inflection_indices(points: np.ndarray, signed_curv: np.ndarray, min_lob
 
 
 def point_deflection_angle_deg(start: np.ndarray, apex: np.ndarray, end: np.ndarray) -> float:
+    """Deflection angle (degrees) of the path bending through *apex*: 180° minus the interior angle at *apex*."""
     ba = np.asarray(start, dtype=float) - np.asarray(apex, dtype=float)
     bc = np.asarray(end, dtype=float) - np.asarray(apex, dtype=float)
     ba_n = float(np.linalg.norm(ba))
@@ -269,6 +293,7 @@ def point_deflection_angle_deg(start: np.ndarray, apex: np.ndarray, end: np.ndar
 
 
 def bend_angles_for_indices(points: np.ndarray, bend_indices: List[int]) -> Dict[int, float]:
+    """Deflection angle at each bend index, measured against its neighboring bend/endpoint keypoints."""
     if len(points) < 3:
         return {}
     bends = sorted(set(int(i) for i in bend_indices if 0 < int(i) < len(points) - 1))
@@ -280,6 +305,13 @@ def bend_angles_for_indices(points: np.ndarray, bend_indices: List[int]) -> Dict
 
 
 def rdp_bend_events(points: np.ndarray) -> List[dict]:
+    """Detect bend "lobes" via recursive Ramer-Douglas-Peucker simplification against a local tolerance.
+
+    Each recursive split point whose deviation from its local chord exceeds a
+    tolerance (scaled by that chord's length) is recorded as a candidate bend
+    event; overlapping candidates closer than 10% of the total path length are
+    then pruned, keeping the most prominent one in each cluster.
+    """
     points = np.asarray(points, dtype=float)
     s = cumulative_s(points)
     events: List[dict] = []
@@ -287,6 +319,7 @@ def rdp_bend_events(points: np.ndarray) -> List[dict]:
         return events
 
     def recurse(start: int, end: int) -> None:
+        """RDP recursion: find the point farthest from the chord ``[start, end]``, split there if it exceeds tolerance."""
         if end - start < 2:
             return
         segment_points = points[start:end + 1]
@@ -336,6 +369,9 @@ def write_debug_vtp(
     max_bending_idx: Optional[int],
     inflection_indices: Optional[List[int]] = None,
 ) -> None:
+    """Write a VTK debug point cloud marking endpoints, bend events, the max-bending point, and inflections
+    (each tagged with its role, arc length, angle, and bend-lobe stats) for visual QC of tortuosity detection.
+    """
     try:
         import vtk
         from vtk.util import numpy_support
@@ -346,6 +382,7 @@ def write_debug_vtp(
     event_by_idx = {int(event["idx"]): event for event in bend_events}
 
     def add_point(idx: int, role: str, role_code: int) -> None:
+        """Record one debug point (with its role tag and metrics) at path index *idx*."""
         if idx < 0 or idx >= len(points):
             return
         event = event_by_idx.get(int(idx), {})
@@ -436,6 +473,13 @@ def write_debug_vtp(
 
 
 def compute_metrics(name: str, points: np.ndarray) -> Tuple[dict, pd.DataFrame]:
+    """Compute the full standalone tortuosity-metric report for one centerline.
+
+    Cleans/resamples the polyline, then derives tortuosity index, signed
+    curvature + inflection points, RDP bend events, per-bend deflection angles,
+    and chord-distance-based bending. Returns ``(summary_dict, pointwise_df)``
+    — a one-row summary plus a per-point table (for the debug VTP / detail sheet).
+    """
     points = remove_duplicate_points(points, MIN_SEGMENT_LENGTH_MM)
     points = resample_polyline_by_arclength(points, RESAMPLE_STEP_MM)
     s = cumulative_s(points)
@@ -512,6 +556,7 @@ def compute_metrics(name: str, points: np.ndarray) -> Tuple[dict, pd.DataFrame]:
 
 
 def load_vtp_points(path: Path) -> np.ndarray:
+    """Load the longest polyline's points from a centerline VTP file."""
     try:
         import vtk
         from vtk.util import numpy_support
@@ -539,6 +584,7 @@ def load_vtp_points(path: Path) -> np.ndarray:
 
 
 def load_centerlines_from_vtp_folder(input_path: Path) -> Dict[str, np.ndarray]:
+    """Load every ``.vtp`` centerline in a folder, keyed by vessel name (strips a ``_radius`` suffix)."""
     files = sorted(input_path.glob("*.vtp"), key=vessel_sort_key)
     if not files:
         raise FileNotFoundError(f"No .vtp files found in {input_path}")
@@ -546,6 +592,7 @@ def load_centerlines_from_vtp_folder(input_path: Path) -> Dict[str, np.ndarray]:
 
 
 def is_centerline_sheet(sheet_name: str, columns: Iterable[str]) -> bool:
+    """True for a per-centerline data sheet (not a numbered summary sheet) that has x/y/z_mm columns."""
     if SUMMARY_SHEET_RE.match(sheet_name):
         return False
     cols = {str(c).lower() for c in columns}
@@ -553,6 +600,7 @@ def is_centerline_sheet(sheet_name: str, columns: Iterable[str]) -> bool:
 
 
 def load_centerlines_from_workbook(input_path: Path) -> Dict[str, np.ndarray]:
+    """Load every per-centerline sheet's x/y/z points from a morphometrics workbook, keyed by sheet name."""
     xls = pd.ExcelFile(input_path)
     out: Dict[str, np.ndarray] = {}
     for sheet in sorted(xls.sheet_names, key=vessel_sort_key):
@@ -570,6 +618,7 @@ def load_centerlines_from_workbook(input_path: Path) -> Dict[str, np.ndarray]:
 
 
 def load_centerlines(input_path: Path) -> Dict[str, np.ndarray]:
+    """Load centerlines from a VTP folder, a single VTP file, or a morphometrics workbook (dispatch by path type)."""
     if input_path.is_dir():
         return load_centerlines_from_vtp_folder(input_path)
     if input_path.suffix.lower() in {".xlsx", ".xls"}:
@@ -580,6 +629,7 @@ def load_centerlines(input_path: Path) -> Dict[str, np.ndarray]:
 
 
 def default_output_paths(input_path: Path, output_csv: Optional[str], output_xlsx: Optional[str]) -> Tuple[Path, Path]:
+    """Resolve the CSV/XLSX report paths, defaulting next to *input_path* when not explicitly given."""
     base_dir = input_path if input_path.is_dir() else input_path.parent
     csv_path = Path(output_csv) if output_csv else base_dir / "tortuosity_metrics.csv"
     xlsx_path = Path(output_xlsx) if output_xlsx else base_dir / "tortuosity_metrics.xlsx"
@@ -587,6 +637,7 @@ def default_output_paths(input_path: Path, output_csv: Optional[str], output_xls
 
 
 def default_debug_vtp_dir(input_path: Path) -> Path:
+    """Resolve the debug-VTP output directory, defaulting next to *input_path* when ``DEBUG_VTP_DIR`` is unset."""
     if DEBUG_VTP_DIR:
         return Path(DEBUG_VTP_DIR).expanduser().resolve()
     return (input_path if input_path.is_dir() else input_path.parent) / "tortuosity_debug_vtps"
@@ -598,6 +649,9 @@ def run(
     output_xlsx: Optional[str] = None,
     save_pointwise_sheets: bool = False,
 ) -> pd.DataFrame:
+    """Full standalone pipeline: load centerlines, compute tortuosity metrics for each, and write CSV/XLSX reports
+    (optionally saving a debug VTP per centerline and per-point detail sheets in the workbook).
+    """
     source = Path(input_path).expanduser().resolve()
     if not source.exists():
         raise FileNotFoundError(f"INPUT_PATH not found: {source}")
@@ -661,6 +715,7 @@ def run(
 
 
 def main() -> None:
+    """Direct-run entry point: run the tortuosity pipeline per the module-level ``INPUT_PATH``/config block."""
     if not INPUT_PATH:
         raise SystemExit("Set INPUT_PATH or call run() with input_path from stage7 outputs.")
     run(

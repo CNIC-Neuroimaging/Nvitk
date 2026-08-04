@@ -66,6 +66,7 @@ def set_ui_hooks(
 
 
 def _emit_status(text: str) -> None:
+    """Forward *text* to the registered status hook, if any (errors are swallowed)."""
     if _status_hook is not None:
         try:
             _status_hook(text)
@@ -74,6 +75,7 @@ def _emit_status(text: str) -> None:
 
 
 def _emit_visibility() -> None:
+    """Call the registered visibility-refresh hook, if any (errors are swallowed)."""
     if _visibility_hook is not None:
         try:
             _visibility_hook()
@@ -157,6 +159,7 @@ def expand_cow_trees(
 
 
 def _is_left_mouse_button(event: Any) -> bool:
+    """True if the mouse *event* was triggered by the left button (or its identity is unknown)."""
     btn = getattr(event, "button", None)
     if btn in (0, 1, None):
         return True
@@ -165,6 +168,7 @@ def _is_left_mouse_button(event: Any) -> bool:
 
 
 def _connect_pick_callback(target: Any, callback: Any) -> None:
+    """Register *callback* as the first mouse-drag handler on *target* (viewer or layer)."""
     try:
         target.mouse_drag_callbacks.insert(0, callback)
     except Exception:
@@ -172,6 +176,7 @@ def _connect_pick_callback(target: Any, callback: Any) -> None:
 
 
 def _disconnect_pick_callback(target: Any, callback: Any) -> None:
+    """Remove *callback* from *target*'s mouse-drag handlers, if present."""
     if target is None or callback is None:
         return
     try:
@@ -209,13 +214,16 @@ class MouseTofCowSession:
 
     @property
     def tree_name(self) -> str:
+        """Display name of the vessel tree currently being assigned (e.g. ``"Left ICA"``)."""
         return TREE_SPECS[self.tree_index][0]
 
     @property
     def tree_label(self) -> int:
+        """Output label id of the vessel tree currently being assigned."""
         return TREE_SPECS[self.tree_index][1]
 
     def status_text(self) -> str:
+        """Human-readable summary of the current tree, pending highlight, and assignment counts."""
         if self._finished:
             return "Mouse TOF CoW: done."
         hl = f"CC {self.highlight_id}" if self.highlight_id else "none"
@@ -227,6 +235,7 @@ class MouseTofCowSession:
         )
 
     def install(self) -> None:
+        """Attach the mouse-pick callback to the viewer and select the CC labels layer."""
         self._callback = self._on_mouse_pick
         # Viewer-level pick so clicks work even when an Image is above the Labels.
         _connect_pick_callback(self.viewer, self._callback)
@@ -238,6 +247,7 @@ class MouseTofCowSession:
         self._push_status()
 
     def uninstall(self) -> None:
+        """Detach the mouse-pick callback and clear the highlighted-label display."""
         _disconnect_pick_callback(self.viewer, self._callback)
         self._callback = None
         try:
@@ -247,6 +257,8 @@ class MouseTofCowSession:
             pass
 
     def _on_mouse_pick(self, layer_or_viewer: Any, event: Any) -> None:
+        """Left-click handler: highlight the connected component clicked on the labels layer, unless
+        it's already assigned to a tree."""
         if self._finished:
             return
         if getattr(event, "type", None) != "mouse_press":
@@ -283,6 +295,7 @@ class MouseTofCowSession:
         self._push_status()
 
     def _apply_highlight(self) -> None:
+        """Set the labels layer's selected/shown label to the currently highlighted CC."""
         layer = self.labels_layer
         lid = self.highlight_id
         if lid is None:
@@ -295,6 +308,7 @@ class MouseTofCowSession:
             pass
 
     def add_highlighted_cc(self) -> None:
+        """Assign the currently highlighted CC to the tree being built and clear the highlight."""
         from nvitk.gui.tools.runner import notify
 
         if self._finished:
@@ -318,6 +332,7 @@ class MouseTofCowSession:
         notify(f"Added CC {lid} to {self.tree_name}.")
 
     def finish_current_tree(self) -> None:
+        """Move on to the next vessel tree, or run the final expand once all trees are done."""
         from nvitk.gui.tools.runner import notify
 
         if self._finished:
@@ -339,6 +354,8 @@ class MouseTofCowSession:
         self._finalize()
 
     def _finalize(self) -> None:
+        """Build multilabel seeds from the assigned CCs, run the final blood-flood expand, add the
+        resulting trees Labels layer, and end the interactive session."""
         from nvitk.gui.core.spatial import layer_spatial_kwargs
         from nvitk.gui.tools.runner import notify
 
@@ -429,10 +446,12 @@ class MouseTofCowSession:
                 layer.color = {k: v for k, v in color_dict.items() if k not in (None,)}
 
     def _push_status(self) -> None:
+        """Publish the current status text through the registered status hook."""
         _emit_status(self.status_text())
 
 
 def session_active(viewer: Any | None = None) -> bool:
+    """True if *viewer* has an unfinished Stage-2 assignment session."""
     if viewer is not None:
         sess = getattr(viewer, _SESSION_ATTR, None)
         return sess is not None and not getattr(sess, "_finished", True)
@@ -440,6 +459,7 @@ def session_active(viewer: Any | None = None) -> bool:
 
 
 def get_session(viewer: Any) -> MouseTofCowSession | None:
+    """The active Stage-2 session on *viewer*, or ``None`` if there isn't one (or it's finished)."""
     sess = getattr(viewer, _SESSION_ATTR, None)
     if sess is None or getattr(sess, "_finished", True):
         return None
@@ -447,6 +467,7 @@ def get_session(viewer: Any) -> MouseTofCowSession | None:
 
 
 def _clear_viewer_session(viewer: Any) -> None:
+    """Detach the stored Stage-2 session from *viewer*."""
     try:
         setattr(viewer, _SESSION_ATTR, None)
     except Exception:

@@ -7,9 +7,14 @@ Used in stage 3 (eICAB island removal, venous slab opening) and stage 4
 from __future__ import annotations
 
 from nvitk.core.array import as_backend_array
-from nvitk.core.backend import setup, get_current_backend
+from nvitk.core.backend import setup
+from nvitk.morphology import dilate
 from nvitk.morphology import open as morph_open
-from nvitk.morphology.components import label_connected, remove_small_components_by_fraction
+from nvitk.morphology.components import (
+    keep_largest_components,
+    label_connected,
+    remove_small_components_by_fraction,
+)
 
 setup(globals())
 
@@ -103,17 +108,9 @@ def keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray:
         n_fg = int(np.count_nonzero(roi))
         if n_fg == 0:
             continue
-        labeled, num = label_connected(roi, connectivity=1)
-        labeled_np = as_backend_array(labeled)
-        if int(num) <= 1:
-            out[roi] = lid
-            continue
-        counts = np.bincount(labeled_np.ravel())
-        if counts.size <= 1:
-            out[roi] = lid
-            continue
-        largest_comp = int(1 + np.argmax(counts[1:]))
-        out[labeled_np == largest_comp] = lid
+        # Largest 6-connected CC for this label id (base tool).
+        kept = as_backend_array(keep_largest_components(roi, n=1, connectivity=1)).astype(bool)
+        out[kept] = lid
     return as_backend_array(out.astype(np.int32, copy=False))
 
 
@@ -128,15 +125,8 @@ def keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int:
     n_fg = int(np.count_nonzero(roi))
     if n_fg == 0:
         return 0
-    labeled, num = label_connected(roi, connectivity=1)
-    labeled_np = as_backend_array(labeled)
-    if int(num) <= 1:
-        return n_fg
-    counts = np.bincount(labeled_np.ravel())
-    if counts.size <= 1:
-        return n_fg
-    largest_comp = int(1 + np.argmax(counts[1:]))
-    keep = labeled_np == largest_comp
+    # Keep only the largest 6-connected CC (base tool); clear the stray islands.
+    keep = as_backend_array(keep_largest_components(roi, n=1, connectivity=1)).astype(bool)
     seg_np[roi & ~keep] = 0
     return int(np.count_nonzero(seg_np == lid))
 
@@ -226,10 +216,10 @@ def clean_volume_seg_for_pitc(
     if int(seed_dilate) > 0 and np.any(seed):
         dilated = np.zeros_like(seed)
         for lid in sorted(int(v) for v in np.unique(seed) if int(v) != 0):
-            dil = ndi.binary_dilation(
-                seed == lid, iterations=int(seed_dilate),
-                brute_force=get_current_backend() == "cupy"
-            )
+            # 6-connected seed dilation (base tool; brute_force handled internally).
+            dil = as_backend_array(
+                dilate(seed == lid, iterations=int(seed_dilate), connectivity=1)
+            ).astype(bool)
             dilated[dil] = lid
         seed = dilated
 
@@ -274,14 +264,10 @@ def keep_seed_connected_per_label(
             out[roi] = 0
             out[as_backend_array(kept).astype(bool)] = lid
         else:
-            labeled, num = label_connected(roi, connectivity=1)
-            labeled_np = as_backend_array(labeled)
-            if int(num) <= 1:
-                continue
-            counts = np.bincount(labeled_np.ravel())
-            largest_comp = int(1 + np.argmax(counts[1:]))
+            # Largest 6-connected CC for non-seed labels (base tool).
+            kept = as_backend_array(keep_largest_components(roi, n=1, connectivity=1)).astype(bool)
             out[roi] = 0
-            out[labeled_np == largest_comp] = lid
+            out[kept] = lid
     return as_backend_array(out.astype(np.int32, copy=False))
 
 

@@ -418,6 +418,8 @@ def _emit_qvtpy_sge_subjects_for_chunk(
             pending = None
 
         def _should_emit(stage_id: str) -> bool:
+            """True if *stage_id* should be included in the array job (no skip-processed filter, or
+            the stage is in the computed pending set)."""
             return pending is None or stage_id in pending
 
         tasks: list[ArrayTaskSpec] = []
@@ -763,6 +765,7 @@ _SGE_SCRIPT_SUBJECT_TOKEN = re.compile(r"[^\w.-]+")
 
 
 def _sge_script_subject_token(subj: str) -> str:
+    """Filesystem/script-safe token for *subj* (non-word chars replaced with ``_``, trimmed)."""
     tok = _SGE_SCRIPT_SUBJECT_TOKEN.sub("_", subj).strip("._-")
     return tok or "subject"
 
@@ -775,6 +778,8 @@ def _local_stage_pending(
     output_root: Path,
     nifti_root: Path,
 ) -> bool:
+    """True if *stage_id* still needs to run locally for *subj* (always True unless *skip_processed*
+    and the stage's QC check reports it already complete)."""
     if not skip_processed:
         return True
     from nvitk.pipes.qvtpy.util.io.qc_report import check_subject_stages
@@ -1407,6 +1412,10 @@ def main(
     xnat_upload_skip_existing: bool,
     xnat_upload_dry_run: bool,
 ) -> None:
+    """CLI entry point (``nvitk-qvtpy``) driving the full QVTpy pipeline for one or more subjects:
+    resolves local/cluster paths, then downloads/converts, runs eICAB, registration, centerline,
+    4D-flow segmentation, LOC generation, measurement, and morphometrics stages, dispatching each
+    either locally or as SGE array jobs per *submit*/*stages_spec*."""
     Logger()
 
     from nvitk.pipes.qvtpy.util.io.paths import layout_cluster, layout_local, resolve_totalseg_model_dir
@@ -1606,6 +1615,8 @@ def main(
                 )
 
                 def _stream_xnat_to_cluster() -> None:
+                    """Download the cohort from XNAT straight onto the cluster over SSH (no local
+                    staging kept), then print the QC report if requested."""
                     results = stream_subjects_xnat_to_cluster(
                         subject_list,
                         local_paths=local_paths,
@@ -1635,6 +1646,8 @@ def main(
                 )
             else:
                 def _download() -> None:
+                    """Download the cohort from XNAT (or scan the local DICOM cache) into
+                    *dicom_download_root*."""
                     stage0_download.run_download(
                         subject_list,
                         dicom_root=dicom_download_root,
@@ -2173,6 +2186,7 @@ def main(
         return
 
     def _submit_drip_subject(subj: str) -> tuple[bool, list[str]]:
+        """Submit one remote SGE script for *subj* (drip-feed mode); returns (success, job ids)."""
         token = _sge_script_subject_token(subj)
         code, drip_ids = _submit_qvtpy_sge_subjects_remote(
             [subj],

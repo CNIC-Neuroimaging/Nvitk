@@ -56,6 +56,7 @@ def _figure_axes(
 
 
 def _safe_tight_layout(fig) -> None:
+    """Apply ``fig.tight_layout()``, silently ignoring any layout-engine errors."""
     try:
         fig.tight_layout(pad=0.35)
     except Exception:
@@ -398,6 +399,8 @@ def make_bjornfoot_qc_figure(
         )
 
         def _scatter_aligned(ax, values: np.ndarray, *, color: str, label: str) -> None:
+            """Scatter *values* against the enclosing ``dist`` array (truncated to the shorter length),
+            or show a placeholder message if there's no overlapping data."""
             n = min(dist.size, values.size)
             if n < 1:
                 ax.text(

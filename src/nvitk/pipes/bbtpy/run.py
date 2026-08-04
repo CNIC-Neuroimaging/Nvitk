@@ -88,6 +88,8 @@ _STAGE_LABELS: dict[str, str] = {
 
 
 def _normalize_stages(stages: str) -> list[str]:
+    """Parse a comma-separated ``--stages`` string into canonical stage ids (resolving aliases),
+    defaulting to convert+reg+seg when empty; raises ``click.BadParameter`` for unknown stages."""
     out: list[str] = []
     for raw in stages.split(","):
         s = raw.strip().lower()
@@ -109,6 +111,8 @@ def _parse_subjects(
     subjects_file: Path | None,
     nifti_root: Path,
 ) -> list[str]:
+    """Resolve the subject list from *subjects_file*, else a comma-separated *subjects* string, else
+    every subdirectory of *nifti_root*."""
     if subjects_file is not None:
         return stage0_download.load_subjects(subjects=None, subjects_file=subjects_file)
     if subjects:
@@ -369,6 +373,7 @@ def main(
             )
 
             def _download() -> None:
+                """Run stage-0 XNAT DICOM download for the resolved cohort subjects."""
                 stage0_download.run_download(
                     dl_subjects,
                     dicom_root=dicom,

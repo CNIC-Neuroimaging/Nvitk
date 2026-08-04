@@ -12,6 +12,7 @@ from .storage import normalize_variable_id
 
 
 def _norm_regions(raw: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize each region name in *raw* via :func:`~nvitk.db.storage.normalize_variable_id`."""
     return tuple(normalize_variable_id(r) for r in raw)
 
 

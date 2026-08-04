@@ -16,6 +16,7 @@ ExtractionMode = Literal["junction_split", "longest_path"]
 
 
 def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
+    """The 26 face/edge/corner neighbours of voxel *p* (self excluded)."""
     x, y, z = p
     out: list[tuple[int, int, int]] = []
     for dx in (-1, 0, 1):
@@ -30,6 +31,7 @@ def _neighbors26(p: tuple[int, int, int]) -> list[tuple[int, int, int]]:
 def _chain_key(
     a: tuple[int, int, int], b: tuple[int, int, int]
 ) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """Order-independent key for an undirected edge ``{a, b}`` (sorted endpoints)."""
     return (a, b) if a <= b else (b, a)
 
 
@@ -97,6 +99,7 @@ def collapse_junction_clusters(
 def _rebuild_deg(
     node_set: set[tuple[int, int, int]],
 ) -> dict[tuple[int, int, int], int]:
+    """Recompute each node's 26-connected degree within *node_set* (after edits)."""
     return {n: sum(1 for m in _neighbors26(n) if m in node_set) for n in node_set}
 
 
@@ -501,6 +504,7 @@ def branch_polylines_from_skeleton(
     )
 
     def _split_at(reps: list[tuple[int, int, int]], *, expand: bool) -> list[np.ndarray]:
+        """Cut the skeleton into branch polylines at endpoints and junction reps *reps*."""
         if expand:
             specials = _expand_reps_to_clusters(nodes, deg, reps, min_degree=3)
         else:
@@ -607,6 +611,7 @@ def extract_polylines_from_centerline(
     min_pts = max(2, int(min_points))
 
     def _extract_on_mask(mask: np.ndarray) -> list[np.ndarray]:
+        """Extract branch polylines from a single centerline *mask* volume."""
         coords = _coords_from_centerline_volume(
             mask.astype(np.uint8), reskeletonize=reskeletonize
         )

@@ -21,12 +21,14 @@ class BackendProxy:
     """
 
     def __init__(self, module_name: str) -> None:
+        """Create an unbound proxy for *module_name* (call :meth:`bind_globals` to attach it)."""
         self.module_name = module_name
         self._cached_backend: str | None = None
         self._cached_modules: tuple[Any, Any, Any] | None = None
         self._module_globals: dict[str, Any] | None = None
 
     def _resolve_modules(self) -> tuple[Any, Any, Any]:
+        """Return the ``(array, scipy, ndimage)`` triple for the active backend, cached per backend."""
         from .backend import _BACKENDS, get_current_backend
 
         backend = get_current_backend()
@@ -56,18 +58,21 @@ class BackendProxy:
 
     @property
     def np(self) -> Any:
+        """Active array module — NumPy on the CPU backend, CuPy on the GPU backend."""
         return self._resolve_modules()[0]
 
     @property
     def scipy(self) -> Any:
+        """Active SciPy module — ``scipy`` or ``cupyx.scipy``."""
         return self._resolve_modules()[1]
 
     @property
     def ndi(self) -> Any:
+        """Active n-d image module — ``scipy.ndimage`` or ``cupyx.scipy.ndimage``."""
         return self._resolve_modules()[2]
 
     def __getattr__(self, name: str) -> Any:
-        # Forward unknown attrs to the active array module (np/cp)
+        """Forward any unknown attribute to the active array module (so ``proxy.zeros`` works)."""
         return getattr(self.np, name)
 
 

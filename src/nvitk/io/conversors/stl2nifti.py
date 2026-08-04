@@ -21,7 +21,9 @@ __all__ = [
 
 
 def _cli_decorator(*args, **kwargs):
+    """No-op stand-in for ``click.command``/``click.option`` when click isn't installed."""
     def decorator(func):
+        """Return *func* unmodified (click is unavailable, so no CLI wiring is applied)."""
         return func
 
     return decorator
@@ -34,18 +36,22 @@ log = Logger()
 
 
 def _info(message: str) -> None:
+    """Log an info message through the module logger."""
     log.info(message)
 
 
 def _warn(message: str) -> None:
+    """Log a warning through the module logger."""
     log.warning(message)
 
 
 def _err(message: str) -> None:
+    """Log an error through the module logger."""
     log.error(message)
 
 
 def _is_nifti_file_path(path: Path) -> bool:
+    """True when *path*'s name ends in ``.nii`` or ``.nii.gz``."""
     lower = path.name.lower()
     return lower.endswith(".nii") or lower.endswith(".nii.gz")
 
@@ -56,6 +62,7 @@ def _select_reference(
     reference_rule_mode: str,
     patient_identifier: str,
 ) -> Path:
+    """Pick a reference NIfTI from *candidates* by name rule (contains/startswith/endswith), or the first if none given."""
     if reference_rule:
         if reference_rule_mode == "startswith":
             filtered = [c for c in candidates if c.name.startswith(reference_rule)]
@@ -78,6 +85,7 @@ def _resolve_reference_path(
     reference_rule_mode: str,
     patient_identifier: str,
 ) -> Path:
+    """Resolve a reference NIfTI path: pass through a file, or search a directory (patient subfolder first)."""
     if reference.is_file():
         return reference
 
@@ -107,6 +115,12 @@ def run_stl2nifti(
     reference_rule: str | None = None,
     reference_rule_mode: str = "contains",
 ) -> list[str]:
+    """Rasterize STL mesh(es) into label NIfTI volume(s) matched to a reference NIfTI's geometry.
+
+    Supports both a single input/reference pair and (with *multifile*) batch mode
+    over per-patient subdirectories; *multilabel* rasterizes multiple STLs in one
+    input folder into a single multi-label output instead of one file per mesh.
+    """
     _ = log_level
     input_root = Path(input_path)
     reference_root = Path(reference_path)
@@ -261,6 +275,7 @@ def stl2nifti(
     reference_rule: str | None = None,
     reference_rule_mode: str = "contains",
 ) -> str | list[str]:
+    """Thin wrapper over :func:`run_stl2nifti` returning a single path instead of a list when there's exactly one output."""
     outputs = run_stl2nifti(
         input_path,
         reference_path,
@@ -353,6 +368,7 @@ def main(
     reference_rule: str | None,
     reference_rule_mode: str,
 ) -> None:
+    """CLI entry point: rasterize STL mesh(es) into label NIfTI volume(s) against a reference geometry."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     try:

@@ -12,6 +12,7 @@ setup(globals())
 
 
 def _resolve_spacing(image: Image) -> tuple[float, float, float]:
+    """Return the 3-D voxel spacing (mm), raising if the image has no usable spacing metadata."""
     spacing = image.spacing
     if spacing is None or len(spacing) < 3:
         raise ValueError(

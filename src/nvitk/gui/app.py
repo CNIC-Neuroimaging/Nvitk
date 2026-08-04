@@ -29,6 +29,7 @@ from nvitk.gui.core.warnings import install_napari_display_warnings
 
 
 def _record_step(state: dict[str, Any], step: dict[str, Any]) -> None:
+    """Append a timestamped *step* to the app's pipeline recording, if recording is enabled."""
     if not state.get("record_enabled", False):
         return
     step = dict(step)
@@ -49,6 +50,8 @@ def _layer_display_kwargs(layer: Any, *, name: str) -> dict[str, Any]:
 
 
 def _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> None:
+    """Rebuild the Layers tab's summary list widget from the viewer's layers and the app's input/
+    output/mesh registry."""
     widget.clear()
     widget.addItem("--- Viewer layers ---")
     for layer in viewer.layers:
@@ -65,6 +68,8 @@ def _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> N
 
 
 def run_app() -> None:
+    """Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
+    assembles the Tools/Data/QC/Statmodels/Layers/Export/Pipeline dock tabs."""
     install_napari_display_warnings()
     import napari
     from magicgui import magicgui
@@ -99,6 +104,7 @@ def run_app() -> None:
     layer_list = QListWidget()
 
     def _on_layers_changed() -> None:
+        """Refresh the Layers tab's summary list."""
         _refresh_layer_list(layer_list, viewer, app_state)
 
     tools_widget, tool_panel = build_tools_dock(
@@ -112,6 +118,7 @@ def run_app() -> None:
     image_props_panel = ImagePropertiesPanel()
 
     def _on_xnat_inputs_opened(paths: list[str]) -> None:
+        """Record newly opened XNAT/data-browser input paths in the app registry."""
         for p in paths:
             app_state["inputs"].append({"path": p, "name": Path(p).name})
         _on_layers_changed()
@@ -157,6 +164,8 @@ def run_app() -> None:
 
     @magicgui(call_button="Reconstruct mesh")
     def mesh_panel(multilabel: bool = False) -> None:
+        """Reconstruct a surface mesh from the active layer via marching cubes and add it as a
+        Surface layer (one mesh per label id when ``multilabel``)."""
         if not viewer.layers:
             notify("No layers loaded.", error=True)
             return
@@ -207,6 +216,8 @@ def run_app() -> None:
         call_button="Overlay mask as Labels (0=transparent)",
     )
     def layers_panel(record_steps: bool = False, labels_opacity: float = 0.6) -> None:
+        """Toggle pipeline-step recording and add a Labels overlay (background transparent) for the
+        active layer's data."""
         app_state["record_enabled"] = record_steps
         if not viewer.layers:
             notify("No layer selected.", error=True)
@@ -237,6 +248,7 @@ def run_app() -> None:
 
     @magicgui(call_button="Refresh layer list")
     def layers_refresh_panel() -> None:
+        """Manually refresh the Layers tab's summary list."""
         _on_layers_changed()
 
     @magicgui(
@@ -245,6 +257,8 @@ def run_app() -> None:
         call_button="Export pipeline JSON",
     )
     def export_panel(record_steps: bool = False, path: str = "pipeline.json") -> None:
+        """Toggle pipeline-step recording and write the recorded steps/inputs/outputs/meshes/layers to
+        a JSON file at *path*."""
         app_state["record_enabled"] = record_steps
         doc = {
             "record_enabled": app_state["record_enabled"],
@@ -264,6 +278,7 @@ def run_app() -> None:
         call_button="Export 3D view (PNG)",
     )
     def export_view_png_panel(path: str = "view.png", view_canvas_only: bool = True) -> None:
+        """Save a screenshot of the current 3D view to *path*."""
         from nvitk.gui.viz.view_capture import export_view_png
 
         out = path.strip()
@@ -288,6 +303,7 @@ def run_app() -> None:
         gif_fps: float = 8.0,
         view_canvas_only: bool = True,
     ) -> None:
+        """Save an animated GIF of the active 4D layer's cardiac-phase playback to *path*."""
         from nvitk.gui.viz.view_capture import export_view_gif
 
         out = path.strip()
@@ -325,6 +341,7 @@ def run_app() -> None:
         use_file_affine = True,
         force_type = "",
     ) -> None:
+        """Export the active layer to *path*, recording the export as a pipeline step."""
         out = path.strip()
         if not out:
             notify("Set an output path.", error=True)
@@ -350,6 +367,7 @@ def run_app() -> None:
         _refresh_layer_list(layer_list, viewer, app_state)
 
     def _save_layer_dialog() -> None:
+        """Open a native "Save As" dialog for the active layer and export it to the chosen path."""
         layer = viewer.layers.selection.active or (viewer.layers[-1] if viewer.layers else None)
         if layer is None:
             notify("No layer to export.", error=True)
@@ -373,6 +391,7 @@ def run_app() -> None:
             )
 
     def _open_files() -> None:
+        """Open a native file-open dialog and load the selected images into the viewer via nvitk's reader."""
         dlg = QFileDialog()
         paths, _ = dlg.getOpenFileNames(
             None,
@@ -438,6 +457,7 @@ def run_app() -> None:
     _refresh_layer_list(layer_list, viewer, app_state)
 
     def _refresh_dicom_tags_tab() -> None:
+        """Update the DICOM tags tab for the active layer, enabling the tab only when it has tags."""
         layer = (
             viewer.layers.selection.active
             if viewer.layers
@@ -453,16 +473,19 @@ def run_app() -> None:
             )
 
     def _refresh_image_properties_tab() -> None:
+        """Update the Image properties tab for the active layer."""
         layer = viewer.layers.selection.active if viewer.layers else None
         image_props_panel.refresh_from_layer(layer)
 
     @viewer.layers.selection.events.active.connect
     def _on_active_layer_changed(_event: Any) -> None:
+        """Refresh the DICOM tags and image properties tabs when the active layer selection changes."""
         _refresh_dicom_tags_tab()
         _refresh_image_properties_tab()
 
     @viewer.layers.events.inserted.connect
     def _on_layer_inserted_dicom(_event: Any) -> None:
+        """Refresh the DICOM tags and image properties tabs when a new layer is added."""
         _refresh_dicom_tags_tab()
         _refresh_image_properties_tab()
 
@@ -474,6 +497,8 @@ def run_app() -> None:
         _orig_close = qt_viewer.closeEvent
 
         def _close_with_xnat_cleanup(event: Any) -> None:
+            """Clean up XNAT temp dirs and shut down the SGE monitor / vessel cross-section state
+            before delegating to the original Qt close handler."""
             if hasattr(xnat_panel, "cleanup_temp_dirs"):
                 xnat_panel.cleanup_temp_dirs()
             from nvitk.gui.sge.poll import shutdown_sge_monitor
@@ -498,10 +523,12 @@ def run_app() -> None:
 
     @viewer.bind_key("Ctrl+O")
     def _open_key(_viewer) -> None:
+        """Keyboard shortcut: open the file-open dialog."""
         _open_files()
 
     @viewer.bind_key("Ctrl+Shift+S")
     def _save_key(_viewer) -> None:
+        """Keyboard shortcut: open the save-active-layer dialog."""
         _save_layer_dialog()
 
     napari.run()

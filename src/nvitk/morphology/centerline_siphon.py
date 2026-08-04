@@ -87,6 +87,7 @@ try:
 except ImportError:
 
     def bb_vessel_name(label_id: int) -> str:
+        """Fallback vessel name (``label_<id>``) when the bbtpy label map is unavailable."""
         return f"label_{int(label_id)}"
 
 setup(globals())
@@ -137,9 +138,11 @@ class GenusReport:
 
     @property
     def suspect(self) -> bool:
+        """True when the mask has ≥1 topological loop (``beta1 > 0``) — a likely siphon donut."""
         return self.beta1 > 0
 
     def to_dict(self) -> dict:
+        """JSON-serializable dict of the genus report (adds the derived ``suspect`` flag)."""
         d = asdict(self)
         d["suspect"] = bool(self.suspect)
         return d
@@ -162,6 +165,7 @@ class SiphonCorrectionResult:
     warning: str | None = None
 
     def to_dict(self) -> dict:
+        """JSON-serializable summary of the per-label siphon-correction outcome."""
         return {
             "label": int(self.label),
             "label_name": self.label_name,
@@ -294,6 +298,7 @@ class RepairLog:
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """JSON-serializable summary of the siphon cleanup (before/after genus, actions)."""
         return {
             "label_name": self.label_name,
             "action": self.action,
@@ -443,6 +448,7 @@ def ica_otsu_mask(
 
 
 def _ball_offsets(radius: int) -> np.ndarray:
+    """``(K, 3)`` integer voxel offsets forming a solid ball of *radius* (centered at 0)."""
     r = int(radius)
     if r <= 0:
         return np.zeros((1, 3)).astype(np.int32)
@@ -453,6 +459,11 @@ def _ball_offsets(radius: int) -> np.ndarray:
 
 
 def _smallest_cycle(G: Any) -> list[tuple[int, int, int]] | None:
+    """Shortest cycle (loop) in graph *G*, or ``None`` if it is acyclic.
+
+    Prefers ``minimum_cycle_basis``; falls back to ``cycle_basis`` and picks the
+    shortest. Used to locate the tight loop of a siphon 'donut' for removal.
+    """
     import networkx as nx
 
     if G.number_of_edges() == 0:
@@ -1962,6 +1973,7 @@ def correct_siphon_centerlines(
 
 
 def _jsonable_default(o: Any) -> Any:
+    """``json.dump`` *default* hook: coerce NumPy scalars/arrays to native Python types."""
     if isinstance(o, (np.integer, np.floating)):
         return int(o) if isinstance(o, np.integer) else float(o)
     if isinstance(o, np.ndarray):

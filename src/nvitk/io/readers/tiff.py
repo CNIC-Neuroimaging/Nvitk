@@ -11,6 +11,7 @@ from .._common import reorder_axes
 
 
 def _infer_axes(ndim: int, series_axes: str | None = None) -> str:
+    """Return the TIFF series' own axis string if known, else a default order by ndim."""
     if series_axes:
         return series_axes
     if ndim == 2:

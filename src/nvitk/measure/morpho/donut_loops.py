@@ -91,6 +91,13 @@ def isolate_donut_arm_mask(
     competing_arm_nodes: List[int],
     spacing,
 ) -> np.ndarray:
+    """Split *mask_cc* into the arm containing *arm_nodes*, by nearest-skeleton-node voting.
+
+    Assigns each foreground voxel to whichever of the two competing arms'
+    skeleton points is closer (with a small margin so ties favor the arm), then
+    keeps only the connected component containing the arm's own seed voxels
+    (majority vote if the seeds span more than one component).
+    """
     spacing = np.asarray(spacing, dtype=float)
     mask_bool = mask_cc.astype(bool)
     vox = np.argwhere(mask_bool)
@@ -140,6 +147,12 @@ def run_isolated_donut_arm_vmtk(
     region_name: str,
     reference_centerline_points: Optional[List[np.ndarray]] = None,
 ) -> Tuple[float, int, int, np.ndarray, dict]:
+    """Extract a VMTK centerline for one donut-loop arm in isolation (its own surface, not the shared trunk mask).
+
+    Isolating the arm mask (:func:`isolate_donut_arm_mask`) before running VMTK
+    avoids the centerline snapping across the loop through the competing arm.
+    Returns ``(length_mm, n_points, arm_mask_voxels, points, metrics_dict)``.
+    """
     spacing = np.asarray(spacing, dtype=float)
     arm_mask = isolate_donut_arm_mask(mask_cc, tree, arm_nodes, competing_arm_nodes, spacing)
     if int(arm_mask.sum()) < 4:
@@ -325,6 +338,16 @@ def process_donut_loop_component_vmtk(
     region_centerline_dir: Optional[str],
     surface_dir: Optional[str],
 ) -> Tuple[List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict], Dict[str, pd.DataFrame], List[dict], pd.DataFrame]:
+    """Full donut-loop-aware processing of one component: root selection, per-terminal centerlines,
+    and per-loop selected/alternate-arm isolation, metrics, and export.
+
+    Component skeletons whose topology includes cycles (from :func:`find_loop_branches`)
+    need special handling because a plain root-to-terminal BFS path can only
+    traverse one side of each loop; this function additionally runs isolated
+    VMTK extraction on the losing ("alternate") arm of every loop so both sides
+    get their own centerline and metrics. Same return shape as
+    :func:`orchestration.process_component_tree_vmtk`.
+    """
     spacing = np.asarray(spacing, dtype=float)
     path_results = []
     point_sheets = {}

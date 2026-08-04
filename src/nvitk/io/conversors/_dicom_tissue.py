@@ -23,10 +23,12 @@ log = Logger()
 
 
 def _warn(message: str) -> None:
+    """Log a warning through the module logger."""
     log.warning(message)
 
 
 def _debug(message: str) -> None:
+    """Log *message* at debug level, gated by the module's ``_DEBUG`` flag."""
     if _DEBUG:
         log.debug(message)
 
@@ -210,6 +212,7 @@ def _debug_log_mask_layout(decoded_bytes: bytes, shape: tuple[int, int, int]) ->
             _debug("MASK DEBUG: flat length != expected; layout analysis may be misleading")
 
         def summarize(volume: np.ndarray, name: str) -> None:
+            """Debug-log a mask volume's foreground count and its first/last nonzero Z slice."""
             ones_total = int(volume.sum())
             z_counts = volume.sum(axis=(0, 1)).astype(int)
             nonzero_slices = int(np.count_nonzero(z_counts))

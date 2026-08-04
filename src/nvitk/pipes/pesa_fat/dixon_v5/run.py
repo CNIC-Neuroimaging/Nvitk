@@ -63,6 +63,7 @@ STAGE_MODULES: dict[str, str] = {
 
 
 def _local_runner(stage: str) -> Callable[..., Any]:
+    """Return the local ``run_subject`` callable for *stage*; raises ``ValueError`` for unknown stages."""
     if stage == "stage1":
         return stage1_segment.run_subject
     if stage == "stage2":
@@ -106,6 +107,8 @@ def _run_local(
     overwrite: bool,
     regions: tuple[str, ...],
 ) -> None:
+    """Run the requested Dixon v5 stages for every subject sequentially in-process, publishing stage-3
+    results to the DB and aggregating the batch summary once stage-3 has run."""
     for subj in subjects:
         log.info(f"=== Dixon v5 LOCAL | subject={subj} | stages={stages_sel} ===")
         for s in stages_sel:
@@ -146,6 +149,7 @@ def _run_local(
 
 
 def _aggregate_stage3(lay: BatchLayout, subjects: list[str]) -> Path | None:
+    """Concatenate per-subject Dixon v5 stage-3 xlsx files into ``<batch>_SummaryCodebook.xlsx``."""
     return aggregate_stage3_summary(lay, subjects, "dixon-v5")
 
 
@@ -206,6 +210,8 @@ def _build_python_cmd(
 
 
 def _cluster_paths(lay: BatchLayout, container: Path, src_dir: Path) -> ClusterPaths:
+    """Build the :class:`~nvitk.cluster.sge.ClusterPaths` (container/model/data/output roots) for
+    submitting Dixon v5 SGE jobs from *lay*."""
     return ClusterPaths(
         src=src_dir,
         container=container,
@@ -336,6 +342,8 @@ def _run_sge(
     log_level: str,
     emit: TextIO | None = None,
 ) -> dict[str, list[str]]:
+    """Submit an SGE job chain for the requested stages for every subject; returns
+    ``{subject: [job_id, ...]}``."""
     all_jids: dict[str, list[str]] = {}
     for subj in subjects:
         all_jids[subj] = submit_subject_chain(

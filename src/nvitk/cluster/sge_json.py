@@ -61,6 +61,7 @@ def load_sge_document() -> dict[str, Any]:
 
 
 def paths_section() -> dict[str, Any]:
+    """The ``paths`` block of ``sge.json`` (empty dict if absent)."""
     return dict(load_sge_document().get("paths", {}))
 
 
@@ -108,10 +109,12 @@ def resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: 
 
 
 def defaults_section() -> dict[str, Any]:
+    """The ``defaults`` block of ``sge.json`` (empty dict if absent)."""
     return dict(load_sge_document().get("defaults", {}))
 
 
 def pipeline_section(pipeline_id: str) -> dict[str, Any]:
+    """The ``pipelines[pipeline_id]`` block of ``sge.json`` (empty dict if absent)."""
     doc = load_sge_document()
     pipes = doc.get("pipelines")
     if not isinstance(pipes, dict):
@@ -128,6 +131,7 @@ def merged_pipeline_flat(pipeline_id: str) -> dict[str, Any]:
 
 
 def _p(path_like: Any) -> Path:
+    """Coerce a string/Path-like value to a user-expanded :class:`Path`."""
     return Path(os.path.expanduser(str(path_like)))
 
 
@@ -175,6 +179,7 @@ def merge_cluster_host_aliases(
     paths: Mapping[str, Any],
     pipe: Mapping[str, Any],
 ) -> dict[str, str]:
+    """Merge ``cluster_host_aliases`` maps from *paths* then *pipe* on top of *base* (later sources win)."""
     out = dict(base)
     for section in (paths, pipe):
         extra = section.get("cluster_host_aliases")

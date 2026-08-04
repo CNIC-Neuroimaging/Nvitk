@@ -78,6 +78,8 @@ _REQUIRE_STAGE_ORDER: tuple[str, ...] = (
 
 
 class UploadStatus(str, Enum):
+    """Outcome status for one resource upload attempt."""
+
     UPLOADED = "uploaded"
     SKIPPED = "skipped"
     INCOMPLETE = "incomplete"
@@ -87,6 +89,8 @@ class UploadStatus(str, Enum):
 
 @dataclass
 class ResourceUploadOutcome:
+    """Result of uploading one named resource (eicab/qvtpy) for a subject."""
+
     resource: str
     status: UploadStatus
     detail: str = ""
@@ -95,6 +99,8 @@ class ResourceUploadOutcome:
 
 @dataclass
 class UploadResult:
+    """Combined eicab + qvtpy upload outcome for one subject."""
+
     subject: str
     experiment_label: str = ""
     eicab: ResourceUploadOutcome | None = None
@@ -103,6 +109,7 @@ class UploadResult:
 
     @property
     def ok(self) -> bool:
+        """True if there was no top-level error and no resource outcome errored."""
         if self.error:
             return False
         outcomes = [o for o in (self.eicab, self.qvtpy) if o is not None]
@@ -140,18 +147,22 @@ def parse_require_stages(spec: str) -> list[str]:
 
 
 def eicab_dir(output_root: Path, subject: str) -> Path:
+    """Stage 1 (eICAB) output directory for *subject* under *output_root*."""
     return output_root / subject / cfg.STAGE1_EICAB_DIR
 
 
 def qvtpy_dir(output_root: Path, subject: str) -> Path:
+    """qvtpy stage output root for *subject* under *output_root*."""
     return output_root / subject / cfg.QVT_SUBDIR
 
 
 def eicab_complete(output_root: Path, subject: str) -> bool:
+    """True if *subject*'s stage-1 eICAB output contains a segmentation."""
     return _output_has_segmentation(eicab_dir(output_root, subject))
 
 
 def qvtpy_stage_complete(output_root: Path, subject: str, stage_id: str) -> bool:
+    """True if *subject*'s *stage_id* QC check reports it complete."""
     checks = check_subject_stages(subject, [stage_id], results_root=output_root)
     return bool(checks) and checks[0].complete
 
@@ -161,6 +172,7 @@ def qvtpy_all_required_complete(
     subject: str,
     required_stages: list[str],
 ) -> tuple[bool, list[str]]:
+    """(all complete?, list of incomplete stage ids) for *subject* over *required_stages*."""
     checks = check_subject_stages(subject, required_stages, results_root=output_root)
     missing = [c.stage for c in checks if not c.complete]
     return not missing, missing
@@ -235,6 +247,8 @@ def _upload_resource(
     skip_existing: bool,
     dry_run: bool,
 ) -> ResourceUploadOutcome:
+    """Upload *local_dir* as an XNAT resource named *resource_label* on *experiment*, skipping
+    when *complete* is False or (if *skip_existing*) files are already present."""
     if not complete:
         log.info(f"skip {resource_label}: {incomplete_detail}")
         return ResourceUploadOutcome(
@@ -299,6 +313,8 @@ def _upload_resource(
 
 @dataclass
 class BatchUploadSummary:
+    """Aggregate counts and per-subject results for a batch XNAT upload run."""
+
     subjects: int = 0
     eicab_uploaded: int = 0
     eicab_skipped: int = 0
@@ -311,6 +327,7 @@ class BatchUploadSummary:
 
 
 def _tally_resource(summary: BatchUploadSummary, outcome: ResourceUploadOutcome | None, kind: str) -> None:
+    """Increment *summary*'s uploaded/skipped/incomplete/error counters for one *kind* outcome."""
     if outcome is None:
         return
     if outcome.status in (UploadStatus.UPLOADED, UploadStatus.DRY_RUN):
@@ -373,6 +390,7 @@ def format_batch_upload_report(summary: BatchUploadSummary) -> str:
                 failed.append(f"{label}: error{detail}")
 
     def _section(title: str, items: list[str]) -> None:
+        """Append a titled bullet-list section (or ``(none)``) to the report's *lines*."""
         lines.append("")
         lines.append(f"-- {title} ({len(items)}) --")
         if items:
@@ -400,6 +418,8 @@ def _upload_subject_from_staging(
     skip_existing: bool,
     dry_run: bool,
 ) -> UploadResult:
+    """Upload *subject*'s resources from a local staging tree (e.g. after SFTP fetch from
+    the cluster), delegating to :func:`upload_subject_to_xnat`."""
     return upload_subject_to_xnat(
         subject,
         output_root=staging_root,
@@ -422,6 +442,8 @@ def _cluster_dry_run_subject(
     upload_eicab: bool,
     upload_qvtpy: bool,
 ) -> None:
+    """Log which remote resource directories a cluster-source upload would fetch, without
+    actually transferring anything (``--dry-run`` path)."""
     remote_subj = remote_subject_results_dir(remote_results_root, subject)
     if upload_eicab:
         remote_eicab = f"{remote_subj}/{XNAT_RESOURCE_EICAB}"

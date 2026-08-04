@@ -11,6 +11,7 @@ from nvitk.core.exceptions import BackendUnavailableError
 
 
 def _measure():
+    """Import and return ``skimage.measure``, or raise a clear install hint."""
     try:
         from skimage import measure
     except ImportError as exc:
@@ -50,6 +51,7 @@ def _metadata_from_image(
     label_id: int | None = None,
     name: str | None = None,
 ) -> dict[str, Any]:
+    """Build mesh metadata (label id/name/affine/spacing) from a source :class:`Image`."""
     meta = dict(image.metadata or {})
     if label_id is not None:
         meta["label_id"] = label_id

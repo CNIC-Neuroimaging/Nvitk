@@ -42,6 +42,7 @@ LABEL_SELECTOR_SCROLL_MIN = 80
 
 
 def _rgba_to_qcolor(rgba: np.ndarray) -> QColor:
+    """Convert a 3- or 4-channel float RGBA array in ``[0, 1]`` to a Qt ``QColor``."""
     arr = np.asarray(rgba, dtype=float).reshape(-1)
     r = int(np.clip(arr[0], 0.0, 1.0) * 255)
     g = int(np.clip(arr[1], 0.0, 1.0) * 255)
@@ -51,6 +52,7 @@ def _rgba_to_qcolor(rgba: np.ndarray) -> QColor:
 
 
 def _qcolor_to_rgba(color: QColor) -> np.ndarray:
+    """Convert a Qt ``QColor`` to a 4-channel float32 RGBA array in ``[0, 1]``."""
     return np.array(
         [
             color.red() / 255.0,
@@ -63,6 +65,7 @@ def _qcolor_to_rgba(color: QColor) -> np.ndarray:
 
 
 def _swatch_stylesheet(rgba: np.ndarray) -> str:
+    """Qt stylesheet giving a ``QToolButton`` a solid background swatch of color *rgba*."""
     c = _rgba_to_qcolor(rgba)
     return (
         f"QToolButton {{ background-color: rgba({c.red()},{c.green()},{c.blue()},{c.alpha()}); "
@@ -76,6 +79,7 @@ class LabelSelectorWidget(QGroupBox):
     selection_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Build the schema picker, All/None/Refresh buttons, and scrollable checkbox list."""
         super().__init__("Label selection", parent)
         self._checks: list[QCheckBox] = []
         self._color_buttons: dict[int, QToolButton] = {}
@@ -141,18 +145,22 @@ class LabelSelectorWidget(QGroupBox):
         self._viewer = viewer
 
     def _emit_selection_changed(self) -> None:
+        """Emit the ``selection_changed`` Qt signal."""
         self.selection_changed.emit()
 
     def _wire_checkbox(self, cb: QCheckBox) -> None:
+        """Connect *cb*'s toggle event to emit ``selection_changed``."""
         cb.toggled.connect(lambda _checked: self._emit_selection_changed())
 
     def _on_schema_changed(self, _index: int) -> None:
+        """Update the active schema key and re-render the checkbox list for it."""
         key = self._schema_combo.currentData()
         if key:
             self._schema_key = str(key)
         self._refresh_current_layer()
 
     def _guess_schema(self) -> None:
+        """Attempt to auto-detect and select the label schema from the current layer's name/path."""
         if self._layer_ref is None:
             self._hint.setText("No layer to guess from.")
             return
@@ -165,6 +173,7 @@ class LabelSelectorWidget(QGroupBox):
             self._schema_combo.setCurrentIndex(idx)
 
     def _refresh_current_layer(self) -> None:
+        """Re-render the checkbox list for whichever layer is currently bound."""
         self.refresh_from_layer(self._layer_ref)
 
     def set_schema_key(self, key: str) -> None:
@@ -177,6 +186,7 @@ class LabelSelectorWidget(QGroupBox):
             self._refresh_current_layer()
 
     def schema_key(self) -> str:
+        """Currently selected label schema key."""
         return self._schema_key
 
     def current_layer(self) -> Any | None:
@@ -199,6 +209,8 @@ class LabelSelectorWidget(QGroupBox):
             self._scroll.setMaximumHeight(200)
 
     def _supports_color_edit(self, layer: Any) -> bool:
+        """True if per-label colors on *layer* can be edited (a Labels layer, or a label-like Image
+        that can be promoted to one given a bound viewer)."""
         if layer is None:
             return False
         if supports_per_label_color(layer):
@@ -207,6 +219,8 @@ class LabelSelectorWidget(QGroupBox):
         return bool(self._viewer is not None and is_label_like_layer(layer))
 
     def _ensure_colorable_layer(self, layer: Any) -> Any:
+        """Return *layer* if it already supports per-label colors, else promote it to a Labels layer
+        (updating the bound layer reference); raises ``TypeError`` if no viewer is bound."""
         if supports_per_label_color(layer):
             return layer
         if self._viewer is None:
@@ -216,6 +230,7 @@ class LabelSelectorWidget(QGroupBox):
         return new_layer
 
     def _make_color_button(self, layer: Any, lid: int) -> QToolButton:
+        """Build a small clickable color swatch for label *lid*, opening the color editor on click."""
         btn = QToolButton()
         btn.setFixedSize(18, 18)
         btn.setToolTip(f"Change color for label {lid}")
@@ -227,6 +242,7 @@ class LabelSelectorWidget(QGroupBox):
         return btn
 
     def _edit_label_color(self, label_id: int) -> None:
+        """Open a Qt color dialog for *label_id* and apply the chosen color to the layer and swatch."""
         layer = self._layer_ref
         if layer is None or not self._supports_color_edit(layer):
             return
@@ -249,6 +265,8 @@ class LabelSelectorWidget(QGroupBox):
             btn.setStyleSheet(_swatch_stylesheet(rgba))
 
     def refresh_from_layer(self, layer: Any | None) -> None:
+        """Rebuild the checkbox list (and color swatches, if supported) for *layer*'s label ids under
+        the current schema, promoting a discrete Image mask to Labels first when a viewer is bound."""
         # Promote discrete Image masks once so swatches / color visibility work.
         if (
             layer is not None
@@ -327,6 +345,7 @@ class LabelSelectorWidget(QGroupBox):
         self._emit_selection_changed()
 
     def select_all(self) -> None:
+        """Check every enabled label checkbox."""
         changed = False
         for cb in self._checks:
             if cb.isEnabled() and not cb.isChecked():
@@ -338,6 +357,7 @@ class LabelSelectorWidget(QGroupBox):
             self._emit_selection_changed()
 
     def select_none(self) -> None:
+        """Uncheck every enabled label checkbox."""
         changed = False
         for cb in self._checks:
             if cb.isEnabled() and cb.isChecked():
@@ -349,6 +369,7 @@ class LabelSelectorWidget(QGroupBox):
             self._emit_selection_changed()
 
     def selected_ids(self) -> list[int]:
+        """Sorted label ids whose checkbox is both checked and enabled."""
         out = []
         for cb in self._checks:
             if cb.isChecked() and cb.isEnabled():

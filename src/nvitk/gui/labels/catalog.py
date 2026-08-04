@@ -19,9 +19,11 @@ class LabelSchema:
     description: str = ""
 
     def name_for(self, label_id: int) -> str | None:
+        """Human name registered for *label_id*, or ``None`` if this schema doesn't have one."""
         return self.id_to_name.get(int(label_id))
 
     def display(self, label_id: int) -> str:
+        """Display string for *label_id*: ``"<name> (<id>)"`` if named, else ``"Label <id>"``."""
         name = self.name_for(label_id)
         if name:
             return f"{name} ({label_id})"
@@ -29,10 +31,13 @@ class LabelSchema:
 
 
 def _invert(name_to_id: Mapping[str, int]) -> dict[int, str]:
+    """Flip a ``{name: id}`` mapping to ``{id: name}``, for building an :class:`LabelSchema`."""
     return {int(v): str(k) for k, v in name_to_id.items()}
 
 
 def _build_pipeline_schemas() -> dict[str, LabelSchema]:
+    """Build the registry of :class:`LabelSchema` entries for every known pipeline label vocabulary
+    (eICAB, QVTpy, BBTpy, PESA-FAT, Dixon)."""
     from nvitk.pipes.bbtpy.labels import BB_ARTERIAL_ID_TO_NAME
     from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
         BODY_LABELS,
@@ -141,6 +146,7 @@ def _build_pipeline_schemas() -> dict[str, LabelSchema]:
 
 
 def _build_totalsegmentator_schemas() -> dict[str, LabelSchema]:
+    """Build one :class:`LabelSchema` per registered TotalSegmentator task, keyed ``ts:<task>``."""
     from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS, get_class_map
 
     out = {}
@@ -175,6 +181,7 @@ def schema_keys() -> list[str]:
     schemas = all_schemas()
 
     def _sort_key(k: str) -> tuple[int, str]:
+        """Sort key placing schema *k* by its display group order, then title, alphabetically."""
         s = schemas[k]
         order = {"General": 0, "Segmentation / vessels": 1, "Pipelines / QVTpy": 2,
                  "Pipelines / BBTpy": 3, "Pipelines / PESA-FAT": 4,
@@ -185,6 +192,8 @@ def schema_keys() -> list[str]:
 
 
 def get_schema(key: str | None) -> LabelSchema | None:
+    """Look up the schema registered under *key* (``"generic"`` or falsy *key* returns the generic
+    schema); ``None`` if unregistered."""
     if not key or key == "generic":
         return all_schemas().get("generic")
     return all_schemas().get(key)

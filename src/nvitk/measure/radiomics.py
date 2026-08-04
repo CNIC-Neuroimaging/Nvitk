@@ -96,6 +96,7 @@ def compute_radiomics(
         result["original_firstorder_IntegratedIntensity"] = integrated_intensity(image, mask)
 
     def _norm(key: str) -> str:
+        """Shorten PyRadiomics feature key prefixes for compact export column names."""
         return (
             key.replace("original_shape_", "s_")
             .replace("original_firstorder_", "fo_")

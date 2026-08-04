@@ -90,6 +90,7 @@ _PREFERRED_PIPELINE_NIFTI_SUBSTR = (
 
 
 def _is_nifti_path(path: Path) -> bool:
+    """True if *path* has a ``.nii`` or ``.nii.gz`` extension."""
     name = path.name.lower()
     return name.endswith(".nii.gz") or name.endswith(".nii")
 
@@ -134,6 +135,8 @@ def _payload_path_format(payload: Any) -> tuple[Path, str]:
 
 
 def _resolve_repo() -> tuple[DataRepo, Path]:
+    """Open the dataset repo from settings, falling back to an auto-scaffolded default repo on
+    failure; returns ``(repo, root)``."""
     try:
         repo = get_repo_from_settings()
         return repo, Path(repo.root)
@@ -143,6 +146,9 @@ def _resolve_repo() -> tuple[DataRepo, Path]:
 
 
 class _XnatDownloadWorker(QThread):
+    """Background thread that downloads selected XNAT scans/pipeline resources to disk, so the GUI
+    stays responsive during network I/O."""
+
     finished_ok = Signal(list)
     failed = Signal(str)
     progress = Signal(str)
@@ -159,6 +165,7 @@ class _XnatDownloadWorker(QThread):
         download_dicom: bool = True,
         download_nifti: bool = True,
     ) -> None:
+        """Store the connection details and the list of scan/pipeline rows to download."""
         super().__init__()
         self._config_path = config_path
         self._project_id = project_id
@@ -170,6 +177,9 @@ class _XnatDownloadWorker(QThread):
         self._download_nifti = download_nifti
 
     def run(self) -> None:
+        """Download every queued scan/pipeline row (reusing a cached local pipeline path when
+        present), emitting progress along the way; emits ``finished_ok`` with the downloaded
+        ``{path, format}`` entries or ``failed`` on error."""
         try:
             profile = load_xnat_profile(self._config_path)
             conn = resolve_xnat_connection(
@@ -282,6 +292,8 @@ class DataBrowserPanel(QWidget):
         on_inputs_opened = None,
         parent = None,
     ) -> None:
+        """Build the source selector, XNAT/local stacked pages, subject/resource lists, and action
+        button, then wire up signal handlers."""
         super().__init__(parent)
         self._viewer = viewer
         self._app_state = app_state
@@ -345,6 +357,8 @@ class DataBrowserPanel(QWidget):
         self._on_source_changed()
 
     def _build_xnat_page(self) -> QWidget:
+        """Build the XNAT-source page: project picker, config path, download folder/temp-cache
+        toggle, and raw-scan reader format selector."""
         page = QWidget()
         self._project_combo = QComboBox()
         for pid in list_xnat_project_ids():
@@ -416,6 +430,7 @@ class DataBrowserPanel(QWidget):
         return page
 
     def _build_xnat_scan_filter_group(self) -> QGroupBox:
+        """Build the collapsible group of scan-type checkboxes used to filter the XNAT subject list."""
         group = QGroupBox("Filter subjects by indexed assets")
         self._xnat_filter_count_label = QLabel("Select scan types to filter the subject list.")
         self._xnat_filter_count_label.setWordWrap(True)
@@ -446,6 +461,8 @@ class DataBrowserPanel(QWidget):
         return group
 
     def _build_local_page(self) -> QWidget:
+        """Build the local-source page: pipeline preset, cohort/batch, DICOM/NIfTI/results root
+        fields, and asset-type include checkboxes."""
         page = QWidget()
         self._preset_combo = QComboBox()
         for pid in list_pipeline_preset_ids():
@@ -496,6 +513,7 @@ class DataBrowserPanel(QWidget):
         return page
 
     def _path_row(self, edit: QLineEdit) -> QWidget:
+        """Wrap *edit* with a "…" browse button that fills it from a directory picker."""
         row = QWidget()
         h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
@@ -508,11 +526,13 @@ class DataBrowserPanel(QWidget):
         return row
 
     def _browse_into(self, edit: QLineEdit) -> None:
+        """Open a directory picker and set *edit*'s text to the chosen path."""
         path = QFileDialog.getExistingDirectory(self, "Select directory", edit.text() or str(Path.home()))
         if path:
             edit.setText(path)
 
     def cleanup_temp_dirs(self) -> None:
+        """Delete every temporary XNAT download directory recorded in app state."""
         roots = self._app_state.get("xnat_temp_dirs") or []
         for path in list(roots):
             p = Path(path)
@@ -525,9 +545,12 @@ class DataBrowserPanel(QWidget):
         self._temp_session_root = None
 
     def _is_xnat(self) -> bool:
+        """True if the currently selected data source is XNAT (vs. a local pipeline preset)."""
         return int(self._source_combo.currentData() or SOURCE_XNAT) == SOURCE_XNAT
 
     def _on_source_changed(self) -> None:
+        """Switch the stacked page and re-label the action button/lists for the newly selected
+        source, then reload its catalog/preset data."""
         is_xnat = self._is_xnat()
         self._stack.setCurrentIndex(SOURCE_XNAT if is_xnat else SOURCE_LOCAL)
         self._xnat_scan_filter_group.setVisible(is_xnat)
@@ -543,6 +566,8 @@ class DataBrowserPanel(QWidget):
             self._on_preset_changed()
 
     def _on_preset_changed(self) -> None:
+        """Load the newly selected pipeline preset's default roots into the local-page fields and
+        refresh the subject list."""
         if self._is_xnat():
             return
         preset_id = str(self._preset_combo.currentData() or "")
@@ -563,6 +588,7 @@ class DataBrowserPanel(QWidget):
         self._apply_local_roots()
 
     def _set_batch_combo_text(self, batch: str) -> None:
+        """Select *batch* in the cohort combo if it's a listed item, else set it as free-text."""
         idx = self._batch_combo.findText(batch)
         if idx >= 0:
             self._batch_combo.setCurrentIndex(idx)
@@ -590,6 +616,8 @@ class DataBrowserPanel(QWidget):
         self._batch_combo.blockSignals(False)
 
     def _apply_local_roots(self) -> None:
+        """Resolve the local DICOM/NIfTI/results roots and current batch from the form fields, then
+        rescan and repopulate the subject list."""
         if self._is_xnat():
             return
         preset_id = str(self._preset_combo.currentData() or "")
@@ -624,6 +652,8 @@ class DataBrowserPanel(QWidget):
         self._status.setText(self._local_subjects_status_text(preset_id))
 
     def _local_subjects_status_text(self, preset_id: str) -> str:
+        """Build the status label summarizing subject count and which asset sources are included for
+        the current local preset."""
         assert self._local_roots is not None
         sources = []
         if self._include_nifti.isChecked():
@@ -638,6 +668,8 @@ class DataBrowserPanel(QWidget):
         return f"{len(self._all_subjects)} subject(s) from {src} ({preset_id}{batch_part})"
 
     def _on_local_resource_filter_changed(self) -> None:
+        """Rescan and refilter the subject list when the DICOM/NIfTI/results include checkboxes
+        change, and refresh the resource list for the currently selected subject."""
         if self._is_xnat():
             return
         if self._local_roots is None:
@@ -662,6 +694,7 @@ class DataBrowserPanel(QWidget):
             self._resource_list.clear()
 
     def _browse_config(self) -> None:
+        """Open a file picker for the XNAT config file and set the config-path field."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select XNAT config",
@@ -672,20 +705,25 @@ class DataBrowserPanel(QWidget):
             self._config_path.setText(path)
 
     def _browse_download_folder(self) -> None:
+        """Open a directory picker for the persistent download folder and disable temp-only mode."""
         path = QFileDialog.getExistingDirectory(self, "Download folder", str(Path.home()))
         if path:
             self._download_path.setText(path)
             self._temp_only.setChecked(False)
 
     def _on_temp_only_toggled(self, checked: bool) -> None:
+        """Enable/disable (and clear) the persistent download-path field based on the temp-only toggle."""
         self._download_path.setEnabled(not checked)
         if checked:
             self._download_path.clear()
 
     def _current_project_id(self) -> str:
+        """Currently selected XNAT project id."""
         return str(self._project_combo.currentData() or "")
 
     def _reload_xnat_catalog(self) -> None:
+        """Reload the subject list and per-subject asset-slot map from the dataset catalog for the
+        currently selected XNAT project, and rebuild the scan-filter checkboxes."""
         if not self._is_xnat():
             return
         project_id = self._current_project_id()
@@ -711,6 +749,8 @@ class DataBrowserPanel(QWidget):
         self._resource_list.clear()
 
     def _rebuild_xnat_scan_filter_checkboxes(self, project_id: str, slots: list[str]) -> None:
+        """Rebuild the scan-filter checkbox grid from *slots*, ordering the project's default
+        sequences and pipeline resources first."""
         while self._xnat_scan_filters_layout.count():
             item = self._xnat_scan_filters_layout.takeAt(0)
             widget = item.widget()
@@ -751,6 +791,7 @@ class DataBrowserPanel(QWidget):
             self._xnat_scan_filter_checks[slot] = cb
 
     def _selected_xnat_scan_slots(self) -> set[str]:
+        """Asset slots whose filter checkbox is currently checked."""
         return {
             slot
             for slot, cb in self._xnat_scan_filter_checks.items()
@@ -758,6 +799,7 @@ class DataBrowserPanel(QWidget):
         }
 
     def _clear_xnat_scan_filters(self) -> None:
+        """Uncheck every scan-filter checkbox and refresh the subject list."""
         for cb in self._xnat_scan_filter_checks.values():
             cb.blockSignals(True)
             cb.setChecked(False)
@@ -765,6 +807,8 @@ class DataBrowserPanel(QWidget):
         self._filter_subjects()
 
     def _xnat_subjects_matching_scan_filter(self) -> list[str]:
+        """All subjects, or (if any scan-filter checkboxes are checked) only subjects whose indexed
+        assets satisfy the selected slots (all or any, per the match-all toggle)."""
         required = self._selected_xnat_scan_slots()
         if not required:
             return list(self._all_subjects)
@@ -775,6 +819,7 @@ class DataBrowserPanel(QWidget):
         )
 
     def _filter_subjects(self) -> None:
+        """Rebuild the subject list widget applying the scan filter (XNAT) and search text."""
         needle = self._subject_search.text().strip().lower()
         if self._is_xnat():
             candidates = self._xnat_subjects_matching_scan_filter()
@@ -815,6 +860,7 @@ class DataBrowserPanel(QWidget):
         current: QListWidgetItem | None,
         _previous: QListWidgetItem | None,
     ) -> None:
+        """Repopulate the resource list for the newly selected subject."""
         self._resource_list.clear()
         if current is None:
             return
@@ -825,6 +871,8 @@ class DataBrowserPanel(QWidget):
             self._populate_local_resources(subject)
 
     def _populate_xnat_resources(self, subject_uid: str) -> None:
+        """List *subject_uid*'s indexed raw scans and pipeline (eicab/qvtpy/4dflows) resources as
+        checkable resource-list items."""
         project_id = self._current_project_id()
         n_items = 0
         try:
@@ -885,17 +933,21 @@ class DataBrowserPanel(QWidget):
         self._status.setText(f"{n_items} resource(s) for {subject_uid}.")
 
     def _populate_local_resources(self, subject: str) -> None:
+        """List *subject*'s local assets, requiring the pipeline roots to already be applied."""
         if self._local_roots is None:
             self._status.setText("Apply pipeline roots first.")
             return
         self._refresh_resources_for_subject(subject)
 
     def _refresh_resources(self) -> None:
+        """Re-list local assets for the currently selected subject."""
         item = self._subject_list.currentItem()
         if item is not None and not self._is_xnat():
             self._refresh_resources_for_subject(item.text())
 
     def _refresh_resources_for_subject(self, subject: str) -> None:
+        """List *subject*'s local DICOM/NIfTI/results assets (per the include checkboxes) as
+        checkable resource-list items."""
         assert self._local_roots is not None
         self._resource_list.clear()
         try:
@@ -919,6 +971,7 @@ class DataBrowserPanel(QWidget):
         self._status.setText(f"{len(assets)} asset(s) for {subject}.")
 
     def _selected_xnat_rows(self) -> list[dict[str, Any]]:
+        """Payload dicts for every checked item in the resource list (XNAT mode)."""
         rows = []
         for i in range(self._resource_list.count()):
             item = self._resource_list.item(i)
@@ -930,6 +983,7 @@ class DataBrowserPanel(QWidget):
         return rows
 
     def _selected_local_assets(self) -> list[LocalAsset]:
+        """:class:`LocalAsset` entries for every checked item in the resource list (local mode)."""
         assets = []
         for i in range(self._resource_list.count()):
             item = self._resource_list.item(i)
@@ -941,12 +995,15 @@ class DataBrowserPanel(QWidget):
         return assets
 
     def _on_action(self) -> None:
+        """Dispatch the action button to the XNAT download or local load handler based on the current
+        source."""
         if self._is_xnat():
             self._on_xnat_download()
         else:
             self._on_local_load()
 
     def _scan_reader_is_dicom(self) -> bool:
+        """True if the raw-scan reader format is currently set to DICOM (vs. NIfTI)."""
         return str(self._scan_format.currentData() or "nifti") == "dicom"
 
     def _uncheck_selected_resources(self) -> None:
@@ -957,6 +1014,7 @@ class DataBrowserPanel(QWidget):
                 item.setCheckState(Qt.Unchecked)
 
     def _on_local_load(self) -> None:
+        """Open every checked local asset into Napari and record the opened paths."""
         assets = self._selected_local_assets()
         if not assets:
             notify("Check at least one asset to load.", error=True)
@@ -979,6 +1037,9 @@ class DataBrowserPanel(QWidget):
         notify(f"Opened {opened} asset(s) in Napari.")
 
     def _on_xnat_download(self) -> None:
+        """Validate the XNAT config/selection, prompt for the password, and start an
+        :class:`_XnatDownloadWorker` to fetch the checked resources in the background (to a temp
+        cache or the configured download folder)."""
         if self._worker is not None and self._worker.isRunning():
             notify("Download already in progress.", error=True)
             return
@@ -1041,10 +1102,13 @@ class DataBrowserPanel(QWidget):
         self._worker.start()
 
     def _on_progress(self, message: str) -> None:
+        """Show a background-worker progress *message* in the status label and log panel."""
         self._status.setText(message)
         gui_log(message)
 
     def _record_opened(self, paths: list[str]) -> None:
+        """Notify the ``on_inputs_opened`` callback (if given) or append *paths* to the app's input
+        registry directly."""
         if self._on_inputs_opened is not None:
             self._on_inputs_opened(paths)
         else:
@@ -1054,6 +1118,8 @@ class DataBrowserPanel(QWidget):
             self._app_state["inputs"] = inputs
 
     def _on_download_ok(self, payloads: list) -> None:
+        """Open every downloaded resource into Napari (expanding NIfTI directories to their files) and
+        record the opened paths."""
         paths: list[str] = []
         opened_layers = 0
         for payload in payloads:
@@ -1094,10 +1160,12 @@ class DataBrowserPanel(QWidget):
         )
 
     def _on_download_failed(self, message: str) -> None:
+        """Show the background worker's failure *message* in the status label and as a notification."""
         self._status.setText(message)
         notify(f"XNAT download failed: {message}", error=True)
 
     def _on_worker_finished(self) -> None:
+        """Re-enable the action button and drop the finished worker reference."""
         self._action_btn.setEnabled(True)
         self._worker = None
 

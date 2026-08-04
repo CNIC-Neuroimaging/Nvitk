@@ -220,6 +220,7 @@ def _bilateral_gpu(
     do_3d: bool,
     axis: int,
 ) -> Any:
+    """CuPy bilateral filter: dispatches to the 2-D, full-3-D, or slicewise CUDA kernel."""
     import cupy as cp
 
     if arr_cp.ndim == 2:

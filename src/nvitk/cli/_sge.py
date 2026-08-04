@@ -28,6 +28,8 @@ def cluster_paths(
     models: Path | None = None,
     nvitk_src: Path | None = None,
 ) -> ClusterPaths:
+    """Build a :class:`~nvitk.cluster.sge.ClusterPaths` for a CLI job, filling container/models/source
+    paths from :mod:`nvitk.cli.config` defaults where not overridden."""
     src = nvitk_src or sge_json.resolve_nvitk_src_dir(fallback=cfg.NVITK_SRC_DIR)
     return ClusterPaths(
         src=src,
@@ -41,6 +43,8 @@ def cluster_paths(
 
 
 def default_resources(*, gpu: bool = False) -> SgeResources:
+    """Default :class:`~nvitk.cluster.sge.SgeResources` for a CLI job, requesting a GPU slot when
+    *gpu* is True (else CPU-only)."""
     if gpu:
         return SgeResources(
             project=cfg.SGE_PROJECT,
@@ -90,6 +94,8 @@ def submit_tool_job(
     gpu: bool = False,
     emit: object | None = None,
 ) -> str | None:
+    """Submit (or, if *emit* is given, append to that script file handle instead of submitting) one
+    SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*."""
     paths = cluster_paths(data_root=data_root, output_root=output_root)
     paths.ensure_dirs()
     binds = SingularityBinds()
@@ -112,6 +118,8 @@ def emit_submit_script(
     output_root: Path,
     gpu: bool = False,
 ) -> Path:
+    """Write a qsub shell script at *script_path* containing one job stage per ``(job_name,
+    python_cmd)`` in *stages*, sharing the header and cluster paths."""
     script_path.parent.mkdir(parents=True, exist_ok=True)
     paths = cluster_paths(data_root=data_root, output_root=output_root)
     paths.ensure_dirs()
@@ -135,6 +143,8 @@ def emit_submit_script(
 
 
 def default_emit_path(tool: str, subcommand: str) -> Path:
+    """Timestamped default path for an emitted submit script for *tool*/*subcommand* under
+    ``cfg.SGE_SCRIPTS_DIR``."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg.SGE_SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     return cfg.SGE_SCRIPTS_DIR / f"submit_{cfg.SGE_JOB_PREFIX}_{tool}_{subcommand}_{ts}.sh"

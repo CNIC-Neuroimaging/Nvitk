@@ -102,6 +102,7 @@ class ClusterPaths:
     err_dir: Path
 
     def ensure_dirs(self) -> None:
+        """Create the SGE stdout/stderr log directories for this run if they don't exist."""
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.err_dir.mkdir(parents=True, exist_ok=True)
 
@@ -512,6 +513,7 @@ def submit_array_job(
 
 
 def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
+    """Render a ``hold_jid`` value (None, string, or sequence) as a comma-joined display string, or ``\"none\"``."""
     if hold_jid is None:
         return "none"
     if isinstance(hold_jid, str):
@@ -521,6 +523,7 @@ def _hold_jid_repr(hold_jid: str | Sequence[str] | None) -> str:
 
 
 def _sge_gpu_resource_log_line(resources: SgeResources) -> str:
+    """Human-readable summary line for the GPU resource request (virtual GPU, ``-l ngpu``, or CPU-only)."""
     vgpu = sge_virtual_gpu_resource_name(resources.project)
     if vgpu is not None:
         return f"  sge_{vgpu} (-l):     0 (virtual GPU; no -l ngpu)"
@@ -625,6 +628,7 @@ _FIRST_QSUB_ARRAY_RE = re.compile(
 
 
 def _bash_single_quoted_tokens(qbody: str) -> list[str]:
+    """Extract each single-quoted token from a bash array body, one per line, for echo-summary parsing."""
     tokens: list[str] = []
     for line in qbody.splitlines():
         s = line.strip()
@@ -693,10 +697,12 @@ _SHELL_VAR_SAFE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _shell_var(job_name: str) -> str:
+    """Sanitize a job name into a valid bash variable name (non-alphanumeric chars → underscore)."""
     return _SHELL_VAR_SAFE.sub("_", job_name)
 
 
 def _quote_qsub_arg(arg: str) -> str:
+    """Shell-quote a qsub argument, leaving shell variable references (``$VAR``) unescaped inside double quotes."""
     if arg.startswith("$"):
         return f'"{arg}"'
     return shlex.quote(arg)
@@ -709,6 +715,7 @@ def _emit_stage_block(
     qsub_argv: Sequence[str],
     hold_jid: str | Sequence[str] | None,
 ) -> str:
+    """Write one stage's singularity-run + qsub commands into a multi-stage driver script; returns a shell expansion (``$jid_...``) referencing this stage's submitted job id."""
     var = _shell_var(spec.job_name)
     jid_var = f"jid_{var}"
     singcmd_var = f"singcmd_{var}"

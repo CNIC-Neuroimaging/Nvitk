@@ -14,6 +14,7 @@ from .._common import reorder_axes
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
+    """Coerce an array to uint8 for image writers: floats are treated as ``[0, 1]``, ints are clipped to ``[0, 255]``."""
     if arr.dtype == np.uint8:
         return arr
     if np.issubdtype(arr.dtype, np.floating):

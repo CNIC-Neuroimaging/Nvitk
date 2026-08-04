@@ -30,7 +30,10 @@ FOURDFLOWS_RESOURCE_LABEL = "4dflows"
 
 
 def _cli_decorator(*args: Any, **kwargs: Any):
+    """No-op stand-in for ``click.command``/``click.option`` when ``click`` isn't installed."""
+
     def decorator(func: Any) -> Any:
+        """Return *func* unchanged."""
         return func
 
     return decorator
@@ -47,6 +50,8 @@ def _experiment_session_uid(
     subject_uid: str,
     experiment_label: str,
 ) -> Any:
+    """Look up the ``session_uid`` in the ``sessions`` table matching *project_id*/*subject_uid*/
+    *experiment_label*; returns ``pd.NA`` if the table is missing or no row matches."""
     if not repo.catalog.table_exists("sessions"):
         return pd.NA
     sessions = repo._load_table_frame(
@@ -65,6 +70,7 @@ def _experiment_session_uid(
 
 
 def _resource_files_collection(resource: Any) -> list[Any]:
+    """Normalize an XNAT resource's ``files`` (attribute, callable, or dict/iterable) into a plain list."""
     files = getattr(resource, "files", None)
     if files is None:
         return []
@@ -82,6 +88,7 @@ def _resource_files_collection(resource: Any) -> list[Any]:
 
 
 def _resource_file_name(file_obj: Any) -> str:
+    """Basename of an XNAT resource file object, checking ``name``/``label``/``path``/``id`` in order."""
     for attr in ("name", "label", "path", "id"):
         value = _coalesce_attr(file_obj, attr)
         if value:
@@ -90,10 +97,12 @@ def _resource_file_name(file_obj: Any) -> str:
 
 
 def _resource_file_uri(file_obj: Any) -> str:
+    """URI (or path) for an XNAT resource file object, checking ``uri``/``fulluri``/``path`` in order."""
     return str(_coalesce_attr(file_obj, "uri", "fulluri", "path") or "").strip()
 
 
 def _is_nifti_or_json(name: str) -> bool:
+    """True if *name* has a ``.nii``, ``.nii.gz``, or ``.json`` extension."""
     lower = name.lower()
     return lower.endswith(".json") or lower.endswith(".nii") or lower.endswith(".nii.gz")
 
@@ -103,6 +112,8 @@ def _list_experiment_resource_files(
     *,
     resource_label: str = FOURDFLOWS_RESOURCE_LABEL,
 ) -> list[dict[str, str]]:
+    """List NIfTI/JSON files under *experiment*'s *resource_label* resource (default ``4dflows``) as
+    ``{name, uri, xnat_path}`` dicts; empty if the experiment has no such resource."""
     resources = getattr(experiment, "resources", None) or {}
     if resource_label not in resources:
         return []
@@ -315,6 +326,8 @@ def main(
     overwrite_downloads: bool,
     build_sqlite_index: bool,
 ) -> None:
+    """CLI entry point: resolve the XNAT connection profile from CLI flags/config file, then run
+    :func:`sync_xnat_4dflows_assets` against the dataset at ``dataset_root``."""
     if click is None:
         raise BackendUnavailableError('click is not installed. Please install it with "pip install click".')
     if download and download_root is None:

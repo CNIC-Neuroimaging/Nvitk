@@ -133,6 +133,7 @@ _METRICS = METRICS
 
 
 def resolve_pipeline_id(pipeline_version: str) -> str:
+    """Resolve a pipeline-version token (or a known qvtpy alias) to the canonical qvtpy pipeline id."""
     token = str(pipeline_version or "").strip()
     if not token or token.lower() in {a.lower() for a in QVTPY_PIPELINE_ALIASES}:
         return QVTPY_PIPELINE_ID
@@ -140,6 +141,7 @@ def resolve_pipeline_id(pipeline_version: str) -> str:
 
 
 def _resolve_subjects_filter(subjects: str | None) -> list[str] | None:
+    """Resolve the *subjects* spec to an explicit subject-id list, or ``None`` when it's a single cohort token."""
     if subjects is None or not str(subjects).strip():
         return None
     tokens = parse_subject_tokens(subjects)
@@ -149,6 +151,7 @@ def _resolve_subjects_filter(subjects: str | None) -> list[str] | None:
 
 
 def _cohort_id_from_subjects(subjects: str | None) -> str | bool:
+    """Extract a cohort id from *subjects* when it's a single recognized cohort token; else ``False``."""
     if subjects is None or not str(subjects).strip():
         return False
     tokens = parse_subject_tokens(subjects)
@@ -213,6 +216,12 @@ def prepare_plot_frame(
     specs: list[tuple[str, str, str]],
     derive_tcbf: bool,
 ) -> pd.DataFrame:
+    """Filter/reshape long measurements into the violin-plot frame: ``subject_uid``/``vessel``/``group``/``value``.
+
+    Optionally derives a synthetic TCBF row per subject, maps region ids to
+    display vessel names and violin groups per *specs*, and drops zero
+    placeholder values (a project convention for "not measured").
+    """
     sub = long_df[long_df["variable_id"].astype(str) == variable_id].copy()
     if sub.empty:
         return pd.DataFrame(columns=["subject_uid", "vessel", "group", "value"])
@@ -292,6 +301,7 @@ def annotate_flagged_points(
     marker: str = "D",
     annotate_uid: bool = True,
 ) -> None:
+    """Overlay flagged (outlier/low-value) points on a violin plot with a distinct marker and optional subject-id labels."""
     if flagged_df.empty:
         return
     vessel_to_x = {v: i for i, v in enumerate(vessels)}
@@ -584,6 +594,7 @@ def plot_violin_figure(
 
 
 def metric_by_key(key: str) -> dict[str, Any] | None:
+    """Look up a metric's spec dict in ``METRICS`` by its key; ``None`` if not found."""
     for m in METRICS:
         if m["key"] == key:
             return m

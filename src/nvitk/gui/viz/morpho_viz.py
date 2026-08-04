@@ -156,6 +156,8 @@ def _pick_scalar(
     color_by: str,
     n: int,
 ) -> np.ndarray:
+    """Select the point-array matching *color_by* (by known aliases, case-insensitive) with length
+    *n* from *arrays*; an all-NaN array if none matches."""
     aliases = _COLOR_BY_ARRAYS.get(str(color_by).strip().lower(), ())
     for key in aliases:
         if key in arrays and arrays[key].shape[0] == n:
@@ -207,6 +209,8 @@ def load_stage7_centerline_polylines(
 
 
 def _path_summary_table(stage7_dir: Path) -> pd.DataFrame:
+    """Load and aggregate the ``00_Path_Summary`` sheet from stage-7's Excel output, one row per
+    vessel; empty frame if the file is missing or unreadable."""
     excel = Path(stage7_dir) / STAGE7_SKIP_MARKER
     if not excel.is_file():
         return pd.DataFrame()
@@ -243,6 +247,7 @@ def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:
         w_sum = float(weights.sum())
 
         def _weighted_mean(col: str) -> float:
+            """Length-weighted mean of *col* over the group (plain nanmean if weights sum to ~0)."""
             if col not in g.columns:
                 return float("nan")
             vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
@@ -253,12 +258,14 @@ def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:
             return float(np.nanmean(vals)) if np.isfinite(vals).any() else float("nan")
 
         def _max(col: str) -> float:
+            """Max finite value of *col* over the group, or NaN if none are finite."""
             if col not in g.columns:
                 return float("nan")
             vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
             return float(np.nanmax(vals)) if np.isfinite(vals).any() else float("nan")
 
         def _sum(col: str) -> float:
+            """Sum of finite values of *col* over the group, or NaN if none are finite."""
             if col not in g.columns:
                 return float("nan")
             vals = pd.to_numeric(g[col], errors="coerce").to_numpy(dtype=np.float64)
@@ -481,6 +488,8 @@ def _apply_morpho_point_size(layer: Any, size: float) -> None:
 
 
 def _read_layer_point_size(layer: Any, fallback: float) -> float:
+    """Recover *layer*'s current point size (correcting for Napari's integer-slider snap-to-1 quirk
+    when a smaller *fallback* was requested), falling back to *fallback* if unreadable."""
     try:
         size = getattr(layer, "current_size", None)
         if size is not None:
@@ -644,6 +653,8 @@ def _add_or_update_morpho_points(
 
 
 def _scalar_rgba(values: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """Map *values* through the viridis colormap normalized to ``[lo, hi]``, making non-finite entries
+    fully transparent."""
     import matplotlib as mpl
 
     try:
@@ -669,6 +680,8 @@ def _attach_summary_dock(
     reference_layer: Any | None = None,
     point_size: float = DEFAULT_MORPHO_POINT_SIZE,
 ) -> None:
+    """Build and dock a per-vessel morphometrics summary table with color-by/point-size controls that
+    live-update the Morpho points layer; no-op if Qt bindings aren't available."""
     try:
         from qtpy.QtCore import Qt
         from qtpy.QtWidgets import (
@@ -765,6 +778,7 @@ def _attach_summary_dock(
     }
 
     def _on_color_changed(_index: int = 0) -> None:
+        """Recreate the Morpho points layer colored by the newly selected scalar array."""
         key = str(color_selector.currentData() or color_selector.currentText() or "radius")
         state["color_by"] = key
         if not state["polylines"]:
@@ -783,6 +797,7 @@ def _attach_summary_dock(
         state["point_size"] = float(size_spin.value())
 
     def _on_size_changed(value: float) -> None:
+        """Apply the newly chosen point size to the Morpho points layer, finding it by name if needed."""
         state["point_size"] = float(value)
         layer = state.get("points_layer")
         if layer is None:

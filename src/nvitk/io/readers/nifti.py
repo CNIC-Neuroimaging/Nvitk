@@ -36,6 +36,7 @@ _NIFTI_JSON_STRIP_KEYS = {
 
 
 def _sorted_nifti_files_in_dir(directory: Path) -> list[Path]:
+    """Alphabetically sorted list of ``.nii``/``.nii.gz`` files directly under *directory* (hidden files excluded)."""
     out: list[Path] = []
     for child in directory.iterdir():
         if not child.is_file():
@@ -54,6 +55,7 @@ def _sorted_nifti_files_in_dir(directory: Path) -> list[Path]:
 
 
 def _resolve_nifti_file_path(path: Path) -> Path:
+    """Resolve *path* to a single NIfTI file: pass through a file, or pick the first match in a directory."""
     if path.is_file():
         return path
     if path.is_dir():
@@ -65,6 +67,7 @@ def _resolve_nifti_file_path(path: Path) -> Path:
 
 
 def _json_sidecar_path(nifti_file: Path) -> Path:
+    """Derive the ``<stem>.json`` sidecar path for a ``.nii``/``.nii.gz`` file."""
     name = nifti_file.name
     low = name.lower()
     if low.endswith(".nii.gz"):
@@ -80,6 +83,7 @@ def nifti_metadata_json_path(nifti_file: str | Path) -> Path:
 
 
 def _merge_sidecar_dict(metadata: dict[str, Any], raw: Any) -> None:
+    """In-place: merge a JSON sidecar dict into *metadata*, skipping nvitk-reserved keys (e.g. affine/spacing)."""
     if not isinstance(raw, dict):
         return
     extra = {k: v for k, v in raw.items() if k not in _NIFTI_JSON_STRIP_KEYS}

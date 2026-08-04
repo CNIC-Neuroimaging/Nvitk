@@ -293,6 +293,7 @@ def weighted_linear_fit(x, y, weights=None, *, eps: float = 1e-12) -> dict[str, 
 
 
 def _np_ones_like(a):
+    """Array of ones with the same shape/dtype as *a* (default weights when none are supplied)."""
     return np.ones_like(a)
 
 
@@ -608,7 +609,8 @@ def pwv_bjornfoot_optimize(
     x0 = np.concatenate([np.mean(F_k, axis=0), np.array([_BJORNFOOT_PWV0])])
 
     def residuals(x: np.ndarray) -> np.ndarray:
-        with using("numpy"):            
+        """Least-squares residual function for the Bjornfoot PWV fit, evaluated on the host backend."""
+        with using("numpy"):
             return pwvest3_share_residuals(to_numpy(x), to_numpy(dist_k), to_numpy(F_k), tr, to_numpy(W_k))
 
     from scipy.optimize import least_squares

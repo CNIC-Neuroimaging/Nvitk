@@ -39,6 +39,7 @@ from nvitk.types import Image
 
 
 def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
+    """Union of *label_ids* in *label_img* as a binary uint8 mask image."""
     if len(label_ids) == 1:
         return get_label(label_img, label_ids[0], missing="empty")
     first = get_label(label_img, label_ids[0], missing="empty").data.copy()
@@ -49,6 +50,7 @@ def _build_binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
 
 
 def _load_mask(stage2_dir: Path, filename: str) -> Image:
+    """Load the mask NIfTI matching *filename* (suffix stripped) from *stage2_dir*."""
     stem = filename
     for suffix in (".nii.gz", ".nii"):
         if stem.endswith(suffix):
@@ -78,6 +80,7 @@ def _ctpet_roi_specs() -> list[tuple[str, str, tuple[int, ...]]]:
 
 
 def _safe_stem(s: str) -> str:
+    """*s* with any character outside ``[A-Za-z0-9_-]`` replaced by ``_``."""
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
 
 
@@ -113,6 +116,7 @@ _DIXON_OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
 
 
 def _pp_label_names(mask_file: str, label_ids: tuple[int, ...], *, pipeline: str) -> list[str]:
+    """Human-readable label names for *label_ids* in *mask_file* (merges L/R deltoids into one)."""
     labels_dict = (
         _CT_MASK_TO_LABELS if pipeline == "ctpet" else _DIXON_MASK_TO_LABELS
     ).get(mask_file, {})
@@ -137,6 +141,8 @@ def _load_raw_ts_mask_ctpet(
     *,
     target: Image,
 ) -> np.ndarray | None:
+    """Union of raw TotalSegmentator CT masks for *output_label_names*, resampled onto
+    *target*'s grid; None if no matching stage-1 outputs are found."""
     stage1_dir = lay.results_dir / ct_cfg.STAGE1_DIR / subject / "CT"
     combined: np.ndarray | None = None
     ref_img: Image | None = None
@@ -183,6 +189,8 @@ def _load_raw_ts_mask_dixon(
     *,
     target: Image,
 ) -> np.ndarray | None:
+    """Union of raw TotalSegmentator MR masks for *output_label_names* in *region*, resampled
+    onto *target*'s grid; None if no matching stage-1 outputs are found."""
     stage1_dir = lay.results_dir / dx_cfg.STAGE1_DIR / subject / f"{dx_cfg.INPUT_PREFIX}_{region}"
     combined: np.ndarray | None = None
     ref_img: Image | None = None
@@ -221,6 +229,7 @@ def _flip_lr_2d(arr: np.ndarray) -> np.ndarray:
 
 
 def _full_volume_display_range(vol: np.ndarray) -> tuple[float, float]:
+    """2nd/98th percentile intensity window over all finite voxels of *vol* (min/max fallback)."""
     v = np.asarray(vol, dtype=np.float64)
     finite = v[np.isfinite(v)]
     if finite.size == 0:
@@ -273,6 +282,7 @@ def _figsize_sagittal_match_y(
 
 
 def _png_data_uri(png_bytes: bytes) -> str:
+    """Base64 ``data:image/png`` URI for *png_bytes*."""
     b64 = base64.b64encode(png_bytes).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
@@ -287,11 +297,14 @@ class _SliceImageStore:
         assets_rel: str | None,
         prefix: str,
     ) -> None:
+        """Store slice PNGs under *assets_dir* (URLs built from *assets_rel*) or inline if either
+        is None; *prefix* namespaces filenames for this viewer instance."""
         self.assets_dir = assets_dir
         self.assets_rel = assets_rel.rstrip("/") if assets_rel else None
         self.prefix = _safe_stem(prefix)
 
     def add(self, png_bytes: bytes, *, view: str, roi: str, tag: str) -> str:
+        """Store one slice PNG and return its URL (relative asset path) or inline data URI."""
         if self.assets_dir is None or self.assets_rel is None:
             return _png_data_uri(png_bytes)
         self.assets_dir.mkdir(parents=True, exist_ok=True)
@@ -311,6 +324,8 @@ def _render_slice_png(
     rotate90: bool = False,
     figsize: tuple[float, float] | None = None,
 ) -> bytes:
+    """Render one axial/sagittal slice to PNG bytes, with raw-TS (blue) and post-processed
+    (red) mask contours overlaid."""
     if figsize is None:
         figsize = _figsize_for_slice(vol_2d, rotate90=rotate90)
     fig, ax = plt.subplots(figsize=figsize)
@@ -366,9 +381,12 @@ def _viewer_html(
     review_ctx: dict | None = None,
     sync_peer_dom_ids: list[str] | None = None,
 ) -> str:
+    """Self-contained HTML/JS slice-viewer widget (ROI dropdown, axial/coronal/sagittal panels,
+    optional review panel and cross-view sync) for one subject/pipeline."""
     from nvitk.pipes.pesa_fat.qc.slice_review import embedded_review_panel_html, embedded_review_panel_js
 
     def js_map(d: dict[str, list[str]]) -> str:
+        """JSON-encode *d* for inlining into the generated JavaScript."""
         return json.dumps(d)
 
     roi_opts = "".join(f"<option value='{_safe_stem(r)}'>{r}</option>" for r in roi_names)
@@ -786,6 +804,7 @@ def _dixon_roi_specs() -> list[tuple[str, str, str, tuple[int, ...]]]:
 
 
 def _load_dixon_ff_map(nifti_dir: Path, region: str) -> Image:
+    """Load the fat-fraction map NIfTI for *region* under *nifti_dir*."""
     stem = f"{dx_cfg.INPUT_PREFIX}_{region}_FAT_FRACTION"
     return imread(str(resolve_nii(nifti_dir, stem)), axes="XYZ")
 

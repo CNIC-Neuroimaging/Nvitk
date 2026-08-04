@@ -130,6 +130,7 @@ def add_locs_layer(
 
 
 def remove_locs_layer(viewer: Any, name: str = LOC_LAYER_NAME) -> None:
+    """Remove the LOC points layer named *name* from *viewer*, if present."""
     for lyr in list(viewer.layers):
         if lyr.name == name:
             viewer.layers.remove(lyr)

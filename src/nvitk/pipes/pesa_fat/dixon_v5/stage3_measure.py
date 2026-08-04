@@ -61,6 +61,7 @@ SPECS = cfg.MEASURE_SPECS
 
 
 def column_order() -> list[str]:
+    """Full stage-3 output column order: ``pesa_id``, then per-ROI metric columns from ``cfg.MEASURE_SPECS``."""
     cols = ["pesa_id"]
     for spec in SPECS:
         for metric in spec.metrics:
@@ -81,6 +82,7 @@ _REGION_LABELS: dict[str, dict[str, int]] = {
 
 
 def _imread_opt(parent: Path, stem: str) -> Image | None:
+    """Read the ``<stem>.nii[.gz]`` file resolved under *parent*, or ``None`` if it doesn't exist."""
     path = resolve_nii_optional(parent, stem)
     if path is None:
         return None
@@ -88,6 +90,8 @@ def _imread_opt(parent: Path, stem: str) -> Image | None:
 
 
 def _load_maps(subject_nifti_dir: Path, region: str) -> dict[str, Image | None]:
+    """Load the FF/T2/WATER Dixon contrast maps for *region* under *subject_nifti_dir* (any missing
+    map is ``None``)."""
     out: dict[str, Image | None] = {}
     for suffix, key in (
         ("FAT_FRACTION", "FF"),
@@ -99,6 +103,7 @@ def _load_maps(subject_nifti_dir: Path, region: str) -> dict[str, Image | None]:
 
 
 def _mean_under_mask(values: Any, mask: Any) -> float:
+    """Mean of *values* where *mask* is non-zero, or NaN if the mask is empty."""
     vals_np = to_numpy(values)
     mask_np = to_numpy(mask) > 0
     if not mask_np.any():
@@ -110,6 +115,7 @@ def _mean_under_mask(values: Any, mask: Any) -> float:
 
 
 def _binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
+    """Union of *label_ids* in *label_img* as a binary mask image."""
     if len(label_ids) == 1:
         return get_label(label_img, label_ids[0], missing="empty")
     acc = get_label(label_img, label_ids[0], missing="empty").data.copy()
@@ -120,6 +126,7 @@ def _binary_mask(label_img: Image, label_ids: tuple[int, ...]) -> Image:
 
 
 def _nslices_axial_xyz(mask: Image) -> int:
+    """Number of axial (Z) slices in *mask* containing at least one foreground voxel."""
     return int(np.any(mask.data > 0, axis=(0, 1)).sum())
 
 # ---------------------------------------------------------------------------
