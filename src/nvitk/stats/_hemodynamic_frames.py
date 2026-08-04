@@ -93,10 +93,11 @@ def merge_subject_covariates(
     if missing:
         raise KeyError(f"clinical_wide missing columns: {missing}")
 
-    if 'sex' in clinical_wide.columns and clinical_wide['sex'].dtype in [str, object]:
-        clinical_wide['sex'] = _map_sex_to_numeric(clinical_wide['sex'])
+    cov = clinical_wide[cov_cols].copy()
+    if "sex" in cov.columns and not pd.api.types.is_numeric_dtype(cov["sex"]):
+        cov["sex"] = _map_sex_to_numeric(cov["sex"])
 
-    cov = clinical_wide[cov_cols].drop_duplicates(subset=[subject_key], keep=dedupe)
+    cov = cov.drop_duplicates(subset=[subject_key], keep=dedupe)
     return long_df.merge(cov, on=subject_key, how="inner")
 
 

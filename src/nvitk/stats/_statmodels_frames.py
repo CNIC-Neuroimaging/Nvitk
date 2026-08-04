@@ -56,6 +56,24 @@ FEATURE_ALIASES: dict[str, str] = {
     "att_cov": "att_cov",
 }
 
+# Subject-level attributes live on the ``subjects`` entity table rather than in
+# ``clinical_measurements``, so they are not catalog "variables" and never show up in
+# ``catalog.variable_entries(domain="clinical")``. They are offered as covariates alongside the
+# clinical variables and merged on ``subject_uid``.
+SUBJECT_TABLE = "subjects"
+_SUBJECT_ATTRIBUTE_EXCLUDED = frozenset(
+    {
+        "subject_uid",
+        "primary_patient_id",
+        "primary_seqn",
+        "notes",
+        "source_batch_id",
+        "source_file",
+        "source_sheet",
+        "updated_at",
+    }
+)
+
 _LR_PREFIX_RE = re.compile(r"^(left_|right_|l_|r_)", re.IGNORECASE)
 _SIDE_LETTER_RE = re.compile(r"^([LR])([A-Z][A-Z0-9_]*)$", re.IGNORECASE)
 _TREE_ICA = frozenset({"L_ICA", "R_ICA", "LICA", "RICA", "LEFT_ICA", "RIGHT_ICA"})
@@ -189,6 +207,86 @@ def atlas_for_request(kind: str, variable_id: str, atlas: str | None) -> str | N
     return None
 
 
+def clinical_measurement_variable_ids(repo: Any) -> set[str]:
+    """``variable_id``s that currently have at least one row in ``clinical_measurements``.
+
+    Used to prefer the measurements table over the sparse ``subjects`` entity columns when both
+    expose the same name (e.g. ``sex`` after ``import_sex.py``). Catalog registration alone is not
+    enough: a Statmodels window opened before the import keeps a stale catalog and would otherwise
+    keep routing ``sex`` through ``subjects``.
+    """
+    try:
+        if not repo.catalog.table_exists("clinical_measurements"):
+            return set()
+        frame = repo.get("clinical_measurements", columns=["variable_id"], cohort_id=False)
+    except Exception:
+        return set()
+    if frame is None or frame.empty or "variable_id" not in frame.columns:
+        return set()
+    return {str(v) for v in frame["variable_id"].dropna().unique()}
+
+
+def subject_attribute_entries(repo: Any) -> list[dict[str, Any]]:
+    """
+    Subject-level covariates (``sex``, …) available on the ``subjects`` table, in the same
+    ``{"variable_id", "label", "domain"}`` shape as :meth:`Catalog.variable_entries`.
+
+    Bookkeeping / identifier / timestamp columns are excluded, as are names already available as
+    clinical measurements (catalog entry **or** rows in ``clinical_measurements``) — the measurement
+    table always wins over the entity column.
+    """
+    try:
+        if not repo.catalog.table_exists(SUBJECT_TABLE):
+            return []
+        columns = dict(repo.catalog.get_table(SUBJECT_TABLE).columns or {})
+    except Exception:
+        return []
+
+    try:
+        registered = {
+            str(e.get("variable_id")) for e in repo.catalog.variable_entries(domain="clinical")
+        }
+    except Exception:
+        registered = set()
+    registered |= clinical_measurement_variable_ids(repo)
+
+    entries: list[dict[str, Any]] = []
+    for name, dtype in columns.items():
+        col = str(name)
+        if col in _SUBJECT_ATTRIBUTE_EXCLUDED or col in registered:
+            continue
+        if "datetime" in str(dtype).lower():
+            continue
+        entries.append(
+            {
+                "variable_id": col,
+                "label": f"{col} (subject)",
+                "domain": "clinical",
+                "table": SUBJECT_TABLE,
+            }
+        )
+    return entries
+
+
+def subject_attribute_columns(repo: Any) -> list[str]:
+    """``variable_id``s of the subject-level covariates returned by :func:`subject_attribute_entries`."""
+    return [str(e["variable_id"]) for e in subject_attribute_entries(repo)]
+
+
+def _subject_attribute_frame(repo: Any, names: list[str]) -> pd.DataFrame:
+    """One row per ``subject_uid`` with the requested ``subjects``-table columns."""
+    if not names:
+        return pd.DataFrame()
+    try:
+        frame = repo.get(SUBJECT_TABLE, columns=["subject_uid", *names])
+    except Exception:
+        return pd.DataFrame()
+    if frame is None or frame.empty or "subject_uid" not in frame.columns:
+        return pd.DataFrame()
+    keep = ["subject_uid", *[c for c in names if c in frame.columns]]
+    return frame[keep].drop_duplicates(subset=["subject_uid"], keep="first")
+
+
 def build_long_analysis_frame(
     repo: Any,
     *,
@@ -271,7 +369,14 @@ def build_long_analysis_frame(
     long["region_id"] = long["region_id"].astype(str)
     long["modality_group"] = kind
 
-    # Covariates
+    # Covariates. Prefer ``clinical_measurements`` whenever the requested name has rows there
+    # (covers a stale in-memory catalog after ``import_sex.py``). Only fall back to the
+    # ``subjects`` entity table for names that exist solely as subject attributes.
+    clinical_present = clinical_measurement_variable_ids(repo)
+    subject_attrs = set(subject_attribute_columns(repo)) - clinical_present
+    subject_vars = [v for v in clinical_vars if v in subject_attrs and v not in clinical_present]
+    clinical_vars = [v for v in clinical_vars if v not in subject_vars]
+
     frames: list[pd.DataFrame] = []
     if clinical_vars:
         try:
@@ -280,6 +385,10 @@ def build_long_analysis_frame(
                 frames.append(clinical)
         except Exception:
             pass
+    if subject_vars:
+        subject_frame = _subject_attribute_frame(repo, subject_vars)
+        if not subject_frame.empty:
+            frames.append(subject_frame)
     if cognitive_vars:
         try:
             cognitive = repo.cognitive(variables=cognitive_vars, wide=True)
@@ -300,7 +409,7 @@ def build_long_analysis_frame(
             )
             covariates = covariates.merge(frame_use, on="subject_uid", how="outer")
 
-    covariate_vars = list(dict.fromkeys([*clinical_vars, *cognitive_vars]))
+    covariate_vars = list(dict.fromkeys([*clinical_vars, *subject_vars, *cognitive_vars]))
     present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
 
     if covariates.empty or not present:
@@ -328,6 +437,25 @@ def build_long_analysis_frame(
         wide["patient_id"] = wide["subject_uid"]
     if "Hematocrit" not in wide.columns and "hematocrit" in wide.columns:
         wide = wide.rename(columns={"hematocrit": "Hematocrit"})
+
+    # Belt-and-suspenders: numeric clinical/cognitive covariates can arrive as object dtype when the
+    # wide pivot mixed them with text variables. Coerce them here so the preview table and formulas
+    # see floats (Patsy otherwise expands Hematocrit into Hematocrit[T.36.0], …).
+    try:
+        numeric_ids = {
+            str(e.get("variable_id"))
+            for e in repo.catalog.variable_entries(domain="clinical")
+            + repo.catalog.variable_entries(domain="cognitive")
+            if str(e.get("value_kind") or "").strip().lower() in {"numeric", "float", "int", "integer", "number"}
+        }
+    except Exception:
+        numeric_ids = set()
+    numeric_ids.update({"Hematocrit", "hematocrit", "age", "age_at_mri", "age_c", "sex", "bmi", "weight", "height"})
+    for col in list(wide.columns):
+        if col in numeric_ids or col.lower() in {v.lower() for v in numeric_ids}:
+            if not pd.api.types.is_numeric_dtype(wide[col]):
+                wide[col] = pd.to_numeric(wide[col], errors="coerce")
+
     if "age" in wide.columns and "age_c" not in wide.columns:
         age = pd.to_numeric(wide["age"], errors="coerce")
         wide["age_c"] = age - age.mean(skipna=True)
@@ -355,4 +483,7 @@ __all__ = [
     "grouping_choices_for",
     "region_to_hemisphere_pair_key",
     "resolve_feature_id",
+    "subject_attribute_columns",
+    "subject_attribute_entries",
+    "clinical_measurement_variable_ids",
 ]

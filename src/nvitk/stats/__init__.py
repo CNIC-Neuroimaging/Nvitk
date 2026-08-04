@@ -23,10 +23,14 @@ from ._statmodels_frames import (
     grouping_choices_for,
     region_to_hemisphere_pair_key,
     resolve_feature_id,
+    subject_attribute_columns,
+    subject_attribute_entries,
+    clinical_measurement_variable_ids,
 )
 from .mixedlm import (
     build_mixedlm_frame_from_repo,
     fit_or_load_mixedlm,
+    formula_columns,
     plot_mixedlm_params,
     print_mixedlm_info,
 )
@@ -52,6 +56,7 @@ __all__ = [
     "build_analysis_df_from_territory_definitions",
     "index_wide_image_columns_by_region_variable",
     "fit_or_load_mixedlm",
+    "formula_columns",
     "print_mixedlm_info",
     "plot_mixedlm_params",
     "build_mixedlm_frame_from_repo",
@@ -70,6 +75,9 @@ __all__ = [
     "grouping_choices_for",
     "region_to_hemisphere_pair_key",
     "resolve_feature_id",
+    "subject_attribute_columns",
+    "subject_attribute_entries",
+    "clinical_measurement_variable_ids",
     "IMAGE_VARIABLE_IDS",
     "IMAGING_VARIABLE_TERRITORY_RULE",
     "FLOW_REGION_ID_TO_TERRITORY",

@@ -1489,8 +1489,54 @@ class DataRepo:
                 kw["image_wide_single_variable"] = (
                     False if image_wide_single_variable is None else image_wide_single_variable
                 )
-            return self._to_wide(df, definition, **kw)
+            out = self._to_wide(df, definition, **kw)
+            return self._coerce_wide_measurement_dtypes(out, table_name=table_name)
         return df.reset_index(drop=True)
+
+    def _coerce_wide_measurement_dtypes(self, df: pd.DataFrame, *, table_name: str) -> pd.DataFrame:
+        """
+        Restore numeric dtypes on wide-pivoted measurement columns.
+
+        ``_resolve_measurement_values`` builds a single ``value`` series from ``value_num`` with a
+        ``value_text`` fallback, which upcasts the whole series to ``object`` whenever *any* text
+        variable is in the query. The subsequent pivot then leaves numeric variables (e.g.
+        ``hematocrit``) as object-dtype floats, and Patsy treats them as categoricals
+        (``Hematocrit[T.36.0]``, …). Coerce columns whose catalog ``value_kind`` is numeric back to
+        float64.
+        """
+        if df.empty:
+            return df
+        numeric_kinds = {"numeric", "float", "int", "integer", "number"}
+        domain = {
+            "clinical_measurements": "clinical",
+            "cognitive_measurements": "cognitive",
+            "image_measurements": "image",
+        }.get(table_name)
+        try:
+            entries = self.catalog.variable_entries(domain=domain) if domain else self.catalog.variable_entries()
+        except Exception:
+            entries = []
+        by_id = {str(e.get("variable_id")): e for e in entries if e.get("variable_id")}
+
+        out = df.copy()
+        for column in out.columns:
+            name = str(column)
+            entry = by_id.get(name)
+            if entry is None and table_name == "image_measurements":
+                # image wide keys are ``{region}_{variable}`` / similar — match by suffix variable_id
+                for vid, ent in by_id.items():
+                    if name == vid or name.endswith(f"_{vid}"):
+                        entry = ent
+                        break
+            if entry is None:
+                continue
+            kind = str(entry.get("value_kind") or "").strip().lower()
+            if kind not in numeric_kinds:
+                continue
+            if pd.api.types.is_numeric_dtype(out[column]):
+                continue
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+        return out
 
     def _resolve_measurement_values(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add a unified ``value`` column, preferring ``value_num`` and falling back to ``value_text``

@@ -13,6 +13,7 @@ from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -26,6 +27,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QSlider,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -45,6 +47,7 @@ from nvitk.stats import (
     plot_mixedlm_params,
     print_mixedlm_info,
     resolve_feature_id,
+    subject_attribute_entries,
 )
 
 log = Logger()
@@ -81,6 +84,12 @@ _DEFAULT_RE = "0"
 _DEFAULT_VC = '{"patient": "0 + C(subject_uid)"}'
 
 _TABLE_ROW_CAP = 500
+
+# Tukey fence multiplier for the optional IQR outlier filter.
+_DEFAULT_IQR_K = 1.5
+# Slider resolution for the axis-limit controls, and how far past the plotted data they may reach.
+_AXIS_SLIDER_STEPS = 1000
+_AXIS_SLIDER_MARGIN = 0.25
 
 _DARK_STYLESHEET = """
 QWidget {
@@ -241,6 +250,83 @@ def _apply_row_filter(df: pd.DataFrame, column: str, op: str, value: str) -> pd.
     return df.loc[series.astype(str) == raw]
 
 
+def _whiten_figure(fig: Any) -> None:
+    """Force a white figure/axes background with dark text, so plots stay readable against the
+    explorer's dark chrome and export cleanly."""
+    fig.patch.set_facecolor("white")
+    for ax in fig.axes:
+        ax.set_facecolor("white")
+        for spine in ax.spines.values():
+            spine.set_color("#333333")
+        ax.tick_params(colors="#222222", which="both")
+        ax.xaxis.label.set_color("#111111")
+        ax.yaxis.label.set_color("#111111")
+        ax.title.set_color("#111111")
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.get_frame().set_facecolor("white")
+            legend.get_frame().set_edgecolor("#999999")
+            for text in legend.get_texts():
+                text.set_color("#111111")
+
+
+def _apply_iqr_filter(
+    df: pd.DataFrame,
+    column: str,
+    *,
+    k: float = _DEFAULT_IQR_K,
+    by: str | None = None,
+) -> pd.DataFrame:
+    """
+    Drop rows whose *column* value falls outside the Tukey fences ``[Q1 - k·IQR, Q3 + k·IQR]``.
+
+    With *by* set, the fences are computed within each level of that column. That is the meaningful
+    scope for image measurements, whose magnitude depends on the region: a global fence is driven by
+    the spread *between* regions rather than within them, so it misses real outliers inside each
+    region and — when one region sits far from the rest — can discard that region wholesale. Rows
+    with a missing value are kept; dropping them is the fit's job, not the filter's.
+    """
+    if df.empty or column not in df.columns:
+        return df
+    values = pd.to_numeric(df[column], errors="coerce")
+    if not values.notna().any():
+        return df
+
+    def fence_mask(series: pd.Series) -> pd.Series:
+        """Boolean mask of rows inside the Tukey fences of *series* (NaN kept)."""
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        if pd.isna(q1) or pd.isna(q3):
+            return pd.Series(True, index=series.index)
+        iqr = q3 - q1
+        if iqr <= 0:  # degenerate spread: nothing is an outlier by this rule
+            return pd.Series(True, index=series.index)
+        lo, hi = q1 - k * iqr, q3 + k * iqr
+        return series.isna() | series.between(lo, hi)
+
+    if by and by in df.columns:
+        mask = pd.Series(True, index=df.index)
+        for _, idx in df.groupby(by, sort=False).groups.items():
+            mask.loc[idx] = fence_mask(values.loc[idx])
+    else:
+        mask = fence_mask(values)
+    return df.loc[mask]
+
+
+def _dropped_rows_note(meta: dict[str, Any]) -> str:
+    """Human-readable note about rows dropped for missing values during a fit, or ``""`` if none were."""
+    dropped = int(meta.get("n_rows_dropped") or 0)
+    if dropped <= 0:
+        return ""
+    by_col = dict(meta.get("dropped_by_column") or {})
+    detail = ", ".join(f"{col} ({n})" for col, n in sorted(by_col.items(), key=lambda kv: -kv[1]))
+    return (
+        f"NOTE: dropped {dropped} of {meta.get('n_rows_input')} rows with missing values "
+        f"before fitting (n={meta.get('n_rows')})."
+        + (f" Missing per column: {detail}." if detail else "")
+    )
+
+
 def _populate_checklist(widget: QListWidget, entries: list[dict[str, Any]]) -> None:
     """Fill *widget* with one unchecked, checkable item per variable *entries*, labeled
     ``"<label> (<variable_id>)"``."""
@@ -287,12 +373,12 @@ class StatmodelsWindow(QMainWindow):
         *,
         initial_pipeline_kind: str = PIPELINE_KIND_QVTPY,
     ) -> None:
-        """Build the data-selection controls, filter row, covariate/formula panels, and wire up all
-        button/combo signal handlers."""
+        """Build the three-column control row (covariates | data selection + filters | model
+        formulation), the plot/report row beneath it, and wire up all signal handlers."""
         super().__init__(parent)
         self.setWindowTitle("nvitk Statmodels")
         self.setWindowFlags(self.windowFlags() | Qt.Window)
-        self.resize(1400, 900)
+        self.resize(1600, 950)
         _apply_dark_theme(self)
 
         self._repo = _repo()
@@ -303,20 +389,37 @@ class StatmodelsWindow(QMainWindow):
         self._analysis_df: pd.DataFrame | None = None
         self._filtered_df: pd.DataFrame | None = None
         self._plot_canvas = None
+        self._plot_fig = None
+        self._plot_axes = None
+        self._axis_base: dict[str, tuple[float, float]] = {}
+        self._axis_span: dict[str, tuple[float, float]] = {}
 
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        root.addWidget(self._build_data_controls())
-        root.addWidget(self._build_filter_row())
+        # Controls on top (three columns), plots + model info underneath, so the figure gets the
+        # full window width and most of its height.
+        controls = QSplitter(Qt.Horizontal)
+        controls.addWidget(self._build_left_panel())
+        controls.addWidget(self._build_center_panel())
+        controls.addWidget(self._build_formula_panel())
+        controls.setSizes([440, 560, 520])
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_left_panel())
-        splitter.addWidget(self._build_right_panel())
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        root.addWidget(splitter, stretch=1)
+        output = QSplitter(Qt.Horizontal)
+        output.addWidget(self._build_plot_panel())
+        output.addWidget(self._build_report_panel())
+        output.setStretchFactor(0, 3)
+        output.setStretchFactor(1, 1)
+        output.setSizes([1200, 400])
+
+        main_split = QSplitter(Qt.Vertical)
+        main_split.addWidget(controls)
+        main_split.addWidget(output)
+        main_split.setStretchFactor(0, 0)
+        main_split.setStretchFactor(1, 1)
+        main_split.setSizes([340, 610])
+        root.addWidget(main_split, stretch=1)
 
         self._status = QLabel(
             f"Dataset: {self._repo.root}  |  qvtpy pipeline: {QVTPY_PIPELINE_ID}"
@@ -330,6 +433,9 @@ class StatmodelsWindow(QMainWindow):
         self._btn_reload.clicked.connect(self._on_reload)
         self._btn_apply_filter.clicked.connect(self._on_apply_filter)
         self._btn_clear_filter.clicked.connect(self._on_clear_filter)
+        self._btn_iqr.toggled.connect(self._on_iqr_toggled)
+        self._iqr_k.valueChanged.connect(self._on_iqr_param_changed)
+        self._iqr_scope.currentIndexChanged.connect(self._on_iqr_param_changed)
         self._btn_fit.clicked.connect(self._on_fit)
         self._btn_save.clicked.connect(self._on_save)
         self._btn_load.clicked.connect(self._on_load)
@@ -337,6 +443,10 @@ class StatmodelsWindow(QMainWindow):
         self._plot_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_x.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
+        for slider in self._axis_sliders.values():
+            slider.valueChanged.connect(self._on_axis_slider_changed)
+        self._btn_reset_axes.clicked.connect(self._on_reset_axes)
+        self._show_legend.stateChanged.connect(self._on_legend_toggled)
 
         self._on_pipeline_kind_changed()
 
@@ -381,9 +491,12 @@ class StatmodelsWindow(QMainWindow):
         return box
 
     def _build_filter_row(self) -> QGroupBox:
-        """Build the column/operator/value row for filtering the analysis frame before fitting."""
+        """Build the column/operator/value row plus the optional IQR outlier filter for the image
+        measurements, both applied to the analysis frame before fitting."""
         box = QGroupBox("Pre-fit filter")
-        row = QHBoxLayout(box)
+        lay = QVBoxLayout(box)
+
+        row = QHBoxLayout()
         self._filter_col = QComboBox()
         self._filter_op = QComboBox()
         for op in _FILTER_OPS:
@@ -399,7 +512,45 @@ class StatmodelsWindow(QMainWindow):
         row.addWidget(self._filter_val, stretch=2)
         row.addWidget(self._btn_apply_filter)
         row.addWidget(self._btn_clear_filter)
+        lay.addLayout(row)
+
+        iqr_row = QHBoxLayout()
+        self._btn_iqr = QPushButton("IQR filter")
+        self._btn_iqr.setCheckable(True)
+        self._btn_iqr.setToolTip(
+            "Drop image measurements outside [Q1 - k·IQR, Q3 + k·IQR].\n"
+            "'per group_key' computes the fences within each region — the right scope when regions "
+            "differ in magnitude (e.g. LMCA ~200 vs LPCOMM ~20 mL/min), since a global fence is set "
+            "by the spread between regions and misses outliers within them."
+        )
+        self._iqr_k = QDoubleSpinBox()
+        self._iqr_k.setRange(0.1, 10.0)
+        self._iqr_k.setSingleStep(0.25)
+        self._iqr_k.setValue(_DEFAULT_IQR_K)
+        self._iqr_scope = QComboBox()
+        self._iqr_scope.addItem("per group_key", "group")
+        self._iqr_scope.addItem("global", "global")
+        self._iqr_status = QLabel("")
+        self._iqr_status.setStyleSheet("color: #a0a0a0; font-weight: normal;")
+
+        iqr_row.addWidget(self._btn_iqr)
+        iqr_row.addWidget(QLabel("k"))
+        iqr_row.addWidget(self._iqr_k)
+        iqr_row.addWidget(QLabel("scope"))
+        iqr_row.addWidget(self._iqr_scope)
+        iqr_row.addWidget(self._iqr_status, stretch=1)
+        lay.addLayout(iqr_row)
         return box
+
+    def _build_center_panel(self) -> QWidget:
+        """Middle column: data selection above the pre-fit filter."""
+        panel = QWidget()
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._build_data_controls())
+        lay.addWidget(self._build_filter_row())
+        lay.addStretch(1)
+        return panel
 
     def _build_left_panel(self) -> QWidget:
         """Build the clinical/cognitive covariate checklists and the analysis-dataframe preview table."""
@@ -432,18 +583,44 @@ class StatmodelsWindow(QMainWindow):
         table_lay.addWidget(self._table)
         lay.addWidget(table_box, stretch=2)
 
+        # Clinical catalog variables, plus any leftover ``subjects``-table attributes that are not
+        # already available as clinical measurements (see :func:`subject_attribute_entries`).
+        self._refresh_covariate_lists()
+        return panel
+
+    def _refresh_covariate_lists(self) -> None:
+        """Re-read the catalog and rebuild the clinical/cognitive checklists, preserving checks.
+
+        Call this on Reload so newly imported variables (e.g. ``sex`` from ``import_sex.py``) appear
+        and so a stale in-memory catalog cannot keep offering the sparse ``subjects.sex`` column.
+        """
+        try:
+            self._repo.catalog.refresh()
+        except Exception:
+            pass
+        clinical_checked = _checked_variable_ids(self._clinical_list)
+        cognitive_checked = _checked_variable_ids(self._cognitive_list)
         _populate_checklist(
-            self._clinical_list, self._repo.catalog.variable_entries(domain="clinical")
+            self._clinical_list,
+            [
+                *subject_attribute_entries(self._repo),
+                *self._repo.catalog.variable_entries(domain="clinical"),
+            ],
         )
         _populate_checklist(
             self._cognitive_list, self._repo.catalog.variable_entries(domain="cognitive")
         )
-        return panel
+        _set_checked_variable_ids(self._clinical_list, clinical_checked)
+        _set_checked_variable_ids(self._cognitive_list, cognitive_checked)
 
-    def _build_right_panel(self) -> QWidget:
-        """Build the formula/fit/save/load controls, plot options, and the summary/plot panes."""
+    def _build_formula_panel(self) -> QWidget:
+        """Right column: model formulation fields, fit/save/load buttons, and plot options."""
         panel = QWidget()
         lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        box = QGroupBox("Model formulation")
+        box_lay = QVBoxLayout(box)
 
         form = QFormLayout()
         self._formula = QPlainTextEdit(_DEFAULT_FORMULA)
@@ -458,7 +635,7 @@ class StatmodelsWindow(QMainWindow):
         form.addRow("re_formula", self._re_formula)
         form.addRow("vc_formula", self._vc_formula)
         form.addRow("Model name (save)", self._model_name)
-        lay.addLayout(form)
+        box_lay.addLayout(form)
 
         btn_row = QHBoxLayout()
         self._btn_fit = QPushButton("Fit model")
@@ -469,10 +646,9 @@ class StatmodelsWindow(QMainWindow):
         btn_row.addWidget(self._btn_save)
         btn_row.addWidget(self._btn_load)
         btn_row.addWidget(self._btn_plot)
-        btn_row.addStretch(1)
-        lay.addLayout(btn_row)
+        box_lay.addLayout(btn_row)
 
-        plot_row = QHBoxLayout()
+        plot_form = QFormLayout()
         self._plot_mode = QComboBox()
         self._plot_mode.addItem("auto", "auto")
         self._plot_mode.addItem("continuous (scatter + regression)", "continuous")
@@ -480,18 +656,19 @@ class StatmodelsWindow(QMainWindow):
         self._plot_x = QComboBox()
         self._include_points = QCheckBox("Include points")
         self._include_points.setChecked(True)
-        plot_row.addWidget(QLabel("Plot mode"))
-        plot_row.addWidget(self._plot_mode)
-        plot_row.addWidget(QLabel("x"))
-        plot_row.addWidget(self._plot_x, stretch=1)
-        plot_row.addWidget(self._include_points)
-        lay.addLayout(plot_row)
+        plot_form.addRow("Plot mode", self._plot_mode)
+        plot_form.addRow("Plot x", self._plot_x)
+        plot_form.addRow("", self._include_points)
+        box_lay.addLayout(plot_form)
 
-        splitter = QSplitter(Qt.Vertical)
-        self._report = QPlainTextEdit()
-        self._report.setReadOnly(True)
-        self._report.setPlaceholderText("MixedLM summary will appear here.")
-        splitter.addWidget(self._report)
+        lay.addWidget(box)
+        lay.addStretch(1)
+        return panel
+
+    def _build_plot_panel(self) -> QWidget:
+        """Bottom-left pane: the Matplotlib canvas plus the axis-limit sliders."""
+        box = QGroupBox("Plots")
+        lay = QVBoxLayout(box)
 
         self._plot_host = QWidget()
         self._plot_layout = QVBoxLayout(self._plot_host)
@@ -499,11 +676,60 @@ class StatmodelsWindow(QMainWindow):
         self._plot_hint = QLabel("Parameter / EMM plots appear here after fitting.")
         self._plot_hint.setWordWrap(True)
         self._plot_layout.addWidget(self._plot_hint)
-        splitter.addWidget(self._plot_host)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        lay.addWidget(splitter, stretch=1)
-        return panel
+        lay.addWidget(self._plot_host, stretch=1)
+        lay.addWidget(self._build_axis_controls())
+        return box
+
+    def _build_axis_controls(self) -> QWidget:
+        """Legend toggle plus sliders that rescale the current figure's axes without recomputing."""
+        box = QGroupBox("Axis limits")
+        lay = QVBoxLayout(box)
+
+        legend_row = QHBoxLayout()
+        self._show_legend = QCheckBox("Show legend")
+        self._show_legend.setChecked(True)
+        self._show_legend.setToolTip("Show or hide the plot legend (model curves only; raw points are never listed).")
+        legend_row.addWidget(self._show_legend)
+        legend_row.addStretch(1)
+        lay.addLayout(legend_row)
+
+        grid = QHBoxLayout()
+        self._axis_sliders: dict[str, QSlider] = {}
+        self._axis_value_labels: dict[str, QLabel] = {}
+        for axis, bound, text in (
+            ("x", "min", "x min"),
+            ("x", "max", "x max"),
+            ("y", "min", "y min"),
+            ("y", "max", "y max"),
+        ):
+            key = f"{axis}{bound}"
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, _AXIS_SLIDER_STEPS)
+            slider.setEnabled(False)
+            value_label = QLabel("—")
+            value_label.setMinimumWidth(64)
+            value_label.setStyleSheet("color: #a0a0a0; font-weight: normal;")
+            self._axis_sliders[key] = slider
+            self._axis_value_labels[key] = value_label
+            grid.addWidget(QLabel(text))
+            grid.addWidget(slider, stretch=1)
+            grid.addWidget(value_label)
+
+        self._btn_reset_axes = QPushButton("Reset")
+        self._btn_reset_axes.setEnabled(False)
+        grid.addWidget(self._btn_reset_axes)
+        lay.addLayout(grid)
+        return box
+
+    def _build_report_panel(self) -> QWidget:
+        """Bottom-right pane: the MixedLM summary text."""
+        box = QGroupBox("Model info")
+        lay = QVBoxLayout(box)
+        self._report = QPlainTextEdit()
+        self._report.setReadOnly(True)
+        self._report.setPlaceholderText("MixedLM summary will appear here.")
+        lay.addWidget(self._report)
+        return box
 
     def show_maximized_floating(self) -> None:
         """Show, maximize, raise, and focus this window."""
@@ -712,6 +938,7 @@ class StatmodelsWindow(QMainWindow):
 
     def _on_reload(self) -> None:
         """Reload the analysis frame, clear any active filter, and refresh the preview table/status."""
+        self._refresh_covariate_lists()
         try:
             df = self._load_data()
         except Exception as exc:
@@ -721,30 +948,99 @@ class StatmodelsWindow(QMainWindow):
         self._analysis_df = df
         self._filtered_df = None
         self._refresh_table(df)
+        # Keep an active row/IQR filter applied across reloads.
+        self._recompute_filters(announce=False)
+        working = self._working_df()
         self._status.setText(
-            f"Loaded n={len(df)} rows  |  pipeline={self._pipeline.currentText()}  |  "
-            f"dataset={self._repo.root}"
+            f"Loaded n={len(df)} rows"
+            + (f" (filtered to {len(working)})" if working is not None and len(working) != len(df) else "")
+            + f"  |  pipeline={self._pipeline.currentText()}  |  dataset={self._repo.root}"
         )
         notify(f"Reloaded analysis frame ({len(df)} rows).")
 
+    def _feature_column(self, df: pd.DataFrame) -> str | None:
+        """The analysis-frame column holding the current image measurements, if present."""
+        for cand in (resolve_feature_id(self._current_feature()), self._current_feature()):
+            if cand and cand in df.columns:
+                return cand
+        return None
+
+    def _recompute_filters(self, *, announce: bool = True) -> None:
+        """
+        Re-derive the working frame from the loaded analysis frame by applying the row filter and
+        then the optional IQR filter, and refresh the preview table.
+
+        Both filters are recomputed from the untouched ``_analysis_df`` every time, so toggling one
+        never compounds on a previously filtered frame.
+        """
+        base = self._analysis_df
+        if base is None:
+            return
+
+        out = base
+        row_filter_active = bool(self._filter_val.text().strip())
+        if row_filter_active:
+            out = _apply_row_filter(
+                out,
+                self._filter_col.currentText(),
+                self._filter_op.currentText(),
+                self._filter_val.text(),
+            )
+
+        iqr_note = ""
+        if self._btn_iqr.isChecked():
+            column = self._feature_column(out)
+            if column is None:
+                iqr_note = "IQR: feature column not in frame"
+            else:
+                scope = str(self._iqr_scope.currentData() or "group")
+                by = "group_key" if scope == "group" and "group_key" in out.columns else None
+                before = len(out)
+                out = _apply_iqr_filter(out, column, k=float(self._iqr_k.value()), by=by)
+                iqr_note = (
+                    f"IQR on {column} (k={self._iqr_k.value():g}, "
+                    f"{'per group_key' if by else 'global'}): removed {before - len(out)}"
+                )
+        self._iqr_status.setText(iqr_note)
+
+        self._filtered_df = out if (row_filter_active or self._btn_iqr.isChecked()) else None
+        self._refresh_table(self._working_df())
+        if announce:
+            notify(f"Filters applied: {len(out)} of {len(base)} rows.")
+
     def _on_apply_filter(self) -> None:
-        """Apply the filter row's column/op/value to the loaded analysis frame and refresh the preview."""
+        """Apply the filter row's column/op/value (plus any IQR filter) and refresh the preview."""
         if self._analysis_df is None:
             notify("Reload data before applying a filter.", error=True)
             return
-        col = self._filter_col.currentText()
-        op = self._filter_op.currentText()
-        val = self._filter_val.text()
-        self._filtered_df = _apply_row_filter(self._analysis_df, col, op, val)
-        self._refresh_table(self._filtered_df)
-        notify(f"Filter applied: {len(self._filtered_df)} rows.")
+        self._recompute_filters()
 
     def _on_clear_filter(self) -> None:
-        """Clear the active row filter and restore the full analysis frame in the preview table."""
-        self._filtered_df = None
+        """Clear both the row filter and the IQR filter, restoring the full analysis frame."""
         self._filter_val.clear()
+        self._btn_iqr.blockSignals(True)
+        self._btn_iqr.setChecked(False)
+        self._btn_iqr.blockSignals(False)
+        self._filtered_df = None
+        self._iqr_status.setText("")
         self._refresh_table(self._analysis_df)
-        notify("Filter cleared.")
+        notify("Filters cleared.")
+
+    def _on_iqr_toggled(self, checked: bool) -> None:
+        """Apply or lift the IQR outlier filter."""
+        if self._analysis_df is None:
+            if checked:
+                notify("Reload data before applying the IQR filter.", error=True)
+                self._btn_iqr.blockSignals(True)
+                self._btn_iqr.setChecked(False)
+                self._btn_iqr.blockSignals(False)
+            return
+        self._recompute_filters()
+
+    def _on_iqr_param_changed(self, *_args: Any) -> None:
+        """Re-apply the IQR filter when its multiplier or scope changes (no-op when it is off)."""
+        if self._btn_iqr.isChecked() and self._analysis_df is not None:
+            self._recompute_filters(announce=False)
 
     def _on_fit(self) -> None:
         """Fit (or reload a cached) MixedLM model from the formula/groups/random-effects fields on the
@@ -783,23 +1079,37 @@ class StatmodelsWindow(QMainWindow):
         self._last_df = model_df
         self._last_meta = meta
         report = print_mixedlm_info(result, outcome_name=lhs or feature, group_name=groups)
+        dropped_note = _dropped_rows_note(meta)
+        if dropped_note:
+            report = f"{dropped_note}\n\n{report}"
         self._report.setPlainText(report)
         self._refresh_table(model_df)
         self._status.setText(
-            f"Fitted n={meta.get('n_rows')}  |  groups={groups}  |  "
-            f"re={re_formula!r}  |  dataset={self._repo.root}"
+            f"Fitted n={meta.get('n_rows')}"
+            + (f" (dropped {meta.get('n_rows_dropped')} incomplete)" if meta.get("n_rows_dropped") else "")
+            + f"  |  groups={groups}  |  re={re_formula!r}  |  dataset={self._repo.root}"
         )
         self._on_plot()
         notify("MixedLM fit complete.")
 
     def _clear_plot(self) -> None:
-        """Remove any existing plot widget from the plot host."""
+        """Remove any existing plot widget from the plot host and release its figure."""
         while self._plot_layout.count():
             item = self._plot_layout.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
+        if self._plot_fig is not None:
+            try:
+                import matplotlib.pyplot as plt
+
+                plt.close(self._plot_fig)
+            except Exception:
+                pass
         self._plot_canvas = None
+        self._plot_fig = None
+        self._plot_axes = None
+        self._disable_axis_sliders()
 
     def _on_plot(self) -> None:
         """Redraw the parameter/EMM plot for the last fitted model using the current x/y/group/mode
@@ -810,8 +1120,6 @@ class StatmodelsWindow(QMainWindow):
         try:
             import matplotlib.pyplot as plt
             from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-
-            plt.style.use("dark_background")
 
             feature = self._current_feature()
             y = feature if feature in self._last_df.columns else None
@@ -833,26 +1141,138 @@ class StatmodelsWindow(QMainWindow):
                     f"Cannot plot: need x/y/group columns (have {list(self._last_df.columns)})"
                 )
 
-            plot_mixedlm_params(
-                result=self._last_result,
-                df_fit=self._last_df,
-                x=x,
-                y=y,
-                group=group,
-                mode=mode,
-                include_points=self._include_points.isChecked(),
-                title=f"MixedLM: {y} ~ {x} | {group}",
-            )
-            fig = plt.gcf()
-            fig.patch.set_facecolor("#2b2b2b")
+            # Draw on the light default style regardless of what the app (or a previous call to
+            # plt.style.use) left in the global rcParams, then force the figure/axes patches white.
+            with plt.style.context("default"):
+                fig = plot_mixedlm_params(
+                    result=self._last_result,
+                    df_fit=self._last_df,
+                    x=x,
+                    y=y,
+                    group=group,
+                    mode=mode,
+                    include_points=self._include_points.isChecked(),
+                    title=f"MixedLM: {y} ~ {x} | {group}",
+                )
+            if fig is None:
+                fig = plt.gcf()
+            _whiten_figure(fig)
+
             canvas = FigureCanvasQTAgg(fig)
             self._plot_layout.addWidget(canvas)
             self._plot_canvas = canvas
+            self._plot_fig = fig
+            self._plot_axes = fig.axes[0] if fig.axes else None
+            fig.tight_layout()
             canvas.draw_idle()
+            self._sync_axis_sliders()
+            self._apply_legend_visibility()
         except Exception as exc:
             err = QLabel(f"Plot unavailable: {exc}")
             err.setWordWrap(True)
             self._plot_layout.addWidget(err)
+            self._disable_axis_sliders()
+
+    def _apply_legend_visibility(self) -> None:
+        """Show or hide the current axes legend according to the Show-legend toggle."""
+        ax = self._plot_axes
+        if ax is None or self._plot_canvas is None:
+            return
+        legend = ax.get_legend()
+        if legend is None:
+            return
+        legend.set_visible(self._show_legend.isChecked())
+        self._plot_canvas.draw_idle()
+
+    def _on_legend_toggled(self, *_args: Any) -> None:
+        """Toggle legend visibility without recomputing the plot."""
+        self._apply_legend_visibility()
+
+    def _disable_axis_sliders(self) -> None:
+        """Grey out the axis-limit controls (no figure to rescale)."""
+        for key, slider in self._axis_sliders.items():
+            slider.blockSignals(True)
+            slider.setEnabled(False)
+            slider.blockSignals(False)
+            self._axis_value_labels[key].setText("—")
+        self._btn_reset_axes.setEnabled(False)
+        self._axis_base = {}
+        self._axis_span = {}
+
+    def _sync_axis_sliders(self) -> None:
+        """
+        Capture the freshly drawn axes limits as the slider baseline and move the handles to match.
+
+        Each slider spans the plotted range padded by ``_AXIS_SLIDER_MARGIN`` on both sides, so the
+        handles start inset and the user can zoom out as well as in.
+        """
+        ax = self._plot_axes
+        if ax is None:
+            self._disable_axis_sliders()
+            return
+
+        self._axis_base = {"x": tuple(ax.get_xlim()), "y": tuple(ax.get_ylim())}
+        self._axis_span = {}
+        for axis, (lo, hi) in self._axis_base.items():
+            span = float(hi) - float(lo)
+            pad = (abs(span) * _AXIS_SLIDER_MARGIN) if span else 1.0
+            self._axis_span[axis] = (float(lo) - pad, float(hi) + pad)
+
+        for key, slider in self._axis_sliders.items():
+            axis, bound = key[0], key[1:]
+            value = self._axis_base[axis][0 if bound == "min" else 1]
+            slider.blockSignals(True)
+            slider.setEnabled(True)
+            slider.setValue(self._axis_value_to_slider(axis, value))
+            slider.blockSignals(False)
+            self._axis_value_labels[key].setText(f"{value:.4g}")
+        self._btn_reset_axes.setEnabled(True)
+
+    def _axis_slider_to_value(self, axis: str, position: int) -> float:
+        """Map a slider position to a data coordinate on *axis*."""
+        lo, hi = self._axis_span[axis]
+        return lo + (hi - lo) * (position / _AXIS_SLIDER_STEPS)
+
+    def _axis_value_to_slider(self, axis: str, value: float) -> int:
+        """Map a data coordinate on *axis* back to a slider position."""
+        lo, hi = self._axis_span[axis]
+        if hi == lo:
+            return 0
+        frac = (float(value) - lo) / (hi - lo)
+        return int(round(min(max(frac, 0.0), 1.0) * _AXIS_SLIDER_STEPS))
+
+    def _on_axis_slider_changed(self, *_args: Any) -> None:
+        """Rescale the current figure's axes to the slider positions and redraw the canvas."""
+        ax = self._plot_axes
+        if ax is None or not self._axis_span or self._plot_canvas is None:
+            return
+        for axis, setter in (("x", ax.set_xlim), ("y", ax.set_ylim)):
+            lo = self._axis_slider_to_value(axis, self._axis_sliders[f"{axis}min"].value())
+            hi = self._axis_slider_to_value(axis, self._axis_sliders[f"{axis}max"].value())
+            self._axis_value_labels[f"{axis}min"].setText(f"{lo:.4g}")
+            self._axis_value_labels[f"{axis}max"].setText(f"{hi:.4g}")
+            if hi <= lo:  # crossed handles would raise; keep a hair of range instead
+                span = self._axis_span[axis]
+                hi = lo + abs(span[1] - span[0]) / _AXIS_SLIDER_STEPS or lo + 1e-9
+            setter(lo, hi)
+        self._plot_canvas.draw_idle()
+
+    def _on_reset_axes(self) -> None:
+        """Restore the autoscaled limits captured when the plot was drawn."""
+        ax = self._plot_axes
+        if ax is None or not self._axis_base:
+            return
+        ax.set_xlim(*self._axis_base["x"])
+        ax.set_ylim(*self._axis_base["y"])
+        for key, slider in self._axis_sliders.items():
+            axis, bound = key[0], key[1:]
+            value = self._axis_base[axis][0 if bound == "min" else 1]
+            slider.blockSignals(True)
+            slider.setValue(self._axis_value_to_slider(axis, value))
+            slider.blockSignals(False)
+            self._axis_value_labels[key].setText(f"{value:.4g}")
+        if self._plot_canvas is not None:
+            self._plot_canvas.draw_idle()
 
     def _config_dict(self) -> dict[str, Any]:
         """Serialize the current data-selection, covariate, formula, and plot settings to a plain dict
@@ -874,6 +1294,10 @@ class StatmodelsWindow(QMainWindow):
             "plot_mode": str(self._plot_mode.currentData() or "auto"),
             "plot_x": self._plot_x.currentText().strip(),
             "include_points": self._include_points.isChecked(),
+            "show_legend": self._show_legend.isChecked(),
+            "iqr_enabled": self._btn_iqr.isChecked(),
+            "iqr_k": float(self._iqr_k.value()),
+            "iqr_scope": str(self._iqr_scope.currentData() or "group"),
         }
 
     def _apply_config(self, cfg: dict[str, Any]) -> None:
@@ -934,6 +1358,20 @@ class StatmodelsWindow(QMainWindow):
             self._plot_x.setCurrentText(str(cfg["plot_x"]))
         if "include_points" in cfg:
             self._include_points.setChecked(bool(cfg["include_points"]))
+        if "show_legend" in cfg:
+            self._show_legend.setChecked(bool(cfg["show_legend"]))
+
+        if "iqr_k" in cfg:
+            self._iqr_k.setValue(float(cfg["iqr_k"]))
+        iqr_scope = str(cfg.get("iqr_scope") or "")
+        if iqr_scope:
+            sidx = self._iqr_scope.findData(iqr_scope)
+            if sidx >= 0:
+                self._iqr_scope.setCurrentIndex(sidx)
+        if "iqr_enabled" in cfg:
+            self._btn_iqr.blockSignals(True)
+            self._btn_iqr.setChecked(bool(cfg["iqr_enabled"]))
+            self._btn_iqr.blockSignals(False)
 
     def _on_save(self) -> None:
         """Save the last fitted model (pickle), its config, and its summary text under
@@ -989,6 +1427,11 @@ class StatmodelsWindow(QMainWindow):
                     self._filtered_df = None
                     self._last_df = df
                     self._refresh_table(df)
+                    # Re-apply any IQR / row filter restored from the saved config.
+                    self._recompute_filters(announce=False)
+                    working = self._working_df()
+                    if working is not None:
+                        self._last_df = working
                     self._on_plot()
                 except Exception:
                     pass

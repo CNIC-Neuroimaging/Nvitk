@@ -20,6 +20,78 @@ def _safe_col(name: str) -> str:
     return re.sub(r"[^0-9a-zA-Z_]+", "_", str(name))
 
 
+def _formula_tokens(text: str) -> set[str]:
+    """Identifier-like tokens in a patsy formula string (mirrors how statsmodels resolves formula terms)."""
+    import tokenize
+    from io import StringIO
+
+    raw = str(text or "").strip()
+    if not raw:
+        return set()
+    try:
+        return {tok.string for tok in tokenize.generate_tokens(StringIO(raw).readline)}
+    except Exception:
+        return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", raw))
+
+
+def formula_columns(
+    columns: Iterable[str],
+    formula: str,
+    *,
+    re_formula: str | None = None,
+    vc_formula: Mapping[str, str] | None = None,
+    groups: str | None = None,
+) -> list[str]:
+    """
+    Columns of *columns* referenced by the fixed-effects *formula* and the random-effects /
+    variance-component specs.
+
+    Used to align the NA-drop set with the rows patsy will actually keep: patsy silently drops rows
+    with missing values in formula terms, while ``groups`` / ``exog_re`` keep their full length,
+    which makes statsmodels raise ``Shape mismatch between endog/exog and extra 2d arrays``.
+    """
+    available = {str(c) for c in columns}
+    tokens: set[str] = set()
+    for text in (formula, re_formula, *(dict(vc_formula or {}).values())):
+        tokens |= _formula_tokens(text or "")
+    if groups:
+        tokens.add(str(groups))
+    return sorted(tokens & available)
+
+
+def _coerce_object_numerics(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+    """
+    Coerce object/string columns that look numeric to ``float64``.
+
+    Patsy treats object-dtype columns as categoricals (``Hematocrit[T.36.0]``, …) even when every
+    cell is a float. That happens when clinical wide frames mix numeric and text variables into one
+    ``value`` series before the pivot. Skip columns wrapped in ``C(...)`` by the caller — we only
+    receive bare column names here.
+    """
+    out = df
+    changed = False
+    for col in columns:
+        if col not in out.columns:
+            continue
+        series = out[col]
+        if pd.api.types.is_numeric_dtype(series) or isinstance(series.dtype, pd.CategoricalDtype):
+            continue
+        if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+            continue
+        numeric = pd.to_numeric(series, errors="coerce")
+        # Only convert when the column is predominantly numeric (avoid turning IDs / groups into NaN).
+        n_non_null = int(series.notna().sum())
+        if n_non_null == 0:
+            continue
+        if int(numeric.notna().sum()) < max(1, int(0.9 * n_non_null)):
+            continue
+        if not changed:
+            out = df.copy()
+            changed = True
+        out[col] = numeric
+    return out
+
+
 def _match_grid_columns_to_df_dtypes(
     grid: pd.DataFrame,
     df_ref: pd.DataFrame,
@@ -80,6 +152,10 @@ def _default_fit_function(
         groups=model_df[groups],
         re_formula=re_formula,
         vc_formula=vc_formula,
+        # Let MixedLM drop incomplete rows from the design *and* from groups/exog_re/exog_vc
+        # together. With the default ('none') only patsy drops them, and the length mismatch
+        # surfaces as "Shape mismatch between endog/exog and extra 2d arrays given to model".
+        missing="drop",
     )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")
@@ -108,6 +184,11 @@ def fit_or_load_mixedlm(
     """
     Fit or load a statsmodels MixedLM result.
 
+    Rows with missing values in any column referenced by *formula* / *re_formula* / *vc_formula*
+    are dropped before fitting, so the returned ``model_df`` has the same grain as the fit and can
+    be reused for prediction / plotting. Pass *dropna_columns* to restrict the NA-drop to an
+    explicit column set instead.
+
     Returns
     -------
     (result, model_df, metadata)
@@ -121,6 +202,22 @@ def fit_or_load_mixedlm(
     df = data.copy()
     df.columns = [_safe_col(c) for c in df.columns]
 
+    # Patsy formula tokens that are *not* wrapped in C() — coerce object-numerics among these so
+    # Hematocrit/age/sex stay continuous even if the upstream wide frame upcast them to object.
+    formula_cols = formula_columns(
+        df.columns,
+        formula,
+        re_formula=re_formula,
+        vc_formula=vc_formula,
+        groups=groups,
+    )
+    # Keep explicit C(col) terms categorical: drop any name that appears inside C(...) in the formula.
+    categorical_forced = set()
+    for text in (formula, re_formula, *(dict(vc_formula or {}).values())):
+        categorical_forced |= set(re.findall(r"C\(\s*([A-Za-z_][A-Za-z0-9_]*)", str(text or "")))
+    coerce_cols = [c for c in formula_cols if c not in categorical_forced]
+    df = _coerce_object_numerics(df, coerce_cols)
+
     req = list(required_columns or [])
     if groups not in req:
         req.append(groups)
@@ -131,10 +228,26 @@ def fit_or_load_mixedlm(
     if outcome_transform is not None:
         df = outcome_transform(df)
 
-    na_cols = list(dropna_columns or req)
+    if dropna_columns is None:
+        na_cols = sorted(set(req) | set(formula_cols))
+    else:
+        na_cols = list(dropna_columns)
     na_cols = [c for c in na_cols if c in df.columns]
+
+    n_input = int(len(df))
+    dropped_by_column: dict[str, int] = {}
     if na_cols:
+        dropped_by_column = {
+            c: int(df[c].isna().sum()) for c in na_cols if bool(df[c].isna().any())
+        }
         df = df.dropna(subset=na_cols).reset_index(drop=True)
+    if not len(df):
+        detail = ", ".join(f"{c} ({n} missing)" for c, n in sorted(dropped_by_column.items()))
+        raise ValueError(
+            f"No complete rows left for MixedLM after dropping missing values in {na_cols} "
+            f"(started from {n_input} rows)."
+            + (f" Columns with missing values: {detail}." if detail else "")
+        )
 
     metadata = {
         "model_path": str(path),
@@ -142,7 +255,11 @@ def fit_or_load_mixedlm(
         "groups": groups,
         "re_formula": re_formula,
         "vc_formula": vc_formula,
+        "n_rows_input": n_input,
         "n_rows": int(len(df)),
+        "n_rows_dropped": n_input - int(len(df)),
+        "dropna_columns": na_cols,
+        "dropped_by_column": dropped_by_column,
         "loaded": False,
     }
 
@@ -321,16 +438,22 @@ def plot_mixedlm_params(
         xmin, xmax = float(np.nanmin(x_num)), float(np.nanmax(x_num))
         x_line = np.linspace(xmin, xmax, 200)
 
+        point_hue = hue if hue else group
+        groups = group_order or sorted(df[group].dropna().astype(str).unique())
+        colors = sns.color_palette(palette, n_colors=max(len(groups), 3))
+        cmap = {g: colors[i % len(colors)] for i, g in enumerate(groups)}
+
         if include_points:
             sns.scatterplot(
                 data=df,
                 x=x,
                 y=y,
-                hue=hue if hue else group,
-                hue_order=hue_order if hue else group_order,
-                palette=palette,
+                hue=point_hue,
+                hue_order=hue_order if hue else groups,
+                palette=cmap if point_hue == group else palette,
                 alpha=0.5,
                 s=18,
+                legend=False,
                 ax=ax,
             )
 
@@ -343,9 +466,6 @@ def plot_mixedlm_params(
             extra += float(fe.get(cov_name, 0.0)) * float(cov_val)
 
         ax.plot(x_line, b_int + extra + b_x * x_line, color="black", lw=2.8, ls="--", label="Fixed effect")
-        groups = group_order or sorted(df[group].dropna().astype(str).unique())
-        colors = sns.color_palette(palette, n_colors=max(len(groups), 3))
-        cmap = {g: colors[i % len(colors)] for i, g in enumerate(groups)}
         for g in groups:
             re_vals = re_dict.get(g, re_dict.get(str(g), None))
             if re_vals is None:
@@ -460,16 +580,28 @@ def plot_mixedlm_params(
             log.error(f"Error calculating EMM: {e}")
 
         if include_points:
+            # Color raw observations like the EMM / territory lines, but keep them out of the
+            # legend so it only lists the model curves.
+            point_hue = hue if hue is not None else (group if group != x else None)
+            if point_hue == hue and hue_order is not None:
+                point_hue_order = list(hue_order)
+            elif point_hue == group and group_order is not None:
+                point_hue_order = list(group_order)
+            elif point_hue is not None:
+                point_hue_order = list(pd.unique(df[point_hue].dropna().astype(str)))
+            else:
+                point_hue_order = None
             sns.pointplot(
                 data=df,
                 x=x,
                 y=y,
-                hue=hue,
+                hue=point_hue,
                 order=order,
-                hue_order=hue_order,
+                hue_order=point_hue_order,
                 palette=palette,
                 errorbar=None,
-                dodge=True if hue else False,
+                dodge=True if point_hue else False,
+                legend=False,
                 ax=ax,
             )
 
@@ -556,6 +688,7 @@ def build_mixedlm_frame_from_repo(
 
 __all__ = [
     "fit_or_load_mixedlm",
+    "formula_columns",
     "print_mixedlm_info",
     "plot_mixedlm_params",
     "build_mixedlm_frame_from_repo",
