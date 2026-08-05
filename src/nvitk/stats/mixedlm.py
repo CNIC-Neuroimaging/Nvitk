@@ -92,6 +92,50 @@ def _coerce_object_numerics(df: pd.DataFrame, columns: Iterable[str]) -> pd.Data
     return out
 
 
+def _lighten(color: Any, amount: float = 0.55) -> tuple[float, float, float]:
+    """
+    Blend an RGB *color* towards white by *amount*.
+
+    Used to give observed (unadjusted) means a lighter tone of their group's colour: the pairing
+    stays obvious, but the model curve and the raw data are no longer the same ink.
+    """
+    import matplotlib.colors as mcolors
+
+    r, g, b = mcolors.to_rgb(color)
+    factor = min(max(float(amount), 0.0), 1.0)
+    return (r + (1.0 - r) * factor, g + (1.0 - g) * factor, b + (1.0 - b) * factor)
+
+
+def _z_critical(ci_level: float) -> float:
+    """Two-sided normal critical value for a confidence level (0.95 → 1.959964…)."""
+    from scipy.stats import norm
+
+    level = min(max(float(ci_level), 0.5), 0.9999)
+    return float(norm.ppf(1.0 - (1.0 - level) / 2.0))
+
+
+_NATURAL_CHUNK_RE = re.compile(r"(\d+)")
+
+
+def _natural_sort_key(value: Any) -> tuple:
+    """
+    Sort key that orders embedded numbers numerically: ``g0 < g1 < g2 < g10``.
+
+    Plain string sorting puts ``g10`` before ``g2``; plain ``pd.unique`` order is not sorted at all.
+    Numeric values sort ahead of strings so a mixed column still has a deterministic order.
+    """
+    if isinstance(value, (int, float, np.integer, np.floating)) and not pd.isna(value):
+        return (0, float(value), "")
+    text = str(value)
+    # Split into alternating text / number chunks so comparison happens piecewise.
+    chunks = tuple(
+        (1, 0.0, chunk.lower()) if i % 2 == 0 else (0, float(chunk), "")
+        for i, chunk in enumerate(_NATURAL_CHUNK_RE.split(text))
+        if chunk != ""
+    )
+    return (1, 0.0, "") + chunks
+
+
 def _match_grid_columns_to_df_dtypes(
     grid: pd.DataFrame,
     df_ref: pd.DataFrame,
@@ -284,6 +328,256 @@ def fit_or_load_mixedlm(
     return result, df, metadata
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Model reporting — structured extraction, then rendering
+# ──────────────────────────────────────────────────────────────────────────────
+def significance_stars(pval: float) -> str:
+    """Conventional significance marker: ``***`` <0.001, ``**`` <0.01, ``*`` <0.05, ``.`` <0.1,
+    ``NS`` otherwise, and ``""`` for a missing p-value."""
+    if pval is None or np.isnan(pval):
+        return ""
+    if pval < 0.001:
+        return "***"
+    if pval < 0.01:
+        return "**"
+    if pval < 0.05:
+        return "*"
+    if pval < 0.1:
+        return "."
+    return "NS"
+
+
+def mixedlm_coef_frame(result: Any, *, alpha: float = 0.05) -> pd.DataFrame:
+    """
+    Fixed-effects table of a MixedLM fit.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``parameter, coef, std_err, z, p_value, ci_low, ci_high, sig``. ``z`` and the
+        confidence bounds are derived from the coefficient and its standard error (a Wald interval),
+        so they are present even for results that do not expose ``conf_int``.
+    """
+    fe = result.fe_params
+    fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
+    fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
+    # 1.959964… for the default alpha; computed so a caller can widen/narrow the interval.
+    from scipy.stats import norm
+
+    crit = float(norm.ppf(1.0 - alpha / 2.0))
+
+    rows: list[dict[str, Any]] = []
+    for param in fe.index:
+        coef = float(fe[param])
+        se = float(fe_se.get(param, np.nan))
+        pval = float(fe_p.get(param, np.nan))
+        rows.append(
+            {
+                "parameter": str(param),
+                "coef": coef,
+                "std_err": se,
+                "z": coef / se if se else np.nan,
+                "p_value": pval,
+                "ci_low": coef - crit * se,
+                "ci_high": coef + crit * se,
+                "sig": significance_stars(pval),
+            }
+        )
+    return pd.DataFrame(rows, columns=[
+        "parameter", "coef", "std_err", "z", "p_value", "ci_low", "ci_high", "sig",
+    ])
+
+
+def mixedlm_random_effects_frame(result: Any) -> pd.DataFrame:
+    """
+    Variance structure of a MixedLM fit, one row per component.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``component, kind, var, sd``. ``kind`` is ``"cov_re"`` for the group random-effects
+        covariance diagonal, ``"vcomp"`` for variance components, and ``"residual"`` for the scale.
+    """
+    rows: list[dict[str, Any]] = []
+
+    cov_re = getattr(result, "cov_re", None)
+    if isinstance(cov_re, pd.DataFrame) and not cov_re.empty:
+        for name in cov_re.index:
+            var = float(cov_re.loc[name, name]) if name in cov_re.columns else np.nan
+            rows.append(
+                {
+                    "component": str(name),
+                    "kind": "cov_re",
+                    "var": var,
+                    "sd": float(np.sqrt(max(var, 0.0))) if np.isfinite(var) else np.nan,
+                }
+            )
+
+    vcomp = getattr(result, "vcomp", None)
+    if vcomp is not None:
+        vc_names = getattr(result.model, "vc_names", [f"VC_{i}" for i in range(len(vcomp))])
+        for name, var in zip(vc_names, vcomp):
+            var_f = float(var)
+            rows.append(
+                {
+                    "component": str(name),
+                    "kind": "vcomp",
+                    "var": var_f,
+                    "sd": float(np.sqrt(max(var_f, 0.0))),
+                }
+            )
+
+    if hasattr(result, "scale"):
+        scale = float(result.scale)
+        rows.append(
+            {
+                "component": "Residual",
+                "kind": "residual",
+                "var": scale,
+                "sd": float(np.sqrt(max(scale, 0.0))),
+            }
+        )
+    return pd.DataFrame(rows, columns=["component", "kind", "var", "sd"])
+
+
+def mixedlm_info_dict(
+    result: Any,
+    *,
+    outcome_name: str = "Outcome",
+    group_name: str = "Group",
+    vc_group_name: str = "Variance Components",
+) -> dict[str, Any]:
+    """
+    Everything :func:`print_mixedlm_info` reports, as structured data.
+
+    This is the single source of truth for model reporting: :func:`render_mixedlm_info` turns it back
+    into the classic fixed-width text, and the GUI renders the same dict as tables.
+
+    Returns
+    -------
+    dict
+        ``header``  — ``formula`` (``None`` when the model does not expose one), ``n_obs``,
+        ``n_groups``, ``group_name``, ``outcome_name``, ``vc_group_name``;
+        ``fixed_effects``  — :func:`mixedlm_coef_frame` output;
+        ``random_effects`` — :func:`mixedlm_random_effects_frame` output;
+        ``cov_re``         — the raw group covariance matrix (empty frame when absent);
+        ``fit_statistics`` — ``llf``, ``aic``, ``bic``, ``converged``, ``scale``, ``resid_sd``
+        (keys are omitted when the result does not expose them).
+
+    Raises
+    ------
+    ValueError
+        If *result* does not look like a ``MixedLMResults``.
+    """
+    required_attrs = ["fe_params", "summary", "nobs"]
+    missing = [a for a in required_attrs if not hasattr(result, a)]
+    if missing:
+        raise ValueError(f"Object does not look like MixedLMResults. Missing attributes: {missing}")
+
+    # ---- 1. Header: formula is best-effort, some fitters do not carry one ------
+    try:
+        formula = str(result.model.formula)
+    except Exception:
+        formula = None
+    ngroups = getattr(result, "ngroups", None)
+    if ngroups is None and hasattr(result, "random_effects"):
+        ngroups = len(result.random_effects)
+
+    header = {
+        "formula": formula,
+        "n_obs": int(result.nobs),
+        "n_groups": int(ngroups) if ngroups is not None else None,
+        "group_name": group_name,
+        "outcome_name": outcome_name,
+        "vc_group_name": vc_group_name,
+    }
+
+    # ---- 2. Fit statistics, each guarded so a partial result still reports -----
+    fit_stats: dict[str, Any] = {}
+    for attr in ("llf", "aic", "bic"):
+        if hasattr(result, attr):
+            fit_stats[attr] = float(getattr(result, attr))
+    if hasattr(result, "converged"):
+        fit_stats["converged"] = bool(result.converged)
+    if hasattr(result, "scale"):
+        scale = float(result.scale)
+        fit_stats["scale"] = scale
+        fit_stats["resid_sd"] = float(np.sqrt(max(scale, 0.0)))
+
+    cov_re = getattr(result, "cov_re", pd.DataFrame())
+    if not isinstance(cov_re, pd.DataFrame):
+        cov_re = pd.DataFrame()
+
+    return {
+        "header": header,
+        "fixed_effects": mixedlm_coef_frame(result),
+        "random_effects": mixedlm_random_effects_frame(result),
+        "cov_re": cov_re,
+        "fit_statistics": fit_stats,
+        "has_vcomp": getattr(result, "vcomp", None) is not None,
+    }
+
+
+def render_mixedlm_info(info: dict[str, Any]) -> str:
+    """Render :func:`mixedlm_info_dict` output as the classic fixed-width MixedLM report."""
+    header = dict(info.get("header") or {})
+    group_name = str(header.get("group_name") or "Group")
+    fit_stats = dict(info.get("fit_statistics") or {})
+
+    buffer = io.StringIO()
+    _w = lambda line="": buffer.write(f"{line}\n")
+
+    _w("=" * 88)
+    _w(f"Mixed Linear Model - {header.get('outcome_name', 'Outcome')}")
+    _w("=" * 88)
+    if header.get("formula"):
+        _w(f"Formula: {header['formula']}")
+    _w(f"Observations: {int(header.get('n_obs') or 0):,}")
+    if header.get("n_groups") is not None:
+        _w(f"{group_name} groups: {int(header['n_groups']):,}")
+    _w()
+
+    _w("Fixed effects")
+    _w("-" * 88)
+    _w(f"{'Parameter':<34}{'Coef':>12}{'Std.Err':>12}{'P-value':>12}{'Sig':>10}")
+    for row in info["fixed_effects"].itertuples(index=False):
+        _w(
+            f"{row.parameter:<34}{row.coef:>12.4f}{row.std_err:>12.4f}"
+            f"{row.p_value:>12.4g}{row.sig:>10}"
+        )
+    _w()
+
+    cov_re = info.get("cov_re")
+    if isinstance(cov_re, pd.DataFrame) and not cov_re.empty:
+        _w(f"{group_name} random effects covariance")
+        _w("-" * 88)
+        _w(cov_re.to_string())
+        _w()
+
+    if info.get("has_vcomp"):
+        re_frame = info["random_effects"]
+        _w(f"Variance components ({header.get('vc_group_name', 'Variance Components')})")
+        _w("-" * 88)
+        for row in re_frame[re_frame["kind"] == "vcomp"].itertuples(index=False):
+            _w(f"{row.component:<24} var={row.var:.6f}  sd={row.sd:.6f}")
+        _w()
+
+    if "scale" in fit_stats:
+        _w(f"Residual variance: {fit_stats['scale']:.6f}")
+        _w(f"Residual std dev: {fit_stats['resid_sd']:.6f}")
+        _w()
+
+    _w("Fit statistics")
+    _w("-" * 88)
+    for attr in ("llf", "aic", "bic"):
+        if attr in fit_stats:
+            _w(f"{attr.upper():<8}: {fit_stats[attr]:.4f}")
+    if "converged" in fit_stats:
+        _w(f"Converged: {fit_stats['converged']}")
+    _w("=" * 88)
+    return buffer.getvalue()
+
+
 def print_mixedlm_info(
     result: Any,
     *,
@@ -293,87 +587,13 @@ def print_mixedlm_info(
     output_path: str | Path | None = None,
 ) -> str:
     """Print and optionally save a generic MixedLM summary report."""
-    required_attrs = ["fe_params", "summary", "nobs"]
-    missing = [a for a in required_attrs if not hasattr(result, a)]
-    if missing:
-        raise ValueError(f"Object does not look like MixedLMResults. Missing attributes: {missing}")
-
-    buffer = io.StringIO()
-    _w = lambda line="": buffer.write(f"{line}\n")
-
-    _w("=" * 88)
-    _w(f"Mixed Linear Model - {outcome_name}")
-    _w("=" * 88)
-    try:
-        _w(f"Formula: {result.model.formula}")
-    except Exception:
-        pass
-    _w(f"Observations: {int(result.nobs):,}")
-    ngroups = getattr(result, "ngroups", None)
-    if ngroups is None and hasattr(result, "random_effects"):
-        ngroups = len(result.random_effects)
-    if ngroups is not None:
-        _w(f"{group_name} groups: {int(ngroups):,}")
-    _w()
-
-    fe = result.fe_params
-    fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
-    fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
-    _w("Fixed effects")
-    _w("-" * 88)
-    _w(f"{'Parameter':<34}{'Coef':>12}{'Std.Err':>12}{'P-value':>12}{'Sig':>10}")
-    for param in fe.index:
-        coef = float(fe[param])
-        se = float(fe_se.get(param, np.nan))
-        pval = float(fe_p.get(param, np.nan))
-        if np.isnan(pval):
-            sig = ""
-        elif pval < 0.001:
-            sig = "***"
-        elif pval < 0.01:
-            sig = "**"
-        elif pval < 0.05:
-            sig = "*"
-        elif pval < 0.1:
-            sig = "."
-        else:
-            sig = "NS"
-        _w(f"{param:<34}{coef:>12.4f}{se:>12.4f}{pval:>12.4g}{sig:>10}")
-    _w()
-
-    cov_re = getattr(result, "cov_re", pd.DataFrame())
-    if isinstance(cov_re, pd.DataFrame) and not cov_re.empty:
-        _w(f"{group_name} random effects covariance")
-        _w("-" * 88)
-        _w(cov_re.to_string())
-        _w()
-
-    vcomp = getattr(result, "vcomp", None)
-    if vcomp is not None:
-        vc_names = getattr(result.model, "vc_names", [f"VC_{i}" for i in range(len(vcomp))])
-        _w(f"Variance components ({vc_group_name})")
-        _w("-" * 88)
-        for name, var in zip(vc_names, vcomp):
-            var_f = float(var)
-            _w(f"{name:<24} var={var_f:.6f}  sd={np.sqrt(max(var_f, 0.0)):.6f}")
-        _w()
-
-    if hasattr(result, "scale"):
-        scale = float(result.scale)
-        _w(f"Residual variance: {scale:.6f}")
-        _w(f"Residual std dev: {np.sqrt(max(scale, 0.0)):.6f}")
-        _w()
-
-    _w("Fit statistics")
-    _w("-" * 88)
-    for attr in ("llf", "aic", "bic"):
-        if hasattr(result, attr):
-            _w(f"{attr.upper():<8}: {float(getattr(result, attr)):.4f}")
-    if hasattr(result, "converged"):
-        _w(f"Converged: {bool(result.converged)}")
-    _w("=" * 88)
-
-    text = buffer.getvalue()
+    info = mixedlm_info_dict(
+        result,
+        outcome_name=outcome_name,
+        group_name=group_name,
+        vc_group_name=vc_group_name,
+    )
+    text = render_mixedlm_info(info)
     log.info(text)
     if output_path is not None:
         out = Path(output_path)
@@ -396,7 +616,9 @@ def plot_mixedlm_params(
     hue_order: list[str] | None = None,
     palette: str | Mapping[str, str] = "tab10",
     include_points: bool = True,
+    restrict_to_orders: bool = False,
     errorbar: bool = False,
+    ci_level: float = 0.95,
     covariate_refs: dict[str, float] | None = None,
     output_path: str | Path | None = None,
     title: str = "MixedLM parameter plot",
@@ -410,6 +632,25 @@ def plot_mixedlm_params(
     (e.g. ``C(x) * C(territory)``), pass that factor as ``hue`` or as ``group``
     when it differs from ``x``; the grid is then the factorial ``x`` × factor so
     patsy can evaluate all terms.
+
+    Parameters
+    ----------
+    restrict_to_orders : bool
+        By default ``group_order`` / ``hue_order`` / ``categorical_order`` only select which model
+        curves are drawn — the raw observations still show every level. Set this to also subset
+        ``df_fit`` to the listed levels, so hiding a group hides its points and lets the axes
+        autoscale to what remains. The fit itself is untouched: the fixed-effect line is still the
+        all-group estimate.
+    errorbar : bool
+        Draw the confidence interval of the model predictions. In categorical mode these are
+        whiskers on each marginal mean, from the delta-method standard error of the fixed-effects
+        prediction; in continuous mode a shaded band around the fixed-effect line.
+    ci_level : float
+        Confidence level for those intervals.
+    include_points : bool
+        Overlay the observed data. In continuous mode this is a scatter of individual rows; in
+        categorical mode it is the **mean of y within each (x, hue) cell** — an unadjusted
+        counterpart to the model's marginal means, drawn dashed and in a lighter tone.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -430,6 +671,19 @@ def plot_mixedlm_params(
         mode = "categorical" if (categorical_order is not None or not pd.api.types.is_numeric_dtype(df[x])) else "continuous"
     if mode not in {"continuous", "categorical"}:
         raise ValueError("mode must be one of: auto, continuous, categorical")
+
+    # ---- 0. Optionally subset the raw data to the requested levels --------------
+    # Done before anything reads ``df`` so the scatter/pointplot cloud, the x-range and the
+    # categorical tick order all follow the selection.
+    if restrict_to_orders:
+        if group_order is not None and group in df.columns:
+            df = df.loc[df[group].astype(str).isin({str(g) for g in group_order})]
+        if hue is not None and hue_order is not None and hue in df.columns:
+            df = df.loc[df[hue].astype(str).isin({str(h) for h in hue_order})]
+        if mode == "categorical" and categorical_order is not None and x in df.columns:
+            df = df.loc[df[x].astype(str).isin({str(v) for v in categorical_order})]
+        if df.empty:
+            raise ValueError("No rows left after restricting to the selected levels.")
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -463,9 +717,49 @@ def plot_mixedlm_params(
         b_x = float(fe.get(x, 0.0))
         extra = 0.0
         for cov_name, cov_val in covariate_refs.items():
-            extra += float(fe.get(cov_name, 0.0)) * float(cov_val)
+            # Categorical references (a level name) are only meaningful to the categorical branch's
+            # patsy grid; here they would blow up on float().
+            if isinstance(cov_val, (int, float, np.integer, np.floating)):
+                extra += float(fe.get(cov_name, 0.0)) * float(cov_val)
 
         ax.plot(x_line, b_int + extra + b_x * x_line, color="black", lw=2.8, ls="--", label="Fixed effect")
+
+        if errorbar:
+            # Band on the fixed-effect line only. The per-group lines add a random-effect
+            # deviation, whose uncertainty is not in ``cov_params``, so shading them would show a
+            # narrower interval than is actually warranted.
+            try:
+                import patsy
+
+                grid = pd.DataFrame({x: x_line})
+                for cov_name, cov_val in covariate_refs.items():
+                    if cov_name != x:
+                        grid[cov_name] = cov_val
+                grid = _match_grid_columns_to_df_dtypes(
+                    grid, df, [c for c in grid.columns if c in df.columns]
+                )
+                design = patsy.build_design_matrices(
+                    [result.model.data.design_info], grid, return_type="dataframe"
+                )[0]
+                fe_all = result.fe_params
+                cov_all = result.cov_params().loc[fe_all.index, fe_all.index]
+                design = design.reindex(columns=fe_all.index, fill_value=0.0)
+                mean = design @ fe_all
+                se = np.sqrt(np.sum((design @ cov_all) * design, axis=1))
+                crit = _z_critical(ci_level)
+                ax.fill_between(
+                    x_line,
+                    mean - crit * se,
+                    mean + crit * se,
+                    color="black",
+                    alpha=0.12,
+                    label=f"{int(round(ci_level * 100))}% CI (fixed effect)",
+                )
+            except Exception as exc:
+                log.warning("Could not build the confidence band: %s", exc)
+                log.debug("CI band failure", exc_info=True)
+                fig.ci_error = str(exc)
+
         for g in groups:
             re_vals = re_dict.get(g, re_dict.get(str(g), None))
             if re_vals is None:
@@ -478,7 +772,19 @@ def plot_mixedlm_params(
             #     ax.fill_between(x_line, y_line - 1.96 * se, y_line + 1.96 * se, color=cmap[g], alpha=0.2)
 
     else:
-        order = list(categorical_order) if categorical_order is not None else list(pd.unique(df[x].dropna()))
+        # Order the categorical axis. ``pd.unique`` returns first-appearance order, which puts the
+        # levels in whatever sequence the rows happen to arrive in (g1, g2, g0, g3) — meaningless to
+        # read and different on every reload.
+        if categorical_order is not None:
+            order = list(categorical_order)
+        elif isinstance(df[x].dtype, pd.CategoricalDtype) and df[x].dtype.ordered:
+            # A binned column already carries its intended order; honour it rather than re-sorting,
+            # so labels like "low"/"medium"/"high" stay in sequence.
+            present = set(df[x].dropna().astype(str))
+            order = [c for c in df[x].dtype.categories if str(c) in present]
+        else:
+            # Natural sort so g2 comes before g10.
+            order = sorted(pd.unique(df[x].dropna()), key=_natural_sort_key)
         # Second factor: interaction models need a full factorial x × (hue|group) grid
         # so patsy can evaluate e.g. C(x) * C(territory); a single-column grid raises
         # NameError for the missing factor.
@@ -488,31 +794,37 @@ def plot_mixedlm_params(
         elif group is not None and group != x:
             facet_col = group
 
+        # ---- Colours, fixed once so the model curves and the observed means stay in step --------
+        facet_order: list[Any] = []
+        if facet_col is not None:
+            if facet_col == hue and hue_order is not None:
+                facet_order = list(hue_order)
+            elif facet_col == group and group_order is not None:
+                facet_order = list(group_order)
+            else:
+                facet_order = list(pd.unique(df[facet_col].dropna().astype(str)))
+        base_colors = sns.color_palette(palette, n_colors=max(len(facet_order), 3))
+        emm_colors = {str(lev): base_colors[i % len(base_colors)] for i, lev in enumerate(facet_order)}
+        # Observed means get a lighter tone of their level's colour: same hue so the pairing is
+        # obvious, lighter so the model curve is not confused with the raw data.
+        point_colors = {lev: _lighten(c) for lev, c in emm_colors.items()}
+        z_crit = _z_critical(ci_level)
+
         # EMM-like fixed-effects prediction grid at reference covariates.
         try:
             import patsy
 
             if facet_col is not None:
-                if facet_col == hue:
-                    facet_order = (
-                        list(hue_order)
-                        if hue_order is not None
-                        else list(pd.unique(df[facet_col].dropna().astype(str)))
-                    )
-                elif facet_col == group:
-                    facet_order = (
-                        list(group_order)
-                        if group_order is not None
-                        else list(pd.unique(df[facet_col].dropna().astype(str)))
-                    )
-                else:
-                    facet_order = list(pd.unique(df[facet_col].dropna().astype(str)))
                 rows = [(xv, fv) for xv in order for fv in facet_order]
                 grid = pd.DataFrame(rows, columns=[x, facet_col])
             else:
                 grid = pd.DataFrame({x: order})
 
             for cov_name, cov_val in covariate_refs.items():
+                # Never overwrite the two columns the grid varies — a caller that pins every
+                # non-outcome term would otherwise collapse the x axis or the facet to a constant.
+                if cov_name in {x, facet_col}:
+                    continue
                 grid[cov_name] = cov_val
 
             grid = _match_grid_columns_to_df_dtypes(grid, df, [c for c in grid.columns if c in df.columns])
@@ -524,8 +836,8 @@ def plot_mixedlm_params(
             se = np.sqrt(np.sum((X @ cov) * X, axis=1))
             emm = grid.copy()
             emm["estimate"] = pred
-            emm["lower"] = pred - 1.96 * se
-            emm["upper"] = pred + 1.96 * se
+            emm["lower"] = pred - z_crit * se
+            emm["upper"] = pred + z_crit * se
 
             x_to_pos = {k: i for i, k in enumerate(order)}
             emm["_xi"] = emm[x].map(x_to_pos)
@@ -541,21 +853,26 @@ def plot_mixedlm_params(
                     label="Fixed-effects EMM",
                 )
                 if errorbar:
-                    ax.fill_between(
+                    # Whiskers rather than a band: on a discrete axis there is nothing between the
+                    # ticks to interpolate, and a shaded ribbon would imply values that do not exist.
+                    ax.errorbar(
                         sub["_xi"],
-                        sub["lower"],
-                        sub["upper"],
-                        color="gray",
-                        alpha=0.2,
-                        label="95% CI",
+                        sub["estimate"],
+                        yerr=[sub["estimate"] - sub["lower"], sub["upper"] - sub["estimate"]],
+                        fmt="none",
+                        ecolor="black",
+                        elinewidth=1.4,
+                        capsize=5,
+                        capthick=1.4,
+                        alpha=0.8,
+                        label=f"{int(round(ci_level * 100))}% CI",
                     )
             else:
-                colors = sns.color_palette(palette, n_colors=max(len(facet_order), 3))
                 for i, lev in enumerate(facet_order):
                     sub = emm[emm[facet_col] == lev].sort_values("_xi")
                     if sub.empty:
                         continue
-                    c = colors[i % len(colors)]
+                    c = emm_colors[str(lev)]
                     ax.plot(
                         sub["_xi"],
                         sub["estimate"],
@@ -565,23 +882,30 @@ def plot_mixedlm_params(
                         label=f"EMM {facet_col}={lev}",
                     )
                     if errorbar:
-                        ax.fill_between(
+                        ax.errorbar(
                             sub["_xi"],
-                            sub["lower"],
-                            sub["upper"],
-                            color=c,
-                            alpha=0.12,
+                            sub["estimate"],
+                            yerr=[sub["estimate"] - sub["lower"], sub["upper"] - sub["estimate"]],
+                            fmt="none",
+                            ecolor=c,
+                            elinewidth=1.3,
+                            capsize=4,
+                            capthick=1.3,
+                            alpha=0.85,
                         )
             ax.set_xticks(np.arange(len(order)))
             ax.set_xticklabels([str(v) for v in order])
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            log.error(f"Error calculating EMM: {e}")
+            # The plot still shows the raw observations; record why the model curves are missing so
+            # a caller (the GUI status line) can say so instead of leaving a silently empty chart.
+            log.warning("Could not evaluate the EMM grid: %s", e)
+            log.debug("EMM grid failure", exc_info=True)
+            fig.emm_error = str(e)
 
         if include_points:
-            # Color raw observations like the EMM / territory lines, but keep them out of the
-            # legend so it only lists the model curves.
+            # These are *observed cell means*, not individual rows: seaborn's pointplot averages y
+            # within each (x, hue) cell. They are drawn in a lighter tone of the level's colour so
+            # they read as data rather than as a second model curve.
             point_hue = hue if hue is not None else (group if group != x else None)
             if point_hue == hue and hue_order is not None:
                 point_hue_order = list(hue_order)
@@ -591,6 +915,17 @@ def plot_mixedlm_params(
                 point_hue_order = list(pd.unique(df[point_hue].dropna().astype(str)))
             else:
                 point_hue_order = None
+            # Seaborn spaces dodged levels by dividing the slot width across them, which is a
+            # division by zero when only one level is left (e.g. after hiding every other group).
+            # Nothing to dodge apart in that case anyway.
+            n_hue_levels = len(point_hue_order) if point_hue_order is not None else 0
+            if point_hue_order is not None:
+                point_palette = {
+                    lev: point_colors.get(str(lev), _lighten(base_colors[i % len(base_colors)]))
+                    for i, lev in enumerate(point_hue_order)
+                }
+            else:
+                point_palette = None
             sns.pointplot(
                 data=df,
                 x=x,
@@ -598,11 +933,24 @@ def plot_mixedlm_params(
                 hue=point_hue,
                 order=order,
                 hue_order=point_hue_order,
-                palette=palette,
+                palette=point_palette if point_palette else palette,
+                color=None if point_hue else _lighten(base_colors[0]),
                 errorbar=None,
-                dodge=True if point_hue else False,
+                dodge=bool(point_hue) and n_hue_levels > 1,
+                linestyles="--",
+                markers="s",
                 legend=False,
                 ax=ax,
+            )
+            # One legend entry explaining the lighter series, rather than leaving twice as many
+            # lines on the plot as the legend accounts for.
+            ax.plot(
+                [], [],
+                color=_lighten(base_colors[0]),
+                lw=2.0,
+                ls="--",
+                marker="s",
+                label="Observed mean (unadjusted)",
             )
 
     ax.set_title(title)
@@ -687,10 +1035,15 @@ def build_mixedlm_frame_from_repo(
 
 
 __all__ = [
+    "build_mixedlm_frame_from_repo",
     "fit_or_load_mixedlm",
     "formula_columns",
-    "print_mixedlm_info",
+    "mixedlm_coef_frame",
+    "mixedlm_info_dict",
+    "mixedlm_random_effects_frame",
     "plot_mixedlm_params",
-    "build_mixedlm_frame_from_repo",
+    "print_mixedlm_info",
+    "render_mixedlm_info",
+    "significance_stars",
 ]
 

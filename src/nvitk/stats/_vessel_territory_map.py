@@ -178,6 +178,23 @@ FLOW_REGION_ID_TO_TERRITORY: dict[str, str] = {
     "rcomm": "Communicating",
     "left_communicating": "Communicating",
     "right_communicating": "Communicating",
+    # Posterior communicating arteries, as published by qvtpy (LPCOMM / RPCOMM).
+    "lpcomm": "Communicating",
+    "rpcomm": "Communicating",
+    "left_pcomm": "Communicating",
+    "right_pcomm": "Communicating",
+    "left_posterior_communicating": "Communicating",
+    "right_posterior_communicating": "Communicating",
+    # Anterior communicating artery — midline, single vessel.
+    "acomm": "Communicating",
+    "anterior_communicating": "Communicating",
+    # Vertebral arteries: they form the basilar, so they belong to the posterior circulation.
+    "lva": "Posterior Circulation",
+    "rva": "Posterior Circulation",
+    "left_va": "Posterior Circulation",
+    "right_va": "Posterior Circulation",
+    "left_vertebral": "Posterior Circulation",
+    "right_vertebral": "Posterior Circulation",
     "left_transverse": "Venous Drainage",
     "right_transverse": "Venous Drainage",
     "basilar": "Posterior Circulation",
@@ -187,7 +204,20 @@ TERRITORY_FLOW_REGIONS: dict[str, tuple[str, ...]] = {
     "Internal Carotid Arteries": ("left_ica", "right_ica"),
     "Venous Drainage": ("sagital_sinus", "straight_sinus", "left_transverse", "right_transverse"),
     "Anterior Circulation": ("left_mca", "right_mca", "left_aca", "right_aca"),
-    "Posterior Circulation": ("basilar", "left_pca", "right_pca"),
+    "Posterior Circulation": (
+        "basilar",
+        "left_pca",
+        "right_pca",
+        "left_vertebral",
+        "right_vertebral",
+    ),
+    "Communicating": (
+        "left_communicating",
+        "right_communicating",
+        "left_posterior_communicating",
+        "right_posterior_communicating",
+        "anterior_communicating",
+    ),
 }
 
 TERRITORY_ASL_V8_REGIONS: dict[str, tuple[str, ...]] = {

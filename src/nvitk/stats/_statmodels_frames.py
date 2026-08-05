@@ -7,11 +7,15 @@ explicit (avoids single-variable wide pivots that drop ``_{variable}`` suffixes)
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping, Sequence
 
 import pandas as pd
 
+from nvitk.core.logger import Logger
 from nvitk.pipes.qvtpy.common.morpho_db_publish import _SCALAR_VARS as _MORPHO_SCALAR_VARS
+
+log = Logger()
 
 GroupingMode = Literal[
     "vessel",
@@ -121,32 +125,80 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
     """Ordered ``(label, key)`` grouping options for the current modality/feature."""
     family = feature_family(kind, variable_id)
     kind = str(kind).strip().lower()
+    # ``territory`` is offered on every vessel-level modality because it is the only grouping whose
+    # keys are shared with ASL — it is what makes a joint 4D-flow + perfusion frame possible.
     if kind == "qvtpy" and family == "tree":
         return [
             ("By tree (L_ICA / R_ICA / Basilar)", "tree"),
             ("By hemisphere (avg L/R ICA; Basilar kept)", "hemisphere"),
+            ("Vascular territory (shared with ASL)", "territory"),
         ]
     if kind == "qvtpy" and family == "vessel":
         return [
             ("Vessel-wise (region_id)", "vessel"),
             ("By hemisphere (avg L/R pairs)", "hemisphere"),
+            ("Vascular territory (shared with ASL)", "territory"),
         ]
     if kind == "tof":
         return [
             ("Vessel-wise (eICAB vessel)", "vessel"),
             ("By hemisphere (avg L/R pairs)", "hemisphere"),
+            ("Vascular territory (shared with ASL)", "territory"),
         ]
     if kind == "asl":
         return [
             ("Atlas region", "region"),
-            ("Vascular territory (melted)", "territory"),
+            ("By hemisphere (MCA / ACA / PCA / ICA / Basilar)", "hemisphere"),
+            ("Vascular territory (shared with 4D flow)", "territory"),
         ]
     # t1 / flair: keep published regions
     return [("Region", "region")]
 
 
+# Canonical spelling of every hemisphere key. Applied last in
+# :func:`region_to_hemisphere_pair_key` so the same vessel reaches the same key whichever way it was
+# published — ``LMCA``, ``LEFT_MCA`` and ASL's ``left_mca_8`` must all become ``MCA``, or a joint
+# 4D-flow + perfusion frame silently fails to align.
+_HEMISPHERE_CANONICAL: dict[str, str] = {
+    "mca": "MCA",
+    "aca": "ACA",
+    "pca": "PCA",
+    "ica": "ICA",
+    "basilar": "Basilar",
+    "basi": "Basilar",
+    "ba": "Basilar",
+    "va": "VA",
+    "vertebral": "VA",
+    "pcomm": "pcomm",
+    "comm": "pcomm",
+    "communicating": "pcomm",
+    "posterior_communicating": "pcomm",
+    "acomm": "acomm",
+    "anterior_communicating": "acomm",
+    "tsv": "TSV",
+    "transverse": "TSV",
+    "sssv": "SSSV",
+    "strv": "STRV",
+    "watershed": "Watershed",
+}
+
+# ASL region ids carry the smoothing kernel as a suffix (``left_mca_8``, ``watershed_0``).
+_ASL_SMOOTHING_SUFFIX_RE = re.compile(r"_(0|8|12)$")
+
+
+def _canonical_hemisphere_key(token: str) -> str:
+    """Canonical spelling for a side-stripped vessel *token*, or the token unchanged."""
+    return _HEMISPHERE_CANONICAL.get(str(token).strip().lower(), token)
+
+
 def region_to_hemisphere_pair_key(region_id: str) -> str:
-    """Collapse L/R counterparts to one key (ICA, MCA, …); midline stays itself."""
+    """
+    Collapse L/R counterparts to one key (ICA, MCA, …); midline stays itself.
+
+    The result is canonicalized through :data:`_HEMISPHERE_CANONICAL`, so spellings that differ only
+    in separator or case land on the same key. That is what lets a 4D-flow measurement grouped by
+    hemisphere join an ASL one on ``(subject_uid, territory)``.
+    """
     raw = str(region_id).strip()
     if not raw:
         return raw
@@ -157,12 +209,38 @@ def region_to_hemisphere_pair_key(region_id: str) -> str:
         return "Basilar"
     for prefix in ("LEFT_", "RIGHT_", "L_", "R_"):
         if su.startswith(prefix) and len(su) > len(prefix):
-            return su[len(prefix) :].lower()
+            return _canonical_hemisphere_key(su[len(prefix) :])
     m = _SIDE_LETTER_RE.match(su)
     if m:
-        return m.group(2).upper() if len(m.group(2)) <= 4 else m.group(2).lower()
+        token = m.group(2)
+        canonical = _canonical_hemisphere_key(token)
+        if canonical != token:
+            return canonical
+        return token.upper() if len(token) <= 4 else token.lower()
     stripped = _LR_PREFIX_RE.sub("", raw)
-    return stripped if stripped else raw
+    return _canonical_hemisphere_key(stripped) if stripped else raw
+
+
+def asl_region_id_to_hemisphere(region_id: str) -> str:
+    """
+    Collapse an ASL atlas region to the same vessel key the 4D-flow hemisphere grouping produces.
+
+    ASL vascular parcels are published per side and per smoothing kernel (``left_mca_8``,
+    ``right_pca_8``, ``watershed_8``). Stripping the kernel suffix and the side prefix yields
+    ``MCA`` / ``ACA`` / ``PCA`` / ``ICA`` / ``Basilar`` — exactly the keys
+    :func:`region_to_hemisphere_pair_key` gives for ``LMCA`` / ``RMCA`` / …, so the two modalities
+    can be joined vessel by vessel rather than only at the coarse territory level.
+
+    Watershed parcels have no 4D-flow counterpart and keep their own ``Watershed`` key; Desikan
+    parcels fall back to a side-stripped parcel name.
+    """
+    raw = str(region_id).strip()
+    if not raw:
+        return raw
+    token = _ASL_SMOOTHING_SUFFIX_RE.sub("", raw)
+    if "watershed" in token.lower():
+        return "Watershed"
+    return region_to_hemisphere_pair_key(token)
 
 
 def assign_group_key(
@@ -178,6 +256,8 @@ def assign_group_key(
     if grouping in {"vessel", "tree", "region"}:
         return rid
     if grouping == "hemisphere":
+        if str(kind).strip().lower() == "asl":
+            return asl_region_id_to_hemisphere(rid)
         return region_to_hemisphere_pair_key(rid)
     if grouping == "territory":
         from nvitk.stats._vessel_territory_map import (
@@ -287,7 +367,108 @@ def _subject_attribute_frame(repo: Any, names: list[str]) -> pd.DataFrame:
     return frame[keep].drop_duplicates(subset=["subject_uid"], keep="first")
 
 
-def build_long_analysis_frame(
+# ──────────────────────────────────────────────────────────────────────────────
+# Composite territory labels
+# ──────────────────────────────────────────────────────────────────────────────
+COMPOSITE_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "TCBF": {
+        "label": "TCBF — total cerebral blood flow (RICA + LICA + BASILAR)",
+        "description": (
+            "Total cerebral blood flow: the summed mean flow of both internal carotid arteries and "
+            "the basilar artery, i.e. everything entering the cranium."
+        ),
+        # Matched case-insensitively against ``region_id``; synonyms cover the published spellings.
+        "regions": (
+            ("rica", "right_ica", "r_ica"),
+            ("lica", "left_ica", "l_ica"),
+            ("basilar", "basi", "ba"),
+        ),
+        "agg": "sum",
+        "kinds": ("qvtpy",),
+        "features": ("flow_mean",),
+    },
+}
+
+
+def composites_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
+    """``(name, label)`` composite territories available for a pipeline kind / feature."""
+    vid = resolve_feature_id(variable_id)
+    kind = str(kind).strip().lower()
+    return [
+        (name, str(spec["label"]))
+        for name, spec in COMPOSITE_DEFINITIONS.items()
+        if kind in spec["kinds"] and vid in spec["features"]
+    ]
+
+
+def _composite_rows(long: pd.DataFrame, name: str, *, value_column: str = "value") -> pd.DataFrame:
+    """
+    Build the long-form rows for one composite territory.
+
+    Each component is resolved per subject and the components are combined with the definition's
+    aggregation. A subject missing **any** component is skipped rather than summed over what it has:
+    a partial TCBF is not a smaller TCBF, it is a wrong one, and silently emitting it would bias
+    every model that uses the label.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-form rows (``subject_uid``, ``region_id``, ``variable_id``, ``value``, …) carrying the
+        composite as their ``region_id``, or an empty frame when no subject has every component.
+    """
+    definition = COMPOSITE_DEFINITIONS[name]
+    components: tuple[tuple[str, ...], ...] = definition["regions"]
+
+    keys = long["region_id"].astype(str).str.strip().str.lower()
+    per_component: list[pd.Series] = []
+    for synonyms in components:
+        wanted = {s.lower() for s in synonyms}
+        part = long.loc[keys.isin(wanted)]
+        if part.empty:
+            log.warning(
+                "Composite %s: no rows for component %s — the label cannot be built.",
+                name,
+                synonyms[0],
+            )
+            return long.iloc[0:0]
+        # One value per subject; a duplicated vessel (repeat scan) is averaged first.
+        per_component.append(
+            pd.to_numeric(part[value_column], errors="coerce")
+            .groupby(part["subject_uid"])
+            .mean()
+        )
+
+    stacked = pd.concat(per_component, axis=1)
+    complete = stacked.dropna()
+    n_partial = len(stacked) - len(complete)
+    if n_partial:
+        log.warning(
+            "Composite %s: skipped %d of %d subjects missing at least one component "
+            "(a partial sum would understate the total).",
+            name,
+            n_partial,
+            len(stacked),
+        )
+    if complete.empty:
+        return long.iloc[0:0]
+
+    values = complete.sum(axis=1) if definition["agg"] == "sum" else complete.mean(axis=1)
+    rows = pd.DataFrame(
+        {
+            "subject_uid": complete.index,
+            "region_id": name,
+            "variable_id": long["variable_id"].iloc[0],
+            value_column: values.to_numpy(),
+        }
+    )
+    log.info("Composite %s: built for %d subjects.", name, len(rows))
+    return rows
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Analysis-frame building blocks
+# ──────────────────────────────────────────────────────────────────────────────
+def build_feature_territory_frame(
     repo: Any,
     *,
     pipeline_kind: str,
@@ -295,14 +476,46 @@ def build_long_analysis_frame(
     feature: str,
     grouping: str,
     atlas: str | None = None,
-    clinical_vars: list[str] | None = None,
-    cognitive_vars: list[str] | None = None,
+    agg: str = "mean",
+    column: str | None = None,
+    composites: Sequence[str] = (),
 ) -> pd.DataFrame:
-    """Load long-form image rows, assign group keys, aggregate, attach covariates."""
-    from nvitk.stats._hemodynamic_frames import (
-        aggregate_territory_measurements,
-        build_analysis_df_from_repo_frames,
-    )
+    """
+    One image measurement, aggregated to one row per ``(subject_uid, territory)``.
+
+    This is the covariate-free half of :func:`build_long_analysis_frame`: it loads the long-form
+    rows for a single ``variable_id``, assigns the ``territory`` group key implied by *grouping*, and
+    aggregates within each ``(subject_uid, territory)`` cell. Keeping it separate is what lets
+    several measurements from *different* pipelines be joined on a shared key before any covariate
+    merge happens — attaching covariates per measurement would compound their inner merge.
+
+    Parameters
+    ----------
+    pipeline_kind : {"qvtpy", "asl", "t1", "flair", "tof"}
+        Selects the imaging modality via :data:`KIND_MODALITY`.
+    pipeline : str
+        Pipeline id, or one of ``latest``/``default``/``current``/``last`` for the catalog default.
+    feature : str
+        Feature name or alias; resolved through :func:`resolve_feature_id`.
+    grouping : GroupingMode
+        How ``region_id`` collapses into ``territory`` (see :func:`assign_group_key`).
+    agg : str
+        Aggregation applied within each ``(subject_uid, territory)`` cell.
+    column : str, optional
+        Output column name. Defaults to the resolved ``variable_id``.
+    composites : sequence of str
+        Names from :data:`COMPOSITE_DEFINITIONS` to append as extra territory labels, e.g.
+        ``("TCBF",)``. They are computed from the raw ``region_id`` rows, so they are unaffected by
+        *grouping*, and appear as additional levels of ``territory``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``subject_uid``, ``territory``, and the measurement column.
+        ``frame.attrs["region_ids"]`` lists the source region ids, which lets callers work out
+        whether a different grouping would produce keys compatible with another measurement.
+    """
+    from nvitk.stats._hemodynamic_frames import aggregate_territory_measurements
 
     kind = str(pipeline_kind).strip().lower()
     modality = KIND_MODALITY.get(kind)
@@ -317,8 +530,6 @@ def build_long_analysis_frame(
         pipeline_sel: str | None = None
     else:
         pipeline_sel = raw_pipeline
-    clinical_vars = list(clinical_vars or [])
-    cognitive_vars = list(cognitive_vars or [])
 
     image_kwargs: dict[str, Any] = {
         "modality": modality,
@@ -360,14 +571,123 @@ def build_long_analysis_frame(
     if long.empty:
         raise ValueError(f"No rows for variable_id={variable_id!r} after filtering.")
 
+    long["region_id"] = long["region_id"].astype(str)
+    source_region_ids = sorted(long["region_id"].unique())
+
+    # ---- Composite labels are summed over raw vessels, so they must be built before grouping ----
+    for name in composites:
+        if name not in COMPOSITE_DEFINITIONS:
+            log.warning("Unknown composite territory %r — skipped.", name)
+            continue
+        extra = _composite_rows(long, name)
+        if not extra.empty:
+            long = pd.concat([long, extra], ignore_index=True)
+
     long["territory"] = [
         assign_group_key(
             rid, grouping=grouping, kind=kind, variable_id=variable_id
         )
         for rid in long["region_id"].astype(str)
     ]
-    long["region_id"] = long["region_id"].astype(str)
+    # A composite is its own label whatever the grouping — it is already an aggregate, so collapsing
+    # it into a territory (or leaving it "Unmapped") would defeat the point of asking for it.
+    composite_names = {n for n in composites if n in COMPOSITE_DEFINITIONS}
+    if composite_names:
+        is_composite = long["region_id"].isin(composite_names)
+        long.loc[is_composite, "territory"] = long.loc[is_composite, "region_id"]
     long["modality_group"] = kind
+
+    wide = aggregate_territory_measurements(long, [variable_id], agg=agg)
+    out_col = str(column or variable_id)
+    if out_col != variable_id and variable_id in wide.columns:
+        wide = wide.rename(columns={variable_id: out_col})
+    wide.attrs["region_ids"] = source_region_ids
+    return wide
+
+
+def collapse_visits_to_subject(
+    frame: pd.DataFrame,
+    *,
+    policy: str = "latest",
+    subject_key: str = "subject_uid",
+    visit_key: str = "visit_id",
+) -> tuple[pd.DataFrame, dict[str, list[str]]]:
+    """
+    Collapse a per-visit measurement frame to one row per subject, combining across visits.
+
+    ``clinical_measurements`` pivots on ``(subject_uid, visit_id)``, so a cohort whose variables were
+    collected at different visits gets one row per visit with the *other* visits' variables blank.
+    Anything downstream that assumes one row per subject then keeps a single visit and silently
+    discards the rest — which is how requesting carotid plaque (visit 3) alongside the rest of the
+    clinical panel (visit 4) can null out the panel.
+
+    Each column is filled from the first non-missing value in visit order, so variables measured at
+    different visits combine instead of competing.
+
+    Parameters
+    ----------
+    policy : {"latest", "earliest"}
+        Which visit wins for a variable recorded at more than one. ``latest`` takes the most recent.
+
+    Returns
+    -------
+    (collapsed, provenance)
+        *provenance* maps each column to the visits that contributed a value, so a caller can tell
+        the user which variables came from where.
+    """
+    if frame.empty or subject_key not in frame.columns or visit_key not in frame.columns:
+        return frame, {}
+    if not frame[subject_key].duplicated().any():
+        return frame.drop(columns=[visit_key], errors="ignore"), {}
+
+    value_columns = [c for c in frame.columns if c not in {subject_key, visit_key}]
+    provenance = {
+        column: sorted(
+            str(v) for v in frame.loc[frame[column].notna(), visit_key].dropna().unique()
+        )
+        for column in value_columns
+    }
+
+    ordered = frame.sort_values([subject_key, visit_key], kind="stable")
+    grouped = ordered.groupby(subject_key, sort=False)[value_columns]
+    # ``first``/``last`` skip missing values, which is exactly the "combine across visits" rule.
+    collapsed = (grouped.last() if policy == "latest" else grouped.first()).reset_index()
+
+    log.info(
+        "Collapsed %d covariate rows across %s to %d subjects (%s visit wins per variable).",
+        len(frame),
+        visit_key,
+        len(collapsed),
+        policy,
+    )
+    return collapsed, provenance
+
+
+def resolve_covariate_frame(
+    repo: Any,
+    *,
+    clinical_vars: list[str] | None = None,
+    cognitive_vars: list[str] | None = None,
+    visit_policy: str = "latest",
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Subject-level covariate frame assembled from the clinical / subjects / cognitive tables.
+
+    Each source is collapsed to one row per subject (see :func:`collapse_visits_to_subject`) *before*
+    the sources are merged, so variables recorded at different visits combine rather than
+    multiplying rows or shadowing one another.
+
+    Returns
+    -------
+    (covariates, present)
+        *covariates* is one row per ``subject_uid`` (outer-merged across sources, duplicated columns
+        dropped from the right frame); *present* lists the requested names that actually resolved.
+        ``covariates.attrs["visit_provenance"]`` maps each column to the visits it came from.
+        A source that raises is skipped silently — a missing cognitive table must not block a model
+        that only needs clinical covariates.
+    """
+    clinical_vars = list(clinical_vars or [])
+    cognitive_vars = list(cognitive_vars or [])
 
     # Covariates. Prefer ``clinical_measurements`` whenever the requested name has rows there
     # (covers a stale in-memory catalog after ``import_sex.py``). Only fall back to the
@@ -378,24 +698,28 @@ def build_long_analysis_frame(
     clinical_vars = [v for v in clinical_vars if v not in subject_vars]
 
     frames: list[pd.DataFrame] = []
+    provenance: dict[str, list[str]] = {}
+
+    def add(frame: pd.DataFrame | None) -> None:
+        """Collapse a source to one row per subject, then queue it for merging."""
+        if frame is None or frame.empty:
+            return
+        collapsed, source_provenance = collapse_visits_to_subject(frame, policy=visit_policy)
+        provenance.update(source_provenance)
+        frames.append(collapsed)
+
     if clinical_vars:
         try:
-            clinical = repo.clinical(variables=clinical_vars, wide=True)
-            if clinical is not None and not clinical.empty:
-                frames.append(clinical)
-        except Exception:
-            pass
+            add(repo.clinical(variables=clinical_vars, wide=True))
+        except Exception as exc:
+            log.debug("Clinical covariates unavailable: %s", exc)
     if subject_vars:
-        subject_frame = _subject_attribute_frame(repo, subject_vars)
-        if not subject_frame.empty:
-            frames.append(subject_frame)
+        add(_subject_attribute_frame(repo, subject_vars))
     if cognitive_vars:
         try:
-            cognitive = repo.cognitive(variables=cognitive_vars, wide=True)
-            if cognitive is not None and not cognitive.empty:
-                frames.append(cognitive)
-        except Exception:
-            pass
+            add(repo.cognitive(variables=cognitive_vars, wide=True))
+        except Exception as exc:
+            log.debug("Cognitive covariates unavailable: %s", exc)
 
     covariates = pd.DataFrame()
     if frames:
@@ -411,21 +735,35 @@ def build_long_analysis_frame(
 
     covariate_vars = list(dict.fromkeys([*clinical_vars, *subject_vars, *cognitive_vars]))
     present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
+    covariates.attrs["visit_provenance"] = {k: v for k, v in provenance.items() if k in present}
+    return covariates, present
 
-    if covariates.empty or not present:
-        wide = aggregate_territory_measurements(long, [variable_id])
-    else:
-        wide = build_analysis_df_from_repo_frames(
-            long,
-            covariates,
-            imaging_variable_ids=[variable_id],
-            covariate_cols=present,
-        )
 
+def finalize_analysis_frame(
+    wide: pd.DataFrame,
+    repo: Any,
+    *,
+    primary_variable_id: str | None = None,
+) -> pd.DataFrame:
+    """
+    Add the conveniences every Statmodels frame is expected to carry.
+
+    In order: ``group_key`` (a copy of ``territory``, used as the default MixedLM grouping), the
+    friendly outcome aliases the default formulas reference (``flow`` for ``flow_mean``, and the
+    inverse of :data:`FEATURE_ALIASES`), ``patient_id``, the ``hematocrit`` → ``Hematocrit`` rename,
+    numeric coercion of catalog-numeric covariates, and the mean-centered ``age_c``.
+
+    Parameters
+    ----------
+    primary_variable_id : str, optional
+        Measurement to alias. With several measurements loaded, only the first one gets aliases —
+        the aliases exist for the legacy single-feature default formulas.
+    """
     wide["group_key"] = wide["territory"].astype(str)
 
     # Friendly outcome aliases used in default formulas
-    if variable_id in wide.columns:
+    variable_id = primary_variable_id
+    if variable_id and variable_id in wide.columns:
         if variable_id == "flow_mean" and "flow" not in wide.columns:
             wide["flow"] = wide[variable_id]
         alias_inv = {v: k for k, v in FEATURE_ALIASES.items() if k != v}
@@ -466,6 +804,314 @@ def build_long_analysis_frame(
     return wide
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Measurement specs and multi-measurement frames
+# ──────────────────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class MeasurementSpec:
+    """
+    One image measurement to load into an analysis frame.
+
+    A spec is self-contained: it names its own pipeline kind, pipeline, feature, atlas and grouping,
+    so measurements from different modalities can be combined as long as their *grouping* produces
+    commensurate ``territory`` keys (e.g. qvtpy ``hemisphere`` → ``MCA``/``ACA``/``PCA`` against ASL
+    ``territory`` → the same vascular-territory labels).
+
+    Parameters
+    ----------
+    alias : str, optional
+        Output column name. Defaults to ``resolve_feature_id(feature)``. Must be a valid Python
+        identifier: :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names, so a
+        non-identifier alias would silently diverge between the analysis frame and the model frame.
+    """
+
+    pipeline_kind: str = "qvtpy"
+    pipeline: str = "latest"
+    feature: str = "flow_mean"
+    grouping: str = "vessel"
+    atlas: str | None = None
+    alias: str | None = None
+    agg: str = "mean"
+    composites: tuple[str, ...] = ()
+
+    def column(self) -> str:
+        """Name this measurement takes in the analysis frame."""
+        return str(self.alias or resolve_feature_id(self.feature))
+
+    def label(self) -> str:
+        """One-line description for list widgets, e.g. ``"qvtpy · latest · pi · hemisphere → pi"``."""
+        parts = [self.pipeline_kind, self.pipeline, self.feature, self.grouping]
+        if self.atlas:
+            parts.append(self.atlas)
+        if self.composites:
+            parts.append("+" + "+".join(self.composites))
+        return f"{' · '.join(str(p) for p in parts)}  →  {self.column()}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict."""
+        return {
+            "pipeline_kind": self.pipeline_kind,
+            "pipeline": self.pipeline,
+            "feature": self.feature,
+            "grouping": self.grouping,
+            "atlas": self.atlas,
+            "alias": self.alias,
+            "agg": self.agg,
+            "composites": list(self.composites),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "MeasurementSpec":
+        """Rebuild from :meth:`to_dict` output, tolerating missing keys."""
+        return cls(
+            pipeline_kind=str(data.get("pipeline_kind") or "qvtpy"),
+            pipeline=str(data.get("pipeline") or "latest"),
+            feature=str(data.get("feature") or "flow_mean"),
+            grouping=str(data.get("grouping") or "vessel"),
+            atlas=(str(data["atlas"]) if data.get("atlas") else None),
+            alias=(str(data["alias"]) if data.get("alias") else None),
+            agg=str(data.get("agg") or "mean"),
+            composites=tuple(str(c) for c in (data.get("composites") or ())),
+        )
+
+
+def _keys_for_grouping(spec: MeasurementSpec, region_ids: Sequence[str], grouping: str) -> set[str]:
+    """Territory keys *spec*'s region ids would produce under *grouping*."""
+    variable_id = resolve_feature_id(spec.feature)
+    return {
+        assign_group_key(rid, grouping=grouping, kind=spec.pipeline_kind, variable_id=variable_id)
+        for rid in region_ids
+    }
+
+
+def _suggest_compatible_groupings(
+    first: MeasurementSpec,
+    first_regions: Sequence[str],
+    second: MeasurementSpec,
+    second_regions: Sequence[str],
+) -> str:
+    """
+    Name a grouping combination that would actually make two measurements joinable.
+
+    Rather than guessing, this replays :func:`assign_group_key` over both measurements' real region
+    ids for every grouping the UI offers, and reports the pairing with the largest key overlap. That
+    matters because the intuitive advice is often wrong: qvtpy ``hemisphere`` yields ``MCA``/``ACA``
+    while ASL ``territory`` yields ``Anterior Circulation`` — only ``territory`` on *both* sides
+    lines up.
+    """
+    if not first_regions or not second_regions:
+        return ""
+
+    first_options = [key for _label, key in grouping_choices_for(first.pipeline_kind, first.feature)]
+    second_options = [key for _label, key in grouping_choices_for(second.pipeline_kind, second.feature)]
+
+    best: tuple[int, str, str] | None = None
+    for g1 in first_options:
+        keys1 = _keys_for_grouping(first, first_regions, g1) - {"Unmapped"}
+        for g2 in second_options:
+            shared = keys1 & (_keys_for_grouping(second, second_regions, g2) - {"Unmapped"})
+            if shared and (best is None or len(shared) > best[0]):
+                best = (len(shared), g1, g2)
+    if best is None:
+        return ""
+
+    _n, g1, g2 = best
+    if g1 == first.grouping and g2 == second.grouping:
+        return ""
+    return (
+        f"Set {first.column()!r} to grouping {g1!r} and {second.column()!r} to {g2!r} — "
+        f"that pairing shares {_n} key(s)."
+    )
+
+
+def _coerce_specs(measurements: Sequence[MeasurementSpec | Mapping[str, Any]]) -> list[MeasurementSpec]:
+    """Accept either :class:`MeasurementSpec` instances or plain dicts (as saved in configs)."""
+    out: list[MeasurementSpec] = []
+    for entry in measurements:
+        out.append(entry if isinstance(entry, MeasurementSpec) else MeasurementSpec.from_dict(entry))
+    return out
+
+
+def build_multi_feature_analysis_frame(
+    repo: Any,
+    *,
+    measurements: Sequence[MeasurementSpec | Mapping[str, Any]],
+    clinical_vars: list[str] | None = None,
+    cognitive_vars: list[str] | None = None,
+    join: str = "inner",
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """
+    Analysis frame combining one or more image measurements plus subject covariates.
+
+    Each measurement is loaded independently by :func:`build_feature_territory_frame` and the
+    results are joined on ``(subject_uid, territory)``. With ``join="inner"`` (the default) only
+    subject/territory cells present in *every* measurement survive, which is the right grain for a
+    model like ``att_mean ~ pi + …``: every row then has all its predictors observed.
+
+    Covariates are merged **once**, after the measurement join. The covariate merge is an inner
+    merge on ``subject_uid``, so attaching it per measurement would apply it repeatedly.
+
+    Parameters
+    ----------
+    join : {"inner", "outer", "left"}
+        How successive measurement frames are combined.
+
+    Returns
+    -------
+    (frame, meta)
+        *meta* carries ``measurements`` (per-spec row/subject/territory counts), ``key_overlap``
+        (fraction of measurement 0's keys retained after each join), ``n_rows``, ``covariates``, and
+        ``warnings`` — a list of human-readable problems worth surfacing in a UI, most importantly a
+        disjoint ``territory`` vocabulary between two pipelines.
+
+    Raises
+    ------
+    ValueError
+        If *measurements* is empty or two specs would write the same output column.
+    """
+    from nvitk.stats._hemodynamic_frames import merge_subject_covariates
+
+    specs = _coerce_specs(measurements)
+    if not specs:
+        raise ValueError("At least one measurement is required.")
+
+    # ---- 1. Reject colliding output columns before doing any I/O ---------------
+    seen: dict[str, int] = {}
+    for i, spec in enumerate(specs):
+        col = spec.column()
+        if col in seen:
+            raise ValueError(
+                f"Measurements {seen[col] + 1} and {i + 1} both produce column {col!r}. "
+                "Give one of them a distinct alias."
+            )
+        seen[col] = i
+
+    meta: dict[str, Any] = {"measurements": [], "warnings": [], "join": join}
+
+    # ---- 2. Load each measurement on its own grouping --------------------------
+    frames: list[pd.DataFrame] = []
+    for spec in specs:
+        frame = build_feature_territory_frame(
+            repo,
+            pipeline_kind=spec.pipeline_kind,
+            pipeline=spec.pipeline,
+            feature=spec.feature,
+            grouping=spec.grouping,
+            atlas=spec.atlas,
+            agg=spec.agg,
+            column=spec.column(),
+            composites=spec.composites,
+        )
+        frames.append(frame)
+        meta["measurements"].append(
+            {
+                "spec": spec,
+                "column": spec.column(),
+                "n_rows": int(len(frame)),
+                "n_subjects": int(frame["subject_uid"].nunique()) if len(frame) else 0,
+                "territories": sorted(frame["territory"].astype(str).unique()) if len(frame) else [],
+                "region_ids": list(frame.attrs.get("region_ids") or []),
+            }
+        )
+
+    # ---- 3. Join on the shared (subject_uid, territory) key --------------------
+    wide = frames[0]
+    base_keys = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
+    for spec, frame in zip(specs[1:], frames[1:]):
+        base_terr = set(meta["measurements"][0]["territories"])
+        this_terr = set(frame["territory"].astype(str).unique()) if len(frame) else set()
+        if base_terr and this_terr and not (base_terr & this_terr):
+            fix = _suggest_compatible_groupings(
+                specs[0], meta["measurements"][0].get("region_ids") or [],
+                spec, list(frame.attrs.get("region_ids") or []),
+            )
+            meta["warnings"].append(
+                f"{spec.column()!r} has no territory in common with "
+                f"{specs[0].column()!r} ({sorted(this_terr)[:4]} vs {sorted(base_terr)[:4]}). "
+                + (fix or "No grouping combination makes these two measurements comparable.")
+            )
+        wide = wide.merge(frame, on=["subject_uid", "territory"], how=join)
+
+    if base_keys:
+        kept = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
+        meta["key_overlap"] = len(kept & base_keys) / len(base_keys)
+    else:
+        meta["key_overlap"] = 0.0
+
+    if wide.empty:
+        meta["warnings"].append(
+            "The measurement join produced no rows — the selected measurements share no "
+            "(subject, territory) cell."
+        )
+
+    # ---- 4. Covariates once, then the shared finalization ----------------------
+    covariates, present = resolve_covariate_frame(
+        repo, clinical_vars=clinical_vars, cognitive_vars=cognitive_vars
+    )
+    if present and not covariates.empty and not wide.empty:
+        before = len(wide)
+        wide = merge_subject_covariates(wide, covariates, present)
+        if len(wide) < before:
+            meta["warnings"].append(
+                f"Covariate merge dropped {before - len(wide)} of {before} rows "
+                "(subjects missing from the covariate tables)."
+            )
+    meta["covariates"] = present
+
+    # Mixing visits is a legitimate thing to want (plaque at one visit, cognition at another) but it
+    # is a modeling decision, so say so rather than letting it happen quietly.
+    provenance = dict(covariates.attrs.get("visit_provenance") or {})
+    meta["visit_provenance"] = provenance
+    visits_used = {v for visits in provenance.values() for v in visits}
+    if len(visits_used) > 1:
+        by_visit: dict[str, list[str]] = {}
+        for column, visits in sorted(provenance.items()):
+            by_visit.setdefault(" + ".join(visits), []).append(column)
+        detail = "; ".join(f"{visit}: {', '.join(cols)}" for visit, cols in sorted(by_visit.items()))
+        meta["warnings"].append(
+            f"Covariates come from more than one visit and were combined per subject ({detail}). "
+            "Each variable keeps its own visit's value."
+        )
+
+    wide = finalize_analysis_frame(wide, repo, primary_variable_id=specs[0].column())
+    meta["n_rows"] = int(len(wide))
+    for message in meta["warnings"]:
+        log.warning("Analysis frame: %s", message)
+    return wide, meta
+
+
+def build_long_analysis_frame(
+    repo: Any,
+    *,
+    pipeline_kind: str,
+    pipeline: str,
+    feature: str,
+    grouping: str,
+    atlas: str | None = None,
+    clinical_vars: list[str] | None = None,
+    cognitive_vars: list[str] | None = None,
+) -> pd.DataFrame:
+    """Load long-form image rows, assign group keys, aggregate, attach covariates.
+
+    Single-measurement convenience wrapper over :func:`build_multi_feature_analysis_frame`.
+    """
+    frame, _meta = build_multi_feature_analysis_frame(
+        repo,
+        measurements=[
+            MeasurementSpec(
+                pipeline_kind=pipeline_kind,
+                pipeline=pipeline,
+                feature=feature,
+                grouping=grouping,
+                atlas=atlas,
+            )
+        ],
+        clinical_vars=clinical_vars,
+        cognitive_vars=cognitive_vars,
+    )
+    return frame
+
+
 __all__ = [
     "ASL_FEATURES",
     "FEATURE_ALIASES",
@@ -475,12 +1121,20 @@ __all__ = [
     "QVTPY_VESSEL_FEATURES",
     "T1_FEATURES",
     "TOF_FEATURES",
+    "MeasurementSpec",
     "assign_group_key",
     "atlas_for_request",
+    "build_feature_territory_frame",
     "build_long_analysis_frame",
+    "build_multi_feature_analysis_frame",
+    "collapse_visits_to_subject",
     "feature_family",
+    "finalize_analysis_frame",
+    "resolve_covariate_frame",
     "features_for_kind",
     "grouping_choices_for",
+    "asl_region_id_to_hemisphere",
+    "composites_for",
     "region_to_hemisphere_pair_key",
     "resolve_feature_id",
     "subject_attribute_columns",
