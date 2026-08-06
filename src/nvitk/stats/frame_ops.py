@@ -313,6 +313,38 @@ def filtered_columns(rules: Sequence[FilterRule]) -> set[str]:
     return {r.column for r in rules if r.enabled and r.column}
 
 
+def ensure_unique_columns(df: pd.DataFrame, *, context: str = "frame") -> pd.DataFrame:
+    """
+    Return *df* with string column names and no duplicates, on a fresh index.
+
+    pandas tolerates two columns of the same name; polars and R both reject it outright, so a frame
+    that is merely awkward in pandas becomes a hard failure the moment it crosses into either — with
+    a message ("Polars dataframes require unique string names for columns") that says nothing about
+    which column is at fault.
+
+    Duplicates keep their first occurrence, since that is the one a formula referring to the name
+    would have resolved to in pandas. Non-string names are stringified.
+    """
+    out = df
+    names = [str(c) for c in out.columns]
+    if list(out.columns) != names:
+        out = out.copy()
+        out.columns = names
+
+    duplicated = [name for name, count in pd.Series(names).value_counts().items() if count > 1]
+    if duplicated:
+        log.warning(
+            "Dropped duplicate column(s) from the %s, keeping the first of each: %s.",
+            context,
+            ", ".join(sorted(duplicated)),
+        )
+        out = out.loc[:, ~out.columns.duplicated(keep="first")]
+
+    if not out.index.is_unique or not isinstance(out.index, pd.RangeIndex):
+        out = out.reset_index(drop=True)
+    return out
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Derived columns
 # ──────────────────────────────────────────────────────────────────────────────
@@ -729,6 +761,7 @@ __all__ = [
     "default_bin_labels",
     "default_bin_name",
     "default_derived_name",
+    "ensure_unique_columns",
     "evaluate_expression",
     "filtered_columns",
     "parse_cut_points",

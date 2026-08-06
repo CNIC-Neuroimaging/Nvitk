@@ -42,10 +42,14 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from nvitk.stats.r_mmrm import COVARIANCE_STRUCTURES, covariance_term
+from nvitk.stats.regression import SPLINE_TERMS, spline_term
 
 from nvitk.stats.frame_ops import (
     TRANSFORM_LABELS,
@@ -583,4 +587,183 @@ class DerivedColumnsDialog(QDialog):
         self._error.setText("")
 
 
-__all__ = ["DerivedColumnsDialog"]
+class SplineTermDialog(QDialog):
+    """
+    Build a spline or polynomial formula term.
+
+    Curvature in a predictor does not need a different engine: a spline basis is still linear in its
+    parameters, so ``bs(age_c, df=4)`` fits inside OLS, GLM and MixedLM alike and the coefficient
+    table and marginal-means plot keep working. This just spares you the patsy syntax.
+    """
+
+    def __init__(self, parent: QWidget | None, *, columns: Sequence[str]) -> None:
+        """Offer *columns* as the predictor to bend."""
+        super().__init__(parent)
+        self.setWindowTitle("Insert curved term")
+        self.resize(460, 240)
+
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        self._column = QComboBox()
+        for name in columns:
+            self._column.addItem(name)
+        self._kind = QComboBox()
+        for term in SPLINE_TERMS:
+            self._kind.addItem(term.label, term.key)
+        self._kind.currentIndexChanged.connect(self._sync)
+        self._df = QSpinBox()
+        self._df.setRange(2, 20)
+        self._df.setValue(4)
+        self._df_label = QLabel("Degrees of freedom")
+        form.addRow("Predictor", self._column)
+        form.addRow("Shape", self._kind)
+        form.addRow(self._df_label, self._df)
+        lay.addLayout(form)
+
+        self._hint = QLabel("")
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet(muted_label_style())
+        lay.addWidget(self._hint)
+
+        self._preview = QLabel("")
+        self._preview.setWordWrap(True)
+        lay.addWidget(self._preview)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+        for widget in (self._column, self._df):
+            widget.currentIndexChanged.connect(self._sync) if hasattr(widget, "currentIndexChanged") else None
+        self._column.currentIndexChanged.connect(self._sync)
+        self._df.valueChanged.connect(self._sync)
+        self._sync()
+
+    def _sync(self, *_args) -> None:
+        """Update the description and the rendered term."""
+        key = str(self._kind.currentData() or "bs")
+        spec = next((t for t in SPLINE_TERMS if t.key == key), None)
+        needs_df = key in {"bs", "cr"}
+        self._df.setVisible(needs_df)
+        self._df_label.setVisible(needs_df)
+        self._hint.setText(spec.description if spec else "")
+        self._preview.setText(f"<code>{self.term()}</code>")
+        self._preview.setTextFormat(Qt.RichText)
+
+    def term(self) -> str:
+        """The patsy term to insert."""
+        return spline_term(
+            str(self._kind.currentData() or "bs"),
+            self._column.currentText(),
+            df=int(self._df.value()),
+        )
+
+
+class CovarianceTermDialog(QDialog):
+    """
+    Build an ``mmrm`` covariance term for insertion into a formula.
+
+    The MMRM engine takes its covariance structure from the formula itself, the way R does. This
+    spares you memorising the nine structure names and the ``visit | subject`` notation, and shows
+    what each structure costs in parameters before you commit to it — an unstructured covariance
+    over many levels needs a lot of subjects to support.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        columns: Sequence[str],
+        visit: str = "",
+        subject: str = "",
+    ) -> None:
+        """Offer *columns* as the repeated and subject dimensions, preselecting *visit*/*subject*."""
+        super().__init__(parent)
+        self.setWindowTitle("Insert covariance term")
+        self.resize(560, 340)
+
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self._structure = QComboBox()
+        for key, spec in COVARIANCE_STRUCTURES.items():
+            self._structure.addItem(f"{spec.label} — {key}({spec.n_parameters} params)", key)
+        self._structure.currentIndexChanged.connect(self._sync)
+
+        self._visit = QComboBox()
+        self._visit.setToolTip(
+            "The repeated dimension — what varies within a subject. For these frames that is "
+            "usually 'territory'."
+        )
+        self._subject = QComboBox()
+        self._subject.setToolTip("The clustering unit whose measurements are correlated.")
+        self._group = QComboBox()
+        self._group.addItem("(none)", "")
+        self._group.setToolTip(
+            "Optional: fit a separate covariance matrix within each level of this column, written "
+            "structure(visit | group / subject)."
+        )
+        for combo in (self._visit, self._subject):
+            for name in columns:
+                combo.addItem(name)
+        for name in columns:
+            self._group.addItem(name, name)
+
+        for combo, preferred in (
+            (self._visit, (visit, "territory", "group_key")),
+            (self._subject, (subject, "subject_uid", "patient_id")),
+        ):
+            for candidate in preferred:
+                idx = combo.findText(candidate)
+                if candidate and idx >= 0:
+                    combo.setCurrentIndex(idx)
+                    break
+        for combo in (self._visit, self._subject, self._group):
+            combo.currentIndexChanged.connect(self._sync)
+
+        form.addRow("Structure", self._structure)
+        form.addRow("Repeated over", self._visit)
+        form.addRow("Subject", self._subject)
+        form.addRow("Separate per", self._group)
+        lay.addLayout(form)
+
+        self._hint = QLabel("")
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet(muted_label_style())
+        lay.addWidget(self._hint)
+
+        self._preview = QLabel("")
+        self._preview.setWordWrap(True)
+        self._preview.setTextFormat(Qt.RichText)
+        lay.addWidget(self._preview)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+        self._sync()
+
+    def _sync(self, *_args) -> None:
+        """Update the structure's description and the rendered term."""
+        spec = COVARIANCE_STRUCTURES.get(str(self._structure.currentData() or "us"))
+        self._hint.setText(
+            f"{spec.description}  Parameters: {spec.n_parameters} for k levels." if spec else ""
+        )
+        try:
+            self._preview.setText(f"<code>+ {self.term()}</code>")
+        except ValueError as exc:
+            self._preview.setText(str(exc))
+
+    def term(self) -> str:
+        """The covariance term to insert."""
+        return covariance_term(
+            str(self._structure.currentData() or "us"),
+            self._visit.currentText(),
+            self._subject.currentText(),
+            group=str(self._group.currentData() or ""),
+        )
+
+
+__all__ = ["CovarianceTermDialog", "DerivedColumnsDialog", "SplineTermDialog"]

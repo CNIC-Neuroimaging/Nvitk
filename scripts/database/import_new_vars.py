@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Batch import: T1 cortical/subcortical volumetry, cognitive wide sheet, clinical renames/derivations,
-ATT (long CSV), WMH (wide CSV). Upserts into an existing nvitk dataset (Parquet + catalog).
+ATT (long Desikan CSV + wide vascular Excel), WMH (wide CSV). Upserts into an existing nvitk
+dataset (Parquet + catalog).
 
 Example::
 
-    python test/db/import_new_vars.py --dataset-root /path/to/dataset --build-sqlite-index
+    python scripts/database/import_new_vars.py --dataset-root /path/to/dataset --build-sqlite-index
 """
 
 from __future__ import annotations
@@ -54,7 +55,30 @@ DEFAULT_PATHS = {
     "t1_subcortical": Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/PESABrain_T1_subcortical_regs_20250605.xlsx"),
     "cognitive": Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/PESABrain_Cognitives_20260201.xlsx"),
     "att": Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/ATT_native_results.csv"),
+    "att_vascular_mean": Path(
+        "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DB/raw/"
+        "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx"
+    ),
+    "att_vascular_median": Path(
+        "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DB/raw/"
+        "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx"
+    ),
     "wmh": Path("/home/imarcoss/NetVolumes/Tierra/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/WMH_MergedBatches_Averaged.csv"),
+}
+
+# Identifier / junk columns on the vascular ATT wide Excel sheets (not region values).
+_VASCULAR_ATT_SKIP_COLUMNS = {
+    "mri_id",
+    "mri_id.1",
+    "patient_id",
+    "subject_uid",
+    "session_id",
+    "session_uid",
+}
+
+_ATT_VASCULAR_LABELS = {
+    "att_mean": "ATT mean (vascular atlas)",
+    "att_median": "ATT median (vascular atlas)",
 }
 
 T1_PIPELINE_ID = "t1_volumetry_v1"
@@ -553,6 +577,156 @@ def import_att_csv(repo: DataRepo, path: Path, *, source_batch_id: str, log: Any
     return out
 
 
+def _vascular_att_region_columns(raw: pd.DataFrame) -> list[str]:
+    """Region value columns on a vascular ATT wide sheet (exclude id / junk columns)."""
+    cols: list[str] = []
+    for column in raw.columns:
+        name = str(column).strip()
+        if not name or name.startswith("Unnamed:"):
+            continue
+        lower = name.lower()
+        if lower in _VASCULAR_ATT_SKIP_COLUMNS or lower.startswith("mri_id"):
+            continue
+        cols.append(column if isinstance(column, str) else name)
+    return cols
+
+
+def import_att_vascular_xlsx(
+    repo: DataRepo,
+    path: Path,
+    *,
+    variable_id: str,
+    source_batch_id: str,
+    sheet_name: str = "Sheet1",
+    log: Any = print,
+) -> pd.DataFrame:
+    """Import vascular-atlas ATT from a wide Excel sheet (``mri_id`` × region columns).
+
+    Unlike the Desikan ``ATT_native_results.csv`` (long: region / corrected_mean / cov), these
+    sheets are wide: one row per ``mri_id``, one column per vascular parcel (``Left_ACA-0``, …).
+    ``mri_id`` is resolved to ``subject_uid`` via sessions (same lookup as :func:`import_att_csv`).
+    """
+    if variable_id not in _ATT_VASCULAR_LABELS:
+        raise ValueError(f"Unsupported vascular ATT variable_id: {variable_id!r}")
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    pid = _default_asl_pipeline(repo)
+    raw = read_tabular_source(path, sheet_name=sheet_name)
+    raw.columns = [str(c).strip() for c in raw.columns]
+    if "mri_id" not in raw.columns:
+        raise ValueError(f"Vascular ATT Excel missing mri_id column: got {list(raw.columns)}")
+
+    region_cols = _vascular_att_region_columns(raw)
+    if not region_cols:
+        raise ValueError(f"Vascular ATT Excel has no region columns: {path.name}")
+
+    melted = raw.melt(
+        id_vars=["mri_id"],
+        value_vars=region_cols,
+        var_name="_region_raw",
+        value_name="value_num",
+    )
+    melted["mri_id"] = melted["mri_id"].astype("string").str.strip()
+    melted["value_num"] = pd.to_numeric(melted["value_num"], errors="coerce")
+    melted = melted.dropna(subset=["mri_id", "value_num"])
+    melted = melted[melted["mri_id"] != ""]
+
+    lookup = _mri_subject_lookup(repo)
+    merged = melted.merge(lookup, on="mri_id", how="left")
+    n_miss = int(merged["subject_uid"].isna().sum())
+    if n_miss:
+        log(f"ATT vascular ({variable_id}): {n_miss} value rows without subject_uid match in sessions")
+    merged = merged.dropna(subset=["subject_uid"])
+
+    frames: list[pd.DataFrame] = []
+    for region_label, sub in merged.groupby("_region_raw", sort=False):
+        agg = sub.copy()
+        agg["session_id"] = agg["mri_id"].astype("string")
+        agg["region_id"] = agg["_region_raw"].map(lambda x: _region_id(str(x)) if pd.notna(x) else None)
+        agg["region_label"] = agg["_region_raw"].astype("string")
+        spec = DerivedImageMeasurementSpec(
+            variable_id=variable_id,
+            modality="asl",
+            pipeline_id=pid,
+            source_file=path.name,
+            source_sheet=sheet_name,
+            source_column=str(region_label),
+            value_column="value_num",
+            source_batch_id=source_batch_id,
+            unit="s",
+            value_kind="numeric",
+        )
+        fr = build_image_measurement_rows(agg, spec)
+        if not fr.empty:
+            frames.append(fr)
+
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not out.empty:
+        # Replace any prior rows for this source file (including broken subject_uid-NA imports).
+        existing = repo.get("image_measurements", cohort_id=False, use_sqlite=False)
+        if not existing.empty and "source_file" in existing.columns:
+            keep = existing.loc[existing["source_file"].astype("string") != path.name].copy()
+        else:
+            keep = existing
+        combined = pd.concat([keep, out], ignore_index=True) if keep is not None and not keep.empty else out
+        repo.write_table(
+            "image_measurements",
+            combined,
+            provenance={"importer": "import_new_vars", "step": f"att_vascular_{variable_id}"},
+            build_sqlite_index=True,
+        )
+        repo.register_variables(
+            [
+                {
+                    "variable_id": variable_id,
+                    "domain": "image",
+                    "table": "image_measurements",
+                    "modality": "asl",
+                    "label": _ATT_VASCULAR_LABELS[variable_id],
+                    "source_file": path.name,
+                    "unit": "s",
+                    "aliases": [variable_id],
+                }
+            ]
+        )
+    log(
+        f"ATT vascular {variable_id} rows: {len(out)} "
+        f"({merged['mri_id'].nunique() if not merged.empty else 0} sessions, "
+        f"{len(region_cols)} regions) from {path.name}"
+    )
+    return out
+
+
+def import_att_vascular(
+    repo: DataRepo,
+    *,
+    mean_path: Path,
+    median_path: Path,
+    source_batch_id: str,
+    log: Any = print,
+) -> pd.DataFrame:
+    """Import vascular-atlas ``att_mean`` and ``att_median`` from the two wide Excel sources."""
+    frames = [
+        import_att_vascular_xlsx(
+            repo,
+            mean_path,
+            variable_id="att_mean",
+            source_batch_id=source_batch_id,
+            log=log,
+        ),
+        import_att_vascular_xlsx(
+            repo,
+            median_path,
+            variable_id="att_median",
+            source_batch_id=source_batch_id,
+            log=log,
+        ),
+    ]
+    nonempty = [f for f in frames if not f.empty]
+    return pd.concat(nonempty, ignore_index=True) if nonempty else pd.DataFrame()
+
+
 _WMH_METRIC = {"Les": "wmh_les", "Reg": "wmh_reg", "Freq": "wmh_freq", "Dist": "wmh_dist"}
 _WMH_RE = re.compile(r"^(Les|Reg|Freq|Dist)([A-Za-z0-9]+)$")
 
@@ -649,6 +823,7 @@ STEPS = (
     "pulse_map",
     "apoe_group",
     "att",
+    "att_vascular",
     "wmh",
 )
 
@@ -661,7 +836,7 @@ def run_import_new_vars(
     steps: Iterable[str] | None = None,
     log: Any = print,
 ) -> None:
-    """Run T1/cognitive imports, clinical derivations (pp, MAP, APOE group), ATT, and WMH."""
+    """Run T1/cognitive imports, clinical derivations (pp, MAP, APOE group), ATT, vascular ATT, and WMH."""
     resolved_paths = dict(DEFAULT_PATHS)
     if paths:
         resolved_paths.update(paths)
@@ -695,6 +870,14 @@ def run_import_new_vars(
         derive_apoe_group(repo, source_batch_id=source_batch_id, log=log)
     if "att" in step_set:
         import_att_csv(repo, resolved_paths["att"], source_batch_id=source_batch_id, log=log)
+    if "att_vascular" in step_set:
+        import_att_vascular(
+            repo,
+            mean_path=resolved_paths["att_vascular_mean"],
+            median_path=resolved_paths["att_vascular_median"],
+            source_batch_id=source_batch_id,
+            log=log,
+        )
     if "wmh" in step_set:
         import_wmh_csv(repo, resolved_paths["wmh"], source_batch_id=source_batch_id, log=log)
 
@@ -728,6 +911,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         "t1_subcortical": args.t1_subcortical,
         "cognitive": args.cognitive,
         "att": args.att,
+        "att_vascular_mean": args.att_vascular_mean,
+        "att_vascular_median": args.att_vascular_median,
         "wmh": args.wmh,
     }
     run_import_new_vars(repo, paths=paths, source_batch_id=args.source_batch_id, steps=steps, log=log)

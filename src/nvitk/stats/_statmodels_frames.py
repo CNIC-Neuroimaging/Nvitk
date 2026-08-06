@@ -1074,6 +1074,21 @@ def build_multi_feature_analysis_frame(
         )
 
     wide = finalize_analysis_frame(wide, repo, primary_variable_id=specs[0].column())
+
+    # pandas tolerates repeated column names; polars and R do not, and they fail with a message
+    # that names neither the column nor the frame. Catch it here, where the report can say which
+    # column it was, rather than at fit time in someone else's error string.
+    from .frame_ops import ensure_unique_columns
+
+    before = list(wide.columns)
+    wide = ensure_unique_columns(wide, context="analysis frame")
+    dropped = [c for c in dict.fromkeys(before) if before.count(c) > 1]
+    if dropped:
+        meta["warnings"].append(
+            f"Duplicate column(s) in the analysis frame were reduced to one: {', '.join(dropped)}. "
+            "Check whether a covariate shares a name with a measurement."
+        )
+
     meta["n_rows"] = int(len(wide))
     for message in meta["warnings"]:
         log.warning("Analysis frame: %s", message)

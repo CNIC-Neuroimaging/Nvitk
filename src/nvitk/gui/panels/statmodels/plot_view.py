@@ -66,8 +66,10 @@ class PlotPanel(QGroupBox):
         self._canvas = None
         self._fig = None
         self._axes = None
+        self._linked_axes: list[Any] = []
         self._axis_base: dict[str, tuple[float, float]] = {}
         self._axis_span: dict[str, tuple[float, float]] = {}
+        self._panel_base: list[dict[str, tuple[float, float]]] = []
         self._group_column = ""
         self._group_boxes: dict[str, QCheckBox] = {}
         self._suspend_group_signal = False
@@ -309,6 +311,7 @@ class PlotPanel(QGroupBox):
         self._canvas = None
         self._fig = None
         self._axes = None
+        self._linked_axes = []
         self._disable_axis_sliders()
 
     def show_figure(self, fig: Any) -> None:
@@ -321,13 +324,39 @@ class PlotPanel(QGroupBox):
         self._host_layout.addWidget(canvas)
         self._canvas = canvas
         self._fig = fig
-        # Axis sliders only make sense for a single-axes figure; the mediation partial-path plot has
-        # two, so leave them disabled there rather than rescaling an arbitrary one.
-        self._axes = fig.axes[0] if len(fig.axes) == 1 else None
-        fig.tight_layout()
+        # Axis sliders act on every axes a plot marks as sharing one data space — the panels of a
+        # grouped display, moved together so the small multiples stay comparable. Figures that do
+        # not mark any (the mediation partial-path pair, a heatmap and its colourbar) get the
+        # sliders only when there is a single, unambiguous axes to rescale.
+        linked = [ax for ax in getattr(fig, "linked_axes", []) or [] if ax in fig.axes]
+        self._linked_axes = linked or (fig.axes[:1] if len(fig.axes) == 1 else [])
+        self._axes = self._linked_axes[0] if self._linked_axes else None
+        self._fit_layout(fig)
+        # The canvas is resized by its splitter, but a layout computed once at creation does not
+        # follow — which is how long tick labels end up outside the figure. Re-fit on every resize.
+        canvas.mpl_connect("resize_event", lambda _event: self._fit_layout(fig))
         canvas.draw_idle()
         self._sync_axis_sliders()
         self.apply_legend_visibility()
+
+    @staticmethod
+    def _fit_layout(fig: Any) -> None:
+        """
+        Re-fit the figure's layout so nothing spills outside the canvas.
+
+        Skipped when the figure already carries a layout engine of its own (``constrained``, which
+        some plots set because they re-flow on every draw) — calling ``tight_layout`` on top of one
+        of those fights it and matplotlib warns.
+        """
+        try:
+            if fig.get_layout_engine() is not None:
+                return
+        except AttributeError:  # matplotlib < 3.6 has no layout-engine API
+            pass
+        try:
+            fig.tight_layout()
+        except Exception as exc:
+            log.debug("Could not re-fit the figure layout: %s", exc)
 
     def show_error(self, message: str) -> None:
         """Replace the plot with an error message."""
@@ -372,6 +401,7 @@ class PlotPanel(QGroupBox):
         self._btn_reset_axes.setEnabled(False)
         self._axis_base = {}
         self._axis_span = {}
+        self._panel_base = []
 
     def _sync_axis_sliders(self) -> None:
         """
@@ -379,13 +409,25 @@ class PlotPanel(QGroupBox):
 
         Each slider spans the plotted range padded by :data:`AXIS_SLIDER_MARGIN` on both sides, so
         the handles start inset and the user can zoom out as well as in.
+
+        With several linked panels the baseline is their **union**, and moving a slider puts every
+        panel on that one common scale — which is how you compare magnitudes between panels that
+        each autoscaled to their own range. *Reset* restores the individual ranges.
         """
-        ax = self._axes
-        if ax is None:
+        if not self._linked_axes:
             self._disable_axis_sliders()
             return
 
-        self._axis_base = {"x": tuple(ax.get_xlim()), "y": tuple(ax.get_ylim())}
+        self._panel_base = [
+            {"x": tuple(ax.get_xlim()), "y": tuple(ax.get_ylim())} for ax in self._linked_axes
+        ]
+        self._axis_base = {
+            axis: (
+                min(base[axis][0] for base in self._panel_base),
+                max(base[axis][1] for base in self._panel_base),
+            )
+            for axis in ("x", "y")
+        }
         self._axis_span = {}
         for axis, (lo, hi) in self._axis_base.items():
             span = float(hi) - float(lo)
@@ -416,11 +458,10 @@ class PlotPanel(QGroupBox):
         return int(round(min(max(frac, 0.0), 1.0) * AXIS_SLIDER_STEPS))
 
     def _on_axis_slider_changed(self, *_args: Any) -> None:
-        """Rescale the current figure's axes to the slider positions and redraw the canvas."""
-        ax = self._axes
-        if ax is None or not self._axis_span or self._canvas is None:
+        """Rescale every linked axes to the slider positions and redraw the canvas."""
+        if not self._linked_axes or not self._axis_span or self._canvas is None:
             return
-        for axis, setter in (("x", ax.set_xlim), ("y", ax.set_ylim)):
+        for axis in ("x", "y"):
             lo = self._axis_slider_to_value(axis, self._axis_sliders[f"{axis}min"].value())
             hi = self._axis_slider_to_value(axis, self._axis_sliders[f"{axis}max"].value())
             self._axis_value_labels[f"{axis}min"].setText(f"{lo:.4g}")
@@ -428,16 +469,17 @@ class PlotPanel(QGroupBox):
             if hi <= lo:  # crossed handles would raise; keep a hair of range instead
                 span = self._axis_span[axis]
                 hi = lo + abs(span[1] - span[0]) / AXIS_SLIDER_STEPS or lo + 1e-9
-            setter(lo, hi)
+            for ax in self._linked_axes:
+                (ax.set_xlim if axis == "x" else ax.set_ylim)(lo, hi)
         self._canvas.draw_idle()
 
     def reset_axes(self) -> None:
-        """Restore the autoscaled limits captured when the plot was drawn."""
-        ax = self._axes
-        if ax is None or not self._axis_base:
+        """Restore the autoscaled limits captured when the plot was drawn, panel by panel."""
+        if not self._linked_axes or not self._axis_base:
             return
-        ax.set_xlim(*self._axis_base["x"])
-        ax.set_ylim(*self._axis_base["y"])
+        for ax, base in zip(self._linked_axes, self._panel_base):
+            ax.set_xlim(*base["x"])
+            ax.set_ylim(*base["y"])
         for key, slider in self._axis_sliders.items():
             axis, bound = key[0], key[1:]
             value = self._axis_base[axis][0 if bound == "min" else 1]

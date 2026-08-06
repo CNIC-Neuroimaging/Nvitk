@@ -190,6 +190,7 @@ nvitk-transform = "nvitk.cli.transform:main"
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
 nvitk-gui = "nvitk.gui.main:main"
+nvitk-statsmodels = "nvitk.gui.panels.statmodels.cli:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
 nvitk-xnat-pipeline-sync = "nvitk.db.xnat_pipeline_resources:main"
 

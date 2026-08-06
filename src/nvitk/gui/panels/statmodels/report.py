@@ -371,6 +371,15 @@ class ModelReportPanel(QGroupBox):
             info["random_effects"],
             headers={"component": "Component", "kind": "Kind", "var": "Variance", "sd": "SD"},
         )
+        # Only for models that actually fit one line per group. The population coefficient table can
+        # read as if a slope were shared across groups; this is where each group's own value lives.
+        group_effects = info.get("group_effects")
+        if isinstance(group_effects, pd.DataFrame) and not group_effects.empty:
+            self._add_table_tab(
+                f"Per-{_group_noun(info)}",
+                group_effects,
+                headers={"factor": "Factor", "level": "Level"},
+            )
         self._add_text_tab("Raw", raw_text)
         self._tabs.setCurrentIndex(1)  # Coefficients is what you look at first
         self._tabs.setVisible(True)
@@ -427,6 +436,16 @@ class ModelReportPanel(QGroupBox):
         """Show a single informational message in place of a result."""
         self.clear()
         self._placeholder.setText(message)
+
+
+def _group_noun(info: Mapping[str, Any]) -> str:
+    """Tab label for the per-group table: the factor's own name when there is just one."""
+    frame = info.get("group_effects")
+    if isinstance(frame, pd.DataFrame) and "factor" in frame.columns:
+        factors = [f for f in frame["factor"].unique() if str(f).strip()]
+        if len(factors) == 1:
+            return str(factors[0])
+    return "group"
 
 
 def _mixedlm_summary_text(header: Mapping[str, Any], stats: Mapping[str, Any], note: str) -> str:

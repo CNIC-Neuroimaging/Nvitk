@@ -181,6 +181,9 @@ def build_image_measurement_rows(
     if spec.value_column not in agg.columns:
         raise ValueError(f"agg is missing value column {spec.value_column!r}.")
 
+    # Range-based Series below use 0..n-1; a non-contiguous ``agg`` index (e.g. after
+    # groupby/dropna) would align on labels and inflate the frame with NA rows.
+    agg = agg.reset_index(drop=True)
     n = len(agg)
     vn = pd.to_numeric(agg[spec.value_column], errors="coerce")
     pipeline_name = spec.pipeline_name or f"derived_{spec.variable_id}"
@@ -247,6 +250,7 @@ def build_clinical_measurement_rows(
     if spec.value_column not in agg.columns:
         raise ValueError(f"agg is missing value column {spec.value_column!r}.")
 
+    agg = agg.reset_index(drop=True)
     n = len(agg)
     vn = pd.to_numeric(agg[spec.value_column], errors="coerce")
     source_table = spec.source_table or f"{spec.source_file}::{spec.source_sheet}"

@@ -6,7 +6,7 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -134,6 +134,84 @@ def _natural_sort_key(value: Any) -> tuple:
         if chunk != ""
     )
     return (1, 0.0, "") + chunks
+
+
+def _prediction_standard_errors(
+    result: Any,
+    df: pd.DataFrame,
+    *,
+    x: str,
+    x_values: np.ndarray,
+    group: str,
+    levels: Sequence[Any],
+    covariate_refs: Mapping[str, Any],
+) -> dict[str | None, np.ndarray]:
+    """
+    Delta-method standard error of the fixed-effects prediction along *x*, once per group level.
+
+    Each level gets its own design matrix with the grouping column pinned to that level, so when the
+    group appears in the formula (``C(territory)``) its interval reflects that level's own precision
+    — a level with few observations gets a visibly wider band than a well-sampled one. When the
+    group is only a random effect the design is identical across levels and every band comes out the
+    same width, which is the honest answer: the fit holds no level-specific fixed-effect
+    information.
+
+    Returns
+    -------
+    dict
+        ``{None: (prediction, se)}`` for the overall fixed-effects line, plus
+        ``{str(level): (prediction, se)}`` per level. Levels whose design matrix cannot be built are
+        simply absent. The prediction is on the link scale; the caller applies the inverse link.
+    """
+    import patsy
+
+    design_info = result.model.data.design_info
+    fe = model_params(result)
+    cov = result.cov_params()
+    # A MixedLM's cov_params spans the variance components too; keep the fixed-effects block.
+    cov = cov.loc[fe.index, fe.index]
+
+    def se_for(pins: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+        """Prediction and its standard error along ``x_values`` with *pins* held constant."""
+        grid = pd.DataFrame({x: x_values})
+        for name, value in pins.items():
+            if name != x:
+                grid[name] = value
+        grid = _match_grid_columns_to_df_dtypes(grid, df, [c for c in grid.columns if c in df.columns])
+        design = patsy.build_design_matrices([design_info], grid, return_type="dataframe")[0]
+        design = design.reindex(columns=fe.index, fill_value=0.0)
+        prediction = (design @ fe).to_numpy(dtype=float)
+        se = np.sqrt(np.clip(np.sum((design @ cov) * design, axis=1).to_numpy(dtype=float), 0.0, None))
+        return prediction, se
+
+    out: dict[str | None, tuple[np.ndarray, np.ndarray]] = {}
+    base_refs = {k: v for k, v in covariate_refs.items() if k != x}
+    grouped = bool(group) and group in df.columns and group != x
+
+    # The black "fixed effect" line is drawn with every group contrast at zero — i.e. at the
+    # grouping factor's reference level — so its band has to be evaluated there to match.
+    overall_refs = dict(base_refs)
+    if grouped and group not in overall_refs:
+        reference_levels = sorted(df[group].dropna().astype(str).unique())
+        if reference_levels:
+            overall_refs[group] = reference_levels[0]
+    try:
+        out[None] = se_for(overall_refs)
+    except Exception as exc:
+        log.debug("No overall confidence band: %s", exc)
+
+    if grouped:
+        for level in levels:
+            try:
+                out[str(level)] = se_for({**base_refs, group: level})
+            except Exception as exc:  # a level patsy cannot encode (unseen category)
+                log.debug("No confidence band for %s=%s: %s", group, level, exc)
+    if not out:
+        raise ValueError(
+            "The prediction grid could not be built for any level — pin every formula term that is "
+            "neither the x axis nor the grouping column."
+        )
+    return out
 
 
 def _match_grid_columns_to_df_dtypes(
@@ -347,9 +425,45 @@ def significance_stars(pval: float) -> str:
     return "NS"
 
 
+def model_params(result: Any) -> pd.Series:
+    """
+    Fixed-effect coefficients of a fitted model.
+
+    MixedLM exposes them as ``fe_params`` (``params`` there also carries the variance components);
+    OLS and GLM use ``params``. One accessor so the reporting and plotting code does not care which
+    engine produced the result.
+    """
+    fe = getattr(result, "fe_params", None)
+    if fe is None:
+        fe = getattr(result, "params", pd.Series(dtype=float))
+    return fe
+
+
+def model_random_effects(result: Any) -> Mapping[str, Any]:
+    """Per-group random effects, or an empty mapping for models that have none."""
+    return getattr(result, "random_effects", {}) or {}
+
+
+def model_inverse_link(result: Any) -> Callable[[Any], Any]:
+    """
+    Map a linear predictor back to the response scale.
+
+    Identity for OLS and MixedLM; the family's inverse link for a GLM, which is where a GLM's
+    non-linearity lives — predictions are linear on the link scale and curved on the response scale.
+    """
+    family = getattr(getattr(result, "model", None), "family", None)
+    link = getattr(family, "link", None)
+    if link is None:
+        return lambda values: values
+    inverse = getattr(link, "inverse", None)
+    if inverse is None:
+        return lambda values: values
+    return lambda values: inverse(np.asarray(values, dtype=float))
+
+
 def mixedlm_coef_frame(result: Any, *, alpha: float = 0.05) -> pd.DataFrame:
     """
-    Fixed-effects table of a MixedLM fit.
+    Fixed-effects table of a fitted model (MixedLM, OLS or GLM).
 
     Returns
     -------
@@ -358,7 +472,7 @@ def mixedlm_coef_frame(result: Any, *, alpha: float = 0.05) -> pd.DataFrame:
         confidence bounds are derived from the coefficient and its standard error (a Wald interval),
         so they are present even for results that do not expose ``conf_int``.
     """
-    fe = result.fe_params
+    fe = model_params(result)
     fe_se = getattr(result, "bse_fe", getattr(result, "bse", pd.Series(dtype=float)))
     fe_p = getattr(result, "pvalues_fe", getattr(result, "pvalues", pd.Series(dtype=float)))
     # 1.959964… for the default alpha; computed so a caller can widen/narrow the interval.
@@ -440,6 +554,42 @@ def mixedlm_random_effects_frame(result: Any) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["component", "kind", "var", "sd"])
 
 
+def mixedlm_group_coefficients(result: Any, *, factor: str = "Group") -> pd.DataFrame:
+    """
+    Per-group coefficients of a MixedLM: each level's own intercept and slopes.
+
+    A random-slope model gives every group its own line, but those live in the random effects, not
+    in the fixed-effects table — so a coefficient table showing one ``age_c`` row can read as if the
+    slope were shared. This makes the per-level values explicit.
+
+    Two numbers per term: the **total** (fixed effect + that level's random deviation), which is the
+    line actually fitted for the group, and the **deviation** alone, which says how far the group
+    sits from the population average.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``factor``, ``level``, then ``<term>`` and ``<term>_dev`` per random term. Empty when the
+        model has no random effects.
+    """
+    random_effects = model_random_effects(result)
+    if not random_effects:
+        return pd.DataFrame(columns=["factor", "level"])
+
+    fixed = model_params(result)
+    rows: list[dict[str, Any]] = []
+    for level, values in random_effects.items():
+        row: dict[str, Any] = {"factor": factor, "level": str(level)}
+        for term, deviation in dict(values).items():
+            # statsmodels names the random intercept "Group"; its fixed counterpart is "Intercept".
+            name = "Intercept" if str(term) in {"Group", "Intercept", "const"} else str(term)
+            base = float(fixed.get(name, fixed.get("const", 0.0) if name == "Intercept" else 0.0))
+            row[name] = base + float(deviation)
+            row[f"{name}_dev"] = float(deviation)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def mixedlm_info_dict(
     result: Any,
     *,
@@ -515,6 +665,7 @@ def mixedlm_info_dict(
         "cov_re": cov_re,
         "fit_statistics": fit_stats,
         "has_vcomp": getattr(result, "vcomp", None) is not None,
+        "group_effects": mixedlm_group_coefficients(result, factor=group_name),
     }
 
 
@@ -556,9 +707,12 @@ def render_mixedlm_info(info: dict[str, Any]) -> str:
 
     if info.get("has_vcomp"):
         re_frame = info["random_effects"]
+        # ``vcomp`` is statsmodels' name for these; the R engines label them ``ranef``. Both belong
+        # in this section — filtering on one spelling silently emptied it for the other.
+        shown = re_frame[re_frame["kind"].isin(["vcomp", "ranef"])]
         _w(f"Variance components ({header.get('vc_group_name', 'Variance Components')})")
         _w("-" * 88)
-        for row in re_frame[re_frame["kind"] == "vcomp"].itertuples(index=False):
+        for row in shown.itertuples(index=False):
             _w(f"{row.component:<24} var={row.var:.6f}  sd={row.sd:.6f}")
         _w()
 
@@ -620,6 +774,7 @@ def plot_mixedlm_params(
     errorbar: bool = False,
     ci_level: float = 0.95,
     covariate_refs: dict[str, float] | None = None,
+    display: str = "overview",
     output_path: str | Path | None = None,
     title: str = "MixedLM parameter plot",
     x_label: str | None = None,
@@ -651,6 +806,12 @@ def plot_mixedlm_params(
         Overlay the observed data. In continuous mode this is a scatter of individual rows; in
         categorical mode it is the **mean of y within each (x, hue) cell** — an unadjusted
         counterpart to the model's marginal means, drawn dashed and in a lighter tone.
+    display : {"overview", "grouped"}
+        ``"overview"`` draws every level on one pair of axes. ``"grouped"`` splits them into a grid
+        of anatomical panels (carotids / anterior / posterior / venous for vessels, lobes for
+        cortical parcels — see :mod:`nvitk.stats.region_groups`), each autoscaled to its own range.
+        The model is untouched: the panels are a view of one fit, and the dashed population line is
+        the same all-level estimate in each of them. Raises when no level maps to a known region.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -685,7 +846,208 @@ def plot_mixedlm_params(
         if df.empty:
             raise ValueError("No rows left after restricting to the selected levels.")
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # ---- 1. Resolve the categorical axis order once ----------------------------
+    # Every panel of a grouped display must share one x axis, so this cannot be left to the
+    # per-axes drawing where each subset would order its own observed levels.
+    if mode == "categorical":
+        categorical_order = _categorical_axis_order(df, x, categorical_order)
+
+    display = str(display or "overview").strip().lower()
+    if display not in {"overview", "grouped"}:
+        raise ValueError("display must be one of: overview, grouped")
+
+    common = dict(
+        result=result,
+        x=x,
+        y=y,
+        group=group,
+        mode=mode,
+        categorical_order=categorical_order,
+        hue=hue,
+        palette=palette,
+        include_points=include_points,
+        errorbar=errorbar,
+        ci_level=ci_level,
+        covariate_refs=covariate_refs,
+    )
+
+    if display == "overview":
+        fig, ax = plt.subplots(figsize=(10, 6))
+        errors = _draw_mixedlm_axes(ax, df=df, group_order=group_order, hue_order=hue_order, **common)
+        _finish_mixedlm_axes(ax, title=title, x_label=x_label, y_label=y_label)
+        panel_axes = [ax]
+    else:
+        fig, panel_axes, errors = _draw_grouped_panels(
+            df=df,
+            group_order=group_order,
+            hue_order=hue_order,
+            title=title,
+            x_label=x_label,
+            y_label=y_label,
+            common=common,
+        )
+
+    for name, message in errors.items():
+        setattr(fig, name, message)
+    # The plot pane rescales these together: panels of one model share a data space, and axis
+    # sliders that moved only the first panel would make the small multiples incomparable.
+    fig.linked_axes = panel_axes
+
+    if output_path is not None:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=300, bbox_inches="tight")
+    return fig
+
+
+def _draw_grouped_panels(
+    *,
+    df: pd.DataFrame,
+    group_order: list[str] | None,
+    hue_order: list[str] | None,
+    title: str,
+    x_label: str,
+    y_label: str,
+    common: dict[str, Any],
+) -> tuple[Any, list[Any], dict[str, str]]:
+    """
+    One axes per anatomical panel — carotids, anterior, posterior, venous — instead of one crowded
+    axes for every level.
+
+    Each panel is drawn from the rows of its own levels, so it autoscales to its own range: a venous
+    ``log(PI)`` around −1.0 no longer flattens a carotid one around −0.2. The palette restarts in
+    every panel, which is what keeps four curves legible where thirteen were not. The population
+    (fixed-effect) line is unchanged by the split — it is the all-level estimate — so it repeats
+    identically across panels and remains the common reference between them.
+    """
+    import matplotlib.pyplot as plt
+
+    from nvitk.stats.region_groups import group_levels_into_panels
+
+    group = common["group"]
+    levels = group_order or sorted(df[group].dropna().astype(str).unique(), key=_natural_sort_key)
+    panels = group_levels_into_panels(levels)
+    if not panels:
+        raise ValueError(
+            f"None of the {len(levels)} {group!r} levels map to a known anatomical region, so there "
+            f"are no groups to split into. Use the Overview display for this model."
+        )
+
+    n_cols = 1 if len(panels) == 1 else 2
+    n_rows = int(np.ceil(len(panels) / n_cols))
+    fig, grid = plt.subplots(
+        n_rows, n_cols, figsize=(8.5 * n_cols, 4.8 * n_rows), squeeze=False
+    )
+    flat = [ax for row in grid for ax in row]
+
+    errors: dict[str, str] = {}
+    panel_axes: list[Any] = []
+    for ax, (panel, panel_levels) in zip(flat, panels.items()):
+        wanted = {str(v) for v in panel_levels}
+        sub = df.loc[df[group].astype(str).isin(wanted)]
+        if sub.empty:
+            # A level can be selected but have no rows left after filtering; say so on the panel
+            # rather than raising and losing the whole figure.
+            ax.text(0.5, 0.5, "No observations", ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(panel)
+            ax.set_axis_off()
+            continue
+        errors.update(
+            _draw_mixedlm_axes(
+                ax,
+                df=sub,
+                group_order=list(panel_levels),
+                # The hue is only restricted when it *is* the panelled column; an unrelated second
+                # factor must keep all its levels or the panels stop being comparable.
+                hue_order=list(panel_levels) if common.get("hue") == group else hue_order,
+                **common,
+            )
+        )
+        _finish_mixedlm_axes(ax, title=panel, x_label=x_label, y_label=y_label)
+        panel_axes.append(ax)
+
+    for ax in flat[len(panels):]:
+        ax.set_visible(False)
+
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+    # Constrained layout re-flows on every draw, which a grid with a suptitle needs; it also tells
+    # the plot pane not to call tight_layout on top of it.
+    fig.set_layout_engine("constrained")
+    return fig, panel_axes, errors
+
+
+def _categorical_axis_order(
+    df: pd.DataFrame, x: str, categorical_order: list[str] | None
+) -> list[Any]:
+    """
+    Order of the categorical x axis.
+
+    ``pd.unique`` returns first-appearance order, which puts the levels in whatever sequence the
+    rows happen to arrive in (g1, g2, g0, g3) — meaningless to read and different on every reload.
+    """
+    if categorical_order is not None:
+        return list(categorical_order)
+    if isinstance(df[x].dtype, pd.CategoricalDtype) and df[x].dtype.ordered:
+        # A binned column already carries its intended order; honour it rather than re-sorting, so
+        # labels like "low"/"medium"/"high" stay in sequence.
+        present = set(df[x].dropna().astype(str))
+        return [c for c in df[x].dtype.categories if str(c) in present]
+    # Natural sort so g2 comes before g10.
+    return sorted(pd.unique(df[x].dropna()), key=_natural_sort_key)
+
+
+def _finish_mixedlm_axes(ax: Any, *, title: str, x_label: str, y_label: str) -> None:
+    """Titles, grid and a de-duplicated legend — applied identically to every axes."""
+    ax.set_title(title)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.grid(True, axis="y", alpha=0.25)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        dedup: dict[str, Any] = {}
+        for h, l in zip(handles, labels):
+            if l not in dedup:
+                dedup[l] = h
+        ax.legend(dedup.values(), dedup.keys(), loc="best", fontsize=9)
+
+
+def _draw_mixedlm_axes(
+    ax: Any,
+    *,
+    result: Any,
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    group: str,
+    mode: str,
+    categorical_order: list[str] | None = None,
+    group_order: list[str] | None = None,
+    hue: str | None = None,
+    hue_order: list[str] | None = None,
+    palette: str | Mapping[str, str] = "tab10",
+    include_points: bool = True,
+    errorbar: bool = False,
+    ci_level: float = 0.95,
+    covariate_refs: dict[str, float] | None = None,
+) -> dict[str, str]:
+    """
+    Draw one model plot onto *ax* — the body shared by the overview and the grouped panels.
+
+    Everything that varies between panels arrives as an argument: *df* is already restricted to the
+    panel's rows and *group_order* to its levels, which is what makes each panel autoscale and
+    restart the palette. Nothing here reads the figure, so the caller owns titles, the legend and
+    the layout.
+
+    Returns
+    -------
+    dict
+        ``{"emm_error": …}`` / ``{"ci_error": …}`` for failures that degrade the plot rather than
+        abort it, so a caller can report why the model curves are missing.
+    """
+    import seaborn as sns
+
+    covariate_refs = dict(covariate_refs or {})
+    errors: dict[str, str] = {}
 
     if mode == "continuous":
         x_num = pd.to_numeric(df[x], errors="coerce")
@@ -711,8 +1073,8 @@ def plot_mixedlm_params(
                 ax=ax,
             )
 
-        fe = result.fe_params
-        re_dict = getattr(result, "random_effects", {})
+        fe = model_params(result)
+        re_dict = model_random_effects(result)
         b_int = float(fe.get("Intercept", fe.get("const", 0.0)))
         b_x = float(fe.get(x, 0.0))
         extra = 0.0
@@ -722,69 +1084,90 @@ def plot_mixedlm_params(
             if isinstance(cov_val, (int, float, np.integer, np.floating)):
                 extra += float(fe.get(cov_name, 0.0)) * float(cov_val)
 
-        ax.plot(x_line, b_int + extra + b_x * x_line, color="black", lw=2.8, ls="--", label="Fixed effect")
+        inverse = model_inverse_link(result)
+        ax.plot(
+            x_line,
+            inverse(b_int + extra + b_x * x_line),
+            color="black",
+            lw=2.8,
+            ls="--",
+            label="Fixed effect",
+        )
 
-        if errorbar:
-            # Band on the fixed-effect line only. The per-group lines add a random-effect
-            # deviation, whose uncertainty is not in ``cov_params``, so shading them would show a
-            # narrower interval than is actually warranted.
-            try:
-                import patsy
-
-                grid = pd.DataFrame({x: x_line})
-                for cov_name, cov_val in covariate_refs.items():
-                    if cov_name != x:
-                        grid[cov_name] = cov_val
-                grid = _match_grid_columns_to_df_dtypes(
-                    grid, df, [c for c in grid.columns if c in df.columns]
-                )
-                design = patsy.build_design_matrices(
-                    [result.model.data.design_info], grid, return_type="dataframe"
-                )[0]
-                fe_all = result.fe_params
-                cov_all = result.cov_params().loc[fe_all.index, fe_all.index]
-                design = design.reindex(columns=fe_all.index, fill_value=0.0)
-                mean = design @ fe_all
-                se = np.sqrt(np.sum((design @ cov_all) * design, axis=1))
-                crit = _z_critical(ci_level)
-                ax.fill_between(
-                    x_line,
-                    mean - crit * se,
-                    mean + crit * se,
-                    color="black",
-                    alpha=0.12,
-                    label=f"{int(round(ci_level * 100))}% CI (fixed effect)",
-                )
-            except Exception as exc:
+        # Fixed-effects prediction and its standard error along the line, per group. Needed both to
+        # draw per-group bands and — for models with no random effects — to draw the per-group
+        # lines at all.
+        crit = _z_critical(ci_level)
+        predictions: dict[str | None, tuple[np.ndarray, np.ndarray]] = {}
+        try:
+            predictions = _prediction_standard_errors(
+                result,
+                df,
+                x=x,
+                x_values=x_line,
+                group=group,
+                levels=groups,
+                covariate_refs=covariate_refs,
+            )
+        except Exception as exc:
+            if errorbar:
                 log.warning("Could not build the confidence band: %s", exc)
                 log.debug("CI band failure", exc_info=True)
-                fig.ci_error = str(exc)
+                errors["ci_error"] = str(exc)
+
+        if errorbar and predictions.get(None) is not None:
+            _pred, overall_se = predictions[None]
+            fixed_line = b_int + extra + b_x * x_line
+            ax.fill_between(
+                x_line,
+                inverse(fixed_line - crit * overall_se),
+                inverse(fixed_line + crit * overall_se),
+                color="black",
+                alpha=0.12,
+                label=f"{int(round(ci_level * 100))}% CI (fixed effect)",
+            )
+
+        # Does the grouping factor actually appear in the model? If every level predicts the same
+        # curve it does not, and drawing one identical line per level would be pure clutter.
+        level_predictions = {k: v for k, v in predictions.items() if k is not None}
+        group_is_in_model = len(level_predictions) > 1 and not all(
+            np.allclose(next(iter(level_predictions.values()))[0], pred)
+            for pred, _se in level_predictions.values()
+        )
 
         for g in groups:
             re_vals = re_dict.get(g, re_dict.get(str(g), None))
-            if re_vals is None:
+            entry = level_predictions.get(str(g))
+            if re_vals is not None:
+                # MixedLM: the line is the fixed-effects prediction plus this group's random offset.
+                re_int = float(re_vals.get("Group", re_vals.get("Intercept", 0.0)))
+                re_x = float(re_vals.get(x, 0.0))
+                eta = (b_int + extra + re_int) + (b_x + re_x) * x_line
+            elif group_is_in_model and entry is not None:
+                # OLS / GLM: no random effects, so the group's line *is* its fixed-effects
+                # prediction — which only differs between levels when the formula contains the
+                # grouping factor.
+                eta = entry[0]
+            else:
                 continue
-            re_int = float(re_vals.get("Group", re_vals.get("Intercept", 0.0)))
-            re_x = float(re_vals.get(x, 0.0))
-            y_line = (b_int + extra + re_int) + (b_x + re_x) * x_line
-            ax.plot(x_line, y_line, color=cmap[g], lw=2, alpha=0.9, label=f"{group}={g}")
-            # if errorbar:
-            #     ax.fill_between(x_line, y_line - 1.96 * se, y_line + 1.96 * se, color=cmap[g], alpha=0.2)
+            ax.plot(x_line, inverse(eta), color=cmap[g], lw=2, alpha=0.9, label=f"{group}={g}")
+
+            if errorbar and entry is not None:
+                # Centred on this group's line, widened by the standard error of the fixed-effects
+                # prediction *at this group's level*. For a MixedLM the random-effect offset that
+                # positions the line carries no standard error from the fit, so it is not included.
+                se_g = entry[1]
+                ax.fill_between(
+                    x_line,
+                    inverse(eta - crit * se_g),
+                    inverse(eta + crit * se_g),
+                    color=cmap[g],
+                    alpha=0.15,
+                    linewidth=0,
+                )
 
     else:
-        # Order the categorical axis. ``pd.unique`` returns first-appearance order, which puts the
-        # levels in whatever sequence the rows happen to arrive in (g1, g2, g0, g3) — meaningless to
-        # read and different on every reload.
-        if categorical_order is not None:
-            order = list(categorical_order)
-        elif isinstance(df[x].dtype, pd.CategoricalDtype) and df[x].dtype.ordered:
-            # A binned column already carries its intended order; honour it rather than re-sorting,
-            # so labels like "low"/"medium"/"high" stay in sequence.
-            present = set(df[x].dropna().astype(str))
-            order = [c for c in df[x].dtype.categories if str(c) in present]
-        else:
-            # Natural sort so g2 comes before g10.
-            order = sorted(pd.unique(df[x].dropna()), key=_natural_sort_key)
+        order = _categorical_axis_order(df, x, categorical_order)
         # Second factor: interaction models need a full factorial x × (hue|group) grid
         # so patsy can evaluate e.g. C(x) * C(territory); a single-column grid raises
         # NameError for the missing factor.
@@ -829,15 +1212,21 @@ def plot_mixedlm_params(
 
             grid = _match_grid_columns_to_df_dtypes(grid, df, [c for c in grid.columns if c in df.columns])
             X = patsy.build_design_matrices([result.model.data.design_info], grid, return_type="dataframe")[0]
-            fe = result.fe_params
+            fe = model_params(result)
             cov = result.cov_params().loc[fe.index, fe.index]
             X = X.reindex(columns=fe.index, fill_value=0.0)
             pred = X @ fe
             se = np.sqrt(np.sum((X @ cov) * X, axis=1))
+            # For a GLM the linear predictor lives on the link scale; map the estimate and both
+            # interval endpoints back through the inverse link so the plot is on the scale of the
+            # data. Transforming the endpoints (rather than building a symmetric interval around the
+            # transformed mean) is what keeps the interval valid — on the response scale it becomes
+            # asymmetric, which is correct for a log or logit link.
+            inverse = model_inverse_link(result)
             emm = grid.copy()
-            emm["estimate"] = pred
-            emm["lower"] = pred - z_crit * se
-            emm["upper"] = pred + z_crit * se
+            emm["estimate"] = inverse(pred)
+            emm["lower"] = inverse(pred - z_crit * se)
+            emm["upper"] = inverse(pred + z_crit * se)
 
             x_to_pos = {k: i for i, k in enumerate(order)}
             emm["_xi"] = emm[x].map(x_to_pos)
@@ -900,7 +1289,7 @@ def plot_mixedlm_params(
             # a caller (the GUI status line) can say so instead of leaving a silently empty chart.
             log.warning("Could not evaluate the EMM grid: %s", e)
             log.debug("EMM grid failure", exc_info=True)
-            fig.emm_error = str(e)
+            errors["emm_error"] = str(e)
 
         if include_points:
             # These are *observed cell means*, not individual rows: seaborn's pointplot averages y
@@ -953,23 +1342,7 @@ def plot_mixedlm_params(
                 label="Observed mean (unadjusted)",
             )
 
-    ax.set_title(title)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.grid(True, axis="y", alpha=0.25)
-    handles, labels = ax.get_legend_handles_labels()
-    if handles:
-        dedup: dict[str, Any] = {}
-        for h, l in zip(handles, labels):
-            if l not in dedup:
-                dedup[l] = h
-        ax.legend(dedup.values(), dedup.keys(), loc="best", fontsize=9)
-
-    if output_path is not None:
-        out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=300, bbox_inches="tight")
-    return fig
+    return errors
 
 
 def build_mixedlm_frame_from_repo(
