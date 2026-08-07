@@ -10,6 +10,7 @@ backend; inputs are coerced with :func:`~nvitk.core.array.as_backend_array`.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from nvitk.core.array import as_backend_array, to_numpy
@@ -860,6 +861,245 @@ def accept_pwv(pwv_m_s: float) -> bool:
     return PWV_MIN_M_S < v < PWV_MAX_M_S
 
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Automatic quality control — literature-grounded plausibility and consistency
+# ──────────────────────────────────────────────────────────────────────────────
+# The scores above answer "is this waveform smooth?". These answer "is this number
+# physiologically possible, and is it consistent with the vessel's neighbours?" —
+# which is what catches a mis-placed LOC, an aliased velocity or a leaked segmentation.
+#
+# Bands come from Zarrinkoob et al. 2015 (J Cereb Blood Flow Metab 35:648-654), 94
+# healthy subjects by 2D PCMRI. They are **not** used verbatim: 4D flow reads 20-46%
+# lower than 2D PC-MRI at matched levels (Neuroinformatics 2021, 7T ICA at C3/C7), so
+# the soft band is widened to ``0.5*(mu - 3*sd)`` .. ``1.3*(mu + 3*sd)``. The point is to
+# catch gross failures (flow 5-10x physiological, or ~0 in a patent vessel), not to grade
+# normal variation - PI/RI and cohort statistics are for that.
+
+#: Per-vessel time-averaged |flow| soft bands in mL/min, widened for the 4D-vs-2D bias.
+FLOW_PLAUSIBILITY_ML_MIN = {
+    "ICA":     (56.5, 521.3),
+    "VA":      (17.0, 215.8),
+    "BA":      (11.0, 348.4),   
+    "MCA":     (26.5, 310.7),
+    "MCAdist": (1.0,  110.5),   
+    "ACA":     (14.0, 176.8),
+    "ACAdist": (1.0,  78.0),    
+    "PCA":     (9.0,  117.0),
+}
+
+#: Vessels deliberately given no band. A communicating artery carrying near-zero or
+#: reversed flow is a normal circle of Willis, not a QC failure -- Krabbe-Hartkamp et al.
+#: 1998 found the CoW anatomically complete in only ~51% of healthy subjects.
+FLOW_PLAUSIBILITY_EXEMPT: frozenset[str] = frozenset({"ACOMM", "PCOMM", "LPCOMM", "RPCOMM"})
+
+#: Anterior share of total cerebral inflow, and the screening tolerance around it.
+#: Zarrinkoob et al. report 72/28% with SD ~4-5%, independent of age, sex and brain
+#: volume; the wider tolerance here is because this is a per-subject screen and CoW
+#: variants (fetal PCA, hypoplastic A1) legitimately shift the ratio.
+ANTERIOR_SHARE_PCT: float = 72.0
+ANTERIOR_SHARE_TOL_PCT: float = 10.0
+
+#: How far outside its band a flow may sit before it scores zero, as a fraction of the bound it
+#: crossed. 0.15 means 15% below the floor (or above the ceiling) is fully implausible. Small
+#: because the bands are already widened well past any healthy cohort — see
+#: :func:`flow_plausibility_score`. Raise it to be more forgiving, lower it to be stricter.
+FLOW_BAND_TOLERANCE: float = 0.15
+
+#: Krabbe-Hartkamp et al. 1998 definition of CoW hypoplasia on 3D TOF MRA.
+HYPOPLASIA_DIAM_MM: float = 0.8
+
+#: Relative bifurcation residual beyond which mass conservation is considered violated,
+#: adapted from the 4D Flow CMR consensus statement's 15% discrepancy threshold.
+CONSERVATION_TOL: float = 0.15
+
+#: Coefficient of variation of flow along a non-branching segment beyond which the
+#: centerline is likely drifting or a side branch was missed.
+SEGMENT_CV_TOL: float = 0.15
+
+
+def _vessel_band_key(vessel_name: str) -> str:
+    """
+    Reduce a qvtpy vessel label to the key its literature band is stored under.
+
+    Side prefixes carry no physiology here -- the bands are reported right/left averaged --
+    so ``LICA``, ``Right_ICA`` and ``ICA`` share one band. Distal segments keep their own.
+    """
+    raw = str(vessel_name or "").strip()
+    if not raw:
+        return ""
+    token = raw.upper().replace("-", "_").replace(" ", "_")
+    for prefix in ("LEFT_", "RIGHT_", "L_", "R_"):
+        if token.startswith(prefix):
+            token = token[len(prefix):]
+            break
+    else:
+        # Bare side letter, but only when what follows is a known stem: ``LICA`` is left
+        # ICA, while ``LSCA`` must not be stripped into a band that does not exist.
+        if len(token) > 2 and token[0] in "LR" and token[1:] in {
+            k.upper() for k in FLOW_PLAUSIBILITY_ML_MIN
+        } | {v.upper() for v in FLOW_PLAUSIBILITY_EXEMPT}:
+            token = token[1:]
+    aliases = {"BASI": "BA", "BASILAR": "BA", "VERT": "VA", "VERTEBRAL": "VA",
+               "MCADIST": "MCAdist", "ACADIST": "ACAdist", "M1": "MCA", "A1": "ACA",
+               "P2": "PCA"}
+    token = aliases.get(token, token)
+    for key in FLOW_PLAUSIBILITY_ML_MIN:
+        if token == key.upper():
+            return key
+    return token
+
+
+def flow_plausibility_score(mean_flow_ml_min: float, vessel_name: str) -> float:
+    """
+    Literature-band plausibility of a time-averaged |flow|, in ``[0, 1]``.
+
+    1.0 anywhere inside the vessel's soft band, decaying linearly to 0.0 one band
+    half-width outside either edge -- which puts the zero point at the hard implausibility
+    cap (2x the soft band) used elsewhere in the qvtpy flow-cap convention.
+
+    Returns ``NaN`` for a vessel with no meaningful band (the communicating arteries, and
+    anything unrecognised), so callers skip rather than silently pass or fail it.
+
+    Parameters
+    ----------
+    mean_flow_ml_min : float
+        Time-averaged flow magnitude in **mL/min**. Note ``loc_mean_flow_ml_s`` is per
+        second; multiply by 60 first.
+    """
+    key = _vessel_band_key(vessel_name)
+    if key in FLOW_PLAUSIBILITY_EXEMPT or key not in FLOW_PLAUSIBILITY_ML_MIN:
+        return float("nan")
+    lo, hi = FLOW_PLAUSIBILITY_ML_MIN[key]
+    value = abs(float(mean_flow_ml_min))
+    if not math.isfinite(value):
+        return float("nan")
+    if lo <= value <= hi:
+        return 1.0
+
+    # Outside the band the score falls steeply, because the band is already generous: it spans
+    # ``0.5*(mu - 3*sd)`` to ``1.3*(mu + 3*sd)``, which is far wider than any healthy cohort. A
+    # measurement outside it is not an unusual subject, it is a number that could not have been
+    # produced by a correctly segmented vessel. Decaying gently over a band half-width (as this
+    # once did) undid the widening: it let an ICA at 31 mL/min -- an eighth of a healthy one --
+    # score 0.55 and pass a 0.5 gate.
+    #
+    # The distance is measured **relative to the bound that was crossed**, so one tolerance works
+    # for every vessel whatever its scale, and the score reaches 0 at
+    # :data:`FLOW_BAND_TOLERANCE` beyond it. Symmetric on both sides: the low end already carries
+    # extra room for the known 4D-vs-2D underestimation, so it needs no further leniency here.
+    bound = hi if value > hi else lo
+    excess = abs(value - bound) / max(abs(bound), 1e-6)
+    return float(max(0.0, 1.0 - excess / max(FLOW_BAND_TOLERANCE, 1e-6)))
+
+
+def is_plausibly_hypoplastic(
+    cross_section_area_mm2: float, *, diam_thresh_mm: float = HYPOPLASIA_DIAM_MM
+) -> bool:
+    """
+    Whether a vessel's segmented caliber puts it at or under the hypoplasia threshold.
+
+    Use this to *gate* :func:`flow_plausibility_score` and the anterior/posterior check: a
+    hypoplastic vessel legitimately carries almost no flow, and scoring it against a
+    healthy-cohort band would report normal anatomy as a data-quality failure.
+
+    Threshold from Krabbe-Hartkamp et al. 1998 (<0.8 mm diameter on 3D TOF MRA).
+    """
+    area = float(cross_section_area_mm2)
+    if not math.isfinite(area) or area <= 0.0:
+        return True
+    equivalent_diameter_mm = 2.0 * math.sqrt(area / math.pi)
+    return bool(equivalent_diameter_mm < float(diam_thresh_mm))
+
+
+def bifurcation_conservation_error(
+    parent_flow_ml_s: float, branch_flows_ml_s: Any
+) -> float:
+    """
+    Relative mass-conservation residual at one junction: ``(Qp - sum(Qb)) / Qp``.
+
+    Zero is perfect conservation. This is the 4D Flow CMR consensus statement's central
+    internal-consistency check, and the same one the cranial QVT/CPS validation work uses.
+
+    A failure is genuinely ambiguous between "the flow measurement is wrong" and "the
+    vessel tree is incomplete" -- a missed side branch removes real outflow and shows up
+    identically. Report both possibilities rather than blaming the flow value.
+
+    Returns ``NaN`` when the parent flow is ~0, since the relative residual is undefined.
+    """
+    parent = float(parent_flow_ml_s)
+    if not math.isfinite(parent) or abs(parent) < 1e-9:
+        return float("nan")
+    with using("cpu"):
+        branches = to_numpy(as_backend_array(branch_flows_ml_s)).astype(float).reshape(-1)
+        branches = branches[np.isfinite(branches)]
+        if branches.size == 0:
+            return float("nan")
+        return float((parent - float(branches.sum())) / parent)
+
+
+def segment_flow_consistency_cv(flow_per_cycle_stations: Any) -> float:
+    """
+    Coefficient of variation of time-averaged flow along one non-branching segment.
+
+    Mass is conserved along a segment with no branches, so the station-to-station flow
+    should barely move. A low CV (under ~0.10-0.15) says the centerline and segmentation
+    track the vessel; a high one says the centerline drifted, partial volume ate the
+    lumen, or a side branch was missed. Mirrors the along-segment Gaussian-fit consistency
+    check from the cranial QVT/CPS validation paper.
+
+    Returns ``NaN`` for fewer than three stations or a mean of ~0, where a CV means nothing.
+    """
+    with using("cpu"):
+        values = to_numpy(as_backend_array(flow_per_cycle_stations)).astype(float).reshape(-1)
+        values = values[np.isfinite(values)]
+        if values.size < 3:
+            return float("nan")
+        mean = float(values.mean())
+        if abs(mean) < 1e-9:
+            return float("nan")
+        return float(values.std() / abs(mean))
+
+
+def anterior_posterior_share_pct(ica_flow_ml_min: float, va_flow_ml_min: float) -> float:
+    """
+    Anterior (carotid) share of total cerebral inflow, as a percentage.
+
+    Both arguments are the **summed bilateral** flows: ICA left + right, and vertebral
+    left + right (or the basilar, which carries their confluence). Returns ``NaN`` when the
+    total is not positive.
+    """
+    anterior = float(ica_flow_ml_min)
+    posterior = float(va_flow_ml_min)
+    total = anterior + posterior
+    if not math.isfinite(total) or total <= 0.0:
+        return float("nan")
+    return float(100.0 * anterior / total)
+
+
+def anterior_posterior_split_flag(
+    ica_flow_ml_min: float,
+    va_flow_ml_min: float,
+    *,
+    expected_anterior_pct: float = ANTERIOR_SHARE_PCT,
+    tolerance_pct: float = ANTERIOR_SHARE_TOL_PCT,
+) -> bool:
+    """
+    Whether the anterior/posterior flow split falls outside its expected band.
+
+    Zarrinkoob et al. report a 72/28% split with SD ~4-5%, stable across age, sex and brain
+    volume -- which makes it a cheap subject-level screen that needs no reference scan. The
+    tolerance is deliberately wider than the population SD because anatomic variants (fetal
+    PCA, hypoplastic A1) shift the ratio without any measurement being wrong.
+
+    ``True`` means "outside the band", including the degenerate no-inflow case.
+    """
+    share = anterior_posterior_share_pct(ica_flow_ml_min, va_flow_ml_min)
+    if not math.isfinite(share):
+        return True
+    return bool(abs(share - float(expected_anterior_pct)) > float(tolerance_pct))
+
+
 __all__ = [
     "PWV_MAX_M_S",
     "PWV_MIN_M_S",
@@ -875,6 +1115,20 @@ __all__ = [
     "normalize_waveform",
     "branch_window_slices",
     "flow_per_heart_cycle_ml_s",
+    "ANTERIOR_SHARE_PCT",
+    "ANTERIOR_SHARE_TOL_PCT",
+    "CONSERVATION_TOL",
+    "FLOW_BAND_TOLERANCE",
+    "FLOW_PLAUSIBILITY_EXEMPT",
+    "FLOW_PLAUSIBILITY_ML_MIN",
+    "HYPOPLASIA_DIAM_MM",
+    "SEGMENT_CV_TOL",
+    "anterior_posterior_share_pct",
+    "anterior_posterior_split_flag",
+    "bifurcation_conservation_error",
+    "flow_plausibility_score",
+    "is_plausibly_hypoplastic",
+    "segment_flow_consistency_cv",
     "flow_pulsatile_ml_s",
     "pitc_fit",
     "pulsatility_index",

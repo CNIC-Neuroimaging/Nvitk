@@ -15,6 +15,7 @@ STAGE_LOC = "stage5"
 STAGE_MEASURE = "stage6"
 STAGE_MORPHOMETRICS = "stage7"
 STAGE_XNAT_UPLOAD = "stage8_xnat_upload"
+STAGE_AUTOQC = "stage9_autoqc"
 
 STAGE_ALIASES: dict[str, str] = {
     "stage0_d": STAGE_DOWNLOAD,
@@ -56,6 +57,10 @@ STAGE_ALIASES: dict[str, str] = {
     "stage8_xnat_upload": STAGE_XNAT_UPLOAD,
     "xnat_upload": STAGE_XNAT_UPLOAD,
     "upload_xnat": STAGE_XNAT_UPLOAD,
+    "stage9": STAGE_AUTOQC,
+    "stage9_autoqc": STAGE_AUTOQC,
+    "autoqc": STAGE_AUTOQC,
+    "qc": STAGE_AUTOQC,
 }
 
 STAGES_ORDERED: tuple[str, ...] = (
@@ -70,6 +75,7 @@ STAGES_ORDERED: tuple[str, ...] = (
     STAGE_MEASURE,
     STAGE_MORPHOMETRICS,
     STAGE_XNAT_UPLOAD,
+    STAGE_AUTOQC,
 )
 
 ALL_STAGES: tuple[str, ...] = STAGES_ORDERED
@@ -125,6 +131,7 @@ __all__ = [
     "STAGE_SEG",
     "STAGE_SEG_T",
     "STAGE_XNAT_UPLOAD",
+    "STAGE_AUTOQC",
     "STAGES_ORDERED",
     "parse_stages",
 ]

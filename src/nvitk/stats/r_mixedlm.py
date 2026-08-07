@@ -973,6 +973,7 @@ def _emmeans_band(
     continuous: bool,
     fixed_formula: str,
     ci_level: float,
+    emmeans_fn: Any = None,
 ) -> dict[str | None, pd.DataFrame] | None:
     """
     Marginal means with intervals, one frame per group level (``None`` keyed for the population).
@@ -980,11 +981,15 @@ def _emmeans_band(
     The grouping factor is only asked for level by level when it appears in the *fixed* part of the
     formula. A factor that enters solely as a random effect has no marginal mean per level for
     emmeans to report — asking anyway just errors, so the population curve is used instead.
+
+    ``emmeans_fn`` selects which engine's emmeans call to make; it defaults to lme4's. Everything
+    else here is engine-independent, which is why the robust engine reuses this function rather than
+    repeating the grouped/population logic.
     """
     grouped = bool(group) and group != x and bool(re.search(rf"\b{re.escape(group)}\b", fixed_formula))
     specs = f"~ {x}" + (f" | {group}" if grouped else "")
     try:
-        frame = lme4_emmeans(
+        frame = (emmeans_fn or lme4_emmeans)(
             model,
             specs,
             at_name=x if continuous else "",
@@ -1082,6 +1087,10 @@ def plot_lme4_params(
     title: str = "lme4",
     x_label: str | None = None,
     y_label: str | None = None,
+    predict_fn: Any = None,
+    band_fn: Any = None,
+    population_label: str = "Population (fixed effects)",
+    excluded_points: pd.DataFrame | None = None,
 ) -> Any:
     """
     Population and per-group curves for an ``lme4`` fit, predicted through ``pymer4``.
@@ -1106,6 +1115,13 @@ def plot_lme4_params(
         anatomical panels (see :mod:`nvitk.stats.region_groups`), each autoscaled to its own range.
         Both draw the same fit — the population curve and the emmeans intervals are computed once and
         repeat across panels.
+    excluded_points : pandas.DataFrame, optional
+        Observations a filter removed, drawn in grey beneath the kept ones. They are not in
+        *df_fit* — the fit ran on the filtered frame — so they have to be supplied separately.
+    predict_fn, band_fn, population_label
+        Engine hooks. They default to ``lme4``'s, and exist so another R engine whose parameters are
+        named by R rather than by patsy — :func:`~nvitk.stats.r_robust.plot_lmrob_params` — reuses
+        this drawing code instead of copying it. Not needed for ordinary ``lme4`` use.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -1162,15 +1178,17 @@ def plot_lme4_params(
         x_values = np.array(sorted(df[x].dropna().astype(str).unique(), key=_natural_sort_key), dtype=object)
     positions = np.arange(len(x_values)) if mode == "categorical" else x_values
 
+    predict_fn = predict_fn or lme4_predict
+
     def predict_at(level: str | None) -> np.ndarray | None:
         """Prediction along the grid, for one group level or for the population."""
         grid = pd.DataFrame([{**base, x: value} for value in x_values])
         if grouped and level is not None:
             grid[group] = str(level)
         try:
-            return lme4_predict(model, grid, use_random_effects=level is not None)
+            return predict_fn(model, grid, use_random_effects=level is not None)
         except Exception as exc:
-            log.debug("lme4 prediction failed for %s=%s: %s", group, level, exc)
+            log.debug("%s prediction failed for %s=%s: %s", population_label, group, level, exc)
             return None
 
     errors: dict[str, str] = {}
@@ -1180,7 +1198,7 @@ def plot_lme4_params(
     # Computed once for every level; each panel then reads the keys it owns.
     bands: dict[str | None, pd.DataFrame] | None = None
     if errorbar:
-        bands = _emmeans_band(
+        bands = (band_fn or _emmeans_band)(
             model,
             x=x,
             x_values=x_values,
@@ -1202,6 +1220,35 @@ def plot_lme4_params(
         """Draw the population curve and *panel_levels* onto *ax*, from *panel_df*'s observations."""
         colors = sns.color_palette(palette, n_colors=max(len(panel_levels), 3))
         cmap = {str(lev): colors[i % len(colors)] for i, lev in enumerate(panel_levels)}
+
+        # Drawn first so the kept observations sit on top of them.
+        if (
+            include_points and excluded_points is not None and not excluded_points.empty
+            and {x, y} <= set(excluded_points.columns)
+        ):
+            dropped = excluded_points
+            if grouped and group in dropped.columns:
+                dropped = dropped.loc[dropped[group].astype(str).isin({str(v) for v in panel_levels})]
+            if not dropped.empty:
+                if mode == "continuous":
+                    ax.scatter(
+                        pd.to_numeric(dropped[x], errors="coerce"),
+                        pd.to_numeric(dropped[y], errors="coerce"),
+                        s=18, alpha=0.45, color="#B0B0B0", linewidths=0, zorder=1,
+                        label="excluded by filter",
+                    )
+                else:
+                    positions_by_level = {str(v): i for i, v in enumerate(x_values)}
+                    xi = dropped[x].astype(str).map(positions_by_level)
+                    keep = xi.notna()
+                    if bool(keep.any()):
+                        rng = np.random.default_rng(int(keep.sum()))
+                        ax.scatter(
+                            xi[keep].to_numpy(float) + rng.uniform(-0.16, 0.16, int(keep.sum())),
+                            pd.to_numeric(dropped.loc[keep, y], errors="coerce"),
+                            s=16, alpha=0.4, color="#B0B0B0", linewidths=0, zorder=1,
+                            label="excluded by filter",
+                        )
 
         if include_points:
             if mode == "continuous":
@@ -1246,8 +1293,7 @@ def plot_lme4_params(
                 )
 
         if population is not None:
-            ax.plot(positions, population, color="black", lw=2.8, ls="--",
-                    label="Population (fixed effects)")
+            ax.plot(positions, population, color="black", lw=2.8, ls="--", label=population_label)
         if bands and None in bands:
             draw_band(bands[None], "black", f"{int(round(ci_level * 100))}% CI (emmeans)")
 
@@ -1285,20 +1331,12 @@ def plot_lme4_params(
         panel_axes = [ax]
         fig.tight_layout()
     else:
-        from nvitk.stats.region_groups import group_levels_into_panels
+        from nvitk.stats.region_groups import panel_grid, resolve_panels
 
-        panels = group_levels_into_panels(levels)
-        if not panels:
-            raise ValueError(
-                f"None of the {len(levels)} {group!r} levels map to a known anatomical region, so "
-                f"there are no groups to split into. Use the Overview display for this model."
-            )
-        n_cols = 1 if len(panels) == 1 else 2
-        n_rows = int(np.ceil(len(panels) / n_cols))
-        fig, grid = plt.subplots(n_rows, n_cols, figsize=(8.5 * n_cols, 4.8 * n_rows), squeeze=False)
-        flat = [a for row in grid for a in row]
+        panels = resolve_panels(levels, column=group)
+        fig, axes = panel_grid(len(panels), title=title)
         panel_axes = []
-        for ax, (panel, panel_levels) in zip(flat, panels.items()):
+        for ax, (panel, panel_levels) in zip(axes, panels.items()):
             sub = df.loc[df[group].astype(str).isin({str(v) for v in panel_levels})]
             if sub.empty:
                 ax.text(0.5, 0.5, "No observations", ha="center", va="center",
@@ -1308,10 +1346,6 @@ def plot_lme4_params(
                 continue
             draw_panel(ax, sub, panel_levels, panel)
             panel_axes.append(ax)
-        for ax in flat[len(panels):]:
-            ax.set_visible(False)
-        fig.suptitle(title, fontsize=13, fontweight="bold")
-        fig.set_layout_engine("constrained")
 
     for name, message in errors.items():
         setattr(fig, name, message)

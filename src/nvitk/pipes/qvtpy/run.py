@@ -16,6 +16,10 @@ Stages (select with ``--stages``; default ``stage0_c,stage1``)
 - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
 - ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
 - ``stage8_xnat_upload`` — upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
+- ``stage9_autoqc`` — score the published measurements against literature bands and physiological
+  consistency, and write the QC metrics back to the dataset. Cohort-level and database-only: it
+  reads what stage 6 published rather than the pipeline outputs, so it is safe to re-run at any
+  time and needs no subject tree on disk.
 
 SGE: per subject, one ``qsub -t`` array job (task = pending stage) with
 ``-tc 1`` and done-markers between tasks (see
@@ -84,6 +88,7 @@ from .stages import (
     STAGE_REG,
     STAGE_SEG,
     STAGE_SEG_T,
+    STAGE_AUTOQC,
     STAGE_XNAT_UPLOAD,
     parse_stages as _parse_stages,
 )
@@ -1490,6 +1495,7 @@ def main(
     run_s6 = STAGE_MEASURE in stages
     run_s7 = STAGE_MORPHOMETRICS in stages
     run_s8 = STAGE_XNAT_UPLOAD in stages
+    run_s9 = STAGE_AUTOQC in stages
 
     use_xnat = from_source.lower() == "xnat"
     # if use_xnat and run_conv and submit == "sge":
@@ -1926,6 +1932,45 @@ def main(
             remote_results_root=remote_results,
         )
 
+    if run_s9:
+        # Cohort-level: it scores what stage 6 published rather than reading the subject trees, so
+        # it runs once after the per-subject loop. It still gets a results source, because a run
+        # whose import has not happened yet has the numbers on disk but not in the dataset — and
+        # this is exactly the moment that is true.
+        from . import stage9_autoqc
+        from .autoqc_sources import ResultsSource
+
+        source = ResultsSource(submit=submit, results_root=output_root_eff)
+        if source.is_remote():
+            if not (ssh_host_resolved and ssh_user and ssh_password):
+                from nvitk.pipes.qvtpy.util.io.cluster_upload import prompt_ssh_credentials
+
+                ssh_host_resolved, ssh_user, ssh_password = prompt_ssh_credentials(
+                    remote_host=remote_host,
+                    remote_user=remote_user,
+                    host_aliases=cfg.CLUSTER_HOST_ALIASES,
+                )
+            source.results_root = cluster_paths.results_root
+            source.host, source.user = ssh_host_resolved, ssh_user
+            source.password = ssh_password
+
+        try:
+            result = stage9_autoqc.run_autoqc(
+                stage9_autoqc._open_repo(None), results=source, subjects=subject_list
+            )
+        except Exception as exc:
+            # A QC pass failing must not fail a pipeline run whose measurements already landed.
+            log.error(f"{STAGE_AUTOQC}: {exc}")
+            log.debug("autoqc failed", exc_info=True)
+        else:
+            recovery = result.get("recovery") or {}
+            if recovery.get("recovered"):
+                log.info(
+                    f"{STAGE_AUTOQC}: recovered "
+                    f"{', '.join(recovery['recovered'])} from {recovery['root']}"
+                )
+            log.ok(f"{STAGE_AUTOQC}: {result['summary']}")
+
     if submit == "local":
         if run_conv and report:
             from . import stage0_convert
@@ -2243,6 +2288,7 @@ __all__ = [
     "STAGE_LOC",
     "STAGE_MEASURE",
     "STAGE_MORPHOMETRICS",
+    "STAGE_AUTOQC",
     "STAGE_XNAT_UPLOAD",
 ]
 

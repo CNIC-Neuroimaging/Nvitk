@@ -380,6 +380,22 @@ class ModelReportPanel(QGroupBox):
                 group_effects,
                 headers={"factor": "Factor", "level": "Level"},
             )
+        # Robust engines report how much each observation was trusted. Sorted worst-first by the
+        # backend, so the rows the fit discounted are the ones on screen.
+        weights = info.get("robust_weights")
+        if isinstance(weights, pd.DataFrame) and not weights.empty:
+            self._add_table_tab(
+                "Weights",
+                weights,
+                headers={
+                    "weight": "Robustness weight",
+                    "residual": "Residual",
+                    "fitted": "Fitted",
+                    "rejected": "Rejected",
+                    "subject_uid": "Subject",
+                    "territory": "Territory",
+                },
+            )
         self._add_text_tab("Raw", raw_text)
         self._tabs.setCurrentIndex(1)  # Coefficients is what you look at first
         self._tabs.setVisible(True)

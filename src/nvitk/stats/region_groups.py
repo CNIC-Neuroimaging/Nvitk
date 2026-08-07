@@ -37,7 +37,7 @@ from __future__ import annotations
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
 import re
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from nvitk.stats._vessel_territory_map import REGION_TO_TERRITORY_FLOW
 
@@ -315,6 +315,64 @@ def group_levels_into_panels(
     return {panel: buckets[panel] for panel in sorted(buckets, key=sort_key)}
 
 
+def resolve_panels(levels: Iterable[str], *, column: str = "group") -> dict[str, list[str]]:
+    """
+    :func:`group_levels_into_panels`, raising a caller-ready message when nothing maps.
+
+    Every grouped plot needs the same refusal — panelling levels that carry no anatomy would produce
+    one "Other" panel identical to the overview — so the wording lives here rather than in each
+    plotting function.
+
+    Raises
+    ------
+    ValueError
+        When no level resolves to a panel.
+    """
+    levels = list(levels)
+    panels = group_levels_into_panels(levels)
+    if not panels:
+        raise ValueError(
+            f"None of the {len(levels)} {column!r} levels map to a known anatomical region, so "
+            f"there are no groups to split into. Use the Overview display for this model."
+        )
+    return panels
+
+
+def panel_grid(
+    n_panels: int,
+    *,
+    panel_size: tuple[float, float] = (8.5, 4.8),
+    n_cols: int | None = None,
+    title: str = "",
+) -> tuple[Any, list[Any]]:
+    """
+    A figure holding one visible axes per panel, two per row.
+
+    Constrained layout rather than ``tight_layout``: a grid with a suptitle needs to re-flow on every
+    draw as the canvas is resized, and it also signals the plot pane not to re-fit on top of it.
+
+    Returns
+    -------
+    (figure, axes)
+        Exactly *n_panels* axes in reading order; any spare cell in the last row is hidden.
+    """
+    import matplotlib.pyplot as plt
+
+    n_panels = max(int(n_panels), 1)
+    n_cols = n_cols or (1 if n_panels == 1 else 2)
+    n_rows = -(-n_panels // n_cols)  # ceiling division
+    fig, grid = plt.subplots(
+        n_rows, n_cols, figsize=(panel_size[0] * n_cols, panel_size[1] * n_rows), squeeze=False
+    )
+    flat = [ax for row in grid for ax in row]
+    for ax in flat[n_panels:]:
+        ax.set_visible(False)
+    if title:
+        fig.suptitle(title, fontsize=13, fontweight="bold")
+    fig.set_layout_engine("constrained")
+    return fig, flat[:n_panels]
+
+
 def natural_level_key(value: object) -> tuple:
     """Sort key placing ``region_2`` before ``region_10`` — digit runs compare numerically."""
     parts = _NUMERIC_CHUNK_RE.split(str(value))
@@ -334,6 +392,8 @@ __all__ = [
     "VASCULAR_PANELS",
     "group_levels_into_panels",
     "natural_level_key",
+    "panel_grid",
     "panel_summary",
     "region_display_panel",
+    "resolve_panels",
 ]

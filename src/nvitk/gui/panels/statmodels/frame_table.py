@@ -60,6 +60,9 @@ from nvitk.stats.frame_ops import (
     FilterRule,
 )
 
+from nvitk.stats.interactive import COLUMN_PLOT_KINDS
+from nvitk.stats.qc_filters import available_presets
+
 from .constants import MAX_CATEGORICAL_LEVELS, TABLE_ROW_CAP
 from .theme import COLOR_ACCENT, COLOR_MUTED, muted_label_style
 
@@ -589,6 +592,10 @@ class AnalysisFrameView(QWidget):
     transformRequested(column, key)  add a derived column applying a canned transform
     binsRequested(column)            open the derived-columns editor to bin a column into groups
     plotXRequested(column)           use a column as the plot's x axis
+    publishRequested(column)         write a derived column back into the dataset
+    columnPlotRequested(column, kind) open the distribution viewer for a column
+    qcFilterRequested(column, key)   apply a ready-made quality-control filter
+    summaryRequested(column, by)    export per-group descriptive statistics for a column
     """
 
     filtersRequested = Signal(str)
@@ -596,6 +603,10 @@ class AnalysisFrameView(QWidget):
     transformRequested = Signal(str, str)
     binsRequested = Signal(str)
     plotXRequested = Signal(str)
+    publishRequested = Signal(str)
+    columnPlotRequested = Signal(str, str)
+    qcFilterRequested = Signal(str, str)
+    summaryRequested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
@@ -622,10 +633,18 @@ class AnalysisFrameView(QWidget):
         lay.addWidget(self._table)
 
         self._filtered: set[str] = set()
+        self._derived: set[str] = set()
 
-    def set_frame(self, df: pd.DataFrame | None, *, filtered_columns: set[str] = frozenset()) -> None:
+    def set_frame(
+        self,
+        df: pd.DataFrame | None,
+        *,
+        filtered_columns: set[str] = frozenset(),
+        derived_columns: set[str] = frozenset(),
+    ) -> None:
         """Display *df*, badging *filtered_columns*, and size the columns to their content once."""
         self._filtered = set(filtered_columns)
+        self._derived = set(derived_columns)
         self._model.set_frame(df, filtered_columns=self._filtered)
         self._table.resizeColumnsToContents()
 
@@ -637,6 +656,35 @@ class AnalysisFrameView(QWidget):
         """Name of the column at header *section*, or ``""`` when out of range."""
         columns = self.columns()
         return columns[section] if 0 <= section < len(columns) else ""
+
+    def _grouping_columns(self, *, exclude: str = "", max_levels: int = 60) -> list[str]:
+        """
+        Columns worth grouping a summary by: discrete, and not one row per level.
+
+        A continuous measurement has as many levels as rows, and ``subject_uid`` nearly so — a
+        summary keyed on either is the raw data with extra columns.
+        """
+        frame = self._model.frame()
+        out: list[str] = []
+        for name in frame.columns:
+            if str(name) == str(exclude):
+                continue
+            series = frame[name]
+            if pd.api.types.is_numeric_dtype(series) and not isinstance(
+                series.dtype, pd.CategoricalDtype
+            ):
+                continue
+            if 2 <= int(series.nunique(dropna=True)) <= int(max_levels):
+                out.append(str(name))
+
+        # Frame order puts identifier columns first, which is the wrong end of the menu: a summary
+        # by territory is the common case, one per subject is the rare one.
+        def rank(name: str) -> tuple[int, str]:
+            """Sort key placing the usual groupings before the incidental ones."""
+            preferred = ("territory", "group_key", "sex", "tacsctot_group", "visit_id")
+            return (preferred.index(name), "") if name in preferred else (len(preferred), name)
+
+        return sorted(out, key=rank)
 
     def _on_header_menu(self, point) -> None:
         """Build and run the per-column header menu."""
@@ -669,6 +717,62 @@ class AnalysisFrameView(QWidget):
         bins.setToolTip(
             "Cut this column into labelled groups (cp0, cp1, …), like tacsctot → tacsctot_group."
         )
+
+        menu.addSeparator()
+        # Only derived columns: everything else is already in the dataset, and re-publishing a
+        # column read straight out of it would write a copy under a second name.
+        publish = menu.addAction(
+            "Save to database…", lambda: self.publishRequested.emit(column)
+        )
+        publish.setEnabled(column in self._derived)
+        publish.setToolTip(
+            "Write this derived column into the dataset as a variable, so later sessions and other "
+            "tools can use it."
+            if column in self._derived
+            else f"“{column}” is not a derived column — it already comes from the dataset."
+        )
+
+        # Descriptive statistics of this column, one row per level of the chosen grouping.
+        numeric_column = column in frame.columns and pd.api.types.is_numeric_dtype(frame[column])
+        summary_menu = menu.addMenu(f"Export summary of “{column}” by")
+        summary_menu.setEnabled(numeric_column)
+        if numeric_column:
+            groupings = self._grouping_columns(exclude=column)
+            for name in groupings:
+                summary_menu.addAction(
+                    name, lambda _=False, g=name: self.summaryRequested.emit(column, g)
+                )
+            if groupings:
+                summary_menu.addSeparator()
+            summary_menu.addAction(
+                "(whole cohort, no grouping)", lambda: self.summaryRequested.emit(column, "")
+            )
+        else:
+            summary_menu.setToolTip("Summaries apply to numeric measurement columns only.")
+        menu.addSeparator()
+
+        qc_menu = menu.addMenu("Quality-control filter")
+        presets = available_presets(self.columns(), column=column)
+        for preset, state in presets:
+            action = qc_menu.addAction(
+                preset.label,
+                lambda _=False, k=preset.key: self.qcFilterRequested.emit(column, k),
+            )
+            action.setEnabled(state == "ready")
+            action.setToolTip(
+                preset.description if state == "ready"
+                else f"Needs {', '.join(preset.requires)}, which this dataset does not carry. "
+                     f"Run the qvtpy stage 9 (autoqc) to publish the QC metrics, then reload."
+            )
+        qc_menu.setEnabled(bool(presets))
+        menu.addSeparator()
+
+        plot_menu = menu.addMenu(f"Plot “{column}”")
+        for key, description in COLUMN_PLOT_KINDS.items():
+            plot_menu.addAction(
+                description.split("—")[0].strip(),
+                lambda _=False, k=key: self.columnPlotRequested.emit(column, k),
+            )
 
         menu.addSeparator()
         menu.addAction("Set as plot x", lambda: self.plotXRequested.emit(column))

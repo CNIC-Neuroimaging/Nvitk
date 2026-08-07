@@ -40,8 +40,11 @@ ANALYSIS_MIXEDLM = "mixedlm"
 ANALYSIS_LME4 = "lme4"
 ANALYSIS_MMRM = "mmrm"
 ANALYSIS_OLS = "ols"
+ANALYSIS_LMROB = "lmrob"
 ANALYSIS_GLM = "glm"
 ANALYSIS_NONLINEAR = "nonlinear"
+ANALYSIS_SEM = "sem"
+ANALYSIS_MRF = "mrf"
 ANALYSIS_MEDIATION = "mediation"
 
 ANALYSIS_ITEMS: tuple[tuple[str, str], ...] = (
@@ -49,24 +52,38 @@ ANALYSIS_ITEMS: tuple[tuple[str, str], ...] = (
     ("Mixed model — R · lme4", ANALYSIS_LME4),
     ("Repeated measures (MMRM) — R · mmrm", ANALYSIS_MMRM),
     ("Linear model (OLS)", ANALYSIS_OLS),
+    ("Robust linear model — R · lmrob", ANALYSIS_LMROB),
     ("Generalized linear model (GLM)", ANALYSIS_GLM),
     ("Non-linear curve fit", ANALYSIS_NONLINEAR),
+    ("Path model / SEM — vascular network", ANALYSIS_SEM),
+    ("MRF smooth over the vessel graph — R · mgcv", ANALYSIS_MRF),
     ("Mediation analysis", ANALYSIS_MEDIATION),
 )
 
 # Analyses driven by a formula, which therefore share the formulation panel and the plot.
 ANALYSIS_FORMULA_KINDS: frozenset[str] = frozenset(
-    {ANALYSIS_MIXEDLM, ANALYSIS_LME4, ANALYSIS_MMRM, ANALYSIS_OLS, ANALYSIS_GLM}
+    {ANALYSIS_MIXEDLM, ANALYSIS_LME4, ANALYSIS_MMRM, ANALYSIS_OLS, ANALYSIS_GLM,
+     ANALYSIS_LMROB, ANALYSIS_MRF}
 )
 
 # Engines whose covariance/random structure is described by dropdowns rather than by the formula.
-ANALYSIS_R_KINDS: frozenset[str] = frozenset({ANALYSIS_LME4, ANALYSIS_MMRM})
+ANALYSIS_R_KINDS: frozenset[str] = frozenset(
+    {ANALYSIS_LME4, ANALYSIS_MMRM, ANALYSIS_LMROB, ANALYSIS_MRF}
+)
 
-# Analyses whose plot draws one curve per level of a grouping column, and can therefore be split
-# into a grid of anatomical panels. MMRM plots marginal means over the repeated factor and the
-# non-linear/mediation plots have no grouping column, so the Display picker does not apply there.
+# Analyses whose plot is a family of curves over anatomical levels, and can therefore be split into
+# a grid of panels. Mediation is the exception: its per-level figure is already a forest with one
+# row per level on a shared effect axis, which panelling would fragment rather than clarify.
 ANALYSIS_PANEL_KINDS: frozenset[str] = frozenset(
-    {ANALYSIS_MIXEDLM, ANALYSIS_LME4, ANALYSIS_OLS, ANALYSIS_GLM}
+    {
+        ANALYSIS_MIXEDLM,
+        ANALYSIS_LME4,
+        ANALYSIS_MMRM,
+        ANALYSIS_OLS,
+        ANALYSIS_GLM,
+        ANALYSIS_LMROB,
+        ANALYSIS_NONLINEAR,
+    }
 )
 
 # lme4 accepts more response families than lmer alone; gaussian uses lmer, the rest glmer.
@@ -98,6 +115,14 @@ ANALYSIS_HINTS: dict[str, str] = {
         "One independent observation per row. Simpler and faster than a MixedLM, but it will "
         "understate the standard errors if the same subject appears in several rows."
     ),
+    ANALYSIS_LMROB: (
+        "Least squares lets one badly segmented vessel move every coefficient. lmrob estimates the "
+        "same linear model by MM-estimation, which tolerates up to half the data being contaminated "
+        "and gives each observation a robustness weight — read the Weights tab to see which scans "
+        "the fit discounted. Unlike statsmodels' RLM it also resists outliers in the *predictors*. "
+        "No random effects: for clustered rows the coefficients hold but the standard errors ignore "
+        "the clustering. Needs R with the robustbase package."
+    ),
     ANALYSIS_GLM: (
         "A non-linear link between the predictors and the response: logistic for binary outcomes, "
         "Poisson for counts, Gamma with a log link for skewed positive measures. Coefficients are "
@@ -106,6 +131,21 @@ ANALYSIS_HINTS: dict[str, str] = {
     ANALYSIS_NONLINEAR: (
         "Fits an explicit curve of one measurement against one predictor. No covariates and no "
         "grouping — the parameters are the model."
+    ),
+    ANALYSIS_SEM: (
+        "Writes the vasculature as a system of regressions — basi ~ lva + rva, lpca ~ basi + "
+        "lpcomm — and fits every junction at once, so an exogenous effect splits into the part "
+        "travelling through the network and the part that does not. The mediation analysis is the "
+        "three-node special case. Needs semopy (pip) or R with lavaan.\n"
+        "Cross-sectional data: the direction is an anatomical assumption written into the model, "
+        "not something the fit establishes."
+    ),
+    ANALYSIS_MRF: (
+        "A random intercept shrinks every territory toward one mean, as if the basilar and the left "
+        "MCA were two draws from a population of vessels. A Markov random field instead penalises "
+        "differences between *adjacent* vessels, so each estimate borrows strength from the ones it "
+        "actually connects to. Undirected — for direction use the path model. Needs R with mgcv, "
+        "which ships with almost every R install."
     ),
     ANALYSIS_MEDIATION: (
         "How much of X's effect on Y runs through M."
@@ -161,6 +201,9 @@ __all__ = [
     "ANALYSIS_ITEMS",
     "ANALYSIS_LME4",
     "ANALYSIS_MMRM",
+    "ANALYSIS_LMROB",
+    "ANALYSIS_MRF",
+    "ANALYSIS_SEM",
     "ANALYSIS_PANEL_KINDS",
     "ANALYSIS_R_KINDS",
     "ANALYSIS_MEDIATION",

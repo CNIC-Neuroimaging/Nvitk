@@ -932,6 +932,90 @@ def _coerce_specs(measurements: Sequence[MeasurementSpec | Mapping[str, Any]]) -
     return out
 
 
+
+#: Per-vessel QC variables the qvtpy stage 9 publishes into ``image_measurements``.
+QC_VESSEL_VARIABLES: tuple[str, ...] = (
+    "qc_flow_plausible", "qc_hypoplastic", "qc_conservation", "qc_score", "qc_flag",
+)
+
+
+def attach_vessel_qc(
+    repo: Any,
+    wide: pd.DataFrame,
+    *,
+    spec: Any,
+    variables: Sequence[str] = QC_VESSEL_VARIABLES,
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Merge the published per-vessel QC metrics onto an analysis frame.
+
+    They live in ``image_measurements`` keyed on ``(subject_uid, region_id)`` — the same grain as a
+    measurement — but they are not measurements anyone selects, so nothing would load them. Without
+    this the QC filters are permanently greyed out on a dataset that has them, which is exactly the
+    dataset where they matter.
+
+    The region key is collapsed with the **same** :func:`assign_group_key` the measurement used, so
+    a melted frame (territory or hemisphere grouping) gets the QC averaged over the vessels that
+    were melted into each key. That is meaningful for the scores; for the flags it becomes the
+    *fraction* of the melted vessels that failed, which is why the melted case is reported.
+
+    Returns
+    -------
+    (frame, attached)
+        The frame with any QC columns added, and their names. Both unchanged/empty when the dataset
+        carries none — a dataset that has not run stage 9 is the normal case, not an error.
+    """
+    if wide.empty or "subject_uid" not in wide.columns or "territory" not in wide.columns:
+        return wide, []
+    try:
+        rows = repo.get("image_measurements", cohort_id=False)
+    except Exception as exc:
+        log.debug("Could not read image_measurements for the QC metrics: %s", exc)
+        return wide, []
+    if rows is None or rows.empty or "variable_id" not in rows.columns:
+        return wide, []
+
+    wanted = [v for v in variables if v in set(rows["variable_id"].astype(str))]
+    if not wanted:
+        return wide, []
+    qc = rows.loc[rows["variable_id"].astype(str).isin(wanted)]
+    if qc.empty or not {"subject_uid", "region_id", "value_num"} <= set(qc.columns):
+        return wide, []
+
+    kind = str(getattr(spec, "pipeline_kind", "qvtpy") or "qvtpy")
+    grouping = str(getattr(spec, "grouping", "vessel") or "vessel")
+    keys = qc["region_id"].astype(str).map(
+        lambda r: assign_group_key(r, grouping=grouping, kind=kind)
+    )
+    table = (
+        qc.assign(territory=keys.astype(str))
+        .pivot_table(
+            index=["subject_uid", "territory"], columns="variable_id",
+            values="value_num", aggfunc="mean",
+        )
+        .reset_index()
+    )
+    table["subject_uid"] = table["subject_uid"].astype(str)
+    table["territory"] = table["territory"].astype(str)
+
+    out = wide.copy()
+    out["subject_uid"] = out["subject_uid"].astype(str)
+    out["territory"] = out["territory"].astype(str)
+    # Never overwrite a column the frame already has — a derived one of the same name wins.
+    attached = [c for c in wanted if c not in out.columns]
+    if not attached:
+        return wide, []
+    merged = out.merge(
+        table.loc[:, ["subject_uid", "territory", *attached]],
+        on=["subject_uid", "territory"], how="left", validate="many_to_one",
+    )
+    log.info(
+        "Attached %d QC metric(s) on the %r grouping: %s",
+        len(attached), grouping, ", ".join(attached),
+    )
+    return merged, attached
+
+
 def build_multi_feature_analysis_frame(
     repo: Any,
     *,
@@ -1072,6 +1156,20 @@ def build_multi_feature_analysis_frame(
             f"Covariates come from more than one visit and were combined per subject ({detail}). "
             "Each variable keeps its own visit's value."
         )
+
+    # The published per-vessel QC metrics, on the same key the measurements were loaded on. They
+    # are what the analysis dataframe's QC filters read, and nothing else would load them.
+    if not wide.empty:
+        wide, qc_columns = attach_vessel_qc(repo, wide, spec=specs[0])
+        meta["qc_columns"] = qc_columns
+        if qc_columns and specs[0].grouping not in {"vessel", "tree", "region"}:
+            meta["warnings"].append(
+                f"The QC metrics were averaged over the vessels melted into each "
+                f"{specs[0].grouping!r} key. The scores stay meaningful; a flag becomes the "
+                f"fraction of that key's vessels that failed."
+            )
+    else:
+        meta["qc_columns"] = []
 
     wide = finalize_analysis_frame(wide, repo, primary_variable_id=specs[0].column())
 

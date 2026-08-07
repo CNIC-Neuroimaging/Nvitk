@@ -25,6 +25,13 @@ def main(backend: str) -> None:
     from nvitk.gui.app import run_app
     from nvitk.gui.core.warnings import install_napari_display_warnings
 
+    # Qt refuses to load its web engine once a QApplication exists unless a shared GL context was
+    # requested first, and napari builds one as it starts. The Statmodels window's interactive
+    # plots are hosted in a web view, so the flag has to be set here — before napari runs — or they
+    # silently fall back to a "web engine unavailable" message.
+    from nvitk.gui.panels.statmodels.plotly_view import prepare_webengine
+
+    prepare_webengine()
     install_napari_display_warnings()
     apply_cli_backend(backend)
     run_app()

@@ -217,6 +217,10 @@ def whiten_figure(fig: Any) -> None:
     """Force a white figure/axes background with dark text, so plots stay readable against the
     explorer's dark chrome and export cleanly."""
     fig.patch.set_facecolor("white")
+    # Grouped displays carry a suptitle, which belongs to the figure rather than to any axes.
+    suptitle = getattr(fig, "_suptitle", None)
+    if suptitle is not None:
+        suptitle.set_color("#111111")
     for ax in fig.axes:
         ax.set_facecolor("white")
         for spine in ax.spines.values():

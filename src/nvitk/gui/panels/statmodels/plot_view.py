@@ -12,6 +12,7 @@ Three controls sit around the figure:
               when the levels should actually leave the model.
 *Axis limits* sliders that rescale the current figure without recomputing anything.
 *Show legend* toggles the legend in place.
+*Export PNG*  writes the figure exactly as displayed, to a location the user picks.
 
 The figure itself is always drawn white (see :func:`~.theme.whiten_figure`) so it stays readable
 against the dark chrome and exports cleanly.
@@ -22,6 +23,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
+from pathlib import Path
 from typing import Any, Sequence
 
 from qtpy.QtCore import Qt, Signal
@@ -56,9 +58,13 @@ class PlotPanel(QGroupBox):
     optionsChanged
         A control that requires the plot to be *redrawn* changed (the group selection). Axis sliders
         and the legend toggle act on the existing figure and do not emit.
+    exportRequested
+        The user pressed *Export PNG…*. The window owns the dialog, because it knows the dataset
+        root and the model name the file should be suggested under.
     """
 
     optionsChanged = Signal()
+    exportRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the canvas host, the Groups box and the axis-limit controls."""
@@ -66,6 +72,10 @@ class PlotPanel(QGroupBox):
         self._canvas = None
         self._fig = None
         self._axes = None
+        # The interactive backend is created lazily — a web view is expensive, and a session that
+        # only ever looks at a correlation heatmap never needs one.
+        self._plotly = None
+        self._interactive = False
         self._linked_axes: list[Any] = []
         self._axis_base: dict[str, tuple[float, float]] = {}
         self._axis_span: dict[str, tuple[float, float]] = {}
@@ -96,6 +106,15 @@ class PlotPanel(QGroupBox):
         kind_lay.addWidget(self._kind)
         self._kind_row.setVisible(False)
         top_lay.addWidget(self._kind_row)
+
+        self._btn_export = QPushButton("Export PNG…")
+        self._btn_export.setToolTip(
+            "Save the figure exactly as displayed — current display type, visible groups, axis "
+            "limits and legend — to a PNG of your choosing."
+        )
+        self._btn_export.setEnabled(False)
+        self._btn_export.clicked.connect(lambda *_: self.exportRequested.emit())
+        top_lay.addWidget(self._btn_export)
         lay.addWidget(self._top_row)
 
         self._status = QLabel("")
@@ -116,7 +135,14 @@ class PlotPanel(QGroupBox):
 
     # ---- construction ---------------------------------------------------------
     def _build_canvas_host(self) -> QWidget:
-        """Container the Matplotlib canvas is swapped into."""
+        """
+        Container the figure is swapped into.
+
+        Two backends live here. Interactive figures (Plotly) go to a web view and own their own
+        zoom, pan and hover; static ones (Matplotlib) go to a canvas and use the axis sliders below.
+        Which one a plot uses is decided by the plot, not by this pane, so an engine that has not
+        been migrated keeps working unchanged.
+        """
         self._host = QWidget()
         self._host_layout = QVBoxLayout(self._host)
         self._host_layout.setContentsMargins(0, 0, 0, 0)
@@ -126,6 +152,10 @@ class PlotPanel(QGroupBox):
         hint.setStyleSheet(muted_label_style())
         self._host_layout.addWidget(hint)
         return self._host
+
+    def _is_interactive(self, figure: Any) -> bool:
+        """Whether *figure* is a Plotly figure rather than a Matplotlib one."""
+        return type(figure).__module__.startswith("plotly")
 
     def _build_groups_box(self) -> QWidget:
         """Scrollable checklist of the grouping column's levels."""
@@ -296,6 +326,10 @@ class PlotPanel(QGroupBox):
     # ---- figure ---------------------------------------------------------------
     def clear(self) -> None:
         """Remove the current plot widget and release its figure."""
+        if self._plotly is not None:
+            self._plotly.clear()
+            self._plotly.setParent(None)
+        self._interactive = False
         while self._host_layout.count():
             item = self._host_layout.takeAt(0)
             widget = item.widget()
@@ -312,6 +346,7 @@ class PlotPanel(QGroupBox):
         self._fig = None
         self._axes = None
         self._linked_axes = []
+        self._btn_export.setEnabled(False)
         self._disable_axis_sliders()
 
     def show_figure(self, fig: Any) -> None:
@@ -319,6 +354,9 @@ class PlotPanel(QGroupBox):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
         self.clear()
+        if self._is_interactive(fig):
+            self._show_interactive(fig)
+            return
         whiten_figure(fig)
         canvas = FigureCanvasQTAgg(fig)
         self._host_layout.addWidget(canvas)
@@ -337,6 +375,59 @@ class PlotPanel(QGroupBox):
         canvas.mpl_connect("resize_event", lambda _event: self._fit_layout(fig))
         canvas.draw_idle()
         self._sync_axis_sliders()
+        self.apply_legend_visibility()
+        self._btn_export.setEnabled(True)
+
+    def has_figure(self) -> bool:
+        """Whether a figure is currently displayed and can be exported."""
+        return self._fig is not None
+
+    def save_figure(self, path: Any, *, dpi: int = 200) -> Path:
+        """
+        Write the displayed figure to *path* as it currently looks.
+
+        Everything the user changed after the plot was drawn is part of the file: hidden groups,
+        dragged axis limits, the legend toggle. The figure was whitened on embed, so the export has
+        a white background rather than the explorer's dark chrome.
+
+        Raises
+        ------
+        RuntimeError
+            When no figure is displayed.
+        """
+        if self._interactive and self._plotly is not None:
+            return self._plotly.save_figure(path, scale=max(dpi / 100.0, 1.0))
+        if self._fig is None:
+            raise RuntimeError("There is no plot to export — fit a model first.")
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        # ``facecolor`` explicitly: rcParams may carry a dark ``savefig.facecolor`` from the app
+        # theme, which would undo the whitening in the written file only.
+        self._fig.savefig(out, dpi=dpi, bbox_inches="tight", facecolor=self._fig.get_facecolor())
+        return out
+
+    def _show_interactive(self, figure: Any) -> None:
+        """Hand a Plotly figure to the web view, and stand the axis sliders down."""
+        from .plotly_view import PlotlyView
+
+        if self._plotly is None:
+            self._plotly = PlotlyView()
+            self._host_layout.addWidget(self._plotly)
+        else:
+            self._host_layout.addWidget(self._plotly)
+        self._plotly.setVisible(True)
+        try:
+            self._plotly.show_figure(figure)
+        except RuntimeError as exc:
+            # No web engine: say so where the plot would have been rather than failing the fit.
+            self._plotly = None
+            self.show_error(str(exc))
+            return
+        self._fig = figure
+        self._interactive = True
+        # Plotly owns zoom and pan, so the sliders would fight it; the legend toggle still applies.
+        self._disable_axis_sliders()
+        self._btn_export.setEnabled(True)
         self.apply_legend_visibility()
 
     @staticmethod
@@ -382,6 +473,10 @@ class PlotPanel(QGroupBox):
 
     def apply_legend_visibility(self) -> None:
         """Show or hide the current axes legends according to the toggle."""
+        if self._interactive:
+            if self._plotly is not None and self._plotly.has_figure():
+                self._plotly.set_legend_visible(self._show_legend.isChecked())
+            return
         if self._fig is None or self._canvas is None:
             return
         for ax in self._fig.axes:

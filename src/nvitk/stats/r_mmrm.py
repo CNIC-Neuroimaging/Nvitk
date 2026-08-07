@@ -839,6 +839,7 @@ def plot_mmrm_emmeans(
     hue: str | None = None,
     errorbar: bool = True,
     palette: str = "tab10",
+    display: str = "overview",
     title: str = "MMRM least-squares means",
     y_label: str = "Estimated marginal mean",
 ) -> Any:
@@ -847,6 +848,14 @@ def plot_mmrm_emmeans(
 
     Whiskers rather than a ribbon: the x axis is a set of levels, and there is nothing between them
     to interpolate.
+
+    Parameters
+    ----------
+    display : {"overview", "grouped"}
+        ``"grouped"`` splits the anatomical levels into a grid of panels (see
+        :mod:`nvitk.stats.region_groups`). The split follows whichever column holds them — *hue* when
+        there is one, otherwise *x*, in which case each panel's axis carries only its own levels.
+        The means themselves are unchanged: they were estimated over the whole model either way.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -860,41 +869,78 @@ def plot_mmrm_emmeans(
     lower = next((c for c in ("lower.CL", "asymp.LCL", "lower") if c in frame.columns), None)
     upper = next((c for c in ("upper.CL", "asymp.UCL", "upper") if c in frame.columns), None)
 
-    order = sorted(frame[x].dropna().astype(str).unique(), key=_natural_sort_key)
-    positions = {level: i for i, level in enumerate(order)}
-
-    fig, ax = plt.subplots(figsize=(10, 6))
+    hued = bool(hue) and hue in frame.columns
     levels = (
-        sorted(frame[hue].dropna().astype(str).unique(), key=_natural_sort_key)
-        if hue and hue in frame.columns
-        else [None]
+        sorted(frame[hue].dropna().astype(str).unique(), key=_natural_sort_key) if hued else [None]
     )
-    colors = sns.color_palette(palette, n_colors=max(len(levels), 3))
 
-    for i, level in enumerate(levels):
-        subset = frame if level is None else frame.loc[frame[hue].astype(str) == level]
-        subset = subset.assign(_xi=subset[x].astype(str).map(positions)).sort_values("_xi")
-        color = "black" if level is None else colors[i % len(colors)]
-        ax.plot(
-            subset["_xi"], subset[estimate], marker="o", lw=2.4, color=color,
-            label=None if level is None else f"{hue}={level}",
-        )
-        if errorbar and lower and upper:
-            ax.errorbar(
-                subset["_xi"], subset[estimate],
-                yerr=[subset[estimate] - subset[lower], subset[upper] - subset[estimate]],
-                fmt="none", ecolor=color, elinewidth=1.3, capsize=4, capthick=1.3, alpha=0.85,
+    def draw_panel(ax: Any, panel_frame: pd.DataFrame, panel_levels: list[Any], panel_title: str) -> None:
+        """One axes: the x levels present in *panel_frame*, one curve per level of *panel_levels*."""
+        order = sorted(panel_frame[x].dropna().astype(str).unique(), key=_natural_sort_key)
+        positions = {level: i for i, level in enumerate(order)}
+        colors = sns.color_palette(palette, n_colors=max(len(panel_levels), 3))
+
+        for i, level in enumerate(panel_levels):
+            subset = (
+                panel_frame if level is None
+                else panel_frame.loc[panel_frame[hue].astype(str) == str(level)]
             )
+            subset = subset.assign(_xi=subset[x].astype(str).map(positions)).sort_values("_xi")
+            color = "black" if level is None else colors[i % len(colors)]
+            ax.plot(
+                subset["_xi"], subset[estimate], marker="o", lw=2.4, color=color,
+                label=None if level is None else f"{hue}={level}",
+            )
+            if errorbar and lower and upper:
+                ax.errorbar(
+                    subset["_xi"], subset[estimate],
+                    yerr=[subset[estimate] - subset[lower], subset[upper] - subset[estimate]],
+                    fmt="none", ecolor=color, elinewidth=1.3, capsize=4, capthick=1.3, alpha=0.85,
+                )
 
-    ax.set_xticks(np.arange(len(order)))
-    ax.set_xticklabels(order)
-    ax.set_title(title)
-    ax.set_xlabel(x)
-    ax.set_ylabel(y_label)
-    ax.grid(True, axis="y", alpha=0.25)
-    if any(level is not None for level in levels):
-        ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
+        ax.set_xticks(np.arange(len(order)))
+        ax.set_xticklabels(order)
+        ax.set_title(panel_title)
+        ax.set_xlabel(x)
+        ax.set_ylabel(y_label)
+        ax.grid(True, axis="y", alpha=0.25)
+        if any(level is not None for level in panel_levels):
+            ax.legend(loc="best", fontsize=9)
+
+    display = str(display or "overview").strip().lower()
+    if display not in {"overview", "grouped"}:
+        raise ValueError("display must be one of: overview, grouped")
+
+    if display == "overview":
+        fig, ax = plt.subplots(figsize=(10, 6))
+        draw_panel(ax, frame, levels, title)
+        panel_axes = [ax]
+        fig.tight_layout()
+    else:
+        from nvitk.stats.region_groups import panel_grid, resolve_panels
+
+        # Panel by whichever column carries the anatomy: the hue when the repeated factor was moved
+        # off the x axis, otherwise x itself.
+        panel_column = hue if hued else x
+        panel_levels_all = (
+            levels if hued
+            else sorted(frame[x].dropna().astype(str).unique(), key=_natural_sort_key)
+        )
+        panels = resolve_panels(panel_levels_all, column=panel_column)
+        fig, axes = panel_grid(len(panels), title=title)
+        panel_axes = []
+        for ax, (panel, members) in zip(axes, panels.items()):
+            wanted = {str(v) for v in members}
+            sub = frame.loc[frame[panel_column].astype(str).isin(wanted)]
+            if sub.empty:
+                ax.text(0.5, 0.5, "No estimates", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(panel)
+                ax.set_axis_off()
+                continue
+            draw_panel(ax, sub, list(members) if hued else [None], panel)
+            panel_axes.append(ax)
+
+    fig.linked_axes = panel_axes
     return fig
 
 

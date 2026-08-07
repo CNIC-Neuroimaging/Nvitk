@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import pandas as pd
 from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QComboBox,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -231,6 +233,63 @@ def load_qc_measurement_rows(
     return rows
 
 
+
+
+#: Labels for the automatic metrics, mirroring ``stage9_autoqc.QC_LABELS`` without importing the
+#: pipeline into the viewer — the GUI must open on a machine that has no qvtpy stage installed.
+QC_METRIC_LABELS: dict[str, str] = {
+    "qc_flow_plausible": "Flow plausibility (literature band)",
+    "qc_hypoplastic": "Plausibly hypoplastic (<0.8 mm)",
+    "qc_conservation": "Mass-conservation residual",
+    "qc_score": "Combined QC score",
+    "qc_flag": "QC flag (review)",
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Automatic-QC colouring
+# ──────────────────────────────────────────────────────────────────────────────
+#: Row tints for the automatic metrics, dark enough to keep the light table text readable.
+_QC_GOOD = QColor("#1e4620")
+_QC_WARN = QColor("#5a4a1e")
+_QC_BAD = QColor("#5a2424")
+_QC_NEUTRAL = QColor("#2b2b2b")
+_QC_UNKNOWN = QColor("#333333")
+
+
+def qc_metric_colour(metric: str, value: Any) -> QColor:
+    """
+    Row tint for one automatic-QC value.
+
+    Each metric reads differently, so the mapping is per metric rather than one shared scale:
+    a plausibility of 0 is bad while a conservation residual of 0 is perfect, and a hypoplasia
+    flag is anatomy rather than a verdict. A missing value is tinted as *unknown* rather than as
+    passing — never having been checked is not the same as having passed.
+    """
+    if value is None:
+        return _QC_UNKNOWN
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _QC_UNKNOWN
+    if number != number:  # NaN
+        return _QC_UNKNOWN
+
+    if metric in {"qc_flow_plausible", "qc_score"}:
+        return _QC_GOOD if number >= 0.75 else _QC_WARN if number >= 0.5 else _QC_BAD
+    if metric == "qc_conservation":
+        magnitude = abs(number)
+        return _QC_GOOD if magnitude <= 0.10 else _QC_WARN if magnitude <= 0.15 else _QC_BAD
+    if metric == "qc_hypoplastic":
+        # Not a failure: a hypoplastic vessel is normal anatomy that merely excuses the other
+        # checks, so it is marked as notable rather than bad.
+        return _QC_WARN if number >= 0.5 else _QC_NEUTRAL
+    if metric in {"qc_flag", "qc_ap_flag", "qc_subject_flag"}:
+        return _QC_BAD if number >= 0.5 else _QC_GOOD
+    if metric == "qc_ap_share":
+        return _QC_GOOD if abs(number - 72.0) <= 10.0 else _QC_BAD
+    return _QC_NEUTRAL
+
+
 class QcMeasurementsPanel(QWidget):
     """Table of grouped per-vessel / per-territory metrics with OK/FAIL + comments."""
 
@@ -252,6 +311,7 @@ class QcMeasurementsPanel(QWidget):
         self._on_revised = on_revised
         self._subject_uid = ""
         self._rows: list[dict[str, Any]] = []
+        self._autoqc: dict[str, Mapping[str, float]] = {}
         self._status = QLabel("Load a qvtpy subject to review measurements.")
         self._status.setWordWrap(True)
 
@@ -290,20 +350,88 @@ class QcMeasurementsPanel(QWidget):
             "}"
         )
 
+        # Colour-by picker for the automatic QC metrics published by stage 9. Populated on load
+        # from whatever that stage actually wrote, so a dataset without it simply shows "none".
+        self._colour_by = QComboBox()
+        self._colour_by.addItem("No colouring", "")
+        self._colour_by.currentIndexChanged.connect(self._apply_colouring)
+        self._colour_row = QWidget()
+        colour_lay = QHBoxLayout(self._colour_row)
+        colour_lay.setContentsMargins(0, 0, 0, 0)
+        colour_lay.addWidget(QLabel("Colour by"))
+        colour_lay.addWidget(self._colour_by, stretch=1)
+        self._colour_legend = QLabel("")
+        self._colour_legend.setStyleSheet("color: #9a9a9a;")
+        colour_lay.addWidget(self._colour_legend, stretch=2)
+
         self._btn_revise = QPushButton("Mark as revised")
         self._btn_revise.setEnabled(False)
         self._btn_revise.clicked.connect(self._on_mark_revised)
 
         root = QVBoxLayout()
         root.addWidget(self._status)
+        root.addWidget(self._colour_row)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._btn_revise)
         self.setLayout(root)
+
+
+    # ---- automatic-QC colouring ----------------------------------------------
+    def set_autoqc(self, values: Mapping[str, Mapping[str, float]] | None) -> None:
+        """
+        Attach the automatic QC metrics for this subject, keyed ``{metric: {region_id: value}}``.
+
+        Populates the colour picker with the metrics actually present. Called after the table is
+        loaded; passing ``None`` clears the colouring and hides the control, so a dataset that has
+        never run stage 9 shows no dead widget.
+        """
+        self._autoqc = dict(values or {})
+        current = str(self._colour_by.currentData() or "")
+        self._colour_by.blockSignals(True)
+        self._colour_by.clear()
+        self._colour_by.addItem("No colouring", "")
+        for metric in sorted(self._autoqc):
+            self._colour_by.addItem(QC_METRIC_LABELS.get(metric, metric), metric)
+        index = self._colour_by.findData(current)
+        self._colour_by.setCurrentIndex(index if index >= 0 else 0)
+        self._colour_by.blockSignals(False)
+        self._colour_row.setVisible(bool(self._autoqc))
+        self._apply_colouring()
+
+    def _apply_colouring(self, *_args: Any) -> None:
+        """Tint each row by the selected metric's value for that row's region."""
+        metric = str(self._colour_by.currentData() or "")
+        by_region = self._autoqc.get(metric, {}) if metric else {}
+
+        for i, row in enumerate(self._rows):
+            region = str(row.get("region_id") or row.get("region_label") or "")
+            colour = (
+                qc_metric_colour(metric, by_region.get(region))
+                if metric else QColor("#2b2b2b")
+            )
+            for column in (self.COL_REGION, self.COL_METRIC, self.COL_VALUE):
+                item = self._table.item(i, column)
+                if item is not None:
+                    item.setBackground(colour)
+                    if metric:
+                        value = by_region.get(region)
+                        item.setToolTip(
+                            f"{QC_METRIC_LABELS.get(metric, metric)}: "
+                            + ("not computed" if value is None else f"{float(value):.4g}")
+                        )
+
+        if not metric:
+            self._colour_legend.setText("")
+            return
+        self._colour_legend.setText(
+            "green = passes  ·  amber = borderline  ·  red = review  ·  grey = not computed"
+        )
 
     def clear(self) -> None:
         """Reset the panel to its empty state (no subject, empty table, disabled revise button)."""
         self._subject_uid = ""
         self._rows = []
+        self._autoqc = {}
         self._table.setRowCount(0)
         self._btn_revise.setEnabled(False)
         self._status.setText("Load a qvtpy subject to review measurements.")

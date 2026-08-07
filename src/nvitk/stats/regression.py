@@ -616,6 +616,23 @@ def model_info_dict(
 
         return mmrm_info_dict(result, outcome_name=outcome_name, meta=meta)
 
+    if engine == "sem":
+        from .sem import sem_info_dict
+
+        return sem_info_dict(result, outcome_name=outcome_name, group_name=group_name, meta=meta)
+
+    if engine == "mrf":
+        from .r_gam import mrf_info_dict
+
+        return mrf_info_dict(result, outcome_name=outcome_name, group_name=group_name, meta=meta)
+
+    if engine == "lmrob":
+        from .r_robust import lmrob_info_dict
+
+        return lmrob_info_dict(
+            result, outcome_name=outcome_name, group_name=group_name, meta=meta
+        )
+
     if isinstance(result, dict) and result.get("engine") == ANALYSIS_NONLINEAR:
         spec: NonlinearModel = result["spec"]
         return {
@@ -658,6 +675,7 @@ def plot_nonlinear_fit(
     group: str | None = None,
     group_order: Sequence[str] | None = None,
     palette: str = "tab10",
+    display: str = "overview",
     title: str | None = None,
     x_label: str | None = None,
     y_label: str | None = None,
@@ -668,44 +686,92 @@ def plot_nonlinear_fit(
     The curve is a single fit over all rows: *group* only colours the scatter, it does not fit one
     curve per group. Fitting per group would mean one non-linear fit per level, which the parameter
     table has no room to report honestly.
+
+    Parameters
+    ----------
+    display : {"overview", "grouped"}
+        ``"grouped"`` splits *group*'s levels into a grid of anatomical panels (see
+        :mod:`nvitk.stats.region_groups`), each autoscaled to its own range. The fitted curve is the
+        same single fit in every panel — which is exactly what makes the panels comparable: each one
+        shows how its own regions sit against the common curve.
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
 
     spec: NonlinearModel = result["spec"]
     x, y = result["x"], result["y"]
-    fig, ax = plt.subplots(figsize=(10, 6))
+    grouped = bool(group) and group in data.columns
+    levels = (
+        (list(group_order) if group_order else sorted(data[group].dropna().astype(str).unique()))
+        if grouped else []
+    )
 
-    if include_points:
-        if group and group in data.columns:
-            levels = list(group_order) if group_order else sorted(data[group].dropna().astype(str).unique())
-            colors = sns.color_palette(palette, n_colors=max(len(levels), 3))
-            for i, level in enumerate(levels):
-                subset = data.loc[data[group].astype(str) == str(level)]
-                ax.scatter(subset[x], subset[y], s=18, alpha=0.45, color=colors[i % len(colors)], label=str(level))
-        else:
-            ax.scatter(data[x], data[y], s=18, alpha=0.4, color="#4C72B0")
-
+    # One curve for the whole fit, evaluated over the full observed range so every panel shares it.
     grid = np.linspace(float(np.nanmin(data[x])), float(np.nanmax(data[x])), 300)
     fitted, lower, upper = nonlinear_confidence_band(result, grid, ci_level=ci_level)
-    if errorbar and not np.allclose(lower, upper):
-        ax.fill_between(
-            grid, lower, upper, color="black", alpha=0.12,
-            label=f"{int(round(ci_level * 100))}% CI",
-        )
-    ax.plot(grid, fitted, color="black", lw=2.6, label=f"{spec.label}: {spec.expression}")
 
-    ax.set_title(title or f"{spec.label}: {y} ~ f({x})   R²={result['r_squared']:.3f}")
-    ax.set_xlabel(x_label or x)
-    ax.set_ylabel(y_label or y)
-    ax.grid(True, axis="y", alpha=0.25)
-    handles, labels = ax.get_legend_handles_labels()
-    if handles:
-        dedup: dict[str, Any] = {}
-        for handle, label in zip(handles, labels):
-            dedup.setdefault(label, handle)
-        ax.legend(dedup.values(), dedup.keys(), loc="best", fontsize=9)
-    fig.tight_layout()
+    def draw_panel(ax: Any, panel_data: pd.DataFrame, panel_levels: Sequence[str], panel_title: str) -> None:
+        """Scatter *panel_data* under the shared fitted curve."""
+        if include_points:
+            if panel_levels:
+                colors = sns.color_palette(palette, n_colors=max(len(panel_levels), 3))
+                for i, level in enumerate(panel_levels):
+                    subset = panel_data.loc[panel_data[group].astype(str) == str(level)]
+                    ax.scatter(subset[x], subset[y], s=18, alpha=0.45,
+                               color=colors[i % len(colors)], label=str(level))
+            else:
+                ax.scatter(panel_data[x], panel_data[y], s=18, alpha=0.4, color="#4C72B0")
+
+        if errorbar and not np.allclose(lower, upper):
+            ax.fill_between(
+                grid, lower, upper, color="black", alpha=0.12,
+                label=f"{int(round(ci_level * 100))}% CI",
+            )
+        ax.plot(grid, fitted, color="black", lw=2.6, label=f"{spec.label}: {spec.expression}")
+
+        ax.set_title(panel_title)
+        ax.set_xlabel(x_label or x)
+        ax.set_ylabel(y_label or y)
+        ax.grid(True, axis="y", alpha=0.25)
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            dedup: dict[str, Any] = {}
+            for handle, label in zip(handles, labels):
+                dedup.setdefault(label, handle)
+            ax.legend(dedup.values(), dedup.keys(), loc="best", fontsize=9)
+
+    display = str(display or "overview").strip().lower()
+    if display not in {"overview", "grouped"}:
+        raise ValueError("display must be one of: overview, grouped")
+    heading = title or f"{spec.label}: {y} ~ f({x})   R²={result['r_squared']:.3f}"
+
+    if display == "overview":
+        fig, ax = plt.subplots(figsize=(10, 6))
+        draw_panel(ax, data, levels, heading)
+        panel_axes = [ax]
+        fig.tight_layout()
+    else:
+        from nvitk.stats.region_groups import panel_grid, resolve_panels
+
+        if not grouped:
+            raise ValueError(
+                "The grouped display needs a grouping column to split by; this fit has none. "
+                "Use the Overview display."
+            )
+        panels = resolve_panels(levels, column=group or "group")
+        fig, axes = panel_grid(len(panels), title=heading)
+        panel_axes = []
+        for ax, (panel, members) in zip(axes, panels.items()):
+            sub = data.loc[data[group].astype(str).isin({str(v) for v in members})]
+            if sub.empty:
+                ax.text(0.5, 0.5, "No observations", ha="center", va="center", transform=ax.transAxes)
+                ax.set_title(panel)
+                ax.set_axis_off()
+                continue
+            draw_panel(ax, sub, list(members), panel)
+            panel_axes.append(ax)
+
+    fig.linked_axes = panel_axes
     return fig
 
 

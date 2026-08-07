@@ -774,6 +774,7 @@ def plot_mixedlm_params(
     errorbar: bool = False,
     ci_level: float = 0.95,
     covariate_refs: dict[str, float] | None = None,
+    excluded_points: pd.DataFrame | None = None,
     display: str = "overview",
     output_path: str | Path | None = None,
     title: str = "MixedLM parameter plot",
@@ -806,6 +807,11 @@ def plot_mixedlm_params(
         Overlay the observed data. In continuous mode this is a scatter of individual rows; in
         categorical mode it is the **mean of y within each (x, hue) cell** — an unadjusted
         counterpart to the model's marginal means, drawn dashed and in a lighter tone.
+    excluded_points : pandas.DataFrame, optional
+        Observations a filter removed, drawn in grey beneath the kept ones. They are **not** in
+        *df_fit* — the fit was run on the filtered frame — so they have to be supplied separately;
+        showing them is what tells you whether a filter took out a coherent cluster or scattered
+        noise. They never affect the axes' autoscale-driving data or the model curves.
     display : {"overview", "grouped"}
         ``"overview"`` draws every level on one pair of axes. ``"grouped"`` splits them into a grid
         of anatomical panels (carotids / anterior / posterior / venous for vessels, lobes for
@@ -869,6 +875,7 @@ def plot_mixedlm_params(
         errorbar=errorbar,
         ci_level=ci_level,
         covariate_refs=covariate_refs,
+        excluded_points=excluded_points,
     )
 
     if display == "overview":
@@ -920,29 +927,16 @@ def _draw_grouped_panels(
     (fixed-effect) line is unchanged by the split — it is the all-level estimate — so it repeats
     identically across panels and remains the common reference between them.
     """
-    import matplotlib.pyplot as plt
-
-    from nvitk.stats.region_groups import group_levels_into_panels
+    from nvitk.stats.region_groups import panel_grid, resolve_panels
 
     group = common["group"]
     levels = group_order or sorted(df[group].dropna().astype(str).unique(), key=_natural_sort_key)
-    panels = group_levels_into_panels(levels)
-    if not panels:
-        raise ValueError(
-            f"None of the {len(levels)} {group!r} levels map to a known anatomical region, so there "
-            f"are no groups to split into. Use the Overview display for this model."
-        )
-
-    n_cols = 1 if len(panels) == 1 else 2
-    n_rows = int(np.ceil(len(panels) / n_cols))
-    fig, grid = plt.subplots(
-        n_rows, n_cols, figsize=(8.5 * n_cols, 4.8 * n_rows), squeeze=False
-    )
-    flat = [ax for row in grid for ax in row]
+    panels = resolve_panels(levels, column=group)
+    fig, axes = panel_grid(len(panels), title=title)
 
     errors: dict[str, str] = {}
     panel_axes: list[Any] = []
-    for ax, (panel, panel_levels) in zip(flat, panels.items()):
+    for ax, (panel, panel_levels) in zip(axes, panels.items()):
         wanted = {str(v) for v in panel_levels}
         sub = df.loc[df[group].astype(str).isin(wanted)]
         if sub.empty:
@@ -952,6 +946,11 @@ def _draw_grouped_panels(
             ax.set_title(panel)
             ax.set_axis_off()
             continue
+        panel_excluded = common.get("excluded_points")
+        if panel_excluded is not None and not panel_excluded.empty and group in panel_excluded.columns:
+            panel_excluded = panel_excluded.loc[
+                panel_excluded[group].astype(str).isin(wanted)
+            ]
         errors.update(
             _draw_mixedlm_axes(
                 ax,
@@ -960,19 +959,12 @@ def _draw_grouped_panels(
                 # The hue is only restricted when it *is* the panelled column; an unrelated second
                 # factor must keep all its levels or the panels stop being comparable.
                 hue_order=list(panel_levels) if common.get("hue") == group else hue_order,
-                **common,
+                **{**common, "excluded_points": panel_excluded},
             )
         )
         _finish_mixedlm_axes(ax, title=panel, x_label=x_label, y_label=y_label)
         panel_axes.append(ax)
 
-    for ax in flat[len(panels):]:
-        ax.set_visible(False)
-
-    fig.suptitle(title, fontsize=13, fontweight="bold")
-    # Constrained layout re-flows on every draw, which a grid with a suptitle needs; it also tells
-    # the plot pane not to call tight_layout on top of it.
-    fig.set_layout_engine("constrained")
     return fig, panel_axes, errors
 
 
@@ -1029,6 +1021,7 @@ def _draw_mixedlm_axes(
     errorbar: bool = False,
     ci_level: float = 0.95,
     covariate_refs: dict[str, float] | None = None,
+    excluded_points: pd.DataFrame | None = None,
 ) -> dict[str, str]:
     """
     Draw one model plot onto *ax* — the body shared by the overview and the grouped panels.
@@ -1048,6 +1041,7 @@ def _draw_mixedlm_axes(
 
     covariate_refs = dict(covariate_refs or {})
     errors: dict[str, str] = {}
+    has_excluded = excluded_points is not None and not excluded_points.empty
 
     if mode == "continuous":
         x_num = pd.to_numeric(df[x], errors="coerce")
@@ -1059,6 +1053,14 @@ def _draw_mixedlm_axes(
         colors = sns.color_palette(palette, n_colors=max(len(groups), 3))
         cmap = {g: colors[i % len(colors)] for i, g in enumerate(groups)}
 
+        if include_points and has_excluded and {x, y} <= set(excluded_points.columns):
+            # Drawn first so the kept observations sit on top of them.
+            ax.scatter(
+                pd.to_numeric(excluded_points[x], errors="coerce"),
+                pd.to_numeric(excluded_points[y], errors="coerce"),
+                s=18, alpha=0.45, color="#B0B0B0", linewidths=0, zorder=1,
+                label="excluded by filter",
+            )
         if include_points:
             sns.scatterplot(
                 data=df,
@@ -1291,6 +1293,18 @@ def _draw_mixedlm_axes(
             log.debug("EMM grid failure", exc_info=True)
             errors["emm_error"] = str(e)
 
+        if include_points and has_excluded and {x, y} <= set(excluded_points.columns):
+            dropped = excluded_points.assign(
+                _xi=excluded_points[x].astype(str).map({str(v): i for i, v in enumerate(order)})
+            ).dropna(subset=["_xi"])
+            if not dropped.empty:
+                rng = np.random.default_rng(len(dropped))
+                ax.scatter(
+                    dropped["_xi"] + rng.uniform(-0.16, 0.16, len(dropped)),
+                    pd.to_numeric(dropped[y], errors="coerce"),
+                    s=16, alpha=0.4, color="#B0B0B0", linewidths=0, zorder=1,
+                    label="excluded by filter",
+                )
         if include_points:
             # These are *observed cell means*, not individual rows: seaborn's pointplot averages y
             # within each (x, hue) cell. They are drawn in a lighter tone of the level's colour so

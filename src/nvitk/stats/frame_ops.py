@@ -146,16 +146,28 @@ def _apply_values_rule(df: pd.DataFrame, column: str, values: Sequence[str], exc
 
 
 def _apply_range_rule(
-    df: pd.DataFrame, column: str, low: float | None, high: float | None
+    df: pd.DataFrame, column: str, low: float | None, high: float | None,
+    *, keep_na: bool = False,
 ) -> pd.DataFrame:
-    """Keep rows whose numeric *column* value lies in ``[low, high]`` (either bound may be open)."""
+    """
+    Keep rows whose numeric *column* value lies in ``[low, high]`` (either bound may be open).
+
+    ``keep_na`` decides what a missing value means. By default it fails, which is right for a
+    measurement: a row with no value cannot be shown to be inside the range. It is wrong for a
+    metric that is only *defined* on some rows — a junction residual exists on the parent vessel
+    and nowhere else, so failing the NaNs would drop every vessel that was never checked. The IQR
+    rule already keeps NaN for the same reason.
+    """
     num = pd.to_numeric(df[column], errors="coerce")
     mask = pd.Series(True, index=df.index)
     if low is not None:
         mask &= num >= float(low)
     if high is not None:
         mask &= num <= float(high)
-    return df.loc[mask.fillna(False)]
+    mask = mask.fillna(False)
+    if keep_na:
+        mask |= num.isna()
+    return df.loc[mask]
 
 
 @dataclass(frozen=True)
@@ -187,6 +199,9 @@ class FilterRule:
     # ---- kind="range" ----------------------------------------------------------
     low: float | None = None
     high: float | None = None
+    #: Treat a missing value as passing rather than failing. For a metric defined on
+    #: only some rows, failing the NaNs would drop everything that was never checked.
+    keep_na: bool = False
     # ---- kind="iqr" ------------------------------------------------------------
     k: float = DEFAULT_IQR_K
     by: str | None = None
@@ -293,7 +308,9 @@ def apply_filter_rules(
         elif rule.kind == "compare":
             out = apply_row_filter(out, rule.column, rule.op, rule.value)
         elif rule.kind == "range":
-            out = _apply_range_rule(out, rule.column, rule.low, rule.high)
+            out = _apply_range_rule(
+                out, rule.column, rule.low, rule.high, keep_na=bool(rule.keep_na)
+            )
         elif rule.kind == "iqr":
             by = rule.by if (rule.by and rule.by in out.columns) else None
             out = apply_iqr_filter(out, rule.column, k=float(rule.k), by=by)

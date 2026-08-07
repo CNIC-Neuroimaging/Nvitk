@@ -134,6 +134,54 @@ def export_analysis_frame(
     return out
 
 
+
+def export_group_summary(
+    path: str | Path,
+    summary: pd.DataFrame,
+    *,
+    provenance: pd.DataFrame | None = None,
+    values: pd.DataFrame | None = None,
+) -> Path:
+    """
+    Write a per-group statistics table, with its provenance and optionally the rows behind it.
+
+    Three sheets rather than one: ``summary`` is the table, ``provenance`` records what it describes
+    (a sheet of means with no note of which column, grouping or confidence level is unreconstructable
+    later), and ``values`` carries the underlying rows so a reader can check a number without going
+    back to the tool.
+
+    Raises
+    ------
+    ValueError
+        For an unsupported extension or an empty summary.
+    """
+    out = Path(path)
+    suffix = out.suffix.lower()
+    if summary is None or summary.empty:
+        raise ValueError("There is nothing to export — the summary is empty.")
+
+    if suffix in {".xlsx", ".xlsm"}:
+        with pd.ExcelWriter(out, engine="openpyxl") as writer_:
+            summary.to_excel(writer_, sheet_name="summary", index=False)
+            _autosize(writer_.sheets["summary"], summary)
+            if provenance is not None and not provenance.empty:
+                provenance.to_excel(writer_, sheet_name="provenance", index=False)
+                _autosize(writer_.sheets["provenance"], provenance)
+            if values is not None and not values.empty and len(values) <= EXCEL_ROW_LIMIT:
+                values.to_excel(writer_, sheet_name="values", index=False)
+                _autosize(writer_.sheets["values"], values)
+    elif suffix in {".csv", ".tsv", ".txt"}:
+        separator = "\t" if suffix == ".tsv" else ","
+        summary.to_csv(out, index=False, sep=separator)
+        if provenance is not None and not provenance.empty:
+            provenance.to_csv(out.with_suffix(f".provenance{suffix}"), index=False, sep=separator)
+    else:
+        raise ValueError(f"Unsupported export format {suffix!r} — use .xlsx, .csv or .tsv.")
+
+    log.info("Exported a %d-group summary to %s", len(summary), out)
+    return out
+
+
 def _autosize(worksheet: Any, frame: pd.DataFrame, *, max_width: int = 42) -> None:
     """Widen each column to roughly fit its content, so the sheet opens readable."""
     from openpyxl.utils import get_column_letter
@@ -144,4 +192,9 @@ def _autosize(worksheet: Any, frame: pd.DataFrame, *, max_width: int = 42) -> No
         worksheet.column_dimensions[get_column_letter(i)].width = min(width + 2, max_width)
 
 
-__all__ = ["EXCEL_ROW_LIMIT", "build_provenance_frame", "export_analysis_frame"]
+__all__ = [
+    "EXCEL_ROW_LIMIT",
+    "build_provenance_frame",
+    "export_analysis_frame",
+    "export_group_summary",
+]

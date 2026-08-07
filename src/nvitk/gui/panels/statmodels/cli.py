@@ -115,6 +115,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         _use_dataset(root)
 
+    # Must happen before the QApplication exists: Qt will not load the web engine afterwards
+    # without a shared GL context, and the interactive plots are hosted in one.
+    from .plotly_view import prepare_webengine
+
+    if not prepare_webengine():
+        log.warning(
+            "Qt's web engine is unavailable — interactive plots will not render. "
+            "Install it with: pip install PyQt6-WebEngine"
+        )
     app = QApplication.instance() or QApplication(sys.argv[:1])
     try:
         window = StatmodelsWindow(initial_pipeline_kind=args.kind)

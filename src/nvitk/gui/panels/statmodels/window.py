@@ -24,11 +24,13 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
 import pandas as pd
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -50,6 +52,42 @@ from qtpy.QtWidgets import (
 from nvitk.core.logger import Logger
 from nvitk.gui.tools.runner import notify
 from nvitk.pipes.qvtpy.common.db_publish import QVTPY_PIPELINE_ID
+from nvitk.stats.mixedlm import formula_columns as _formula_columns
+from nvitk.stats.interactive import forest_plot, matrix_plot, network_plot
+from nvitk.stats.interactive_adapters import (
+    mmrm_geometry,
+    r_model_geometry,
+    render,
+    statsmodels_geometry,
+)
+from nvitk.stats.r_gam import (
+    GAM_FAMILIES,
+    GAM_METHODS,
+    fit_mrf,
+    gam_backend_status,
+    mrf_field_frame,
+    plot_mrf_field,
+    plot_mrf_graph,
+)
+from nvitk.stats.qc_filters import (
+    KEEP_COLUMN,
+    QC_FILTER_BY_KEY,
+    SUBJECT_AWARE_KEYS,
+    flow_qc_keep,
+    preset_rules,
+)
+from nvitk.stats.summaries import OVERALL_LABEL, summarize_by_group, summary_provenance
+from nvitk.stats.region_algebra import RegionCombination, apply_region_combinations
+from nvitk.stats.sem import (
+    SemSpec,
+    fit_sem,
+    path_effects,
+    plot_sem_network,
+    plot_sem_paths,
+    sem_backend_status,
+    sem_paths_frame,
+)
+from nvitk.stats.vessel_network import VESSEL_NODES, canonical_node, sem_model_syntax
 from nvitk.stats import (
     GLM_FAMILIES,
     NONLINEAR_MODELS,
@@ -60,17 +98,25 @@ from nvitk.stats import (
     fit_lme4,
     fit_mmrm,
     fit_nonlinear,
+    LMROB_ESTIMATORS,
+    LMROB_PSI,
+    LMROB_SETTINGS,
+    fit_lmrob,
     fit_ols,
     fit_or_load_mixedlm,
     mixedlm_info_dict,
     model_info_dict,
     mixedlm_to_lme4_formula,
     mmrm_backend_status,
+    robust_backend_status,
     parse_mmrm_covariance,
     mmrm_emmeans,
+    lmrob_weights_frame,
     plot_lme4_params,
+    plot_lmrob_params,
+    plot_lmrob_weights,
     plot_mmrm_correlation,
-    plot_mmrm_emmeans,
+    mmrm_correlation_matrix,
     plot_mixedlm_params,
     plot_nonlinear_fit,
     r_backend_status,
@@ -102,6 +148,9 @@ from .constants import (
     ANALYSIS_HINTS,
     ANALYSIS_ITEMS,
     ANALYSIS_LME4,
+    ANALYSIS_LMROB,
+    ANALYSIS_MRF,
+    ANALYSIS_SEM,
     ANALYSIS_MEDIATION,
     ANALYSIS_MMRM,
     ANALYSIS_MIXEDLM,
@@ -118,8 +167,12 @@ from .constants import (
     DEFAULT_VC,
     PIPELINE_KIND_QVTPY,
 )
+from .column_plot_dialog import ColumnPlotDialog
+from .combinations_dialog import RegionCombinationsDialog
+from .db_publish import resolve_publish_target
 from .derived import CovarianceTermDialog, DerivedColumnsDialog, SplineTermDialog
-from .export import build_provenance_frame, export_analysis_frame
+from .publish_dialog import PublishDerivedDialog
+from .export import build_provenance_frame, export_analysis_frame, export_group_summary
 from .frame_table import AnalysisFrameView, ColumnFilterDialog, FilterChipBar
 from .helpers import (
     checked_variable_ids,
@@ -166,6 +219,21 @@ _MMRM_PLOTS: tuple[tuple[str, str], ...] = (
     ("Correlation between levels", "correlation"),
 )
 
+_SEM_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Path coefficients", "paths"),
+    ("Network diagram", "network"),
+)
+
+_MRF_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Smoothed field", "field"),
+    ("Adjacency graph", "graph"),
+)
+
+_LMROB_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Robust fit", "fit"),
+    ("Robustness weights", "weights"),
+)
+
 _MEDIATION_PLOTS: tuple[tuple[str, str], ...] = (
     ("Path forest", "forest"),
     ("Indirect bootstrap", "bootstrap"),
@@ -197,6 +265,7 @@ class StatmodelsWindow(QMainWindow):
         self._working_df: pd.DataFrame | None = None    # + derived columns, − filtered rows
         self._load_meta: dict[str, Any] | None = None
         self._derived: list[DerivedColumn] = []
+        self._combinations: list[RegionCombination] = []
         self._filter_report: list[dict[str, Any]] = []
 
         # ---- result state -----------------------------------------------------
@@ -210,6 +279,7 @@ class StatmodelsWindow(QMainWindow):
         # Probing R shells out to Rscript; do it once, lazily.
         self._r_status = None
         self._mmrm_status = None
+        self._robust_status = None
 
         # ---- workers ----------------------------------------------------------
         self._load_worker: FrameLoadWorker | None = None
@@ -447,6 +517,31 @@ class StatmodelsWindow(QMainWindow):
         )
         self._mmrm_method_label = QLabel("Denominator df")
 
+        # R / robustbase only. lmrob takes a plain formula — the estimator and the loss function are
+        # what shape the fit, so they are the only extra controls.
+        self._lmrob_method = QComboBox()
+        for key, spec in LMROB_ESTIMATORS.items():
+            self._lmrob_method.addItem(spec.label, key)
+        self._lmrob_method.setToolTip(
+            "\n\n".join(f"{s.label}: {s.description}" for s in LMROB_ESTIMATORS.values())
+        )
+        self._lmrob_method_label = QLabel("Estimator")
+        self._lmrob_psi = QComboBox()
+        for key, description in LMROB_PSI.items():
+            self._lmrob_psi.addItem(description, key)
+        self._lmrob_psi.setToolTip(
+            "How fast a residual's influence is cut off as it grows. Redescending functions give "
+            "extreme observations zero weight; Huber only bounds their influence."
+        )
+        self._lmrob_psi_label = QLabel("Loss (psi)")
+        self._lmrob_setting = QComboBox()
+        for key, description in LMROB_SETTINGS.items():
+            self._lmrob_setting.addItem(description, key)
+        self._lmrob_setting.setToolTip(
+            "A published control preset. Choosing one overrides the estimator and loss above."
+        )
+        self._lmrob_setting_label = QLabel("Preset")
+
         form.addRow("Formula", self._formula)
         form.addRow(self._groups_label, self._groups)
         form.addRow(self._re_label, self._re_formula)
@@ -456,11 +551,48 @@ class StatmodelsWindow(QMainWindow):
         form.addRow(self._lme4_family_label, self._lme4_family)
         form.addRow(self._lme4_reml_label, self._lme4_reml)
         form.addRow(self._mmrm_method_label, self._mmrm_method)
+        # SEM and MRF only.
+        self._sem_backend = QComboBox()
+        self._sem_backend.addItem("auto — semopy if present, else lavaan", "")
+        self._sem_backend.addItem("semopy (Python)", "semopy")
+        self._sem_backend.addItem("lavaan (R)", "lavaan")
+        self._sem_backend_label = QLabel("SEM backend")
+        self._sem_standardize = QCheckBox("Standardize variables")
+        self._sem_standardize.setChecked(True)
+        self._sem_standardize.setToolTip(
+            "Flows in mL/min and ages in years differ by two orders of magnitude, which makes the "
+            "raw path coefficients incomparable and the optimiser badly conditioned. Standardizing "
+            "puts every path on the same SD-per-SD scale."
+        )
+        self._sem_standardize_label = QLabel("Scaling")
+        self._mrf_family = QComboBox()
+        for key, description in GAM_FAMILIES.items():
+            self._mrf_family.addItem(description, key)
+        self._mrf_family_label = QLabel("Family")
+        self._mrf_method = QComboBox()
+        for key, description in GAM_METHODS.items():
+            self._mrf_method.addItem(description, key)
+        self._mrf_method_label = QLabel("Smoothing")
+
+        form.addRow(self._sem_backend_label, self._sem_backend)
+        form.addRow(self._sem_standardize_label, self._sem_standardize)
+        form.addRow(self._mrf_family_label, self._mrf_family)
+        form.addRow(self._mrf_method_label, self._mrf_method)
+        form.addRow(self._lmrob_method_label, self._lmrob_method)
+        form.addRow(self._lmrob_psi_label, self._lmrob_psi)
+        form.addRow(self._lmrob_setting_label, self._lmrob_setting)
         form.addRow(self._robust_label, self._robust)
         form.addRow("Model name (save)", self._model_name)
         box_lay.addLayout(form)
 
         term_row = QHBoxLayout()
+        self._btn_network_syntax = QPushButton("Insert network syntax")
+        self._btn_network_syntax.setToolTip(
+            "Write the vascular path model into the formula box — one equation per junction, built "
+            "from the vessels actually present, with the current covariates added to each."
+        )
+        self._btn_network_syntax.clicked.connect(self._on_insert_network_syntax)
+        term_row.addWidget(self._btn_network_syntax)
         self._btn_lme4_convert = QPushButton("Convert MixedLM → lme4")
         self._btn_lme4_convert.setToolTip(
             "Rewrite the current groups / re_formula / vc_formula as one lme4 formula, so an "
@@ -499,22 +631,47 @@ class StatmodelsWindow(QMainWindow):
         return box
 
     def _build_plot_options(self) -> QWidget:
-        """Plot display / mode / x / points, laid out for the plot pane's own top row."""
+        """Plot display / QC gate / mode / x / points, laid out for the plot pane's own top row."""
         widget = QWidget()
         lay = QHBoxLayout(widget)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
+        # Show the rows the analysis dataframe's filters removed, in grey, so a filter's effect is
+        # visible on the plot. A plain toggle rather than a metric picker: the filters already live
+        # on the frame, and asking the plot to re-derive a second, different exclusion was confusing
+        # and let the two disagree.
+        self._show_filtered = QCheckBox("Show filtered")
+        self._show_filtered.setToolTip(
+            "Draw the observations removed by the active dataframe filters in grey instead of "
+            "hiding them, so you can see whether a filter took out a coherent cluster or scattered "
+            "noise.\nDisabled when no filter is active — there is nothing to show."
+        )
+        self._show_filtered.stateChanged.connect(lambda *_: self._on_plot())
+        lay.addWidget(self._show_filtered)
+
+        # Matplotlib by default; the interactive backend is opt-in per plot.
+        self._interactive_plot = QCheckBox("Interactive")
+        self._interactive_plot.setToolTip(
+            "Render with Plotly instead of Matplotlib: hover a point for its subject and values, "
+            "drag to zoom, click a legend entry to hide a series.\n"
+            "Matplotlib is the default — it is what the axis-limit sliders act on and what exports "
+            "as a publication figure."
+        )
+        self._interactive_plot.stateChanged.connect(lambda *_: self._on_plot())
+        lay.addWidget(self._interactive_plot)
+
         self._plot_display = QComboBox()
         self._plot_display.addItem("Overview", "overview")
         self._plot_display.addItem("Grouped", "grouped")
-        self._plot_display.setToolTip(
+        self._display_tooltip = (
             "Overview draws every group on one pair of axes.\n"
             "Grouped splits them into a grid of anatomical panels — carotids / anterior / "
             "posterior / venous for vessels, lobes for cortical parcels — each autoscaled to its "
             "own range, so a venous measurement no longer flattens an arterial one.\n"
-            "This is a view of the same fit: the dashed population line is identical in every panel."
+            "This is a view of the same fit: the population estimate is identical in every panel."
         )
+        self._plot_display.setToolTip(self._display_tooltip)
 
         self._plot_mode = QComboBox()
         self._plot_mode.addItem("auto", "auto")
@@ -584,6 +741,13 @@ class StatmodelsWindow(QMainWindow):
             "usable as the model outcome, as predictors, as plot axes and as filter targets."
         )
         row.addWidget(self._btn_derived)
+        self._btn_combinations = QPushButton("Region combinations…")
+        self._btn_combinations.setToolTip(
+            "Combine a measurement across regions — TCBF = RICA + LICA + BASI, or a mass-balance "
+            "residual. Derived columns work within a row; these work across a subject's rows."
+        )
+        self._btn_combinations.clicked.connect(lambda: self._on_edit_combinations())
+        row.addWidget(self._btn_combinations)
         self._btn_export = QPushButton("Export table…")
         self._btn_export.setToolTip(
             "Save exactly what this table shows — measurements joined, derived columns computed, "
@@ -609,12 +773,14 @@ class StatmodelsWindow(QMainWindow):
         self._btn_save.clicked.connect(self._on_save)
         self._btn_load.clicked.connect(self._on_load)
         self._btn_plot.clicked.connect(self._on_plot)
+        self._plot.exportRequested.connect(self._on_export_plot)
         self._plot_display.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_x.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
+        self._mediation_plot.currentIndexChanged.connect(lambda *_: self._sync_display_enabled())
         self._mediation_plot.currentIndexChanged.connect(lambda *_: self._on_plot())
 
         self._chips.rulesChanged.connect(lambda: self._recompute_frame())
@@ -622,6 +788,10 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.clearFiltersRequested.connect(self._on_clear_column_filter)
         self._frame_view.transformRequested.connect(self._on_quick_transform)
         self._frame_view.binsRequested.connect(self._on_bin_column)
+        self._frame_view.publishRequested.connect(self._on_publish_column)
+        self._frame_view.columnPlotRequested.connect(self._on_column_plot)
+        self._frame_view.qcFilterRequested.connect(self._on_qc_filter)
+        self._frame_view.summaryRequested.connect(self._on_export_summary)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
         self._btn_derived.clicked.connect(lambda *_: self._on_edit_derived())
         self._btn_export.clicked.connect(self._on_export_frame)
@@ -789,7 +959,12 @@ class StatmodelsWindow(QMainWindow):
             self._chips.set_rules(self._chips.rules(), [])
             return
 
-        derived_frame, derived_errors = apply_derived_columns(base, self._derived)
+        # Region algebra first: a derived column may well be built from a combination
+        # (``log(TCBF)``), and the reverse never happens — a combination reads one measurement
+        # across rows, which a within-row transform cannot produce.
+        combined, combo_errors, _reports = apply_region_combinations(base, self._combinations)
+        derived_frame, derived_errors = apply_derived_columns(combined, self._derived)
+        derived_errors = [*combo_errors, *derived_errors]
         if derived_errors:
             self._derived_label.setText("⚠ " + "; ".join(derived_errors))
         else:
@@ -804,7 +979,12 @@ class StatmodelsWindow(QMainWindow):
 
         self._chips.set_rules(rules, report)
         self._chips.set_counts(len(working), len(derived_frame))
-        self._frame_view.set_frame(working, filtered_columns=filtered_columns(rules))
+        self._sync_filter_toggle()
+        self._frame_view.set_frame(
+            working,
+            filtered_columns=filtered_columns(rules),
+            derived_columns={d.name for d in self._derived},
+        )
         self._sync_column_combos(working)
         self._sync_nonlinear_columns(working)
         self._mediation_form.set_columns(working)
@@ -842,7 +1022,8 @@ class StatmodelsWindow(QMainWindow):
             return
         # Offer the levels of the *unfiltered* frame, so a level filtered out earlier can be
         # re-included without clearing everything first.
-        derived_frame, _ = apply_derived_columns(base, self._derived)
+        combined, _, _ = apply_region_combinations(base, self._combinations)
+        derived_frame, _ = apply_derived_columns(combined, self._derived)
         series = derived_frame[column] if column in derived_frame.columns else working[column]
 
         existing = [r for r in self._chips.rules() if r.column == column]
@@ -881,6 +1062,24 @@ class StatmodelsWindow(QMainWindow):
         self._recompute_frame(announce=False)
         notify(f"Added derived column {name}.")
 
+
+    def _on_edit_combinations(self) -> None:
+        """Open the region-combinations editor and re-apply the result."""
+        if self._analysis_df is None:
+            notify("Reload data before adding region combinations.", error=True)
+            return
+        dialog = RegionCombinationsDialog(
+            self,
+            frame=self._analysis_df,
+            combinations=self._combinations,
+            region_column="territory" if "territory" in self._analysis_df.columns else "group_key",
+        )
+        if dialog.exec():
+            self._combinations = dialog.combinations()
+            self._recompute_frame(announce=False)
+            if self._combinations:
+                notify(f"{len(self._combinations)} region combination(s) applied.")
+
     def _on_edit_derived(self, *, bin_column: str | None = None) -> None:
         """Open the derived-columns editor, optionally on the bins page for *bin_column*."""
         if self._analysis_df is None:
@@ -896,6 +1095,301 @@ class StatmodelsWindow(QMainWindow):
     def _on_bin_column(self, column: str) -> None:
         """Open the derived-columns editor to cut *column* into labelled groups."""
         self._on_edit_derived(bin_column=column)
+
+
+
+    def _hover_columns(self, df: pd.DataFrame) -> list[str]:
+        """Identifier and QC columns worth attaching to every point's hover box."""
+        from nvitk.pipes.qvtpy.stage9_autoqc import QC_LABELS
+
+        base = [c for c in ("subject_uid", "territory", "group_key", "visit_id") if c in df.columns]
+        qc = [str(c) for c in df.columns if str(c) in QC_LABELS]
+        return base + qc
+
+
+
+    @staticmethod
+    def _panel_note(fig: Any) -> str:
+        """
+        How many anatomical panels a grouped figure ended up with.
+
+        The two backends record it differently: Matplotlib figures carry ``linked_axes``, Plotly
+        subplot figures carry a summary in ``layout.meta``. Reading only one gave "0 panels" on the
+        other.
+        """
+        meta = getattr(getattr(fig, "layout", None), "meta", None) or {}
+        summary = meta.get("panels") if isinstance(meta, dict) else ""
+        if summary:
+            return str(summary)
+        return f"{len(getattr(fig, 'linked_axes', []) or [])} anatomical panels."
+
+    def _excluded_points(self, x: str, y: str, group: str) -> pd.DataFrame | None:
+        """
+        The observations the active filters removed, in the columns the plot uses.
+
+        These are **not** in the model frame — the fit ran on the filtered data — so there is nothing
+        inside it to grey out. They have to come from the unfiltered analysis frame and be drawn as
+        a separate series, which is what makes it visible whether a filter took out a coherent
+        cluster or scattered noise.
+
+        ``None`` when nothing was filtered, or when the plot's columns are not all present in the
+        analysis frame (a fit can rename them), since guessing a mapping would mislabel points.
+        """
+        base, working = self._analysis_df, self._working_df
+        if base is None or working is None or len(working) >= len(base):
+            return None
+        derived, _ = apply_derived_columns(base, self._derived)
+        wanted = [c for c in (x, y, group) if c]
+        if any(c not in derived.columns for c in wanted):
+            return None
+        dropped = derived.loc[~derived.index.isin(set(working.index))]
+        return dropped if not dropped.empty else None
+
+    def _sync_filter_toggle(self) -> None:
+        """Enable the grey-out toggle only when a filter has actually removed something."""
+        base, working = self._analysis_df, self._working_df
+        removed = len(base) - len(working) if base is not None and working is not None else 0
+        self._show_filtered.setEnabled(removed > 0)
+        self._show_filtered.setText(
+            f"Show filtered ({removed})" if removed > 0 else "Show filtered"
+        )
+
+    def _region_column_name(self) -> str:
+        """Whichever column carries the vessel identity in this frame."""
+        frame = self._analysis_df
+        if frame is None:
+            return "territory"
+        return next(
+            (c for c in ("territory", "group_key", "region_id") if c in frame.columns), "territory"
+        )
+
+    def _on_export_summary(self, column: str, by: str) -> None:
+        """
+        Export per-group descriptive statistics for one measurement.
+
+        Summarises the **working** frame — derived columns computed, filters applied — so the table
+        describes the rows a model would be fitted on rather than the raw load. The export carries a
+        provenance sheet and the underlying values, because a sheet of means with no record of which
+        column, which grouping and which confidence level is unreadable a month later.
+        """
+        frame = self._working_df
+        if frame is None or frame.empty:
+            notify("Reload the data before exporting a summary.", error=True)
+            return
+
+        try:
+            summary = summarize_by_group(frame, column, by=by or "")
+        except ValueError as exc:
+            notify(str(exc), error=True)
+            self._status.setText(str(exc))
+            return
+
+        stem = f"{column}_by_{by}" if by else f"{column}_summary"
+        suggested = statmodels_root(self._repo) / f"{stem}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"Export summary of {column}", str(suggested),
+            "Excel (*.xlsx);;CSV (*.csv);;TSV (*.tsv);;All (*)",
+        )
+        if not path:
+            return
+        target = Path(path)
+        if not target.suffix:
+            target = target.with_suffix(".xlsx")
+
+        keep = [
+            c for c in dict.fromkeys([by, column, "subject_uid", "territory"])
+            if c and c in frame.columns
+        ]
+        try:
+            written = export_group_summary(
+                target,
+                summary,
+                provenance=summary_provenance(
+                    summary, dataset=str(statmodels_root(self._repo)), n_rows_source=len(frame)
+                ),
+                values=frame.loc[:, keep] if keep else None,
+            )
+        except Exception as exc:
+            log.debug("Summary export failed: %s", exc, exc_info=True)
+            notify(f"Export failed: {exc}", error=True)
+            self._status.setText(f"Export failed: {exc}")
+            return
+
+        n_groups = int((summary["group"] != OVERALL_LABEL).sum())
+        notify(f"Summary of {column} \u2192 {written.name}")
+        self._status.setText(
+            f"Exported {column} summarised by {by or 'the whole cohort'} \u2014 {n_groups} group(s) "
+            f"over {len(frame)} row(s) \u2192 {written}"
+        )
+
+    def _on_qc_filter(self, column: str, key: str) -> None:
+        """
+        Apply a ready-made quality-control filter to the analysis dataframe.
+
+        These *drop* rows, so they change the fit — unlike the plot's QC gate, which only greys
+        observations out. Existing rules on the same columns are replaced rather than stacked, so
+        re-picking a preset re-applies it instead of intersecting two copies of itself.
+        """
+        if self._analysis_df is None or self._analysis_df.empty:
+            notify("Reload the data before applying a QC filter.", error=True)
+            return
+
+        decision: dict[str, object] = {}
+        try:
+            preset = QC_FILTER_BY_KEY[key]
+            missing = [c for c in preset.requires if c not in self._analysis_df.columns]
+            if missing:
+                # Read from the dataset only. Scoring here would give this session's filter a
+                # different answer from the published metrics and from every other session; the QC
+                # has to mean the same thing wherever it is read.
+                raise ValueError(
+                    f"{preset.label!r} needs {', '.join(missing)}, which this dataset does not "
+                    f"carry. Run 'nvitk-qvtpy-autoqc' to publish the QC metrics, then reload."
+                )
+            if key in SUBJECT_AWARE_KEYS:
+                # The flow presets are not a column threshold: exempt vessels are kept whatever
+                # their (absent) score, and a failing carotid or basilar takes its whole subject.
+                # The decision is materialised as a column so the chip stays removable.
+                keep, decision = flow_qc_keep(
+                    self._analysis_df, metric=SUBJECT_AWARE_KEYS[key],
+                    region_column=self._region_column_name(),
+                )
+                self._analysis_df = self._analysis_df.assign(
+                    **{KEEP_COLUMN: keep.astype(float)}
+                )
+            rules = preset_rules(key, self._analysis_df)
+        except (KeyError, ValueError) as exc:
+            notify(str(exc), error=True)
+            self._status.setText(str(exc))
+            return
+
+        before = len(self._working_df) if self._working_df is not None else 0
+        touched = {r.column for r in rules}
+        kept = [r for r in self._chips.rules() if r.column not in touched]
+        self._chips.set_rules([*kept, *rules], report=[])
+        self._recompute_frame(announce=False)
+        after = len(self._working_df) if self._working_df is not None else 0
+
+        removed = max(before - after, 0)
+        notify(f"{preset.label}: {removed} row(s) removed.")
+        if decision:
+            note_parts = [
+                f"{decision['n_failing']} vessel(s) failed",
+                f"{decision['n_exempt_kept']} exempt row(s) kept (communicating / venous)",
+            ]
+            if decision["subjects_dropped"]:
+                note_parts.append(
+                    f"{decision['subjects_dropped']} subject(s) dropped entirely because "
+                    f"{', '.join(decision['critical_failures'])} failed"
+                )
+            log.info("QC filter: %s.", "; ".join(note_parts))
+        note = (
+            f"{preset.label} — {removed} of {before} row(s) removed, {after} remain. "
+            f"This filters the model, not just the plot; remove the chip to undo."
+        )
+        if decision and decision.get("subjects_dropped"):
+            note += (
+                f"  {decision['subjects_dropped']} subject(s) removed entirely — "
+                f"{', '.join(decision['critical_failures'])} implausible, which makes that "
+                f"subject's other flows unreliable too."
+            )
+        if decision:
+            note += f"  {decision['n_exempt_kept']} communicating/venous row(s) kept."
+        self._status.setText(note)
+
+    def _on_column_plot(self, column: str, kind: str) -> None:
+        """
+        Open the distribution viewer for one column.
+
+        Draws from the **unfiltered** frame with the filtered-out rows marked, so the plot shows
+        what the filters removed rather than hiding it — which is the only way to tell a filter that
+        took out a coherent cluster from one that took out scattered noise.
+        """
+        base = self._analysis_df if self._analysis_df is not None else self._working_df
+        if base is None or base.empty:
+            notify("Reload the data before plotting a column.", error=True)
+            return
+
+        frame, excluded = self._frame_with_exclusions(base)
+        if column not in frame.columns:
+            notify(f"“{column}” is not in the analysis dataframe.", error=True)
+            return
+        dialog = ColumnPlotDialog(
+            self, frame=frame, column=column, kind=kind, excluded_mask=excluded,
+            default_directory=statmodels_root(self._repo),
+        )
+        dialog.show()
+
+    def _frame_with_exclusions(self, base: pd.DataFrame) -> tuple[pd.DataFrame, Any]:
+        """
+        The derived frame plus a boolean mask of the rows the active filters removed.
+
+        The mask is built by comparing the filtered frame's index against the unfiltered one, so it
+        follows whatever rules are active without this needing to re-implement them.
+        """
+        derived, _ = apply_derived_columns(base, self._derived)
+        working = self._working_df
+        if working is None or len(working) >= len(derived):
+            return derived, None
+        kept = set(working.index)
+        return derived, ~derived.index.isin(kept) if kept else None
+
+    def _on_publish_column(self, column: str) -> None:
+        """
+        Write a derived column into the dataset as a variable.
+
+        The target table follows the column's *source*: a transform of an image measurement becomes
+        an image measurement keyed on subject × region, a transform of a clinical variable becomes a
+        clinical one keyed on subject. The dialog states which and why, and nothing is written until
+        it is confirmed — this is the one action here that changes a shared dataset.
+        """
+        frame = self._working_df
+        spec = next((d for d in self._derived if d.name == column), None)
+        if frame is None or frame.empty:
+            notify("Reload the data before publishing a column.", error=True)
+            return
+        if spec is None:
+            notify(f"“{column}” is not a derived column.", error=True)
+            return
+
+        target = resolve_publish_target(
+            column,
+            derived=self._derived,
+            measurement_columns={s.column(): s for s in self._measurements.specs()},
+            clinical_columns=checked_variable_ids(self._clinical_list),
+            cognitive_columns=checked_variable_ids(self._cognitive_list),
+            frame_columns=list(frame.columns),
+        )
+        definition = (
+            f"{spec.kind}: {spec.expression}" if spec.kind == "expression"
+            else f"{spec.kind}({spec.source}"
+            + (f", {spec.transform}" if spec.transform else "")
+            + ")"
+        )
+        region_columns = [c for c in ("territory", "group_key", "region_id") if c in frame.columns]
+
+        dialog = PublishDerivedDialog(
+            self,
+            repo=self._repo,
+            frame=frame,
+            column=column,
+            target=target,
+            definition=definition,
+            region_columns=region_columns or ["territory"],
+        )
+        if not dialog.exec():
+            return
+        summary = dialog.summary()
+        request = dialog.request()
+        notify(
+            f"Published {request.variable_id} → {summary.get('table')} "
+            f"({summary.get('n_rows', 0)} rows)."
+        )
+        self._status.setText(
+            f"Published “{column}” as {request.variable_id} in {summary.get('table')} — "
+            f"{summary.get('n_rows', 0)} rows over {summary.get('n_subjects', 0)} subjects. "
+            f"Reload to see it in the covariate lists."
+        )
 
     def _on_export_frame(self) -> None:
         """Save the active (derived + filtered) frame to a spreadsheet."""
@@ -987,6 +1481,13 @@ class StatmodelsWindow(QMainWindow):
             self._mmrm_status = mmrm_backend_status()
             log.info("R/mmrm backend: %s", self._mmrm_status.summary())
         return self._mmrm_status
+
+    def _robust_backend_status(self):
+        """Probe the robustbase backend once per window."""
+        if self._robust_status is None:
+            self._robust_status = robust_backend_status()
+            log.info("R/robustbase backend: %s", self._robust_status.summary())
+        return self._robust_status
 
     def _suggested_mmrm_term(self) -> str:
         """A covariance term that would suit the loaded frame, offered when the formula lacks one."""
@@ -1123,7 +1624,28 @@ class StatmodelsWindow(QMainWindow):
         is_mmrm = kind == ANALYSIS_MMRM
         for widget in (self._mmrm_method, self._mmrm_method_label):
             widget.setVisible(is_mmrm)
+        is_sem = kind == ANALYSIS_SEM
+        for widget in (self._sem_backend, self._sem_backend_label,
+                       self._sem_standardize, self._sem_standardize_label):
+            widget.setVisible(is_sem)
+        is_mrf = kind == ANALYSIS_MRF
+        for widget in (self._mrf_family, self._mrf_family_label,
+                       self._mrf_method, self._mrf_method_label):
+            widget.setVisible(is_mrf)
+        is_lmrob = kind == ANALYSIS_LMROB
+        for widget in (self._lmrob_method, self._lmrob_method_label,
+                       self._lmrob_psi, self._lmrob_psi_label,
+                       self._lmrob_setting, self._lmrob_setting_label):
+            widget.setVisible(is_lmrob)
+        if is_lmrob:
+            # A preset fixes both the estimation chain and the loss, so leaving them editable would
+            # show a choice that has no effect.
+            preset = bool(self._lmrob_setting.currentData())
+            self._lmrob_method.setEnabled(not preset)
+            self._lmrob_psi.setEnabled(not preset)
         self._btn_insert_covariance.setVisible(is_mmrm)
+        # The network-syntax builder writes the whole path model, which only SEM consumes.
+        self._btn_network_syntax.setVisible(is_sem)
         # The curved-term builder emits patsy syntax (bs(...), I(x ** 2)); the R engines parse their
         # formulas in R, where those are wrong. Offer it only where it applies.
         self._btn_insert_term.setVisible(kind not in ANALYSIS_R_KINDS)
@@ -1131,9 +1653,13 @@ class StatmodelsWindow(QMainWindow):
         for widget in (self._lme4_reml, self._lme4_reml_label):
             widget.setVisible(is_lme4 or is_mmrm)
 
-        if is_lme4 or is_mmrm:
+        if is_lme4 or is_mmrm or is_lmrob or is_sem or is_mrf:
             status = (
-                self._r_backend_status() if is_lme4 else self._mmrm_backend_status()
+                self._r_backend_status() if is_lme4
+                else self._mmrm_backend_status() if is_mmrm
+                else self._robust_backend_status() if is_lmrob
+                else sem_backend_status() if is_sem
+                else gam_backend_status()
             )
             if not status.available:
                 self._analysis_hint.setText(f"⚠ {status.reason}\n{status.install_hint()}")
@@ -1144,13 +1670,25 @@ class StatmodelsWindow(QMainWindow):
 
         # The figure picker serves mediation and MMRM, which each produce several plots; the group
         # checklist only applies to the grouped model plots.
-        self._plot.set_kind_row_visible(kind in {ANALYSIS_MEDIATION, ANALYSIS_MMRM})
+        self._plot.set_kind_row_visible(
+            kind in {ANALYSIS_MEDIATION, ANALYSIS_MMRM, ANALYSIS_LMROB,
+                     ANALYSIS_SEM, ANALYSIS_MRF}
+        )
         self._plot.set_groups_visible(kind in ANALYSIS_FORMULA_KINDS)
-        # Panelling needs one curve per level of a grouping column to split up.
+        # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
+        self._sync_display_enabled()
         if is_mmrm:
             self._set_plot_kinds(_MMRM_PLOTS)
+        elif is_lmrob:
+            self._set_plot_kinds(_LMROB_PLOTS)
+        elif is_sem:
+            self._set_plot_kinds(_SEM_PLOTS)
+        elif is_mrf:
+            self._set_plot_kinds(_MRF_PLOTS)
+        elif kind == ANALYSIS_MEDIATION and self._mediation_bundle is None:
+            self._set_plot_kinds((("Run a mediation first", ""),))
 
         if kind == ANALYSIS_MEDIATION:
             self._mediation_form.set_columns(self._working_df)
@@ -1214,6 +1752,13 @@ class StatmodelsWindow(QMainWindow):
         info = model_info_dict(
             result, outcome_name=outcome or self._primary_column(), group_name=groups, meta=meta
         )
+        if kind == ANALYSIS_LMROB:
+            # The weights need the fitted frame to name each row's subject and territory, which the
+            # info builder never sees — it only gets the fit.
+            try:
+                info["robust_weights"] = lmrob_weights_frame(result, model_df)
+            except Exception as exc:
+                log.debug("Could not read the robustness weights: %s", exc, exc_info=True)
         note = dropped_rows_note(meta)
         raw = render_mixedlm_info(info)
         self._report.set_mixedlm(info, raw_text=f"{note}\n\n{raw}" if note else raw, note=note)
@@ -1244,6 +1789,28 @@ class StatmodelsWindow(QMainWindow):
         )
         groups = self._groups.text().strip() or "group_key"
 
+        if kind == ANALYSIS_SEM:
+            spec = SemSpec(
+                syntax=formula,
+                backend=str(self._sem_backend.currentData() or ""),
+                standardize=self._sem_standardize.isChecked(),
+            )
+            result, model_df, meta = fit_sem(data=df, spec=spec)
+            return result, model_df, meta, outcome, groups
+        if kind == ANALYSIS_MRF:
+            result, model_df, meta = fit_mrf(
+                data=df,
+                formula=formula if "s(" in formula else "",
+                outcome=outcome or formula.split("~")[0].strip(),
+                region_column=groups,
+                covariates=[
+                    c for c in _formula_columns(df.columns, formula.split("~", 1)[-1])
+                    if c != groups
+                ],
+                family=str(self._mrf_family.currentData() or "gaussian"),
+                method=str(self._mrf_method.currentData() or "REML"),
+            )
+            return result, model_df, meta, outcome, meta["region_column"]
         if kind == ANALYSIS_MMRM:
             # The covariance term comes from the formula; only the arguments that are not part of it
             # are passed separately.
@@ -1265,7 +1832,15 @@ class StatmodelsWindow(QMainWindow):
             # lme4 names its grouping factors in the formula; use the first for the plot's groups.
             factors = meta.get("grouping_factors") or []
             return result, model_df, meta, outcome, (factors[0] if factors else groups)
-        if kind == ANALYSIS_OLS:
+        if kind == ANALYSIS_LMROB:
+            result, model_df, meta = fit_lmrob(
+                data=df,
+                formula=formula,
+                method=str(self._lmrob_method.currentData() or "MM"),
+                psi=str(self._lmrob_psi.currentData() or "bisquare"),
+                setting=str(self._lmrob_setting.currentData() or ""),
+            )
+        elif kind == ANALYSIS_OLS:
             result, model_df, meta = fit_ols(
                 data=df, formula=formula, robust=self._robust.currentData()
             )
@@ -1369,6 +1944,15 @@ class StatmodelsWindow(QMainWindow):
         if kind == ANALYSIS_MMRM:
             self._plot_mmrm()
             return
+        if kind == ANALYSIS_LMROB:
+            self._plot_lmrob()
+            return
+        if kind == ANALYSIS_SEM:
+            self._plot_sem()
+            return
+        if kind == ANALYSIS_MRF:
+            self._plot_mrf()
+            return
 
         try:
             import matplotlib.pyplot as plt
@@ -1406,32 +1990,65 @@ class StatmodelsWindow(QMainWindow):
 
             display = str(self._plot_display.currentData() or "overview")
             display_note = ""
-            kwargs = dict(
-                result=self._last_result,
-                df_fit=df,
-                x=x,
-                y=y,
-                group=group,
-                mode=str(self._plot_mode.currentData() or "auto"),
-                include_points=self._include_points.isChecked(),
-                errorbar=self._show_ci.isChecked(),
-                group_order=selected,
-                restrict_to_orders=subset,
-                covariate_refs=refs,
-                title=f"MixedLM: {y} ~ {x} | {group}",
+            dropped = (
+                self._excluded_points(x, y, group)
+                if self._show_filtered.isChecked() and self._show_filtered.isEnabled() else None
             )
-            # Draw on the light default style regardless of what the app (or a previous call to
-            # plt.style.use) left in the global rcParams; the canvas is whitened on embed.
+            geometry_error = ""
+
             with plt.style.context("default"):
-                try:
-                    fig = plot_mixedlm_params(display=display, **kwargs)
-                except ValueError as exc:
-                    # Grouped needs levels it can place anatomically. Losing the plot entirely over a
-                    # display choice is worse than showing the overview and saying why.
-                    if display != "grouped":
-                        raise
-                    display_note = f"⚠ Grouped display unavailable — {exc}"
-                    fig = plot_mixedlm_params(display="overview", **kwargs)
+                if self._interactive_plot.isChecked():
+                    geometry = statsmodels_geometry(
+                        self._last_result, df, x=x, y=y, group=group,
+                        mode=str(self._plot_mode.currentData() or "auto"),
+                        group_order=selected, covariate_refs=refs,
+                        errorbar=self._show_ci.isChecked(),
+                    )
+                    if not self._include_points.isChecked():
+                        geometry.points = None
+                    elif dropped is not None:
+                        # Append them so one mask can mark which of the plotted rows were filtered.
+                        geometry.points = pd.concat(
+                            [geometry.points, dropped.loc[:, geometry.points.columns]],
+                            ignore_index=True,
+                        )
+                    excluded = (
+                        np.r_[np.zeros(len(df), bool), np.ones(len(dropped), bool)]
+                        if dropped is not None and self._include_points.isChecked() else None
+                    )
+                    render_kwargs = dict(
+                        x=x, y=y, group=group, hover_columns=self._hover_columns(df),
+                        excluded_mask=excluded,
+                        show_excluded=True,
+                        errorbar=self._show_ci.isChecked(),
+                        title=f"{y} ~ {x} | {group}", x_label=x, y_label=y,
+                    )
+                    try:
+                        fig = render(geometry, display=display, **render_kwargs)
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = render(geometry, display="overview", **render_kwargs)
+                    geometry_error = geometry.error
+                else:
+                    plot_kwargs = dict(
+                        result=self._last_result, df_fit=df, x=x, y=y, group=group,
+                        mode=str(self._plot_mode.currentData() or "auto"),
+                        include_points=self._include_points.isChecked(),
+                        errorbar=self._show_ci.isChecked(),
+                        group_order=selected, restrict_to_orders=subset,
+                        covariate_refs=refs, excluded_points=dropped,
+                        title=f"MixedLM: {y} ~ {x} | {group}",
+                    )
+                    try:
+                        fig = plot_mixedlm_params(display=display, **plot_kwargs)
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = plot_mixedlm_params(display="overview", **plot_kwargs)
+                    geometry_error = getattr(fig, "emm_error", "") or getattr(fig, "ci_error", "")
             if fig is None:
                 fig = plt.gcf()
             self._plot.show_figure(fig)
@@ -1440,18 +2057,13 @@ class StatmodelsWindow(QMainWindow):
             if display_note:
                 notes.append(display_note)
             elif display == "grouped":
-                notes.append(
-                    f"{len(getattr(fig, 'linked_axes', []))} anatomical panels; the axis sliders "
-                    f"move them together."
-                )
+                notes.append(self._panel_note(fig))
             if subset:
                 notes.append(f"Showing {len(selected)} of {len(all_levels)} {group} levels.")
-            emm_error = getattr(fig, "emm_error", "")
-            if emm_error:
-                notes.append(
-                    f"⚠ Model curves unavailable — the marginal-means grid could not be built "
-                    f"({emm_error}). The raw observations are still shown."
-                )
+            if dropped is not None:
+                notes.append(f"{len(dropped)} filtered observation(s) shown in grey.")
+            if geometry_error:
+                notes.append(f"\u26a0 {geometry_error}")
             self._plot.set_status("  ".join(notes))
         except Exception as exc:
             log.debug("Plot failed: %s", exc)
@@ -1480,13 +2092,21 @@ class StatmodelsWindow(QMainWindow):
             if not selected and all_levels:
                 raise ValueError("No groups selected — tick at least one in the Groups list.")
 
+            display = str(self._plot_display.currentData() or "overview")
             with plt.style.context("default"):
                 if kind == "correlation":
-                    fig = plot_mmrm_correlation(
-                        self._last_result,
-                        levels=selected or None,
+                    # A correlation matrix is one object, not a family of curves; there is nothing
+                    # to split into panels.
+                    correlation = mmrm_correlation_matrix(self._last_result)
+                    if selected:
+                        keep = [str(v) for v in selected if str(v) in correlation.index]
+                        if keep:
+                            correlation = correlation.loc[keep, keep]
+                    fig = matrix_plot(
+                        correlation,
                         title=f"MMRM {meta.get('structure_label', '')}: correlation between "
                         f"{visit} levels",
+                        value_label="correlation",
                     )
                     note = ""
                 else:
@@ -1498,15 +2118,29 @@ class StatmodelsWindow(QMainWindow):
                     # the display, exactly as for the other engines.
                     if selected and visit in frame.columns:
                         frame = frame.loc[frame[visit].astype(str).isin(set(selected))]
-                    fig = plot_mmrm_emmeans(
-                        frame,
-                        x=x,
-                        hue=hue,
-                        errorbar=self._show_ci.isChecked(),
-                        title=f"MMRM least-squares means: {self._last_outcome or ''} by {x}",
-                        y_label=self._last_outcome or "Estimated marginal mean",
-                    )
+                    geometry = mmrm_geometry(frame, x=x, hue=hue or "")
                     note = f"Least-squares means from emmeans, at {meta.get('method')} df."
+                    panel_group = hue or x
+                    try:
+                        fig = render(
+                            geometry, x=x, y=self._last_outcome or "estimate",
+                            group=panel_group, display=display,
+                            title=f"MMRM least-squares means: {self._last_outcome or ''} by {x}",
+                            y_label=self._last_outcome or "Estimated marginal mean",
+                        )
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        note = f"⚠ Grouped display unavailable — {exc}"
+                        fig = render(
+                            geometry, x=x, y=self._last_outcome or "estimate",
+                            group=panel_group, display="overview",
+                            title=f"MMRM least-squares means: {self._last_outcome or ''} by {x}",
+                            y_label=self._last_outcome or "Estimated marginal mean",
+                        )
+                    else:
+                        if display == "grouped":
+                            note += f"  {(fig.layout.meta or {}).get('panels', '')}"
             self._plot.show_figure(fig)
             if subset:
                 note = (note + "  " if note else "") + (
@@ -1539,43 +2173,268 @@ class StatmodelsWindow(QMainWindow):
             subset = bool(selected) and len(selected) < len(all_levels)
             display = str(self._plot_display.currentData() or "overview")
             display_note = ""
-            kwargs = dict(
-                model=self._last_result,
-                df_fit=df,
-                x=x,
-                y=y,
-                group=group_col,
-                mode=str(self._plot_mode.currentData() or "auto"),
-                include_points=self._include_points.isChecked(),
-                errorbar=self._show_ci.isChecked(),
-                # Whether the grouping factor has per-level marginal means depends on it being
-                # in the fixed part, which only the formula knows.
-                fixed_formula=(self._last_fit_meta or {}).get("fixed_formula", ""),
-                group_order=selected or None,
-                restrict_to_orders=subset,
-                title=f"lme4: {y} ~ {x} | {group_col}",
+            fixed_formula = (self._last_fit_meta or {}).get("fixed_formula", "")
+            dropped = (
+                self._excluded_points(x, y, group_col)
+                if self._show_filtered.isChecked() and self._show_filtered.isEnabled() else None
             )
+
             with plt.style.context("default"):
-                try:
-                    fig = plot_lme4_params(display=display, **kwargs)
-                except ValueError as exc:
-                    if display != "grouped":
-                        raise
-                    display_note = f"⚠ Grouped display unavailable — {exc}"
-                    fig = plot_lme4_params(display="overview", **kwargs)
+                if self._interactive_plot.isChecked():
+                    from nvitk.stats.r_mixedlm import _emmeans_band, lme4_predict
+
+                    geometry = r_model_geometry(
+                        self._last_result, df, x=x, y=y, group=group_col,
+                        mode=str(self._plot_mode.currentData() or "auto"),
+                        group_order=selected or None,
+                        predict_fn=lme4_predict, band_fn=_emmeans_band,
+                        fixed_formula=fixed_formula,
+                        errorbar=self._show_ci.isChecked(),
+                    )
+                    if not self._include_points.isChecked():
+                        geometry.points = None
+                    elif dropped is not None:
+                        geometry.points = pd.concat(
+                            [geometry.points, dropped.loc[:, geometry.points.columns]],
+                            ignore_index=True,
+                        )
+                    excluded = (
+                        np.r_[np.zeros(len(df), bool), np.ones(len(dropped), bool)]
+                        if dropped is not None and self._include_points.isChecked() else None
+                    )
+                    render_kwargs = dict(
+                        x=x, y=y, group=group_col, hover_columns=self._hover_columns(df),
+                        excluded_mask=excluded, show_excluded=True,
+                        errorbar=self._show_ci.isChecked(),
+                        title=f"lme4: {y} ~ {x} | {group_col}", x_label=x, y_label=y,
+                    )
+                    try:
+                        fig = render(geometry, display=display, **render_kwargs)
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = render(geometry, display="overview", **render_kwargs)
+                    ci_error = geometry.error
+                else:
+                    kwargs = dict(
+                        model=self._last_result, df_fit=df, x=x, y=y, group=group_col,
+                        mode=str(self._plot_mode.currentData() or "auto"),
+                        include_points=self._include_points.isChecked(),
+                        errorbar=self._show_ci.isChecked(),
+                        # Whether the grouping factor has per-level marginal means depends on it
+                        # being in the fixed part, which only the formula knows.
+                        fixed_formula=fixed_formula,
+                        group_order=selected or None, restrict_to_orders=subset,
+                        excluded_points=dropped,
+                        title=f"lme4: {y} ~ {x} | {group_col}",
+                    )
+                    try:
+                        fig = plot_lme4_params(display=display, **kwargs)
+                    except ValueError as exc:
+                        if display != "grouped":
+                            raise
+                        display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = plot_lme4_params(display="overview", **kwargs)
+                    ci_error = getattr(fig, "ci_error", "")
             self._plot.show_figure(fig)
             notes = []
             if display_note:
                 notes.append(display_note)
             elif display == "grouped":
-                notes.append(f"{len(getattr(fig, 'linked_axes', []))} anatomical panels.")
+                notes.append(self._panel_note(fig))
             if subset:
                 notes.append(f"Showing {len(selected)} of {len(all_levels)} {group_col} levels.")
+            if dropped is not None:
+                notes.append(f"{len(dropped)} filtered observation(s) shown in grey.")
+            if self._show_ci.isChecked() and ci_error:
+                notes.append(f"⚠ {ci_error}")
+            self._plot.set_status("  ".join(notes))
+        except Exception as exc:
+            log.debug("lme4 plot failed: %s", exc)
+            self._plot.show_error(f"Plot unavailable: {exc}")
+
+    def _plot_lmrob(self) -> None:
+        """
+        Robust fit curves, or the robustness weights.
+
+        The weights figure is the one specific to this engine: it shows which observations the
+        estimator discounted, which is a QC shortlist rather than a result.
+        """
+        try:
+            import matplotlib.pyplot as plt
+
+            df = self._last_model_df
+            group = self._groups.text().strip() or "group_key"
+            kind = str(self._mediation_plot.currentData() or "fit")
+
+            if kind == "weights":
+                weights = lmrob_weights_frame(self._last_result, df)
+                label = next(
+                    (c for c in ("territory", "group_key", "subject_uid") if c in weights.columns), ""
+                )
+                with plt.style.context("default"):
+                    fig = plot_lmrob_weights(
+                        weights,
+                        label_column=label,
+                        title=f"Robustness weights — {self._last_outcome or ''}",
+                    )
+                self._plot.show_figure(fig)
+                rejected = int(weights["rejected"].sum())
+                self._plot.set_status(
+                    f"{int((weights['weight'] < 0.5).sum())} of {len(weights)} observations carry a "
+                    f"weight below 0.5 ({rejected} rejected outright). Low-weight rows are "
+                    f"candidates for QC, not findings."
+                )
+                return
+
+            y = self._last_outcome or self._primary_column()
+            x = self._plot_x.currentText().strip()
+            if not x or x not in df.columns:
+                x = next((c for c in ("age_c", "tacsctot_group") if c in df.columns), "")
+            if not x:
+                raise ValueError("Choose a plot x column.")
+
+            selected = self._plot.checked_levels()
+            all_levels = (
+                sorted(str(v) for v in df[group].dropna().unique()) if group in df.columns else []
+            )
+            subset = bool(selected) and len(selected) < len(all_levels)
+            display = str(self._plot_display.currentData() or "overview")
+            display_note = ""
+            kwargs = dict(
+                fit=self._last_result,
+                df_fit=df,
+                x=x,
+                y=y,
+                group=group if group in df.columns else "",
+                mode=str(self._plot_mode.currentData() or "auto"),
+                include_points=self._include_points.isChecked(),
+                errorbar=self._show_ci.isChecked(),
+                fixed_formula=(self._last_fit_meta or {}).get("formula", ""),
+                group_order=selected or None,
+                restrict_to_orders=subset,
+                title=f"lmrob: {y} ~ {x}",
+            )
+            with plt.style.context("default"):
+                try:
+                    fig = plot_lmrob_params(display=display, **kwargs)
+                except ValueError as exc:
+                    if display != "grouped":
+                        raise
+                    display_note = f"⚠ Grouped display unavailable — {exc}"
+                    fig = plot_lmrob_params(display="overview", **kwargs)
+            self._plot.show_figure(fig)
+
+            notes = []
+            if display_note:
+                notes.append(display_note)
+            elif display == "grouped":
+                notes.append(self._panel_note(fig))
+            if subset:
+                notes.append(f"Showing {len(selected)} of {len(all_levels)} {group} levels.")
             if self._show_ci.isChecked() and getattr(fig, "ci_error", ""):
                 notes.append(f"⚠ {fig.ci_error}")
             self._plot.set_status("  ".join(notes))
         except Exception as exc:
-            log.debug("lme4 plot failed: %s", exc)
+            log.debug("lmrob plot failed: %s", exc)
+            self._plot.show_error(f"Plot unavailable: {exc}")
+
+
+    def _on_insert_network_syntax(self) -> None:
+        """Write the vascular path model into the formula box, built from the vessels present."""
+        df = self._working_df
+        if df is None or df.empty:
+            notify("Reload the data before building the network syntax.", error=True)
+            return
+        column = "territory" if "territory" in df.columns else "group_key"
+        if column not in df.columns:
+            notify("No territory column to build a network from.", error=True)
+            return
+
+        nodes = sorted({n for n in (canonical_node(v) for v in df[column].dropna().unique()) if n})
+        covariates = [c for c in ("age_c", "sex") if c in df.columns]
+        try:
+            syntax = sem_model_syntax(nodes=nodes, covariates=covariates)
+        except ValueError as exc:
+            notify(str(exc), error=True)
+            return
+        self._formula.setPlainText(syntax)
+        self._status.setText(
+            f"Network syntax for {len(nodes)} vessel(s). It needs one column per vessel — pivot the "
+            f"frame with a region combination, or fit on a wide frame."
+        )
+
+    def _plot_sem(self) -> None:
+        """Path coefficients as a forest, or the fitted network as a diagram."""
+        try:
+            import matplotlib.pyplot as plt
+
+            kind = str(self._mediation_plot.currentData() or "paths")
+            paths = sem_paths_frame(
+                self._last_result, backend=(self._last_fit_meta or {}).get("backend", "")
+            )
+            regressions = paths.loc[paths["op"] == "~"] if "op" in paths.columns else paths
+            with plt.style.context("default"):
+                if kind == "network":
+                    fig = network_plot(
+                        regressions, node_labels=VESSEL_NODES, title="Fitted vascular network"
+                    )
+                    note = (
+                        "Edge width is the coefficient's magnitude, colour its sign, dotted means "
+                        "the interval covers zero. Hover an edge for the exact value."
+                    )
+                else:
+                    fig = forest_plot(
+                        regressions, label="parameter", title="Path coefficients",
+                        x_label="Path coefficient",
+                    )
+                    note = (
+                        "Standardized paths, strongest first. Blue = interval excludes zero."
+                        if (self._last_fit_meta or {}).get("standardized")
+                        else "Unstandardized paths — magnitudes are not comparable between edges."
+                    )
+            self._plot.show_figure(fig)
+            self._plot.set_status(note)
+        except Exception as exc:
+            log.debug("SEM plot failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Plot unavailable: {exc}")
+
+    def _plot_mrf(self) -> None:
+        """The smoothed field over the vessels, or the adjacency graph it was smoothed on."""
+        try:
+            import matplotlib.pyplot as plt
+
+            meta = self._last_fit_meta or {}
+            kind = str(self._mediation_plot.currentData() or "field")
+            field = mrf_field_frame(self._last_result, self._last_model_df, meta)
+            with plt.style.context("default"):
+                if kind == "graph":
+                    fig = plot_mrf_graph(
+                        field, meta.get("neighbours", {}), node_labels=VESSEL_NODES
+                    )
+                    note = (
+                        "Node colour is the fitted effect. A sharp jump between two adjacent "
+                        "vessels is where the data overruled the smoothing penalty."
+                    )
+                else:
+                    labelled = field.assign(
+                        vessel=[VESSEL_NODES.get(str(v), str(v)) for v in field["level"]]
+                    )
+                    fig = forest_plot(
+                        labelled, label="vessel", estimate="effect",
+                        title="Smoothed field over the vessel graph",
+                        x_label="Deviation from the overall level",
+                    )
+                    note = (
+                        f"Each vessel's departure from the overall level, shrunk toward its "
+                        f"neighbours. {len(meta.get('levels', []))} vessels, "
+                        f"{len(meta.get('isolated') or [])} isolated."
+                    )
+            self._plot.show_figure(fig)
+            self._plot.set_status(note)
+        except Exception as exc:
+            log.debug("MRF plot failed: %s", exc, exc_info=True)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
     def _plot_nonlinear(self) -> None:
@@ -1588,20 +2447,33 @@ class StatmodelsWindow(QMainWindow):
             group = self._groups.text().strip()
             if data is None or group not in (data.columns if data is not None else []):
                 group = None
-            with plt.style.context("default"):
-                fig = plot_nonlinear_fit(
-                    result,
-                    data if data is not None else self._last_model_df,
-                    errorbar=self._show_ci.isChecked(),
-                    include_points=self._include_points.isChecked(),
-                    group=group,
-                )
-            self._plot.show_figure(fig)
-            self._plot.set_status(
-                "One curve is fitted over all rows; the grouping column only colours the points."
-                if group
-                else ""
+            display = str(self._plot_display.currentData() or "overview")
+            display_note = ""
+            args = (result, data if data is not None else self._last_model_df)
+            kwargs = dict(
+                errorbar=self._show_ci.isChecked(),
+                include_points=self._include_points.isChecked(),
+                group=group,
             )
+            with plt.style.context("default"):
+                try:
+                    fig = plot_nonlinear_fit(*args, display=display, **kwargs)
+                except ValueError as exc:
+                    if display != "grouped":
+                        raise
+                    display_note = f"⚠ Grouped display unavailable — {exc}"
+                    fig = plot_nonlinear_fit(*args, display="overview", **kwargs)
+            self._plot.show_figure(fig)
+            notes = []
+            if display_note:
+                notes.append(display_note)
+            elif display == "grouped":
+                notes.append(self._panel_note(fig))
+            if group:
+                notes.append(
+                    "One curve is fitted over all rows; the grouping column only colours the points."
+                )
+            self._plot.set_status("  ".join(notes))
         except Exception as exc:
             log.debug("Non-linear plot failed: %s", exc)
             self._plot.show_error(f"Plot unavailable: {exc}")
@@ -1745,6 +2617,7 @@ class StatmodelsWindow(QMainWindow):
             "cognitive": self._cognitive_vars(),
             "filters": [rule.to_dict() for rule in self._chips.rules()],
             "derived": [column.to_dict() for column in self._derived],
+            "combinations": [c.to_dict() for c in self._combinations],
             "analysis_type": self._analysis_kind(),
             "mm_formula": self._formula.toPlainText().strip(),
             "groups": self._groups.text().strip(),
@@ -1809,6 +2682,9 @@ class StatmodelsWindow(QMainWindow):
             set_checked_variable_ids(self._cognitive_list, cfg["cognitive"])
 
         self._chips.set_rules([FilterRule.from_dict(r) for r in cfg.get("filters") or []], [])
+        self._combinations = [
+            RegionCombination.from_dict(c) for c in cfg.get("combinations") or []
+        ]
         derived = [DerivedColumn.from_dict(d) for d in cfg.get("derived") or []]
         if not allow_expressions:
             dropped = [d.name for d in derived if d.kind == "expression"]
@@ -1936,6 +2812,12 @@ class StatmodelsWindow(QMainWindow):
         attempt("config.json", lambda: (out_dir / "config.json").write_text(
             json.dumps(self._config_dict(), indent=2), encoding="utf-8"))
 
+        # The figure as it currently looks, so the saved model carries the picture that was being
+        # looked at when it was saved. Skipped rather than reported when nothing is displayed —
+        # a config-only save is a legitimate thing to do.
+        if self._plot.has_figure():
+            attempt("plot.png", lambda: self._plot.save_figure(out_dir / "plot.png"))
+
         if self._last_result is not None:
             info = model_info_dict(
                 self._last_result,
@@ -1986,6 +2868,51 @@ class StatmodelsWindow(QMainWindow):
         notify(f"Saved → {out_dir}")
         self._status.setText(f"Saved {', '.join(written)} → {out_dir}")
 
+    def _sync_display_enabled(self) -> None:
+        """
+        Grey the Display picker out for figures that are not a family of curves.
+
+        MMRM offers both least-squares means, which panel, and a correlation heatmap, which is a
+        single matrix with nothing to split — so the picker follows the figure choice there.
+        """
+        applicable = True
+        if self._analysis_kind() == ANALYSIS_MMRM:
+            applicable = str(self._mediation_plot.currentData() or "emmeans") != "correlation"
+        self._plot_display.setEnabled(applicable)
+        self._plot_display.setToolTip(
+            self._display_tooltip
+            if applicable
+            else "The correlation heatmap is a single matrix — there is nothing to split into panels."
+        )
+
+    def _on_export_plot(self) -> None:
+        """Prompt for a location and write the displayed figure there as a PNG."""
+        if not self._plot.has_figure():
+            notify("There is no plot to export — fit a model first.", error=True)
+            return
+
+        name = self._model_name.text().strip() or "model"
+        suggested = statmodels_root(self._repo) / name / f"{name}_plot.png"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export plot as PNG", str(suggested), "PNG image (*.png);;All (*)"
+        )
+        if not path:
+            return
+        # A user who typed a bare name still means a PNG; savefig would otherwise infer the format
+        # from an extension that is not there and fail.
+        target = Path(path)
+        if target.suffix.lower() != ".png":
+            target = target.with_suffix(".png")
+
+        try:
+            written = self._plot.save_figure(target)
+        except Exception as exc:
+            log.debug("Plot export failed: %s", exc, exc_info=True)
+            notify(f"Export failed: {exc}", error=True)
+            return
+        notify(f"Plot exported → {written}")
+        self._status.setText(f"Plot exported → {written}")
+
     def _save_model_artifact(self, out_dir: Path) -> str:
         """
         Serialize the fitted model object itself, however this engine allows.
@@ -2010,7 +2937,7 @@ class StatmodelsWindow(QMainWindow):
             return "nonlinear_parameters.csv"
 
         r_object = getattr(result, "r_model", None) or (
-            result if engine == ANALYSIS_MMRM else None
+            result if engine in {ANALYSIS_MMRM, ANALYSIS_LMROB} else None
         )
         if r_object is not None:
             from rpy2.robjects import r as R_

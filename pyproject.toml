@@ -123,6 +123,8 @@ dependencies = [
   "napari[all]>=0.5.0",
   "magicgui>=0.8.0",
   "superqt>=0.6.0",
+  "PyQt6-WebEngine>=6.11.0",
+  "semopy>=2.3.11",
 
   # -----------------------------------------------------------------------------
   # FastAPI dependencies
@@ -211,6 +213,7 @@ nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 nvitk-qvtpy-xnat-upload = "nvitk.pipes.qvtpy.xnat_upload:main"
+nvitk-qvtpy-autoqc = "nvitk.pipes.qvtpy.stage9_autoqc:main"
 
 # -----------------------------------------------------------------------------
 # GUI scripts
