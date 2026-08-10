@@ -301,6 +301,7 @@ def load_qvtpy_qc_layers(
         )
 
     # --- LOCs (on) ---
+    loc_rows: list[dict[str, Any]] = []
     locs_csv = _find_first(
         qvt / cfg.STAGE5_LOC_DIR,
         ("locs.csv",),
@@ -309,16 +310,18 @@ def load_qvtpy_qc_layers(
         locs_csv = _find_first(qvt, ("**/locs.csv",))
     if locs_csv is not None:
         try:
-            rows = load_locs_csv(locs_csv)
+            loc_rows = load_locs_csv(locs_csv)
             ref = loaded.get("seg") or loaded.get("cd") or (
                 viewer.layers[-1] if viewer.layers else None
             )
-            add_locs_layer(viewer, rows, reference_layer=ref, name="LOCs")
+            add_locs_layer(viewer, loc_rows, reference_layer=ref, name="LOCs")
             _set_layer_visible(viewer, "LOCs", True)
             loaded["locs_csv"] = locs_csv
+            loaded["loc_rows"] = loc_rows
             loaded["locs"] = _layer_by_name(viewer, "LOCs")
         except Exception as exc:
             log.warning("QC LOCs load failed: %s", exc)
+            loc_rows = []
 
     # --- Flow velocity vectors (off) ---
     ap_lyr = loaded.get("phase_ap")
@@ -418,6 +421,8 @@ def load_qvtpy_qc_layers(
                     # QC: upsample stage-4 seg masks in-plane (no CD resegmentation).
                     "measure_resegment": False,
                     "cs_supersampling": True,
+                    # Match stage-6 LOC velocity sampling (linear plane interp).
+                    "cross_section_plane_interp": 1,
                     "thr_algorithm": "otsu",
                     "show_segmentation_3d": True,
                 },
@@ -427,6 +432,8 @@ def load_qvtpy_qc_layers(
                 arterial_branches=arterial_br,
                 venous_centerlines=venous_cls,
                 venous_label_by_name=venous_labels,
+                # Exact stage-5 LOC poses so Q̄ matches loc_measurements.csv.
+                locs=loc_rows or None,
             )
             xs_state = app_state.get("vessel_xs") or {}
             panel = xs_state.get("panel")

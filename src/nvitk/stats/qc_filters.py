@@ -73,14 +73,22 @@ def _conservation_rules(threshold: float | None) -> list[FilterRule]:
     Keep rows whose junction residual is small in magnitude.
 
     A residual fails in *either* direction, so this is a symmetric range rather than a comparison —
-    ``> -0.15`` would keep every subject whose outflow exceeds inflow by any amount at all.
+    ``> -0.10`` would keep every subject whose outflow exceeds inflow by any amount at all.
     """
-    limit = abs(0.15 if threshold is None else threshold)
-    # ``keep_na``: the residual is a property of a junction and is recorded on the parent vessel
-    # only, so most rows have none. Failing those would turn "drop junctions that do not balance"
-    # into "keep only the three parent vessels".
+    limit = abs(0.10 if threshold is None else threshold)
+    # ``keep_na``: the residual is a property of a junction and is recorded on anchor vessels
+    # only, so many rows have none. Failing those would turn "drop junctions that do not balance"
+    # into "keep only the junction anchors".
     return [FilterRule(
         column="qc_conservation", kind="range", low=-limit, high=limit, keep_na=True,
+    )]
+
+
+def _segment_cv_rules(threshold: float | None) -> list[FilterRule]:
+    """Keep rows whose along-segment flow CV is below the gate (default 15%)."""
+    limit = abs(0.15 if threshold is None else threshold)
+    return [FilterRule(
+        column="qc_segment_cv", kind="range", low=-limit, high=limit, keep_na=True,
     )]
 
 
@@ -108,6 +116,7 @@ _PRESET_RULES = {
     "flow_plausible": _plausibility_rules,
     "hypoplastic": _hypoplastic_rules,
     "conservation": _conservation_rules,
+    "segment_cv": _segment_cv_rules,
     "score": _score_rules,
     "flag": _flag_rules,
     "cbf_window": _cbf_rules,
@@ -130,16 +139,26 @@ QC_FILTER_PRESETS: tuple[QcFilterPreset, ...] = (
         requires=("qc_hypoplastic",),
     ),
     QcFilterPreset(
-        "conservation", "Mass conservation within 15%",
-        "Keep junctions whose inflow and outflow agree to within 15% either way, the 4D Flow CMR "
-        "consensus statement's internal-consistency threshold. A failure is ambiguous between a "
-        "bad flow measurement and an incomplete vessel tree.",
+        "conservation", "Mass conservation within 10%",
+        "Keep junctions whose inflow and outflow agree to within 10% either way — the upper end "
+        "of the ~1–10% 'good' band reported for proximal cranial junctions (ISMRM 2017). Distal "
+        "(BA→PCA) and venous balances are scored more loosely in stage 9; this filter uses the "
+        "proximal arterial gate. A failure is ambiguous between a bad flow measurement and an "
+        "incomplete vessel tree.",
         requires=("qc_conservation",),
     ),
     QcFilterPreset(
+        "segment_cv", "Along-segment flow CV within 15%",
+        "Keep vessels whose station-to-station flow coefficient of variation is under 15%. The "
+        "QVT validation paper reported ~3% SD along continuous ICA / SSS segments; a high CV "
+        "usually means centerline drift, partial-volume loss or a missed side branch.",
+        requires=("qc_segment_cv",),
+    ),
+    QcFilterPreset(
         "score", "Combined QC score ≥ 0.5",
-        "Keep vessels whose combined score — plausibility and conservation together — is at least "
-        "0.5. The broadest of the flow filters; use it when you want one gate rather than three.",
+        "Keep vessels whose combined score — plausibility, conservation and along-segment CV "
+        "together — is at least 0.5. The broadest of the flow filters; use it when you want one "
+        "gate rather than three.",
         requires=("qc_score",),
     ),
     QcFilterPreset(

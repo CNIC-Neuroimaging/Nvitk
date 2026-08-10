@@ -28,6 +28,9 @@ from nvitk.db.qvtpy_qc import (
 )
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
+from nvitk.core.logger import Logger
+
+log = Logger()
 
 DOCK_OBJECT_NAME = "nvitk_qc_measurements_dock"
 
@@ -226,9 +229,7 @@ def load_qc_measurement_rows(
                 )
         except Exception as exc:  # noqa: BLE001
             # Keep hemodynamics QC usable even if morphometrics Excel is incomplete.
-            from nvitk.core.logger import Logger
-
-            Logger().warning("QC stenosis rows skipped: %s", exc)
+            log.warning("QC stenosis rows skipped: %s", exc)
 
     return rows
 
@@ -237,12 +238,26 @@ def load_qc_measurement_rows(
 
 #: Labels for the automatic metrics, mirroring ``stage9_autoqc.QC_LABELS`` without importing the
 #: pipeline into the viewer — the GUI must open on a machine that has no qvtpy stage installed.
-QC_METRIC_LABELS: dict[str, str] = {
+QC_VESSEL_METRIC_LABELS: dict[str, str] = {
     "qc_flow_plausible": "Flow plausibility (literature band)",
     "qc_hypoplastic": "Plausibly hypoplastic (<0.8 mm)",
     "qc_conservation": "Mass-conservation residual",
+    "qc_segment_cv": "Along-segment flow CV",
     "qc_score": "Combined QC score",
     "qc_flag": "QC flag (review)",
+}
+
+#: Subject-level metrics live in ``clinical_measurements`` (one value per subject).
+QC_SUBJECT_METRIC_LABELS: dict[str, str] = {
+    "qc_ap_share": "Anterior share of cerebral inflow (%)",
+    "qc_ap_flag": "Anterior/posterior split flag",
+    "qc_subject_flag": "Subject QC flag",
+}
+
+#: Union used by colouring helpers that accept either vessel- or subject-level ids.
+QC_METRIC_LABELS: dict[str, str] = {
+    **QC_VESSEL_METRIC_LABELS,
+    **QC_SUBJECT_METRIC_LABELS,
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -279,6 +294,8 @@ def qc_metric_colour(metric: str, value: Any) -> QColor:
     if metric == "qc_conservation":
         magnitude = abs(number)
         return _QC_GOOD if magnitude <= 0.10 else _QC_WARN if magnitude <= 0.15 else _QC_BAD
+    if metric == "qc_segment_cv":
+        return _QC_GOOD if number <= 0.05 else _QC_WARN if number <= 0.15 else _QC_BAD
     if metric == "qc_hypoplastic":
         # Not a failure: a hypoplastic vessel is normal anatomy that merely excuses the other
         # checks, so it is marked as notable rather than bad.
@@ -288,6 +305,144 @@ def qc_metric_colour(metric: str, value: Any) -> QColor:
     if metric == "qc_ap_share":
         return _QC_GOOD if abs(number - 72.0) <= 10.0 else _QC_BAD
     return _QC_NEUTRAL
+
+
+
+def _numeric_or_none(value: Any) -> float | None:
+    """Coerce *value* to float, returning ``None`` for missing / non-finite entries."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:  # NaN
+        return None
+    return number
+
+
+def load_autoqc_for_subject(
+    subject_uid: str, *, repo: Any = None, pipeline: str = ""
+) -> dict[str, dict[str, float]]:
+    """
+    Per-vessel automatic QC metrics for one subject, keyed ``{metric: {region: value}}``.
+
+    Read from ``image_measurements`` — the qvtpy stage 9 writes them there as ordinary rows — so the
+    panel colours by whatever the dataset actually holds rather than recomputing anything.
+
+    Regions are keyed **both** by their published spelling and by their canonical vessel, because a
+    dataset can carry two importers' conventions (``LICA`` and ``left_ica``) while the review table
+    shows only one of them. Matching on either is what makes the colouring land on the right row.
+
+    Never raises: no dataset, no stage-9 output, or an unreadable table all mean "no colouring",
+    which is a normal state and must not take the QC panel down with it.
+    """
+    metrics: dict[str, dict[str, float]] = {}
+    subject = str(subject_uid).strip()
+    if not subject:
+        return metrics
+    try:
+        if repo is None:
+            from nvitk.db.repo import get_repo_from_settings
+
+            repo = get_repo_from_settings()
+        rows = repo.get("image_measurements", cohort_id=False)
+    except Exception as exc:
+        log.debug("Automatic QC unavailable (%s).", exc)
+        return metrics
+    if rows is None or rows.empty or "variable_id" not in rows.columns:
+        return metrics
+
+    wanted = set(QC_VESSEL_METRIC_LABELS)
+    mine = rows.loc[
+        (rows["subject_uid"].astype(str) == subject)
+        & (rows["variable_id"].astype(str).isin(wanted))
+    ]
+    if pipeline and "pipeline_id" in mine.columns:
+        mine = mine.loc[mine["pipeline_id"].astype(str) == str(pipeline)]
+    if mine.empty:
+        return metrics
+
+    try:
+        from nvitk.stats.vessel_network import canonical_node
+    except Exception:  # pragma: no cover - the viewer must open without nvitk.stats
+        canonical_node = lambda value: None  # noqa: E731
+
+    for metric, group in mine.groupby(mine["variable_id"].astype(str)):
+        by_region: dict[str, float] = {}
+        for region, value in zip(group["region_id"].astype(str), group["value_num"]):
+            number = _numeric_or_none(value)
+            if number is None:
+                continue
+            by_region[region] = number
+            by_region[region.upper()] = number
+            node = canonical_node(region)
+            if node:
+                by_region.setdefault(node, number)
+        if by_region:
+            metrics[str(metric)] = by_region
+    log.info(
+        "Automatic QC for %s: %d vessel metric(s) over %d region(s).",
+        subject, len(metrics), len({r for m in metrics.values() for r in m}),
+    )
+    return metrics
+
+
+def load_subject_autoqc(
+    subject_uid: str, *, repo: Any = None
+) -> dict[str, float]:
+    """
+    Subject-level automatic QC metrics for one subject, keyed ``{metric: value}``.
+
+    Stage 9 publishes these to ``clinical_measurements`` (``qc_ap_share``, ``qc_ap_flag``,
+    ``qc_subject_flag``). Never raises — missing data simply yields an empty dict.
+    """
+    metrics: dict[str, float] = {}
+    subject = str(subject_uid).strip()
+    if not subject:
+        return metrics
+    try:
+        if repo is None:
+            from nvitk.db.repo import get_repo_from_settings
+
+            repo = get_repo_from_settings()
+        rows = repo.get("clinical_measurements", cohort_id=False)
+    except Exception as exc:
+        log.debug("Subject automatic QC unavailable (%s).", exc)
+        return metrics
+    if rows is None or rows.empty or "variable_id" not in rows.columns:
+        return metrics
+
+    wanted = set(QC_SUBJECT_METRIC_LABELS)
+    mine = rows.loc[
+        (rows["subject_uid"].astype(str) == subject)
+        & (rows["variable_id"].astype(str).isin(wanted))
+    ]
+    if mine.empty:
+        return metrics
+
+    for metric, group in mine.groupby(mine["variable_id"].astype(str)):
+        # One value per subject; if duplicates somehow exist, take the first finite one.
+        for value in group["value_num"]:
+            number = _numeric_or_none(value)
+            if number is not None:
+                metrics[str(metric)] = number
+                break
+    log.info(
+        "Subject automatic QC for %s: %s.",
+        subject,
+        ", ".join(f"{k}={v:.4g}" for k, v in sorted(metrics.items())) or "none",
+    )
+    return metrics
+
+
+def _fmt_subject_qc_value(metric: str, value: float | None) -> str:
+    """Compact display string for one subject-level autoQC metric."""
+    if value is None:
+        return "—"
+    if metric in {"qc_ap_flag", "qc_subject_flag"}:
+        return "FAIL" if value >= 0.5 else "OK"
+    if metric == "qc_ap_share":
+        return f"{value:.1f}%"
+    return f"{value:.4g}"
 
 
 class QcMeasurementsPanel(QWidget):
@@ -312,6 +467,7 @@ class QcMeasurementsPanel(QWidget):
         self._subject_uid = ""
         self._rows: list[dict[str, Any]] = []
         self._autoqc: dict[str, Mapping[str, float]] = {}
+        self._subject_autoqc: dict[str, float] = {}
         self._status = QLabel("Load a qvtpy subject to review measurements.")
         self._status.setWordWrap(True)
 
@@ -329,8 +485,11 @@ class QcMeasurementsPanel(QWidget):
             "  gridline-color: #454545;"
             "  alternate-background-color: #2b2b2b;"
             "}"
+            # No ``background-color`` here on purpose. A stylesheet rule on ``::item`` overrides
+            # whatever ``QTableWidgetItem.setBackground`` sets, which silently disabled the
+            # automatic-QC row tinting — the values were applied, the paint just never used them.
+            # The widget-level rule above still gives the dark viewport.
             "QTableWidget::item {"
-            "  background-color: #2b2b2b;"
             "  color: #e8e8e8;"
             "}"
             "QTableWidget::item:selected {"
@@ -349,6 +508,49 @@ class QcMeasurementsPanel(QWidget):
             "  border: 1px solid #555;"
             "}"
         )
+
+        # Subject-level autoQC summary (clinical_measurements). Shown above the vessel table so
+        # anterior/posterior split and the subject flag are visible without being vessel rows.
+        self._subject_qc_row = QWidget()
+        subject_lay = QHBoxLayout(self._subject_qc_row)
+        subject_lay.setContentsMargins(0, 0, 0, 0)
+        subject_lay.setSpacing(8)
+        subject_lay.addWidget(QLabel("Subject autoQC"))
+        self._subject_qc_chips: dict[str, QLabel] = {}
+        for metric, label in QC_SUBJECT_METRIC_LABELS.items():
+            chip = QLabel("—")
+            chip.setToolTip(label)
+            chip.setAlignment(Qt.AlignCenter)
+            chip.setMinimumWidth(72)
+            chip.setStyleSheet(
+                "QLabel {"
+                "  background-color: #333333;"
+                "  color: #e8e8e8;"
+                "  border: 1px solid #555;"
+                "  border-radius: 4px;"
+                "  padding: 3px 8px;"
+                "}"
+            )
+            self._subject_qc_chips[metric] = chip
+            # Short heading above each chip via a tiny stacked widget.
+            cell = QWidget()
+            cell_lay = QVBoxLayout(cell)
+            cell_lay.setContentsMargins(0, 0, 0, 0)
+            cell_lay.setSpacing(1)
+            heading = QLabel(
+                {
+                    "qc_ap_share": "A/P share",
+                    "qc_ap_flag": "A/P flag",
+                    "qc_subject_flag": "Subject flag",
+                }.get(metric, metric)
+            )
+            heading.setStyleSheet("color: #9a9a9a; font-size: 11px;")
+            heading.setAlignment(Qt.AlignCenter)
+            cell_lay.addWidget(heading)
+            cell_lay.addWidget(chip)
+            subject_lay.addWidget(cell)
+        subject_lay.addStretch(1)
+        self._subject_qc_row.setVisible(False)
 
         # Colour-by picker for the automatic QC metrics published by stage 9. Populated on load
         # from whatever that stage actually wrote, so a dataset without it simply shows "none".
@@ -370,51 +572,114 @@ class QcMeasurementsPanel(QWidget):
 
         root = QVBoxLayout()
         root.addWidget(self._status)
+        root.addWidget(self._subject_qc_row)
         root.addWidget(self._colour_row)
         root.addWidget(self._table, stretch=1)
         root.addWidget(self._btn_revise)
         self.setLayout(root)
 
-
     # ---- automatic-QC colouring ----------------------------------------------
-    def set_autoqc(self, values: Mapping[str, Mapping[str, float]] | None) -> None:
+    def set_autoqc(
+        self,
+        values: Mapping[str, Mapping[str, float]] | None,
+        *,
+        subject_values: Mapping[str, float] | None = None,
+    ) -> None:
         """
-        Attach the automatic QC metrics for this subject, keyed ``{metric: {region_id: value}}``.
+        Attach automatic QC metrics for this subject.
 
-        Populates the colour picker with the metrics actually present. Called after the table is
-        loaded; passing ``None`` clears the colouring and hides the control, so a dataset that has
-        never run stage 9 shows no dead widget.
+        Parameters
+        ----------
+        values :
+            Per-vessel metrics keyed ``{metric: {region_id: value}}``.
+        subject_values :
+            Subject-level metrics keyed ``{metric: value}`` (from ``clinical_measurements``).
+
+        Populates the colour picker with whichever metrics are present, refreshes the subject
+        summary chips, and applies colouring. Passing empty/``None`` clears both.
         """
         self._autoqc = dict(values or {})
+        self._subject_autoqc = {
+            str(k): float(v)
+            for k, v in dict(subject_values or {}).items()
+            if _numeric_or_none(v) is not None
+        }
+        self._refresh_subject_qc_chips()
+
         current = str(self._colour_by.currentData() or "")
         self._colour_by.blockSignals(True)
         self._colour_by.clear()
         self._colour_by.addItem("No colouring", "")
         for metric in sorted(self._autoqc):
-            self._colour_by.addItem(QC_METRIC_LABELS.get(metric, metric), metric)
+            self._colour_by.addItem(
+                f"Vessel · {QC_METRIC_LABELS.get(metric, metric)}", metric
+            )
+        for metric in sorted(self._subject_autoqc):
+            self._colour_by.addItem(
+                f"Subject · {QC_METRIC_LABELS.get(metric, metric)}", metric
+            )
         index = self._colour_by.findData(current)
         self._colour_by.setCurrentIndex(index if index >= 0 else 0)
         self._colour_by.blockSignals(False)
-        self._colour_row.setVisible(bool(self._autoqc))
+        self._colour_row.setVisible(bool(self._autoqc) or bool(self._subject_autoqc))
         self._apply_colouring()
 
+    def _refresh_subject_qc_chips(self) -> None:
+        """Update the subject-level autoQC chips from ``self._subject_autoqc``."""
+        any_present = bool(self._subject_autoqc)
+        self._subject_qc_row.setVisible(any_present)
+        for metric, chip in self._subject_qc_chips.items():
+            value = self._subject_autoqc.get(metric)
+            text = _fmt_subject_qc_value(metric, value)
+            colour = qc_metric_colour(metric, value) if value is not None else _QC_UNKNOWN
+            chip.setText(text)
+            chip.setToolTip(
+                f"{QC_SUBJECT_METRIC_LABELS.get(metric, metric)}: "
+                + ("not computed" if value is None else f"{float(value):.4g}")
+            )
+            chip.setStyleSheet(
+                "QLabel {"
+                f"  background-color: {colour.name()};"
+                "  color: #e8e8e8;"
+                "  border: 1px solid #555;"
+                "  border-radius: 4px;"
+                "  padding: 3px 8px;"
+                "  font-weight: 600;"
+                "}"
+            )
+
+    @staticmethod
+    def _qc_value(by_region: Mapping[str, float], row: Mapping[str, Any]) -> float | None:
+        """This row's value for the selected metric, trying each spelling the table might use."""
+        for key in ("region_id", "region_label"):
+            name = str(row.get(key) or "").strip()
+            if not name:
+                continue
+            for candidate in (name, name.upper(), name.lower()):
+                if candidate in by_region:
+                    return by_region[candidate]
+        return None
+
     def _apply_colouring(self, *_args: Any) -> None:
-        """Tint each row by the selected metric's value for that row's region."""
+        """Tint each row by the selected metric (per-vessel lookup, or whole-subject value)."""
         metric = str(self._colour_by.currentData() or "")
+        subject_value = self._subject_autoqc.get(metric) if metric else None
         by_region = self._autoqc.get(metric, {}) if metric else {}
+        is_subject_metric = metric in QC_SUBJECT_METRIC_LABELS
 
         for i, row in enumerate(self._rows):
-            region = str(row.get("region_id") or row.get("region_label") or "")
-            colour = (
-                qc_metric_colour(metric, by_region.get(region))
-                if metric else QColor("#2b2b2b")
-            )
+            if not metric:
+                value = None
+            elif is_subject_metric:
+                value = subject_value
+            else:
+                value = self._qc_value(by_region, row)
+            colour = qc_metric_colour(metric, value) if metric else QColor("#2b2b2b")
             for column in (self.COL_REGION, self.COL_METRIC, self.COL_VALUE):
                 item = self._table.item(i, column)
                 if item is not None:
                     item.setBackground(colour)
                     if metric:
-                        value = by_region.get(region)
                         item.setToolTip(
                             f"{QC_METRIC_LABELS.get(metric, metric)}: "
                             + ("not computed" if value is None else f"{float(value):.4g}")
@@ -423,8 +688,10 @@ class QcMeasurementsPanel(QWidget):
         if not metric:
             self._colour_legend.setText("")
             return
+        scope = "all rows" if is_subject_metric else "per vessel"
         self._colour_legend.setText(
-            "green = passes  ·  amber = borderline  ·  red = review  ·  grey = not computed"
+            f"{scope}  ·  green = passes  ·  amber = borderline  ·  "
+            "red = review  ·  grey = not computed"
         )
 
     def clear(self) -> None:
@@ -432,8 +699,11 @@ class QcMeasurementsPanel(QWidget):
         self._subject_uid = ""
         self._rows = []
         self._autoqc = {}
+        self._subject_autoqc = {}
         self._table.setRowCount(0)
         self._btn_revise.setEnabled(False)
+        self._subject_qc_row.setVisible(False)
+        self._colour_row.setVisible(False)
         self._status.setText("Load a qvtpy subject to review measurements.")
 
     def load_from_stage6(self, subject_uid: str, stage6_dir: Path) -> int:
@@ -469,6 +739,12 @@ class QcMeasurementsPanel(QWidget):
             self._table.setItem(i, self.COL_VALUE, value_item)
             self._table.setCellWidget(i, self.COL_STATUS, status)
             self._table.setCellWidget(i, self.COL_COMMENT, comment)
+
+        # Vessel- and subject-level autoQC from the dataset, if stage 9 has run.
+        self.set_autoqc(
+            load_autoqc_for_subject(self._subject_uid),
+            subject_values=load_subject_autoqc(self._subject_uid),
+        )
 
         n_loc = sum(1 for r in self._rows if r.get("metric_key") == "loc")
         n_pitc = sum(1 for r in self._rows if r.get("metric_key") == "pitc")

@@ -50,6 +50,12 @@ log = Logger()
 #: Stage-6 CSV holding one row per localized cross-section.
 LOC_MEASUREMENTS = "loc_measurements.csv"
 
+#: Stage-6 CSV holding one row per dense PITC/PWV station (along-segment CV input).
+PITC_PROFILE = "pitc_profile.csv"
+
+#: Stage-6 CSVs the remote fetch mirrors locally.
+STAGE6_FETCH_FILES: tuple[str, ...] = (LOC_MEASUREMENTS, PITC_PROFILE)
+
 #: Dataset variable → the stage-6 column it is written from.
 VARIABLE_TO_LOC_COLUMN: dict[str, str] = {
     "flow_mean": "loc_mean_flow_ml_s",
@@ -162,6 +168,40 @@ def read_loc_measurements(
     return out
 
 
+def load_pitc_profiles(
+    results_root: Path, subjects: Sequence[str] | None = None
+) -> pd.DataFrame:
+    """
+    Concatenate every subject's ``pitc_profile.csv`` into one frame with ``subject_uid``.
+
+    Returns an empty frame when nothing is found — along-segment CV is optional and must not
+    take the rest of autoQC down with it.
+    """
+    root = Path(results_root)
+    wanted = list(subjects) if subjects is not None else discover_subjects(root)
+    frames: list[pd.DataFrame] = []
+    for subject in wanted:
+        path = stage6_dir(root, subject) / PITC_PROFILE
+        if not path.is_file():
+            continue
+        try:
+            frame = pd.read_csv(path)
+        except Exception as exc:
+            log.warning("Could not read %s (%s) — skipping this subject.", path, exc)
+            continue
+        frame["subject_uid"] = subject
+        frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    log.info(
+        "Read %d PITC-profile station(s) for %d subject(s) from %s",
+        len(out), len(frames), root,
+    )
+    return out
+
+
 def long_measurements(
     loc: pd.DataFrame, variable_id: str
 ) -> pd.DataFrame:
@@ -198,7 +238,7 @@ def fetch_stage6_csvs(
     """
     Pull each subject's stage-6 CSV from the cluster into a temporary tree, and return its root.
 
-    Only ``loc_measurements.csv`` is transferred, mirrored into the same
+    Only the stage-6 CSVs in :data:`STAGE6_FETCH_FILES` are transferred, mirrored into the same
     ``<subject>/qvtpy/stage6_measure/`` layout so the local reader is unchanged. A QC pass has no
     reason to move the NIfTIs, and on a full cohort that is the difference between seconds and
     hours.
@@ -221,20 +261,21 @@ def fetch_stage6_csvs(
         names = list(subjects) if subjects is not None else _remote_subjects(sftp, root)
         log.info("Fetching stage-6 measurements for %d subject(s) from %s", len(names), root)
         for subject in names:
-            remote = (
-                f"{str(root).rstrip('/')}/{subject}/{cfg.QVT_SUBDIR}/"
-                f"{cfg.STAGE6_MEASURE_DIR}/{LOC_MEASUREMENTS}"
-            )
-            if not remote_path_exists(sftp, remote):
-                continue
-            local = stage6_dir(staged, subject) / LOC_MEASUREMENTS
-            local.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                sftp.get(remote, str(local))
-            except Exception as exc:
-                log.warning("Could not fetch %s (%s) — skipping.", remote, exc)
-                continue
-            n_files += 1
+            for filename in STAGE6_FETCH_FILES:
+                remote = (
+                    f"{str(root).rstrip('/')}/{subject}/{cfg.QVT_SUBDIR}/"
+                    f"{cfg.STAGE6_MEASURE_DIR}/{filename}"
+                )
+                if not remote_path_exists(sftp, remote):
+                    continue
+                local = stage6_dir(staged, subject) / filename
+                local.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    sftp.get(remote, str(local))
+                except Exception as exc:
+                    log.warning("Could not fetch %s (%s) — skipping.", remote, exc)
+                    continue
+                n_files += 1
 
     log.ok("Staged %d stage-6 CSV(s) under %s", n_files, staged)
     if not n_files:
@@ -299,9 +340,13 @@ def fetch_stage6_xnat(
                         found = list(Path(resource_dir).rglob(LOC_MEASUREMENTS))
                         if not found:
                             continue
-                        local = stage6_dir(staged, str(subject_label)) / LOC_MEASUREMENTS
-                        local.parent.mkdir(parents=True, exist_ok=True)
-                        _shutil.copy2(found[0], local)
+                        local_dir = stage6_dir(staged, str(subject_label))
+                        local_dir.mkdir(parents=True, exist_ok=True)
+                        _shutil.copy2(found[0], local_dir / LOC_MEASUREMENTS)
+                        # Prefer a pitc_profile next to the LOC CSV when the resource has one.
+                        profile_candidates = list(Path(resource_dir).rglob(PITC_PROFILE))
+                        if profile_candidates:
+                            _shutil.copy2(profile_candidates[0], local_dir / PITC_PROFILE)
                         n_files += 1
                     finally:
                         # One subject's worth of scratch at a time, whatever happened above.
@@ -404,12 +449,15 @@ def recover_missing(
 
 __all__ = [
     "LOC_MEASUREMENTS",
+    "PITC_PROFILE",
     "REGION_COLUMNS",
+    "STAGE6_FETCH_FILES",
     "VARIABLE_TO_LOC_COLUMN",
     "ResultsSource",
     "discover_subjects",
     "fetch_stage6_csvs",
     "fetch_stage6_xnat",
+    "load_pitc_profiles",
     "long_measurements",
     "open_results",
     "read_loc_measurements",

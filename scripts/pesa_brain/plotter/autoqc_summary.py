@@ -39,6 +39,67 @@ log = Logger()
 #: Score at or below which a vessel counts as failing, matching the stage's own flag.
 FAIL_BELOW = 0.5
 
+#: Compact plot labels for :func:`~nvitk.stats.vessel_network.canonical_node` ids.
+#: Two importers routinely publish the same vessel as ``LICA`` and ``left_ica``; without this map
+#: every figure would draw them as separate categories.
+_PLOT_LABEL: dict[str, str] = {
+    "lva": "LVA",
+    "rva": "RVA",
+    "basi": "BASILAR",
+    "lpca": "LPCA",
+    "rpca": "RPCA",
+    "lica": "LICA",
+    "rica": "RICA",
+    "laca": "LACA",
+    "raca": "RACA",
+    "lmca": "LMCA",
+    "rmca": "RMCA",
+    "lpcomm": "LPCOMM",
+    "rpcomm": "RPCOMM",
+    "acomm": "ACOMM",
+    "sss": "SSSV",
+    "strs": "STRV",
+    "lts": "LTSV",
+    "rts": "RTSV",
+}
+
+
+def _display_region(region_id: object) -> str:
+    """Canonical short label for a published region spelling, or the original when unknown."""
+    from nvitk.stats.vessel_network import canonical_node
+
+    node = canonical_node(region_id)
+    if node is None:
+        return str(region_id)
+    return _PLOT_LABEL.get(node, node.upper())
+
+
+def _canonicalize_vessel_frame(vessel: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse mixed region spellings onto one display label per vessel.
+
+    Without this, a cohort that mixed ``4dflow_v2`` (``left_ica``) and ``qvtpy`` (``LICA``) imports
+    draws every vessel twice — once per spelling — and the pass-rate / violin plots look like
+    duplicated anatomy.
+    """
+    if vessel.empty or "region_id" not in vessel.columns:
+        return vessel
+    out = vessel.copy()
+    before = int(out["region_id"].nunique())
+    out["region_id"] = out["region_id"].map(_display_region)
+    after = int(out["region_id"].nunique())
+    if before != after:
+        log.info(
+            "Canonicalized region labels for plotting: %d spellings → %d vessels.",
+            before, after,
+        )
+    # Same subject can now carry two rows for one vessel (one per importer spelling); average them.
+    keys = ["subject_uid", "region_id"]
+    value_cols = [c for c in out.columns if c not in keys]
+    if not value_cols:
+        return out.drop_duplicates(subset=keys)
+    return out.groupby(keys, as_index=False)[value_cols].mean(numeric_only=True)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Loading
@@ -50,6 +111,9 @@ def load_qc(repo, *, pipeline: str = "") -> tuple[pd.DataFrame, pd.DataFrame]:
     Read from the long tables directly rather than through ``DataRepo.image``, which applies
     catalog-default and cohort restrictions this report does not want — it should describe every
     row the stage wrote.
+
+    Region spellings are canonicalized (``LICA`` / ``left_ica`` → ``LICA``) so mixed importers do
+    not fragment the figures.
 
     Returns
     -------
@@ -70,6 +134,7 @@ def load_qc(repo, *, pipeline: str = "") -> tuple[pd.DataFrame, pd.DataFrame]:
         ).reset_index()
         if not rows.empty else pd.DataFrame()
     )
+    vessel = _canonicalize_vessel_frame(vessel)
 
     clinical = repo.get("clinical_measurements", cohort_id=False)
     crows = clinical.loc[clinical["variable_id"].astype(str).isin(clinical_vars)]
@@ -174,12 +239,42 @@ def plot_conservation(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
     ax.axvspan(-CONSERVATION_TOL, CONSERVATION_TOL, color="#55A868", alpha=0.12,
                label=f"within ±{CONSERVATION_TOL:.0%}")
     ax.set_xlabel("(inflow − outflow) / inflow")
-    ax.set_ylabel("parent vessel")
+    ax.set_ylabel("anchor vessel")
     ax.set_title("Junction mass-conservation residuals")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, axis="x", alpha=0.25)
     fig.tight_layout()
     return _save(fig, out_dir / "qc_conservation.png")
+
+
+def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
+    """Along-segment flow CV, with the soft gate drawn on."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    from nvitk.measure.hemodynamics import SEGMENT_CV_TOL
+
+    if vessel.empty or "qc_segment_cv" not in vessel.columns:
+        return None
+    rows = vessel.dropna(subset=["qc_segment_cv"])
+    if rows.empty:
+        return None
+
+    order = sorted(rows["region_id"].astype(str).unique())
+    fig, ax = plt.subplots(figsize=(9, max(4.0, 1.1 * len(order) + 2.0)))
+    sns.violinplot(
+        data=rows, x="qc_segment_cv", y="region_id", order=order, hue="region_id",
+        legend=False, ax=ax, inner="quartile", cut=0, density_norm="width", palette="tab10",
+    )
+    ax.axvspan(0.0, SEGMENT_CV_TOL, color="#55A868", alpha=0.12,
+               label=f"within {SEGMENT_CV_TOL:.0%}")
+    ax.set_xlabel("flow CV along segment")
+    ax.set_ylabel("vessel")
+    ax.set_title("Along-segment flow consistency")
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    return _save(fig, out_dir / "qc_segment_cv.png")
 
 
 def plot_subject_summary(subject: pd.DataFrame, out_dir: Path) -> Path | None:
@@ -191,16 +286,27 @@ def plot_subject_summary(subject: pd.DataFrame, out_dir: Path) -> Path | None:
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 
     ax = axes[0]
+    n_subjects = int(len(subject))
     if "qc_ap_share" in subject.columns:
-        share = pd.to_numeric(subject["qc_ap_share"], errors="coerce").dropna()
-        ax.hist(share, bins=40, color="#4C72B0", alpha=0.8)
+        share = pd.to_numeric(subject["qc_ap_share"], errors="coerce")
+        valid = share.dropna()
+        ax.hist(valid, bins=40, color="#4C72B0", alpha=0.8)
         lo = ANTERIOR_SHARE_PCT - ANTERIOR_SHARE_TOL_PCT
         hi = ANTERIOR_SHARE_PCT + ANTERIOR_SHARE_TOL_PCT
         ax.axvspan(lo, hi, color="#55A868", alpha=0.15, label=f"expected {lo:.0f}–{hi:.0f}%")
         ax.axvline(ANTERIOR_SHARE_PCT, color="#C44E52", ls="--", lw=1.5,
                    label=f"{ANTERIOR_SHARE_PCT:.0f}% (Zarrinkoob 2015)")
-        outside = int(((share < lo) | (share > hi)).sum())
-        ax.set_title(f"Anterior share of inflow — {outside} of {len(share)} outside the band")
+        # Prefer the published flag when present so the left title matches the right-hand bar
+        # (same denominator / gate as ``qc_ap_flag``).
+        if "qc_ap_flag" in subject.columns:
+            outside = int(
+                (pd.to_numeric(subject["qc_ap_flag"], errors="coerce").fillna(0.0) >= 0.5).sum()
+            )
+        else:
+            outside = int(((share < lo) | (share > hi) | share.isna()).sum())
+        ax.set_title(
+            f"Anterior share of inflow — {outside} of {n_subjects} outside the band"
+        )
         ax.set_xlabel("anterior share (%)")
         ax.set_ylabel("subjects")
         ax.legend(fontsize=8)
@@ -212,11 +318,11 @@ def plot_subject_summary(subject: pd.DataFrame, out_dir: Path) -> Path | None:
     counts, labels = [], []
     for column in ("qc_ap_flag", "qc_subject_flag"):
         if column in subject.columns:
-            values = pd.to_numeric(subject[column], errors="coerce").dropna()
+            values = pd.to_numeric(subject[column], errors="coerce").fillna(0.0)
             counts.append(float((values >= 0.5).sum()))
             labels.append(QC_LABELS.get(column, column).split("(")[0].strip())
     if counts:
-        total = len(subject)
+        total = n_subjects
         bars = ax.bar(labels, counts, color=["#DD8452", "#C44E52"][: len(counts)])
         for bar, value in zip(bars, counts):
             ax.annotate(f"{int(value)} / {total}\n({100*value/max(total,1):.0f}%)",
@@ -322,6 +428,7 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
             plot_pass_rates(vessel, out_dir),
             plot_score_distributions(vessel, out_dir),
             plot_conservation(vessel, out_dir),
+            plot_segment_cv(vessel, out_dir),
             plot_subject_summary(subject, out_dir),
         ) if path is not None
     ]

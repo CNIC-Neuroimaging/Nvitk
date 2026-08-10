@@ -23,6 +23,7 @@ Metric                  What it catches                                         
 ``qc_flow_plausible``   flow far outside the healthy band for that vessel        vessel
 ``qc_hypoplastic``      caliber under 0.8 mm — normal anatomy, not a failure     vessel
 ``qc_conservation``     junction inflow ≠ outflow                                vessel
+``qc_segment_cv``       flow varies too much along a non-branching segment       vessel
 ``qc_ap_share``         anterior/posterior split away from 72/28                 subject
 ``qc_score``            the per-vessel scores combined                           vessel
 ``qc_flag``             any check failed                                         both
@@ -57,11 +58,15 @@ from nvitk.measure.hemodynamics import (
     ANTERIOR_SHARE_PCT,
     ANTERIOR_SHARE_TOL_PCT,
     CONSERVATION_TOL,
+    CONSERVATION_TOL_ARTERIAL,
+    CONSERVATION_TOL_DISTAL,
+    CONSERVATION_TOL_VENOUS,
+    SEGMENT_CV_TOL,
     anterior_posterior_share_pct,
     anterior_posterior_split_flag,
-    bifurcation_conservation_error,
     flow_plausibility_score,
     is_plausibly_hypoplastic,
+    segment_flow_consistency_cv,
 )
 
 log = Logger()
@@ -73,6 +78,7 @@ QC_VARIABLES: dict[str, str] = {
     "qc_flow_plausible": "image_measurements",
     "qc_hypoplastic": "image_measurements",
     "qc_conservation": "image_measurements",
+    "qc_segment_cv": "image_measurements",
     "qc_score": "image_measurements",
     "qc_flag": "image_measurements",
     "qc_ap_share": "clinical_measurements",
@@ -85,6 +91,7 @@ QC_LABELS: dict[str, str] = {
     "qc_flow_plausible": "Flow plausibility (literature band, 0–1)",
     "qc_hypoplastic": "Plausibly hypoplastic (<0.8 mm)",
     "qc_conservation": "Junction mass-conservation residual",
+    "qc_segment_cv": "Along-segment flow CV",
     "qc_score": "Combined per-vessel QC score (0–1)",
     "qc_flag": "Vessel QC flag (1 = review)",
     "qc_ap_share": "Anterior share of cerebral inflow (%)",
@@ -95,13 +102,22 @@ QC_LABELS: dict[str, str] = {
 #: Score at or below which a vessel is flagged for review.
 QC_SCORE_FLAG_BELOW: float = 0.5
 
-#: Junctions checked for mass conservation, as ``parent: (branches...)`` in canonical ids.
-#: The vertebrals feed the basilar; each carotid splits into its ACA and MCA.
-CONSERVATION_JUNCTIONS: dict[str, tuple[str, ...]] = {
-    "basi": ("lva", "rva"),
-    "lica": ("laca", "lmca"),
-    "rica": ("raca", "rmca"),
-}
+#: AutoQC mass-balance checks: ``(rule_key, anchor_nodes, tolerance)``.
+#: Rules come from :data:`~nvitk.stats.vessel_network.CONSERVATION_RULES`. Communicating-artery
+#: terms are dropped (unsigned LOC flows), so ICA and BA→PCA balances reduce to the classical
+#: parent → daughters check used by the QVT validation paper. Residuals are written onto every
+#: *anchor* vessel so arterial parents, VAs/PCAs and the venous confluence all colour in the GUI.
+AUTOQC_CONSERVATION: tuple[tuple[str, tuple[str, ...], float], ...] = (
+    ("left_carotid_split", ("lica",), CONSERVATION_TOL_ARTERIAL),
+    ("right_carotid_split", ("rica",), CONSERVATION_TOL_ARTERIAL),
+    ("basilar_inflow", ("basi", "lva", "rva"), CONSERVATION_TOL_ARTERIAL),
+    ("posterior_split", ("basi", "lpca", "rpca"), CONSERVATION_TOL_DISTAL),
+    ("venous_drainage", ("sss", "strs", "lts", "rts"), CONSERVATION_TOL_VENOUS),
+)
+
+#: Vessels whose along-segment flow CV is published. Matches the QVT paper's continuous-segment
+#: check (L/R ICA, SSS) plus the basilar, which is long enough for a meaningful CV.
+SEGMENT_CV_NODES: frozenset[str] = frozenset({"lica", "rica", "basi", "sss"})
 
 
 @dataclass(frozen=True)
@@ -116,6 +132,10 @@ class AutoQcConfig:
     #: minute. Assuming either one silently mis-scales the other by 60x and fails the whole cohort.
     flow_to_ml_min: float | None = None
     conservation_tol: float = CONSERVATION_TOL
+    conservation_tol_arterial: float = CONSERVATION_TOL_ARTERIAL
+    conservation_tol_distal: float = CONSERVATION_TOL_DISTAL
+    conservation_tol_venous: float = CONSERVATION_TOL_VENOUS
+    segment_cv_tol: float = SEGMENT_CV_TOL
     score_flag_below: float = QC_SCORE_FLAG_BELOW
     anterior_pct: float = ANTERIOR_SHARE_PCT
     anterior_tol_pct: float = ANTERIOR_SHARE_TOL_PCT
@@ -129,6 +149,7 @@ def compute_vessel_qc(
     areas: pd.DataFrame | None = None,
     *,
     config: AutoQcConfig | None = None,
+    segment_cv: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Per-vessel QC scores for one cohort's published flow measurements.
@@ -142,12 +163,16 @@ def compute_vessel_qc(
         The same shape for the cross-sectional area, used only to gate hypoplastic vessels.
         Without it every vessel is scored as patent, which over-flags a normal circle of
         Willis — so its absence is reported rather than passed over.
+    segment_cv : pandas.DataFrame, optional
+        Long rows with ``subject_uid``, ``region_id`` and ``value`` holding the along-segment
+        flow coefficient of variation (from ``pitc_profile.csv``). Missing → ``qc_segment_cv``
+        is NaN and is skipped in the combined score.
 
     Returns
     -------
     pandas.DataFrame
         One row per ``(subject_uid, region_id)`` with ``qc_flow_plausible``,
-        ``qc_hypoplastic``, ``qc_conservation``, ``qc_score`` and ``qc_flag``.
+        ``qc_hypoplastic``, ``qc_conservation``, ``qc_segment_cv``, ``qc_score`` and ``qc_flag``.
     """
     from nvitk.stats.vessel_network import canonical_node
 
@@ -223,31 +248,70 @@ def compute_vessel_qc(
         scores.append(flow_plausibility_score(flow, region))
     out["qc_flow_plausible"] = scores
 
-    # ---- 3. Mass conservation at each junction, attributed to the parent vessel -------
-    out["qc_conservation"] = _conservation_column(out, config)
+    # ---- 3. Mass conservation at each junction (ICA, VA→BA→PCA, venous) ----------------
+    residual, tol_used = _conservation_columns(out, config)
+    out["qc_conservation"] = residual
+    out["_conservation_tol"] = tol_used
 
-    # ---- 4. Combined score: the mean of whichever checks applied ----------------------
-    # A conservation residual is an error, not a score, so it is mapped onto [0, 1] by how
-    # far past the tolerance it sits before being averaged with the plausibility.
-    conservation_score = 1.0 - (out["qc_conservation"].abs() / max(config.conservation_tol, 1e-9))
+    # ---- 4. Along-segment flow CV (from pitc_profile stations, when available) --------
+    out["qc_segment_cv"] = _segment_cv_column(out, segment_cv)
+
+    # ---- 5. Combined score: the mean of whichever checks applied ----------------------
+    # Residuals / CVs are errors, not scores — map each onto [0, 1] by its own tolerance
+    # before averaging with the literature-band plausibility.
+    conservation_score = 1.0 - (
+        out["qc_conservation"].abs() / out["_conservation_tol"].clip(lower=1e-9)
+    )
     conservation_score = conservation_score.clip(lower=0.0, upper=1.0)
-    parts = pd.concat([out["qc_flow_plausible"], conservation_score], axis=1)
+    segment_score = 1.0 - (out["qc_segment_cv"].abs() / max(config.segment_cv_tol, 1e-9))
+    segment_score = segment_score.clip(lower=0.0, upper=1.0)
+    parts = pd.concat(
+        [out["qc_flow_plausible"], conservation_score, segment_score], axis=1
+    )
     out["qc_score"] = parts.mean(axis=1, skipna=True)
     out["qc_flag"] = (out["qc_score"] <= config.score_flag_below).astype(float)
     # A vessel with no applicable check is unknown, not passing.
     out.loc[out["qc_score"].isna(), "qc_flag"] = np.nan
-    return out.drop(columns=["node"])
+    return out.drop(columns=["node", "_conservation_tol"])
 
 
-def _conservation_column(frame: pd.DataFrame, config: AutoQcConfig) -> pd.Series:
+def _autoqc_conservation_specs(
+    config: AutoQcConfig,
+) -> tuple[tuple[str, tuple[str, ...], float], ...]:
+    """Resolve rule anchors and class-specific tolerances for this run."""
+    # Allow a single CLI ``--conservation-tol`` to retune the arterial gate without losing the
+    # distal/venous offsets: keep the relative gaps when the caller overrides the default.
+    arterial = float(config.conservation_tol_arterial)
+    distal = float(config.conservation_tol_distal)
+    venous = float(config.conservation_tol_venous)
+    if abs(float(config.conservation_tol) - CONSERVATION_TOL) > 1e-12:
+        # Caller overrode the single gate — treat it as the arterial baseline and scale the others.
+        scale = float(config.conservation_tol) / max(CONSERVATION_TOL_ARTERIAL, 1e-9)
+        arterial = float(config.conservation_tol)
+        distal = CONSERVATION_TOL_DISTAL * scale
+        venous = CONSERVATION_TOL_VENOUS * scale
+    return (
+        ("left_carotid_split", ("lica",), arterial),
+        ("right_carotid_split", ("rica",), arterial),
+        ("basilar_inflow", ("basi", "lva", "rva"), arterial),
+        ("posterior_split", ("basi", "lpca", "rpca"), distal),
+        ("venous_drainage", ("sss", "strs", "lts", "rts"), venous),
+    )
+
+
+def _conservation_columns(
+    frame: pd.DataFrame, config: AutoQcConfig
+) -> tuple[pd.Series, pd.Series]:
     """
-    Relative conservation residual per subject, written onto the *parent* vessel's row.
+    Relative conservation residual and the tolerance that scored it, per vessel row.
 
-    Attributing it to the parent is a choice: the residual is a property of the junction, and
-    the parent is the one row every junction has. A branch's own row carries NaN, so a
-    conservation failure never double-counts against the vessels downstream of it.
+    Each :data:`AUTOQC_CONSERVATION` rule is evaluated as
+    ``(Σ inflow − Σ outflow) / Σ inflow`` (communicating-artery terms dropped — LOC flows are
+    unsigned). The residual is written onto every anchor vessel for that rule. When a vessel
+    participates in more than one rule (the basilar is both VA confluence and PCA split), the
+    **worst** residual by magnitude is kept, together with that rule's class tolerance.
     """
-    from nvitk.stats.vessel_network import canonical_node
+    from nvitk.stats.vessel_network import CONSERVATION_RULES, canonical_node
 
     node = frame["region_id"].map(canonical_node)
     wide = (
@@ -256,25 +320,132 @@ def _conservation_column(frame: pd.DataFrame, config: AutoQcConfig) -> pd.Series
         .pivot_table(index="subject_uid", columns="node", values="flow_ml_min", aggfunc="mean")
     )
 
-    residuals: dict[tuple[str, str], float] = {}
-    for parent, branches in CONSERVATION_JUNCTIONS.items():
-        if parent not in wide.columns or not all(b in wide.columns for b in branches):
+    # subject → node → (residual, tol)
+    best: dict[tuple[str, str], tuple[float, float]] = {}
+    for rule_key, anchors, tol in _autoqc_conservation_specs(config):
+        rule = CONSERVATION_RULES.get(rule_key)
+        if rule is None:
+            continue
+        terms = {n: c for n, c in rule.terms.items() if n not in rule.signed_terms}
+        missing = [n for n in terms if n not in wide.columns]
+        if missing:
             log.info(
-                "autoqc: junction %s → %s not checkable (missing vessels).",
-                parent, " + ".join(branches),
+                "autoqc: junction %s not checkable (missing %s).",
+                rule.label, ", ".join(missing),
             )
             continue
         for subject, row in wide.iterrows():
-            residuals[(str(subject), parent)] = bifurcation_conservation_error(
-                row[parent], [row[b] for b in branches]
-            )
+            values = {n: float(row[n]) for n in terms}
+            if not all(np.isfinite(v) for v in values.values()):
+                continue
+            residual = sum(c * values[n] for n, c in terms.items())
+            inflow = sum(values[n] for n, c in terms.items() if c > 0)
+            if abs(inflow) < 1e-9:
+                continue
+            rel = float(residual / inflow)
+            for anchor in anchors:
+                if anchor not in wide.columns:
+                    continue
+                key = (str(subject), anchor)
+                prev = best.get(key)
+                if prev is None or abs(rel) > abs(prev[0]):
+                    best[key] = (rel, float(tol))
 
-    if not residuals:
-        return pd.Series(np.nan, index=frame.index)
-    return pd.Series(
-        [residuals.get((s, n), np.nan) for s, n in zip(frame["subject_uid"], node)],
-        index=frame.index,
+    if not best:
+        nan = pd.Series(np.nan, index=frame.index)
+        return nan, nan
+
+    residuals = []
+    tols = []
+    for subject, node_id in zip(frame["subject_uid"], node):
+        hit = best.get((str(subject), node_id)) if node_id else None
+        if hit is None:
+            residuals.append(np.nan)
+            tols.append(np.nan)
+        else:
+            residuals.append(hit[0])
+            tols.append(hit[1])
+    return (
+        pd.Series(residuals, index=frame.index, dtype=float),
+        pd.Series(tols, index=frame.index, dtype=float),
     )
+
+
+def _segment_cv_column(
+    frame: pd.DataFrame, segment_cv: pd.DataFrame | None
+) -> pd.Series:
+    """Align a long segment-CV frame onto *frame*'s rows (NaN when unavailable)."""
+    if segment_cv is None or segment_cv.empty:
+        return pd.Series(np.nan, index=frame.index)
+    required = {"subject_uid", "region_id", "value"}
+    if not required <= set(segment_cv.columns):
+        return pd.Series(np.nan, index=frame.index)
+
+    from nvitk.stats.vessel_network import canonical_node
+
+    lookup: dict[tuple[str, str], float] = {}
+    for subject, region, value in zip(
+        segment_cv["subject_uid"].astype(str),
+        segment_cv["region_id"].astype(str),
+        pd.to_numeric(segment_cv["value"], errors="coerce"),
+    ):
+        if not np.isfinite(value):
+            continue
+        lookup[(subject, region)] = float(value)
+        lookup[(subject, region.upper())] = float(value)
+        node = canonical_node(region)
+        if node:
+            lookup.setdefault((subject, node), float(value))
+
+    node = frame["region_id"].map(canonical_node)
+    values = []
+    for subject, region, node_id in zip(frame["subject_uid"], frame["region_id"], node):
+        hit = lookup.get((str(subject), str(region)))
+        if hit is None and node_id:
+            hit = lookup.get((str(subject), node_id))
+        values.append(np.nan if hit is None else hit)
+    return pd.Series(values, index=frame.index, dtype=float)
+
+
+def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
+    """
+    Along-segment flow CV from a concatenated ``pitc_profile.csv`` frame.
+
+    Groups stations by ``(subject_uid, vessel)``, keeps only the vessels in
+    :data:`SEGMENT_CV_NODES`, and returns a long ``(subject_uid, region_id, value)`` frame
+    ready for :func:`compute_vessel_qc`.
+    """
+    from nvitk.stats.vessel_network import canonical_node
+
+    if profiles is None or profiles.empty:
+        return pd.DataFrame(columns=["subject_uid", "region_id", "value"])
+
+    work = profiles.copy()
+    if "subject_uid" not in work.columns:
+        raise ValueError("profiles must carry subject_uid.")
+    region_col = next(
+        (c for c in ("vessel_name", "region_id", "vessel_id") if c in work.columns),
+        None,
+    )
+    flow_col = next(
+        (c for c in ("flow_mean_ml_s", "flow_mean", "value") if c in work.columns),
+        None,
+    )
+    if region_col is None or flow_col is None:
+        return pd.DataFrame(columns=["subject_uid", "region_id", "value"])
+
+    work["subject_uid"] = work["subject_uid"].astype(str)
+    work["region_id"] = work[region_col].astype(str)
+    work["node"] = work["region_id"].map(canonical_node)
+    work = work.loc[work["node"].isin(SEGMENT_CV_NODES)].copy()
+    work["_flow"] = pd.to_numeric(work[flow_col], errors="coerce")
+    rows: list[dict[str, Any]] = []
+    for (subject, region), group in work.groupby(["subject_uid", "region_id"], sort=False):
+        cv = segment_flow_consistency_cv(group["_flow"].to_numpy())
+        if not np.isfinite(cv):
+            continue
+        rows.append({"subject_uid": str(subject), "region_id": str(region), "value": float(cv)})
+    return pd.DataFrame(rows, columns=["subject_uid", "region_id", "value"])
 
 
 def compute_subject_qc(
@@ -650,10 +821,11 @@ def run_autoqc(
     Parameters
     ----------
     results : ResultsSource, optional
-        Where to look for measurements the dataset does not carry. Stage 6 writes the numbers to
-        disk before anything imports them, so a dataset whose import has not run — or has run only
-        for the flows, leaving no areas to excuse hypoplastic vessels — can still be scored. Without
-        it, a missing variable is simply missing.
+        Where to look for measurements the dataset does not carry, and for ``pitc_profile.csv``
+        station flows used by the along-segment CV check. Stage 6 writes the numbers to disk
+        before anything imports them, so a dataset whose import has not run — or has run only
+        for the flows, leaving no areas to excuse hypoplastic vessels — can still be scored.
+        Without it, a missing variable is simply missing and ``qc_segment_cv`` stays NaN.
 
     Returns
     -------
@@ -671,21 +843,60 @@ def run_autoqc(
             (config.flow_variable, flows), (config.area_variable, areas)
         ) if frame.empty
     ]
-    if missing and results is not None:
-        from .autoqc_sources import recover_missing
+    segment_cv = pd.DataFrame(columns=["subject_uid", "region_id", "value"])
+    if results is not None:
+        from .autoqc_sources import long_measurements, load_pitc_profiles, open_results
 
-        log.info(
-            "autoqc: %s not in the dataset — recovering from the results tree.",
-            ", ".join(missing),
-        )
         try:
-            recovered, recovery = recover_missing(missing, results, subjects=subjects)
+            loc, profile_root = open_results(results, subjects)
+            recovery = {
+                "root": str(profile_root),
+                "n_subjects": int(loc["subject_uid"].nunique()) if not loc.empty else 0,
+                "recovered": [],
+                "unavailable": [],
+            }
+            if missing:
+                log.info(
+                    "autoqc: %s not in the dataset — recovering from the results tree.",
+                    ", ".join(missing),
+                )
+                recovered: dict[str, pd.DataFrame] = {}
+                for variable in missing:
+                    frame = long_measurements(loc, variable)
+                    if not frame.empty:
+                        recovered[variable] = frame
+                recovery["recovered"] = sorted(recovered)
+                recovery["unavailable"] = sorted(set(missing) - set(recovered))
+                if config.flow_variable in recovered:
+                    flows = recovered[config.flow_variable]
+                if config.area_variable in recovered:
+                    areas = recovered[config.area_variable]
+                if recovered:
+                    log.ok(
+                        "autoqc: recovered %s from the results tree (%d subject(s)).",
+                        ", ".join(recovery["recovered"]), recovery["n_subjects"],
+                    )
+
+            wanted = subjects
+            if wanted is None and not flows.empty:
+                wanted = sorted(flows["subject_uid"].astype(str).unique())
+            profiles = load_pitc_profiles(profile_root, subjects=wanted)
+            segment_cv = compute_segment_cv_from_profiles(profiles)
+            if segment_cv.empty:
+                log.info(
+                    "autoqc: no along-segment CV computable from pitc_profile.csv under %s "
+                    "(need ≥3 stations on ICA / basilar / SSS).",
+                    profile_root,
+                )
+            else:
+                log.info(
+                    "autoqc: along-segment CV for %d vessel(s) from pitc_profile.csv.",
+                    len(segment_cv),
+                )
+        except Exception as exc:
+            log.warning("autoqc: results tree unavailable for recovery / segment CV (%s).", exc)
         finally:
             results.cleanup()
-        if config.flow_variable in recovered:
-            flows = recovered[config.flow_variable]
-        if config.area_variable in recovered:
-            areas = recovered[config.area_variable]
 
     if flows.empty:
         raise ValueError(
@@ -693,7 +904,12 @@ def run_autoqc(
             f"stage 6 (and its import), or point --results-root at the tree that has them."
         )
 
-    vessel = compute_vessel_qc(flows, areas if not areas.empty else None, config=config)
+    vessel = compute_vessel_qc(
+        flows,
+        areas if not areas.empty else None,
+        config=config,
+        segment_cv=segment_cv if not segment_cv.empty else None,
+    )
     subject = compute_subject_qc(vessel, config=config)
     written = publish_autoqc(repo, vessel, subject, dry_run=dry_run)
 
@@ -823,7 +1039,17 @@ def _open_repo(dataset: Any = None) -> Any:
     type=float,
     default=CONSERVATION_TOL,
     show_default=True,
-    help="Relative junction residual beyond which mass conservation is considered violated.",
+    help=(
+        "Relative residual gate for proximal arterial junctions (ICA, VA→BA). Distal "
+        "(BA→PCA) and venous gates scale with this; defaults are 10% / 15% / 20%."
+    ),
+)
+@click.option(
+    "--segment-cv-tol",
+    type=float,
+    default=SEGMENT_CV_TOL,
+    show_default=True,
+    help="Along-segment flow CV beyond which a vessel is considered inconsistent.",
 )
 @click.option(
     "--score-flag-below",
@@ -893,6 +1119,7 @@ def main(
     area_variable: str,
     flow_scale: float | None,
     conservation_tol: float,
+    segment_cv_tol: float,
     score_flag_below: float,
     submit: str,
     results_root: Path | None,
@@ -927,6 +1154,7 @@ def main(
         area_variable=area_variable,
         flow_to_ml_min=flow_scale,
         conservation_tol=conservation_tol,
+        segment_cv_tol=segment_cv_tol,
         score_flag_below=score_flag_below,
     )
     source = None
@@ -979,14 +1207,16 @@ def main(
 
 
 __all__ = [
-    "CONSERVATION_JUNCTIONS",
+    "AUTOQC_CONSERVATION",
     "FLOW_SCALE_BOUNDARY",
     "QC_LABELS",
     "QC_SCORE_FLAG_BELOW",
     "QC_VARIABLES",
+    "SEGMENT_CV_NODES",
     "STAGE_NAME",
     "AutoQcConfig",
     "compute_qc_columns",
+    "compute_segment_cv_from_profiles",
     "compute_subject_qc",
     "compute_vessel_qc",
     "infer_flow_scale",

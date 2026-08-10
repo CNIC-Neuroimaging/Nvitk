@@ -25,6 +25,9 @@ PWV_MAX_M_S: float = 30.0
 # points below this threshold are excluded from PITC / PWV fits.
 QUALITY_SCALE_MAX: float = 4.0
 QUALITY_THRESH_DEFAULT: float = 2.5
+# Reporting unit for flow: pipelines compute ml/s, literature bands and the DB
+# (``flow_mean`` / ``flow_tseries``) are in mL/min.
+ML_S_TO_ML_MIN: float = 60.0
 
 
 def flow_pulsatile_ml_s(velocity_ts_mm_s, area_mm2: float) -> np.ndarray:
@@ -39,6 +42,19 @@ def flow_per_heart_cycle_ml_s(flow_pulsatile: np.ndarray) -> float:
     if x.size == 0:
         return 0.0
     return float(np.mean(x))
+
+
+def mean_flow_ml_min(flow_pulsatile) -> float:
+    """
+    Cardiac time-averaged flow **magnitude** in mL/min.
+
+    Same quantity as :func:`flow_per_heart_cycle_ml_s` scaled by
+    :data:`ML_S_TO_ML_MIN`, but ``|Q(t)|`` is taken first so a flipped plane
+    normal (tangent polarity) cannot cancel the mean — this matches how
+    ``loc_mean_flow_ml_s`` and the ``flow_mean`` DB variable are reported.
+    """
+    x = np.abs(as_backend_array(flow_pulsatile).astype(np.float64).reshape(-1))
+    return flow_per_heart_cycle_ml_s(x) * ML_S_TO_ML_MIN
 
 
 def pulsatility_index_qvt(flow_pulsatile, *, eps: float = 1e-9):
@@ -909,12 +925,30 @@ FLOW_BAND_TOLERANCE: float = 0.15
 #: Krabbe-Hartkamp et al. 1998 definition of CoW hypoplasia on 3D TOF MRA.
 HYPOPLASIA_DIAM_MM: float = 0.8
 
-#: Relative bifurcation residual beyond which mass conservation is considered violated,
-#: adapted from the 4D Flow CMR consensus statement's 15% discrepancy threshold.
-CONSERVATION_TOL: float = 0.15
+#: Default relative junction residual beyond which mass conservation is considered violated.
+#: Cranial literature does **not** publish one universal threshold: ISMRM 2017 (Roberts et al.)
+#: observed ~1–10% residuals at well-conserved proximal junctions and 11–55% where flow was
+#: clearly broken, while venous confluence imbalances of ~4–9% are typical even in good data
+#: (Sci Rep 2025). Class-specific tolerances below are preferred; this default is the arterial
+#: gate used when a single number is needed (filters, CLI ``--conservation-tol``).
+CONSERVATION_TOL: float = 0.10
+
+#: Proximal arterial junctions (ICA → ACA+MCA, VA → BA). Upper end of the "good" 1–10% band.
+CONSERVATION_TOL_ARTERIAL: float = 0.15
+
+#: Distal / incomplete arterial junctions (BA → PCA). Smaller vessels plus unmeasured AICA/SCA
+#: outflow systematically inflate the residual, so the gate is looser than the proximal one.
+CONSERVATION_TOL_DISTAL: float = 0.20
+
+#: Venous confluence (SSS + straight sinus → transverse sinuses). Direct cortical / petrosal /
+#: emissary tributaries make a zero residual anatomically unreachable; ~20% catches gross
+#: failures without flagging every healthy subject.
+CONSERVATION_TOL_VENOUS: float = 0.20
 
 #: Coefficient of variation of flow along a non-branching segment beyond which the
-#: centerline is likely drifting or a side branch was missed.
+#: centerline is likely drifting or a side branch was missed. The QVT validation paper
+#: reported along-segment percent variation with SD ≈ 3%; 0.15 is a soft upper gate
+#: (≈ 5× that scatter) for automatic review rather than a physiological hard limit.
 SEGMENT_CV_TOL: float = 0.15
 
 
@@ -1018,12 +1052,13 @@ def bifurcation_conservation_error(
     """
     Relative mass-conservation residual at one junction: ``(Qp - sum(Qb)) / Qp``.
 
-    Zero is perfect conservation. This is the 4D Flow CMR consensus statement's central
-    internal-consistency check, and the same one the cranial QVT/CPS validation work uses.
+    Zero is perfect conservation. This is the same junction mass-balance check used by the
+    cranial QVT/CPS validation work and by cardiac 4D Flow CMR quality assurance
+    (conservation of mass). Relative residual ``(Qp - sum(Qb)) / Qp``.
 
     A failure is genuinely ambiguous between "the flow measurement is wrong" and "the
     vessel tree is incomplete" -- a missed side branch removes real outflow and shows up
-    identically. Report both possibilities rather than blaming the flow value.
+    identically. 
 
     Returns ``NaN`` when the parent flow is ~0, since the relative residual is undefined.
     """
@@ -1101,6 +1136,7 @@ def anterior_posterior_split_flag(
 
 
 __all__ = [
+    "ML_S_TO_ML_MIN",
     "PWV_MAX_M_S",
     "PWV_MIN_M_S",
     "QUALITY_SCALE_MAX",
@@ -1110,6 +1146,7 @@ __all__ = [
     "circular_cross_correlation_lag",
     "cross_correlation_delay_seconds",
     "damping_index",
+    "mean_flow_ml_min",
     "mean_flow_ml_s",
     "mean_velocity_mm_s",
     "normalize_waveform",
@@ -1118,6 +1155,9 @@ __all__ = [
     "ANTERIOR_SHARE_PCT",
     "ANTERIOR_SHARE_TOL_PCT",
     "CONSERVATION_TOL",
+    "CONSERVATION_TOL_ARTERIAL",
+    "CONSERVATION_TOL_DISTAL",
+    "CONSERVATION_TOL_VENOUS",
     "FLOW_BAND_TOLERANCE",
     "FLOW_PLAUSIBILITY_EXEMPT",
     "FLOW_PLAUSIBILITY_ML_MIN",

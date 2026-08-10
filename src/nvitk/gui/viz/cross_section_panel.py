@@ -14,6 +14,17 @@ LAYER_NAME = "Cross-section (2D dock)"
 DOCK_OBJECT_NAME = "nvitk_vessel_cross_section_dock"
 
 
+def _finite_or_none(value: Any) -> float | None:
+    """*value* as a float, or ``None`` when it is missing / NaN / infinite."""
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
 class CrossSectionPanel(QWidget):
     """Dock widget showing intensity + mask overlay and optional flow waveforms."""
 
@@ -118,7 +129,12 @@ class CrossSectionPanel(QWidget):
 
     def _draw_waveforms(self, waveforms: list[dict[str, Any]] | None) -> None:
         """Plot each flow waveform in *waveforms* on the waveform axes, color-coding by offset from
-        the selected cross-section (blue = selected, red = upstream, green = downstream)."""
+        the selected cross-section (blue = selected, red = upstream, green = downstream).
+
+        Each curve's cardiac time-averaged flow magnitude (``mean_flow_ml_min``) is appended to its
+        legend entry, and the selected station's value is called out in a box beside the curves —
+        mL/min is the reporting unit, while the curves stay in the ml/s the pipeline computes.
+        """
         if self._wave_ax is None or self._wave_canvas is None:
             return
         self._wave_ax.clear()
@@ -127,6 +143,7 @@ class CrossSectionPanel(QWidget):
             self._wave_canvas.draw_idle()
             return
         phases = None
+        selected_mean_ml_min: float | None = None
         for item in waveforms:
             flow = np.asarray(item.get("flow_ml_s", []), dtype=np.float64).reshape(-1)
             if flow.size == 0:
@@ -135,22 +152,38 @@ class CrossSectionPanel(QWidget):
                 phases = np.arange(flow.size, dtype=np.float64)
             offset = int(item.get("offset", 0))
             index = int(item.get("index", 0))
+            mean_ml_min = _finite_or_none(item.get("mean_flow_ml_min"))
+            # Rounded to whole mL/min in the legend; the selected station gets a
+            # finer readout in the title above the axes.
+            flow_txt = f" — {mean_ml_min:.0f} mL/min" if mean_ml_min is not None else ""
             if offset == 0:
                 color = "#1f3b73"
-                label = f"selected (idx {index})"
+                label = f"sel idx {index}{flow_txt}"
                 lw = 2.2
+                selected_mean_ml_min = mean_ml_min
             elif offset < 0:
                 color = "#d62728"
-                label = f"{offset:+d} (idx {index})"
+                label = f"{offset:+d} idx {index}{flow_txt}"
                 lw = 1.4
             else:
                 color = "#2ca02c"
-                label = f"{offset:+d} (idx {index})"
+                label = f"{offset:+d} idx {index}{flow_txt}"
                 lw = 1.4
             self._wave_ax.plot(phases, flow, color=color, lw=lw, label=label)
+        # Time-averaged |Q| at the picked station — the headline number, kept out
+        # of the legend stack so it survives a narrow dock.
+        self._wave_ax.set_title(
+            f"Q̄ = {selected_mean_ml_min:.1f} mL/min"
+            if selected_mean_ml_min is not None
+            else "Q̄ unavailable",
+            loc="left",
+            fontsize=9,
+            color="#1f3b73",
+            fontweight="bold",
+        )
         self._wave_ax.set_xlabel("cardiac phase")
         self._wave_ax.set_ylabel("Q (ml/s)")
-        self._wave_ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+        self._wave_ax.legend(loc="upper right", fontsize=6.5, framealpha=0.9)
         self._wave_ax.grid(True, alpha=0.25)
         self._wave_fig.tight_layout(pad=0.3)
         self._wave_canvas.draw_idle()

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from nvitk.core.array import to_numpy
 from nvitk.measure.cross_section import cross_section_at_loc, cross_section_at_point, masked_plane_velocity_series
-from nvitk.measure.hemodynamics import flow_pulsatile_ml_s
+from nvitk.measure.hemodynamics import flow_pulsatile_ml_s, mean_flow_ml_min
 from nvitk.morphology import compute_centerlines
 from nvitk.morphology.centerline import centerline_tangents
 from nvitk.viz.centerline_pick import (
@@ -30,6 +30,12 @@ from nvitk.gui.core.spatial import (
 )
 from nvitk.gui.viz.layers import DEFAULT_FLOW_EDGE_WIDTH
 from nvitk.gui.viz.cross_section_panel import CrossSectionPanel, attach_cross_section_dock
+from nvitk.gui.viz.loc_points import (
+    LOC_SNAP_DISTANCE_VOX,
+    LocPose,
+    nearest_loc_pose,
+    parse_loc_poses,
+)
 
 XS_CENTERLINES = "Vessel centerlines (xs)"
 XS_CL_POINTS = "Centerline points (xs)"
@@ -266,20 +272,32 @@ def _params_from_dict(params: dict[str, Any]) -> dict[str, Any]:
     (radius, resolution, interpolation, resegment/supersampling flags, threshold algorithm)."""
     resegment = bool(params.get("measure_resegment", False))
     supersampling = bool(params.get("cs_supersampling", True))
-    interp = bool(params.get("interpolate_plane", True)) and resegment
     # Keep interp_vals for supersampled grid even when not resegmenting, so the
     # stage-4 mask is nearest-neighbor upsampled onto the finer plane.
     default_interp = 4 if (resegment or supersampling) else 1
+    # Match stage-6 LOC measurement: linear plane interpolation for velocity sampling
+    # (``cross_section_plane_interp=1``). Previously this was forced to 0 whenever
+    # ``measure_resegment`` was off, which systematically shifted mean flow vs the CSV.
+    plane_order = params.get("cross_section_plane_interp", params.get("plane_interp_order"))
+    try:
+        plane_interp_order = int(plane_order) if plane_order is not None else 1
+    except (TypeError, ValueError):
+        plane_interp_order = 1
+    if plane_interp_order not in (0, 1):
+        plane_interp_order = 1
     return {
         "radius_vox": float(params.get("cross_section_radius_vox") or 12.0),
         "cross_section_res": int(params.get("cross_section_res") or 0),
         "interp_vals": int(params.get("interp_vals") or default_interp),
-        "plane_interp_order": 1 if interp else 0,
+        "plane_interp_order": plane_interp_order,
         "measure_resegment": resegment,
         "cs_supersampling": supersampling,
         "thr_algorithm": str(params.get("thr_algorithm") or "lsthr"),
         "centerline_window": int(str(params.get("centerline_window") or "5")),
         "show_segmentation_3d": bool(params.get("show_segmentation_3d", True)),
+        "loc_snap_distance_vox": float(
+            params.get("loc_snap_distance_vox") or LOC_SNAP_DISTANCE_VOX
+        ),
     }
 
 
@@ -557,68 +575,189 @@ def shutdown_vessel_cross_sections(app_state: dict[str, Any]) -> None:
             pass
 
 
+def _resolve_loc_centerline(
+    loc: LocPose,
+    centerlines: dict[int, np.ndarray],
+    branch_name_by_key: Mapping[int, str],
+    volume_label_by_key: Mapping[int, int],
+) -> tuple[int, int] | None:
+    """Best ``(centerline_key, index)`` for *loc*: name match first, then vessel_id, then nearest."""
+    name_u = loc.vessel_name.upper()
+    candidates: list[int] = []
+    for key, name in branch_name_by_key.items():
+        nu = str(name).upper()
+        if nu == name_u or nu.startswith(name_u) or name_u.startswith(nu):
+            candidates.append(int(key))
+    if not candidates and loc.vessel_id:
+        for key, lid in volume_label_by_key.items():
+            if int(lid) == int(loc.vessel_id):
+                candidates.append(int(key))
+    if not candidates:
+        candidates = [int(k) for k in centerlines.keys()]
+
+    best: tuple[int, int, float] | None = None
+    for key in candidates:
+        pts = centerlines.get(int(key))
+        if pts is None or pts.shape[0] < 1:
+            continue
+        d2 = np.sum((pts.astype(np.float64) - loc.center.reshape(1, 3)) ** 2, axis=1)
+        idx = int(np.argmin(d2))
+        dist = float(d2[idx])
+        if loc.centerline_index is not None and 0 <= int(loc.centerline_index) < pts.shape[0]:
+            # Prefer the recorded index when it is close to the LOC center.
+            alt = int(loc.centerline_index)
+            if float(d2[alt]) <= dist * 1.25 + 1.0:
+                idx, dist = alt, float(d2[alt])
+        if best is None or dist < best[2]:
+            best = (int(key), idx, dist)
+    if best is None:
+        return None
+    return best[0], best[1]
+
+
+def _flow_at_pose(
+    center: np.ndarray,
+    tangent: np.ndarray,
+    *,
+    state: dict[str, Any],
+    volume_label_id: int,
+    offset: int,
+    index: int,
+) -> dict[str, Any] | None:
+    """One flow-waveform entry at an exact center/tangent pose (stage-6–compatible sampling)."""
+    vx = state.get("vx")
+    vy = state.get("vy")
+    vz = state.get("vz")
+    if vx is None or vy is None or vz is None:
+        return None
+    p = state["params"]
+    cd = state["cd"]
+    mag = state.get("mag", cd)
+    vel_mag = state.get("vel_mag", cd)
+    try:
+        cs = cross_section_at_loc(
+            center,
+            tangent,
+            mag=mag,
+            cd=cd,
+            vel_mag=vel_mag,
+            voxel_spacing=state["voxel_spacing"],
+            radius_vox=p["radius_vox"],
+            interp_vals=p["interp_vals"],
+            cross_section_res=p["cross_section_res"],
+            plane_interp_order=p["plane_interp_order"],
+            cs_supersampling=p.get("cs_supersampling", False),
+            measure_resegment=p["measure_resegment"],
+            thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
+            volume_seg=state.get("segmentation"),
+            volume_label_id=int(volume_label_id),
+            label_constrain=not p["measure_resegment"],
+        )
+    except Exception:
+        return None
+    if cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
+        return None
+    vel_ts = masked_plane_velocity_series(
+        vx, vy, vz, cs, plane_interp_order=p["plane_interp_order"],
+    )
+    flow_ts = np.abs(flow_pulsatile_ml_s(vel_ts, cs.area_mm2))
+    return {
+        "offset": int(offset),
+        "index": int(index),
+        "flow_ml_s": to_numpy(flow_ts),
+        "mean_flow_ml_min": float(mean_flow_ml_min(flow_ts)),
+        "area_mm2": float(cs.area_mm2),
+    }
+
+
 def _neighbor_flow_waveforms(
     pick: CenterlinePick,
     centerlines: dict[int, np.ndarray],
     state: dict[str, Any],
+    *,
+    loc: LocPose | None = None,
 ) -> list[dict[str, Any]]:
-    """Flow Q(t) at the picked station and up to ±2 neighbors along the centerline."""
+    """Flow Q(t) at the picked station and up to ±2 neighbors along the centerline.
+
+    Each entry carries the pulsatile series in ml/s plus its cardiac time-averaged
+    magnitude in **mL/min** (``mean_flow_ml_min``), the unit the panel reports and
+    the one the DB / literature bands use.
+
+    When *loc* is set (QC tab with ``locs.csv``), offset 0 uses the **exact** stage-5
+    LOC center + saved tangent — the same pose stage 6 wrote into ``loc_measurements.csv``.
+    Neighbors still walk the matched centerline with recomputed tangents.
+    """
     vx = state.get("vx")
     vy = state.get("vy")
     vz = state.get("vz")
     if vx is None or vy is None or vz is None:
         return []
+
+    branch_name_by_key = state.get("branch_name_by_key") or {}
+    volume_label_by_key = state.get("volume_label_by_key") or {}
+
+    if loc is not None:
+        resolved = _resolve_loc_centerline(
+            loc, centerlines, branch_name_by_key, volume_label_by_key,
+        )
+        if resolved is not None:
+            cl_key, cl_idx = resolved
+        else:
+            cl_key, cl_idx = int(pick.label), int(pick.index)
+        pts = centerlines.get(int(cl_key))
+        vol_lid = int(loc.vessel_id or volume_label_by_key.get(int(cl_key), cl_key))
+        out: list[dict[str, Any]] = []
+        # Exact LOC pose for the selected station.
+        selected = _flow_at_pose(
+            loc.center,
+            loc.tangent,
+            state=state,
+            volume_label_id=vol_lid,
+            offset=0,
+            index=int(loc.centerline_index if loc.centerline_index is not None else cl_idx),
+        )
+        if selected is not None:
+            out.append(selected)
+        if pts is None or pts.shape[0] < 1:
+            return out
+        tangents = centerline_tangents(pts, k_half=2)
+        for offset in (-2, -1, 1, 2):
+            idx = int(cl_idx) + int(offset)
+            if idx < 0 or idx >= pts.shape[0]:
+                continue
+            entry = _flow_at_pose(
+                pts[idx],
+                tangents[idx],
+                state=state,
+                volume_label_id=vol_lid,
+                offset=offset,
+                index=idx,
+            )
+            if entry is not None:
+                out.append(entry)
+        out.sort(key=lambda e: int(e.get("offset", 0)))
+        return out
+
     pts = centerlines.get(int(pick.label))
     if pts is None or pts.shape[0] < 1:
         return []
-    p = state["params"]
-    vol_lid = int(
-        (state.get("volume_label_by_key") or {}).get(int(pick.label), pick.label)
-    )
+    vol_lid = int(volume_label_by_key.get(int(pick.label), pick.label))
     tangents = centerline_tangents(pts, k_half=2)
-    out: list[dict[str, Any]] = []
+    out = []
     for offset in (-2, -1, 0, 1, 2):
         idx = int(pick.index) + int(offset)
         if idx < 0 or idx >= pts.shape[0]:
             continue
-        try:
-            cs = cross_section_at_loc(
-                pts[idx],
-                tangents[idx],
-                mag=state["cd"],
-                cd=state["cd"],
-                vel_mag=state["cd"],
-                voxel_spacing=state["voxel_spacing"],
-                radius_vox=p["radius_vox"],
-                interp_vals=p["interp_vals"],
-                cross_section_res=p["cross_section_res"],
-                plane_interp_order=p["plane_interp_order"],
-                cs_supersampling=p.get("cs_supersampling", False),
-                measure_resegment=p["measure_resegment"],
-                thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
-                volume_seg=state.get("segmentation"),
-                volume_label_id=vol_lid,
-                label_constrain=not p["measure_resegment"],
-            )
-        except Exception:
-            continue
-        if cs.area_mm2 <= 0.0 or not bool(np.any(cs.mask_2d)):
-            continue
-        vel_ts = masked_plane_velocity_series(
-            vx,
-            vy,
-            vz,
-            cs,
-            plane_interp_order=p["plane_interp_order"],
+        entry = _flow_at_pose(
+            pts[idx],
+            tangents[idx],
+            state=state,
+            volume_label_id=vol_lid,
+            offset=offset,
+            index=idx,
         )
-        flow_ts = np.abs(flow_pulsatile_ml_s(vel_ts, cs.area_mm2))
-        out.append(
-            {
-                "offset": int(offset),
-                "index": int(idx),
-                "flow_ml_s": flow_ts,
-            }
-        )
+        if entry is not None:
+            out.append(entry)
     return out
 
 
@@ -636,6 +775,9 @@ def install_vessel_cross_sections(
     arterial_branches: dict[int, list[tuple[str, Any]]] | None = None,
     venous_centerlines: dict[str, Any] | None = None,
     venous_label_by_name: dict[str, int] | None = None,
+    locs: Sequence[Mapping[str, Any]] | Sequence[LocPose] | None = None,
+    mag: np.ndarray | None = None,
+    vel_mag: np.ndarray | None = None,
 ) -> None:
     """Register Napari layers, dock, and 3D click-to-inspect behavior.
 
@@ -645,11 +787,21 @@ def install_vessel_cross_sections(
 
     Optional *venous_centerlines* (stage-3 name → polyline) are always appended
     when present so venous vessels are pickable alongside arterial branches.
+
+    Optional *locs* (stage-5 ``locs.csv`` rows or :class:`LocPose` list) enables
+    snapping to the exact LOC pose stage 6 measured — used by the QC tab loader.
+    The standalone visualization tool omits *locs* and keeps centerline-only picks.
     """
     shutdown_vessel_cross_sections(app_state)
 
     cd = _intensity_volume(intensity_layer)
     p = _params_from_dict(params)
+    loc_poses: list[LocPose] = []
+    if locs:
+        if locs and isinstance(locs[0], LocPose):
+            loc_poses = list(locs)  # type: ignore[arg-type]
+        else:
+            loc_poses = parse_loc_poses(locs)  # type: ignore[arg-type]
     volume_label_by_key: dict[int, int] = {}
     branch_name_by_key: dict[int, str] = {}
     from_stage_branches = False
@@ -718,6 +870,8 @@ def install_vessel_cross_sections(
 
     state: dict[str, Any] = {
         "cd": cd,
+        "mag": mag if mag is not None else cd,
+        "vel_mag": vel_mag if vel_mag is not None else cd,
         "vx": vx,
         "vy": vy,
         "vz": vz,
@@ -728,6 +882,7 @@ def install_vessel_cross_sections(
         "segmentation": segmentation,
         "params": p,
         "voxel_spacing": voxel_sp,
+        "locs": loc_poses,
         "pick_layer": pick_layer,
         "plane_layer": plane_layer,
         "normal_layer": normal_layer,
@@ -836,29 +991,59 @@ def install_vessel_cross_sections(
             tangent_layer.data = tang_paths
             tangent_layer.edge_width = tang_edge_w
 
-    def _apply_pick(pick: CenterlinePick, click_xyz: np.ndarray) -> None:
+    def _apply_pick(
+        pick: CenterlinePick,
+        click_xyz: np.ndarray,
+        *,
+        loc: LocPose | None = None,
+    ) -> None:
         """Compute the oblique cross-section at *pick*, update all overlay layers (pick marker, plane,
-        normal, tangent, highlighted centerline points), and render the slice/waveforms in the dock."""
+        normal, tangent, highlighted centerline points), and render the slice/waveforms in the dock.
+
+        When *loc* is provided, the plane and selected-station flow use the exact stage-5
+        LOC center + saved tangent (stage-6 parity). Otherwise the tangent is recomputed
+        from the centerline (standalone visualization tool).
+        """
         pts = centerlines[pick.label]
-        tang = tangent_from_centerline(
-            pts,
-            pick.index,
-            window=p["centerline_window"],
-        )
-        tang = choose_plane_normal_sense(
-            tang,
-            pick.point,
-            click_xyz,
-            centerline_pts=pts,
-            index=pick.index,
-        )
-        vol_lid = int(volume_label_by_key.get(int(pick.label), pick.label))
-        branch_name = str(branch_name_by_key.get(int(pick.label), pick.label))
-        try:
-            result = cross_section_at_point(
-                pick.point,
+        if loc is not None:
+            center = np.asarray(loc.center, dtype=np.float64).reshape(3)
+            tang = np.asarray(loc.tangent, dtype=np.float64).reshape(3)
+            # Rebuild a pick whose point is the exact LOC center for overlays.
+            pick = CenterlinePick(
+                label=int(pick.label),
+                index=int(pick.index),
+                point=center.astype(np.float32, copy=False),
+                distance_sq=float(pick.distance_sq),
+            )
+            vol_lid = int(loc.vessel_id or volume_label_by_key.get(int(pick.label), pick.label))
+            branch_name = loc.label()
+            title_extra = "  LOC pose"
+        else:
+            center = np.asarray(pick.point, dtype=np.float64).reshape(3)
+            tang = tangent_from_centerline(
+                pts,
+                pick.index,
+                window=p["centerline_window"],
+            )
+            tang = choose_plane_normal_sense(
                 tang,
+                pick.point,
+                click_xyz,
+                centerline_pts=pts,
+                index=pick.index,
+            )
+            vol_lid = int(volume_label_by_key.get(int(pick.label), pick.label))
+            branch_name = str(branch_name_by_key.get(int(pick.label), pick.label))
+            title_extra = ""
+        try:
+            # Prefer the same cross_section_at_loc path used for flow so the
+            # displayed mask/area matches the Q̄ readout.
+            result = cross_section_at_loc(
+                center,
+                tang,
+                mag=state.get("mag", state["cd"]),
                 cd=state["cd"],
+                vel_mag=state.get("vel_mag", state["cd"]),
                 voxel_spacing=state["voxel_spacing"],
                 radius_vox=p["radius_vox"],
                 interp_vals=p["interp_vals"],
@@ -869,10 +1054,29 @@ def install_vessel_cross_sections(
                 thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
                 volume_seg=state["segmentation"],
                 volume_label_id=vol_lid,
+                label_constrain=not p["measure_resegment"],
             )
         except Exception as exc:
-            panel.clear(f"Cross-section failed: {exc}")
-            return
+            # Fallback for display-only if loc path fails (e.g. missing seg).
+            try:
+                result = cross_section_at_point(
+                    center,
+                    tang,
+                    cd=state["cd"],
+                    voxel_spacing=state["voxel_spacing"],
+                    radius_vox=p["radius_vox"],
+                    interp_vals=p["interp_vals"],
+                    cross_section_res=p["cross_section_res"],
+                    plane_interp_order=p["plane_interp_order"],
+                    cs_supersampling=p.get("cs_supersampling", False),
+                    measure_resegment=p["measure_resegment"],
+                    thr_algorithm=p["thr_algorithm"],  # type: ignore[arg-type]
+                    volume_seg=state["segmentation"],
+                    volume_label_id=vol_lid,
+                )
+            except Exception:
+                panel.clear(f"Cross-section failed: {exc}")
+                return
 
         pick_layer.data = np.asarray(pick.point, dtype=np.float64).reshape(1, 3)
         _update_plane_and_normal(pick, tang)
@@ -891,11 +1095,18 @@ def install_vessel_cross_sections(
                     f"Intensity/mask shape mismatch: {intensity_2d.shape} vs {mask_arr.shape}"
                 )
                 return
+        idx_txt = (
+            f"cl_idx {loc.centerline_index}"
+            if loc is not None and loc.centerline_index is not None
+            else f"index {pick.index}"
+        )
         title = (
-            f"{branch_name}  index {pick.index}\n"
+            f"{branch_name}  {idx_txt}{title_extra}\n"
             f"area {result.area_mm2:.2f} mm²  circularity {result.circularity:.3f}"
         )
-        waveforms = _neighbor_flow_waveforms(pick, centerlines, state)
+        waveforms = _neighbor_flow_waveforms(
+            pick, centerlines, state, loc=loc,
+        )
         panel.show_slice(intensity_2d, result.mask_2d, title=title, waveforms=waveforms)
         if dock is not None:
             try:
@@ -943,7 +1154,11 @@ def install_vessel_cross_sections(
 
     def _on_mouse_pick(viewer_obj: Any, event: Any) -> None:
         """Left-click handler in 3D view: pick the nearest centerline point/segment near the click and
-        apply the cross-section pick, when picking is enabled and centerlines are visible."""
+        apply the cross-section pick, when picking is enabled and centerlines are visible.
+
+        When stage-5 LOCs were passed in (QC tab), a click near a LOC snaps to that exact
+        pose so flow matches ``loc_measurements.csv``.
+        """
         if getattr(event, "type", None) != "mouse_press":
             return
         if not _is_left_mouse_button(event):
@@ -955,14 +1170,45 @@ def install_vessel_cross_sections(
             return
         if not _centerlines_layer_visible(state.get("centerlines_layer")):
             return
+
+        click_xyz = world_to_data_coords(
+            intensity_layer, getattr(event, "position", None)
+        )
+        snap_dist = float(p.get("loc_snap_distance_vox") or LOC_SNAP_DISTANCE_VOX)
+        loc_hit = nearest_loc_pose(
+            state.get("locs") or [],
+            click_xyz if click_xyz is not None else np.zeros(3),
+            max_distance_vox=snap_dist,
+        ) if click_xyz is not None else None
+
+        # Prefer a direct LOC hit (clicking the red LOC points) before centerline snap.
+        if loc_hit is not None:
+            resolved = _resolve_loc_centerline(
+                loc_hit, centerlines, branch_name_by_key, volume_label_by_key,
+            )
+            if resolved is not None:
+                cl_key, cl_idx = resolved
+                pick = CenterlinePick(
+                    label=int(cl_key),
+                    index=int(cl_idx),
+                    point=loc_hit.center.astype(np.float32, copy=False),
+                    distance_sq=0.0,
+                )
+                _apply_pick(pick, click_xyz.astype(np.float32, copy=False), loc=loc_hit)
+                try:
+                    event.handled = True
+                except Exception:
+                    pass
+                yield
+                while getattr(event, "type", None) == "mouse_move":
+                    yield
+                return
+
         pick = _try_pick_from_event(
             event, ndisplay=int(getattr(viewer_obj.dims, "ndisplay", 2))
         )
         if pick is None:
             return
-        click_xyz = world_to_data_coords(
-            intensity_layer, getattr(event, "position", None)
-        )
         if click_xyz is None:
             click_xyz = pick.point
         else:
@@ -973,7 +1219,13 @@ def install_vessel_cross_sections(
             click_xyz,
             max_distance_vox=max(2.0, _pick_max_distance_vox(p) * 0.35),
         )
-        _apply_pick(pick, click_xyz)
+        # Snap centerline picks that land next to a LOC onto the LOC pose.
+        loc_near = nearest_loc_pose(
+            state.get("locs") or [],
+            pick.point,
+            max_distance_vox=snap_dist,
+        )
+        _apply_pick(pick, click_xyz, loc=loc_near)
         try:
             event.handled = True
         except Exception:
