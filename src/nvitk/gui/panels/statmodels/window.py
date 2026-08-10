@@ -56,6 +56,7 @@ from nvitk.stats.mixedlm import formula_columns as _formula_columns
 from nvitk.stats.interactive import forest_plot, matrix_plot, network_plot
 from nvitk.stats.interactive_adapters import (
     mmrm_geometry,
+    nonlinear_geometry,
     r_model_geometry,
     render,
     statsmodels_geometry,
@@ -114,6 +115,7 @@ from nvitk.stats import (
     lmrob_weights_frame,
     plot_lme4_params,
     plot_lmrob_params,
+    plot_mmrm_emmeans,
     plot_lmrob_weights,
     plot_mmrm_correlation,
     mmrm_correlation_matrix,
@@ -2102,11 +2104,16 @@ class StatmodelsWindow(QMainWindow):
                         keep = [str(v) for v in selected if str(v) in correlation.index]
                         if keep:
                             correlation = correlation.loc[keep, keep]
-                    fig = matrix_plot(
-                        correlation,
-                        title=f"MMRM {meta.get('structure_label', '')}: correlation between "
-                        f"{visit} levels",
-                        value_label="correlation",
+                    title = (
+                        f"MMRM {meta.get('structure_label', '')}: correlation between "
+                        f"{visit} levels"
+                    )
+                    fig = (
+                        matrix_plot(correlation, title=title, value_label="correlation")
+                        if self._interactive_plot.isChecked()
+                        else plot_mmrm_correlation(
+                            self._last_result, levels=selected or None, title=title
+                        )
                     )
                     note = ""
                 else:
@@ -2118,29 +2125,39 @@ class StatmodelsWindow(QMainWindow):
                     # the display, exactly as for the other engines.
                     if selected and visit in frame.columns:
                         frame = frame.loc[frame[visit].astype(str).isin(set(selected))]
-                    geometry = mmrm_geometry(frame, x=x, hue=hue or "")
                     note = f"Least-squares means from emmeans, at {meta.get('method')} df."
-                    panel_group = hue or x
-                    try:
-                        fig = render(
-                            geometry, x=x, y=self._last_outcome or "estimate",
-                            group=panel_group, display=display,
-                            title=f"MMRM least-squares means: {self._last_outcome or ''} by {x}",
-                            y_label=self._last_outcome or "Estimated marginal mean",
+                    title = f"MMRM least-squares means: {self._last_outcome or ''} by {x}"
+                    y_label = self._last_outcome or "Estimated marginal mean"
+
+                    if self._interactive_plot.isChecked():
+                        geometry = mmrm_geometry(frame, x=x, hue=hue or "")
+                        kwargs = dict(
+                            x=x, y=self._last_outcome or "estimate", group=hue or x,
+                            errorbar=self._show_ci.isChecked(),
+                            title=title, y_label=y_label,
                         )
+                    else:
+                        kwargs = dict(
+                            x=x, hue=hue, errorbar=self._show_ci.isChecked(),
+                            title=title, y_label=y_label,
+                        )
+
+                    def draw(display_mode: str):
+                        """One MMRM figure on whichever backend is selected."""
+                        if self._interactive_plot.isChecked():
+                            return render(geometry, display=display_mode, **kwargs)
+                        return plot_mmrm_emmeans(frame, display=display_mode, **kwargs)
+
+                    try:
+                        fig = draw(display)
                     except ValueError as exc:
                         if display != "grouped":
                             raise
-                        note = f"⚠ Grouped display unavailable — {exc}"
-                        fig = render(
-                            geometry, x=x, y=self._last_outcome or "estimate",
-                            group=panel_group, display="overview",
-                            title=f"MMRM least-squares means: {self._last_outcome or ''} by {x}",
-                            y_label=self._last_outcome or "Estimated marginal mean",
-                        )
+                        note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                        fig = draw("overview")
                     else:
                         if display == "grouped":
-                            note += f"  {(fig.layout.meta or {}).get('panels', '')}"
+                            note += f"  {self._panel_note(fig)}"
             self._plot.show_figure(fig)
             if subset:
                 note = (note + "  " if note else "") + (
@@ -2317,13 +2334,36 @@ class StatmodelsWindow(QMainWindow):
                 title=f"lmrob: {y} ~ {x}",
             )
             with plt.style.context("default"):
+                if self._interactive_plot.isChecked():
+                    from nvitk.stats.r_robust import _lmrob_band, lmrob_predict
+
+                    geometry = r_model_geometry(
+                        self._last_result, df, x=x, y=y,
+                        group=group if group in df.columns else "",
+                        mode=str(self._plot_mode.currentData() or "auto"),
+                        group_order=selected or None,
+                        predict_fn=lmrob_predict, band_fn=_lmrob_band,
+                        fixed_formula=(self._last_fit_meta or {}).get("formula", ""),
+                        errorbar=self._show_ci.isChecked(),
+                    )
+                    if not self._include_points.isChecked():
+                        geometry.points = None
+                    render_kwargs = dict(
+                        x=x, y=y, group=group if group in df.columns else "",
+                        hover_columns=self._hover_columns(df),
+                        errorbar=self._show_ci.isChecked(),
+                        title=f"lmrob: {y} ~ {x}", x_label=x, y_label=y,
+                    )
+                    draw = lambda mode: render(geometry, display=mode, **render_kwargs)
+                else:
+                    draw = lambda mode: plot_lmrob_params(display=mode, **kwargs)
                 try:
-                    fig = plot_lmrob_params(display=display, **kwargs)
+                    fig = draw(display)
                 except ValueError as exc:
                     if display != "grouped":
                         raise
-                    display_note = f"⚠ Grouped display unavailable — {exc}"
-                    fig = plot_lmrob_params(display="overview", **kwargs)
+                    display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                    fig = draw("overview")
             self._plot.show_figure(fig)
 
             notes = []
@@ -2456,13 +2496,29 @@ class StatmodelsWindow(QMainWindow):
                 group=group,
             )
             with plt.style.context("default"):
+                if self._interactive_plot.isChecked():
+                    geometry = nonlinear_geometry(
+                        result, args[1], group=group or "",
+                        errorbar=self._show_ci.isChecked(),
+                    )
+                    if not self._include_points.isChecked():
+                        geometry.points = None
+                    render_kwargs = dict(
+                        x=result["x"], y=result["y"], group=group or "",
+                        hover_columns=self._hover_columns(args[1]),
+                        errorbar=self._show_ci.isChecked(),
+                        title=f"{result['y']} ~ f({result['x']})",
+                    )
+                    draw = lambda mode: render(geometry, display=mode, **render_kwargs)
+                else:
+                    draw = lambda mode: plot_nonlinear_fit(*args, display=mode, **kwargs)
                 try:
-                    fig = plot_nonlinear_fit(*args, display=display, **kwargs)
+                    fig = draw(display)
                 except ValueError as exc:
                     if display != "grouped":
                         raise
-                    display_note = f"⚠ Grouped display unavailable — {exc}"
-                    fig = plot_nonlinear_fit(*args, display="overview", **kwargs)
+                    display_note = f"\u26a0 Grouped display unavailable \u2014 {exc}"
+                    fig = draw("overview")
             self._plot.show_figure(fig)
             notes = []
             if display_note:
@@ -2584,7 +2640,18 @@ class StatmodelsWindow(QMainWindow):
                         ci_high=summary["ci_high"],
                     )
                 elif kind == "by_level":
-                    fig = plot_indirect_by_level(bundle["summary"])
+                    summary = bundle["summary"]
+                    if self._interactive_plot.isChecked():
+                        fig = forest_plot(
+                            summary.rename(columns={
+                                "indirect": "coef", "indirect_lo": "ci_low",
+                                "indirect_hi": "ci_high",
+                            }),
+                            label="level", title="Indirect effect by level",
+                            x_label="Indirect effect (a·b)",
+                        )
+                    else:
+                        fig = plot_indirect_by_level(summary)
                 elif kind == "partial":
                     fig = plot_partial_paths_mediation(
                         self._working_df,
@@ -2594,9 +2661,14 @@ class StatmodelsWindow(QMainWindow):
                         covars=spec.covariates,
                     )
                 else:
-                    fig = plot_mediation_forest(
-                        bundle["paths"],
-                        title=f"Mediation: {spec.x} → {spec.m} → {spec.y}",
+                    title = f"Mediation: {spec.x} → {spec.m} → {spec.y}"
+                    fig = (
+                        forest_plot(
+                            bundle["paths"].rename(columns={"pval": "p_value"}),
+                            label="path", title=title, x_label="Effect",
+                        )
+                        if self._interactive_plot.isChecked()
+                        else plot_mediation_forest(bundle["paths"], title=title)
                     )
             self._plot.show_figure(fig)
             self._plot.set_status(str(bundle.get("note") or ""))
