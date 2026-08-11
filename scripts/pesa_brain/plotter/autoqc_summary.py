@@ -178,22 +178,30 @@ def load_flow(repo, *, pipeline: str = "", variable: str = "flow_mean") -> pd.Da
 # ──────────────────────────────────────────────────────────────────────────────
 # Figures
 # ──────────────────────────────────────────────────────────────────────────────
-def plot_consensus_junctions(flow: pd.DataFrame, out_dir: Path) -> Path | None:
+def plot_consensus_junctions(
+    flow: pd.DataFrame, out_dir: Path, *, robust: bool = False
+) -> Path | None:
     """
     Junction inflow against outflow, one panel per junction — the consensus consistency check.
 
     Each point is a subject. The dashed line is identity (perfect conservation); the solid line is
     the fitted regression. Read the **slope**: a pipeline that loses a constant fraction of outflow
     still correlates near-perfectly, so a high *r* on its own certifies nothing.
+
+    With *robust* the fit is repeated inside Tukey fences on both axes and written to a separate
+    ``_trimmed`` file. That is a sensitivity analysis, not a cosmetic rescale: the slope it reports
+    comes from different data, and both belong in the record.
     """
     import matplotlib.pyplot as plt
 
-    from nvitk.pipes.qvtpy.stage9_autoqc import CONSENSUS_JUNCTIONS, consensus_junction_report
+    from nvitk.pipes.qvtpy.stage9_autoqc import (
+        CONSENSUS_JUNCTIONS, consensus_junction_report, robust_range,
+    )
     from nvitk.stats.vessel_network import canonical_node
 
     if flow.empty:
         return None
-    report = consensus_junction_report(flow)
+    report = consensus_junction_report(flow, robust=robust)
     if report.empty:
         return None
 
@@ -215,6 +223,12 @@ def plot_consensus_junctions(flow: pd.DataFrame, out_dir: Path) -> Path | None:
         block = wide.loc[:, [*inlets, *outlets]].dropna()
         x = block[list(inlets)].sum(axis=1)
         y = block[list(outlets)].sum(axis=1)
+
+        hidden = 0
+        if robust and len(x) >= 10:
+            keep = x.between(*robust_range(x)) & y.between(*robust_range(y))
+            hidden = int((~keep).sum())
+            x, y = x[keep], y[keep]
         ax.scatter(x, y, s=18, alpha=0.65, edgecolor="none", color="#4878cf")
 
         span = np.linspace(float(min(x.min(), y.min())), float(max(x.max(), y.max())), 2)
@@ -222,9 +236,11 @@ def plot_consensus_junctions(flow: pd.DataFrame, out_dir: Path) -> Path | None:
         ax.plot(span, stats.intercept + stats.slope * span, "-", color="#c44e52", lw=1.6,
                 label=f"slope {stats.slope:.3f}")
         ok = "✓" if stats.slope_includes_one else "✗"
+        note = f"  ·  {hidden} off-scale dropped" if hidden else ""
         ax.set_title(
             f"{stats.label}\n{ok} slope {stats.slope:.3f} "
-            f"[{stats.slope_ci_low:.3f}, {stats.slope_ci_high:.3f}]  ·  r={stats.r:.3f}  ·  n={int(stats.n)}",
+            f"[{stats.slope_ci_low:.3f}, {stats.slope_ci_high:.3f}]  ·  r={stats.r:.3f}  ·  "
+            f"n={int(stats.n)}{note}",
             fontsize=9,
         )
         ax.set_xlabel(f"inflow: {stats.inlets}  (mL/min)")
@@ -233,13 +249,15 @@ def plot_consensus_junctions(flow: pd.DataFrame, out_dir: Path) -> Path | None:
 
     for ax in axes.ravel()[len(panels):]:
         ax.set_visible(False)
+    scope = " — outliers fenced out and refitted" if robust else ""
     fig.suptitle(
         "Junction internal consistency — inflow vs outflow across subjects "
-        "(✓ = 95% CI on the slope includes 1)",
+        f"(✓ = 95% CI on the slope includes 1){scope}",
         fontsize=11,
     )
     fig.tight_layout()
-    return _save(fig, out_dir / "qc_consensus_junctions.png")
+    name = "qc_consensus_junctions_trimmed.png" if robust else "qc_consensus_junctions.png"
+    return _save(fig, out_dir / name)
 
 
 def plot_pass_rates(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
@@ -311,16 +329,48 @@ def plot_score_distributions(vessel: pd.DataFrame, out_dir: Path) -> Path | None
     return _save(fig, out_dir / "qc_score_distributions.png")
 
 
-def plot_conservation(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
-    """Junction mass-conservation residuals, with the tolerance band drawn on."""
+def plot_conservation(
+    vessel: pd.DataFrame, out_dir: Path, *, robust: bool = False
+) -> Path | None:
+    """
+    Junction mass-conservation residuals, with the tolerance band drawn on.
+
+    The residual is a *ratio*, so a near-zero inflow denominator sends it to hundreds of times the
+    tolerance and flattens every distribution against the zero line. With *robust* the x range is
+    clipped to :func:`robust_range` fences and written to a separate ``_trimmed`` file; every
+    subject is still in the data, the axis just stops chasing the tail. The count left off-scale is
+    printed in the title so the trimmed figure never hides how much it is not showing.
+    """
     import matplotlib.pyplot as plt
     import seaborn as sns
+
+    from nvitk.pipes.qvtpy.stage9_autoqc import robust_range
 
     if vessel.empty or "qc_conservation" not in vessel.columns:
         return None
     rows = vessel.dropna(subset=["qc_conservation"])
     if rows.empty:
         return None
+
+    title = "Junction mass-conservation residuals"
+    n_total = len(rows)
+    if robust:
+        values = rows["qc_conservation"].astype(float)
+        lo, hi = robust_range(values)
+        # Always keep the tolerance band in frame: a window that excluded it would make the one
+        # reference line on the figure invisible.
+        lo = min(lo, -2 * CONSERVATION_TOL)
+        hi = max(hi, 2 * CONSERVATION_TOL)
+        # Drop rather than clip the axis: the violin's kernel is estimated from the values it is
+        # given, so an axis limit alone leaves every distribution a flat block spanning the frame.
+        rows = rows.loc[values.between(lo, hi)]
+        if rows.empty:
+            return None
+        dropped = n_total - len(rows)
+        title += (
+            f" — {dropped} of {n_total} outlying residuals excluded "
+            f"({100.0 * dropped / n_total:.1f}%)"
+        )
 
     order = sorted(rows["region_id"].astype(str).unique())
     fig, ax = plt.subplots(figsize=(9, max(4.0, 1.1 * len(order) + 2.0)))
@@ -331,13 +381,15 @@ def plot_conservation(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
     ax.axvline(0, color="#333333", lw=1.2)
     ax.axvspan(-CONSERVATION_TOL, CONSERVATION_TOL, color="#55A868", alpha=0.12,
                label=f"within ±{CONSERVATION_TOL:.0%}")
+
     ax.set_xlabel("(inflow − outflow) / inflow")
     ax.set_ylabel("anchor vessel")
-    ax.set_title("Junction mass-conservation residuals")
+    ax.set_title(title)
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, axis="x", alpha=0.25)
     fig.tight_layout()
-    return _save(fig, out_dir / "qc_conservation.png")
+    name = "qc_conservation_trimmed.png" if robust else "qc_conservation.png"
+    return _save(fig, out_dir / name)
 
 
 def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
@@ -523,9 +575,11 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
             plot_pass_rates(vessel, out_dir),
             plot_score_distributions(vessel, out_dir),
             plot_conservation(vessel, out_dir),
+            plot_conservation(vessel, out_dir, robust=True),
             plot_segment_cv(vessel, out_dir),
             plot_subject_summary(subject, out_dir),
             plot_consensus_junctions(flow, out_dir),
+            plot_consensus_junctions(flow, out_dir, robust=True),
         ) if path is not None
     ]
 
@@ -542,13 +596,20 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
         from nvitk.pipes.qvtpy.stage9_autoqc import consensus_junction_report
 
         consensus = consensus_junction_report(flow)
+        trimmed = consensus_junction_report(flow, robust=True)
         if not consensus.empty:
-            shown = consensus.loc[:, [
-                "label", "n", "slope", "slope_ci_low", "slope_ci_high", "r",
-                "mean_rel_residual", "slope_includes_one",
-            ]]
+            columns = ["label", "n", "slope", "slope_ci_low", "slope_ci_high", "r",
+                       "mean_rel_residual", "slope_includes_one"]
             click.echo("\nJunction internal consistency (inflow regressed on outflow):")
-            click.echo(shown.round(4).to_string(index=False))
+            click.echo(consensus.loc[:, columns].round(4).to_string(index=False))
+            if not trimmed.empty:
+                click.echo(
+                    "\nSame fit with outliers fenced out "
+                    "(leverage check — a slope that moves here was set by a handful of points):"
+                )
+                click.echo(
+                    trimmed.loc[:, [*columns, "n_trimmed"]].round(4).to_string(index=False)
+                )
             failed = consensus.loc[~consensus["slope_includes_one"], "label"].tolist()
             if failed:
                 click.echo(
@@ -558,6 +619,7 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
                 )
             if export_csv:
                 consensus.to_csv(out_dir / "qc_consensus_junctions.csv", index=False)
+                trimmed.to_csv(out_dir / "qc_consensus_junctions_trimmed.csv", index=False)
                 log.info("Wrote %s", out_dir / "qc_consensus_junctions.csv")
 
     if not written:

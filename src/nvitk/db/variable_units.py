@@ -66,6 +66,8 @@ CURATED_VARIABLE_UNITS: list[dict[str, Any]] = [
     {"variable_id": "ri", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "dimensionless"},
     {"variable_id": "flow_mean", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "mL/min"},
     {"variable_id": "flow_tseries", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "mL/min"},
+    {"variable_id": "cross_section_area", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "mm2"},
+    {"variable_id": "velocity_mean", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "mm/s"},
     {
         "variable_id": "pwv",
         "domain": "image",

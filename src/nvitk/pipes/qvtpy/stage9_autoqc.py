@@ -388,11 +388,35 @@ CONSENSUS_JUNCTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = 
 CONSENSUS_SEGMENTS: tuple[str, ...] = ("lica", "rica", "sss")
 
 
+def robust_range(values: Any, *, k: float = 3.0) -> tuple[float, float]:
+    """
+    Tukey fences ``[Q1 − k·IQR, Q3 + k·IQR]`` — the window holding the bulk of a distribution.
+
+    Preferred over a fixed percentile trim because it does not need the *proportion* of outliers to
+    be known in advance: clipping the outer 1% does nothing when 2% of the values are absurd, while
+    the fences sit at a fixed distance from the quartiles however many outliers there are. ``k=3``
+    is the conventional "extreme outlier" fence.
+
+    Returns ``(-inf, inf)`` when fewer than four finite values make quartiles meaningless.
+    """
+    x = pd.to_numeric(pd.Series(values), errors="coerce").replace(
+        [np.inf, -np.inf], np.nan
+    ).dropna()
+    if x.size < 4:
+        return (float("-inf"), float("inf"))
+    q1, q3 = (float(v) for v in np.percentile(x, [25, 75]))
+    iqr = q3 - q1
+    if iqr <= 0:
+        return (float("-inf"), float("inf"))
+    return (q1 - k * iqr, q3 + k * iqr)
+
+
 def consensus_junction_report(
     frame: pd.DataFrame,
     *,
     flow_column: str = "flow_ml_min",
     junctions: Sequence[tuple[str, tuple[str, ...], tuple[str, ...]]] | None = None,
+    robust: bool = False,
 ) -> pd.DataFrame:
     """
     Cohort-level junction consistency: inlet flow regressed on outlet flow, one row per junction.
@@ -414,20 +438,27 @@ def consensus_junction_report(
         :func:`load_flow_measurements` returns them after renaming.
     junctions : sequence, optional
         ``(key, inlet_nodes, outlet_nodes)`` triples. Defaults to :data:`CONSENSUS_JUNCTIONS`.
+    robust : bool
+        Drop pairs outside the :func:`robust_range` fences of **either** axis before fitting. A
+        single implausible flow — a segmentation that leaked and reported 10⁶ mL/min — sits at
+        enormous leverage and can set the slope on its own, so the fenced fit is the honest
+        sensitivity check. It is a *different estimate*, not a redrawn view: report it beside the
+        full one, never instead of it.
 
     Returns
     -------
     pandas.DataFrame
         One row per checkable junction: ``junction``, ``label``, ``inlets``, ``outlets``, ``n``,
-        ``slope`` with CI, ``intercept`` with CI, ``r``, ``p_value``, ``mean_rel_residual``, and
-        ``slope_includes_one`` — the actual pass/fail of the check.
+        ``slope`` with CI, ``intercept`` with CI, ``r``, ``p_value``, ``mean_rel_residual``,
+        ``slope_includes_one`` — the actual pass/fail of the check — and ``n_trimmed``, how many
+        pairs the trim removed.
     """
     from nvitk.measure.hemodynamics import junction_consistency_regression
     from nvitk.stats.vessel_network import CONSERVATION_RULES, canonical_node
 
     columns = [
-        "junction", "label", "inlets", "outlets", "n", "slope", "slope_ci_low", "slope_ci_high",
-        "intercept", "intercept_ci_low", "intercept_ci_high", "r", "p_value",
+        "junction", "label", "inlets", "outlets", "n", "n_trimmed", "slope", "slope_ci_low",
+        "slope_ci_high", "intercept", "intercept_ci_low", "intercept_ci_high", "r", "p_value",
         "mean_rel_residual", "slope_includes_one",
     ]
     if frame is None or frame.empty or flow_column not in frame.columns:
@@ -448,9 +479,14 @@ def consensus_junction_report(
         # A subject counts only when every vessel of the junction was measured — summing over a
         # missing outlet would manufacture a conservation failure out of an absent column.
         block = wide.loc[:, [*inlets, *outlets]].dropna()
-        stats = junction_consistency_regression(
-            block[list(inlets)].sum(axis=1), block[list(outlets)].sum(axis=1)
-        )
+        x = block[list(inlets)].sum(axis=1)
+        y = block[list(outlets)].sum(axis=1)
+
+        n_full = int(len(x))
+        if robust and n_full >= 10:
+            keep = x.between(*robust_range(x)) & y.between(*robust_range(y))
+            x, y = x[keep], y[keep]
+        stats = junction_consistency_regression(x, y)
         rule = CONSERVATION_RULES.get(key)
         includes_one = (
             bool(stats["slope_ci_low"] <= 1.0 <= stats["slope_ci_high"])
@@ -463,6 +499,7 @@ def consensus_junction_report(
             "inlets": " + ".join(inlets),
             "outlets": " + ".join(outlets),
             "slope_includes_one": includes_one,
+            "n_trimmed": n_full - int(len(x)),
             **stats,
         })
 
@@ -906,6 +943,76 @@ def load_flow_measurements(
     return out.groupby(["subject_uid", "region_id"], as_index=False)["value"].mean()
 
 
+def purge_subject_qc(
+    repo: Any,
+    subjects: Sequence[str],
+    *,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """
+    Drop every ``qc_*`` row this stage owns for *subjects*, so a re-run cannot leave stale values.
+
+    The upsert that follows overwrites any row whose
+    ``(subject_uid, region_id, variable_id, frame_index)`` it re-emits — but a metric that was
+    computable last time and is **not** this time is simply not re-emitted, and its old value would
+    survive. That is the dangerous case: a junction that no longer has all its vessels stops
+    producing a ``qc_conservation`` row, and without this purge the dataset keeps reporting the
+    previous run's residual as if it were current.
+
+    Absence is the honest representation of "not evaluated", so the subjects in scope are cleared
+    first and only what this run actually computed is written back.
+
+    Only the variables in :data:`QC_VARIABLES` and only the subjects passed in are touched — every
+    other measurement, and every other subject's QC, is left alone. Rows are matched on
+    ``variable_id`` regardless of ``pipeline_id``: this stage is the sole producer of ``qc_*``, so a
+    row carrying a different pipeline id is a leftover from an earlier naming, not a parallel result.
+
+    Returns
+    -------
+    dict
+        ``{table: rows_removed}`` for the tables that actually changed.
+    """
+    wanted = {str(s) for s in subjects}
+    removed: dict[str, int] = {}
+    if not wanted:
+        return removed
+
+    for table in sorted({t for t in QC_VARIABLES.values()}):
+        variables = {v for v, t in QC_VARIABLES.items() if t == table}
+        try:
+            # Parquet, not SQLite: the index may lag when a prior write skipped the rebuild.
+            frame = repo.get(table, cohort_id=False, use_sqlite=False)
+        except Exception as exc:
+            log.warning("autoqc: could not read %s to clear previous QC rows (%s).", table, exc)
+            continue
+        if frame is None or frame.empty:
+            continue
+        if not {"variable_id", "subject_uid"} <= set(frame.columns):
+            continue
+        stale = frame["variable_id"].astype(str).isin(variables) & frame[
+            "subject_uid"
+        ].astype(str).isin(wanted)
+        n_stale = int(stale.sum())
+        if not n_stale:
+            continue
+        removed[table] = n_stale
+        if not dry_run:
+            repo.write_table(
+                table,
+                frame.loc[~stale],
+                provenance={"importer": STAGE_NAME, "action": "purge_stale_qc"},
+                build_sqlite_index=False,
+            )
+    if removed:
+        log.info(
+            "autoqc: cleared %s previous QC row(s) for %d subject(s)%s.",
+            ", ".join(f"{n} from {t}" for t, n in sorted(removed.items())),
+            len(wanted),
+            " (dry run — nothing removed)" if dry_run else "",
+        )
+    return removed
+
+
 def publish_autoqc(
     repo: Any,
     vessel_qc: pd.DataFrame,
@@ -913,6 +1020,7 @@ def publish_autoqc(
     *,
     pipeline_id: str = "qvtpy",
     dry_run: bool = False,
+    purge_existing: bool = True,
 ) -> dict[str, int]:
     """
     Write the QC metrics into the dataset as ordinary measurements.
@@ -921,6 +1029,10 @@ def publish_autoqc(
     same schema, provenance and catalog registration as any importer-produced variable and
     become immediately queryable — which is what lets the Statmodels filter and the QC panel's
     colour picker use them without knowing this stage exists.
+
+    With *purge_existing* (the default) every ``qc_*`` row for the subjects being published is
+    dropped first — see :func:`purge_subject_qc` for why an upsert alone is not enough. Pass
+    ``False`` only to add QC for new subjects without touching what is already stored.
 
     The SQLite index is rebuilt **once, after every table is written**, not per variable. Each
     rebuild re-reads the whole Parquet table, so leaving the default on would do it eight times for
@@ -943,6 +1055,17 @@ def publish_autoqc(
     written: dict[str, int] = {}
     touched: set[str] = set()
     provenance = {"importer": STAGE_NAME, "parent_variable": "flow_mean"}
+
+    if purge_existing:
+        subjects = {
+            str(s)
+            for frame in (vessel_qc, subject_qc)
+            if frame is not None and "subject_uid" in getattr(frame, "columns", [])
+            for s in frame["subject_uid"].astype(str)
+        }
+        # A purge that removes rows is itself a change to the table, so the SQLite index has to be
+        # rebuilt even when no variable ends up producing a row to write.
+        touched.update(purge_subject_qc(repo, sorted(subjects), dry_run=dry_run))
 
     for variable in (v for v, t in QC_VARIABLES.items() if t == "image_measurements"):
         if variable not in vessel_qc.columns:
@@ -1016,12 +1139,18 @@ def run_autoqc(
     dry_run: bool = False,
     results: Any = None,
     subjects: Sequence[str] | None = None,
+    purge_existing: bool = True,
 ) -> dict[str, Any]:
     """
     Compute and publish every automatic QC metric for the cohort in *repo*.
 
     Parameters
     ----------
+    purge_existing : bool
+        Clear each published subject's previous ``qc_*`` rows before writing, so a metric that is
+        no longer computable disappears instead of keeping its stale value
+        (:func:`purge_subject_qc`). Turn off only to add QC for new subjects without touching
+        what is already stored.
     results : ResultsSource, optional
         Where to look for measurements the dataset does not carry, and for ``pitc_profile.csv``
         station flows used by the along-segment CV check. Stage 6 writes the numbers to disk
@@ -1113,7 +1242,9 @@ def run_autoqc(
         segment_cv=segment_cv if not segment_cv.empty else None,
     )
     subject = compute_subject_qc(vessel, config=config)
-    written = publish_autoqc(repo, vessel, subject, dry_run=dry_run)
+    written = publish_autoqc(
+        repo, vessel, subject, dry_run=dry_run, purge_existing=purge_existing
+    )
 
     n_flagged = int(pd.to_numeric(vessel["qc_flag"], errors="coerce").fillna(0).sum())
     n_subjects_flagged = int(pd.to_numeric(subject["qc_subject_flag"], errors="coerce").fillna(0).sum())
@@ -1303,6 +1434,16 @@ def _open_repo(dataset: Any = None) -> Any:
     help="Score only what the dataset carries; never read the results tree.",
 )
 @click.option(
+    "--purge-existing/--no-purge-existing",
+    default=True,
+    show_default=True,
+    help=(
+        "Clear each scored subject's previous qc_* rows before writing. Keeps the dataset honest "
+        "on a re-run: a metric that is no longer computable disappears instead of keeping its "
+        "stale value. Disable to add QC for new subjects without touching existing rows."
+    ),
+)
+@click.option(
     "--dry-run/--write",
     default=False,
     show_default=True,
@@ -1334,6 +1475,7 @@ def main(
     xnat_user: str | None,
     xnat_password: str | None,
     no_recover: bool,
+    purge_existing: bool,
     dry_run: bool,
     report: Path | None,
 ) -> None:
@@ -1372,7 +1514,7 @@ def main(
     try:
         result = run_autoqc(
             repo, config=config, pipeline=pipeline, dry_run=dry_run,
-            results=source, subjects=wanted,
+            results=source, subjects=wanted, purge_existing=purge_existing,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1424,6 +1566,7 @@ __all__ = [
     "infer_flow_scale",
     "load_flow_measurements",
     "publish_autoqc",
+    "purge_subject_qc",
     "main",
     "run_autoqc",
 ]

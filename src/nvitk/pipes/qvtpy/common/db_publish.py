@@ -6,9 +6,10 @@ for the same ``(subject_uid, pipeline_id, variable_id, region_id, frame_index)``
 
 Sources (written by :mod:`nvitk.pipes.qvtpy.stage6_measure`):
 
-- ``loc_measurements.csv`` — per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min), and the
-  per-frame ``flow_tseries`` (mL/min). Includes surviving PCOMMs (``LPCOMM`` /
-  ``RPCOMM``) when stage-5 placed mid-LOCs; ACOMM is never measured.
+- ``loc_measurements.csv`` — per-LOC ``pi``, ``ri``, ``flow_mean`` (mL/min),
+  ``cross_section_area`` (mm2), ``velocity_mean`` (mm/s), and the per-frame
+  ``flow_tseries`` (mL/min). Includes surviving PCOMMs (``LPCOMM`` / ``RPCOMM``) when
+  stage-5 placed mid-LOCs; ACOMM is never measured.
 - ``vessel_hemodynamics.csv`` — per-root ``pitc_slope`` / ``pitc_intercept`` / ``pwv``
   (Bjornfoot) / ``pwv_fielding_xcor`` and per-branch ``damping_index``.
 """
@@ -190,6 +191,17 @@ def _rows_from_loc_measurements(
         mean_flow = _finite(row.get("loc_mean_flow_ml_s"))
         if mean_flow is not None:
             scalar_map["flow_mean"] = (mean_flow * _ML_S_TO_ML_MIN, "mL/min")
+        # Stage 9 gates every flow check on caliber: a vessel under the 0.8 mm
+        # hypoplasia threshold carries almost no flow by anatomy, and without an
+        # area it is scored against a patent-vessel band instead.
+        area = _finite(row.get("loc_cross_section_area_mm2"))
+        if area is not None:
+            scalar_map["cross_section_area"] = (area, "mm2")
+        # Reported as a magnitude (stage 6 abs'd the series), so a flipped plane
+        # normal cannot turn a normal vessel into a negative mean velocity.
+        mean_velocity = _finite(row.get("loc_mean_velocity_mm_s"))
+        if mean_velocity is not None:
+            scalar_map["velocity_mean"] = (mean_velocity, "mm/s")
         for var, (val, unit) in scalar_map.items():
             if val is None:
                 continue

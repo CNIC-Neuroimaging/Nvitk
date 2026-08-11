@@ -120,6 +120,16 @@ SKELETON_MAX_STEPS = 300
 PRUNE_TERMINAL_SPURS = True
 PRUNE_SPUR_LENGTH_MM = 2.0
 
+# Hysteresis: a lesion is *confirmed* at the core threshold (STENOSIS_THRESHOLD_PCT /
+# ENLARGEMENT_THRESHOLD_PCT) but *delineated* at a looser support contour, so a short severe
+# lesion whose core footprint is under the minimum length can still be accepted on the strength
+# of its shoulders. The support tier is therefore expressed as a FRACTION of the core threshold:
+# an absolute constant silently disables the mechanism whenever it lands above the core (the
+# `min(support, core)` guard then collapses the two contours onto each other), which is exactly
+# what the previous absolute 25.0 did against a 10 % core.
+STENOSIS_SUPPORT_FRACTION = 0.5
+ENLARGEMENT_SUPPORT_FRACTION = 0.5
+
 STENOSIS_MIN_LEN_MM = 3.0
 STENOSIS_EXCLUDE_END_MM = 2.0
 # Larger end-exclusion applied only to the CoreCandidate / SupportCandidate
@@ -128,18 +138,21 @@ STENOSIS_EXCLUDE_END_MM = 2.0
 # without touching the main detection threshold.
 STENOSIS_CANDIDATE_EXCLUDE_END_MM = 5.0
 STENOSIS_MAX_INTERNAL_GAP_MM = 1.5
-STENOSIS_SUPPORT_THRESHOLD_PCT = 25.0
+STENOSIS_SUPPORT_THRESHOLD_PCT = STENOSIS_THRESHOLD_PCT * STENOSIS_SUPPORT_FRACTION
 STENOSIS_SEGMENT_REFERENCE_MARGIN_MM = 5.0
 ENLARGEMENT_MIN_LEN_MM = 5.0
-# Alternative acceptance criterion: a segment is kept when it spans at least
-# this many consecutive support-threshold points, even if its arc length is
-# below ENLARGEMENT_MIN_LEN_MM.  At 0.1 mm resampling, 3 points ≈ 0.3 mm.
-# Set to None to disable (pure mm-length filter only).
-ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS = 3
+# Alternative acceptance criterion: a segment is kept when its support-contour extent reaches
+# this arc length, even if it is below ENLARGEMENT_MIN_LEN_MM — focal saccular aneurysms are
+# genuinely short, so a flat 5 mm floor would miss them.
+#
+# Expressed in mm, NOT in points: the previous 3-point form meant 0.3 mm at the default 0.1 mm
+# resampling, which is below TOF voxel size and made ENLARGEMENT_MIN_LEN_MM dead config — any
+# 3-sample blip was reported as an enlargement. Set to None to disable (pure mm-length filter).
+ENLARGEMENT_MIN_SUPPORT_LENGTH_MM = 2.0
 ENLARGEMENT_EXCLUDE_END_MM = 3.0
 ENLARGEMENT_CANDIDATE_EXCLUDE_END_MM = 5.0
 ENLARGEMENT_MAX_INTERNAL_GAP_MM = STENOSIS_MAX_INTERNAL_GAP_MM
-ENLARGEMENT_SUPPORT_THRESHOLD_PCT = 25.0
+ENLARGEMENT_SUPPORT_THRESHOLD_PCT = ENLARGEMENT_THRESHOLD_PCT * ENLARGEMENT_SUPPORT_FRACTION
 SUPPRESS_ENLARGEMENT_NEAR_CENTERLINE_STARTS = True
 ENLARGEMENT_CENTERLINE_START_EXCLUDE_MM = None
 

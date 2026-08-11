@@ -24,7 +24,7 @@ QC_STATUS_VALUES = frozenset({"PENDING", "OK", "FAIL"})
 # Metrics shown in the QC review table (grouped UI key -> DB variable_id(s)).
 # One OK/FAIL in the UI expands to all listed variables for that region.
 QC_METRIC_VARIABLES: dict[str, tuple[str, ...]] = {
-    "loc": ("flow_mean", "flow_tseries", "pi", "ri"),
+    "loc": ("flow_mean", "flow_tseries", "pi", "ri", "cross_section_area", "velocity_mean"),
     "pitc": ("pitc_slope", "pitc_intercept"),
     "pwv": ("pwv", "pwv_fielding_xcor"),
 }

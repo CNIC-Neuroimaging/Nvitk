@@ -10,8 +10,8 @@ from scipy import ndimage as ndi
 
 from nvitk.measure.morphometrics_config import (
     ENLARGEMENT_MAX_INTERNAL_GAP_MM,
-    ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
     ENLARGEMENT_MIN_LEN_MM,
+    ENLARGEMENT_MIN_SUPPORT_LENGTH_MM,
     ENLARGEMENT_SUPPORT_THRESHOLD_PCT,
     ENLARGEMENT_TAPER_FIT_EXCLUDE_END_MM,
     ENLARGEMENT_THRESHOLD_PCT,
@@ -436,10 +436,15 @@ def detect_stenosis_segments(
         & np.isfinite(pct_per_point)
         & support_domain
     )
-    segments_point_idx = hysteresis_segments_from_min_length(
-        s, core, support, min_segment_mm, max_gap_mm=max_gap,
+    # Accept on the support contour (so a short severe lesion is not lost to the length rule),
+    # then report on the core contour.
+    segments_point_idx = clip_segments_to_core(
+        hysteresis_segments_from_min_length(
+            s, core, support, min_segment_mm, max_gap_mm=max_gap,
+        ),
+        core,
     )
-    accepted = support & mask_from_segments(len(r), segments_point_idx)
+    accepted = core & mask_from_segments(len(r), segments_point_idx)
     segments_s_mm = [(float(s[a]), float(s[b])) for a, b in segments_point_idx]
     reported_pct = stenosis_segment_percent(s, r, r_ref_per_point, segments_point_idx)
     pct_values = reported_pct[accepted & np.isfinite(reported_pct)]
@@ -480,14 +485,18 @@ def stenosis_pointwise(
             & np.isfinite(pct)
             & support_domain
         )
-        segments = hysteresis_segments_from_min_length(
-            s,
-            is_stenotic == 1,
-            support,
-            float(min_segment_mm),
-            max_gap_mm=max_gap,
+        core = is_stenotic == 1
+        segments = clip_segments_to_core(
+            hysteresis_segments_from_min_length(
+                s,
+                core,
+                support,
+                float(min_segment_mm),
+                max_gap_mm=max_gap,
+            ),
+            core,
         )
-        is_stenotic = (support & mask_from_segments(len(r), segments)).astype(int)
+        is_stenotic = (core & mask_from_segments(len(r), segments)).astype(int)
         pct_reported = stenosis_segment_percent(s, r, r_ref_per_point, segments)
         pct_reported[is_stenotic != 1] = 0.0
         return pct_reported, is_stenotic
@@ -560,7 +569,10 @@ def detect_enlargement_segments(
                 (pct_iter >= min(float(ENLARGEMENT_SUPPORT_THRESHOLD_PCT), float(threshold_pct)))
                 & np.isfinite(pct_iter) & detect_core
             )
-            segs_iter = hysteresis_segments_from_min_length(s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap, min_points=ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS)
+            segs_iter = hysteresis_segments_from_min_length(
+                s, core_iter, support_iter, min_segment_mm, max_gap_mm=max_gap,
+                min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
+            )
             new_mask = mask_from_segments(len(r), segs_iter) if segs_iter else np.zeros(len(r), dtype=bool)
             if np.array_equal(new_mask, lesion_mask):
                 break  # converged — reference and lesion map are stable
@@ -588,11 +600,15 @@ def detect_enlargement_segments(
         & np.isfinite(pct_per_point)
         & detect_core
     )
-    segments_point_idx = hysteresis_segments_from_min_length(
-        s, core, support, min_segment_mm, max_gap_mm=max_gap,
-        min_points=ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
+    # Accept on the support contour, report on the core contour (mirrors the stenosis path).
+    segments_point_idx = clip_segments_to_core(
+        hysteresis_segments_from_min_length(
+            s, core, support, min_segment_mm, max_gap_mm=max_gap,
+            min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
+        ),
+        core,
     )
-    accepted = support & mask_from_segments(len(r), segments_point_idx)
+    accepted = core & mask_from_segments(len(r), segments_point_idx)
     segments_s_mm = [(float(s[a]), float(s[b])) for a, b in segments_point_idx]
     pct_values = pct_per_point[accepted & np.isfinite(pct_per_point)]
     pct = float(np.nanmax(pct_values)) if len(pct_values) else 0.0
@@ -644,15 +660,19 @@ def enlargement_pointwise(
             & np.isfinite(pct)
             & detect_core
         )
-        segments = hysteresis_segments_from_min_length(
-            s,
-            is_enlarged == 1,
-            support,
-            float(min_segment_mm),
-            max_gap_mm=max_gap,
-            min_points=ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
+        core = is_enlarged == 1
+        segments = clip_segments_to_core(
+            hysteresis_segments_from_min_length(
+                s,
+                core,
+                support,
+                float(min_segment_mm),
+                max_gap_mm=max_gap,
+                min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
+            ),
+            core,
         )
-        is_enlarged = (support & mask_from_segments(len(r), segments)).astype(int)
+        is_enlarged = (core & mask_from_segments(len(r), segments)).astype(int)
         # Return 0 outside enlarged segments (mirrors stenosis_pointwise behaviour so
         # downstream interpolation in anatomic-split VTPs never sees all-NaN slices).
         pct_reported = np.zeros_like(r, dtype=float)
@@ -770,6 +790,52 @@ def mask_from_segments(n_points: int, segments: List[Tuple[int, int]]) -> np.nda
     return keep
 
 
+def points_for_length(s: np.ndarray, length_mm: Optional[float]) -> Optional[int]:
+    """Point count spanning *length_mm* at this path's own sampling step, or ``None``.
+
+    Lets a policy be stated in mm while :func:`flag_segments_from_min_length` still counts points,
+    so changing ``CENTERLINE_RESAMPLE_STEP_MM`` cannot silently retune a detection rule.
+    """
+    if length_mm is None:
+        return None
+    s = np.asarray(s, dtype=float)
+    if s.size < 2:
+        return None
+    step = float(np.nanmedian(np.diff(s)))
+    if not np.isfinite(step) or step <= 1e-9:
+        return None
+    # A run of n points spans (n-1) steps. The epsilon absorbs the float error in the median step
+    # (an arange at 0.1 mm medians to 0.0999…, which would otherwise round the count up by one).
+    n_intervals = int(np.ceil(float(length_mm) / step - 1e-6))
+    return max(2, n_intervals + 1)
+
+
+def clip_segments_to_core(
+    segments: List[Tuple[int, int]], core_flag: np.ndarray
+) -> List[Tuple[int, int]]:
+    """Trim each accepted segment to the span between its first and last core point.
+
+    The support contour decides *whether* a lesion is real and merges runs across small internal
+    dips; it should not widen what gets **reported**. Reporting the halo would inflate
+    ``*_length_total_mm`` and make "stenosis length" mean something other than "length narrowed by
+    at least the core threshold". Trimming keeps the merge (an internal sub-core dip stays inside
+    one segment) while pinning both ends to the core contour.
+
+    Segments holding no core point are dropped — they cannot occur via
+    :func:`hysteresis_segments_from_min_length`, which already requires one, but the guard keeps
+    this usable on any segment list.
+    """
+    core_flag = np.asarray(core_flag, dtype=bool)
+    out: List[Tuple[int, int]] = []
+    for start, end in segments:
+        start, end = int(start), int(end)
+        local = np.flatnonzero(core_flag[start:end + 1])
+        if local.size == 0:
+            continue
+        out.append((start + int(local[0]), start + int(local[-1])))
+    return out
+
+
 def filter_flag_by_min_length(
     s: np.ndarray,
     flag: np.ndarray,
@@ -836,7 +902,7 @@ def refresh_enlargement_summary_from_flags(res: dict) -> None:
         flag == 1,
         ENLARGEMENT_MIN_LEN_MM,
         max_gap_mm=ENLARGEMENT_MAX_INTERNAL_GAP_MM,
-        min_points=ENLARGEMENT_MIN_CONSECUTIVE_SUPPORT_POINTS,
+        min_points=points_for_length(s, ENLARGEMENT_MIN_SUPPORT_LENGTH_MM),
     )
     if segments:
         keep = np.zeros(len(flag), dtype=bool)
