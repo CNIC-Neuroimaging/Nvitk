@@ -85,10 +85,16 @@ from nvitk.stats.sem import (
     path_effects,
     plot_sem_network,
     plot_sem_paths,
+    resolve_network_syntax,
     sem_backend_status,
     sem_paths_frame,
 )
-from nvitk.stats.vessel_network import VESSEL_NODES, canonical_node, sem_model_syntax
+from nvitk.stats.vessel_network import (
+    VESSEL_NODES,
+    canonical_node,
+    network_frame,
+    sem_model_syntax,
+)
 from nvitk.stats import (
     GLM_FAMILIES,
     NONLINEAR_MODELS,
@@ -125,6 +131,7 @@ from nvitk.stats import (
     validate_mmrm_data,
     render_mixedlm_info,
     subject_attribute_entries,
+    subject_image_annotation_entries,
 )
 from nvitk.stats.frame_ops import (
     DerivedColumn,
@@ -269,6 +276,14 @@ class StatmodelsWindow(QMainWindow):
         self._derived: list[DerivedColumn] = []
         self._combinations: list[RegionCombination] = []
         self._filter_report: list[dict[str, Any]] = []
+        # Wide = one row per subject, one column per vessel. Applied *after* derived columns and
+        # filters, so a vessel-wise QC filter still gets to act on the rows it was written for.
+        self._wide_mode: bool = False
+        self._wide_coverage: pd.DataFrame | None = None
+        self._wide_complete: int = 0
+        # Columns hidden from the working frame. Held as names rather than by dropping them from
+        # ``_analysis_df``, so a reload or a restore brings them back without re-querying.
+        self._dropped_columns: set[str] = set()
 
         # ---- result state -----------------------------------------------------
         self._last_result = None
@@ -750,6 +765,14 @@ class StatmodelsWindow(QMainWindow):
         )
         self._btn_combinations.clicked.connect(lambda: self._on_edit_combinations())
         row.addWidget(self._btn_combinations)
+        self._btn_reshape = QPushButton("Reshape → wide")
+        self._btn_reshape.setToolTip(
+            "Switch between one row per subject × region (long) and one row per subject with a "
+            "column per vessel (wide). Path models need the wide shape — an equation like "
+            "'lmca ~ lica' compares two columns of the same row. Every other engine wants long."
+        )
+        self._btn_reshape.clicked.connect(self._on_reshape_frame)
+        row.addWidget(self._btn_reshape)
         self._btn_export = QPushButton("Export table…")
         self._btn_export.setToolTip(
             "Save exactly what this table shows — measurements joined, derived columns computed, "
@@ -794,6 +817,8 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.columnPlotRequested.connect(self._on_column_plot)
         self._frame_view.qcFilterRequested.connect(self._on_qc_filter)
         self._frame_view.summaryRequested.connect(self._on_export_summary)
+        self._frame_view.dropRequested.connect(self._on_drop_column)
+        self._frame_view.restoreRequested.connect(self._on_restore_columns)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
         self._btn_derived.clicked.connect(lambda *_: self._on_edit_derived())
         self._btn_export.clicked.connect(self._on_export_frame)
@@ -854,6 +879,9 @@ class StatmodelsWindow(QMainWindow):
             self._clinical_list,
             [
                 *subject_attribute_entries(self._repo),
+                # Manual anatomy annotations (cow_config / venous_config): image variables, but one
+                # value per subject, so they belong with the covariates rather than the measurements.
+                *subject_image_annotation_entries(self._repo),
                 *self._repo.catalog.variable_entries(domain="clinical"),
             ],
         )
@@ -976,12 +1004,25 @@ class StatmodelsWindow(QMainWindow):
 
         rules = self._chips.rules()
         working, report = apply_filter_rules(derived_frame, rules)
+
+        # Reshape last: filters and derived columns are written against long rows, so pivoting
+        # before them would put their targets out of reach.
+        long_rows = len(working)
+        if self._wide_mode:
+            working = self._to_wide(working)
+
+        # Dropped columns go last of all, so a rule or a derived column defined on one still
+        # evaluated above — dropping hides a column from the model, it does not undo the frame.
+        drop = [c for c in self._dropped_columns if c in working.columns]
+        if drop:
+            working = working.drop(columns=drop)
         self._working_df = working
         self._filter_report = report
 
         self._chips.set_rules(rules, report)
-        self._chips.set_counts(len(working), len(derived_frame))
+        self._chips.set_counts(long_rows, len(derived_frame))
         self._sync_filter_toggle()
+        self._frame_view.set_dropped(self._dropped_columns)
         self._frame_view.set_frame(
             working,
             filtered_columns=filtered_columns(rules),
@@ -992,7 +1033,8 @@ class StatmodelsWindow(QMainWindow):
         self._mediation_form.set_columns(working)
 
         if announce:
-            notify(f"Filters applied: {len(working)} of {len(derived_frame)} rows.")
+            shape = f", reshaped to {len(working)} subject rows" if self._wide_mode else ""
+            notify(f"Filters applied: {long_rows} of {len(derived_frame)} rows{shape}.")
 
     def _sync_column_combos(self, df: pd.DataFrame | None) -> None:
         """
@@ -1164,6 +1206,160 @@ class StatmodelsWindow(QMainWindow):
         return next(
             (c for c in ("territory", "group_key", "region_id") if c in frame.columns), "territory"
         )
+
+    def _to_wide(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Pivot a long frame to one row per subject and one column per vessel.
+
+        The cell value is the primary measurement; subject-level covariates ride along, so
+        ``age_c`` and ``sex`` stay available to every structural equation. Per-vessel coverage is
+        recorded in ``self._wide_coverage`` — with a dozen vessels in one model, listwise deletion
+        is decided by whichever vessel is measured least often, and that is the number worth
+        knowing before blaming the model.
+
+        Returns the frame unchanged, with a warning, when it cannot be pivoted: a failed reshape
+        should not empty the table the user is looking at.
+        """
+        if df is None or df.empty:
+            return df
+
+        measurements = self._measurements.columns()
+        value_column = next((c for c in measurements if c in df.columns), "")
+        region_column = self._region_column_name()
+        if not value_column or region_column not in df.columns or "subject_uid" not in df.columns:
+            notify(
+                "Cannot reshape: this needs 'subject_uid', a region column and a measurement.",
+                error=True,
+            )
+            return df
+
+        try:
+            wide = network_frame(
+                df,
+                value_column=value_column,
+                region_column=region_column,
+                subject_column="subject_uid",
+            )
+        except ValueError as exc:
+            notify(f"Cannot reshape: {exc}", error=True)
+            return df
+
+        vessels = list(wide.attrs.get("vessels", []))
+        n_subjects = len(wide)
+        present = wide.loc[:, vessels].notna() if vessels else pd.DataFrame(index=wide.index)
+        self._wide_coverage = pd.DataFrame({
+            "vessel": vessels,
+            "n_measured": [int(present[v].sum()) for v in vessels],
+            "pct": [100.0 * float(present[v].mean()) for v in vessels],
+        }).sort_values("n_measured") if vessels else None
+        self._wide_complete = int(present.all(axis=1).sum()) if vessels else 0
+
+        wide = wide.reset_index()
+        wide.attrs["vessels"] = vessels
+        wide.attrs["value_column"] = value_column
+        log.info(
+            "Wide frame: %d subject(s) × %d vessel(s); %d complete across every vessel.",
+            n_subjects, len(vessels), self._wide_complete,
+        )
+        return wide
+
+    def _coverage_note(self) -> str:
+        """One line naming the vessels that decide listwise deletion, or ``""``."""
+        coverage = self._wide_coverage
+        if coverage is None or coverage.empty:
+            return ""
+        sparse = coverage.head(3)
+        return "  |  sparsest: " + ", ".join(
+            f"{r.vessel} {r.pct:.0f}%" for r in sparse.itertuples()
+        )
+
+    def _on_reshape_frame(self) -> None:
+        """Toggle the analysis dataframe between long and wide (one column per vessel)."""
+        if self._analysis_df is None:
+            notify("Load the data first.", error=True)
+            return
+
+        self._wide_mode = not self._wide_mode
+        self._recompute_frame(announce=False)
+
+        if not self._wide_mode:
+            self._wide_coverage = None
+            self._btn_reshape.setText("Reshape → wide")
+            self._status.setText("Analysis dataframe: long (one row per subject × region).")
+            notify("Reshaped to long.")
+            return
+
+        self._btn_reshape.setText("Reshape → long")
+        frame = self._working_df
+        vessels = list(frame.attrs.get("vessels", [])) if frame is not None else []
+        if not vessels:
+            # The pivot bailed out and returned the long frame — keep the button honest.
+            self._wide_mode = False
+            self._btn_reshape.setText("Reshape → wide")
+            return
+
+        complete = self._wide_complete
+        self._status.setText(
+            f"Analysis dataframe: wide — {len(frame)} subject(s) × {len(vessels)} vessel column(s) "
+            f"of {frame.attrs.get('value_column')}; {complete} complete across every vessel."
+            + self._coverage_note()
+        )
+        if complete == 0:
+            notify(
+                "Reshaped to wide, but no subject has every vessel measured — a path model over "
+                "all of them would have nothing to fit. Narrow the model to the well-covered "
+                "vessels.",
+                error=True,
+            )
+        else:
+            notify(f"Reshaped to wide: {len(vessels)} vessel columns, {complete} complete rows.")
+
+    def _structural_columns(self) -> set[str]:
+        """
+        Columns the frame is built on, which dropping would break rather than simplify.
+
+        The subject key, the region key and the primary measurement are what every later stage
+        addresses: filters join on them, the reshape pivots on them, and the measurement is the
+        cell value. Removing one does not give a smaller frame, it gives a frame nothing can be
+        rebuilt from.
+        """
+        structural = {"subject_uid", self._region_column_name()}
+        measurements = self._measurements.columns()
+        if measurements:
+            structural.add(measurements[0])
+        return structural
+
+    def _on_drop_column(self, column: str) -> None:
+        """Hide a column from the working frame, leaving the dataset untouched."""
+        if not column:
+            return
+        if column in self._structural_columns():
+            notify(
+                f"“{column}” is a key the frame is built on (subject, region or the primary "
+                f"measurement) — dropping it would leave nothing to rebuild from.",
+                error=True,
+            )
+            return
+
+        self._dropped_columns.add(column)
+        used_by = [d.name for d in self._derived if column in getattr(d, "expression", "")]
+        self._recompute_frame(announce=False)
+        note = f" It is still read by {', '.join(used_by)}." if used_by else ""
+        self._status.setText(
+            f"Dropped “{column}” — {len(self._dropped_columns)} column(s) hidden. "
+            f"The dataset is unchanged; restore from any column's right-click menu.{note}"
+        )
+        notify(f"Dropped {column}.{note}")
+
+    def _on_restore_columns(self) -> None:
+        """Put every dropped column back."""
+        if not self._dropped_columns:
+            return
+        restored = sorted(self._dropped_columns)
+        self._dropped_columns.clear()
+        self._recompute_frame(announce=False)
+        self._status.setText(f"Restored {len(restored)} column(s): {', '.join(restored)}.")
+        notify(f"Restored {len(restored)} column(s).")
 
     def _on_export_summary(self, column: str, by: str) -> None:
         """
@@ -1773,6 +1969,10 @@ class StatmodelsWindow(QMainWindow):
             detail = f"  |  {meta.get('family_label')} / {meta.get('link_label')} link"
         elif kind == ANALYSIS_OLS and meta.get("robust"):
             detail = f"  |  {meta['robust']} standard errors"
+        elif kind == ANALYSIS_SEM:
+            detail = f"  |  wide frame on {meta.get('value_column')}" + self._coverage_note()
+            if meta.get("resolved_names"):
+                detail += f"  |  resolved {meta['resolved_names']}"
         self._status.setText(
             f"Fitted {label}: n={meta.get('n_rows')}"
             + (f" (dropped {meta.get('n_rows_dropped')} incomplete)" if meta.get("n_rows_dropped") else "")
@@ -1786,19 +1986,36 @@ class StatmodelsWindow(QMainWindow):
     def _fit_formula_model(self, kind: str):
         """Fit MixedLM / OLS / GLM from the shared formulation panel."""
         formula = self._formula.toPlainText().strip()
-        df, outcome = resolve_outcome_column(
-            self._working_df.copy(), formula, self._measurements.columns()
-        )
         groups = self._groups.text().strip() or "group_key"
 
+        # A path model's left-hand sides are vessels, not the outcome column, so the usual
+        # LHS-to-measurement resolution would rename the very column the model reads.
         if kind == ANALYSIS_SEM:
+            wide = self._working_df
+            if wide is None or wide.empty:
+                raise ValueError("Load the data before fitting a path model.")
+            if not self._wide_mode:
+                raise ValueError(
+                    "A path model needs one column per vessel, and this frame is long (one row "
+                    "per subject × region). Press 'Reshape → wide' on the analysis dataframe."
+                )
+            # Published labels come in several spellings for one artery; map them onto the
+            # columns the reshape produced so a hand-typed model still fits.
+            syntax, renames = resolve_network_syntax(formula, wide.columns)
             spec = SemSpec(
-                syntax=formula,
+                syntax=syntax,
                 backend=str(self._sem_backend.currentData() or ""),
                 standardize=self._sem_standardize.isChecked(),
             )
-            result, model_df, meta = fit_sem(data=df, spec=spec)
-            return result, model_df, meta, outcome, groups
+            result, model_df, meta = fit_sem(data=wide, spec=spec)
+            if renames:
+                meta["resolved_names"] = ", ".join(f"{k}→{v}" for k, v in sorted(renames.items()))
+            meta["value_column"] = wide.attrs.get("value_column", "")
+            return result, model_df, meta, meta["value_column"], groups
+
+        df, outcome = resolve_outcome_column(
+            self._working_df.copy(), formula, self._measurements.columns()
+        )
         if kind == ANALYSIS_MRF:
             result, model_df, meta = fit_mrf(
                 data=df,
@@ -2400,9 +2617,10 @@ class StatmodelsWindow(QMainWindow):
             notify(str(exc), error=True)
             return
         self._formula.setPlainText(syntax)
+        measurement = (self._measurements.columns() or ["the primary measurement"])[0]
         self._status.setText(
-            f"Network syntax for {len(nodes)} vessel(s). It needs one column per vessel — pivot the "
-            f"frame with a region combination, or fit on a wide frame."
+            f"Network syntax for {len(nodes)} vessel(s). Fitting pivots the frame to one row per "
+            f"subject with {measurement} spread across the vessel columns."
         )
 
     def _plot_sem(self) -> None:
@@ -2690,6 +2908,10 @@ class StatmodelsWindow(QMainWindow):
             "filters": [rule.to_dict() for rule in self._chips.rules()],
             "derived": [column.to_dict() for column in self._derived],
             "combinations": [c.to_dict() for c in self._combinations],
+            # Part of the frame recipe, not a view preference: a model fitted on a wide frame with
+            # columns dropped cannot be reproduced from a long frame that still has them.
+            "dropped_columns": sorted(self._dropped_columns),
+            "wide": self._wide_mode,
             "analysis_type": self._analysis_kind(),
             "mm_formula": self._formula.toPlainText().strip(),
             "groups": self._groups.text().strip(),
@@ -2764,6 +2986,9 @@ class StatmodelsWindow(QMainWindow):
             if dropped:
                 notify(f"Skipped untrusted expression column(s): {', '.join(dropped)}", error=True)
         self._derived = derived
+        self._dropped_columns = {str(c) for c in cfg.get("dropped_columns") or []}
+        self._wide_mode = bool(cfg.get("wide", False))
+        self._btn_reshape.setText("Reshape → long" if self._wide_mode else "Reshape → wide")
 
         for key, widget in (
             ("mm_formula", self._formula),

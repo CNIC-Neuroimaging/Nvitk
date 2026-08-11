@@ -34,6 +34,8 @@ from ._statmodels_frames import (
     resolve_feature_id,
     subject_attribute_columns,
     subject_attribute_entries,
+    subject_image_annotation_columns,
+    subject_image_annotation_entries,
     clinical_measurement_variable_ids,
 )
 from .frame_ops import (
@@ -363,6 +365,8 @@ __all__ = [
     "resolve_feature_id",
     "subject_attribute_columns",
     "subject_attribute_entries",
+    "subject_image_annotation_columns",
+    "subject_image_annotation_entries",
     "clinical_measurement_variable_ids",
     "IMAGE_VARIABLE_IDS",
     "IMAGING_VARIABLE_TERRITORY_RULE",

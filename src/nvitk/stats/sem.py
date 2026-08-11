@@ -137,6 +137,54 @@ def sem_backend_status() -> SemBackendStatus:
 # ---------------------------------------------------------------------------
 # Specification
 # ---------------------------------------------------------------------------
+def resolve_network_syntax(syntax: str, columns: Sequence[str]) -> tuple[str, dict[str, str]]:
+    """
+    Rewrite vessel names in *syntax* onto the columns a network frame actually carries.
+
+    A path model is typed by hand, and the published labels have several spellings for the same
+    vessel — ``BASILAR``, ``BASI`` and ``basi`` are one artery, and a single model often mixes them.
+    The network frame names its columns by canonical node, so every vessel token that is not already
+    a column is resolved through :func:`~nvitk.stats.vessel_network.canonical_node` and rewritten
+    when that lands on one.
+
+    Tokens that are not vessels (``age_c``, ``sex``, the operators) are left untouched, as is any
+    token that already matches a column — a real column always wins over a rename.
+
+    Returns
+    -------
+    tuple of (str, dict)
+        The rewritten syntax, and the ``{written: resolved}`` map of what changed.
+    """
+    from nvitk.stats.vessel_network import canonical_node
+
+    available = {str(c) for c in columns}
+    renames: dict[str, str] = {}
+
+    def _resolve(match: "re.Match[str]") -> str:
+        token = match.group(0)
+        if token in available:
+            return token
+        node = canonical_node(token)
+        if node and node in available:
+            renames[token] = node
+            return node
+        return token
+
+    # Comments may hold vessel names in prose; rewriting inside them would be noise.
+    rewritten = []
+    for line in syntax.splitlines():
+        body, sep, comment = line.partition("#")
+        rewritten.append(re.sub(r"[A-Za-z_][A-Za-z0-9_.]*", _resolve, body) + sep + comment)
+
+    if renames:
+        log.info(
+            "Path model: resolved %d vessel name(s) onto the network frame (%s).",
+            len(renames),
+            ", ".join(f"{k}→{v}" for k, v in sorted(renames.items())[:6]),
+        )
+    return "\n".join(rewritten), renames
+
+
 @dataclass
 class SemSpec:
     """A path model: the syntax, the data it needs, and how to estimate it."""
@@ -163,18 +211,75 @@ class SemSpec:
                     names.append(token)
         return names
 
+    def endogenous(self) -> list[str]:
+        """Variables the model gives an equation to — the left-hand sides of ``~``."""
+        names: list[str] = []
+        for line in self.syntax.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if not line or "~" not in line or "~~" in line:
+                continue
+            lhs = line.split("~", 1)[0].strip()
+            if lhs and lhs not in names:
+                names.append(lhs)
+        return names
+
+    def covariances(self) -> list[tuple[str, str]]:
+        """``(left, right)`` pairs from the residual-covariance (``~~``) lines."""
+        pairs: list[tuple[str, str]] = []
+        for line in self.syntax.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if "~~" not in line:
+                continue
+            left, _, right = line.partition("~~")
+            left, right = left.strip(), right.strip()
+            if left and right:
+                pairs.append((left, right))
+        return pairs
+
     def validate(self, data: pd.DataFrame) -> str:
         """Empty when the model can be fitted against *data*, otherwise the reason it cannot."""
         if "~" not in self.syntax:
             return "The model syntax contains no structural equation (nothing of the form 'y ~ x')."
+
+        # A residual covariance is only defined between two variables of the same kind: both with
+        # equations of their own, or neither. Mixing them fails deep inside the backend with a bare
+        # "'x' is not in list", which says nothing about what to change.
+        endogenous = set(self.endogenous())
+        for left, right in self.covariances():
+            if (left in endogenous) != (right in endogenous):
+                loose = right if left in endogenous else left
+                paired = left if left in endogenous else right
+                return (
+                    f"'{left} ~~ {right}' pairs a modelled variable with an unmodelled one: "
+                    f"{paired} has its own equation, {loose} does not. Residual covariances need "
+                    f"both sides to be the same kind — give {loose} an equation (its bilateral "
+                    f"counterpart usually has one), or drop the line."
+                )
+
         missing = [v for v in self.variables() if v not in data.columns]
-        if missing:
-            return (
-                f"The model mentions {', '.join(missing)}, which {'is' if len(missing) == 1 else 'are'} "
-                f"not in the frame. A path model over the vascular network needs one column per "
-                f"vessel — pivot the analysis frame first (Derived → Network variables)."
+        if not missing:
+            return ""
+
+        # Separate the two reasons a name can be absent, because the fixes are different: a vessel
+        # that is missing was never measured (or the frame is still long), whereas anything else is
+        # a covariate that is simply not in this analysis frame.
+        from nvitk.stats.vessel_network import canonical_node
+
+        vessels = [v for v in missing if canonical_node(v)]
+        others = [v for v in missing if not canonical_node(v)]
+        parts: list[str] = []
+        if vessels:
+            parts.append(
+                f"{', '.join(vessels)} — vessel(s) with no column. A path model needs one column "
+                f"per vessel; the frame is pivoted for you, so this means the vessel carries no "
+                f"measurement in this cohort. Drop it from the syntax or widen the region selection."
             )
-        return ""
+        if others:
+            parts.append(
+                f"{', '.join(others)} — not in the frame. Covariates have to be subject-level "
+                f"columns of the analysis dataframe."
+            )
+        return "The model mentions " + "  ".join(parts)
 
 
 def prepare_sem_frame(
@@ -211,9 +316,18 @@ def prepare_sem_frame(
         frame = frame.dropna()
     dropped = n_input - len(frame)
     if not len(frame):
+        # Listwise deletion is decided by the *least* measured variable, so naming the sparse ones
+        # turns an unactionable failure into a specific edit: drop those terms from the syntax.
+        source = data.loc[:, variables]
+        coverage = (source.notna().mean() * 100.0).sort_values()
+        sparse = coverage.head(4)
+        best = float(coverage.max()) if len(coverage) else 0.0
         raise ValueError(
-            "No complete rows remain. Every vessel in the model must be measured in the same "
-            "subject — check which vessels the frame actually covers before widening the model."
+            "No complete rows remain: no subject has every modelled variable measured. "
+            "Listwise deletion is set by the sparsest term — "
+            + ", ".join(f"{name} {pct:.0f}%" for name, pct in sparse.items())
+            + f" (best covered: {best:.0f}%). Drop those terms from the syntax, or set "
+            "listwise=False to estimate with FIML instead."
         )
 
     constant = [c for c in frame.columns if float(frame[c].std(ddof=0) or 0.0) == 0.0]

@@ -409,6 +409,103 @@ def wide_flow_frame(
     return wide
 
 
+def network_frame(
+    df: pd.DataFrame,
+    *,
+    value_column: str,
+    region_column: str = "territory",
+    subject_column: str = "subject_uid",
+    covariates: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """
+    One row per subject: a column per vessel, plus the subject-level covariates carried across.
+
+    :func:`wide_flow_frame` gives the vessels; a path model also needs ``age_c``, ``sex`` and the
+    rest of the design on the same row. Those live in the long frame repeated once per territory,
+    so they are folded back by taking the single value each subject carries.
+
+    A covariate that *varies within a subject* is not subject-level — it is another vessel-wise
+    measurement, and averaging it would invent a number that was never observed. Those are dropped
+    with a warning rather than silently collapsed; name them in the syntax as vessels if that is
+    what they are.
+
+    Parameters
+    ----------
+    covariates : sequence of str, optional
+        Columns to carry over. ``None`` takes every column of *df* that is constant within subject,
+        which is usually what the design table contributes.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by *subject_column*. ``frame.attrs`` carries ``vessels``, ``carried``,
+        ``dropped_regions`` and ``dropped_covariates``.
+
+    Examples
+    --------
+    >>> wide = network_frame(long, value_column="flow_mean")   # doctest: +SKIP
+    >>> sorted(wide.columns)[:3]                               # doctest: +SKIP
+    ['age_c', 'basi', 'laca']
+    """
+    wide = wide_flow_frame(
+        df,
+        value_column=value_column,
+        region_column=region_column,
+        subject_column=subject_column,
+    )
+    vessels = list(wide.columns)
+    dropped_regions = list(wide.attrs.get("dropped_regions", []))
+
+    # ---- Candidate covariates: everything that is not the pivot's own three columns ----------
+    reserved = {value_column, region_column, subject_column}
+    if covariates is None:
+        candidates = [c for c in df.columns if c not in reserved]
+    else:
+        candidates = [str(c) for c in covariates if str(c) not in reserved]
+        missing = [c for c in candidates if c not in df.columns]
+        if missing:
+            raise ValueError(f"Covariate column(s) not in the frame: {', '.join(missing)}.")
+
+    # ---- Keep only what is genuinely subject-level -------------------------------------------
+    # nunique(dropna=False) > 1 means the column moves between a subject's territories, so it is a
+    # per-vessel measurement wearing a covariate's name.
+    carried: list[str] = []
+    varying: list[str] = []
+    grouped = df.groupby(subject_column, observed=True, sort=False)
+    for column in candidates:
+        if column in vessels:
+            continue
+        try:
+            spread = grouped[column].nunique(dropna=False).max()
+        except TypeError:                       # unhashable cells (lists, arrays) — never a covariate
+            continue
+        if spread is not None and spread > 1:
+            varying.append(column)
+            continue
+        carried.append(column)
+
+    if varying:
+        log.warning(
+            "%d column(s) vary within subject and were left out of the network frame: %s. They are "
+            "vessel-wise measurements, not subject-level covariates.",
+            len(varying), ", ".join(sorted(varying)[:8]),
+        )
+
+    if carried:
+        design = grouped[carried].first()
+        wide = wide.join(design, how="left")
+
+    wide.attrs["vessels"] = vessels
+    wide.attrs["carried"] = carried
+    wide.attrs["dropped_regions"] = dropped_regions
+    wide.attrs["dropped_covariates"] = sorted(varying)
+    log.info(
+        "Network frame: %d subject(s) × %d vessel(s), %d covariate(s) carried.",
+        len(wide), len(vessels), len(carried),
+    )
+    return wide
+
+
 def conservation_frame(
     df: pd.DataFrame,
     *,

@@ -21,6 +21,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.db.qvtpy_anatomy import (
+    ANATOMY_CONFIG_VARIABLES,
+    load_anatomy_configs,
+    publish_anatomy_configs,
+)
 from nvitk.db.qvtpy_qc import (
     QC_METRIC_VARIABLES,
     QcReviewDecision,
@@ -57,6 +62,30 @@ def _fmt(value: Any) -> str:
 def _fmt_parts(parts: list[str]) -> str:
     """Join non-empty *parts* with ``"; "``, for compact multi-value table cells."""
     return "; ".join(p for p in parts if p)
+
+
+def anatomy_config_rows() -> list[dict[str, Any]]:
+    """
+    The manual anatomy rows that head the review table — one per configuration variable.
+
+    These carry no measured value: their ``Value`` cell is a dropdown the reviewer fills in, and
+    they are ``review_optional`` because a config is an annotation, not an OK/FAIL verdict on a
+    number. Marking the subject as revised publishes whichever ones were set.
+    """
+    return [
+        {
+            "metric_key": "anatomy",
+            "variable_ids": [],
+            "anatomy_variable": var.variable_id,
+            "metric_label": var.label,
+            "region_id": "",
+            "region_label": var.region_label,
+            "value": "",
+            "unit": "",
+            "review_optional": True,
+        }
+        for var in ANATOMY_CONFIG_VARIABLES.values()
+    ]
 
 
 def load_qc_measurement_rows(
@@ -707,11 +736,21 @@ class QcMeasurementsPanel(QWidget):
         self._status.setText("Load a qvtpy subject to review measurements.")
 
     def load_from_stage6(self, subject_uid: str, stage6_dir: Path) -> int:
-        """Load and populate the review table for *subject_uid* from *stage6_dir* (and its sibling
-        stage-7 morphometrics directory). Returns the number of rows loaded."""
+        """
+        Load and populate the review table for *subject_uid* from *stage6_dir* (and its sibling
+        stage-7 morphometrics directory).
+
+        Returns the number of **measured** rows, excluding the two manual anatomy rows — those are
+        always present, so counting them would hide the "no measurement CSVs found" case from the
+        caller.
+        """
         self._subject_uid = str(subject_uid).strip()
         stage7_dir = Path(stage6_dir).parent / "stage7_morphometrics"
-        self._rows = load_qc_measurement_rows(stage6_dir, stage7_dir=stage7_dir)
+        measured = load_qc_measurement_rows(stage6_dir, stage7_dir=stage7_dir)
+        # Anatomy first: it is the one thing the reviewer must supply, and burying it under a
+        # hundred vessel rows is how it ends up never filled in.
+        self._rows = [*anatomy_config_rows(), *measured]
+        saved_configs = load_anatomy_configs(self._subject_uid)
         self._table.setRowCount(0)
         self._table.setRowCount(len(self._rows))
         for i, row in enumerate(self._rows):
@@ -721,24 +760,30 @@ class QcMeasurementsPanel(QWidget):
             region_item.setFlags(region_item.flags() & ~Qt.ItemIsEditable)
             metric_item = QTableWidgetItem(str(row.get("metric_label") or ""))
             metric_item.setFlags(metric_item.flags() & ~Qt.ItemIsEditable)
-            value_item = QTableWidgetItem(str(row.get("value") or ""))
-            value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
-            value_item.setToolTip(str(row.get("value") or ""))
 
-            status = QComboBox()
-            status.addItem("—", "")
-            status.addItem("OK", "OK")
-            status.addItem("FAIL", "FAIL")
-            status.currentIndexChanged.connect(self._refresh_revise_enabled)
+            anatomy_variable = str(row.get("anatomy_variable") or "")
+            if anatomy_variable:
+                self._fill_anatomy_row(i, anatomy_variable, saved_configs, metric_item)
+            else:
+                value_item = QTableWidgetItem(str(row.get("value") or ""))
+                value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
+                value_item.setToolTip(str(row.get("value") or ""))
 
-            comment = QLineEdit()
-            comment.setPlaceholderText("optional comment")
+                status = QComboBox()
+                status.addItem("—", "")
+                status.addItem("OK", "OK")
+                status.addItem("FAIL", "FAIL")
+                status.currentIndexChanged.connect(self._refresh_revise_enabled)
+
+                comment = QLineEdit()
+                comment.setPlaceholderText("optional comment")
+
+                self._table.setItem(i, self.COL_VALUE, value_item)
+                self._table.setCellWidget(i, self.COL_STATUS, status)
+                self._table.setCellWidget(i, self.COL_COMMENT, comment)
 
             self._table.setItem(i, self.COL_REGION, region_item)
             self._table.setItem(i, self.COL_METRIC, metric_item)
-            self._table.setItem(i, self.COL_VALUE, value_item)
-            self._table.setCellWidget(i, self.COL_STATUS, status)
-            self._table.setCellWidget(i, self.COL_COMMENT, comment)
 
         # Vessel- and subject-level autoQC from the dataset, if stage 9 has run.
         self.set_autoqc(
@@ -750,13 +795,58 @@ class QcMeasurementsPanel(QWidget):
         n_pitc = sum(1 for r in self._rows if r.get("metric_key") == "pitc")
         n_pwv = sum(1 for r in self._rows if r.get("metric_key") == "pwv")
         n_sten = sum(1 for r in self._rows if r.get("metric_key") == "stenosis")
+        stored = (
+            "; ".join(f"{k}={v}" for k, v in sorted(saved_configs.items()))
+            if saved_configs
+            else "not set yet"
+        )
         self._status.setText(
-            f"{len(self._rows)} check(s) for {self._subject_uid} "
+            f"{len(measured)} check(s) for {self._subject_uid} "
             f"(LOC={n_loc}, PITC={n_pitc}, PWV={n_pwv}, stenosis={n_sten}). "
-            "One OK/FAIL covers the grouped metrics; stenosis rows are optional."
+            "One OK/FAIL covers the grouped metrics; stenosis rows are optional. "
+            f"Anatomy configs: {stored}."
         )
         self._refresh_revise_enabled()
-        return len(self._rows)
+        return len(measured)
+
+    def _fill_anatomy_row(
+        self,
+        index: int,
+        variable_id: str,
+        saved: Mapping[str, str],
+        metric_item: QTableWidgetItem,
+    ) -> None:
+        """
+        Render one manual-anatomy row: a vocabulary dropdown in ``Value``, nothing else editable.
+
+        The OK/FAIL and comment cells are placeholders — an anatomy config is not a verdict on a
+        number, and a comment typed here would have nowhere to go in ``image_measurements``. The
+        variable's description becomes the row tooltip so the vocabulary is explained in place.
+        """
+        var = ANATOMY_CONFIG_VARIABLES[variable_id]
+        metric_item.setToolTip(var.description)
+
+        choice = QComboBox()
+        choice.addItem("— select —", "")
+        for code, label in var.choices:
+            choice.addItem(f"{label}  ({code})", code)
+        stored = str(saved.get(variable_id) or "")
+        if stored:
+            found = choice.findData(stored)
+            if found >= 0:
+                choice.setCurrentIndex(found)
+        choice.setToolTip(var.description)
+        choice.currentIndexChanged.connect(self._refresh_revise_enabled)
+        self._table.setCellWidget(index, self.COL_VALUE, choice)
+
+        for column, text, tip in (
+            (self.COL_STATUS, "manual", "Anatomy configs are annotations, not OK/FAIL checks."),
+            (self.COL_COMMENT, "—", "Notes are not stored for anatomy rows."),
+        ):
+            item = QTableWidgetItem(text)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setToolTip(tip)
+            self._table.setItem(index, column, item)
 
     def _all_marked(self) -> bool:
         """True if every non-optional row has an OK/FAIL status selected (and there's at least one)."""
@@ -775,9 +865,40 @@ class QcMeasurementsPanel(QWidget):
                 return False
         return required
 
+    def _has_required_rows(self) -> bool:
+        """True if the table holds at least one row that needs an OK/FAIL."""
+        return any(not row.get("review_optional") for row in self._rows)
+
+    def _revise_ready(self) -> bool:
+        """
+        True when there is something to publish.
+
+        Normally that means every required row is marked. A subject whose stage-6 CSVs are missing
+        has no required rows at all, and there the anatomy configs are the only thing to save — so
+        a chosen config is enough to enable the button rather than leaving the reviewer stuck.
+        """
+        if self._all_marked():
+            return True
+        return not self._has_required_rows() and bool(self._collect_anatomy_values())
+
     def _refresh_revise_enabled(self, *_args: Any) -> None:
-        """Enable the mark-as-revised button only once every required row is marked."""
-        self._btn_revise.setEnabled(self._all_marked())
+        """Enable the mark-as-revised button once the review has something publishable."""
+        self._btn_revise.setEnabled(self._revise_ready())
+
+    def _collect_anatomy_values(self) -> dict[str, str]:
+        """``{variable_id: code}`` for the anatomy rows the reviewer actually filled in."""
+        out: dict[str, str] = {}
+        for i, row in enumerate(self._rows):
+            variable_id = str(row.get("anatomy_variable") or "")
+            if not variable_id:
+                continue
+            widget = self._table.cellWidget(i, self.COL_VALUE)
+            if not isinstance(widget, QComboBox):
+                continue
+            code = str(widget.currentData() or "").strip()
+            if code:
+                out[variable_id] = code
+        return out
 
     def _collect_decisions(self) -> list[QcReviewDecision]:
         """Expand each grouped UI row into one decision per underlying variable_id."""
@@ -812,26 +933,57 @@ class QcMeasurementsPanel(QWidget):
         return decisions
 
     def _on_mark_revised(self) -> None:
-        """Publish the collected OK/FAIL decisions for the loaded subject, notifying on success/failure."""
-        if not self._all_marked():
+        """
+        Publish the review for the loaded subject: OK/FAIL decisions first, then the manual anatomy
+        configs. Notifies on success and on either failure.
+
+        The QC pass runs first because it rewrites the whole ``image_measurements`` table from what
+        it read; the anatomy upsert always reads Parquet directly, so it is the safe one to run
+        against a freshly rebuilt index.
+        """
+        if not self._revise_ready():
             notify("Mark every measurement as OK or FAIL first.", error=True)
             return
         if not self._subject_uid:
             notify("No subject loaded.", error=True)
             return
-        try:
-            result = publish_qvtpy_qc_reviews(
-                subject_uid=self._subject_uid,
-                decisions=self._collect_decisions(),
-                build_sqlite_index=True,
+        decisions = self._collect_decisions()
+        updated = 0
+        if decisions:
+            try:
+                result = publish_qvtpy_qc_reviews(
+                    subject_uid=self._subject_uid,
+                    decisions=decisions,
+                    build_sqlite_index=True,
+                )
+            except Exception as exc:
+                notify(f"Failed to update qc_status: {exc}", error=True)
+                return
+            updated = int(result.get("updated", 0))
+
+        parts = [f"updated {updated} image_measurements row(s)"]
+        chosen = self._collect_anatomy_values()
+        if chosen:
+            try:
+                published = publish_anatomy_configs(
+                    subject_uid=self._subject_uid,
+                    values=chosen,
+                    build_sqlite_index=True,
+                )
+            except Exception as exc:
+                # The QC decisions are already saved — report the anatomy failure on its own rather
+                # than making the whole revise look like it did not happen.
+                notify(f"QC saved, but anatomy configs failed: {exc}", error=True)
+                if self._on_revised is not None:
+                    self._on_revised()
+                return
+            parts.append(
+                "anatomy " + ", ".join(f"{k}={v}" for k, v in sorted(published.items()))
             )
-        except Exception as exc:
-            notify(f"Failed to update qc_status: {exc}", error=True)
-            return
-        notify(
-            f"Revised {self._subject_uid}: "
-            f"updated {result.get('updated', 0)} image_measurements row(s)."
-        )
+        missing = [v for v in ANATOMY_CONFIG_VARIABLES if v not in chosen]
+        if missing:
+            parts.append(f"not set: {', '.join(missing)}")
+        notify(f"Revised {self._subject_uid}: " + "; ".join(parts) + ".")
         if self._on_revised is not None:
             self._on_revised()
 

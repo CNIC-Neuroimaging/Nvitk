@@ -44,6 +44,11 @@ import pandas as pd
 from .repo import DataRepo
 from .storage import utc_now_iso
 
+#: ``value_kind``s whose values belong in ``value_text``; every other kind takes the numeric path.
+TEXT_VALUE_KINDS: frozenset[str] = frozenset(
+    {"text", "string", "str", "categorical", "category", "factor"}
+)
+
 
 @dataclass(frozen=True)
 class DerivedImageMeasurementSpec:
@@ -164,6 +169,32 @@ def _optional_string_col(agg: pd.DataFrame, name: str, n: int) -> pd.Series:
     return _series_na_string(n)
 
 
+def _split_values(
+    agg: pd.DataFrame,
+    *,
+    value_column: str,
+    value_kind: str,
+    n: int,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    ``(value_num, value_text)`` for one derived variable.
+
+    Categorical / text variables (``value_kind`` in :data:`TEXT_VALUE_KINDS`, or a spec that reads
+    straight from ``value_text``) store their value as text with an empty ``value_num``; everything
+    else keeps the numeric path. Blank strings become ``pd.NA`` so an empty cell reads as missing
+    rather than as a category of its own.
+
+    *agg* must already carry a 0..n-1 index — the padded Series built here align on labels.
+    """
+    raw = agg[value_column]
+    is_text = str(value_kind or "").strip().lower() in TEXT_VALUE_KINDS or value_column == "value_text"
+    if not is_text:
+        return pd.to_numeric(raw, errors="coerce").astype("float64"), _series_na_string(n)
+    text = raw.astype("string").str.strip()
+    text = text.where(text.notna() & (text != ""), pd.NA)
+    return pd.Series([float("nan")] * n, dtype="float64"), text
+
+
 def build_image_measurement_rows(
     agg: pd.DataFrame,
     spec: DerivedImageMeasurementSpec,
@@ -172,7 +203,8 @@ def build_image_measurement_rows(
 
     ``agg`` must include ``subject_uid`` and the column named by ``spec.value_column``.
     Optional columns copied through when present: ``session_id``, ``region_id``,
-    ``region_label``, ``frame_index``.
+    ``region_label``, ``frame_index``. A categorical / text ``spec.value_kind`` routes the value to
+    ``value_text`` instead of ``value_num`` (see :func:`_split_values`).
     """
     if agg.empty:
         return pd.DataFrame()
@@ -185,7 +217,9 @@ def build_image_measurement_rows(
     # groupby/dropna) would align on labels and inflate the frame with NA rows.
     agg = agg.reset_index(drop=True)
     n = len(agg)
-    vn = pd.to_numeric(agg[spec.value_column], errors="coerce")
+    vn, vt = _split_values(
+        agg, value_column=spec.value_column, value_kind=spec.value_kind, n=n
+    )
     pipeline_name = spec.pipeline_name or f"derived_{spec.variable_id}"
     source_table = spec.source_table or f"{spec.source_file}::{spec.source_sheet}"
 
@@ -219,7 +253,7 @@ def build_image_measurement_rows(
             "frame_index": frame_index,
             "variable_id": pd.Series([spec.variable_id] * n, dtype="string"),
             "value_num": vn.astype("float64"),
-            "value_text": _series_na_string(n),
+            "value_text": vt,
             "unit": pd.Series([spec.unit if spec.unit is not None else pd.NA] * n, dtype="string"),
             "value_kind": pd.Series([spec.value_kind] * n, dtype="string"),
             "pipeline_name": pd.Series([pipeline_name] * n, dtype="string"),
@@ -242,7 +276,11 @@ def build_clinical_measurement_rows(
     agg: pd.DataFrame,
     spec: DerivedClinicalMeasurementSpec,
 ) -> pd.DataFrame:
-    """Map an aggregate frame to ``clinical_measurements`` columns (one derived variable)."""
+    """Map an aggregate frame to ``clinical_measurements`` columns (one derived variable).
+
+    As with the image builder, a categorical / text ``spec.value_kind`` routes the value to
+    ``value_text`` rather than ``value_num``.
+    """
     if agg.empty:
         return pd.DataFrame()
     if "subject_uid" not in agg.columns:
@@ -252,7 +290,9 @@ def build_clinical_measurement_rows(
 
     agg = agg.reset_index(drop=True)
     n = len(agg)
-    vn = pd.to_numeric(agg[spec.value_column], errors="coerce")
+    vn, vt = _split_values(
+        agg, value_column=spec.value_column, value_kind=spec.value_kind, n=n
+    )
     source_table = spec.source_table or f"{spec.source_file}::{spec.source_sheet}"
 
     measured_at = spec.measured_at
@@ -275,7 +315,7 @@ def build_clinical_measurement_rows(
             "visit_id": visit,
             "variable_id": pd.Series([spec.variable_id] * n, dtype="string"),
             "value_num": vn.astype("float64"),
-            "value_text": _series_na_string(n),
+            "value_text": vt,
             "unit": pd.Series([spec.unit if spec.unit is not None else pd.NA] * n, dtype="string"),
             "value_kind": pd.Series([spec.value_kind] * n, dtype="string"),
             "source_table": pd.Series([source_table] * n, dtype="string"),

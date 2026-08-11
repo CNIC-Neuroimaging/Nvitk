@@ -94,7 +94,11 @@ def publish_qvtpy_qc_reviews(
     if not parsed:
         return {"updated": 0, "decisions": 0}
 
-    all_df = repo.get("image_measurements", cohort_id=False)
+    # Read Parquet, not the SQLite index: this function rewrites the *whole* table from what it
+    # reads here, so an index that lags Parquet (any upsert since the last rebuild — the anatomy
+    # configs the same review panel writes, a stage publish with build_sqlite_index=False) would
+    # come back without those rows and the write would delete them.
+    all_df = repo.get("image_measurements", cohort_id=False, use_sqlite=False)
     if all_df.empty:
         log.warning("QC review: image_measurements is empty")
         return {"updated": 0, "decisions": len(parsed)}

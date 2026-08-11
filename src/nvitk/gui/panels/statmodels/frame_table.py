@@ -24,7 +24,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 import pandas as pd
 from qtpy.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
@@ -596,6 +596,8 @@ class AnalysisFrameView(QWidget):
     columnPlotRequested(column, kind) open the distribution viewer for a column
     qcFilterRequested(column, key)   apply a ready-made quality-control filter
     summaryRequested(column, by)    export per-group descriptive statistics for a column
+    dropRequested(column)            remove a column from the analysis frame
+    restoreRequested()               put every dropped column back
     """
 
     filtersRequested = Signal(str)
@@ -607,10 +609,13 @@ class AnalysisFrameView(QWidget):
     columnPlotRequested = Signal(str, str)
     qcFilterRequested = Signal(str, str)
     summaryRequested = Signal(str, str)
+    dropRequested = Signal(str)
+    restoreRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
         super().__init__(parent)
+        self._dropped: set[str] = set()
         self._model = PandasFrameModel(self)
         self._proxy = QSortFilterProxyModel(self)
         self._proxy.setSourceModel(self._model)
@@ -777,7 +782,27 @@ class AnalysisFrameView(QWidget):
         menu.addSeparator()
         menu.addAction("Set as plot x", lambda: self.plotXRequested.emit(column))
         menu.addAction("Copy column name", lambda: QApplication.clipboard().setText(column))
+
+        menu.addSeparator()
+        drop = menu.addAction(
+            f"Drop “{column}” from the frame", lambda: self.dropRequested.emit(column)
+        )
+        drop.setToolTip(
+            "Hide this column from the analysis frame. The dataset is untouched and the column "
+            "can be restored — dropping only changes what this session works with."
+        )
+        restore = menu.addAction(
+            f"Restore {len(self._dropped)} dropped column(s)",
+            lambda: self.restoreRequested.emit(),
+        )
+        restore.setEnabled(bool(self._dropped))
+        if self._dropped:
+            restore.setToolTip("Dropped: " + ", ".join(sorted(self._dropped)))
         menu.exec(header.mapToGlobal(point))
+
+    def set_dropped(self, columns: Iterable[str]) -> None:
+        """Record which columns are currently dropped, for the restore entry."""
+        self._dropped = {str(c) for c in columns}
 
 
 __all__ = [

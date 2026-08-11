@@ -85,6 +85,22 @@ CURATED_VARIABLE_UNITS: list[dict[str, Any]] = [
     {"variable_id": "pitc_intercept", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "dimensionless"},
     {"variable_id": "damping_index", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "dimensionless"},
     {"variable_id": "tcbf", "domain": "image", "table": "image_measurements", "modality": "4dflow", "unit": "mL/min"},
+    # Manual QC annotations (see nvitk.db.qvtpy_anatomy): one categorical value per subject, so the
+    # "unit" carries the vocabulary rather than a physical unit.
+    {
+        "variable_id": "cow_config",
+        "domain": "image",
+        "table": "image_measurements",
+        "modality": "4dflow",
+        "unit": "categorical (circle-of-Willis configuration)",
+    },
+    {
+        "variable_id": "venous_config",
+        "domain": "image",
+        "table": "image_measurements",
+        "modality": "4dflow",
+        "unit": "categorical (venous drainage configuration)",
+    },
     {"variable_id": "length_mm", "domain": "image", "table": "image_measurements", "modality": "tof", "unit": "mm"},
     {"variable_id": "radius_mean_mm", "domain": "image", "table": "image_measurements", "modality": "tof", "unit": "mm"},
     {"variable_id": "radius_max_mm", "domain": "image", "table": "image_measurements", "modality": "tof", "unit": "mm"},

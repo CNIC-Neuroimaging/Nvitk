@@ -371,6 +371,208 @@ def _conservation_columns(
     )
 
 
+#: Junctions the 4D Flow consensus / QVT validation work reports as its internal-consistency
+#: check, as ``rule key -> (inlet nodes, outlet nodes)``. The two carotid splits and the venous
+#: confluence are exactly the three that paper analyses; the vertebrobasilar pair is ours, and is
+#: reported alongside because the same physics applies to it.
+CONSENSUS_JUNCTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("left_carotid_split", ("lica",), ("laca", "lmca")),
+    ("right_carotid_split", ("rica",), ("raca", "rmca")),
+    ("venous_drainage", ("sss", "strs"), ("lts", "rts")),
+    ("basilar_inflow", ("lva", "rva"), ("basi",)),
+    ("posterior_split", ("basi",), ("lpca", "rpca")),
+)
+
+#: Segments the validation work samples for along-segment consistency. Long, non-branching, and
+#: large enough that partial volume does not dominate the station-to-station scatter.
+CONSENSUS_SEGMENTS: tuple[str, ...] = ("lica", "rica", "sss")
+
+
+def consensus_junction_report(
+    frame: pd.DataFrame,
+    *,
+    flow_column: str = "flow_ml_min",
+    junctions: Sequence[tuple[str, tuple[str, ...], tuple[str, ...]]] | None = None,
+) -> pd.DataFrame:
+    """
+    Cohort-level junction consistency: inlet flow regressed on outlet flow, one row per junction.
+
+    This is the *validation* view of mass conservation, distinct from the per-scan ``qc_conservation``
+    residual that stage 9 publishes. The residual asks "is this scan self-consistent"; the
+    regression asks "does this pipeline conserve flow across its measuring range" — the question the
+    4D Flow consensus statement's internal-consistency check is designed to answer, and the one the
+    QVT/CPS validation paper reports as slope, intercept, 95% CI and Pearson *r*.
+
+    Read the **slope**, not the correlation. A pipeline that systematically loses a fixed fraction of
+    outflow still correlates near-perfectly — *r* stays above 0.99 while the slope sits at 0.88 —
+    so *r* alone certifies nothing about conservation.
+
+    Parameters
+    ----------
+    frame : pandas.DataFrame
+        Long ``subject_uid`` / ``region_id`` / *flow_column* rows, as
+        :func:`load_flow_measurements` returns them after renaming.
+    junctions : sequence, optional
+        ``(key, inlet_nodes, outlet_nodes)`` triples. Defaults to :data:`CONSENSUS_JUNCTIONS`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per checkable junction: ``junction``, ``label``, ``inlets``, ``outlets``, ``n``,
+        ``slope`` with CI, ``intercept`` with CI, ``r``, ``p_value``, ``mean_rel_residual``, and
+        ``slope_includes_one`` — the actual pass/fail of the check.
+    """
+    from nvitk.measure.hemodynamics import junction_consistency_regression
+    from nvitk.stats.vessel_network import CONSERVATION_RULES, canonical_node
+
+    columns = [
+        "junction", "label", "inlets", "outlets", "n", "slope", "slope_ci_low", "slope_ci_high",
+        "intercept", "intercept_ci_low", "intercept_ci_high", "r", "p_value",
+        "mean_rel_residual", "slope_includes_one",
+    ]
+    if frame is None or frame.empty or flow_column not in frame.columns:
+        return pd.DataFrame(columns=columns)
+
+    wide = (
+        frame.assign(node=frame["region_id"].map(canonical_node))
+        .dropna(subset=["node"])
+        .pivot_table(index="subject_uid", columns="node", values=flow_column, aggfunc="mean")
+    )
+
+    rows: list[dict[str, Any]] = []
+    for key, inlets, outlets in (junctions or CONSENSUS_JUNCTIONS):
+        missing = [n for n in (*inlets, *outlets) if n not in wide.columns]
+        if missing:
+            log.info("consensus: junction %s not checkable (missing %s).", key, ", ".join(missing))
+            continue
+        # A subject counts only when every vessel of the junction was measured — summing over a
+        # missing outlet would manufacture a conservation failure out of an absent column.
+        block = wide.loc[:, [*inlets, *outlets]].dropna()
+        stats = junction_consistency_regression(
+            block[list(inlets)].sum(axis=1), block[list(outlets)].sum(axis=1)
+        )
+        rule = CONSERVATION_RULES.get(key)
+        includes_one = (
+            bool(stats["slope_ci_low"] <= 1.0 <= stats["slope_ci_high"])
+            if np.isfinite(stats["slope_ci_low"]) and np.isfinite(stats["slope_ci_high"])
+            else False
+        )
+        rows.append({
+            "junction": key,
+            "label": rule.label if rule is not None else key,
+            "inlets": " + ".join(inlets),
+            "outlets": " + ".join(outlets),
+            "slope_includes_one": includes_one,
+            **stats,
+        })
+
+    if not rows:
+        log.warning("consensus: no junction had every one of its vessels measured.")
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows).loc[:, columns]
+
+
+def consensus_segment_report(
+    segment_stations: Mapping[tuple[str, str], Sequence[float]] | pd.DataFrame,
+    *,
+    segments: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """
+    Cohort-level along-segment consistency: percent-from-mean flow variation fitted to a Gaussian.
+
+    Mass is conserved along a non-branching segment, so station-to-station flow should barely move.
+    Each segment is centred on its own mean and expressed in percent — which puts a sagittal sinus
+    and a vertebral on one scale — then all stations are pooled and fitted. The **SD** is the
+    result; the QVT validation work reports roughly 3%. A mean far from zero would mean the pooling
+    itself is lopsided, not that flow is drifting.
+
+    Parameters
+    ----------
+    segment_stations : mapping or DataFrame
+        Either ``{(subject_uid, region_id): [station flows]}`` or a long frame with
+        ``subject_uid`` / ``region_id`` / ``value`` and one row per station.
+    segments : sequence of str, optional
+        Canonical nodes to include. Defaults to :data:`CONSENSUS_SEGMENTS`; pass ``()`` for all.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per segment plus a pooled ``all`` row: ``segment``, ``n_subjects``, ``n_stations``,
+        ``mean_pct`` with CI, ``sd_pct`` with CI.
+    """
+    from nvitk.measure.hemodynamics import gaussian_mvue_fit, percent_variation_from_mean
+    from nvitk.stats.vessel_network import canonical_node
+
+    columns = [
+        "segment", "n_subjects", "n_stations", "mean_pct", "mean_ci_low", "mean_ci_high",
+        "sd_pct", "sd_ci_low", "sd_ci_high",
+    ]
+
+    # ---- Normalize either input shape into {(subject, node): stations} -----------------------
+    stations: dict[tuple[str, str], list[float]] = {}
+    if isinstance(segment_stations, pd.DataFrame):
+        needed = {"subject_uid", "region_id", "value"}
+        if segment_stations.empty or not needed <= set(segment_stations.columns):
+            return pd.DataFrame(columns=columns)
+        for (subject, region), group in segment_stations.groupby(
+            ["subject_uid", "region_id"], observed=True
+        ):
+            stations[(str(subject), str(region))] = [
+                float(v) for v in pd.to_numeric(group["value"], errors="coerce")
+            ]
+    else:
+        for (subject, region), values in dict(segment_stations).items():
+            stations[(str(subject), str(region))] = [float(v) for v in values]
+
+    wanted = CONSENSUS_SEGMENTS if segments is None else tuple(segments)
+    by_segment: dict[str, list[np.ndarray]] = {}
+    subjects: dict[str, set[str]] = {}
+    for (subject, region), values in stations.items():
+        node = canonical_node(region)
+        if node is None or (wanted and node not in wanted):
+            continue
+        percent = percent_variation_from_mean(values)
+        if percent.size == 0:
+            continue
+        by_segment.setdefault(node, []).append(percent)
+        subjects.setdefault(node, set()).add(subject)
+
+    if not by_segment:
+        log.warning("consensus: no along-segment stations for %s.", ", ".join(wanted) or "any node")
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, Any]] = []
+    for node in sorted(by_segment):
+        pooled = np.concatenate(by_segment[node])
+        fit = gaussian_mvue_fit(pooled)
+        rows.append({
+            "segment": node,
+            "n_subjects": len(subjects[node]),
+            "n_stations": int(fit["n"]),
+            "mean_pct": fit["mean"],
+            "mean_ci_low": fit["mean_ci_low"],
+            "mean_ci_high": fit["mean_ci_high"],
+            "sd_pct": fit["sd"],
+            "sd_ci_low": fit["sd_ci_low"],
+            "sd_ci_high": fit["sd_ci_high"],
+        })
+
+    everything = np.concatenate([p for group in by_segment.values() for p in group])
+    fit = gaussian_mvue_fit(everything)
+    rows.append({
+        "segment": "all",
+        "n_subjects": len({s for group in subjects.values() for s in group}),
+        "n_stations": int(fit["n"]),
+        "mean_pct": fit["mean"],
+        "mean_ci_low": fit["mean_ci_low"],
+        "mean_ci_high": fit["mean_ci_high"],
+        "sd_pct": fit["sd"],
+        "sd_ci_low": fit["sd_ci_low"],
+        "sd_ci_high": fit["sd_ci_high"],
+    })
+    return pd.DataFrame(rows).loc[:, columns]
+
+
 def _segment_cv_column(
     frame: pd.DataFrame, segment_cv: pd.DataFrame | None
 ) -> pd.Series:

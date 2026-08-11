@@ -146,9 +146,102 @@ def load_qc(repo, *, pipeline: str = "") -> tuple[pd.DataFrame, pd.DataFrame]:
     return vessel, subject
 
 
+def load_flow(repo, *, pipeline: str = "", variable: str = "flow_mean") -> pd.DataFrame:
+    """
+    Long ``subject_uid`` / ``region_id`` / ``flow_ml_min`` rows for the consensus checks.
+
+    The published QC columns are enough for the per-scan figures, but the cohort-level junction
+    regression needs the flows themselves. The unit is inferred rather than assumed, exactly as
+    stage 9 infers it — a dataset holding mL/s would otherwise regress fine and report nonsense
+    intercepts.
+    """
+    from nvitk.pipes.qvtpy.stage9_autoqc import infer_flow_scale
+
+    empty = pd.DataFrame(columns=["subject_uid", "region_id", "flow_ml_min"])
+    image = repo.get("image_measurements", cohort_id=False)
+    if image is None or image.empty or "variable_id" not in image.columns:
+        return empty
+    rows = image.loc[image["variable_id"].astype(str) == str(variable)]
+    if pipeline and "pipeline_id" in rows.columns:
+        rows = rows.loc[rows["pipeline_id"].astype(str) == str(pipeline)]
+    if rows.empty:
+        log.warning("No %s rows — the consensus junction check needs them.", variable)
+        return empty
+
+    flow = rows.loc[:, ["subject_uid", "region_id", "value_num"]].copy()
+    flow["flow_ml_min"] = pd.to_numeric(flow["value_num"], errors="coerce") * infer_flow_scale(
+        flow["value_num"]
+    )
+    return flow.drop(columns=["value_num"])
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Figures
 # ──────────────────────────────────────────────────────────────────────────────
+def plot_consensus_junctions(flow: pd.DataFrame, out_dir: Path) -> Path | None:
+    """
+    Junction inflow against outflow, one panel per junction — the consensus consistency check.
+
+    Each point is a subject. The dashed line is identity (perfect conservation); the solid line is
+    the fitted regression. Read the **slope**: a pipeline that loses a constant fraction of outflow
+    still correlates near-perfectly, so a high *r* on its own certifies nothing.
+    """
+    import matplotlib.pyplot as plt
+
+    from nvitk.pipes.qvtpy.stage9_autoqc import CONSENSUS_JUNCTIONS, consensus_junction_report
+    from nvitk.stats.vessel_network import canonical_node
+
+    if flow.empty:
+        return None
+    report = consensus_junction_report(flow)
+    if report.empty:
+        return None
+
+    wide = (
+        flow.assign(node=flow["region_id"].map(canonical_node))
+        .dropna(subset=["node"])
+        .pivot_table(index="subject_uid", columns="node", values="flow_ml_min", aggfunc="mean")
+    )
+    checked = {row.junction: row for row in report.itertuples()}
+    panels = [j for j in CONSENSUS_JUNCTIONS if j[0] in checked]
+    if not panels:
+        return None
+
+    cols = min(3, len(panels))
+    rows_n = (len(panels) + cols - 1) // cols
+    fig, axes = plt.subplots(rows_n, cols, figsize=(4.6 * cols, 4.4 * rows_n), squeeze=False)
+    for ax, (key, inlets, outlets) in zip(axes.ravel(), panels):
+        stats = checked[key]
+        block = wide.loc[:, [*inlets, *outlets]].dropna()
+        x = block[list(inlets)].sum(axis=1)
+        y = block[list(outlets)].sum(axis=1)
+        ax.scatter(x, y, s=18, alpha=0.65, edgecolor="none", color="#4878cf")
+
+        span = np.linspace(float(min(x.min(), y.min())), float(max(x.max(), y.max())), 2)
+        ax.plot(span, span, "--", color="#888", lw=1.2, label="identity")
+        ax.plot(span, stats.intercept + stats.slope * span, "-", color="#c44e52", lw=1.6,
+                label=f"slope {stats.slope:.3f}")
+        ok = "✓" if stats.slope_includes_one else "✗"
+        ax.set_title(
+            f"{stats.label}\n{ok} slope {stats.slope:.3f} "
+            f"[{stats.slope_ci_low:.3f}, {stats.slope_ci_high:.3f}]  ·  r={stats.r:.3f}  ·  n={int(stats.n)}",
+            fontsize=9,
+        )
+        ax.set_xlabel(f"inflow: {stats.inlets}  (mL/min)")
+        ax.set_ylabel(f"outflow: {stats.outlets}  (mL/min)")
+        ax.legend(fontsize=8, frameon=False)
+
+    for ax in axes.ravel()[len(panels):]:
+        ax.set_visible(False)
+    fig.suptitle(
+        "Junction internal consistency — inflow vs outflow across subjects "
+        "(✓ = 95% CI on the slope includes 1)",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    return _save(fig, out_dir / "qc_consensus_junctions.png")
+
+
 def plot_pass_rates(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
     """Failure rate per vessel, ranked worst first."""
     import matplotlib.pyplot as plt
@@ -422,6 +515,8 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
         len(vessel), vessel["subject_uid"].nunique() if not vessel.empty else 0, len(subject),
     )
 
+    flow = load_flow(repo, pipeline=pipeline)
+
     out_dir = Path(output_path)
     written = [
         path for path in (
@@ -430,6 +525,7 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
             plot_conservation(vessel, out_dir),
             plot_segment_cv(vessel, out_dir),
             plot_subject_summary(subject, out_dir),
+            plot_consensus_junctions(flow, out_dir),
         ) if path is not None
     ]
 
@@ -440,6 +536,29 @@ def main(output_path: Path, dataset: Path | None, pipeline: str, export_csv: boo
             csv_path = out_dir / "qc_summary.csv"
             table.to_csv(csv_path, index=False)
             log.info("Wrote %s", csv_path)
+
+    # ---- Cohort-level consistency: the validation statistic, not the per-scan gate ------------
+    if not flow.empty:
+        from nvitk.pipes.qvtpy.stage9_autoqc import consensus_junction_report
+
+        consensus = consensus_junction_report(flow)
+        if not consensus.empty:
+            shown = consensus.loc[:, [
+                "label", "n", "slope", "slope_ci_low", "slope_ci_high", "r",
+                "mean_rel_residual", "slope_includes_one",
+            ]]
+            click.echo("\nJunction internal consistency (inflow regressed on outflow):")
+            click.echo(shown.round(4).to_string(index=False))
+            failed = consensus.loc[~consensus["slope_includes_one"], "label"].tolist()
+            if failed:
+                click.echo(
+                    "\n  Slope CI excludes 1 at: " + ", ".join(failed)
+                    + "\n  A systematic inflow/outflow imbalance — unmeasured side branches or a "
+                      "scaling error, not per-scan noise."
+                )
+            if export_csv:
+                consensus.to_csv(out_dir / "qc_consensus_junctions.csv", index=False)
+                log.info("Wrote %s", out_dir / "qc_consensus_junctions.csv")
 
     if not written:
         raise click.ClickException("Nothing could be plotted — the QC columns are all empty.")

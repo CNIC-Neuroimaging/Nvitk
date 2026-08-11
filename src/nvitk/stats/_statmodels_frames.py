@@ -353,6 +353,111 @@ def subject_attribute_columns(repo: Any) -> list[str]:
     return [str(e["variable_id"]) for e in subject_attribute_entries(repo)]
 
 
+def subject_image_annotation_entries(repo: Any) -> list[dict[str, Any]]:
+    """
+    Image variables holding **one value per subject** rather than one per vessel.
+
+    These are the manual QC annotations — ``cow_config`` / ``venous_config``, see
+    :mod:`nvitk.db.qvtpy_anatomy` — which describe the subject's anatomy as a whole and so carry no
+    ``region_id``. They cannot be measurements in an analysis frame (there is no region to join on),
+    but they are exactly what a model wants as a subject-level factor, so they are offered
+    alongside the clinical covariates.
+
+    Recognized by ``scope == "subject"`` on the catalog entry, plus the known annotation ids —
+    a dataset whose catalog was written by an older run may carry the rows without the flag.
+    """
+    try:
+        from nvitk.db.qvtpy_anatomy import ANATOMY_CONFIG_VARIABLES
+    except Exception:  # pragma: no cover - stats must import without the db extras
+        ANATOMY_CONFIG_VARIABLES = {}  # type: ignore[assignment]
+
+    try:
+        registered = repo.catalog.variable_entries(domain="image")
+    except Exception:
+        registered = []
+
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in registered:
+        variable_id = str(entry.get("variable_id") or "").strip()
+        if not variable_id or variable_id in seen:
+            continue
+        is_subject_scoped = str(entry.get("scope") or "").strip().lower() == "subject"
+        if not (is_subject_scoped or variable_id in ANATOMY_CONFIG_VARIABLES):
+            continue
+        seen.add(variable_id)
+        entries.append(
+            {
+                "variable_id": variable_id,
+                "label": f"{entry.get('label') or variable_id} (subject)",
+                "domain": "clinical",
+                "table": "image_measurements",
+            }
+        )
+    for variable_id, var in ANATOMY_CONFIG_VARIABLES.items():
+        if variable_id in seen:
+            continue
+        seen.add(str(variable_id))
+        entries.append(
+            {
+                "variable_id": str(variable_id),
+                "label": f"{var.label} (subject)",
+                "domain": "clinical",
+                "table": "image_measurements",
+            }
+        )
+    return entries
+
+
+def subject_image_annotation_columns(repo: Any) -> list[str]:
+    """``variable_id``s of the subject-level image annotations offered as covariates."""
+    return [str(e["variable_id"]) for e in subject_image_annotation_entries(repo)]
+
+
+def _subject_image_annotation_frame(repo: Any, names: list[str]) -> pd.DataFrame:
+    """
+    One row per ``subject_uid`` with the requested subject-level image annotations as columns.
+
+    Read long and pivoted here rather than through ``repo.image(wide=True)``: the wide pivot keys on
+    ``region_id``, which these rows deliberately leave empty. Values come from ``value_text`` with a
+    numeric fallback, and a subject annotated twice keeps the last non-empty value.
+    """
+    if not names:
+        return pd.DataFrame()
+    try:
+        frame = repo.get(
+            "image_measurements",
+            cohort_id=False,
+            filters={"variable_id": list(names)},
+        )
+    except Exception as exc:
+        log.debug("Subject image annotations unavailable: %s", exc)
+        return pd.DataFrame()
+    if frame is None or frame.empty or "variable_id" not in frame.columns:
+        return pd.DataFrame()
+
+    text = frame["value_text"] if "value_text" in frame.columns else pd.Series(pd.NA, index=frame.index)
+    numeric = frame["value_num"] if "value_num" in frame.columns else pd.Series(pd.NA, index=frame.index)
+    values = text.astype("object").where(text.notna(), numeric)
+    tidy = pd.DataFrame(
+        {
+            "subject_uid": frame["subject_uid"].astype("string"),
+            "variable_id": frame["variable_id"].astype("string"),
+            "value": values,
+        }
+    ).dropna(subset=["subject_uid", "value"])
+    if tidy.empty:
+        return pd.DataFrame()
+    wide = (
+        tidy.drop_duplicates(subset=["subject_uid", "variable_id"], keep="last")
+        .pivot(index="subject_uid", columns="variable_id", values="value")
+        .reset_index()
+    )
+    wide.columns.name = None
+    keep = ["subject_uid", *[c for c in names if c in wide.columns]]
+    return wide[keep]
+
+
 def _subject_attribute_frame(repo: Any, names: list[str]) -> pd.DataFrame:
     """One row per ``subject_uid`` with the requested ``subjects``-table columns."""
     if not names:
@@ -671,7 +776,7 @@ def resolve_covariate_frame(
     visit_policy: str = "latest",
 ) -> tuple[pd.DataFrame, list[str]]:
     """
-    Subject-level covariate frame assembled from the clinical / subjects / cognitive tables.
+    Subject-level covariate frame assembled from the clinical / subjects / image / cognitive tables.
 
     Each source is collapsed to one row per subject (see :func:`collapse_visits_to_subject`) *before*
     the sources are merged, so variables recorded at different visits combine rather than
@@ -691,8 +796,12 @@ def resolve_covariate_frame(
 
     # Covariates. Prefer ``clinical_measurements`` whenever the requested name has rows there
     # (covers a stale in-memory catalog after ``import_sex.py``). Only fall back to the
-    # ``subjects`` entity table for names that exist solely as subject attributes.
+    # ``subjects`` entity table for names that exist solely as subject attributes, and to
+    # ``image_measurements`` for the subject-level manual annotations (``cow_config``, …).
     clinical_present = clinical_measurement_variable_ids(repo)
+    annotation_names = set(subject_image_annotation_columns(repo)) - clinical_present
+    annotation_vars = [v for v in clinical_vars if v in annotation_names]
+    clinical_vars = [v for v in clinical_vars if v not in annotation_vars]
     subject_attrs = set(subject_attribute_columns(repo)) - clinical_present
     subject_vars = [v for v in clinical_vars if v in subject_attrs and v not in clinical_present]
     clinical_vars = [v for v in clinical_vars if v not in subject_vars]
@@ -715,6 +824,8 @@ def resolve_covariate_frame(
             log.debug("Clinical covariates unavailable: %s", exc)
     if subject_vars:
         add(_subject_attribute_frame(repo, subject_vars))
+    if annotation_vars:
+        add(_subject_image_annotation_frame(repo, annotation_vars))
     if cognitive_vars:
         try:
             add(repo.cognitive(variables=cognitive_vars, wide=True))
@@ -733,7 +844,9 @@ def resolve_covariate_frame(
             )
             covariates = covariates.merge(frame_use, on="subject_uid", how="outer")
 
-    covariate_vars = list(dict.fromkeys([*clinical_vars, *subject_vars, *cognitive_vars]))
+    covariate_vars = list(
+        dict.fromkeys([*clinical_vars, *subject_vars, *annotation_vars, *cognitive_vars])
+    )
     present = [c for c in covariate_vars if c in covariates.columns] if not covariates.empty else []
     covariates.attrs["visit_provenance"] = {k: v for k, v in provenance.items() if k in present}
     return covariates, present
@@ -1252,5 +1365,7 @@ __all__ = [
     "resolve_feature_id",
     "subject_attribute_columns",
     "subject_attribute_entries",
+    "subject_image_annotation_columns",
+    "subject_image_annotation_entries",
     "clinical_measurement_variable_ids",
 ]
