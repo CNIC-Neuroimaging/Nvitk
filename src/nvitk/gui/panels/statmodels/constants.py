@@ -33,6 +33,14 @@ JOIN_MODES: tuple[tuple[str, str], ...] = (
     ("left — keep the first measurement's cells", "left"),
 )
 
+#: What a row of the analysis frame is. Territory grain is the default and the only one that can
+#: carry a territory term in a model; subject grain is what makes measurements from different
+#: parcellations (ASL whole-brain, a 4D-flow vessel, a FreeSurfer parcel) comparable at all.
+JOIN_GRAINS: tuple[tuple[str, str], ...] = (
+    ("territory — one row per subject × region", "territory"),
+    ("subject — one row per subject, regions become columns", "subject"),
+)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Analysis types
 # ──────────────────────────────────────────────────────────────────────────────
@@ -221,6 +229,7 @@ __all__ = [
     "DEFAULT_MODEL_NAME",
     "DEFAULT_RE",
     "DEFAULT_VC",
+    "JOIN_GRAINS",
     "JOIN_MODES",
     "MAX_CATEGORICAL_LEVELS",
     "MAX_PLOT_GROUP_LEVELS",

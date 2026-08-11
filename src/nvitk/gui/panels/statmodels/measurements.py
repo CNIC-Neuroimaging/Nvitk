@@ -55,6 +55,7 @@ from nvitk.stats.frame_ops import IDENTIFIER_RE
 
 from .constants import (
     ASL_ATLASES,
+    JOIN_GRAINS,
     JOIN_MODES,
     PIPELINE_KIND_ASL,
     PIPELINE_KIND_FLAIR,
@@ -127,6 +128,28 @@ class MeasurementForm(QWidget):
         self._composite_boxes: dict[str, QCheckBox] = {}
         self._composites_label = QLabel("Extra labels")
 
+        # Optional region pre-filter: load only some of the measurement's published regions.
+        self._regions_host = QWidget()
+        regions_row = QHBoxLayout(self._regions_host)
+        regions_row.setContentsMargins(0, 0, 0, 0)
+        self._regions = QLineEdit()
+        self._regions.setPlaceholderText("(all regions)")
+        self._regions.setToolTip(
+            "Comma-separated region ids to keep, before grouping. Blank loads every region.\n\n"
+            "Use it to pull a single scalar out of a multi-region variable — 't1_volume_mm3' "
+            "publishes 61 regions of which 'etiv' is one — or to restrict a flow measurement to "
+            "the vessels you actually model. A composite label such as TCBF can be named here too: "
+            "the filter runs after composites are built, so it keeps the composite and drops the "
+            "vessels it was summed from."
+        )
+        self._regions.textChanged.connect(lambda *_: self.changed.emit())
+        regions_row.addWidget(self._regions, stretch=1)
+        self._btn_pick_regions = QPushButton("Pick…")
+        self._btn_pick_regions.setToolTip("Choose from the regions this measurement publishes.")
+        self._btn_pick_regions.clicked.connect(self._on_pick_regions)
+        regions_row.addWidget(self._btn_pick_regions)
+        self._regions_label = QLabel("Regions")
+
         self._hint = QLabel("")
         self._hint.setWordWrap(True)
         self._hint.setStyleSheet(muted_label_style())
@@ -137,6 +160,7 @@ class MeasurementForm(QWidget):
         lay.addRow(self._atlas_label, self._atlas)
         lay.addRow("Grouping", self._grouping)
         lay.addRow(self._composites_label, self._composites_host)
+        lay.addRow(self._regions_label, self._regions_host)
         lay.addRow(self._alias_label, self._alias)
         lay.addRow("", self._hint)
 
@@ -317,7 +341,65 @@ class MeasurementForm(QWidget):
             composites=tuple(
                 name for name, box in self._composite_boxes.items() if box.isChecked()
             ),
+            regions=tuple(
+                token.strip() for token in self._regions.text().split(",") if token.strip()
+            ),
         )
+
+    def _on_pick_regions(self) -> None:
+        """Offer the measurement's published regions as a checkable list."""
+        from nvitk.stats._statmodels_frames import available_region_ids
+
+        available = available_region_ids(
+            self._repo,
+            pipeline_kind=self._current_kind(),
+            feature=self._current_feature(),
+            pipeline=str(self._pipeline.currentData() or "latest"),
+        )
+        # Composites are not published rows — they are computed at load time — so they are offered
+        # alongside whatever the table holds rather than looked up in it.
+        composites = [name for name, box in self._composite_boxes.items() if box.isChecked()]
+        available = [*composites, *available]
+        if not available:
+            self._hint.setText(
+                f"No published regions found for {self._current_feature()!r} — type region ids "
+                f"directly, or check the measurement is imported."
+            )
+            return
+
+        current = {
+            token.strip().lower() for token in self._regions.text().split(",") if token.strip()
+        }
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Regions — {self._current_feature()}")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"{len(available)} region(s). Nothing checked loads them all."))
+
+        listing = QListWidget()
+        listing.setSelectionMode(QListWidget.NoSelection)
+        for region in available:
+            item = QListWidgetItem(str(region))
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.Checked if str(region).lower() in current else Qt.Unchecked
+            )
+            listing.addItem(item)
+        layout.addWidget(listing, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.resize(360, 480)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+        chosen = [
+            listing.item(i).text()
+            for i in range(listing.count())
+            if listing.item(i).checkState() == Qt.Checked
+        ]
+        self._regions.setText(", ".join(chosen))
 
     def apply_spec(self, spec: MeasurementSpec) -> None:
         """Load *spec* into the form without emitting intermediate change signals."""
@@ -346,6 +428,7 @@ class MeasurementForm(QWidget):
                 if aidx >= 0:
                     self._atlas.setCurrentIndex(aidx)
             self._alias.setText(spec.alias or "")
+            self._regions.setText(", ".join(spec.regions))
             self._sync_atlas_visibility()
             self._sync_hint()
         finally:
@@ -455,6 +538,36 @@ class MeasurementsWidget(QGroupBox):
         join_row.addWidget(self._join, stretch=1)
         lay.addLayout(join_row)
 
+        grain_row = QHBoxLayout()
+        grain_row.addWidget(QLabel("Grain"))
+        self._grain = QComboBox()
+        for label, key in JOIN_GRAINS:
+            self._grain.addItem(label, key)
+        self._grain.setToolTip(
+            "What a row is.\n\n"
+            "territory — one row per subject × region, joined on a shared region key. The default, "
+            "and the only grain in which a model can carry a territory term.\n\n"
+            "subject — one row per subject, with each measurement's regions spread into "
+            "'value@region' columns. Use this to relate measurements from different parcellations: "
+            "an ASL whole-brain CBF against a 4D-flow vessel, or a FreeSurfer parcel against "
+            "either. They name different kinds of region, so no shared key exists."
+        )
+        self._grain.currentIndexChanged.connect(lambda *_: self.changed.emit())
+        grain_row.addWidget(self._grain, stretch=1)
+        lay.addLayout(grain_row)
+
+        self._attach_qc = QCheckBox("Load automatic QC columns")
+        self._attach_qc.setChecked(False)
+        self._attach_qc.setToolTip(
+            "Merge the published per-vessel autoQC metrics (qc_flow_plausible, qc_conservation, "
+            "qc_score, …) onto the frame when it loads.\n\n"
+            "They are what the QC filter presets read, so the presets stay unavailable while this "
+            "is off. Left off by default: they add five columns to every frame, including ones "
+            "built from modalities the QC stage never covered."
+        )
+        self._attach_qc.stateChanged.connect(lambda *_: self.changed.emit())
+        lay.addWidget(self._attach_qc)
+
         self._diagnostics = QLabel("")
         self._diagnostics.setWordWrap(True)
         self._diagnostics.setStyleSheet(muted_label_style())
@@ -491,6 +604,26 @@ class MeasurementsWidget(QGroupBox):
         idx = self._join.findData(mode)
         if idx >= 0:
             self._join.setCurrentIndex(idx)
+
+    def attach_qc(self) -> bool:
+        """Whether the automatic QC columns should be merged onto the frame."""
+        return bool(self._attach_qc.isChecked())
+
+    def set_attach_qc(self, enabled: bool) -> None:
+        """Set the automatic-QC toggle without emitting an intermediate change signal."""
+        self._attach_qc.blockSignals(True)
+        self._attach_qc.setChecked(bool(enabled))
+        self._attach_qc.blockSignals(False)
+
+    def grain(self) -> str:
+        """The selected join grain (``"territory"`` or ``"subject"``)."""
+        return str(self._grain.currentData() or "territory")
+
+    def set_grain(self, grain: str) -> None:
+        """Select the join grain named *grain*, if known."""
+        idx = self._grain.findData(grain)
+        if idx >= 0:
+            self._grain.setCurrentIndex(idx)
 
     def columns(self) -> list[str]:
         """Output column name of every measurement."""
@@ -602,6 +735,8 @@ class FrameLoadWorker(QThread):
         clinical_vars: list[str],
         cognitive_vars: list[str],
         join: str,
+        grain: str = "territory",
+        attach_qc: bool = True,
     ) -> None:
         """Store the query parameters; the repo is only touched from :meth:`run`."""
         super().__init__()
@@ -610,6 +745,8 @@ class FrameLoadWorker(QThread):
         self._clinical_vars = list(clinical_vars)
         self._cognitive_vars = list(cognitive_vars)
         self._join = join
+        self._grain = grain
+        self._attach_qc = attach_qc
 
     def run(self) -> None:
         """Build the frame and emit it, or report the failure."""
@@ -621,6 +758,8 @@ class FrameLoadWorker(QThread):
                 clinical_vars=self._clinical_vars,
                 cognitive_vars=self._cognitive_vars,
                 join=self._join,
+                grain=self._grain,
+                attach_qc=self._attach_qc,
             )
         except Exception as exc:
             log.exception("Analysis frame load failed.")

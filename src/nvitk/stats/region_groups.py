@@ -66,6 +66,9 @@ LOBE_PANELS: tuple[str, ...] = (
     "Insula",
     "Subcortical",
     "Cerebellum & Brainstem",
+    "White Matter",
+    "Ventricles & CSF",
+    "Whole Brain",
 )
 
 #: Canonical display order; anything unrecognized sorts after these, with ``Other`` always last.
@@ -166,6 +169,53 @@ DESIKAN_LOBES: dict[str, tuple[str, ...]] = {
         "pons",
         "midbrain",
         "medulla",
+    ),
+    # The corpus callosum and the WM hypointensity classes are white matter, not grey structures,
+    # and pooling them with the basal ganglia would mix tissue types inside one panel.
+    "White Matter": (
+        "cc_anterior",
+        "cc_central",
+        "cc_mid_anterior",
+        "cc_mid_posterior",
+        "cc_posterior",
+        "cerebralwhitemattervol",
+        "lhcerebralwhitemattervol",
+        "rhcerebralwhitemattervol",
+        "wm_hypointensities",
+        "non_wm_hypointensities",
+        "optic_chiasm",
+        "vessel",
+    ),
+    "Ventricles & CSF": (
+        "3rd_ventricle",
+        "4th_ventricle",
+        "5th_ventricle",
+        "lateral_ventricle",
+        "inf_lat_vent",
+        "csf",
+        "ventriclechoroidvol",
+    ),
+    # FreeSurfer's whole-head summaries. They are not regions at all — every parcel is measured
+    # *against* them — so they get their own panel rather than diluting an anatomical one.
+    "Whole Brain": (
+        "brainsegvol",
+        "brainsegvolnotvent",
+        "brainsegvolnotventsurf",
+        "cortexvol",
+        "lhcortexvol",
+        "rhcortexvol",
+        "subcortgrayvol",
+        "totalgrayvol",
+        "supratentorialvol",
+        "supratentorialvolnotvent",
+        "maskvol",
+        "etiv",
+        "meanthickness",
+        "whitesurfarea",
+        "numvert",
+        "surfaceholes",
+        "brainsegvol_to_etiv",
+        "maskvol_to_etiv",
     ),
 }
 

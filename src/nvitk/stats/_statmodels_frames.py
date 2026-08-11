@@ -45,7 +45,38 @@ QVTPY_TREE_FEATURES: tuple[str, ...] = (
     "pitc_intercept",
 )
 ASL_FEATURES: tuple[str, ...] = ("mean_cbf", "cov_cbf", "att_mean", "att_cov")
-T1_FEATURES: tuple[str, ...] = ("t1_cortical_volume", "t1_subcortical_volume")
+#: FreeSurfer measurements, one variable per quantity. Ordered by how often they are modelled:
+#: grey-matter volume and cortical thickness first, then the rest of the surface morphometry, then
+#: the subcortical intensity statistics. ``t1_cortical_volume`` / ``t1_subcortical_volume`` are the
+#: pre-``import_t1_regions`` variables, kept last so saved configs that name them still resolve.
+T1_FEATURES: tuple[str, ...] = (
+    # ---- cortical parcels (Desikan-Killiany, lateralized) ---------------------
+    "t1_gray_volume",
+    "t1_thickness_avg",
+    "t1_thickness_std",
+    "t1_surface_area",
+    "t1_num_vertices",
+    "t1_mean_curvature",
+    "t1_gaussian_curvature",
+    "t1_folding_index",
+    "t1_curvature_index",
+    # ---- subcortical structures and whole-brain scalars -----------------------
+    # eTIV is *not* a variable of its own: it is one region of ``t1_volume_mm3``, alongside
+    # BrainSegVol, CortexVol and the rest. Reach it with the measurement's region filter
+    # (``regions=("etiv",)``) rather than by publishing a parallel variable that would have to be
+    # kept in step with this one.
+    "t1_volume_mm3",
+    "t1_num_voxels",
+    "t1_intensity_mean",
+    "t1_intensity_std",
+    "t1_intensity_min",
+    "t1_intensity_max",
+    "t1_intensity_range",
+    "t1_index_unitless",
+    # ---- superseded ------------------------------------------------------------
+    "t1_cortical_volume",
+    "t1_subcortical_volume",
+)
 FLAIR_FEATURES: tuple[str, ...] = ("wmh_dist", "wmh_freq", "wmh_les", "wmh_reg")
 TOF_FEATURES: tuple[str, ...] = tuple(_MORPHO_SCALAR_VARS.keys())
 
@@ -151,7 +182,16 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
             ("By hemisphere (MCA / ACA / PCA / ICA / Basilar)", "hemisphere"),
             ("Vascular territory (shared with 4D flow)", "territory"),
         ]
-    # t1 / flair: keep published regions
+    if kind == "t1":
+        # Cortical parcels are lateralized and subcortical structures mostly are too, so both a
+        # left/right pairing and a lobe pooling are meaningful — and each is a real reduction in
+        # multiplicity: 68 parcels → 34 pairs → 6 lobes.
+        return [
+            ("Region (parcel / structure)", "region"),
+            ("By hemisphere (avg L/R pairs)", "hemisphere"),
+            ("By lobe (Desikan / aseg panel)", "lobe"),
+        ]
+    # flair: keep published regions
     return [("Region", "region")]
 
 
@@ -221,6 +261,79 @@ def region_to_hemisphere_pair_key(region_id: str) -> str:
     return _canonical_hemisphere_key(stripped) if stripped else raw
 
 
+def _region_match_key(region_id: Any) -> str:
+    """Spelling-insensitive key for matching a region filter against published ``region_id``s."""
+    return re.sub(r"[^0-9a-z]+", "", str(region_id).strip().lower())
+
+
+def available_region_ids(
+    repo: Any,
+    *,
+    pipeline_kind: str,
+    feature: str,
+    pipeline: str = "latest",
+) -> list[str]:
+    """
+    Published ``region_id``s for one measurement, for populating a region picker.
+
+    Reads ``image_measurements`` directly rather than through :meth:`DataRepo.image` so the list is
+    what the table actually holds — a catalog default pipeline or a cohort restriction would
+    otherwise hide regions the user can legitimately select. Never raises: an unreadable table just
+    yields an empty list, and the picker falls back to free text.
+    """
+    variable_id = resolve_feature_id(feature)
+    try:
+        frame = repo.get("image_measurements", cohort_id=False)
+    except Exception as exc:
+        log.debug("Could not list regions for %s: %s", variable_id, exc)
+        return []
+    if frame is None or frame.empty or "variable_id" not in frame.columns:
+        return []
+
+    rows = frame.loc[frame["variable_id"].astype(str) == variable_id]
+    wanted = str(pipeline).strip().lower()
+    if wanted not in {"", "latest", "any", "default", "current", "last"} and "pipeline_id" in rows.columns:
+        selected = rows.loc[rows["pipeline_id"].astype(str) == str(pipeline)]
+        if not selected.empty:
+            rows = selected
+    if rows.empty or "region_id" not in rows.columns:
+        return []
+    return sorted({str(r) for r in rows["region_id"].dropna().unique()})
+
+
+def t1_region_to_hemisphere_pair_key(region_id: str) -> str:
+    """
+    Drop the hemisphere prefix from a FreeSurfer region so L/R counterparts share a key.
+
+    ``left_precuneus`` and ``right_precuneus`` both become ``precuneus``; midline structures
+    (``brain_stem``, ``csf``) and the whole-head scalars (``etiv``) are returned unchanged.
+
+    Kept separate from :func:`region_to_hemisphere_pair_key` because that one is built for vessels:
+    it canonicalizes through the vessel table and upper-cases short names, which would turn
+    ``left_bankssts`` into ``BANKSSTS`` and leave the hemisphere grouping spelled unlike every other
+    T1 grouping. Parcel names have no canonical short form, so stripping the side is all there is
+    to do.
+
+    Examples
+    --------
+    >>> t1_region_to_hemisphere_pair_key("left_precuneus")
+    'precuneus'
+    >>> t1_region_to_hemisphere_pair_key("brain_stem")
+    'brain_stem'
+    """
+    raw = str(region_id).strip()
+    if not raw:
+        return raw
+    lowered = raw.lower()
+    for prefix in ("left_", "right_", "lh_", "rh_", "ctx_lh_", "ctx_rh_", "l_", "r_"):
+        if lowered.startswith(prefix) and len(lowered) > len(prefix):
+            return lowered[len(prefix):]
+    for suffix in ("_left", "_right", "_lh", "_rh"):
+        if lowered.endswith(suffix) and len(lowered) > len(suffix):
+            return lowered[: -len(suffix)]
+    return lowered
+
+
 def asl_region_id_to_hemisphere(region_id: str) -> str:
     """
     Collapse an ASL atlas region to the same vessel key the 4D-flow hemisphere grouping produces.
@@ -258,7 +371,13 @@ def assign_group_key(
     if grouping == "hemisphere":
         if str(kind).strip().lower() == "asl":
             return asl_region_id_to_hemisphere(rid)
+        if str(kind).strip().lower() == "t1":
+            return t1_region_to_hemisphere_pair_key(rid)
         return region_to_hemisphere_pair_key(rid)
+    if grouping == "lobe":
+        from nvitk.stats.region_groups import region_display_panel
+
+        return region_display_panel(rid) or "Other"
     if grouping == "territory":
         from nvitk.stats._vessel_territory_map import (
             REGION_TO_TERRITORY_FLOW,
@@ -584,6 +703,7 @@ def build_feature_territory_frame(
     agg: str = "mean",
     column: str | None = None,
     composites: Sequence[str] = (),
+    regions: Sequence[str] = (),
 ) -> pd.DataFrame:
     """
     One image measurement, aggregated to one row per ``(subject_uid, territory)``.
@@ -612,6 +732,15 @@ def build_feature_territory_frame(
         Names from :data:`COMPOSITE_DEFINITIONS` to append as extra territory labels, e.g.
         ``("TCBF",)``. They are computed from the raw ``region_id`` rows, so they are unaffected by
         *grouping*, and appear as additional levels of ``territory``.
+    regions : sequence of str
+        Keep only these published ``region_id``s. Empty means all. Matching is case-insensitive and
+        ignores ``-``/``_`` differences, because the same structure is spelled several ways across
+        importers.
+
+        The filter runs *after* composites are built, so naming ``TCBF`` here keeps the composite
+        while dropping the vessels it was summed from — which is the point of asking for it. It is
+        what makes a whole-head scalar usable: ``t1_volume_mm3`` publishes 61 regions, of which
+        ``etiv`` is one, and a model wanting head size wants that row and no other.
 
     Returns
     -------
@@ -687,6 +816,35 @@ def build_feature_territory_frame(
         extra = _composite_rows(long, name)
         if not extra.empty:
             long = pd.concat([long, extra], ignore_index=True)
+
+    # ---- Region pre-filter, after composites so a composite label can be selected ---------------
+    if regions:
+        wanted = {_region_match_key(r) for r in regions if str(r).strip()}
+        keep = long["region_id"].map(lambda r: _region_match_key(r) in wanted)
+        matched = sorted({str(r) for r, k in zip(long["region_id"], keep) if k})
+        unmatched = sorted(
+            r for r in regions
+            if _region_match_key(r) not in {_region_match_key(m) for m in matched}
+        )
+        if unmatched:
+            log.warning(
+                "Region filter: %s not present in %s (available: %s%s).",
+                ", ".join(unmatched), variable_id,
+                ", ".join(source_region_ids[:8]),
+                "…" if len(source_region_ids) > 8 else "",
+            )
+        long = long.loc[keep].copy()
+        if long.empty:
+            raise ValueError(
+                f"The region filter {list(regions)!r} matched none of {variable_id}'s "
+                f"{len(source_region_ids)} region(s). Available: "
+                f"{', '.join(source_region_ids[:12])}"
+                f"{'…' if len(source_region_ids) > 12 else ''}."
+            )
+        log.info(
+            "Region filter on %s: kept %d of %d region(s) — %s.",
+            variable_id, len(matched), len(source_region_ids), ", ".join(matched[:8]),
+        )
 
     long["territory"] = [
         assign_group_key(
@@ -872,7 +1030,13 @@ def finalize_analysis_frame(
         Measurement to alias. With several measurements loaded, only the first one gets aliases —
         the aliases exist for the legacy single-feature default formulas.
     """
-    wide["group_key"] = wide["territory"].astype(str)
+    # A subject-grain frame has no territory column — each region became its own variable. There is
+    # then exactly one group, and saying so keeps every downstream consumer (plot facets, mixed-model
+    # grouping defaults, summaries) working off one column name instead of branching on the grain.
+    if "territory" in wide.columns:
+        wide["group_key"] = wide["territory"].astype(str)
+    elif "group_key" not in wide.columns:
+        wide["group_key"] = "subject"
 
     # Friendly outcome aliases used in default formulas
     variable_id = primary_variable_id
@@ -946,6 +1110,10 @@ class MeasurementSpec:
     alias: str | None = None
     agg: str = "mean"
     composites: tuple[str, ...] = ()
+    #: Restrict the measurement to these published ``region_id``s before grouping. Empty means all.
+    #: Applied *after* composites are built, so a composite label (``TCBF``) can be named here and
+    #: still be computed from every vessel that feeds it.
+    regions: tuple[str, ...] = ()
 
     def column(self) -> str:
         """Name this measurement takes in the analysis frame."""
@@ -958,6 +1126,10 @@ class MeasurementSpec:
             parts.append(self.atlas)
         if self.composites:
             parts.append("+" + "+".join(self.composites))
+        if self.regions:
+            shown = ", ".join(self.regions[:3])
+            more = f" +{len(self.regions) - 3}" if len(self.regions) > 3 else ""
+            parts.append(f"[{shown}{more}]")
         return f"{' · '.join(str(p) for p in parts)}  →  {self.column()}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -971,6 +1143,7 @@ class MeasurementSpec:
             "alias": self.alias,
             "agg": self.agg,
             "composites": list(self.composites),
+            "regions": list(self.regions),
         }
 
     @classmethod
@@ -985,6 +1158,7 @@ class MeasurementSpec:
             alias=(str(data["alias"]) if data.get("alias") else None),
             agg=str(data.get("agg") or "mean"),
             composites=tuple(str(c) for c in (data.get("composites") or ())),
+            regions=tuple(str(r) for r in (data.get("regions") or ())),
         )
 
 
@@ -995,6 +1169,196 @@ def _keys_for_grouping(spec: MeasurementSpec, region_ids: Sequence[str], groupin
         assign_group_key(rid, grouping=grouping, kind=spec.pipeline_kind, variable_id=variable_id)
         for rid in region_ids
     }
+
+
+def _join_on_subject(
+    specs: Sequence[MeasurementSpec],
+    frames: Sequence[pd.DataFrame],
+    meta: dict[str, Any],
+    *,
+    join: str = "inner",
+) -> pd.DataFrame:
+    """
+    Combine measurements on ``subject_uid`` alone, spreading each one's territories into columns.
+
+    The territory column is dropped rather than kept, because after this join there is no single
+    territory a row belongs to — that is the point of the grain. Anything downstream that wants to
+    group by region works off the ``@territory`` suffix instead.
+    """
+    wide: pd.DataFrame | None = None
+    produced: dict[str, list[str]] = {}
+    for spec, frame in zip(specs, frames):
+        block = subject_wide_frame(frame, column=spec.column())
+        if block.empty:
+            meta["warnings"].append(f"{spec.column()!r} contributed no rows to the subject join.")
+            continue
+        produced[spec.column()] = list(block.attrs.get("value_columns") or block.columns)
+        wide = block if wide is None else wide.join(block, how=join)
+
+    if wide is None:
+        meta["key_overlap"] = 0.0
+        meta["warnings"].append("No measurement produced any subject-level column.")
+        return pd.DataFrame(columns=["subject_uid"])
+
+    base_subjects = set(frames[0]["subject_uid"].astype(str)) if len(frames[0]) else set()
+    kept = set(wide.index.astype(str))
+    meta["key_overlap"] = len(kept & base_subjects) / len(base_subjects) if base_subjects else 0.0
+    meta["subject_columns"] = produced
+    meta["grain"] = "subject"
+
+    total = sum(len(v) for v in produced.values())
+    meta["warnings"].append(
+        f"Joined on subject: {len(wide)} row(s), {total} measurement column(s) "
+        f"({'; '.join(f'{k} → {len(v)}' for k, v in produced.items())}). There is no 'territory' "
+        f"column in this grain — a model cannot carry a territory term, and each region is its own "
+        f"variable."
+    )
+    if wide.empty:
+        meta["warnings"].append(
+            "No subject has all of the selected measurements. Try join='outer' to keep partial "
+            "subjects."
+        )
+    return wide.reset_index()
+
+
+def subject_wide_frame(
+    frame: pd.DataFrame, *, column: str, region_column: str = "territory"
+) -> pd.DataFrame:
+    """
+    Spread one measurement's territories across columns, leaving one row per subject.
+
+    Turns the long ``(subject, territory, value)`` shape into ``subject`` plus one column per
+    territory, named ``value__territory`` — ``flow_mean__LICA``, ``mean_cbf__left_mca_8``. A
+    measurement with a single territory keeps its plain name, since ``mean_cbf__ctx_whole_brain``
+    carries no more information than ``mean_cbf`` when that is the only one there is.
+
+    The double underscore is not decoration: these names go into patsy and R formulas, which accept
+    only ``[A-Za-z_][A-Za-z0-9_]*``. A separator like ``@`` or ``.`` would read better and produce
+    columns no model could reference without quoting.
+
+    This is what makes cross-modality models possible. Territories are only comparable *within* a
+    parcellation: a 4D-flow vessel, an ASL vascular territory and a FreeSurfer parcel name different
+    kinds of thing, so joining them on a shared territory key is not a constraint to relax but a
+    question with no answer. Joining on the subject instead asks something that does have one —
+    "does this subject's whole-brain perfusion track their carotid flow" — and puts both on one row.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by ``subject_uid``. ``frame.attrs["value_columns"]`` lists the columns produced.
+    """
+    if frame.empty or column not in frame.columns:
+        return pd.DataFrame()
+    if region_column not in frame.columns:
+        # Already one row per subject — nothing to spread.
+        out = frame.set_index("subject_uid")[[column]]
+        out.attrs["value_columns"] = [column]
+        return out
+
+    territories = [str(t) for t in frame[region_column].dropna().unique()]
+    wide = frame.pivot_table(
+        index="subject_uid", columns=region_column, values=column, aggfunc="mean"
+    )
+    if len(territories) <= 1:
+        wide.columns = [column]
+    else:
+        wide.columns = [f"{column}__{_identifier_fragment(c)}" for c in wide.columns]
+    wide.attrs["value_columns"] = list(wide.columns)
+    return wide
+
+
+def subject_measurement_families(df: pd.DataFrame) -> dict[str, list[str]]:
+    """
+    ``{measurement: [regions]}`` for the ``value__region`` columns of a subject-grain frame.
+
+    Reads the naming :func:`subject_wide_frame` produced, so a frame can be melted back without
+    being told which columns belong together.
+    """
+    families: dict[str, list[str]] = {}
+    for column in df.columns:
+        name = str(column)
+        head, sep, tail = name.partition("__")
+        if sep and head and tail:
+            families.setdefault(head, []).append(tail)
+    return {k: sorted(v) for k, v in sorted(families.items())}
+
+
+def melt_subject_frame(
+    df: pd.DataFrame,
+    *,
+    family: str,
+    region_column: str = "territory",
+) -> pd.DataFrame:
+    """
+    Melt one measurement's ``value__region`` columns of a subject-grain frame back to long.
+
+    This is the shape a model needs when the *region* is a term rather than a set of separate
+    variables. A frame joined on the subject can hold measurements from unrelated parcellations —
+    a 4D-flow vessel beside a whole-head eTIV — but ``flow_mean ~ psqeduca * territory`` cannot be
+    written against it, because there is no territory column to interact with. Melting one family
+    restores that column while leaving every *other* column repeated down the rows, so the eTIV and
+    the covariates ride along and stay usable as predictors.
+
+    Only the named family moves. Melting two at once would need their regions to correspond, which
+    is exactly the assumption the subject grain exists to avoid.
+
+    Parameters
+    ----------
+    family : str
+        Measurement prefix, e.g. ``flow_mean`` for ``flow_mean__LICA`` … ``flow_mean__TCBF``.
+    region_column : str
+        Name for the recovered region column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per (subject × region of *family*), with *family* as the value column and
+        ``group_key`` set to the region so plots and grouped models pick it up.
+
+    Raises
+    ------
+    ValueError
+        When no column carries the ``family__`` prefix — melting would otherwise silently produce
+        an empty frame.
+    """
+    prefix = f"{family}__"
+    value_columns = [c for c in df.columns if str(c).startswith(prefix)]
+    if not value_columns:
+        available = ", ".join(subject_measurement_families(df)) or "none"
+        raise ValueError(
+            f"No column starts with {prefix!r}, so there is nothing to melt. "
+            f"Measurement families in this frame: {available}."
+        )
+    if family in df.columns:
+        raise ValueError(
+            f"{family!r} is already a column of this frame; melting would produce two columns of "
+            f"that name. Rename the measurement's output column first."
+        )
+
+    id_columns = [c for c in df.columns if c not in value_columns]
+    long = df.melt(
+        id_vars=id_columns,
+        value_vars=value_columns,
+        var_name=region_column,
+        value_name=family,
+    )
+    long[region_column] = long[region_column].astype(str).str.slice(len(prefix))
+    long["group_key"] = long[region_column].astype(str)
+
+    missing = int(long[family].isna().sum())
+    if missing:
+        log.info(
+            "Melted %s into %d row(s) over %d region(s); %d cell(s) are empty (a subject without "
+            "that region).",
+            family, len(long), len(value_columns), missing,
+        )
+    return long.reset_index(drop=True)
+
+
+def _identifier_fragment(value: Any) -> str:
+    """Reduce a territory label to something usable inside a formula identifier."""
+    token = re.sub(r"[^0-9A-Za-z_]+", "_", str(value)).strip("_")
+    return token or "region"
 
 
 def _suggest_compatible_groupings(
@@ -1136,6 +1500,8 @@ def build_multi_feature_analysis_frame(
     clinical_vars: list[str] | None = None,
     cognitive_vars: list[str] | None = None,
     join: str = "inner",
+    grain: str = "territory",
+    attach_qc: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Analysis frame combining one or more image measurements plus subject covariates.
@@ -1152,6 +1518,18 @@ def build_multi_feature_analysis_frame(
     ----------
     join : {"inner", "outer", "left"}
         How successive measurement frames are combined.
+    grain : {"territory", "subject"}
+        What a row is. ``"territory"`` keeps the long shape and joins on the shared
+        ``(subject, territory)`` cell — right when the measurements share a parcellation, and the
+        only way to fit a model with a territory term. ``"subject"`` gives one row per subject and
+        spreads each measurement's territories into ``value@territory`` columns, which is the only
+        way to relate measurements whose parcellations name different kinds of region: an ASL
+        whole-brain CBF against a 4D-flow vessel, or a FreeSurfer parcel against either.
+    attach_qc : bool
+        Merge the published per-vessel autoQC metrics (``qc_flow_plausible``, ``qc_score``, …) onto
+        the frame. They are what the QC filter presets read, so turning this off greys those out —
+        but it also keeps five columns nobody asked for out of a frame built for something else,
+        and skips their lookup on a dataset where the stage never ran.
 
     Returns
     -------
@@ -1198,6 +1576,7 @@ def build_multi_feature_analysis_frame(
             agg=spec.agg,
             column=spec.column(),
             composites=spec.composites,
+            regions=spec.regions,
         )
         frames.append(frame)
         meta["measurements"].append(
@@ -1211,35 +1590,42 @@ def build_multi_feature_analysis_frame(
             }
         )
 
-    # ---- 3. Join on the shared (subject_uid, territory) key --------------------
-    wide = frames[0]
-    base_keys = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
-    for spec, frame in zip(specs[1:], frames[1:]):
-        base_terr = set(meta["measurements"][0]["territories"])
-        this_terr = set(frame["territory"].astype(str).unique()) if len(frame) else set()
-        if base_terr and this_terr and not (base_terr & this_terr):
-            fix = _suggest_compatible_groupings(
-                specs[0], meta["measurements"][0].get("region_ids") or [],
-                spec, list(frame.attrs.get("region_ids") or []),
-            )
-            meta["warnings"].append(
-                f"{spec.column()!r} has no territory in common with "
-                f"{specs[0].column()!r} ({sorted(this_terr)[:4]} vs {sorted(base_terr)[:4]}). "
-                + (fix or "No grouping combination makes these two measurements comparable.")
-            )
-        wide = wide.merge(frame, on=["subject_uid", "territory"], how=join)
-
-    if base_keys:
-        kept = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
-        meta["key_overlap"] = len(kept & base_keys) / len(base_keys)
+    # ---- 3. Join, either on the shared (subject, territory) cell or per subject -
+    if grain == "subject":
+        wide = _join_on_subject(specs, frames, meta, join=join)
     else:
-        meta["key_overlap"] = 0.0
+        wide = frames[0]
+        base_keys = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
+        for spec, frame in zip(specs[1:], frames[1:]):
+            base_terr = set(meta["measurements"][0]["territories"])
+            this_terr = set(frame["territory"].astype(str).unique()) if len(frame) else set()
+            if base_terr and this_terr and not (base_terr & this_terr):
+                fix = _suggest_compatible_groupings(
+                    specs[0], meta["measurements"][0].get("region_ids") or [],
+                    spec, list(frame.attrs.get("region_ids") or []),
+                )
+                meta["warnings"].append(
+                    f"{spec.column()!r} has no territory in common with "
+                    f"{specs[0].column()!r} ({sorted(this_terr)[:4]} vs {sorted(base_terr)[:4]}). "
+                    + (fix or "These parcellations name different kinds of region, so no grouping "
+                              "makes them share a key — switch the join grain to 'subject' to put "
+                              "them side by side as one row per subject instead.")
+                )
+            wide = wide.merge(frame, on=["subject_uid", "territory"], how=join)
 
-    if wide.empty:
-        meta["warnings"].append(
-            "The measurement join produced no rows — the selected measurements share no "
-            "(subject, territory) cell."
-        )
+        if base_keys:
+            kept = set(map(tuple, wide[["subject_uid", "territory"]].astype(str).to_numpy())) if len(wide) else set()
+            meta["key_overlap"] = len(kept & base_keys) / len(base_keys)
+        else:
+            meta["key_overlap"] = 0.0
+
+        if wide.empty:
+            meta["warnings"].append(
+                "The measurement join produced no rows — the selected measurements share no "
+                "(subject, territory) cell. If they come from different parcellations (a vessel "
+                "against a cortical parcel, say), that is expected: switch the join grain to "
+                "'subject'."
+            )
 
     # ---- 4. Covariates once, then the shared finalization ----------------------
     covariates, present = resolve_covariate_frame(
@@ -1272,7 +1658,14 @@ def build_multi_feature_analysis_frame(
 
     # The published per-vessel QC metrics, on the same key the measurements were loaded on. They
     # are what the analysis dataframe's QC filters read, and nothing else would load them.
-    if not wide.empty:
+    if not attach_qc:
+        meta["qc_columns"] = []
+    elif not wide.empty and grain == "subject":
+        # The vessel QC metrics are per (subject, vessel); with no territory column there is no row
+        # to attach them to, and averaging them over a subject would turn a per-vessel gate into a
+        # number that gates nothing. Filter on the territory grain, then switch.
+        meta["qc_columns"] = []
+    elif not wide.empty:
         wide, qc_columns = attach_vessel_qc(repo, wide, spec=specs[0])
         meta["qc_columns"] = qc_columns
         if qc_columns and specs[0].grouping not in {"vessel", "tree", "region"}:
@@ -1362,6 +1755,7 @@ __all__ = [
     "asl_region_id_to_hemisphere",
     "composites_for",
     "region_to_hemisphere_pair_key",
+    "t1_region_to_hemisphere_pair_key",
     "resolve_feature_id",
     "subject_attribute_columns",
     "subject_attribute_entries",

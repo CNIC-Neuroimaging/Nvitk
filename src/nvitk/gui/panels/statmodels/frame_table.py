@@ -24,7 +24,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 from qtpy.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
@@ -54,6 +54,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.stats.frame_ops import (
+    COLUMN_TYPES,
     DEFAULT_IQR_K,
     FILTER_OPS,
     TRANSFORM_LABELS,
@@ -598,6 +599,7 @@ class AnalysisFrameView(QWidget):
     summaryRequested(column, by)    export per-group descriptive statistics for a column
     dropRequested(column)            remove a column from the analysis frame
     restoreRequested()               put every dropped column back
+    typeChangeRequested(column, kind) recast a column (numeric / factor / …)
     """
 
     filtersRequested = Signal(str)
@@ -611,11 +613,13 @@ class AnalysisFrameView(QWidget):
     summaryRequested = Signal(str, str)
     dropRequested = Signal(str)
     restoreRequested = Signal()
+    typeChangeRequested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
         super().__init__(parent)
         self._dropped: set[str] = set()
+        self._column_types: dict[str, str] = {}
         self._model = PandasFrameModel(self)
         self._proxy = QSortFilterProxyModel(self)
         self._proxy.setSourceModel(self._model)
@@ -781,6 +785,17 @@ class AnalysisFrameView(QWidget):
 
         menu.addSeparator()
         menu.addAction("Set as plot x", lambda: self.plotXRequested.emit(column))
+        type_menu = menu.addMenu("Column type")
+        current_kind = self._column_types.get(column, "auto")
+        for key, (label, effect) in COLUMN_TYPES.items():
+            action = type_menu.addAction(
+                f"{label}{'  ✓' if key == current_kind else ''}",
+                lambda _=False, k=key: self.typeChangeRequested.emit(column, k),
+            )
+            action.setToolTip(effect)
+        if column in frame.columns:
+            type_menu.setToolTip(f"Currently {frame[column].dtype}")
+
         menu.addAction("Copy column name", lambda: QApplication.clipboard().setText(column))
 
         menu.addSeparator()
@@ -799,6 +814,10 @@ class AnalysisFrameView(QWidget):
         if self._dropped:
             restore.setToolTip("Dropped: " + ", ".join(sorted(self._dropped)))
         menu.exec(header.mapToGlobal(point))
+
+    def set_column_types(self, types: Mapping[str, str]) -> None:
+        """Record the active per-column type overrides, so the menu can tick the current one."""
+        self._column_types = {str(k): str(v) for k, v in dict(types).items()}
 
     def set_dropped(self, columns: Iterable[str]) -> None:
         """Record which columns are currently dropped, for the restore entry."""

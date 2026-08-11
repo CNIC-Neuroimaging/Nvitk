@@ -925,10 +925,10 @@ FLOW_BAND_TOLERANCE: float = 0.15
 #: Krabbe-Hartkamp et al. 1998 definition of CoW hypoplasia on 3D TOF MRA.
 HYPOPLASIA_DIAM_MM: float = 0.8
 
-# Arterial proximal (ICA, VA→BA):  10%   ← top of ISMRM “good” band
-# Distal arterial (BA→PCA):        15%   ← distal inflation (ISMRM) + unmeasured AICA/SCA
-# Venous (SSS+STR→TS):             20%   ← Sci Rep: 4–9% is normal incomplete tree
-# Along-segment CV:                15%   ← ~5× QVT’s ~3% SD (soft review gate)
+#: Arterial proximal (ICA, VA→BA):  10%   ← top of ISMRM “good” band
+#: Distal arterial (BA→PCA):        15%   ← distal inflation (ISMRM) + unmeasured AICA/SCA
+#: Venous (SSS+STR→TS):             20%   ← Sci Rep: 4–9% is normal incomplete tree
+#: Along-segment CV:                15%   ← ~5× QVT’s ~3% SD (soft review gate)
 #: Default relative junction residual beyond which mass conservation is considered violated.
 #: Cranial literature does **not** publish one universal threshold: ISMRM 2017 (Roberts et al.)
 #: observed ~1–10% residuals at well-conserved proximal junctions and 11–55% where flow was

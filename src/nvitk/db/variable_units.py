@@ -114,6 +114,27 @@ CURATED_VARIABLE_UNITS: list[dict[str, Any]] = [
     {"variable_id": "att_mean", "domain": "image", "table": "image_measurements", "modality": "asl", "unit": "s"},
     {"variable_id": "att_median", "domain": "image", "table": "image_measurements", "modality": "asl", "unit": "s"},
     {"variable_id": "att_cov", "domain": "image", "table": "image_measurements", "modality": "asl", "unit": "%"},
+    # FreeSurfer morphometry. Units come straight from the stats files: volumes in mm³, thickness
+    # in mm, surface area in mm², curvature integrated over the surface (so 1/mm and 1/mm²), and
+    # the folding/curvature indices and normalized intensities dimensionless by construction.
+    {"variable_id": "t1_gray_volume", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm3"},
+    {"variable_id": "t1_volume_mm3", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm3"},
+    {"variable_id": "t1_etiv_volume", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm3"},
+    {"variable_id": "t1_thickness_avg", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm"},
+    {"variable_id": "t1_thickness_std", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm"},
+    {"variable_id": "t1_surface_area", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "mm2"},
+    {"variable_id": "t1_num_vertices", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "count"},
+    {"variable_id": "t1_num_voxels", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "count"},
+    {"variable_id": "t1_mean_curvature", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "1/mm"},
+    {"variable_id": "t1_gaussian_curvature", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "1/mm2"},
+    {"variable_id": "t1_folding_index", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_curvature_index", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_intensity_mean", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_intensity_std", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_intensity_min", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_intensity_max", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_intensity_range", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
+    {"variable_id": "t1_index_unitless", "domain": "image", "table": "image_measurements", "modality": "t1", "unit": "dimensionless"},
     {
         "variable_id": "t1_cortical_volume",
         "domain": "image",

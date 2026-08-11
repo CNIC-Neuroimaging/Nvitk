@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -134,8 +135,10 @@ from nvitk.stats import (
     subject_image_annotation_entries,
 )
 from nvitk.stats.frame_ops import (
+    COLUMN_TYPES,
     DerivedColumn,
     FilterRule,
+    apply_column_types,
     apply_derived_columns,
     apply_filter_rules,
     default_derived_name,
@@ -281,9 +284,14 @@ class StatmodelsWindow(QMainWindow):
         self._wide_mode: bool = False
         self._wide_coverage: pd.DataFrame | None = None
         self._wide_complete: int = 0
+        # Measurement family melted back to long after the wide pivot, or "".
+        self._melt_family: str = ""
         # Columns hidden from the working frame. Held as names rather than by dropping them from
         # ``_analysis_df``, so a reload or a restore brings them back without re-querying.
         self._dropped_columns: set[str] = set()
+        # Per-column dtype overrides. A column's type decides whether a model term is a slope or a
+        # set of contrasts, so it is part of the frame recipe rather than a display preference.
+        self._column_types: dict[str, str] = {}
 
         # ---- result state -----------------------------------------------------
         self._last_result = None
@@ -773,6 +781,17 @@ class StatmodelsWindow(QMainWindow):
         )
         self._btn_reshape.clicked.connect(self._on_reshape_frame)
         row.addWidget(self._btn_reshape)
+        self._btn_melt = QPushButton("Melt by…")
+        self._btn_melt.setToolTip(
+            "Melt one measurement's per-region columns of a wide frame back into a 'territory' "
+            "column, keeping every other column repeated down the rows.\n\n"
+            "This is what lets a region be a model *term* in a cross-modality frame: melt "
+            "flow_mean and you can write 'flow_mean ~ psqeduca * territory + t1_volume_mm3', with "
+            "the eTIV and the covariates still there as predictors."
+        )
+        self._btn_melt.clicked.connect(self._on_melt_frame)
+        self._btn_melt.setEnabled(False)
+        row.addWidget(self._btn_melt)
         self._btn_export = QPushButton("Export table…")
         self._btn_export.setToolTip(
             "Save exactly what this table shows — measurements joined, derived columns computed, "
@@ -819,6 +838,7 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.summaryRequested.connect(self._on_export_summary)
         self._frame_view.dropRequested.connect(self._on_drop_column)
         self._frame_view.restoreRequested.connect(self._on_restore_columns)
+        self._frame_view.typeChangeRequested.connect(self._on_change_column_type)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
         self._btn_derived.clicked.connect(lambda *_: self._on_edit_derived())
         self._btn_export.clicked.connect(self._on_export_frame)
@@ -935,6 +955,8 @@ class StatmodelsWindow(QMainWindow):
             clinical_vars=self._clinical_vars(),
             cognitive_vars=self._cognitive_vars(),
             join=self._measurements.join(),
+            grain=self._measurements.grain(),
+            attach_qc=self._measurements.attach_qc(),
         )
         worker.finished_ok.connect(self._on_frame_loaded)
         worker.failed.connect(self._on_frame_load_failed)
@@ -1002,14 +1024,34 @@ class StatmodelsWindow(QMainWindow):
                 f"{len(self._derived)} derived column(s)" if self._derived else ""
             )
 
+        derived_frame, type_notes = apply_column_types(derived_frame, self._column_types)
+        if type_notes:
+            log.info("Column types: %s", " ".join(type_notes))
+
         rules = self._chips.rules()
         working, report = apply_filter_rules(derived_frame, rules)
 
-        # Reshape last: filters and derived columns are written against long rows, so pivoting
-        # before them would put their targets out of reach.
+        # Reshape after the long-shape filters: derived columns and most rules are written against
+        # long rows, so pivoting first would put their targets out of reach.
         long_rows = len(working)
         if self._wide_mode:
             working = self._to_wide(working)
+            if self._melt_family:
+                working = self._melt_working(working)
+
+            # A rule can name a column that only exists *after* the reshape — an IQR fence on
+            # 'flow_mean__TCBF', say. Those were skipped above with "column not in frame", so they
+            # get a second pass here, in the shape they were written for. Rules already applied are
+            # not re-run: apply_filter_rules skips what it cannot find, and a rule's column exists
+            # in exactly one of the two shapes.
+            deferred = [
+                entry["rule"] for entry in report
+                if entry.get("skipped") and entry.get("reason") == "column not in frame"
+            ]
+            if deferred:
+                working, late = apply_filter_rules(working, deferred)
+                by_rule = {id(entry["rule"]): entry for entry in late}
+                report = [by_rule.get(id(entry["rule"]), entry) for entry in report]
 
         # Dropped columns go last of all, so a rule or a derived column defined on one still
         # evaluated above — dropping hides a column from the model, it does not undo the frame.
@@ -1023,6 +1065,7 @@ class StatmodelsWindow(QMainWindow):
         self._chips.set_counts(long_rows, len(derived_frame))
         self._sync_filter_toggle()
         self._frame_view.set_dropped(self._dropped_columns)
+        self._frame_view.set_column_types(self._column_types)
         self._frame_view.set_frame(
             working,
             filtered_columns=filtered_columns(rules),
@@ -1263,6 +1306,76 @@ class StatmodelsWindow(QMainWindow):
         )
         return wide
 
+    def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Melt ``self._melt_family``'s per-region columns back to long, or return *df* unchanged."""
+        from nvitk.stats._statmodels_frames import melt_subject_frame
+
+        if df is None or df.empty or not self._melt_family:
+            return df
+        try:
+            return melt_subject_frame(df, family=self._melt_family)
+        except ValueError as exc:
+            notify(f"Cannot melt: {exc}", error=True)
+            self._melt_family = ""
+            return df
+
+    def _on_melt_frame(self) -> None:
+        """Choose a measurement family to melt back into a territory column."""
+        from nvitk.stats._statmodels_frames import subject_measurement_families
+
+        if not self._wide_mode:
+            notify("Melting applies to a wide frame — reshape to wide first.", error=True)
+            return
+
+        # Offer the families of the *un-melted* wide frame: once one is melted its columns are
+        # gone, so asking the current frame would hide the option that is already active.
+        probe = self._melt_family
+        self._melt_family = ""
+        self._recompute_frame(announce=False)
+        families = subject_measurement_families(self._working_df or pd.DataFrame())
+        self._melt_family = probe
+
+        if not families:
+            notify(
+                "No per-region columns to melt — every measurement in this frame has a single "
+                "region.",
+                error=True,
+            )
+            self._recompute_frame(announce=False)
+            return
+
+        options = ["(none — keep it wide)"] + [
+            f"{name}  ({len(regions)} regions: {', '.join(regions[:4])}"
+            f"{'…' if len(regions) > 4 else ''})"
+            for name, regions in families.items()
+        ]
+        keys = ["", *families]
+        current = keys.index(self._melt_family) if self._melt_family in keys else 0
+        choice, ok = QInputDialog.getItem(
+            self, "Melt by region", "Measurement to spread down the rows:", options, current, False
+        )
+        if not ok:
+            self._recompute_frame(announce=False)
+            return
+
+        self._melt_family = keys[options.index(choice)]
+        self._recompute_frame(announce=False)
+        frame = self._working_df
+
+        if not self._melt_family:
+            self._btn_melt.setText("Melt by…")
+            self._status.setText("Analysis dataframe: wide, not melted.")
+            notify("Kept wide.")
+            return
+
+        self._btn_melt.setText(f"Melt: {self._melt_family}")
+        levels = frame["territory"].nunique() if frame is not None and "territory" in frame else 0
+        self._status.setText(
+            f"Melted {self._melt_family} into {len(frame)} row(s) over {levels} territory level(s). "
+            f"'territory' is a model term again; every other column repeats down the rows."
+        )
+        notify(f"Melted {self._melt_family} — {levels} territory levels.")
+
     def _coverage_note(self) -> str:
         """One line naming the vessels that decide listwise deletion, or ``""``."""
         coverage = self._wide_coverage
@@ -1282,8 +1395,11 @@ class StatmodelsWindow(QMainWindow):
         self._wide_mode = not self._wide_mode
         self._recompute_frame(announce=False)
 
+        self._btn_melt.setEnabled(self._wide_mode)
         if not self._wide_mode:
             self._wide_coverage = None
+            self._melt_family = ""
+            self._btn_melt.setText("Melt by…")
             self._btn_reshape.setText("Reshape → wide")
             self._status.setText("Analysis dataframe: long (one row per subject × region).")
             notify("Reshaped to long.")
@@ -1350,6 +1466,32 @@ class StatmodelsWindow(QMainWindow):
             f"The dataset is unchanged; restore from any column's right-click menu.{note}"
         )
         notify(f"Dropped {column}.{note}")
+
+    def _on_change_column_type(self, column: str, kind: str) -> None:
+        """Recast one column, or clear its override with ``auto``."""
+        if not column:
+            return
+        if kind == "auto":
+            self._column_types.pop(column, None)
+        else:
+            self._column_types[column] = kind
+
+        self._recompute_frame(announce=False)
+        frame = self._working_df
+        dtype = frame[column].dtype if frame is not None and column in frame.columns else "?"
+        label = COLUMN_TYPES.get(kind, (kind, ""))[0]
+
+        # A cast that silently drops values is the one worth naming: it shrinks every model built
+        # on the column, and the row count alone will not say why.
+        note = ""
+        if frame is not None and column in frame.columns:
+            base = self._analysis_df
+            if base is not None and column in base.columns:
+                lost = int(base[column].notna().sum()) - int(frame[column].notna().sum())
+                if lost > 0:
+                    note = f"  |  {lost} value(s) did not convert and are now missing"
+        self._status.setText(f"{column} → {label} (dtype {dtype}){note}")
+        notify(f"{column} is now {label}.{note}")
 
     def _on_restore_columns(self) -> None:
         """Put every dropped column back."""
@@ -2903,6 +3045,8 @@ class StatmodelsWindow(QMainWindow):
             "version": CONFIG_VERSION,
             "measurements": [spec.to_dict() for spec in self._measurements.specs()],
             "join": self._measurements.join(),
+            "grain": self._measurements.grain(),
+            "attach_qc": self._measurements.attach_qc(),
             "clinical": self._clinical_vars(),
             "cognitive": self._cognitive_vars(),
             "filters": [rule.to_dict() for rule in self._chips.rules()],
@@ -2911,7 +3055,9 @@ class StatmodelsWindow(QMainWindow):
             # Part of the frame recipe, not a view preference: a model fitted on a wide frame with
             # columns dropped cannot be reproduced from a long frame that still has them.
             "dropped_columns": sorted(self._dropped_columns),
+            "column_types": dict(self._column_types),
             "wide": self._wide_mode,
+            "melt_family": self._melt_family,
             "analysis_type": self._analysis_kind(),
             "mm_formula": self._formula.toPlainText().strip(),
             "groups": self._groups.text().strip(),
@@ -2966,6 +3112,9 @@ class StatmodelsWindow(QMainWindow):
             self._data_form.apply_spec(specs[0])
         if cfg.get("join"):
             self._measurements.set_join(str(cfg["join"]))
+        if cfg.get("grain"):
+            self._measurements.set_grain(str(cfg["grain"]))
+        self._measurements.set_attach_qc(bool(cfg.get("attach_qc", False)))
 
         clinical = cfg.get("clinical")
         if isinstance(clinical, str):
@@ -2987,8 +3136,14 @@ class StatmodelsWindow(QMainWindow):
                 notify(f"Skipped untrusted expression column(s): {', '.join(dropped)}", error=True)
         self._derived = derived
         self._dropped_columns = {str(c) for c in cfg.get("dropped_columns") or []}
+        self._column_types = {
+            str(k): str(v) for k, v in (cfg.get("column_types") or {}).items()
+        }
         self._wide_mode = bool(cfg.get("wide", False))
+        self._melt_family = str(cfg.get("melt_family") or "")
         self._btn_reshape.setText("Reshape → long" if self._wide_mode else "Reshape → wide")
+        self._btn_melt.setEnabled(self._wide_mode)
+        self._btn_melt.setText(f"Melt: {self._melt_family}" if self._melt_family else "Melt by…")
 
         for key, widget in (
             ("mm_formula", self._formula),

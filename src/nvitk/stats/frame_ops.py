@@ -330,6 +330,99 @@ def filtered_columns(rules: Sequence[FilterRule]) -> set[str]:
     return {r.column for r in rules if r.enabled and r.column}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Column types
+# ──────────────────────────────────────────────────────────────────────────────
+#: ``key -> (menu label, one-line effect)``. A column's dtype is not cosmetic: patsy and R decide
+#: whether a term is a slope or a set of contrasts from it, so ``visit`` stored as 1/2/3 enters a
+#: model as a *linear trend in visit number* unless it is made a factor.
+COLUMN_TYPES: dict[str, tuple[str, str]] = {
+    "auto": ("Auto (as loaded)", "Clear the override and use the dtype the frame was built with."),
+    "numeric": ("Numeric (continuous)", "One slope per unit. Unparseable values become NaN."),
+    "factor": ("Factor (categorical)", "One contrast per level, against the first."),
+    "integer": ("Integer", "Whole numbers, still continuous in a model."),
+    "boolean": ("Boolean", "True/False from 0/1, yes/no, true/false."),
+    "text": ("Text", "Plain strings; excluded from numeric summaries and plots."),
+}
+
+_TRUE_TOKENS = frozenset({"1", "true", "t", "yes", "y", "si", "sí"})
+_FALSE_TOKENS = frozenset({"0", "false", "f", "no", "n"})
+
+
+def cast_column(series: pd.Series, kind: str) -> pd.Series:
+    """
+    Recast one column to *kind*, one of :data:`COLUMN_TYPES`.
+
+    Casting never raises on bad cells: a value that will not convert becomes missing, because the
+    alternative — failing the whole frame because one row holds ``"n/a"`` — is worse than losing
+    that row from the model. The count of newly-missing cells is the caller's to report.
+
+    ``factor`` goes through ``str`` before ``category`` so that a numerically-coded factor (visit
+    1/2/3, APOE allele counts) gets levels ``"1"``/``"2"``/``"3"`` rather than a numeric
+    categorical, which patsy would still treat as a number.
+
+    Examples
+    --------
+    >>> cast_column(pd.Series([1, 2, 3]), "factor").dtype.name
+    'category'
+    >>> list(cast_column(pd.Series(["yes", "no"]), "boolean"))
+    [True, False]
+    """
+    kind = str(kind).strip().lower()
+    if kind in {"", "auto"}:
+        return series
+    if kind == "numeric":
+        return pd.to_numeric(series, errors="coerce")
+    if kind == "integer":
+        return pd.to_numeric(series, errors="coerce").round().astype("Int64")
+    if kind == "text":
+        return series.astype("string")
+    if kind == "factor":
+        text = series.astype("string")
+        return text.where(text.notna(), pd.NA).astype("category")
+    if kind == "boolean":
+        token = series.astype("string").str.strip().str.lower()
+        truthy = token.isin(_TRUE_TOKENS)
+        falsy = token.isin(_FALSE_TOKENS)
+        known = truthy | falsy
+        return truthy.where(known, pd.NA).astype("boolean")
+    raise ValueError(f"Unknown column type {kind!r}. Known: {', '.join(COLUMN_TYPES)}.")
+
+
+def apply_column_types(
+    df: pd.DataFrame, types: Mapping[str, str]
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Apply a ``{column: kind}`` map to *df*.
+
+    Returns the frame and a list of human-readable notes — one per cast that lost values, so the
+    UI can say "12 cells became missing" instead of leaving the user to notice a shrunken model.
+    """
+    if not types:
+        return df, []
+    out = df
+    notes: list[str] = []
+    for column, kind in types.items():
+        if column not in out.columns or str(kind).lower() in {"", "auto"}:
+            continue
+        before = int(out[column].notna().sum())
+        try:
+            cast = cast_column(out[column], kind)
+        except ValueError as exc:
+            notes.append(str(exc))
+            continue
+        if out is df:
+            out = df.copy()
+        out[column] = cast
+        lost = before - int(cast.notna().sum())
+        if lost:
+            notes.append(
+                f"{column} → {COLUMN_TYPES.get(kind, (kind, ''))[0]}: {lost} value(s) "
+                f"became missing."
+            )
+    return out, notes
+
+
 def ensure_unique_columns(df: pd.DataFrame, *, context: str = "frame") -> pd.DataFrame:
     """
     Return *df* with string column names and no duplicates, on a fresh index.
@@ -766,13 +859,16 @@ __all__ = [
     "IDENTIFIER_RE",
     "TRANSFORMS",
     "TRANSFORM_LABELS",
+    "COLUMN_TYPES",
     "DerivedColumn",
     "FilterRule",
+    "apply_column_types",
     "apply_derived_columns",
     "apply_filter_rules",
     "apply_iqr_filter",
     "apply_row_filter",
     "bin_counts",
+    "cast_column",
     "bin_interval_labels",
     "cut_into_bins",
     "default_bin_labels",
