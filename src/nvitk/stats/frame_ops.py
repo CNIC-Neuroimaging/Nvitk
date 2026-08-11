@@ -389,6 +389,52 @@ def cast_column(series: pd.Series, kind: str) -> pd.Series:
     raise ValueError(f"Unknown column type {kind!r}. Known: {', '.join(COLUMN_TYPES)}.")
 
 
+def set_reference_level(series: pd.Series, level: str) -> pd.Series:
+    """
+    Make *level* the first category of *series*, so models contrast every other level against it.
+
+    Both patsy and R take a factor's **first** level as the treatment reference, so reordering the
+    categories is all it takes — no formula surgery, no ``C(x, Treatment(...))`` that would have to
+    be written differently for statsmodels and for lme4. Reordering is also lossless: no value
+    changes, only the order the levels are declared in.
+
+    A non-categorical series is converted first, because "reference level" has no meaning for a
+    float. A *level* not present is refused rather than silently ignored — a reference that does not
+    exist would leave the model contrasting against whatever happened to sort first.
+    """
+    text = series.astype("string")
+    levels = [str(v) for v in pd.unique(text.dropna())]
+    if str(level) not in levels:
+        raise ValueError(
+            f"{level!r} is not a level of this column. Present: {', '.join(sorted(levels)[:12])}"
+            f"{'…' if len(levels) > 12 else ''}."
+        )
+    ordered = [str(level), *sorted(v for v in levels if v != str(level))]
+    return pd.Categorical(text, categories=ordered, ordered=False)
+
+
+def apply_reference_levels(
+    df: pd.DataFrame, references: Mapping[str, str]
+) -> tuple[pd.DataFrame, list[str]]:
+    """Apply a ``{column: reference level}`` map, returning the frame and any problems as notes."""
+    if not references:
+        return df, []
+    out = df
+    notes: list[str] = []
+    for column, level in references.items():
+        if column not in out.columns or not str(level):
+            continue
+        try:
+            recoded = set_reference_level(out[column], str(level))
+        except ValueError as exc:
+            notes.append(f"{column}: {exc}")
+            continue
+        if out is df:
+            out = df.copy()
+        out[column] = recoded
+    return out, notes
+
+
 def apply_column_types(
     df: pd.DataFrame, types: Mapping[str, str]
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -864,6 +910,7 @@ __all__ = [
     "FilterRule",
     "apply_column_types",
     "apply_derived_columns",
+    "apply_reference_levels",
     "apply_filter_rules",
     "apply_iqr_filter",
     "apply_row_filter",
@@ -878,5 +925,6 @@ __all__ = [
     "evaluate_expression",
     "filtered_columns",
     "parse_cut_points",
+    "set_reference_level",
     "suggest_cut_points",
 ]

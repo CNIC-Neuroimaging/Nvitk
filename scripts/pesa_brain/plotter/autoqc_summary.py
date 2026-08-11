@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Plot the automatic 4D-flow QC metrics published by the qvtpy stage 9.
 
-Reads the ``qc_*`` variables straight out of the dataset and draws the four views that answer
+Reads the ``qc_*`` variables straight out of the dataset and draws the views that answer
 "how healthy is this cohort's flow data, and where is the damage concentrated?":
 
 1. **Per-vessel pass rates** — which vessels fail the literature band, ranked. A single vessel at the
    top usually means a segmentation or LOC-placement problem specific to it, not a bad cohort.
 2. **Score distributions** — the plausibility and combined scores per vessel, so a vessel that is
    merely borderline is distinguishable from one that is failing outright.
-3. **Conservation residuals** — the junction balances, with the ±15% tolerance drawn on. The spread
-   matters more than the offset: a consistent bias is an unmeasured branch, scatter is measurement
-   noise.
-4. **Subject-level summary** — the anterior/posterior split against its 72% reference, and how many
+3. **Conservation residuals** — the junction balances, each with **its own class tolerance** drawn
+   on (proximal arterial / distal / venous differ). The spread matters more than the offset: a
+   consistent bias is an unmeasured branch, scatter is measurement noise.
+4. **Along-segment consistency** — the per-vessel flow CV along each vessel's main path.
+5. **Subject-level summary** — the anterior/posterior split against its 72% reference, and how many
    subjects carry at least one failing check.
+6. **Cohort junction regression** — inflow against outflow per junction, the validation statistic.
 
 Examples::
 
@@ -31,7 +33,12 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
-from nvitk.measure.hemodynamics import ANTERIOR_SHARE_PCT, ANTERIOR_SHARE_TOL_PCT, CONSERVATION_TOL
+from nvitk.measure.hemodynamics import (
+    ANTERIOR_SHARE_PCT,
+    ANTERIOR_SHARE_TOL_PCT,
+    CONSERVATION_TOL,
+    SEGMENT_CV_TOL,
+)
 from nvitk.pipes.qvtpy.stage9_autoqc import QC_LABELS, QC_VARIABLES
 
 log = Logger()
@@ -62,6 +69,36 @@ _PLOT_LABEL: dict[str, str] = {
     "lts": "LTSV",
     "rts": "RTSV",
 }
+
+
+def conservation_tolerances() -> dict[str, tuple[float, ...]]:
+    """
+    Canonical node → the class tolerance(s) stage 9 can score its conservation residual against.
+
+    There is no single gate. Proximal arterial junctions are held to 20 %, the distal basilar → PCA
+    split to 30 % (unmeasured AICA/SCA outflow inflates it), the venous confluence to 20 %. Drawing
+    one global band — as this report used to, at ``CONSERVATION_TOL`` = 15 % — paints PCAs as
+    failing when they are inside their own gate, and is stricter than any gate the stage applies.
+
+    The basilar anchors **two** rules, and stage 9 keeps whichever residual was worse together with
+    *that* rule's tolerance, so its applicable gate depends on the subject. Both are returned; the
+    figures draw the stricter one solid and the looser one as an outer band.
+    """
+    from nvitk.pipes.qvtpy.stage9_autoqc import AutoQcConfig, _autoqc_conservation_specs
+
+    out: dict[str, set[float]] = {}
+    for _key, anchors, tol in _autoqc_conservation_specs(AutoQcConfig()):
+        for anchor in anchors:
+            out.setdefault(str(anchor), set()).add(float(tol))
+    return {node: tuple(sorted(tols)) for node, tols in out.items()}
+
+
+def _tolerances_for_label(display_label: object) -> tuple[float, ...]:
+    """Class tolerance(s) for a display label like ``LICA``, or ``()`` when it anchors no rule."""
+    from nvitk.stats.vessel_network import canonical_node
+
+    node = canonical_node(display_label)
+    return conservation_tolerances().get(str(node), ()) if node else ()
 
 
 def _display_region(region_id: object) -> str:
@@ -333,7 +370,12 @@ def plot_conservation(
     vessel: pd.DataFrame, out_dir: Path, *, robust: bool = False
 ) -> Path | None:
     """
-    Junction mass-conservation residuals, with the tolerance band drawn on.
+    Junction mass-conservation residuals, with **each vessel's own class tolerance** drawn on.
+
+    The gate is not global: proximal arterial junctions are held to 20 %, the distal basilar → PCA
+    split to 30 %, the venous confluence to 20 % (:func:`conservation_tolerances`). Each row gets
+    its own band, so a PCA at 0.25 reads as inside its gate instead of failing a 15 % line the
+    stage never applied.
 
     The residual is a *ratio*, so a near-zero inflow denominator sends it to hundreds of times the
     tolerance and flattens every distribution against the zero line. With *robust* the x range is
@@ -343,6 +385,7 @@ def plot_conservation(
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from matplotlib.patches import Patch, Rectangle
 
     from nvitk.pipes.qvtpy.stage9_autoqc import robust_range
 
@@ -353,14 +396,18 @@ def plot_conservation(
         return None
 
     title = "Junction mass-conservation residuals"
+    widest = max(
+        (t for label in rows["region_id"].unique() for t in _tolerances_for_label(label)),
+        default=CONSERVATION_TOL,
+    )
     n_total = len(rows)
     if robust:
         values = rows["qc_conservation"].astype(float)
         lo, hi = robust_range(values)
-        # Always keep the tolerance band in frame: a window that excluded it would make the one
-        # reference line on the figure invisible.
-        lo = min(lo, -2 * CONSERVATION_TOL)
-        hi = max(hi, 2 * CONSERVATION_TOL)
+        # Always keep the tolerance bands in frame: a window that excluded them would make the only
+        # reference marks on the figure invisible.
+        lo = min(lo, -2 * widest)
+        hi = max(hi, 2 * widest)
         # Drop rather than clip the axis: the violin's kernel is estimated from the values it is
         # given, so an axis limit alone leaves every distribution a flat block spanning the frame.
         rows = rows.loc[values.between(lo, hi)]
@@ -379,13 +426,34 @@ def plot_conservation(
         legend=False, ax=ax, inner="quartile", cut=0, density_norm="width", palette="tab10",
     )
     ax.axvline(0, color="#333333", lw=1.2)
-    ax.axvspan(-CONSERVATION_TOL, CONSERVATION_TOL, color="#55A868", alpha=0.12,
-               label=f"within ±{CONSERVATION_TOL:.0%}")
 
+    # One band per row, at that vessel's own class gate. Where a vessel anchors two rules (the
+    # basilar), the stricter gate is drawn solid and the looser one as a paler outer band — which
+    # of the two applied depends on which junction gave the worse residual for that subject.
+    seen_multi = False
+    for i, label in enumerate(order):
+        tols = _tolerances_for_label(label)
+        if not tols:
+            continue
+        for depth, tol in enumerate(reversed(tols)):
+            ax.add_patch(Rectangle(
+                (-tol, i - 0.42), 2 * tol, 0.84,
+                facecolor="#55A868", alpha=0.10 if depth == 0 and len(tols) > 1 else 0.18,
+                edgecolor="none", zorder=0,
+            ))
+        if len(tols) > 1:
+            seen_multi = True
+    handles = [Patch(facecolor="#55A868", alpha=0.18, label="within the vessel's class tolerance")]
+    if seen_multi:
+        handles.append(Patch(facecolor="#55A868", alpha=0.10,
+                             label="looser gate where a vessel anchors two junctions"))
+
+    gates = sorted({t for label in order for t in _tolerances_for_label(label)})
     ax.set_xlabel("(inflow − outflow) / inflow")
     ax.set_ylabel("anchor vessel")
-    ax.set_title(title)
-    ax.legend(loc="best", fontsize=9)
+    ax.set_title(f"{title}\nclass tolerances: {', '.join(f'±{t:.0%}' for t in gates)}"
+                 if gates else title)
+    ax.legend(handles=handles, loc="best", fontsize=9)
     ax.grid(True, axis="x", alpha=0.25)
     fig.tight_layout()
     name = "qc_conservation_trimmed.png" if robust else "qc_conservation.png"
@@ -393,7 +461,15 @@ def plot_conservation(
 
 
 def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
-    """Along-segment flow CV, with the soft gate drawn on."""
+    """
+    Along-segment flow consistency, one row per vessel, ranked worst first.
+
+    Stage 9 computes this per **individual vessel** along that vessel's own **main path** — the
+    ACA/MCA/PCA bifurcation arms are excluded, because flow legitimately steps down past a
+    bifurcation and pooling the arms would measure the branching rather than the segmentation.
+    Every vessel the station profile carries appears here, so the row count is the coverage: a
+    vessel missing from this figure had fewer than three main-path stations.
+    """
     import matplotlib.pyplot as plt
     import seaborn as sns
 
@@ -405,18 +481,38 @@ def plot_segment_cv(vessel: pd.DataFrame, out_dir: Path) -> Path | None:
     if rows.empty:
         return None
 
-    order = sorted(rows["region_id"].astype(str).unique())
-    fig, ax = plt.subplots(figsize=(9, max(4.0, 1.1 * len(order) + 2.0)))
+    # Worst first: with coverage now spanning every vessel rather than the three tree roots, an
+    # alphabetical axis buries the one vessel that is actually drifting.
+    stats = rows.groupby("region_id")["qc_segment_cv"].agg(["median", "size"])
+    order = list(stats.sort_values("median", ascending=False).index.astype(str))
+
+    fig, ax = plt.subplots(figsize=(9.5, max(4.0, 0.9 * len(order) + 2.0)))
     sns.violinplot(
         data=rows, x="qc_segment_cv", y="region_id", order=order, hue="region_id",
         legend=False, ax=ax, inner="quartile", cut=0, density_norm="width", palette="tab10",
     )
     ax.axvspan(0.0, SEGMENT_CV_TOL, color="#55A868", alpha=0.12,
                label=f"within {SEGMENT_CV_TOL:.0%}")
-    ax.set_xlabel("flow CV along segment")
+    ax.axvline(SEGMENT_CV_TOL, color="#C44E52", ls="--", lw=1.1)
+
+    over = rows.assign(_over=rows["qc_segment_cv"] > SEGMENT_CV_TOL).groupby("region_id")["_over"]
+    for i, label in enumerate(order):
+        n = int(stats.loc[label, "size"])
+        n_over = int(over.sum().get(label, 0))
+        # Boxed: a vessel drifting far past the gate has a violin reaching the right edge, and an
+        # unboxed label lands on top of it.
+        ax.annotate(f"n={n}  ·  {n_over} over gate", (1.0, i), xycoords=("axes fraction", "data"),
+                    xytext=(-6, 0), textcoords="offset points", ha="right", va="center",
+                    fontsize=8, color="#555555",
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                              edgecolor="none", alpha=0.75))
+
+    ax.set_xlabel("flow CV along the vessel's main path  (std / |mean| of station mean flows)")
     ax.set_ylabel("vessel")
-    ax.set_title("Along-segment flow consistency")
-    ax.legend(loc="best", fontsize=9)
+    ax.set_title(
+        f"Along-segment flow consistency — per vessel, main path only ({len(order)} vessels)"
+    )
+    ax.legend(loc="lower right", fontsize=9)
     ax.grid(True, axis="x", alpha=0.25)
     fig.tight_layout()
     return _save(fig, out_dir / "qc_segment_cv.png")
@@ -510,12 +606,25 @@ def summary_table(vessel: pd.DataFrame, subject: pd.DataFrame) -> pd.DataFrame:
         if "qc_conservation" in group.columns:
             residual = pd.to_numeric(group["qc_conservation"], errors="coerce").dropna()
             if not residual.empty:
+                # Score against the vessel's own class gate, not one global number — a PCA is held
+                # to 30 % and an ICA to 20 %, so a single threshold mislabels both.
+                tols = _tolerances_for_label(region)
+                gate = max(tols) if tols else CONSERVATION_TOL
                 entry["conservation_median"] = float(residual.median())
-                entry["conservation_out_pct"] = float(
-                    100.0 * (residual.abs() > CONSERVATION_TOL).mean()
-                )
+                entry["conservation_tol"] = float(gate)
+                entry["conservation_out_pct"] = float(100.0 * (residual.abs() > gate).mean())
+        if "qc_segment_cv" in group.columns:
+            cv = pd.to_numeric(group["qc_segment_cv"], errors="coerce").dropna()
+            if not cv.empty:
+                entry["segment_cv_median"] = float(cv.median())
+                entry["segment_cv_out_pct"] = float(100.0 * (cv > SEGMENT_CV_TOL).mean())
         rows.append(entry)
-    return pd.DataFrame(rows).sort_values("qc_flow_plausible_fail_pct", ascending=False)
+    table = pd.DataFrame(rows)
+    sort_key = (
+        "qc_flow_plausible_fail_pct" if "qc_flow_plausible_fail_pct" in table.columns
+        else table.columns[0]
+    )
+    return table.sort_values(sort_key, ascending=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

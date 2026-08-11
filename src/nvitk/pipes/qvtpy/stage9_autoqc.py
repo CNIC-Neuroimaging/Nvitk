@@ -115,9 +115,13 @@ AUTOQC_CONSERVATION: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("venous_drainage", ("sss", "strs", "lts", "rts"), CONSERVATION_TOL_VENOUS),
 )
 
-#: Vessels whose along-segment flow CV is published. Matches the QVT paper's continuous-segment
-#: check (L/R ICA, SSS) plus the basilar, which is long enough for a meaningful CV.
-SEGMENT_CV_NODES: frozenset[str] = frozenset({"lica", "rica", "basi", "sss"})
+#: Vessels held out of the along-segment flow CV. Empty by default: the check runs on **every**
+#: vessel the station profile carries, one CV per vessel, along that vessel's own trunk centerline.
+#:
+#: Communicating arteries need no entry — they are dropped from the PITC root groups upstream and
+#: never reach ``pitc_profile.csv``. Neither do the venous sinuses: the profile is written only for
+#: the arterial root groups, so a venous node listed here (or anywhere) would simply never match.
+SEGMENT_CV_EXCLUDED_NODES: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -646,45 +650,118 @@ def _segment_cv_column(
     return pd.Series(values, index=frame.index, dtype=float)
 
 
+def is_main_path_station(branch_name: Any, label_id: int) -> bool:
+    """
+    Whether a ``pitc_profile.csv`` station sits on its vessel's **main path**.
+
+    Stage 4/6 decompose a branched territory into a trunk plus bifurcation arms and name them with
+    :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names` — ``LMCA-M1`` for the trunk, ``LMCA-M2a``
+    / ``LMCA-M2b`` for the arms; a non-branched vessel keeps its bare name (``LICA``) with any
+    extra path suffixed ``-b2``, ``-b3``.
+
+    The along-segment CV is a statement about **one continuous vessel**: mass is conserved along a
+    non-branching segment, so its station flows should barely move. Pooling a trunk with its side
+    arms breaks that premise — flow legitimately steps down past each bifurcation, and the CV would
+    measure the branching, not the segmentation quality. Only the trunk qualifies.
+
+    Both the canonical trunk name and the bare vessel name are accepted, so a profile written
+    before branch naming (bare names throughout) still resolves; ``-M2a`` / ``-b2`` never do.
+    """
+    from nvitk.pipes.qvtpy.labels import qvtpy_branch_names, qvtpy_vessel_name
+
+    key = str(branch_name or "").strip().upper()
+    if not key:
+        return False
+    trunk = str(qvtpy_branch_names(int(label_id), 1)[0]).upper()
+    return key in {trunk, str(qvtpy_vessel_name(int(label_id))).upper()}
+
+
 def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
     """
-    Along-segment flow CV from a concatenated ``pitc_profile.csv`` frame.
+    Along-segment flow CV **per individual vessel**, from a concatenated ``pitc_profile.csv`` frame.
 
-    Groups stations by ``(subject_uid, vessel)``, keeps only the vessels in
-    :data:`SEGMENT_CV_NODES`, and returns a long ``(subject_uid, region_id, value)`` frame
-    ready for :func:`compute_vessel_qc`.
+    One CV per ``(subject_uid, vessel)``, computed over that vessel's own trunk stations:
+
+    - **Per vessel, not per tree.** The profile tags every station with the root tree it feeds
+      (``L_ICA`` / ``R_ICA`` / ``Basilar``), but a tree spans several vessels and a bifurcation
+      between them, where flow is *supposed* to change. Grouping by tree would fold the carotid
+      terminus into the ICA's own consistency. Every vessel the profile carries gets its own CV —
+      ICA, VA, basilar, and the ACA / MCA / PCA trunks — minus anything in
+      :data:`SEGMENT_CV_EXCLUDED_NODES`.
+    - **Main path only.** For the branched territories (ACA / MCA / PCA) only the trunk centerline
+      counts; the bifurcation arms are dropped (:func:`is_main_path_station`).
+
+    ``region_id`` is emitted as the plain vessel name (``LMCA``, not ``LMCA-M1``) so it joins the
+    published flow rows directly.
+
+    Returns a long ``(subject_uid, region_id, value)`` frame ready for :func:`compute_vessel_qc`.
     """
+    from nvitk.pipes.qvtpy.labels import qvtpy_branch_parent_label, qvtpy_vessel_name
     from nvitk.stats.vessel_network import canonical_node
 
+    columns = ["subject_uid", "region_id", "value"]
     if profiles is None or profiles.empty:
-        return pd.DataFrame(columns=["subject_uid", "region_id", "value"])
+        return pd.DataFrame(columns=columns)
 
     work = profiles.copy()
     if "subject_uid" not in work.columns:
         raise ValueError("profiles must carry subject_uid.")
-    region_col = next(
-        (c for c in ("vessel_name", "region_id", "vessel_id") if c in work.columns),
-        None,
+    name_col = next(
+        (c for c in ("vessel_name", "region_id") if c in work.columns), None
     )
     flow_col = next(
-        (c for c in ("flow_mean_ml_s", "flow_mean", "value") if c in work.columns),
-        None,
+        (c for c in ("flow_mean_ml_s", "flow_mean", "value") if c in work.columns), None
     )
-    if region_col is None or flow_col is None:
-        return pd.DataFrame(columns=["subject_uid", "region_id", "value"])
+    if name_col is None or flow_col is None:
+        return pd.DataFrame(columns=columns)
 
     work["subject_uid"] = work["subject_uid"].astype(str)
-    work["region_id"] = work[region_col].astype(str)
-    work["node"] = work["region_id"].map(canonical_node)
-    work = work.loc[work["node"].isin(SEGMENT_CV_NODES)].copy()
+    work["_branch"] = work[name_col].astype(str)
     work["_flow"] = pd.to_numeric(work[flow_col], errors="coerce")
+
+    # Parent label: the profile's own vessel_id, else parsed back off the branch-name prefix.
+    if "vessel_id" in work.columns:
+        labels = pd.to_numeric(work["vessel_id"], errors="coerce")
+    else:
+        labels = pd.Series(
+            [qvtpy_branch_parent_label(n) for n in work["_branch"]],
+            index=work.index, dtype="float64",
+        )
+    work["_label"] = labels
+    work = work.loc[work["_label"].notna()].copy()
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+    work["_label"] = work["_label"].astype(int)
+
+    n_stations = len(work)
+    work = work.loc[
+        [
+            is_main_path_station(name, label)
+            for name, label in zip(work["_branch"], work["_label"])
+        ]
+    ].copy()
+    if work.empty:
+        log.info(
+            "autoqc: no main-path stations in %d profile row(s) — every station sits on a "
+            "bifurcation arm, or the branch names are unrecognised.", n_stations,
+        )
+        return pd.DataFrame(columns=columns)
+    log.info(
+        "autoqc: along-segment CV over %d of %d profile station(s) (main path only).",
+        len(work), n_stations,
+    )
+
+    work["_vessel"] = [qvtpy_vessel_name(int(v)) for v in work["_label"]]
     rows: list[dict[str, Any]] = []
-    for (subject, region), group in work.groupby(["subject_uid", "region_id"], sort=False):
+    for (subject, vessel), group in work.groupby(["subject_uid", "_vessel"], sort=False):
+        node = canonical_node(vessel)
+        if node and node in SEGMENT_CV_EXCLUDED_NODES:
+            continue
         cv = segment_flow_consistency_cv(group["_flow"].to_numpy())
         if not np.isfinite(cv):
             continue
-        rows.append({"subject_uid": str(subject), "region_id": str(region), "value": float(cv)})
-    return pd.DataFrame(rows, columns=["subject_uid", "region_id", "value"])
+        rows.append({"subject_uid": str(subject), "region_id": str(vessel), "value": float(cv)})
+    return pd.DataFrame(rows, columns=columns)
 
 
 def compute_subject_qc(
@@ -1216,7 +1293,7 @@ def run_autoqc(
             if segment_cv.empty:
                 log.info(
                     "autoqc: no along-segment CV computable from pitc_profile.csv under %s "
-                    "(need ≥3 stations on ICA / basilar / SSS).",
+                    "(need ≥3 main-path stations on a vessel).",
                     profile_root,
                 )
             else:
@@ -1556,7 +1633,7 @@ __all__ = [
     "QC_LABELS",
     "QC_SCORE_FLAG_BELOW",
     "QC_VARIABLES",
-    "SEGMENT_CV_NODES",
+    "SEGMENT_CV_EXCLUDED_NODES",
     "STAGE_NAME",
     "AutoQcConfig",
     "compute_qc_columns",
@@ -1564,6 +1641,7 @@ __all__ = [
     "compute_subject_qc",
     "compute_vessel_qc",
     "infer_flow_scale",
+    "is_main_path_station",
     "load_flow_measurements",
     "publish_autoqc",
     "purge_subject_qc",

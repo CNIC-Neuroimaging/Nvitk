@@ -600,6 +600,7 @@ class AnalysisFrameView(QWidget):
     dropRequested(column)            remove a column from the analysis frame
     restoreRequested()               put every dropped column back
     typeChangeRequested(column, kind) recast a column (numeric / factor / …)
+    referenceRequested(column, level) make a level the model's reference
     """
 
     filtersRequested = Signal(str)
@@ -614,12 +615,14 @@ class AnalysisFrameView(QWidget):
     dropRequested = Signal(str)
     restoreRequested = Signal()
     typeChangeRequested = Signal(str, str)
+    referenceRequested = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
         super().__init__(parent)
         self._dropped: set[str] = set()
         self._column_types: dict[str, str] = {}
+        self._references: dict[str, str] = {}
         self._model = PandasFrameModel(self)
         self._proxy = QSortFilterProxyModel(self)
         self._proxy.setSourceModel(self._model)
@@ -796,6 +799,30 @@ class AnalysisFrameView(QWidget):
         if column in frame.columns:
             type_menu.setToolTip(f"Currently {frame[column].dtype}")
 
+        # Reference level: only meaningful for a column with a manageable number of levels, and
+        # only for the categorical ones — a continuous predictor has a slope, not contrasts.
+        ref_menu = menu.addMenu("Reference level")
+        levels = self._column_levels(column)
+        ref_menu.setEnabled(bool(levels))
+        if levels:
+            current = self._references.get(column, "")
+            clear = ref_menu.addAction(
+                f"Default (first level){'  ✓' if not current else ''}",
+                lambda: self.referenceRequested.emit(column, ""),
+            )
+            clear.setToolTip("Let the frame's own level order decide.")
+            ref_menu.addSeparator()
+            for level in levels:
+                ref_menu.addAction(
+                    f"{level}{'  ✓' if level == current else ''}",
+                    lambda _=False, lv=level: self.referenceRequested.emit(column, lv),
+                )
+        else:
+            ref_menu.setToolTip(
+                "Only for categorical columns with a workable number of levels — set the type to "
+                "Factor first if this should be one."
+            )
+
         menu.addAction("Copy column name", lambda: QApplication.clipboard().setText(column))
 
         menu.addSeparator()
@@ -814,6 +841,21 @@ class AnalysisFrameView(QWidget):
         if self._dropped:
             restore.setToolTip("Dropped: " + ", ".join(sorted(self._dropped)))
         menu.exec(header.mapToGlobal(point))
+
+    def _column_levels(self, column: str, *, cap: int = MAX_CATEGORICAL_LEVELS) -> list[str]:
+        """Distinct levels of *column*, or ``[]`` when it is not usable as a factor."""
+        frame = self._model.frame()
+        if column not in frame.columns:
+            return []
+        series = frame[column]
+        if pd.api.types.is_float_dtype(series):
+            return []
+        levels = [str(v) for v in pd.unique(series.dropna())]
+        return sorted(levels) if 1 < len(levels) <= cap else []
+
+    def set_references(self, references: Mapping[str, str]) -> None:
+        """Record the active reference levels, so the menu can tick the current one."""
+        self._references = {str(k): str(v) for k, v in dict(references).items()}
 
     def set_column_types(self, types: Mapping[str, str]) -> None:
         """Record the active per-column type overrides, so the menu can tick the current one."""

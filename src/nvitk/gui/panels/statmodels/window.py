@@ -140,6 +140,7 @@ from nvitk.stats.frame_ops import (
     FilterRule,
     apply_column_types,
     apply_derived_columns,
+    apply_reference_levels,
     apply_filter_rules,
     default_derived_name,
     filtered_columns,
@@ -154,6 +155,7 @@ from nvitk.stats.mediation import (
 )
 
 from .constants import (
+    MAX_CATEGORICAL_LEVELS,
     ANALYSIS_FORMULA_KINDS,
     ANALYSIS_PANEL_KINDS,
     ANALYSIS_GLM,
@@ -236,6 +238,16 @@ _SEM_PLOTS: tuple[tuple[str, str], ...] = (
     ("Network diagram", "network"),
 )
 
+#: Sub-views of the vascular map: what colour encodes. Kept separate from the estimate/p-value
+#: split because "which vessel carries the most flow" and "where is the evidence" are different
+#: questions and a single control conflating them would make the figure ambiguous to read.
+_VASCULAR_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Model estimate (grey = n.s.)", "estimate"),
+    ("Model estimate (all vessels)", "estimate_all"),
+    ("p-value (−log₁₀)", "pvalue"),
+    ("Observed mean per vessel", "means"),
+)
+
 _MRF_PLOTS: tuple[tuple[str, str], ...] = (
     ("Smoothed field", "field"),
     ("Adjacency graph", "graph"),
@@ -292,6 +304,9 @@ class StatmodelsWindow(QMainWindow):
         # Per-column dtype overrides. A column's type decides whether a model term is a slope or a
         # set of contrasts, so it is part of the frame recipe rather than a display preference.
         self._column_types: dict[str, str] = {}
+        # Treatment reference per factor. Both patsy and R contrast against a factor's first level,
+        # so this is applied by reordering categories rather than by rewriting the formula.
+        self._reference_levels: dict[str, str] = {}
 
         # ---- result state -----------------------------------------------------
         self._last_result = None
@@ -689,11 +704,15 @@ class StatmodelsWindow(QMainWindow):
         self._plot_display = QComboBox()
         self._plot_display.addItem("Overview", "overview")
         self._plot_display.addItem("Grouped", "grouped")
+        self._plot_display.addItem("Vascular map", "vascular")
         self._display_tooltip = (
             "Overview draws every group on one pair of axes.\n"
             "Grouped splits them into a grid of anatomical panels — carotids / anterior / "
             "posterior / venous for vessels, lobes for cortical parcels — each autoscaled to its "
             "own range, so a venous measurement no longer flattens an arterial one.\n"
+            "Vascular map draws each vessel's estimate on a schematic of the circle of Willis and "
+            "the dural sinuses, so a pattern across the anatomy — both carotids together, the "
+            "posterior circulation alone — is visible instead of being spread down a forest plot.\n"
             "This is a view of the same fit: the population estimate is identical in every panel."
         )
         self._plot_display.setToolTip(self._display_tooltip)
@@ -704,6 +723,18 @@ class StatmodelsWindow(QMainWindow):
         self._plot_mode.addItem("categorical (marginal means)", "categorical")
         self._plot_x = QComboBox()
         self._plot_x.setMinimumWidth(140)
+        # Which factor the curves are coloured by. For lme4 this used to be the random grouping
+        # factor and nothing else, which draws 510 subject curves for a model whose interesting
+        # structure is a 17-level fixed effect.
+        self._plot_group = QComboBox()
+        self._plot_group.setMinimumWidth(120)
+        self._plot_group.setToolTip(
+            "Factor the curves are drawn per level of.\n\n"
+            "Offers the model's random grouping factors and any categorical fixed effect. A "
+            "categorical fixed effect is preferred by default: a per-subject curve set is rarely "
+            "readable, and the fixed term is what the coefficient table is about."
+        )
+        self._plot_group_label = QLabel("colour by")
         self._include_points = QCheckBox("Points")
         self._include_points.setChecked(True)
         self._include_points.setToolTip(
@@ -726,6 +757,8 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._plot_mode)
         lay.addWidget(QLabel("x"))
         lay.addWidget(self._plot_x)
+        lay.addWidget(self._plot_group_label)
+        lay.addWidget(self._plot_group)
         lay.addWidget(self._include_points)
         lay.addWidget(self._show_ci)
         lay.addStretch(1)
@@ -818,9 +851,11 @@ class StatmodelsWindow(QMainWindow):
         self._btn_load.clicked.connect(self._on_load)
         self._btn_plot.clicked.connect(self._on_plot)
         self._plot.exportRequested.connect(self._on_export_plot)
+        self._plot_display.currentIndexChanged.connect(lambda *_: self._sync_analysis_type())
         self._plot_display.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_mode.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._plot_x.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._plot_group.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._include_points.stateChanged.connect(lambda *_: self._on_plot())
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
@@ -839,6 +874,7 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.dropRequested.connect(self._on_drop_column)
         self._frame_view.restoreRequested.connect(self._on_restore_columns)
         self._frame_view.typeChangeRequested.connect(self._on_change_column_type)
+        self._frame_view.referenceRequested.connect(self._on_set_reference_level)
         self._frame_view.plotXRequested.connect(self._on_set_plot_x)
         self._btn_derived.clicked.connect(lambda *_: self._on_edit_derived())
         self._btn_export.clicked.connect(self._on_export_frame)
@@ -1025,8 +1061,11 @@ class StatmodelsWindow(QMainWindow):
             )
 
         derived_frame, type_notes = apply_column_types(derived_frame, self._column_types)
-        if type_notes:
-            log.info("Column types: %s", " ".join(type_notes))
+        # References after casts: casting to Factor is what makes a column eligible for one, and a
+        # cast rebuilds the categories, discarding any order set before it.
+        derived_frame, ref_notes = apply_reference_levels(derived_frame, self._reference_levels)
+        if type_notes or ref_notes:
+            log.info("Column types: %s", " ".join([*type_notes, *ref_notes]))
 
         rules = self._chips.rules()
         working, report = apply_filter_rules(derived_frame, rules)
@@ -1034,11 +1073,18 @@ class StatmodelsWindow(QMainWindow):
         # Reshape after the long-shape filters: derived columns and most rules are written against
         # long rows, so pivoting first would put their targets out of reach.
         long_rows = len(working)
+        reshaped = False
         if self._wide_mode:
             working = self._to_wide(working)
-            if self._melt_family:
-                working = self._melt_working(working)
+            reshaped = True
+        # Melt independently of the reshape button: the frame can already be wide because the
+        # measurements were loaded on the subject grain, in which case the button was never pressed
+        # and _wide_mode is False. The frame's own columns decide, not how it got that way.
+        if self._melt_family:
+            working = self._melt_working(working)
+            reshaped = True
 
+        if reshaped:
             # A rule can name a column that only exists *after* the reshape — an IQR fence on
             # 'flow_mean__TCBF', say. Those were skipped above with "column not in frame", so they
             # get a second pass here, in the shape they were written for. Rules already applied are
@@ -1064,8 +1110,10 @@ class StatmodelsWindow(QMainWindow):
         self._chips.set_rules(rules, report)
         self._chips.set_counts(long_rows, len(derived_frame))
         self._sync_filter_toggle()
+        self._sync_reshape_buttons(working)
         self._frame_view.set_dropped(self._dropped_columns)
         self._frame_view.set_column_types(self._column_types)
+        self._frame_view.set_references(self._reference_levels)
         self._frame_view.set_frame(
             working,
             filtered_columns=filtered_columns(rules),
@@ -1099,6 +1147,47 @@ class StatmodelsWindow(QMainWindow):
                     self._plot_x.setCurrentIndex(idx)
                     break
         self._plot_x.blockSignals(False)
+        self._sync_group_combo(df)
+
+    def _sync_group_combo(self, df: pd.DataFrame | None) -> None:
+        """
+        Repopulate the colour-by combo: random grouping factors, then categorical fixed effects.
+
+        A column is offered when it has at least two levels and few enough to draw — a 510-level
+        subject factor is still listed (it is the model's own grouping) but never preselected.
+        """
+        previous = self._plot_group.currentText()
+        meta = self._last_fit_meta or {}
+        factors = [str(g) for g in (meta.get("grouping_factors") or [])]
+        groups_field = self._groups.text().strip()
+        if groups_field and groups_field not in factors:
+            factors.append(groups_field)
+
+        candidates: list[str] = []
+        if df is not None and not df.empty:
+            for column in df.columns:
+                name = str(column)
+                if name in candidates:
+                    continue
+                series = df[name]
+                if pd.api.types.is_float_dtype(series):
+                    continue
+                levels = series.dropna().nunique()
+                if 1 < levels <= MAX_CATEGORICAL_LEVELS or name in factors:
+                    candidates.append(name)
+
+        ordered = [c for c in candidates if c not in factors] + [c for c in factors if c in candidates]
+        self._plot_group.blockSignals(True)
+        self._plot_group.clear()
+        for name in ordered:
+            self._plot_group.addItem(name)
+        # Prefer what the user already had, then a vessel-like factor, then anything small.
+        for candidate in (previous, self._region_column_name(), "territory", "group_key"):
+            idx = self._plot_group.findText(candidate)
+            if idx >= 0:
+                self._plot_group.setCurrentIndex(idx)
+                break
+        self._plot_group.blockSignals(False)
 
     # ---- filter actions -------------------------------------------------------
     def _on_edit_column_filter(self, column: str) -> None:
@@ -1306,6 +1395,39 @@ class StatmodelsWindow(QMainWindow):
         )
         return wide
 
+    def _sync_reshape_buttons(self, df: pd.DataFrame | None) -> None:
+        """
+        Enable the reshape controls from the *frame's* shape, not from which button was last pressed.
+
+        A frame loaded on the subject grain is already wide without the reshape button having been
+        touched, so gating on ``_wide_mode`` left Melt disabled on exactly the frames it exists for.
+        """
+        from nvitk.stats._statmodels_frames import subject_measurement_families
+
+        families = subject_measurement_families(df) if df is not None and not df.empty else {}
+        # A single-region measurement has no '__' columns and nothing to melt; a family needs at
+        # least one region column to spread down the rows.
+        self._btn_melt.setEnabled(bool(families) or bool(self._melt_family))
+        self._btn_melt.setText(f"Melt: {self._melt_family}" if self._melt_family else "Melt by…")
+
+        already_wide = bool(families) or (
+            df is not None and "territory" not in df.columns and not self._melt_family
+        )
+        if already_wide and not self._wide_mode:
+            self._btn_reshape.setEnabled(False)
+            self._btn_reshape.setToolTip(
+                "This frame is already one row per subject — it was loaded on the subject grain. "
+                "Change the grain in the Measurements panel to load it long, or use 'Melt by…' to "
+                "spread one measurement's regions back down the rows."
+            )
+        else:
+            self._btn_reshape.setEnabled(True)
+            self._btn_reshape.setToolTip(
+                "Switch between one row per subject × region (long) and one row per subject with a "
+                "column per vessel (wide). Path models need the wide shape — an equation like "
+                "'lmca ~ lica' compares two columns of the same row. Every other engine wants long."
+            )
+
     def _melt_working(self, df: pd.DataFrame) -> pd.DataFrame:
         """Melt ``self._melt_family``'s per-region columns back to long, or return *df* unchanged."""
         from nvitk.stats._statmodels_frames import melt_subject_frame
@@ -1323,25 +1445,27 @@ class StatmodelsWindow(QMainWindow):
         """Choose a measurement family to melt back into a territory column."""
         from nvitk.stats._statmodels_frames import subject_measurement_families
 
-        if not self._wide_mode:
-            notify("Melting applies to a wide frame — reshape to wide first.", error=True)
-            return
-
-        # Offer the families of the *un-melted* wide frame: once one is melted its columns are
-        # gone, so asking the current frame would hide the option that is already active.
+        # Offer the families of the *un-melted* frame: once one is melted its columns are gone, so
+        # asking the current frame would hide the option that is already active. This deliberately
+        # does not consult _wide_mode — a frame loaded on the subject grain is already wide.
         probe = self._melt_family
         self._melt_family = ""
         self._recompute_frame(announce=False)
-        families = subject_measurement_families(self._working_df or pd.DataFrame())
+        # Explicit None test: a DataFrame in a boolean context raises rather than being falsy.
+        probe_df = self._working_df
+        families = (
+            subject_measurement_families(probe_df) if probe_df is not None else {}
+        )
         self._melt_family = probe
 
         if not families:
+            self._recompute_frame(announce=False)
             notify(
-                "No per-region columns to melt — every measurement in this frame has a single "
-                "region.",
+                "Nothing to melt: no column is named '<measurement>__<region>'. That naming comes "
+                "from a subject-grain load or the reshape button, and only a measurement with more "
+                "than one region produces it.",
                 error=True,
             )
-            self._recompute_frame(announce=False)
             return
 
         options = ["(none — keep it wide)"] + [
@@ -1395,7 +1519,6 @@ class StatmodelsWindow(QMainWindow):
         self._wide_mode = not self._wide_mode
         self._recompute_frame(announce=False)
 
-        self._btn_melt.setEnabled(self._wide_mode)
         if not self._wide_mode:
             self._wide_coverage = None
             self._melt_family = ""
@@ -1492,6 +1615,39 @@ class StatmodelsWindow(QMainWindow):
                     note = f"  |  {lost} value(s) did not convert and are now missing"
         self._status.setText(f"{column} → {label} (dtype {dtype}){note}")
         notify(f"{column} is now {label}.{note}")
+
+    def _on_set_reference_level(self, column: str, level: str) -> None:
+        """Make *level* the treatment reference for *column*, or clear the override."""
+        if not column:
+            return
+        if not level:
+            self._reference_levels.pop(column, None)
+        else:
+            self._reference_levels[column] = level
+
+        self._recompute_frame(announce=False)
+        frame = self._working_df
+        if not level:
+            self._status.setText(f"{column}: reference cleared — the frame's own order decides.")
+            notify(f"{column}: default reference.")
+            return
+
+        # Confirm against the rebuilt frame rather than the request: an unusable level is dropped
+        # by apply_reference_levels with a note, and the status must not claim it was applied.
+        applied = (
+            frame is not None
+            and column in frame.columns
+            and list(getattr(frame[column].dtype, "categories", [])[:1]) == [level]
+        )
+        if applied:
+            self._status.setText(
+                f"{column}: reference is now {level!r} — every other level is contrasted against "
+                f"it, and {level!r} itself drops out of the coefficient table."
+            )
+            notify(f"{column} reference: {level}.")
+        else:
+            self._reference_levels.pop(column, None)
+            notify(f"Could not set {level!r} as the reference for {column}.", error=True)
 
     def _on_restore_columns(self) -> None:
         """Put every dropped column back."""
@@ -2013,13 +2169,24 @@ class StatmodelsWindow(QMainWindow):
         self._plot.set_kind_row_visible(
             kind in {ANALYSIS_MEDIATION, ANALYSIS_MMRM, ANALYSIS_LMROB,
                      ANALYSIS_SEM, ANALYSIS_MRF}
+            or str(self._plot_display.currentData() or "") == "vascular"
         )
-        self._plot.set_groups_visible(kind in ANALYSIS_FORMULA_KINDS)
+        # The checklist drives the vascular map too, so it stays visible there whatever
+        # engine produced the fit.
+        self._plot.set_groups_visible(
+            kind in ANALYSIS_FORMULA_KINDS
+            or str(self._plot_display.currentData() or "") == "vascular"
+        )
         # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
         self._sync_display_enabled()
-        if is_mmrm:
+        # The vascular display is checked first because it *replaces* the engine's own figure set:
+        # left after the engine branches, an MMRM or lmrob fit kept offering only its own plots and
+        # the map's estimate/p-value views were unreachable.
+        if str(self._plot_display.currentData() or "") == "vascular":
+            self._set_plot_kinds(self._vascular_plot_kinds())
+        elif is_mmrm:
             self._set_plot_kinds(_MMRM_PLOTS)
         elif is_lmrob:
             self._set_plot_kinds(_LMROB_PLOTS)
@@ -2136,10 +2303,15 @@ class StatmodelsWindow(QMainWindow):
             wide = self._working_df
             if wide is None or wide.empty:
                 raise ValueError("Load the data before fitting a path model.")
-            if not self._wide_mode:
+            # Judge the frame, not the reshape button: a subject-grain load is already wide, and
+            # gating on the button refused a frame that was perfectly fittable.
+            if "territory" in wide.columns or "group_key" in wide.columns and wide[
+                "group_key"
+            ].nunique() > 1:
                 raise ValueError(
                     "A path model needs one column per vessel, and this frame is long (one row "
-                    "per subject × region). Press 'Reshape → wide' on the analysis dataframe."
+                    "per subject × region). Press 'Reshape → wide' on the analysis dataframe, or "
+                    "load the measurements on the subject grain."
                 )
             # Published labels come in several spellings for one artery; map them onto the
             # columns the reshape produced so a hand-typed model still fits.
@@ -2295,6 +2467,11 @@ class StatmodelsWindow(QMainWindow):
             self._plot_mediation()
             return
         if self._last_result is None or self._last_model_df is None:
+            return
+        # Before the per-engine branches: the vascular map reads the fitted parameter table, which
+        # every engine produces, so an engine's own plotter must not shadow it.
+        if str(self._plot_display.currentData() or "") == "vascular":
+            self._plot_vascular()
             return
         if kind == ANALYSIS_NONLINEAR:
             self._plot_nonlinear()
@@ -2533,8 +2710,12 @@ class StatmodelsWindow(QMainWindow):
             import matplotlib.pyplot as plt
 
             df = self._last_model_df
-            group = (self._last_fit_meta or {}).get("grouping_factors") or []
-            group_col = group[0] if group else ""
+            factors = (self._last_fit_meta or {}).get("grouping_factors") or []
+            chosen = self._plot_group.currentText().strip()
+            group_col = (
+                chosen if chosen and chosen in (df.columns if df is not None else [])
+                else (factors[0] if factors else "")
+            )
             y = self._last_outcome or self._primary_column()
             x = self._plot_x.currentText().strip()
             if not x or x not in df.columns:
@@ -2800,6 +2981,120 @@ class StatmodelsWindow(QMainWindow):
             log.debug("SEM plot failed: %s", exc, exc_info=True)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
+    def _vascular_plot_kinds(self) -> tuple[tuple[str, str], ...]:
+        """
+        Views the vascular map can offer for the current fit.
+
+        A model whose vessel information lives in a random term — ``(1 + age_c | territory)`` — has
+        nothing about individual vessels in its fixed effects, so the coefficient view would fall
+        back to observed means without saying why. When per-group terms exist they are offered
+        first, one entry each, because they are what that model actually estimated per vessel.
+        """
+        from nvitk.stats.vascular_map import group_coefficient_terms
+
+        groups = self._groups.text().strip() or self._region_column_name()
+        terms = (
+            group_coefficient_terms(self._last_result, group_column=groups)
+            if self._last_result is not None else []
+        )
+        if not terms:
+            return _VASCULAR_PLOTS
+
+        offered: list[tuple[str, str]] = []
+        for term in terms:
+            pretty = "intercept" if term.strip("()").lower() == "intercept" else f"{term} slope"
+            offered.append((f"Per-vessel {pretty}", f"group:{term}"))
+        # The fixed-effect views stay available: a model can have both a territory term and a
+        # random slope over it, and they answer different questions.
+        return (*offered, *_VASCULAR_PLOTS)
+
+    def _plot_vascular(self) -> None:
+        """Draw the fit's per-vessel numbers on the cerebral circulation schematic."""
+        try:
+            import matplotlib.pyplot as plt
+
+            from nvitk.stats.vascular_map import (
+                plot_vascular_map,
+                vascular_values_from_result,
+            )
+
+            df = self._last_model_df
+            groups = self._groups.text().strip() or self._region_column_name()
+            if df is None or groups not in df.columns:
+                self._plot.show_error(
+                    f"The vascular map needs a per-vessel term: {groups!r} is not in the model "
+                    f"frame. Group the measurement vessel-wise and put it in the formula."
+                )
+                return
+
+            view = str(self._mediation_plot.currentData() or "estimate")
+            if view.startswith("group:"):
+                source = view
+            elif view == "means":
+                source = "mean"
+            else:
+                source = "coefficient"
+            try:
+                values, pvalues, note = vascular_values_from_result(
+                    self._last_result, group_column=groups, source=source,
+                    data=df, outcome=self._last_outcome or self._primary_column(),
+                )
+            except ValueError:
+                if source == "coefficient":
+                    values, pvalues, note = vascular_values_from_result(
+                        self._last_result, group_column=groups, source="mean",
+                        data=df, outcome=self._last_outcome or self._primary_column(),
+                    )
+                else:
+                    raise
+
+            # The Groups checklist drives the map the same way it drives every other plot. Its
+            # entries are published labels (LICA) while the map is keyed by canonical node (lica),
+            # so both sides go through canonical_node before the difference is taken.
+            checked = self._plot.checked_levels()
+            hide: list[str] = []
+            if checked:
+                keep = {canonical_node(level) for level in checked}
+                hide = [node for node in values if node not in keep]
+
+            mode = "pvalue" if view == "pvalue" else "estimate"
+            # "all vessels" and the observed means both drop the mask — the first by request, the
+            # second because a mean has no p-value and greying every vessel would say the opposite
+            # of what is true.
+            mask = bool(pvalues) and view == "estimate"
+            outcome = self._last_outcome or self._primary_column()
+            with plt.style.context("default"):
+                fig = plot_vascular_map(
+                    values,
+                    pvalues=pvalues,
+                    mode=mode,
+                    mask_nonsignificant=mask,
+                    hide=hide,
+                    title=f"{outcome} — {note}",
+                    label="p" if mode == "pvalue" else outcome,
+                )
+            self._plot.show_figure(fig)
+            self._plot.set_status(
+                f"{len(values) - len(hide)} vessel(s) drawn from {note}"
+                + (f", {len(hide)} hidden by the group checklist" if hide else "")
+                + ". "
+                + (
+                    "Colour is −log₁₀(p): brighter means stronger evidence, and nothing about "
+                    "direction or size."
+                    if mode == "pvalue"
+                    else (
+                        "Grey vessels did not reach significance; a dashed outline means the "
+                        "model has no estimate for that vessel."
+                        if mask
+                        else "Significance is not shown — every vessel with an estimate is "
+                             "coloured. A dashed outline means the model has no estimate."
+                    )
+                )
+            )
+        except Exception as exc:
+            log.debug("Vascular map failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Vascular map unavailable: {exc}")
+
     def _plot_mrf(self) -> None:
         """The smoothed field over the vessels, or the adjacency graph it was smoothed on."""
         try:
@@ -3056,6 +3351,7 @@ class StatmodelsWindow(QMainWindow):
             # columns dropped cannot be reproduced from a long frame that still has them.
             "dropped_columns": sorted(self._dropped_columns),
             "column_types": dict(self._column_types),
+            "reference_levels": dict(self._reference_levels),
             "wide": self._wide_mode,
             "melt_family": self._melt_family,
             "analysis_type": self._analysis_kind(),
@@ -3138,6 +3434,9 @@ class StatmodelsWindow(QMainWindow):
         self._dropped_columns = {str(c) for c in cfg.get("dropped_columns") or []}
         self._column_types = {
             str(k): str(v) for k, v in (cfg.get("column_types") or {}).items()
+        }
+        self._reference_levels = {
+            str(k): str(v) for k, v in (cfg.get("reference_levels") or {}).items()
         }
         self._wide_mode = bool(cfg.get("wide", False))
         self._melt_family = str(cfg.get("melt_family") or "")
