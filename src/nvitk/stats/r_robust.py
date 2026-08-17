@@ -46,6 +46,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
+from .frame_ops import _as_factor_preserving_order
 
 log = Logger()
 
@@ -391,7 +392,7 @@ def fit_lmrob(
     df = ensure_unique_columns(df, context="analysis dataframe")
     for column in needed:
         if column in df.columns and not pd.api.types.is_numeric_dtype(df[column]):
-            df[column] = pd.Categorical(df[column].astype(str))
+            df[column] = _as_factor_preserving_order(df[column])
 
     with _converter():
         from rpy2.robjects import conversion
@@ -622,7 +623,7 @@ def lmrob_predict(fit: Any, newdata: pd.DataFrame, *, use_random_effects: bool =
     frame = newdata.reset_index(drop=True).copy()
     for column in frame.columns:
         if not pd.api.types.is_numeric_dtype(frame[column]):
-            frame[column] = pd.Categorical(frame[column].astype(str))
+            frame[column] = _as_factor_preserving_order(frame[column])
     with _converter():
         from rpy2.robjects import conversion
 

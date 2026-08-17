@@ -39,11 +39,17 @@ def skeletonize_mask(mask_bool: np.ndarray) -> np.ndarray:
     return skeletonize(mask_bool.astype(bool)).astype(np.uint8)
 
 
-def skeleton_tree_from_mask(mask_bool: np.ndarray, spacing=None) -> SkeletonTree:
-    """Skeletonize *mask_bool*, optionally prune short terminal spurs, and build a :class:`SkeletonTree`."""
+def skeleton_tree_from_mask(mask_bool: np.ndarray, spacing=None, length_scale: float = 1.0) -> SkeletonTree:
+    """Skeletonize *mask_bool*, optionally prune short terminal spurs, and build a :class:`SkeletonTree`.
+
+    *length_scale* rescales the human-calibrated spur threshold for other
+    species (see ``_meta.length_scale`` in the topology JSON).
+    """
     skel = skeletonize_mask(mask_bool)
     if PRUNE_TERMINAL_SPURS:
-        skel = prune_short_terminal_spurs(skel, PRUNE_SPUR_LENGTH_MM, spacing=spacing)
+        skel = prune_short_terminal_spurs(
+            skel, float(PRUNE_SPUR_LENGTH_MM) * float(length_scale), spacing=spacing
+        )
     pts, neighbors, degree = skeleton_graph(skel)
     endpoints = list(np.where(degree == 1)[0])
     branchpoints = list(np.where(degree >= 3)[0])

@@ -38,9 +38,13 @@ MORPHO_POINT_CANVAS_SIZE_LIMITS = (0.5, 200.0)
 _MORPHO_TABLE_COLS: tuple[str, ...] = (
     "vessel_name",
     "full_name",
+    "n_voxels",
+    "volume_mm3",
+    "surface_area_mm2",
     "length_mm",
     "radius_mean_mm",
     "radius_p95_mm",
+    "equivalent_radius_mm",
     "tortuosity_dm",
     "stenosis_percent_max",
     "degree_of_stenosis_pct",
@@ -48,6 +52,17 @@ _MORPHO_TABLE_COLS: tuple[str, ...] = (
     "stenosis_segments_n",
     "curvature_mean_1_per_mm",
     "n_paths",
+)
+
+#: Per-label volumetry columns merged in from the ``06_Volumetry`` sheet.
+_VOLUMETRY_MERGE_COLS: tuple[str, ...] = (
+    "n_voxels",
+    "volume_mm3",
+    "volume_ul",
+    "mesh_volume_mm3",
+    "surface_area_mm2",
+    "equivalent_radius_mm",
+    "input_volume_mm3",
 )
 
 # Aggregation: length-weighted means for continuous metrics; max / sum for stenosis.
@@ -219,7 +234,28 @@ def _path_summary_table(stage7_dir: Path) -> pd.DataFrame:
     except Exception as exc:
         log.warning("Could not read Path Summary from %s: %s", excel, exc)
         return pd.DataFrame()
-    return _aggregate_summary_by_vessel(raw)
+    return _merge_volumetry(_aggregate_summary_by_vessel(raw), excel)
+
+
+def _merge_volumetry(summary: pd.DataFrame, excel: Path) -> pd.DataFrame:
+    """Attach per-label volumetry (voxels, mm³, surface area) from ``06_Volumetry``.
+
+    Volumetry is measured on the segmentation mask, so it is per label rather
+    than per centerline; joining on ``vessel_name`` puts it beside the
+    centerline metrics without double-counting anything.
+    """
+    if summary.empty or "vessel_name" not in summary.columns:
+        return summary
+    try:
+        vol = pd.read_excel(excel, sheet_name="06_Volumetry")
+    except Exception:
+        return summary
+    if vol.empty or "vessel_name" not in vol.columns:
+        return summary
+    vol = vol[vol["label"].astype(str) != "TOTAL"]
+    cols = ["vessel_name", *[c for c in _VOLUMETRY_MERGE_COLS if c in vol.columns]]
+    keep = [c for c in summary.columns if c not in _VOLUMETRY_MERGE_COLS]
+    return summary[keep].merge(vol[cols].drop_duplicates("vessel_name"), on="vessel_name", how="left")
 
 
 def _aggregate_summary_by_vessel(df: pd.DataFrame) -> pd.DataFrame:

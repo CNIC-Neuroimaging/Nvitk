@@ -8,16 +8,26 @@ schema expected by :func:`nvitk.measure.morpho.io_utils.load_mapping`.
 - ``qvtpy_topology.json`` — 4D-flow / qvtpy pipeline label IDs (arterial 1–14,
   venous 31–34). Reference only; not selected by the qvtpy pipeline.
 - ``mouse_root_topology.json`` — mouse CoW root vessels.
+
+Beside the integer-keyed vessel entries a topology may carry an optional
+``"_meta"`` object describing the *subject* the label ids belong to (species,
+axis overrides, length scaling). ``load_mapping`` skips non-integer keys, so
+``_meta`` is invisible to every existing consumer; read it with
+:func:`load_topology_meta`.
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
 
+from nvitk.measure.morpho.anatomy_axes import SPECIES_HUMAN, normalize_species
 from nvitk.measure.morpho.io_utils import load_mapping
 from nvitk.measure.morpho.models import VesselInfo
 
 TOPOLOGY_NONE = "none"
+TOPOLOGY_META_KEY = "_meta"
 EICAB_TOPOLOGY_NAME = "eicab_topology.json"
 QVTPY_TOPOLOGY_NAME = "qvtpy_topology.json"
 MOUSE_ROOT_TOPOLOGY_NAME = "mouse_root_topology.json"
@@ -72,6 +82,59 @@ def load_topology(name_or_path: str | Path | None) -> dict[int, VesselInfo] | No
     return load_mapping(str(path))
 
 
+@dataclass(frozen=True)
+class TopologyMeta:
+    """Subject-level settings declared by a topology JSON's ``"_meta"`` block.
+
+    ``species`` picks the animal frame used to resolve ``rostral``/``caudal``/
+    ``dorsal``/``ventral`` in ``no_upstream_start``. ``axes_override`` replaces
+    the header-derived axis codes for volumes whose NIfTI orientation labels are
+    known to be wrong. ``length_scale`` rescales the human-calibrated millimetre
+    thresholds (a mouse circle of Willis is roughly 0.15× human).
+    """
+
+    species: str = SPECIES_HUMAN
+    axes_override: str | None = None
+    length_scale: float = 1.0
+    description: str = ""
+
+
+def load_topology_meta(name_or_path: str | Path | None) -> TopologyMeta:
+    """Read the ``"_meta"`` block of a topology JSON; defaults for none/absent."""
+    path = resolve_topology_path(name_or_path)
+    if path is None:
+        return TopologyMeta()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return TopologyMeta()
+    return parse_topology_meta(raw.get(TOPOLOGY_META_KEY) if isinstance(raw, dict) else None)
+
+
+def parse_topology_meta(meta: dict | None) -> TopologyMeta:
+    """Build a :class:`TopologyMeta` from a raw ``"_meta"`` dict (tolerant of junk)."""
+    if not isinstance(meta, dict):
+        return TopologyMeta()
+    try:
+        species = normalize_species(meta.get("species"))
+    except ValueError:
+        species = SPECIES_HUMAN
+    override = str(meta.get("axes_override") or "").strip().upper() or None
+    try:
+        length_scale = float(meta.get("length_scale", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        length_scale = 1.0
+    if not (length_scale > 0):
+        length_scale = 1.0
+    return TopologyMeta(
+        species=species,
+        axes_override=override,
+        length_scale=length_scale,
+        description=str(meta.get("description") or ""),
+    )
+
+
 def default_eicab_topology_path() -> Path:
     """Path to the eICAB topology JSON (qvtpy stage-7 morphometrics default)."""
     return topology_dir() / EICAB_TOPOLOGY_NAME
@@ -94,13 +157,17 @@ __all__ = [
     "EICAB_TOPOLOGY_NAME",
     "MOUSE_ROOT_TOPOLOGY_NAME",
     "QVTPY_TOPOLOGY_NAME",
+    "TOPOLOGY_META_KEY",
     "TOPOLOGY_NONE",
+    "TopologyMeta",
     "default_eicab_topology_path",
     "default_qvtpy_topology_path",
     "list_topology_jsons",
     "load_eicab_topology",
     "load_qvtpy_topology",
     "load_topology",
+    "load_topology_meta",
+    "parse_topology_meta",
     "resolve_topology_path",
     "topology_choices",
     "topology_dir",

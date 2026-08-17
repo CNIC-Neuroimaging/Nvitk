@@ -264,6 +264,10 @@ class MorphometricsConfig:
     run_tortuosity: bool = True
     run_histograms: bool = True
     n_workers: int | None = None
+    # Subject description. ``"auto"`` defers to the topology JSON's ``_meta``
+    # block; see :mod:`nvitk.measure.morpho.anatomy_axes`.
+    species: str = "auto"
+    axes_override: str | None = None
 
 
 def default_morphometrics_config() -> MorphometricsConfig:

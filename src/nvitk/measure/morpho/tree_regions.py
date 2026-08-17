@@ -55,15 +55,19 @@ def remove_discarded_tree_path_outputs(discarded_path_ids: set, centerline_dir: 
             print(f"    [tree regions] Removed discarded spurious path outputs: {', '.join(removed)}")
 
 
-def min_tree_arm_length_for_vessel(vessel_info: VesselInfo) -> float:
-    """Minimum tree-arm length (mm) for this vessel: per-vessel/pair override, else the global default."""
+def min_tree_arm_length_for_vessel(vessel_info: VesselInfo, length_scale: float = 1.0) -> float:
+    """Minimum tree-arm length (mm) for this vessel: per-vessel/pair override, else the global default.
+
+    The stored thresholds are calibrated on human anatomy; *length_scale* rescales
+    them for other species (see ``_meta.length_scale`` in the topology JSON).
+    """
     name = str(getattr(vessel_info, "name", "") or "")
     pair = str(getattr(vessel_info, "pair", "") or "")
     candidates = [name, pair]
     for key in candidates:
         if key in VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM:
-            return float(VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM[key])
-    return float(MIN_TREE_ARM_LENGTH_MM)
+            return float(VESSEL_SPECIFIC_MIN_TREE_ARM_LENGTH_MM[key]) * float(length_scale)
+    return float(MIN_TREE_ARM_LENGTH_MM) * float(length_scale)
 
 
 def ordered_terminal_path_records(tree: SkeletonTree, root_idx: int, terminal_indices: List[int], spacing) -> List[dict]:
@@ -160,6 +164,7 @@ def split_bifurcating_tree_centerlines(
     path_results: List[dict],
     spacing,
     region_centerline_dir: Optional[str] = None,
+    length_scale: float = 1.0,
 ) -> Tuple[List[dict], Dict[str, pd.DataFrame], List[dict]]:
     """Split a simple 2-terminal bifurcation into a shared trunk region plus two arm regions.
 
@@ -242,7 +247,7 @@ def split_bifurcating_tree_centerlines(
 
     arm1_length_mm = arc_length(arm1_points)
     arm2_length_mm = arc_length(arm2_points)
-    min_tree_arm_length_mm = min_tree_arm_length_for_vessel(vessel_info)
+    min_tree_arm_length_mm = min_tree_arm_length_for_vessel(vessel_info, length_scale)
 
     if DISCARD_SHORT_TREE_ARMS:
         arm1_short = np.isfinite(arm1_length_mm) and arm1_length_mm < min_tree_arm_length_mm

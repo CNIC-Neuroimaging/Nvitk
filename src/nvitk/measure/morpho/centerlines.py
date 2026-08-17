@@ -11,6 +11,7 @@ from scipy.spatial import cKDTree
 from vtk.util import numpy_support
 
 from .anatomy import orient_centerline_points_by_flow
+from .anatomy_axes import AnatomicalAxes
 from .caliber import (
     compute_siphon_mask,
     detect_enlargement_segments,
@@ -342,9 +343,118 @@ def refresh_centerline_result_metrics(res: dict) -> None:
     res["enlargement_segments_detail_json"] = segment_detail_json(s, enlargement_pct_point, enlarg.segments_point_idx)
 
 
-def slice_centerline_result(res: dict, start_idx: int) -> dict:
+def _as_flag_array(values, n: int) -> np.ndarray:
+    """Coerce a per-point boolean-ish array to ``int`` 0/1 of length *n* (NaN → 0)."""
+    if values is None:
+        return np.zeros(n, dtype=int)
+    arr = np.asarray(values, dtype=float)
+    arr = np.where(np.isfinite(arr), arr, 0.0)
+    out = (arr >= 0.5).astype(int)
+    if len(out) < n:
+        out = np.concatenate([out, np.zeros(n - len(out), dtype=int)])
+    return out[:n]
+
+
+def binary_runs(flags) -> List[Tuple[int, int]]:
+    """Contiguous ``[start, end]`` index runs where *flags* is truthy."""
+    arr = np.asarray(flags, dtype=float)
+    arr = np.where(np.isfinite(arr), arr, 0.0) >= 0.5
+    runs: List[Tuple[int, int]] = []
+    start = None
+    for i, on in enumerate(arr):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            runs.append((start, i - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(arr) - 1))
+    return runs
+
+
+def summarize_segment_result(res: dict) -> dict:
+    """Complete a non-overlapping segment's result dict in place, without re-detecting caliber.
+
+    Geometry, curvature and radius statistics are purely local, so they are
+    recomputed for the segment. Stenosis and enlargement are **not** re-detected:
+    their reference radius is established over the whole parent vessel and often
+    lies proximal to the segment, so re-running detection on an isolated distal
+    piece would silently lose lesions (and flag uniformly narrow segments as
+    normal). The per-point flags transferred from the measured root→terminal
+    paths are aggregated instead.
+    """
+    pts = centerline_points_from_result(res)
+    n = len(pts)
+    s = cumulative_s(pts)
+    radius = np.asarray(res.get("stenosis_detection_radius_mm", res["radius_mm"]), dtype=float)
+    curvature = np.asarray(res["curvature_1_per_mm"], dtype=float)
+
+    res["s_mm"] = s
+    res["diameter_mm"] = 2.0 * np.asarray(res["radius_mm"], dtype=float)
+    res["length_mm"] = float(arc_length(pts))
+    res["chord_length_mm"] = float(chord_length(pts))
+    res["tortuosity_dm"] = float(tortuosity_dm(pts))
+    res["turn_proxy"] = signed_turn_proxy(pts)
+
+    k_valid = curvature[np.isfinite(curvature)]
+    res["curvature_mean_1_per_mm"] = float(np.nanmean(curvature)) if k_valid.size else np.nan
+    res["curvature_median_1_per_mm"] = float(np.nanmedian(curvature)) if k_valid.size else np.nan
+    res["curvature_p95_1_per_mm"] = float(np.nanpercentile(k_valid, 95)) if k_valid.size else np.nan
+    res["curvature_max_1_per_mm"] = float(np.nanmax(curvature)) if k_valid.size else np.nan
+    res["inflection_count"] = int(
+        inflection_count(curvature, res["turn_proxy"], INFLECT_KAPPA_MIN, INFLECT_SMOOTH_WIN)
+    )
+    res["bend_peak_count"] = int(bend_peak_count(curvature, BEND_KAPPA_PEAK, INFLECT_SMOOTH_WIN))
+
+    res.update(radius_stats(radius))
+    res["taper_slope_mm_per_mm"] = float(taper_slope(s, radius))
+
+    ref = np.asarray(res.get("stenosis_reference_radius_point", np.full(n, np.nan)), dtype=float)
+    ref_valid = ref[np.isfinite(ref)]
+    res["radius_ref_mm"] = float(np.nanmedian(ref_valid)) if ref_valid.size else np.nan
+
+    # -- stenosis, aggregated from the transferred per-point flags -----------
+    # stenosis_total_length bit-ANDs consecutive flags, so it needs an integer array.
+    is_stenotic = _as_flag_array(res.get("is_stenotic"), n)
+    sten_pct = np.asarray(res.get("stenosis_percent_point", np.full(n, np.nan)), dtype=float)
+    sten_runs = binary_runs(is_stenotic)
+    stenotic_radius = radius[(is_stenotic >= 0.5) & np.isfinite(radius)]
+    sten_pct_valid = sten_pct[(is_stenotic >= 0.5) & np.isfinite(sten_pct)]
+    res["radius_min_stenotic_mm"] = float(np.min(stenotic_radius)) if stenotic_radius.size else np.nan
+    res["stenosis_percent_max"] = float(np.max(sten_pct_valid)) if sten_pct_valid.size else 0.0
+    res["degree_of_stenosis_pct"] = res["stenosis_percent_max"]
+    res["stenosis_length_total_mm"] = float(stenosis_total_length(s, is_stenotic))
+    res["stenosis_segments_n"] = int(len(sten_runs))
+    res["stenosis_segments_point_idx"] = json.dumps(sten_runs)
+    res["stenosis_segments_detail_json"] = segment_detail_json(s, sten_pct, sten_runs)
+
+    # -- enlargement, likewise ----------------------------------------------
+    is_enlarged = _as_flag_array(res.get("is_enlarged"), n)
+    enl_pct = np.asarray(res.get("enlargement_percent_point", np.full(n, np.nan)), dtype=float)
+    enl_runs = binary_runs(is_enlarged)
+    enlarged_radius = radius[(is_enlarged >= 0.5) & np.isfinite(radius)]
+    enl_pct_valid = enl_pct[(is_enlarged >= 0.5) & np.isfinite(enl_pct)]
+    enl_ref = np.asarray(res.get("enlargement_reference_radius_point", np.full(n, np.nan)), dtype=float)
+    enl_ref_valid = enl_ref[np.isfinite(enl_ref)]
+    res["enlargement_radius_ref_mm"] = float(np.nanmedian(enl_ref_valid)) if enl_ref_valid.size else np.nan
+    res["enlargement_radius_max_mm"] = float(np.max(enlarged_radius)) if enlarged_radius.size else np.nan
+    res["radius_max_enlarged_mm"] = res["enlargement_radius_max_mm"]
+    res["enlargement_percent_max"] = float(np.max(enl_pct_valid)) if enl_pct_valid.size else 0.0
+    res["enlargement_length_total_mm"] = float(stenosis_total_length(s, is_enlarged))
+    res["enlargement_segments_n"] = int(len(enl_runs))
+    res["enlargement_segments_point_idx"] = json.dumps(enl_runs)
+    res["enlargement_segments_detail_json"] = segment_detail_json(s, enl_pct, enl_runs)
+    return res
+
+
+def slice_centerline_result(res: dict, start_idx: int, *, redetect: bool = True) -> dict:
     """Truncate a path result to points ``[start_idx:]`` (drop an overlapping proximal prefix) and
     recompute all derived metrics on the shortened path.
+
+    With ``redetect=False`` the stenosis/enlargement point flags established on
+    the full path are kept and merely re-aggregated
+    (:func:`summarize_segment_result`), instead of re-running detection on the
+    truncated path — the reference radius usually lies in the removed prefix.
     """
     n = len(res["x_mm"])
     start_idx = int(np.clip(start_idx, 0, max(0, n - 1)))
@@ -368,8 +478,69 @@ def slice_centerline_result(res: dict, start_idx: int) -> dict:
         if key in sliced:
             sliced[key] = np.asarray(sliced[key])[start_idx:].copy()
     sliced["overlap_pruned_start_points"] = int(start_idx)
-    refresh_centerline_result_metrics(sliced)
+    if redetect:
+        refresh_centerline_result_metrics(sliced)
+    else:
+        summarize_segment_result(sliced)
     return sliced
+
+
+def deduplicate_path_results(
+    path_results: List[dict],
+    spacing,
+    *,
+    tol_mm: Optional[float] = None,
+    min_points: int = 3,
+) -> Tuple[List[dict], List[str]]:
+    """Trim path results so each piece of vessel is represented exactly once.
+
+    Root→terminal paths of the same component all traverse the shared proximal
+    trunk, so summing their lengths multiply-counts it. Paths are processed
+    longest-first against a growing reference cloud; the leading run of points
+    already covered by an earlier path is removed. A path left with fewer than
+    *min_points* unique points is dropped entirely.
+
+    Returns ``(kept_results, dropped_path_ids)``. Caliber flags are preserved
+    rather than re-detected — see :func:`slice_centerline_result`.
+    """
+    if len(path_results) <= 1:
+        return list(path_results), []
+
+    spacing = np.asarray(spacing, dtype=float)
+    tol = float(tol_mm) if tol_mm is not None else max(0.5, 1.5 * float(np.min(spacing)))
+    ordered = sorted(path_results, key=lambda r: float(r.get("length_mm", 0.0)), reverse=True)
+
+    kept: List[dict] = []
+    dropped: List[str] = []
+    ref_points: List[np.ndarray] = []
+
+    for res in ordered:
+        pts = centerline_points_from_result(res)
+        if len(pts) < 2:
+            continue
+        if not ref_points:
+            kept.append(res)
+            ref_points.append(pts)
+            continue
+
+        dist, _ = cKDTree(np.vstack(ref_points)).query(pts, k=1)
+        covered = np.isfinite(dist) & (dist <= tol)
+        prefix_n = int(np.argmin(covered)) if not covered.all() else len(pts)
+
+        if prefix_n == 0:
+            kept.append(res)
+            ref_points.append(pts)
+            continue
+        if len(pts) - prefix_n < int(min_points):
+            dropped.append(str(res.get("path_id", "")))
+            continue
+
+        trimmed = slice_centerline_result(res, prefix_n, redetect=False)
+        kept.append(trimmed)
+        ref_points.append(centerline_points_from_result(trimmed))
+
+    kept.sort(key=lambda r: int(r.get("path_index", 0)))
+    return kept, [pid for pid in dropped if pid]
 
 
 def save_centerline_result_vtps(res: dict, centerline_dir: Optional[str], centerline_radius_dir: Optional[str]) -> None:
@@ -701,6 +872,7 @@ def analyze_centerline_poly(
     preferred_start_mm: Optional[np.ndarray] = None,
     save_centerline_vtp: Optional[str] = None,
     save_centerline_radius_vtp: Optional[str] = None,
+    axes: Optional[AnatomicalAxes] = None,
 ) -> dict:
     """Turn a raw VMTK centerline polydata into a fully-populated path result dict.
 
@@ -716,7 +888,9 @@ def analyze_centerline_poly(
     radius_mis = extract_point_data_array(centerline_poly, "MaximumInscribedSphereRadius", len(pts))
 
     if not force_start_to_end:
-        pts_oriented, flipped = orient_centerline_points_by_flow(pts, vessel_info, multilabel, spacing, mapping)
+        pts_oriented, flipped = orient_centerline_points_by_flow(
+            pts, vessel_info, multilabel, spacing, mapping, axes=axes
+        )
         if flipped:
             print("    [direction] Reversed — flipping.")
             pts = pts_oriented

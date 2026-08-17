@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.measure.morpho.anatomy import choose_root_endpoint, make_path_id
+from nvitk.measure.morpho.anatomy_axes import MorphoContext, default_morpho_context
 from nvitk.measure.morpho.centerlines import (
     analyze_centerline_poly,
     centerline_poly_length_mm,
@@ -75,6 +76,7 @@ from nvitk.measure.morpho.export_utils.summaries import (
     build_vessel_points_dataframe,
 )
 from nvitk.measure.morpho.surface import mask_to_surface, save_vtp
+from nvitk.measure.morpho.volumetry import anatomy_provenance_fields, component_volumetry_fields
 from nvitk.measure.morpho.tree_regions import (
     discarded_source_path_ids_from_regions,
     ordered_terminal_path_records,
@@ -104,7 +106,11 @@ def process_component_tree_vmtk(
     centerline_radius_dir: Optional[str],
     region_centerline_dir: Optional[str],
     surface_dir: Optional[str],
-) -> Tuple[List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict], Dict[str, pd.DataFrame], List[dict], pd.DataFrame]:
+    ctx: Optional[MorphoContext] = None,
+) -> Tuple[
+    List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict],
+    Dict[str, pd.DataFrame], List[dict], pd.DataFrame, List[dict],
+]:
     """Full per-component morphometrics pipeline: skeletonize → VMTK centerlines → metrics/export.
 
     Drives, for one connected component of one label: skeleton extraction and
@@ -117,15 +123,21 @@ def process_component_tree_vmtk(
     -------
     tuple
         ``(path_results, point_sheets, tree_summary, branch_df, region_summaries,
-        region_sheets, recursive_segments, donut_loop_df)`` — see the call sites in
-        :mod:`run_case` for how each piece feeds the exported workbook.
+        region_sheets, recursive_segments, donut_loop_df, split_results)`` — see the
+        call sites in :mod:`run_case` for how each piece feeds the exported workbook.
+        ``path_results`` are the measured root→terminal paths, which overlap on
+        shared trunks; ``split_results`` is the non-overlapping representation the
+        workbook summarises.
     """
     if not VMTK_AVAILABLE:
         raise RuntimeError("Morphometrics centerline backend unavailable.")
     spacing = np.asarray(spacing, dtype=float)
+    ctx = ctx or default_morpho_context()
+    axes = ctx.axes
+    min_path_length_mm = ctx.scaled(MIN_CENTERLINE_PATH_LENGTH_MM)
 
     skel = skeletonize_mask(mask_cc.astype(bool))
-    tree = skeleton_tree_from_mask(mask_cc.astype(bool), spacing=spacing)
+    tree = skeleton_tree_from_mask(mask_cc.astype(bool), spacing=spacing, length_scale=ctx.length_scale)
     if len(tree.pts_vox) < 2:
         raise RuntimeError("Skeleton too short.")
 
@@ -164,6 +176,7 @@ def process_component_tree_vmtk(
                 centerline_radius_dir=centerline_radius_dir,
                 region_centerline_dir=region_centerline_dir,
                 surface_dir=surface_dir,
+                ctx=ctx,
             )
 
     use_tree_mode = ENABLE_TREE_MODE and len(tree.endpoints) >= MIN_TREE_ENDPOINTS_FOR_TREE_MODE
@@ -179,7 +192,10 @@ def process_component_tree_vmtk(
         path_vox_list = [path_vox]
         print(f"    Mode: single path. Endpoints={np.round(np.asarray(ep_a_vox)*spacing,2)} -> {np.round(np.asarray(ep_b_vox)*spacing,2)}")
     else:
-        root_idx = choose_root_endpoint(tree, vessel_info, multilabel, spacing, mapping, mask_bool=mask_cc.astype(bool))
+        root_idx = choose_root_endpoint(
+            tree, vessel_info, multilabel, spacing, mapping,
+            mask_bool=mask_cc.astype(bool), axes=axes,
+        )
         tree.root = root_idx
         tree.dist_from_root_mm = dijkstra_dist_from_root(tree, root_idx, spacing)
         terminal_indices = [e for e in tree.endpoints if e != root_idx]
@@ -210,7 +226,7 @@ def process_component_tree_vmtk(
             recursive_tree_segments = build_recursive_tree_segments(tree, spacing)
         if recursive_tree_segments:
             recursive_tree_segments = annotate_anatomic_tree_segments(
-                tree, recursive_tree_segments
+                tree, recursive_tree_segments, axes=axes
             )
             print(
                 f"    [tree segments] Connected skeleton-edge segments: "
@@ -261,12 +277,12 @@ def process_component_tree_vmtk(
         if (
             short_centerline_pruning_enabled
             and np.isfinite(centerline_length_mm)
-            and centerline_length_mm < MIN_CENTERLINE_PATH_LENGTH_MM
+            and centerline_length_mm < min_path_length_mm
         ):
             n_short_centerline_paths_discarded += 1
             print(
                 f"    Path {path_i}: discarded short centerline "
-                f"({centerline_length_mm:.2f} mm < {MIN_CENTERLINE_PATH_LENGTH_MM:.2f} mm)."
+                f"({centerline_length_mm:.2f} mm < {min_path_length_mm:.2f} mm)."
             )
             continue
 
@@ -276,6 +292,7 @@ def process_component_tree_vmtk(
             force_start_to_end=use_tree_mode,  # tree paths are seeded root -> terminal; do not reorient by downstream labels.
             preferred_start_mm=actual_seed_start_mm if use_tree_mode else None,
             save_centerline_vtp=cl_path, save_centerline_radius_vtp=cl_radius_path,
+            axes=axes,
         )
         res.update({
             "label": int(label), "component_id": int(component_id), "path_id": path_id,
@@ -307,7 +324,7 @@ def process_component_tree_vmtk(
         "n_centerline_paths": int(len(path_results)),
         "n_centerline_paths_discarded_short": int(n_short_centerline_paths_discarded),
         "min_centerline_path_length_mm": (
-            float(MIN_CENTERLINE_PATH_LENGTH_MM)
+            float(min_path_length_mm)
             if DISCARD_SHORT_CENTERLINE_PATHS and not is_acoa_vessel(vessel_info)
             else np.nan
         ),
@@ -317,6 +334,11 @@ def process_component_tree_vmtk(
         "root_y_mm": float(tree.pts_vox[root_idx][1] * spacing[1]) if root_idx is not None else np.nan,
         "root_z_mm": float(tree.pts_vox[root_idx][2] * spacing[2]) if root_idx is not None else np.nan,
     }
+    tree_summary.update(anatomy_provenance_fields(ctx, vessel_info))
+    tree_summary.update(component_volumetry_fields(
+        mask_cc, spacing, surface,
+        skeleton_length_mm=tree_summary["unique_skeleton_graph_length_mm"],
+    ))
 
     tree_region_summaries, tree_region_sheets, tree_regions = split_bifurcating_tree_centerlines(
         label=label,
@@ -325,6 +347,7 @@ def process_component_tree_vmtk(
         path_results=path_results if use_tree_mode else [],
         spacing=spacing,
         region_centerline_dir=region_centerline_dir,
+        length_scale=ctx.length_scale,
     )
     discarded_path_ids = discarded_source_path_ids_from_regions(tree_regions)
     remove_discarded_tree_path_outputs(discarded_path_ids, centerline_dir, centerline_radius_dir)
@@ -369,9 +392,12 @@ def process_component_tree_vmtk(
         point_sheets[sheet_name] = build_vessel_points_dataframe("", label, vessel_info, res)
 
     saved_anatomic: List[str] = []
+    # Non-overlapping export rows: each piece of vessel appears exactly once,
+    # unlike path_results where every root->terminal path re-traverses the trunk.
+    split_results: List[dict] = []
     if recursive_tree_segments:
         if EXPORT_ANATOMIC_SPLIT_CENTERLINES:
-            saved_anatomic = save_anatomic_split_tree_centerlines(
+            saved_anatomic, split_results = save_anatomic_split_tree_centerlines(
                 label=label,
                 component_id=component_id,
                 vessel_info=vessel_info,
@@ -382,6 +408,7 @@ def process_component_tree_vmtk(
                 spacing=spacing,
                 root_idx=int(root_idx) if root_idx is not None else None,
                 mask_cc=mask_cc.astype(bool),
+                axes=axes,
             )
         else:
             save_recursive_labeled_tree_path_centerlines(
@@ -392,12 +419,14 @@ def process_component_tree_vmtk(
             )
     else:
         if EXPORT_ANATOMIC_SPLIT_CENTERLINES and use_tree_mode:
-            saved_anatomic = save_anatomic_fallback_centerlines(
+            saved_anatomic, split_results = save_anatomic_fallback_centerlines(
                 vessel_info=vessel_info,
                 component_id=component_id,
                 path_results=path_results,
                 centerline_dir=centerline_dir,
                 centerline_radius_dir=centerline_radius_dir,
+                axes=axes,
+                spacing=spacing,
             )
         else:
             save_labeled_tree_path_centerlines(path_results, tree_regions, centerline_dir if use_tree_mode else None)
@@ -412,13 +441,17 @@ def process_component_tree_vmtk(
                 "    [anatomic sanity] Anatomical export wrote no centerline VTP(s). "
                 "Writing anatomical fallback centerline(s) so no surviving vessel path is lost."
             )
-            fallback_saved = save_anatomic_fallback_centerlines(
+            fallback_saved, fallback_results = save_anatomic_fallback_centerlines(
                 vessel_info=vessel_info,
                 component_id=component_id,
                 path_results=path_results,
                 centerline_dir=centerline_dir,
                 centerline_radius_dir=centerline_radius_dir,
+                axes=axes,
+                spacing=spacing,
             )
+            if fallback_results and not split_results:
+                split_results = fallback_results
             saved_anatomic = list(dict.fromkeys(fallback_saved))
         elif len(saved_anatomic) < expected_anatomic:
             print(
@@ -430,5 +463,18 @@ def process_component_tree_vmtk(
         tree_summary["n_anatomic_centerline_vtps_written"] = int(len(saved_anatomic))
         tree_summary["anatomic_centerline_vtps_written"] = ";".join(saved_anatomic)
 
-    return path_results, point_sheets, tree_summary, branch_df, tree_region_summaries, tree_region_sheets, recursive_tree_segments, pd.DataFrame()
+    if not split_results:
+        # Single-path mode traverses each piece once already, so the measured
+        # paths are their own non-overlapping representation.
+        split_results = [dict(res, non_overlapping=True) for res in path_results]
+    non_overlapping_length_mm = float(
+        np.nansum([r.get("length_mm", np.nan) for r in split_results])
+    ) if split_results else np.nan
+    tree_summary["n_non_overlapping_segments"] = int(len(split_results))
+    tree_summary["centerline_total_length_mm"] = non_overlapping_length_mm
+
+    return (
+        path_results, point_sheets, tree_summary, branch_df, tree_region_summaries,
+        tree_region_sheets, recursive_tree_segments, pd.DataFrame(), split_results,
+    )
 

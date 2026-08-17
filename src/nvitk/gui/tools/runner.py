@@ -2590,6 +2590,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     from nvitk.gui.viz.morpho_viz import DEFAULT_MORPHO_POINT_SIZE, install_morphometrics_viz
     from nvitk.io import imsave
     from nvitk.measure.morphometrics import run_morphometrics_case
+    from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO
     from nvitk.measure.morpho.topology_io import TOPOLOGY_NONE
 
     if layer is None:
@@ -2617,15 +2618,16 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
     imsave(seg_path, layer_to_image(layer, data=bridged))
 
     topology = str(params.get("topology") or TOPOLOGY_NONE).strip() or TOPOLOGY_NONE
+    species = str(params.get("species") or SPECIES_AUTO).strip() or SPECIES_AUTO
     n_workers = int(params.get("n_workers") or 1)
     skip_existing = bool(params.get("skip_existing")) and persist
     already_smoothed = bool(params.get("input_already_smoothed"))
 
     if persist:
-        notify(f"Morphometrics running (topology={topology!r}) → {out_dir} …")
+        notify(f"Morphometrics running (topology={topology!r}, species={species!r}) → {out_dir} …")
     else:
         notify(
-            f"Morphometrics running (topology={topology!r}); "
+            f"Morphometrics running (topology={topology!r}, species={species!r}); "
             "no output directory — results displayed in GUI only…"
         )
     excel = run_morphometrics_case(
@@ -2636,6 +2638,7 @@ def _run_measure_morphometrics(viewer: Any, layer: Any, params: dict[str, Any]) 
         n_workers=n_workers,
         input_already_smoothed=already_smoothed,
         skip_if_excel_exists=skip_existing,
+        species=species,
     )
 
     # Show the (bridged) vessel mask used for computation as a Labels layer.

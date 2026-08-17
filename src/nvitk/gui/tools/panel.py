@@ -20,6 +20,7 @@ from nvitk.gui.tools.registry import (
     tool_by_id,
     tool_id_from_label,
 )
+from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS
 
@@ -91,6 +92,7 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "new_id",
         "output_dir",
         "topology",
+        "species",
         "n_workers",
         "input_already_smoothed",
         "working_dir",
@@ -415,6 +417,11 @@ def build_tool_panel(
             "choices": list(_morpho_topology_choices()),
             "label": "Topology JSON",
             "value": "none",
+        },
+        species={
+            "choices": list(SPECIES_CHOICES),
+            "label": "Species",
+            "value": SPECIES_AUTO,
         },
         n_workers={"label": "Workers", "min": 1, "max": 64, "value": 1},
         input_already_smoothed={"label": "Input already Taubin-smoothed", "value": False},
@@ -807,6 +814,7 @@ def build_tool_panel(
         new_id: int,
         output_dir: str,
         topology: str,
+        species: str,
         n_workers: int,
         input_already_smoothed: bool,
         working_dir: str,

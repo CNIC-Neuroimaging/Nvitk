@@ -118,7 +118,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         "Topology dropdown lists JSON files under measure/morpho/topology "
         "(eicab_topology.json for TOF/eICAB labels, qvtpy_topology.json for "
         "4D-flow reference labels, mouse_root_topology.json, …); choose 'none' for "
-        "vessel-wise metrics without CoW topology. Leave Output directory empty "
+        "vessel-wise metrics without CoW topology. Species selects the anatomical "
+        "frame used to find each vessel's proximal end: 'auto' reads it from the "
+        "topology's _meta block (mouse_root_topology.json declares 'mouse'), and a "
+        "mouse is treated as a quadruped so 'caudal' resolves onto the scanner A/P "
+        "axis instead of S/I. Leave Output directory empty "
         "to display results in the GUI only (nothing persisted)."
     ),
     "seg_adjust_masks": "Morphological adjust label masks (open/close per label).",

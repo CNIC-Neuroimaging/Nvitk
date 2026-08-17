@@ -241,10 +241,28 @@ _SEM_PLOTS: tuple[tuple[str, str], ...] = (
 #: Sub-views of the vascular map: what colour encodes. Kept separate from the estimate/p-value
 #: split because "which vessel carries the most flow" and "where is the evidence" are different
 #: questions and a single control conflating them would make the figure ambiguous to read.
+#: Colormaps offered for the vascular map. Diverging ones are listed first because the default
+#: view is an effect, where a meaningful midpoint matters more than perceptual uniformity.
+_VASCULAR_COLORMAPS: tuple[tuple[str, str], ...] = (
+    ("auto (diverging for effects)", ""),
+    ("RdBu (diverging)", "RdBu_r"),
+    ("coolwarm (diverging)", "coolwarm"),
+    ("PuOr (diverging)", "PuOr_r"),
+    ("viridis", "viridis"),
+    ("magma", "magma"),
+    ("cividis", "cividis"),
+    ("plasma", "plasma"),
+)
+
 _VASCULAR_PLOTS: tuple[tuple[str, str], ...] = (
+    # First, because it is the only coefficient view that gives *every* vessel a value: treatment
+    # coding leaves the reference territory without a term, and a map with one artery missing reads
+    # as a measurement failure rather than as a contrast baseline.
+    ("Marginal mean per vessel", "emmeans"),
     ("Model estimate (grey = n.s.)", "estimate"),
     ("Model estimate (all vessels)", "estimate_all"),
-    ("p-value (−log₁₀)", "pvalue"),
+    ("p-value (significant only)", "pvalue"),
+    ("p-value (all vessels)", "pvalue_all"),
     ("Observed mean per vessel", "means"),
 )
 
@@ -735,6 +753,32 @@ class StatmodelsWindow(QMainWindow):
             "readable, and the fixed term is what the coefficient table is about."
         )
         self._plot_group_label = QLabel("colour by")
+
+        # ---- Vascular-map-only controls ------------------------------------------
+        self._vasc_cmap = QComboBox()
+        for label, key in _VASCULAR_COLORMAPS:
+            self._vasc_cmap.addItem(label, key)
+        self._vasc_cmap.setToolTip(
+            "Colormap for the vascular map.\n\n"
+            "Diverging maps (RdBu, coolwarm) centre on zero and are the right choice for an effect "
+            "— the midpoint is 'no change'. Sequential maps (viridis, magma) have no meaningful "
+            "midpoint and suit a magnitude such as a mean or a p-value."
+        )
+        self._vasc_cmap.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._vasc_cmap_label = QLabel("cmap")
+
+        self._vasc_contrast = QComboBox()
+        self._vasc_contrast.setMinimumWidth(120)
+        self._vasc_contrast.setToolTip(
+            "Which side of an interaction to draw.\n\n"
+            "With a term like 'territory * sex' the model estimates a different vessel profile per "
+            "group. The main effect is the profile at the interacting factor's reference level; "
+            "picking a contrast adds the interaction, giving that group's own profile.\n"
+            "The p-value shown then belongs to the interaction — it tests whether the vessel's "
+            "effect differs between groups."
+        )
+        self._vasc_contrast.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._vasc_contrast_label = QLabel("contrast")
         self._include_points = QCheckBox("Points")
         self._include_points.setChecked(True)
         self._include_points.setToolTip(
@@ -759,6 +803,10 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._plot_x)
         lay.addWidget(self._plot_group_label)
         lay.addWidget(self._plot_group)
+        lay.addWidget(self._vasc_cmap_label)
+        lay.addWidget(self._vasc_cmap)
+        lay.addWidget(self._vasc_contrast_label)
+        lay.addWidget(self._vasc_contrast)
         lay.addWidget(self._include_points)
         lay.addWidget(self._show_ci)
         lay.addStretch(1)
@@ -1099,6 +1147,15 @@ class StatmodelsWindow(QMainWindow):
                 by_rule = {id(entry["rule"]): entry for entry in late}
                 report = [by_rule.get(id(entry["rule"]), entry) for entry in report]
 
+            # Casts and reference levels get the same second pass, and for the same reason: a melt
+            # *creates* the 'territory' column, so a reference set on it could not have been applied
+            # on the first pass — it was dropped as "not a level of this column", and the model then
+            # used whichever level sorted first. Re-applying is idempotent for columns already done.
+            working, late_types = apply_column_types(working, self._column_types)
+            working, late_refs = apply_reference_levels(working, self._reference_levels)
+            if late_types or late_refs:
+                log.info("Post-reshape recode: %s", " ".join([*late_types, *late_refs]))
+
         # Dropped columns go last of all, so a rule or a derived column defined on one still
         # evaluated above — dropping hides a column from the model, it does not undo the frame.
         drop = [c for c in self._dropped_columns if c in working.columns]
@@ -1244,11 +1301,40 @@ class StatmodelsWindow(QMainWindow):
         if self._analysis_df is None:
             notify("Reload data before adding region combinations.", error=True)
             return
+
+        # Region combinations aggregate one measurement *across rows of a region column*, so they
+        # need a frame that has one. A subject-grain load has none — every region is already its
+        # own column — and offering those columns as if they were regions is what made the dialog
+        # list 'flow_mean__LICA' while the table showed melted rows. Prefer the working frame when
+        # it carries a usable region column, and fall back to the base otherwise.
+        base = self._analysis_df
+        working = self._working_df
+        frame = base
+        for candidate in (working, base):
+            if candidate is None or candidate.empty:
+                continue
+            column = next(
+                (c for c in ("territory", "group_key", "region_id") if c in candidate.columns), ""
+            )
+            if column and candidate[column].nunique() > 1:
+                frame, region_column = candidate, column
+                break
+        else:
+            region_column = "territory" if "territory" in base.columns else "group_key"
+
+        if region_column not in frame.columns or frame[region_column].nunique() <= 1:
+            notify(
+                "This frame has no region column to combine across — it is one row per subject. "
+                "Melt a measurement back to long first, or load on the territory grain.",
+                error=True,
+            )
+            return
+
         dialog = RegionCombinationsDialog(
             self,
-            frame=self._analysis_df,
+            frame=frame,
             combinations=self._combinations,
-            region_column="territory" if "territory" in self._analysis_df.columns else "group_key",
+            region_column=region_column,
         )
         if dialog.exec():
             self._combinations = dialog.combinations()
@@ -1620,10 +1706,18 @@ class StatmodelsWindow(QMainWindow):
         """Make *level* the treatment reference for *column*, or clear the override."""
         if not column:
             return
+        # The region is carried twice — 'territory' and 'group_key' hold the same labels — and a
+        # formula may name either. Setting the reference on only the clicked one left the model
+        # using the untouched copy, where R falls back to the alphabetically first level.
+        from nvitk.stats._statmodels_frames import region_alias_columns
+
+        targets = region_alias_columns(self._analysis_df, column)
         if not level:
-            self._reference_levels.pop(column, None)
+            for target in targets:
+                self._reference_levels.pop(target, None)
         else:
-            self._reference_levels[column] = level
+            for target in targets:
+                self._reference_levels[target] = level
 
         self._recompute_frame(announce=False)
         frame = self._working_df
@@ -1640,9 +1734,11 @@ class StatmodelsWindow(QMainWindow):
             and list(getattr(frame[column].dtype, "categories", [])[:1]) == [level]
         )
         if applied:
+            also = [t for t in targets if t != column]
+            mirror = f" (also applied to {', '.join(also)})" if also else ""
             self._status.setText(
-                f"{column}: reference is now {level!r} — every other level is contrasted against "
-                f"it, and {level!r} itself drops out of the coefficient table."
+                f"{column}: reference is now {level!r}{mirror} — every other level is contrasted "
+                f"against it, and {level!r} itself drops out of the coefficient table."
             )
             notify(f"{column} reference: {level}.")
         else:
@@ -2180,6 +2276,10 @@ class StatmodelsWindow(QMainWindow):
         # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
+        vascular = str(self._plot_display.currentData() or "") == "vascular"
+        for widget in (self._vasc_cmap, self._vasc_cmap_label):
+            widget.setVisible(vascular)
+        self._sync_vascular_contrasts(vascular)
         self._sync_display_enabled()
         # The vascular display is checked first because it *replaces* the engine's own figure set:
         # left after the engine branches, an MMRM or lmrob fit kept offering only its own plots and
@@ -2981,6 +3081,38 @@ class StatmodelsWindow(QMainWindow):
             log.debug("SEM plot failed: %s", exc, exc_info=True)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
+    def _sync_vascular_contrasts(self, vascular: bool) -> None:
+        """Populate the contrast picker from the fit's interaction terms, or hide it."""
+        from nvitk.stats.vascular_map import interaction_contrasts
+
+        contrasts: list[str] = []
+        if vascular and self._last_result is not None:
+            groups = self._plot_group.currentText().strip() or self._region_column_name()
+            try:
+                contrasts = interaction_contrasts(
+                    self._last_result, group_column=groups, data=self._last_model_df
+                )
+            except Exception as exc:
+                log.debug("Contrast discovery failed: %s", exc, exc_info=True)
+
+        # Hidden rather than disabled when the model has no interaction: an empty picker invites
+        # the reader to look for a setting that does not apply to this fit.
+        show = vascular and bool(contrasts)
+        for widget in (self._vasc_contrast, self._vasc_contrast_label):
+            widget.setVisible(show)
+        if not show:
+            return
+
+        previous = str(self._vasc_contrast.currentData() or "")
+        self._vasc_contrast.blockSignals(True)
+        self._vasc_contrast.clear()
+        self._vasc_contrast.addItem("main effect (reference level)", "")
+        for contrast in contrasts:
+            self._vasc_contrast.addItem(contrast, contrast)
+        index = self._vasc_contrast.findData(previous)
+        self._vasc_contrast.setCurrentIndex(index if index >= 0 else 0)
+        self._vasc_contrast.blockSignals(False)
+
     def _vascular_plot_kinds(self) -> tuple[tuple[str, str], ...]:
         """
         Views the vascular map can offer for the current fit.
@@ -3019,7 +3151,11 @@ class StatmodelsWindow(QMainWindow):
             )
 
             df = self._last_model_df
-            groups = self._groups.text().strip() or self._region_column_name()
+            groups = (
+                self._plot_group.currentText().strip()
+                or self._groups.text().strip()
+                or self._region_column_name()
+            )
             if df is None or groups not in df.columns:
                 self._plot.show_error(
                     f"The vascular map needs a per-vessel term: {groups!r} is not in the model "
@@ -3028,16 +3164,23 @@ class StatmodelsWindow(QMainWindow):
                 return
 
             view = str(self._mediation_plot.currentData() or "estimate")
+            # A contrast only applies to a coefficient view; an observed mean has no interaction.
+            contrast = str(self._vasc_contrast.currentData() or "")
+            if view in {"means", "emmeans"} or view.startswith("group:"):
+                contrast = ""
             if view.startswith("group:"):
                 source = view
             elif view == "means":
                 source = "mean"
+            elif view == "emmeans":
+                source = "emmeans"
             else:
                 source = "coefficient"
             try:
                 values, pvalues, note = vascular_values_from_result(
                     self._last_result, group_column=groups, source=source,
                     data=df, outcome=self._last_outcome or self._primary_column(),
+                    contrast=contrast,
                 )
             except ValueError:
                 if source == "coefficient":
@@ -3049,19 +3192,27 @@ class StatmodelsWindow(QMainWindow):
                     raise
 
             # The Groups checklist drives the map the same way it drives every other plot. Its
-            # entries are published labels (LICA) while the map is keyed by canonical node (lica),
-            # so both sides go through canonical_node before the difference is taken.
+            # entries are published labels and the map is keyed by drawn node, so both sides go
+            # through ``nodes_for_label`` — which, unlike ``canonical_node``, expands a
+            # hemisphere-melted level such as 'ICA' to *both* carotids. Using the narrower resolver
+            # here meant a hemisphere-grouped fit had its values mirrored correctly and then hid
+            # every mirrored vessel, leaving only the three midline ones on the figure.
+            from nvitk.stats.vascular_map import nodes_for_label
+
             checked = self._plot.checked_levels()
             hide: list[str] = []
             if checked:
-                keep = {canonical_node(level) for level in checked}
+                keep = {node for level in checked for node in nodes_for_label(level)}
                 hide = [node for node in values if node not in keep]
 
-            mode = "pvalue" if view == "pvalue" else "estimate"
+            mode = "pvalue" if view.startswith("pvalue") else "estimate"
             # "all vessels" and the observed means both drop the mask — the first by request, the
             # second because a mean has no p-value and greying every vessel would say the opposite
             # of what is true.
-            mask = bool(pvalues) and view == "estimate"
+            # The two "_all" views are the unmasked halves of their pairs; the observed mean has
+            # no p-values at all, so masking it would grey every vessel and say the opposite of
+            # what is true.
+            mask = bool(pvalues) and view in {"estimate", "pvalue"}
             outcome = self._last_outcome or self._primary_column()
             with plt.style.context("default"):
                 fig = plot_vascular_map(
@@ -3070,6 +3221,7 @@ class StatmodelsWindow(QMainWindow):
                     mode=mode,
                     mask_nonsignificant=mask,
                     hide=hide,
+                    cmap=str(self._vasc_cmap.currentData() or "") or None,
                     title=f"{outcome} — {note}",
                     label="p" if mode == "pvalue" else outcome,
                 )

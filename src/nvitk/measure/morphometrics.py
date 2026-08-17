@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from nvitk.measure.morpho.anatomy_axes import SPECIES_CHOICES, normalize_species
 from nvitk.measure.morpho.export_utils.compute_tortuosity_metrics import run as run_tortuosity_metrics
 from nvitk.measure.morpho.export_utils.generate_radius_histograms import run as run_radius_histograms
 from nvitk.measure.morpho.preprocess_taubin import (
@@ -23,13 +24,16 @@ from nvitk.measure.morpho.preprocess_taubin import (
 from nvitk.measure.morpho.run_case import N_WORKERS, run_case
 from nvitk.measure.morpho.topology_io import (
     TOPOLOGY_NONE,
+    TopologyMeta,
     default_eicab_topology_path,
     load_topology,
+    load_topology_meta,
     resolve_topology_path,
 )
 from nvitk.measure.morphometrics_config import MorphometricsConfig, default_morphometrics_config
 
 __all__ = [
+    "SPECIES_CHOICES",
     "MorphometricsConfig",
     "default_morphometrics_config",
     "run_case",
@@ -64,15 +68,26 @@ def _smooth_taubin(
     )
     save_segmentation(str(output_path), smoothed, affine, header)
 
+    labels = [int(x) for x in np.unique(seg) if x != 0]
+    voxel_mm3 = float(np.prod(np.asarray(spacing, dtype=float)))
     report = {
         "input": str(seg_path),
         "output": str(output_path),
         "spacing_mm": [float(x) for x in spacing],
+        "voxel_volume_mm3": voxel_mm3,
         "taubin_iters": int(taubin_iters),
         "taubin_lambda": float(taubin_lambda),
         "taubin_mu": float(taubin_mu),
         "keep_largest_component": bool(keep_largest),
-        "labels": [int(x) for x in np.unique(seg) if x != 0],
+        "labels": labels,
+        # Raw vs smoothed volume per label: the morphometrics workbook measures
+        # the smoothed mask, so this is where the difference is recorded.
+        "raw_volume_mm3": {
+            str(l): float(np.count_nonzero(seg == l)) * voxel_mm3 for l in labels
+        },
+        "smoothed_volume_mm3": {
+            str(l): float(np.count_nonzero(smoothed == l)) * voxel_mm3 for l in labels
+        },
     }
     report_path = out_dir / f"{stem}_taubin_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -83,27 +98,28 @@ def _resolve_mapping(
     *,
     mapping: dict | None,
     mapping_json: str | None,
-) -> tuple[dict | None, str | None]:
+) -> tuple[dict | None, str | None, TopologyMeta]:
     """Resolve topology mapping for morphometrics.
 
-    Returns ``(mapping_dict_or_empty, mapping_json_path_or_None)``.
-    An empty dict means vessel-wise only (no topology awareness).
+    Returns ``(mapping_dict_or_empty, mapping_json_path_or_None, topology_meta)``.
+    An empty dict means vessel-wise only (no topology awareness); the meta then
+    carries its defaults (human, unscaled).
     """
     if mapping is not None:
-        return mapping, mapping_json
+        return mapping, mapping_json, load_topology_meta(mapping_json)
 
     token = None if mapping_json is None else str(mapping_json).strip()
     if token is not None and token.lower() == TOPOLOGY_NONE:
-        return {}, None
+        return {}, None, TopologyMeta()
     if token is not None and token != "":
         path = resolve_topology_path(token)
         if path is None:
-            return {}, None
-        return load_topology(path) or {}, str(path)
+            return {}, None, TopologyMeta()
+        return load_topology(path) or {}, str(path), load_topology_meta(path)
 
     # Default: eICAB topology (TOF label IDs). Not the 4D-flow qvtpy_topology.json.
     path = default_eicab_topology_path()
-    return load_topology(path) or {}, str(path)
+    return load_topology(path) or {}, str(path), load_topology_meta(path)
 
 
 def run_morphometrics_case(
@@ -117,6 +133,9 @@ def run_morphometrics_case(
     config: MorphometricsConfig | None = None,
     input_already_smoothed: bool = False,
     skip_if_excel_exists: bool = False,
+    species: str | None = None,
+    axes_override: str | None = None,
+    length_scale: float | None = None,
 ) -> Path:
     """Run full TOF morphometrics for one multilabel segmentation NIfTI.
 
@@ -125,6 +144,17 @@ def run_morphometrics_case(
     2. ``mapping_json`` path / basename under ``measure/morpho/topology/``
     3. ``mapping_json="none"`` → vessel-wise only (no topology)
     4. Default ``eicab_topology.json``
+
+    Species resolution order (drives how ``no_upstream_start`` rules resolve onto
+    array axes — a mouse is a quadruped, so ``caudal`` lands on scanner A/P
+    rather than S/I):
+    1. Explicit ``species`` argument (``"human"`` / ``"mouse"``)
+    2. ``config.species`` when it is not ``"auto"``
+    3. The topology JSON's ``_meta.species``
+    4. ``"human"``
+
+    ``axes_override`` (axis codes such as ``"LSA"``) and ``length_scale`` follow
+    the same order, defaulting to the topology's ``_meta``.
 
     Returns path to ``case_metrics_donut_tree.xlsx``.
     """
@@ -141,8 +171,19 @@ def run_morphometrics_case(
     else:
         pipeline_skipped = False
 
-    topo, topo_json = _resolve_mapping(mapping=mapping, mapping_json=mapping_json)
+    topo, topo_json, topo_meta = _resolve_mapping(mapping=mapping, mapping_json=mapping_json)
     workers = int(n_workers) if n_workers is not None else (cfg.n_workers or N_WORKERS)
+
+    requested_species = species if species is not None else cfg.species
+    resolved_species = normalize_species(requested_species, fallback=topo_meta.species)
+    resolved_axes_override = (
+        axes_override
+        if axes_override is not None
+        else (cfg.axes_override if cfg.axes_override is not None else topo_meta.axes_override)
+    )
+    resolved_length_scale = float(
+        length_scale if length_scale is not None else topo_meta.length_scale
+    )
 
     if not pipeline_skipped:
         if input_already_smoothed:
@@ -164,6 +205,9 @@ def run_morphometrics_case(
             mapping=topo if topo is not None else {},
             case_out_dir_override=str(case_dir),
             n_workers=workers,
+            species=resolved_species,
+            axes_override=resolved_axes_override,
+            length_scale=resolved_length_scale,
         )
 
     if cfg.run_tortuosity:

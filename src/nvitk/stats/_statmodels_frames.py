@@ -1267,6 +1267,35 @@ def subject_wide_frame(
     return wide
 
 
+#: Columns of an analysis frame that hold the *same* region label under different names.
+#: :func:`finalize_analysis_frame` copies ``territory`` into ``group_key`` so downstream consumers
+#: have one name to rely on, which means a frame carries the region twice — and a formula may name
+#: either. Anything that changes one of them (a reference level, a recode) has to change all of
+#: them, or the model silently uses the untouched copy.
+REGION_ALIAS_COLUMNS: tuple[str, ...] = ("territory", "group_key", "region_id")
+
+
+def region_alias_columns(frame: pd.DataFrame, column: str) -> list[str]:
+    """
+    Columns of *frame* carrying the same region labels as *column*, itself included.
+
+    Membership is decided by comparing values rather than by trusting the names: a frame where
+    ``group_key`` was melted from something else, or where the user renamed a column, must not have
+    an unrelated column recoded underneath it.
+    """
+    if frame is None or column not in frame.columns:
+        return [column]
+    reference = frame[column].astype(str)
+    out = [column]
+    for candidate in REGION_ALIAS_COLUMNS:
+        if candidate == column or candidate not in frame.columns:
+            continue
+        other = frame[candidate].astype(str)
+        if len(other) == len(reference) and other.equals(reference):
+            out.append(candidate)
+    return out
+
+
 def subject_measurement_families(df: pd.DataFrame) -> dict[str, list[str]]:
     """
     ``{measurement: [regions]}`` for the ``value__region`` columns of a subject-grain frame.
@@ -1352,6 +1381,12 @@ def melt_subject_frame(
             "that region).",
             family, len(long), len(value_columns), missing,
         )
+    # ``melt`` emits one contiguous block per value column, so the first rows of the result are all
+    # the same region. A capped table preview then shows a handful of regions and looks as though
+    # the rest were lost. Interleaving by subject makes the preview representative of the whole.
+    sort_keys = [c for c in ("subject_uid", region_column) if c in long.columns]
+    if sort_keys:
+        long = long.sort_values(sort_keys, kind="stable")
     return long.reset_index(drop=True)
 
 

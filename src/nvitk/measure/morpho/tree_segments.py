@@ -10,7 +10,13 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .anatomy import display_anatomic_segment_path
-from .centerlines import centerline_points_from_result, save_centerline_result_vtps
+from .anatomy_axes import AnatomicalAxes
+from .centerlines import (
+    centerline_points_from_result,
+    deduplicate_path_results,
+    save_centerline_result_vtps,
+    summarize_segment_result,
+)
 from nvitk.measure.morphometrics_config import (
     ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS,
     EXPORT_ANATOMIC_SPLIT_CENTERLINES,
@@ -368,19 +374,42 @@ def build_connected_skeleton_edge_segments(tree: SkeletonTree, spacing) -> List[
     return segments
 
 
-def segment_child_z_score(segment: dict, lookahead_points: int = ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS) -> float:
-    """Mean Z (superior-inferior) coordinate over the segment's first few points, for sibling ordering."""
+def superior_axis(axes: Optional[AnatomicalAxes] = None) -> Tuple[int, int]:
+    """``(array_axis, sign)`` whose increasing coordinate is *superior*.
+
+    Without *axes* this is the legacy hardcoded ``(2, +1)`` — i.e. array axis 2
+    assumed to run inferior→superior.
+    """
+    if axes is None:
+        return 2, 1
+    return int(axes.si_axis), int(axes.si_sign)
+
+
+def segment_child_z_score(
+    segment: dict,
+    lookahead_points: int = ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS,
+    axes: Optional[AnatomicalAxes] = None,
+) -> float:
+    """Mean superior-inferior coordinate over the segment's first few points, for sibling ordering.
+
+    Increasing score always means *more superior*, whichever array axis the
+    volume's affine puts S/I on.
+    """
     pts = np.asarray(segment.get("_anatomic_centerline_points_for_z", segment.get("points", [])), dtype=float)
     if len(pts) == 0:
         return np.nan
+    axis, sign = superior_axis(axes)
     start = 1 if len(pts) > 1 else 0
     stop = min(len(pts), start + int(max(1, lookahead_points)))
-    vals = pts[start:stop, 2]
+    vals = sign * pts[start:stop, axis]
     vals = vals[np.isfinite(vals)]
     return float(np.mean(vals)) if len(vals) else np.nan
 
 
-def branch_suffixes_by_superior_inferior(child_segments: List[dict]) -> Dict[int, str]:
+def branch_suffixes_by_superior_inferior(
+    child_segments: List[dict],
+    axes: Optional[AnatomicalAxes] = None,
+) -> Dict[int, str]:
     """Assign anatomic suffixes (``i``/``s``/``b01``, ``b02``, ...) to sibling branches by Z ordering.
 
     The most inferior sibling gets ``i``, the most superior gets ``s``, and any
@@ -391,7 +420,7 @@ def branch_suffixes_by_superior_inferior(child_segments: List[dict]) -> Dict[int
         return {}
     scored = []
     for seg in children:
-        score = segment_child_z_score(seg)
+        score = segment_child_z_score(seg, axes=axes)
         scored.append((float(score) if np.isfinite(score) else -np.inf, int(seg["segment_id"]), seg))
     scored.sort(key=lambda row: (row[0], row[1]))
     if len(scored) == 1:
@@ -405,7 +434,11 @@ def branch_suffixes_by_superior_inferior(child_segments: List[dict]) -> Dict[int
     return suffixes
 
 
-def annotate_anatomic_tree_segments(tree: SkeletonTree, segments: List[dict]) -> List[dict]:
+def annotate_anatomic_tree_segments(
+    tree: SkeletonTree,
+    segments: List[dict],
+    axes: Optional[AnatomicalAxes] = None,
+) -> List[dict]:
     """Assign M1/M2s/M2i/... labels to directed skeleton segments."""
     if tree.root is None or not segments:
         return segments
@@ -415,7 +448,7 @@ def annotate_anatomic_tree_segments(tree: SkeletonTree, segments: List[dict]) ->
         start_key = seg.get("start_junction", f"N{int(seg['start_node'])}")
         by_start.setdefault(start_key, []).append(seg)
     for children in by_start.values():
-        children.sort(key=lambda seg: (segment_child_z_score(seg), int(seg["segment_id"])))
+        children.sort(key=lambda seg: (segment_child_z_score(seg, axes=axes), int(seg["segment_id"])))
 
     annotated_by_id: Dict[int, dict] = {int(seg["segment_id"]): seg for seg in segments}
     queue = deque()
@@ -431,7 +464,7 @@ def annotate_anatomic_tree_segments(tree: SkeletonTree, segments: List[dict]) ->
         })
         queue.append(seg)
     else:
-        suffixes = branch_suffixes_by_superior_inferior(root_children)
+        suffixes = branch_suffixes_by_superior_inferior(root_children, axes=axes)
         for seg in root_children:
             suffix = suffixes.get(int(seg["segment_id"]), "")
             name = f"M1{suffix}" if suffix else "M1"
@@ -456,7 +489,7 @@ def annotate_anatomic_tree_segments(tree: SkeletonTree, segments: List[dict]) ->
         if not children:
             continue
         generation = int(parent_seg.get("anatomic_generation", 1)) + 1
-        suffixes = branch_suffixes_by_superior_inferior(children)
+        suffixes = branch_suffixes_by_superior_inferior(children, axes=axes)
         for child in children:
             if int(child["segment_id"]) in visited_ids:
                 continue
@@ -613,6 +646,7 @@ def collapse_unary_supported_anatomic_segments(
     segments: List[dict],
     best_chunks: Dict[int, dict],
     root_idx: Optional[int],
+    axes: Optional[AnatomicalAxes] = None,
 ) -> List[dict]:
     """Collapse skeleton splits that are not supported by final kept paths."""
     supported = [seg for seg in segments if int(seg["segment_id"]) in best_chunks]
@@ -625,7 +659,7 @@ def collapse_unary_supported_anatomic_segments(
         by_start.setdefault(str(seg["start_junction"]), []).append(seg)
         incoming.add(str(seg["end_junction"]))
     for children in by_start.values():
-        children.sort(key=lambda seg: (segment_child_z_score(seg), int(seg["segment_id"])))
+        children.sort(key=lambda seg: (segment_child_z_score(seg, axes=axes), int(seg["segment_id"])))
 
     roots: List[dict] = []
     if root_idx is not None:
@@ -716,8 +750,14 @@ def save_anatomic_split_tree_centerlines(
     spacing,
     root_idx: Optional[int] = None,
     mask_cc: Optional[np.ndarray] = None,
-) -> List[str]:
+    axes: Optional[AnatomicalAxes] = None,
+) -> Tuple[List[str], List[dict]]:
     """Export unique skeleton-edge centerlines that stay connected at bifurcations.
+
+    Returns ``(saved_path_ids, segment_results)``. The segment results are
+    path-result-shaped dicts over the **non-overlapping** geometry, so the
+    export layer can summarise each piece of vessel exactly once instead of
+    once per root→terminal path that happens to traverse it.
 
     Geometry comes from the recursive skeleton segments (exact shared junction
     voxels). Caliber / stenosis attributes are transferred from the measured
@@ -725,7 +765,7 @@ def save_anatomic_split_tree_centerlines(
     dropped by overlap pruning or path-assignment gaps.
     """
     if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results or not segments:
-        return []
+        return [], []
 
     spacing = np.asarray(spacing, dtype=float)
     assign_tol = (
@@ -756,16 +796,19 @@ def save_anatomic_split_tree_centerlines(
     # Export unique skeleton edges as-is. Unary collapse can restitch long
     # corridors for naming, but never drop an edge that has geometry — missing
     # roots previously came from collapsing/skipping unsupported segments.
-    export_segments = collapse_unary_supported_anatomic_segments(segments, best_chunks, root_idx)
+    export_segments = collapse_unary_supported_anatomic_segments(segments, best_chunks, root_idx, axes=axes)
     if not export_segments:
         export_segments = [seg for seg in segments if int(seg["segment_id"]) in best_chunks]
     if not export_segments:
         print("    [anatomic segments] Warning: no final supported tree segments to export.")
-        return []
+        return [], []
     if root_idx is not None:
-        annotate_anatomic_tree_segments(type("AnatomicSegmentTreeView", (), {"root": int(root_idx)})(), export_segments)
+        annotate_anatomic_tree_segments(
+            type("AnatomicSegmentTreeView", (), {"root": int(root_idx)})(), export_segments, axes=axes
+        )
 
     saved = []
+    segment_results: List[dict] = []
     vessel_token = safe_filename(str(vessel_info.name or f"label_{label}"))
     for seg in sorted(export_segments, key=lambda row: int(row["segment_id"])):
         seg_id = int(seg["segment_id"])
@@ -860,6 +903,49 @@ def save_anatomic_split_tree_centerlines(
         if component_id != 1:
             path_id = safe_filename(f"{path_id}_comp{component_id:02d}")
 
+        # Path-result-shaped dict over this segment's non-overlapping geometry, so
+        # the export layer can summarise each piece of vessel exactly once. Caliber
+        # flags come from the measured root->terminal paths (their reference radius
+        # is established over the whole vessel); geometry is recomputed locally.
+        seg_res = {
+            "x_mm": pts[:, 0], "y_mm": pts[:, 1], "z_mm": pts[:, 2],
+            "radius_mm": radius,
+            "maximum_inscribed_sphere_radius_mm": maximum_inscribed_sphere_radius,
+            "stenosis_detection_radius_mm": stenosis_detection_radius,
+            "curvature_1_per_mm": curvature,
+            "torsion_1_per_mm": torsion,
+            "stenosis_reference_radius_point": stenosis_reference,
+            "stenosis_threshold_radius_point": stenosis_threshold,
+            "stenosis_raw_percent_point": stenosis_raw_percent,
+            "stenosis_core_candidate_point": stenosis_core_candidate,
+            "stenosis_support_candidate_point": stenosis_support_candidate,
+            "stenosis_percent_point": stenosis_percent,
+            "is_stenotic": stenosis_binary,
+            "enlargement_reference_radius_point": enlargement_reference,
+            "enlargement_threshold_radius_point": enlargement_threshold,
+            "enlargement_percent_point": enlargement_percent,
+            "is_enlarged": enlargement_binary,
+            "is_enlarged_cs": enlargement_binary_cs,
+            "is_enlarged_mis": enlargement_binary_mis,
+            "label": int(label),
+            "component_id": int(component_id),
+            "path_id": path_id,
+            "tree_label": str(seg.get("anatomic_segment_name", segment_path)),
+            "tree_path": segment_path,
+            "path_role": str(seg.get("tree_region_role", "branch")),
+            "path_index": int(seg_id),
+            "tree_segment_id": int(seg_id),
+            "anatomic_segment_name": str(seg.get("anatomic_segment_name", "")),
+            "anatomic_segment_path": raw_segment_path,
+            "anatomic_parent_path": str(seg.get("anatomic_parent_path", "")),
+            "anatomic_generation": int(seg.get("anatomic_generation", 0)),
+            "is_terminal": bool(seg.get("is_terminal", False)),
+            "tree_mode": True,
+            "non_overlapping": True,
+            "root_skeleton_index": int(root_idx) if root_idx is not None else np.nan,
+        }
+        segment_results.append(summarize_segment_result(seg_res))
+
         poly = build_polyline_polydata(points=pts, arrays=[
             (curvature, "Curvature"),
             (torsion, "Torsion"),
@@ -902,11 +988,13 @@ def save_anatomic_split_tree_centerlines(
         keep_path_ids=set(saved),
     )
     if saved:
+        total_mm = float(np.nansum([r.get("length_mm", np.nan) for r in segment_results]))
         print(
             f"    [anatomic segments] Saved {len(saved)} connected skeleton-edge "
-            f"centerline VTP(s): {', '.join(saved)}"
+            f"centerline VTP(s) totalling {total_mm:.2f} mm (non-overlapping): "
+            f"{', '.join(saved)}"
         )
-    return saved
+    return saved, segment_results
 
 
 def save_anatomic_fallback_centerlines(
@@ -915,26 +1003,47 @@ def save_anatomic_fallback_centerlines(
     path_results: List[dict],
     centerline_dir: Optional[str],
     centerline_radius_dir: Optional[str],
-) -> List[str]:
+    axes: Optional[AnatomicalAxes] = None,
+    spacing=None,
+) -> Tuple[List[str], List[dict]]:
     """Export M1/M2-style anatomic-named centerlines when the recursive tree-segment split doesn't apply
-    (e.g. a simple single- or few-terminal vessel). Longest path becomes M1; remaining paths are named
-    by superior/inferior ordering. Returns the list of saved path ids.
+    (e.g. a simple single- or few-terminal vessel, or a donut/loop component whose
+    cyclic skeleton has no tree decomposition). Longest path becomes M1; remaining paths are named
+    by superior/inferior ordering.
+
+    Root→terminal paths of one component share their proximal trunk, so they are
+    deduplicated first (:func:`deduplicate_path_results`) — otherwise the shared
+    trunk is exported, and its length counted, once per terminal.
+
+    Returns ``(saved_path_ids, exported_results)``.
     """
     if not EXPORT_ANATOMIC_SPLIT_CENTERLINES or not centerline_dir or not path_results:
-        return []
+        return [], []
 
     vessel_token = safe_filename(str(vessel_info.name or "vessel"))
+    if spacing is not None:
+        deduped, dropped = deduplicate_path_results(path_results, spacing)
+        if dropped:
+            print(
+                f"    [anatomic segments] Dropped {len(dropped)} fully-duplicated path(s): "
+                f"{', '.join(dropped)}"
+            )
+        path_results = deduped
+        if not path_results:
+            return [], []
     paths = sorted(path_results, key=lambda row: float(row.get("length_mm", 0.0)), reverse=True)
     saved = []
+    exported: List[dict] = []
 
     if len(paths) == 1:
         names = [(paths[0], "M1")]
     else:
+        si_ax, si_sign = superior_axis(axes)
         scored = []
         for res in paths:
             pts = centerline_points_from_result(res)
             lookahead = pts[1:min(len(pts), 1 + int(ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS))]
-            z = float(np.nanmean(lookahead[:, 2])) if len(lookahead) else -np.inf
+            z = float(si_sign * np.nanmean(lookahead[:, si_ax])) if len(lookahead) else -np.inf
             scored.append((z, res))
         scored.sort(key=lambda row: row[0])
         suffix_by_id = {id(scored[0][1]): "M2i", id(scored[-1][1]): "M2s"}
@@ -948,12 +1057,17 @@ def save_anatomic_fallback_centerlines(
             path_id = safe_filename(f"{path_id}_comp{int(component_id):02d}")
         fallback = dict(res)
         fallback["path_id"] = path_id
+        fallback["tree_label"] = segment_name
+        fallback["tree_path"] = segment_name
+        fallback["non_overlapping"] = True
         save_centerline_result_vtps(fallback, centerline_dir, centerline_radius_dir)
         saved.append(path_id)
+        exported.append(fallback)
 
     if saved:
+        total_mm = float(np.nansum([r.get("length_mm", np.nan) for r in exported]))
         print(
-            "    [anatomic segments] Fallback saved root-to-terminal centerline(s) "
-            f"with anatomical names: {', '.join(saved)}"
+            f"    [anatomic segments] Fallback saved {len(saved)} deduplicated centerline(s) "
+            f"totalling {total_mm:.2f} mm: {', '.join(saved)}"
         )
-    return saved
+    return saved, exported

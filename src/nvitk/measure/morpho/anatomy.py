@@ -8,6 +8,7 @@ import numpy as np
 from scipy import ndimage as ndi
 
 from nvitk.measure.morphometrics_config import EXPORT_ANATOMIC_SPLIT_CENTERLINES, TREE_REGION_ROLE_CODES
+from .anatomy_axes import AnatomicalAxes
 from .io_utils import safe_filename
 from .models import SkeletonTree, VesselInfo
 
@@ -29,8 +30,20 @@ def nearest_dist_to_vessel_names(vessel_names: List[str], pt_mm: np.ndarray, mul
     return best
 
 
-def anatomical_endpoint_score(pt_mm: np.ndarray, rule: Optional[str]) -> float:
-    """Ranking score for *pt_mm* under an anatomical direction *rule* (lower = more extreme in that direction)."""
+def anatomical_endpoint_score(
+    pt_mm: np.ndarray,
+    rule: Optional[str],
+    axes: Optional[AnatomicalAxes] = None,
+) -> float:
+    """Ranking score for *pt_mm* under an anatomical direction *rule* (lower = more extreme in that direction).
+
+    With *axes* the rule is resolved against the volume's real orientation and
+    the subject's species (see :mod:`nvitk.measure.morpho.anatomy_axes`).
+    Without it the legacy hardcoded axes are used: array axis 2 = S/I, axis 1 =
+    A/P, axis 0 increasing toward L — i.e. an implicit LAS volume.
+    """
+    if axes is not None:
+        return float(axes.score(pt_mm, rule))
     if rule == "inferior":
         return float(pt_mm[2])
     if rule == "superior":
@@ -46,6 +59,18 @@ def anatomical_endpoint_score(pt_mm: np.ndarray, rule: Optional[str]) -> float:
     return 0.0
 
 
+def anatomical_endpoint_scores(
+    pts_mm: np.ndarray,
+    rule: Optional[str],
+    axes: Optional[AnatomicalAxes] = None,
+) -> np.ndarray:
+    """Vectorised :func:`anatomical_endpoint_score` (needed to normalise combined ``a+b`` rules)."""
+    pts = np.atleast_2d(np.asarray(pts_mm, dtype=float))
+    if axes is not None:
+        return np.asarray(axes.score_many(pts, rule), dtype=float)
+    return np.array([anatomical_endpoint_score(p, rule) for p in pts], dtype=float)
+
+
 def choose_root_endpoint(
     tree: SkeletonTree,
     vessel_info: VesselInfo,
@@ -53,6 +78,7 @@ def choose_root_endpoint(
     spacing,
     mapping: dict,
     mask_bool: Optional[np.ndarray] = None,
+    axes: Optional[AnatomicalAxes] = None,
 ) -> int:
     """Choose proximal/root endpoint among all skeleton terminals."""
     if not tree.endpoints:
@@ -75,9 +101,10 @@ def choose_root_endpoint(
     # If no upstream label is present, use the existing anatomical fallback rule.
     rule = vessel_info.no_upstream_start
     if rule:
-        scores = np.array([anatomical_endpoint_score(p, rule) for p in endpoint_pts_mm])
+        scores = anatomical_endpoint_scores(endpoint_pts_mm, rule, axes)
         root = int(tree.endpoints[int(np.argmin(scores))])
-        print(f"    [tree root] anatomical fallback '{rule}'.")
+        resolved = f" ({axes.describe_rule(rule)})" if axes is not None else ""
+        print(f"    [tree root] anatomical fallback '{rule}'{resolved}.")
         return root
 
     # Last fallback: largest EDT radius at endpoint, if mask is available.
@@ -101,11 +128,17 @@ def orient_centerline_points_by_flow(
     multilabel: np.ndarray,
     spacing,
     mapping: dict,
+    axes: Optional[AnatomicalAxes] = None,
 ) -> Tuple[np.ndarray, bool]:
     """Orient a centerline so it runs upstream→downstream per *vessel_info* flow topology.
 
     Returns ``(points, was_reversed)``. Falls back through downstream-only, then
-    upstream-only proximity when one side of the topology is unavailable.
+    upstream-only proximity when one side of the topology is unavailable, and
+    finally onto the vessel's ``no_upstream_start`` anatomical rule. That last
+    fallback matters for root vessels whose topology has no usable
+    ``flow_from``/``flow_to`` (``"systemic"`` upstream, empty downstream) — e.g.
+    every entry in ``mouse_root_topology.json`` — which otherwise get no
+    orientation at all when the component is unbranched.
     """
     spacing = np.asarray(spacing, dtype=float)
     downstream = [name for name in (vessel_info.flow_to or []) if name and not name.startswith("cortex") and name != "systemic"]
@@ -128,6 +161,14 @@ def orient_centerline_points_by_flow(
     if upstream_valid:
         print(f"    [direction] flow_from={upstream}: start={d0_up:.1f} end={d1_up:.1f}")
         return (pts, False) if d0_up <= d1_up else (pts[::-1], True)
+
+    rule = vessel_info.no_upstream_start
+    if rule:
+        s0, s1 = anatomical_endpoint_scores(np.asarray([pts[0], pts[-1]]), rule, axes)
+        if np.isfinite(s0) and np.isfinite(s1) and s0 != s1:
+            resolved = f" ({axes.describe_rule(rule)})" if axes is not None else ""
+            print(f"    [direction] anatomical fallback '{rule}'{resolved}: start={s0:.2f} end={s1:.2f}")
+            return (pts, False) if s0 <= s1 else (pts[::-1], True)
     return pts, False
 
 

@@ -40,6 +40,7 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
+import re
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -70,15 +71,15 @@ DEFAULT_ALPHA: float = 0.05
 VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[float, float], str]] = {
     # ---- Anterior circulation ------------------------------------------------
     # The carotid siphon enters from below, turns up, and bifurcates into ACA and MCA at ~y=0.60.
-    "lica": (((0.360, 0.330), (0.368, 0.470), (0.392, 0.600)), 9.0, (0.268, 0.462), "ICA"),
-    "rica": (((0.640, 0.330), (0.632, 0.470), (0.608, 0.600)), 9.0, (0.732, 0.462), "ICA"),
-    "lmca": (((0.392, 0.600), (0.318, 0.632), (0.252, 0.690), (0.300, 0.726)), 7.5,
+    "lica": (((0.320, 0.330), (0.332, 0.470), (0.362, 0.600)), 9.0, (0.248, 0.470), "ICA"),
+    "rica": (((0.680, 0.330), (0.668, 0.470), (0.638, 0.600)), 9.0, (0.752, 0.470), "ICA"),
+    "lmca": (((0.362, 0.600), (0.300, 0.638), (0.246, 0.694), (0.294, 0.730)), 7.5,
              (0.286, 0.788), "MCA"),
-    "rmca": (((0.608, 0.600), (0.682, 0.632), (0.748, 0.690), (0.700, 0.726)), 7.5,
+    "rmca": (((0.638, 0.600), (0.700, 0.638), (0.754, 0.694), (0.706, 0.730)), 7.5,
              (0.788, 0.735), "MCA"),
-    "laca": (((0.392, 0.600), (0.404, 0.700), (0.436, 0.798), (0.464, 0.856)), 7.0,
+    "laca": (((0.362, 0.600), (0.392, 0.700), (0.432, 0.798), (0.464, 0.856)), 7.0,
              (0.372, 0.792), "ACA"),
-    "raca": (((0.608, 0.600), (0.596, 0.700), (0.564, 0.798), (0.536, 0.856)), 7.0,
+    "raca": (((0.638, 0.600), (0.608, 0.700), (0.568, 0.798), (0.536, 0.856)), 7.0,
              (0.628, 0.792), "ACA"),
     "acomm": (((0.464, 0.856), (0.500, 0.874), (0.536, 0.856)), 6.0, (0.582, 0.898), "AComA"),
     # ---- Posterior circulation -----------------------------------------------
@@ -89,11 +90,27 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     # no corridor to reach it without crossing one of them.
     "lva": (((0.462, 0.268), (0.480, 0.300), (0.500, 0.330)), 6.5, (0.428, 0.244), "VA"),
     "rva": (((0.538, 0.268), (0.520, 0.300), (0.500, 0.330)), 6.5, (0.572, 0.244), "VA"),
-    "lpca": (((0.500, 0.468), (0.448, 0.500), (0.396, 0.524)), 7.0, (0.412, 0.452), "PCA"),
-    "rpca": (((0.500, 0.468), (0.552, 0.500), (0.604, 0.524)), 7.0, (0.588, 0.452), "PCA"),
-    "lpcomm": (((0.392, 0.600), (0.388, 0.562), (0.396, 0.524)), 5.0, (0.286, 0.606), "PComA"),
-    "rpcomm": (((0.608, 0.600), (0.612, 0.562), (0.604, 0.524)), 5.0, (0.714, 0.606), "PComA"),
+    # Carried past the PComm junction: the posterior cerebral does not end where the communicating
+    # artery joins it, and stopping there drew P1 alone — the shortest vessel on the figure for one
+    # of the larger ones.
+    # Carried past the PComm junction, posterolaterally around the midbrain. Extending it *up* and
+    # out instead would have it cross the carotid — true of the real anatomy, which passes behind
+    # the ICA, but unreadable in a flat schematic with no depth to show the crossing.
+    "lpca": (((0.500, 0.468), (0.456, 0.492), (0.412, 0.500), (0.386, 0.470),
+              (0.376, 0.420)), 7.0, (0.430, 0.404), "PCA"),
+    "rpca": (((0.500, 0.468), (0.544, 0.492), (0.588, 0.500), (0.614, 0.470),
+              (0.624, 0.420)), 7.0, (0.570, 0.404), "PCA"),
+    "lpcomm": (((0.362, 0.600), (0.378, 0.552), (0.412, 0.500)), 5.0, (0.240, 0.560), "PComA"),
+    "rpcomm": (((0.638, 0.600), (0.622, 0.552), (0.588, 0.500)), 5.0, (0.790, 0.560), "PComA"),
     # ---- Venous drainage -----------------------------------------------------
+    # Routed outside the vertebral confluence: the previous path crossed both of them on its way
+    # to the torcula, which read as an anastomosis that does not exist.
+    "strs": (((0.336, 0.300), (0.362, 0.226), (0.416, 0.168), (0.500, 0.140)), 7.0,
+             (0.240, 0.410), "Straight Sinus"),
+    "lts": (((0.500, 0.140), (0.368, 0.092), (0.196, 0.140), (0.104, 0.300)), 8.0,
+            (0.196, 0.062), "Left Transverse Sinus"),
+    "rts": (((0.500, 0.140), (0.648, 0.100), (0.812, 0.166), (0.896, 0.330)), 8.0,
+            (0.816, 0.076), "Right Transverse Sinus"),
     # The sagittal sinus is strictly midline, and drawing it that way bisected the circle of Willis
     # — a line through the middle of the arterial anatomy that belongs to a different system and
     # reads as though it connected to it. It is swept laterally instead, following the falx from
@@ -103,19 +120,11 @@ VESSEL_PATHS: dict[str, tuple[tuple[tuple[float, float], ...], float, tuple[floa
     # midline position carried no information the label does not already give.
     "sss": (((0.500, 0.958), (0.345, 0.912), (0.205, 0.790), (0.140, 0.610),
              (0.132, 0.430), (0.208, 0.252), (0.330, 0.168), (0.500, 0.140)), 10.5,
-            (0.232, 0.556), "Superior Sagittal Sinus"),
-    # Routed outside the vertebral confluence: the previous path crossed both of them on its way
-    # to the torcula, which read as an anastomosis that does not exist.
-    "strs": (((0.336, 0.300), (0.362, 0.226), (0.416, 0.168), (0.500, 0.140)), 7.0,
-             (0.300, 0.348), "Straight Sinus"),
-    "lts": (((0.500, 0.140), (0.368, 0.092), (0.196, 0.140), (0.104, 0.300)), 8.0,
-            (0.196, 0.062), "Left Transverse Sinus"),
-    "rts": (((0.500, 0.140), (0.648, 0.100), (0.812, 0.166), (0.896, 0.330)), 8.0,
-            (0.816, 0.076), "Right Transverse Sinus"),
+            (0.196, 0.716), "Superior Sagittal Sinus"),
 }
 
 #: Venous nodes are painted first so the arterial circle reads on top of the midline sinus.
-_VENOUS_NODES: frozenset[str] = frozenset({"sss", "strs", "lts", "rts"})
+_VENOUS_NODES: frozenset[str] = frozenset({"strs", "lts", "rts", "sss"})
 
 #: Drawn behind the vessels as an anatomical frame; carries no value and is never coloured.
 _SKULL_OUTLINE: tuple[tuple[float, float], ...] = (
@@ -126,6 +135,53 @@ _SKULL_OUTLINE: tuple[tuple[float, float], ...] = (
 
 #: Where the confluence of sinuses sits, annotated so the venous panel reads as a system.
 _CONFLUENCE: tuple[float, float] = (0.500, 0.140)
+
+
+#: Hemisphere-melted keys and the pair of drawn vessels each stands for. A frame grouped by
+#: hemisphere reports ``ICA`` rather than ``LICA``/``RICA``, and that key canonicalizes to nothing —
+#: which left the map able to draw only the three midline vessels. One averaged value belongs on
+#: *both* sides, since that is what it was averaged from.
+BILATERAL_KEYS: dict[str, tuple[str, str]] = {
+    "ica": ("lica", "rica"),
+    "mca": ("lmca", "rmca"),
+    "aca": ("laca", "raca"),
+    "pca": ("lpca", "rpca"),
+    "va": ("lva", "rva"),
+    "vertebral": ("lva", "rva"),
+    "pcomm": ("lpcomm", "rpcomm"),
+    "pcoma": ("lpcomm", "rpcomm"),
+    "pcom": ("lpcomm", "rpcomm"),
+    "ts": ("lts", "rts"),
+    "tsv": ("lts", "rts"),
+    "transverse": ("lts", "rts"),
+    "transversesinus": ("lts", "rts"),
+}
+
+
+def nodes_for_label(label: Any) -> list[str]:
+    """
+    Drawn vessels a grouping level refers to — one, or **two** for a hemisphere-melted key.
+
+    A vessel-wise frame gives ``LICA`` and the answer is one node. A hemisphere-wise frame gives
+    ``ICA``: a single number averaged over the two carotids, which belongs on both of them. Painting
+    it on neither — the previous behaviour, because ``ICA`` canonicalizes to nothing — left a
+    hemisphere-grouped model with three drawable vessels out of seventeen.
+
+    Returns ``[]`` for anything that is not a vessel at all.
+
+    Examples
+    --------
+    >>> nodes_for_label("LICA"), nodes_for_label("ICA"), nodes_for_label("Basilar")
+    (['lica'], ['lica', 'rica'], ['basi'])
+    """
+    from nvitk.stats.vessel_network import canonical_node
+
+    node = canonical_node(label)
+    if node in VESSEL_PATHS:
+        return [node]
+    key = re.sub(r"[^0-9a-z]+", "", str(label or "").strip().lower())
+    pair = BILATERAL_KEYS.get(key)
+    return [n for n in pair if n in VESSEL_PATHS] if pair else []
 
 
 def _smooth_path(points: Sequence[tuple[float, float]]) -> Any:
@@ -188,17 +244,19 @@ def vascular_values_from_frame(
         )
 
     for _, row in frame.iterrows():
-        node = canonical_node(row[key_column])
-        if node is None or node not in VESSEL_PATHS:
+        nodes = nodes_for_label(row[key_column])
+        if not nodes:
             continue
         value = pd.to_numeric(row[value_column], errors="coerce")
         if pd.isna(value):
             continue
-        values[node] = float(value)
+        for node in nodes:
+            values[node] = float(value)
         if pvalue_column and pvalue_column in frame.index.union(frame.columns):
             p = pd.to_numeric(row.get(pvalue_column), errors="coerce")
             if not pd.isna(p):
-                pvalues[node] = float(p)
+                for node in nodes:
+                    pvalues[node] = float(p)
     return values, pvalues
 
 
@@ -209,6 +267,7 @@ def vascular_values_from_result(
     source: str = "coefficient",
     data: pd.DataFrame | None = None,
     outcome: str = "",
+    contrast: str = "",
 ) -> tuple[dict[str, float], dict[str, float], str]:
     """
     Pull per-vessel numbers off a fitted model.
@@ -227,13 +286,22 @@ def vascular_values_from_result(
         reduces to for a model whose only term is the vessel, and it is the honest fallback when
         the fit has no per-vessel parameter to read.
 
+    contrast : str
+        A level of an interacting factor, as :func:`interaction_contrasts` names it (``sex[T.M]``).
+        The vessel's value becomes its **simple effect at that level** — main effect plus the
+        interaction — which is the profile actually seen in that group. Left empty, the map shows
+        the main effect, i.e. the profile at the interacting factor's *reference* level; on a model
+        with an interaction that is one group's answer presented as if it were everyone's.
+
+        The p-value reported alongside stays the **interaction** term's: it tests whether this
+        vessel's effect differs between the groups, which is the question a contrast view raises.
+        A simple effect's own test needs a linear combination the coefficient table does not carry.
+
     Returns
     -------
     (values, pvalues, note)
         *note* describes what was extracted, for the figure subtitle.
     """
-    from nvitk.stats.mixedlm import model_params
-    from nvitk.stats.vessel_network import canonical_node
 
     source = str(source).strip()
     values: dict[str, float] = {}
@@ -242,6 +310,11 @@ def vascular_values_from_result(
     if source.startswith("group:"):
         term = source.split(":", 1)[1] or "(Intercept)"
         return _values_from_group_coefficients(result, group_column=group_column, term=term)
+
+    if source.lower() in {"emmeans", "emm"}:
+        return _values_from_marginal_means(
+            result, group_column=group_column, data=data
+        )
 
     if source.lower() == "mean":
         if data is None or not outcome or outcome not in data.columns:
@@ -252,37 +325,24 @@ def vascular_values_from_result(
             raise ValueError(f"{group_column!r} is not in the model frame.")
         grouped = data.groupby(data[group_column].astype(str), observed=True)[outcome].mean()
         for level, value in grouped.items():
-            node = canonical_node(level)
-            if node in VESSEL_PATHS and np.isfinite(value):
+            if not np.isfinite(value):
+                continue
+            for node in nodes_for_label(level):
                 values[node] = float(value)
         return values, pvalues, f"observed mean {outcome} per vessel"
 
     # statsmodels exposes params/pvalues directly; the R engines (lme4, mmrm, lmrob) wrap an R
     # object whose table has to be normalized first. Trying the normalizer means one code path
     # serves every engine instead of the map silently working only for OLS and MixedLM.
-    params = model_params(result)
-    pvals = getattr(result, "pvalues", None)
-    # ``model_params`` returns a pandas Series for statsmodels. The R engines hand back whatever
-    # pymer4 stored — a *polars* frame in 0.9 — which has no ``.items()``, so the type is checked
-    # rather than the truthiness: a non-empty polars frame would otherwise sail past the guard and
-    # fail three lines later with "'DataFrame' object has no attribute 'items'".
-    if not isinstance(params, pd.Series) or params.empty:
-        try:
-            from nvitk.stats.r_mixedlm import lme4_coef_frame
+    params, pvals = _coefficient_series(result)
 
-            table = lme4_coef_frame(result)
-            params = pd.Series(
-                table["coef"].to_numpy(), index=table["parameter"].astype(str)
-            )
-            pvals = pd.Series(
-                table["p_value"].to_numpy(), index=table["parameter"].astype(str)
-            )
-        except Exception as exc:
-            raise ValueError(
-                f"This model exposes no coefficient table the map can read ({exc})."
-            ) from exc
-
+    # Longest first so 'territory_id' is tried before 'territory' and cannot mis-split a term.
+    prefixes = sorted(
+        {str(c) for c in (data.columns if data is not None else [])} | {str(group_column)},
+        key=len, reverse=True,
+    )
     reference: str | None = None
+    mirrored = False
     for term, coef in params.items():
         name = str(term)
         # patsy spells a categorical contrast 'col[T.level]', a no-intercept fit 'col[level]', and
@@ -296,18 +356,56 @@ def vascular_values_from_result(
             level = name[name.index("[") + 1: -1]
             if level.startswith("T."):
                 level = level[2:]
-        elif group_column and name.startswith(group_column) and len(name) > len(group_column):
-            level = name[len(group_column):]
-        node = canonical_node(level)
-        if node is None or node not in VESSEL_PATHS:
+        else:
+            # R concatenates factor and level without punctuation ('territoryLICA'), so the prefix
+            # has to be stripped by name. Every column of the model frame is a candidate, not just
+            # ``group_column``: the plot's grouping is often 'group_key' while the model term is
+            # 'territory', and matching only the former left lmrob and lme4 resolving nothing.
+            for prefix in prefixes:
+                if name.startswith(prefix) and len(name) > len(prefix):
+                    level = name[len(prefix):]
+                    break
+        nodes = nodes_for_label(level)
+        if not nodes or not np.isfinite(coef):
             continue
-        if not np.isfinite(coef):
-            continue
-        values[node] = float(coef)
+        mirrored |= len(nodes) > 1
+        for node in nodes:
+            values[node] = float(coef)
         if pvals is not None and term in getattr(pvals, "index", []):
             p = pvals[term]
             if np.isfinite(p):
-                pvalues[node] = float(p)
+                for node in nodes:
+                    pvalues[node] = float(p)
+
+    # ---- Fold in the interaction, when one was asked for -------------------------------------
+    if contrast:
+        matched = 0
+        for term, coef in params.items():
+            parts = _term_parts(str(term))
+            if len(parts) < 2 or contrast not in parts:
+                continue
+            vessel_part = next(
+                (p for p in parts if nodes_for_label(_level_of(p, prefixes))), ""
+            )
+            nodes = nodes_for_label(_level_of(vessel_part, prefixes)) if vessel_part else []
+            nodes = [n for n in nodes if n in values]
+            if not nodes or not np.isfinite(coef):
+                continue
+            for node in nodes:
+                values[node] += float(coef)
+            matched += 1
+            # The interaction's own p-value replaces the main effect's: it is the one that tests
+            # the difference this view is about.
+            if pvals is not None and term in getattr(pvals, "index", []):
+                p = pvals[term]
+                if np.isfinite(p):
+                    for node in nodes:
+                        pvalues[node] = float(p)
+        if not matched:
+            raise ValueError(
+                f"No interaction term pairs a vessel with {contrast!r}. Available contrasts: "
+                f"{', '.join(interaction_contrasts(result, group_column=group_column, data=data)) or 'none'}."
+            )
 
     if not values:
         raise ValueError(
@@ -317,14 +415,124 @@ def vascular_values_from_result(
 
     # Name the reference level so the reader knows why one vessel is blank.
     if data is not None and group_column in data.columns:
-        levels = {canonical_node(v) for v in data[group_column].astype(str).unique()}
-        missing = sorted({v for v in levels if v in VESSEL_PATHS} - set(values))
+        levels = {n for v in data[group_column].astype(str).unique() for n in nodes_for_label(v)}
+        missing = sorted(levels - set(values))
         reference = missing[0] if len(missing) == 1 else None
 
     note = f"{group_column} coefficients"
+    if mirrored:
+        note += ", mirrored across hemispheres"
+    if contrast:
+        note += f" at {contrast}"
     if reference:
         note += f" (reference: {reference})"
     return values, pvalues, note
+
+
+def _term_parts(name: str) -> list[str]:
+    """Split a patsy/R interaction term into its factors (``a[T.x]:b[T.y]`` → two parts)."""
+    return [part for part in str(name).split(":") if part]
+
+
+def interaction_contrasts(
+    result: Any, *, group_column: str = "territory", data: pd.DataFrame | None = None
+) -> list[str]:
+    """
+    Levels of the *other* factor in interactions with the vessel term, e.g. ``["sex[T.M]"]``.
+
+    A model with ``territory * sex`` estimates a different vessel profile for each sex, and the
+    coefficient table holds them as ``territory[T.LICA]:sex[T.M]``. Without naming which side of
+    the interaction to draw, the map would show only the main effect — the profile at the *other*
+    factor's reference level — and quietly present it as the whole story.
+
+    Empty when the model has no interaction on the vessel term, which is the signal a caller needs
+    to hide the selector rather than offer one with nothing in it.
+    """
+
+    try:
+        params = _coefficient_series(result)[0]
+    except Exception:
+        return []
+    prefixes = sorted(
+        {str(c) for c in (data.columns if data is not None else [])} | {str(group_column)},
+        key=len, reverse=True,
+    )
+    found: list[str] = []
+    for term in params.index:
+        parts = _term_parts(str(term))
+        if len(parts) < 2:
+            continue
+        vessel_parts = [p for p in parts if nodes_for_label(_level_of(p, prefixes))]
+        if not vessel_parts:
+            continue
+        for other in (p for p in parts if p not in vessel_parts):
+            if other not in found:
+                found.append(other)
+    return found
+
+
+def _level_of(part: str, prefixes: Sequence[str]) -> str:
+    """The factor level a single (non-interaction) term names."""
+    name = str(part)
+    if "[" in name and name.endswith("]"):
+        level = name[name.index("[") + 1: -1]
+        return level[2:] if level.startswith("T.") else level
+    for prefix in prefixes:
+        if name.startswith(prefix) and len(name) > len(prefix):
+            return name[len(prefix):]
+    return name
+
+
+#: Per-engine normalizers to a ``parameter / coef / p_value`` table, tried in turn. statsmodels
+#: exposes ``params``/``pvalues`` directly; every R engine wraps an object that does not, and each
+#: wraps it differently — an ``lmrob`` fit *is* the R object, a pymer4 model holds one, MMRM another.
+#: Trying only one of them is what left lmrob and MMRM silently falling back to observed means.
+_COEF_NORMALIZERS: tuple[tuple[str, str], ...] = (
+    ("nvitk.stats.r_mixedlm", "lme4_coef_frame"),
+    ("nvitk.stats.r_robust", "lmrob_coef_frame"),
+    ("nvitk.stats.r_mmrm", "mmrm_coef_frame"),
+    ("nvitk.stats.r_gam", "mrf_coef_frame"),
+)
+
+
+def _coefficient_series(result: Any) -> tuple[pd.Series, pd.Series | None]:
+    """
+    ``(params, pvalues)`` as pandas Series, whichever engine produced *result*.
+
+    Raises
+    ------
+    ValueError
+        When no normalizer recognizes the object, naming what was tried — a silent empty result
+        here becomes "the map shows observed means" three frames up, which looks like data rather
+        than a failure.
+    """
+    from importlib import import_module
+
+    from nvitk.stats.mixedlm import model_params
+
+    params = model_params(result)
+    pvals = getattr(result, "pvalues", None)
+    if isinstance(params, pd.Series) and not params.empty:
+        return params, pvals if isinstance(pvals, pd.Series) else None
+
+    tried: list[str] = []
+    for module_name, function_name in _COEF_NORMALIZERS:
+        try:
+            table = getattr(import_module(module_name), function_name)(result)
+        except Exception as exc:
+            tried.append(f"{function_name} ({type(exc).__name__})")
+            continue
+        if table is None or table.empty or "parameter" not in table.columns:
+            tried.append(f"{function_name} (empty)")
+            continue
+        index = table["parameter"].astype(str)
+        return (
+            pd.Series(pd.to_numeric(table["coef"], errors="coerce").to_numpy(), index=index),
+            pd.Series(pd.to_numeric(table["p_value"], errors="coerce").to_numpy(), index=index),
+        )
+    raise ValueError(
+        "No coefficient table could be read from this fit. Tried: " + "; ".join(tried) + "."
+    )
 
 
 def group_coefficient_terms(result: Any, *, group_column: str = "territory") -> list[str]:
@@ -353,6 +561,85 @@ def group_coefficient_terms(result: Any, *, group_column: str = "territory") -> 
     ]
 
 
+def _values_from_marginal_means(
+    result: Any, *, group_column: str, data: pd.DataFrame | None
+) -> tuple[dict[str, float], dict[str, float], str]:
+    """
+    Model-predicted mean per vessel, on the outcome's own scale — **including the reference level**.
+
+    Treatment coding gives the reference territory no coefficient: it is absorbed into the
+    intercept, which is why a ``~ territory + …`` fit shows sixteen vessels and leaves the basilar
+    blank. That is correct for a contrast table and wrong for a map, where the reader is looking at
+    anatomy and one artery is simply missing.
+
+    The marginal mean rebuilds it: ``intercept + β_vessel`` (with ``β = 0`` for the reference),
+    plus each numeric covariate held at its mean. Categorical covariates stay at their own reference
+    level, so the result is "predicted flow in an average subject", comparable across vessels and
+    interpretable in mL/min rather than as a difference from whichever vessel sorted first.
+
+    No p-values come back. A coefficient's p-value tests the *contrast against the reference*, not
+    whether a marginal mean differs from zero, and carrying it here would attach a test to a number
+    it does not describe. Use the coefficient view when significance is the question.
+    """
+
+    params, _ = _coefficient_series(result)
+    prefixes = sorted(
+        {str(c) for c in (data.columns if data is not None else [])} | {str(group_column)},
+        key=len, reverse=True,
+    )
+
+    intercept = 0.0
+    for name in ("Intercept", "(Intercept)", "const"):
+        if name in params.index:
+            intercept = float(params[name])
+            break
+
+    # Covariate offset: numeric terms at their mean, everything else at its reference. Shared by
+    # every vessel, so it shifts the map without changing the ordering — but it is what puts the
+    # numbers on the outcome's scale instead of an arbitrary one.
+    offset = 0.0
+    if data is not None:
+        for term, coef in params.items():
+            name = str(term)
+            if name in {"Intercept", "(Intercept)", "const"} or ":" in name:
+                continue
+            if nodes_for_label(_level_of(name, prefixes)):
+                continue
+            if name in data.columns and pd.api.types.is_numeric_dtype(data[name]):
+                column = pd.to_numeric(data[name], errors="coerce")
+                if column.notna().any() and np.isfinite(coef):
+                    offset += float(coef) * float(column.mean())
+
+    values: dict[str, float] = {}
+    for term, coef in params.items():
+        nodes = nodes_for_label(_level_of(str(term), prefixes))
+        if nodes and np.isfinite(coef) and ":" not in str(term):
+            for node in nodes:
+                values[node] = intercept + offset + float(coef)
+
+    # The reference level has no term of its own; its marginal mean is the intercept.
+    reference = None
+    if data is not None and group_column in data.columns:
+        levels = {
+            n for v in data[group_column].astype(str).dropna().unique()
+            for n in nodes_for_label(v)
+        }
+        missing = sorted(levels - set(values))
+        for node in missing:
+            values[node] = intercept + offset
+        reference = missing[0] if len(missing) == 1 else None
+
+    if not values:
+        raise ValueError(
+            f"No parameter of this model names a vessel level of {group_column!r}, so there are no "
+            f"marginal means to draw."
+        )
+    note = "marginal mean per vessel"
+    if reference:
+        note += f" ({reference} recovered from the intercept)"
+    return values, {}, note
+
+
 def _values_from_group_coefficients(
     result: Any, *, group_column: str, term: str
 ) -> tuple[dict[str, float], dict[str, float], str]:
@@ -370,7 +657,6 @@ def _values_from_group_coefficients(
     hypothesis attached to it.
     """
     from nvitk.stats.r_mixedlm import lme4_group_coefficients
-    from nvitk.stats.vessel_network import canonical_node
 
     table = lme4_group_coefficients(result)
     if table is None or table.empty:
@@ -392,8 +678,9 @@ def _values_from_group_coefficients(
 
     values: dict[str, float] = {}
     for level, value in zip(rows["level"], rows[term]):
-        node = canonical_node(level)
-        if node in VESSEL_PATHS and np.isfinite(value):
+        if not np.isfinite(value):
+            continue
+        for node in nodes_for_label(level):
             values[node] = float(value)
     if not values:
         raise ValueError(
@@ -473,7 +760,7 @@ def plot_vascular_map(
     }
     if mode == "pvalue" and not pvalues:
         raise ValueError("mode='pvalue' needs a pvalues mapping.")
-    if mask_nonsignificant and mode == "estimate" and not pvalues:
+    if mask_nonsignificant and not pvalues:
         log.warning(
             "mask_nonsignificant was requested without p-values — every vessel will be drawn as "
             "though it were significant."
@@ -489,7 +776,11 @@ def plot_vascular_map(
         scalars = {k: -np.log10(max(p, 1e-300)) for k, p in pvalues.items() if k in VESSEL_PATHS}
         colormap = plt.get_cmap(cmap or "viridis")
         finite = list(scalars.values())
-        norm = Normalize(vmin=0.0, vmax=max(finite + [-np.log10(alpha) * 2]))
+        # With the mask on, nothing below the threshold is drawn, so starting the scale at zero
+        # would spend most of the colormap on vessels that are grey. Anchoring vmin at the
+        # threshold gives the drawn vessels the whole range.
+        floor = -np.log10(alpha) if mask_nonsignificant else 0.0
+        norm = Normalize(vmin=floor, vmax=max([*finite, floor + 1.0]))
         bar_label = label or "−log₁₀(p)"
     else:
         scalars = {k: v for k, v in values.items() if k in VESSEL_PATHS}
@@ -532,7 +823,9 @@ def plot_vascular_map(
 
         if not has_value:
             colour, edge = "none", COLOR_ABSENT
-        elif mode == "estimate" and not significant:
+        elif not significant:
+            # Applies in both modes. Greying the non-significant vessels of a p-value map leaves
+            # the colour reading only.
             colour, edge = COLOR_NONSIGNIFICANT, COLOR_NONSIGNIFICANT
         else:
             colour = colormap(norm(scalars[node]))
@@ -587,7 +880,7 @@ def plot_vascular_map(
                         fontsize=7, color="#c44e52", va="center")
 
     notes = []
-    if mode == "estimate" and mask_nonsignificant:
+    if mask_nonsignificant:
         notes.append(f"grey = p ≥ {alpha:g}")
     if hidden:
         notes.append(f"{len(hidden)} vessel(s) hidden")
@@ -612,4 +905,5 @@ __all__ = [
     "vascular_values_from_frame",
     "vascular_values_from_result",
     "group_coefficient_terms",
+    "interaction_contrasts",
 ]

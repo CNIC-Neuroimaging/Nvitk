@@ -188,6 +188,51 @@ def build_groupings(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return out
 
 
+def repair_source_column_aliases(repo: Any) -> list[str]:
+    """
+    Un-alias ``apoe`` from the derived variables, for a dataset written before that was fixed.
+
+    An earlier version of this script registered ``source_column="apoe"`` on every grouping, and the
+    catalog turns a source column into an alias — so ``apoe`` resolved to a carrier flag and the raw
+    genotype became unreachable. Rewriting each entry's ``source_column`` to its own id drops the
+    bad alias the next time the catalog is read.
+
+    Returns the variable ids that were repaired.
+    """
+    try:
+        existing = {
+            str(e.get("variable_id")): e
+            for e in repo.catalog.variable_entries(domain="clinical")
+        }
+    except Exception as exc:
+        log.debug("Could not read the variable catalog: %s", exc)
+        return []
+
+    repaired: list[str] = []
+    entries: list[dict[str, Any]] = []
+    for variable in DERIVATIONS:
+        current = existing.get(variable)
+        if current is None:
+            continue
+        if str(current.get("source_column") or "") != SOURCE_VARIABLE:
+            continue
+        entries.append({
+            "variable_id": variable,
+            "domain": "clinical",
+            "table": "clinical_measurements",
+            "source_column": variable,
+            "derived_from": SOURCE_VARIABLE,
+        })
+        repaired.append(variable)
+    if entries:
+        repo.register_variables(entries)
+        log.ok(
+            "Repaired the 'apoe' alias on %d derived variable(s): %s.",
+            len(repaired), ", ".join(repaired),
+        )
+    return repaired
+
+
 def publish_groupings(
     repo: Any, groupings: dict[str, pd.DataFrame], *, write: bool = False
 ) -> dict[str, int]:
@@ -222,7 +267,12 @@ def publish_groupings(
                 value_kind="float",
                 source_file="clinical_measurements",
                 source_sheet="derived",
-                source_column=SOURCE_VARIABLE,
+                # NOT ``apoe``. The catalog registers ``source_column`` as a *variable alias*, so
+                # naming the parent here made ``apoe`` resolve to whichever derived variable was
+                # registered last — asking for the genotype returned a carrier flag. The
+                # provenance belongs in ``extra``, which is metadata only.
+                source_column=variable,
+                extra={"derived_from": SOURCE_VARIABLE},
             ),
             provenance={"importer": "import_apoe_grouping", "derived_from": SOURCE_VARIABLE},
             # Rebuild the index once, after the last variable: it is derived from Parquet, so
@@ -265,6 +315,8 @@ def main(dataset: Path | None, write: bool) -> None:
 
     groupings = build_groupings(frame)
     written = publish_groupings(repo, groupings, write=write)
+    if write:
+        repair_source_column_aliases(repo)
 
     click.echo("")
     summary = pd.DataFrame(

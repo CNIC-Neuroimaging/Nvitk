@@ -42,6 +42,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -166,6 +167,7 @@ class DerivedColumnsDialog(QDialog):
         self._kind.addItem("Transform of a column", "transform")
         self._kind.addItem("Expression", "expression")
         self._kind.addItem("Grouped bins (categorical)", "bins")
+        self._kind.addItem("Merge categorical levels", "merge")
         self._kind.currentIndexChanged.connect(self._on_kind_changed)
         self._name = QLineEdit()
         self._name.setPlaceholderText("log_pi")
@@ -201,6 +203,7 @@ class DerivedColumnsDialog(QDialog):
         self._stack.addWidget(expression_page)
 
         self._stack.addWidget(self._build_bins_page())
+        self._stack.addWidget(self._build_merge_page())
 
         lay.addWidget(self._stack)
 
@@ -227,6 +230,99 @@ class DerivedColumnsDialog(QDialog):
 
         self._refresh_sources()
         return panel
+
+    def _build_merge_page(self) -> QWidget:
+        """
+        Pool the levels of a categorical column into fewer groups.
+
+        The categorical counterpart of the bins page. Each level of the source column gets a text
+        box holding the group it belongs to; levels sharing a group name are merged. Typing the
+        same name in two boxes is the whole interface — there is no separate "create group" step,
+        because the group *is* its name.
+        """
+        page = QWidget()
+        lay = QVBoxLayout(page)
+
+        form = QFormLayout()
+        self._merge_source = QComboBox()
+        self._merge_source.currentIndexChanged.connect(self._on_merge_source_changed)
+        form.addRow("Source", self._merge_source)
+
+        self._merge_unmapped = QComboBox()
+        self._merge_unmapped.addItem("keep its own name", "keep")
+        self._merge_unmapped.addItem("drop the row (missing)", "drop")
+        self._merge_unmapped.addItem("pool into 'other'", "other")
+        self._merge_unmapped.setToolTip(
+            "What happens to a level left blank below, and to a level that appears in the data "
+            "later than this definition was written.\n\n"
+            "Keeping its own name is the safe default: a new level shows up as itself rather than "
+            "being silently folded into a group it was never assigned to."
+        )
+        self._merge_unmapped.currentIndexChanged.connect(self._on_merge_changed)
+        form.addRow("Unassigned levels", self._merge_unmapped)
+        lay.addLayout(form)
+
+        self._merge_scroll = QScrollArea()
+        self._merge_scroll.setWidgetResizable(True)
+        self._merge_host = QWidget()
+        self._merge_form = QFormLayout(self._merge_host)
+        self._merge_scroll.setWidget(self._merge_host)
+        self._merge_scroll.setMinimumHeight(200)
+        lay.addWidget(self._merge_scroll, stretch=1)
+        self._merge_edits: dict[str, QLineEdit] = {}
+
+        self._merge_preview = QLabel("")
+        self._merge_preview.setWordWrap(True)
+        self._merge_preview.setStyleSheet(muted_label_style())
+        lay.addWidget(self._merge_preview)
+        return page
+
+    def _on_merge_source_changed(self) -> None:
+        """Rebuild one row per level of the selected column."""
+        while self._merge_form.rowCount():
+            self._merge_form.removeRow(0)
+        self._merge_edits = {}
+
+        source = self._merge_source.currentText().strip()
+        frame = self._preview_frame
+        if not source or frame is None or source not in frame.columns:
+            self._merge_preview.setText("")
+            return
+
+        counts = frame[source].astype(str).value_counts()
+        for level, n in counts.items():
+            edit = QLineEdit()
+            edit.setPlaceholderText("(unassigned)")
+            edit.textChanged.connect(self._on_merge_changed)
+            self._merge_edits[str(level)] = edit
+            self._merge_form.addRow(f"{level}   (n={n})", edit)
+
+        if not self._name.text().strip():
+            self._name.setText(f"{source}_group")
+        self._on_merge_changed()
+
+    def _on_merge_changed(self) -> None:
+        """Summarize the grouping the boxes currently describe."""
+        groups: dict[str, list[str]] = {}
+        for level, edit in self._merge_edits.items():
+            name = edit.text().strip()
+            if name:
+                groups.setdefault(name, []).append(level)
+        unassigned = [lv for lv, e in self._merge_edits.items() if not e.text().strip()]
+
+        if not groups:
+            self._merge_preview.setText(
+                "Type a group name beside each level. Levels sharing a name are merged."
+            )
+            return
+        parts = [f"{g} ← {' + '.join(v)}" for g, v in groups.items()]
+        policy = str(self._merge_unmapped.currentData() or "keep")
+        if unassigned:
+            fate = {"keep": "kept as themselves", "drop": "dropped"}.get(
+                policy, f"pooled into '{policy}'"
+            )
+            parts.append(f"{len(unassigned)} unassigned ({fate}): {', '.join(unassigned[:6])}")
+        self._merge_preview.setText("   ·   ".join(parts))
 
     def _build_bins_page(self) -> QWidget:
         """
@@ -297,6 +393,24 @@ class DerivedColumnsDialog(QDialog):
         """Columns that can be binned — base columns plus any numeric derived ones."""
         frame = self._preview_frame
         return [str(c) for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
+
+    def _categorical_columns(self, *, max_levels: int = 60) -> list[str]:
+        """
+        Columns whose levels can be merged: discrete, and few enough to lay out one row each.
+
+        A float column is excluded — its "levels" are its values, and merging those is what the
+        bins page is for. So is anything past *max_levels*: a subject id has nothing to pool.
+        """
+        frame = self._preview_frame
+        out: list[str] = []
+        for column in frame.columns:
+            series = frame[column]
+            if pd.api.types.is_float_dtype(series):
+                continue
+            levels = series.dropna().nunique()
+            if 1 < levels <= max_levels:
+                out.append(str(column))
+        return out
 
     def _on_bin_source_changed(self) -> None:
         """Suggest a name from the source, mirroring ``tacsctot`` → ``tacsctot_group``."""
@@ -379,6 +493,17 @@ class DerivedColumnsDialog(QDialog):
             self._source.setCurrentIndex(idx)
         self._source.blockSignals(False)
 
+        # Merging only makes sense over a column with levels to merge.
+        current_merge = self._merge_source.currentText()
+        self._merge_source.blockSignals(True)
+        self._merge_source.clear()
+        for name in self._categorical_columns():
+            self._merge_source.addItem(name)
+        midx = self._merge_source.findText(current_merge)
+        if midx >= 0:
+            self._merge_source.setCurrentIndex(midx)
+        self._merge_source.blockSignals(False)
+
         # Bins only make sense over a continuous column.
         current_bin = self._bin_source.currentText()
         self._bin_source.blockSignals(True)
@@ -440,6 +565,13 @@ class DerivedColumnsDialog(QDialog):
         kind = str(self._kind.currentData())
         cut_points: tuple[float, ...] = ()
         labels: tuple[str, ...] = ()
+        mapping: tuple[tuple[str, str], ...] = ()
+        if kind == "merge":
+            mapping = tuple(
+                (level, edit.text().strip())
+                for level, edit in self._merge_edits.items()
+                if edit.text().strip()
+            )
         if kind == "bins":
             cut_points = parse_cut_points(self._bin_cuts.text())
             raw_labels = [t.strip() for t in self._bin_labels.text().split(",") if t.strip()]
@@ -450,6 +582,7 @@ class DerivedColumnsDialog(QDialog):
             source=(
                 self._source.currentText() if kind == "transform"
                 else self._bin_source.currentText() if kind == "bins"
+                else self._merge_source.currentText() if kind == "merge"
                 else ""
             ),
             transform=str(self._transform.currentData() or "") if kind == "transform" else "",
@@ -458,13 +591,18 @@ class DerivedColumnsDialog(QDialog):
             labels=labels,
             label_prefix=self._bin_prefix.text().strip() or "g",
             right=self._bin_right.isChecked(),
+            mapping=mapping,
+            unmapped=str(self._merge_unmapped.currentData() or "keep"),
         )
 
     def _on_kind_changed(self) -> None:
         """Swap the definition page and refresh the suggested name."""
         self._stack.setCurrentIndex(self._kind.currentIndex())
-        if self._kind.currentData() == "bins":
+        kind = self._kind.currentData()
+        if kind == "bins":
             self._on_bin_source_changed()
+        elif kind == "merge":
+            self._on_merge_source_changed()
         else:
             self._suggest_name()
 

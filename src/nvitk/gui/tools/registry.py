@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from nvitk.gui.pipeline.catalog import PIPELINE_TOOLS
+from nvitk.measure.morpho.anatomy_axes import SPECIES_AUTO, SPECIES_CHOICES
 from nvitk.measure.morpho.topology_io import topology_choices as _morpho_topology_choices
 
 ParamKind = Literal[
@@ -1313,6 +1314,13 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 "none",
                 choices=_morpho_topology_choices(),
             ),
+            ParamSpec(
+                "species",
+                "Species",
+                "choice",
+                SPECIES_AUTO,
+                choices=SPECIES_CHOICES,
+            ),
             ParamSpec("n_workers", "Workers", "int", 1, min=1, max=64),
             ParamSpec("skip_existing", "Skip if Excel exists", "bool", False),
             ParamSpec(
@@ -1327,10 +1335,11 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "Run vessel-wise TOF morphometrics on the selected multilabel Labels layer. "
             "Choose a topology JSON under measure/morpho/topology "
-            "(eicab_topology.json for TOF/eICAB; qvtpy_topology.json is the "
-            "4D-flow label reference), or 'none' for topology-agnostic "
-            "per-label metrics. Leave Output directory empty to show results "
-            "in the GUI only."
+            "(eicab_topology.json for TOF/eICAB; mouse_root_topology.json for the "
+            "Mouse TOF CoW labels; qvtpy_topology.json is the 4D-flow label "
+            "reference), or 'none' for topology-agnostic per-label metrics. "
+            "Species 'auto' reads the topology's _meta block. Leave Output "
+            "directory empty to show results in the GUI only."
         ),
     ),
     GuiToolSpec(

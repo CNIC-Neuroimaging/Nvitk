@@ -389,6 +389,95 @@ def cast_column(series: pd.Series, kind: str) -> pd.Series:
     raise ValueError(f"Unknown column type {kind!r}. Known: {', '.join(COLUMN_TYPES)}.")
 
 
+def _as_factor_preserving_order(series: "pd.Series") -> "pd.Categorical":
+    """
+    Coerce *series* to a pandas Categorical **without disturbing an existing level order**.
+
+    ``pd.Categorical(series.astype(str))`` re-derives the categories by sorting, so a column whose
+    reference level was deliberately set — the first category is what patsy and R contrast against
+    — silently reverts to alphabetical. That is invisible in the frame and only shows up as the
+    wrong baseline in the coefficient table.
+
+    Categories are stringified because R wants character levels, keeping their order; the rare
+    collision (``1`` and ``"1"`` becoming one level) is de-duplicated rather than raising.
+    """
+    import pandas as pd
+
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        ordered: list[str] = []
+        for category in series.cat.categories:
+            text = str(category)
+            if text not in ordered:
+                ordered.append(text)
+        return pd.Categorical(series.astype(str), categories=ordered)
+    return pd.Categorical(series.astype(str))
+
+
+def merge_levels(
+    series: pd.Series,
+    mapping: Sequence[tuple[str, str]],
+    *,
+    unmapped: str = "keep",
+) -> pd.Categorical:
+    """
+    Pool levels of a categorical column into fewer groups.
+
+    The categorical counterpart of :func:`cut_into_bins`. A six-level APOE genotype spends five
+    degrees of freedom on contrasts nobody asked for and puts four subjects in ``E2/E2``; folding it
+    to ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` asks the question actually being posed, with
+    groups large enough to estimate.
+
+    Parameters
+    ----------
+    mapping : sequence of (level, group)
+        Source level → new group name. A level may appear once; the caller's validation catches
+        duplicates before this is reached.
+    unmapped : str
+        ``"keep"`` leaves an unlisted level under its own name — the safe default, since a level
+        that appears after the definition was written is then visible rather than silently pooled.
+        ``"drop"`` makes it missing. Any other string becomes a catch-all group of that name.
+
+    Returns
+    -------
+    pandas.Categorical
+        Categories ordered as the groups were first named in *mapping*, so the first group is the
+        model's reference unless one is set explicitly.
+
+    Examples
+    --------
+    >>> s = pd.Series(["E3/E4", "E4/E4", "E3/E3", "E2/E3"])
+    >>> list(merge_levels(s, [("E3/E4", "E4c"), ("E4/E4", "E4c")], unmapped="other"))
+    ['E4c', 'E4c', 'other', 'other']
+    """
+    lookup = {str(level): str(group) for level, group in mapping}
+    text = series.astype("string")
+
+    def recode(value: Any) -> Any:
+        if pd.isna(value):
+            return pd.NA
+        key = str(value)
+        if key in lookup:
+            return lookup[key]
+        if unmapped == "keep":
+            return key
+        if unmapped == "drop":
+            return pd.NA
+        return unmapped
+
+    recoded = text.map(recode).astype("string")
+
+    # Order: the groups in the order they were named, then anything kept, then a catch-all last —
+    # so the definition's first group is the reference and stray levels never displace it.
+    ordered: list[str] = []
+    for _level, group in mapping:
+        if str(group) not in ordered:
+            ordered.append(str(group))
+    for value in recoded.dropna().unique():
+        if str(value) not in ordered:
+            ordered.append(str(value))
+    return pd.Categorical(recoded, categories=ordered)
+
+
 def set_reference_level(series: pd.Series, level: str) -> pd.Series:
     """
     Make *level* the first category of *series*, so models contrast every other level against it.
@@ -743,11 +832,19 @@ class DerivedColumn:
     ----------
     name : str
         Output column name. Must be a valid identifier — see :data:`IDENTIFIER_RE`.
-    kind : {"transform", "expression", "bins"}
+    kind : {"transform", "expression", "bins", "merge"}
         ``transform`` applies :data:`TRANSFORMS`\\ ``[transform]`` to *source*;
         ``expression`` evaluates *expression* via :func:`evaluate_expression`;
         ``bins`` cuts *source* into an ordered categorical at *cut_points*, the
-        ``tacsctot`` → ``tacsctot_group`` pattern.
+        ``tacsctot`` → ``tacsctot_group`` pattern;
+        ``merge`` pools levels of a categorical *source* into fewer groups via *mapping*, the
+        ``apoe`` → ``E4_carrier`` / ``E2_carrier`` / ``E3E3`` pattern.
+    mapping : tuple of (level, group)
+        For ``kind="merge"``: which source level goes into which new group. Stored as pairs rather
+        than a dict so the definition round-trips through JSON with a stable order.
+    unmapped : str
+        What happens to a level not named in *mapping*: ``"keep"`` leaves it under its own name,
+        ``"drop"`` makes it missing, or any other string is used as a catch-all group label.
     cut_points : tuple of float
         Interior cut points for ``kind="bins"``. The bins are bracketed by ±∞, so ``(0, 25, 100)``
         gives four groups: ``≤ 0``, ``(0, 25]``, ``(25, 100]``, ``> 100``.
@@ -765,6 +862,9 @@ class DerivedColumn:
     labels: tuple[str, ...] = ()
     label_prefix: str = "g"
     right: bool = True
+    # ---- kind="merge" ----------------------------------------------------------
+    mapping: tuple[tuple[str, str], ...] = ()
+    unmapped: str = "keep"
 
     def n_bins(self) -> int:
         """Number of bins this definition produces (one more than the interior cut points)."""
@@ -776,6 +876,13 @@ class DerivedColumn:
             return tuple(self.labels)
         return default_bin_labels(self.n_bins(), self.label_prefix or "g")
 
+    def merge_groups(self) -> dict[str, list[str]]:
+        """``{new group: [source levels]}``, in the order the groups were first named."""
+        groups: dict[str, list[str]] = {}
+        for level, group in self.mapping:
+            groups.setdefault(str(group), []).append(str(level))
+        return groups
+
     def label(self) -> str:
         """Human-readable definition, e.g. ``"cp_group = bins(lcp: 0, 25, 100)"``."""
         if self.kind == "transform":
@@ -783,6 +890,11 @@ class DerivedColumn:
         if self.kind == "bins":
             points = ", ".join(f"{c:g}" for c in self.cut_points)
             return f"{self.name} = bins({self.source}: {points}) → {', '.join(self.bin_labels())}"
+        if self.kind == "merge":
+            groups = self.merge_groups()
+            shown = "; ".join(f"{g} ← {'+'.join(v)}" for g, v in list(groups.items())[:3])
+            more = f" (+{len(groups) - 3})" if len(groups) > 3 else ""
+            return f"{self.name} = merge({self.source}: {shown}{more})"
         return f"{self.name} = {self.expression}"
 
     def validate(self) -> str:
@@ -815,6 +927,20 @@ class DerivedColumn:
                 )
             if len(set(labels)) != len(labels):
                 return "Bin labels must be unique."
+        elif self.kind == "merge":
+            if not self.source:
+                return "No source column selected."
+            if not self.mapping:
+                return "Assign at least one level to a group."
+            seen: set[str] = set()
+            for level, group in self.mapping:
+                if not str(group).strip():
+                    return f"Level {level!r} has no group name."
+                if level in seen:
+                    return f"Level {level!r} is assigned to more than one group."
+                seen.add(level)
+            if len(self.merge_groups()) < 2 and self.unmapped == "drop":
+                return "Merging everything into one group leaves nothing to compare."
         else:
             return f"Unknown derived-column kind {self.kind!r}."
         return ""
@@ -831,6 +957,8 @@ class DerivedColumn:
             "labels": list(self.labels),
             "label_prefix": self.label_prefix,
             "right": bool(self.right),
+            "mapping": [[str(a), str(b)] for a, b in self.mapping],
+            "unmapped": self.unmapped,
         }
 
     @classmethod
@@ -846,6 +974,12 @@ class DerivedColumn:
             labels=tuple(str(v) for v in (data.get("labels") or ())),
             label_prefix=str(data.get("label_prefix") or "g"),
             right=bool(data.get("right", True)),
+            mapping=tuple(
+                (str(pair[0]), str(pair[1]))
+                for pair in (data.get("mapping") or ())
+                if len(pair) == 2
+            ),
+            unmapped=str(data.get("unmapped") or "keep"),
         )
 
 
@@ -879,6 +1013,13 @@ def apply_derived_columns(
                 if spec.source not in out.columns:
                     raise ValueError(f"source column {spec.source!r} is not in the frame")
                 series = TRANSFORMS[spec.transform](out[spec.source])
+            elif spec.kind == "merge":
+                if spec.source not in out.columns:
+                    raise ValueError(f"source column {spec.source!r} is not in the frame")
+                out[spec.name] = merge_levels(
+                    out[spec.source], spec.mapping, unmapped=spec.unmapped
+                )
+                continue
             elif spec.kind == "bins":
                 if spec.source not in out.columns:
                     raise ValueError(f"source column {spec.source!r} is not in the frame")
@@ -916,6 +1057,7 @@ __all__ = [
     "apply_row_filter",
     "bin_counts",
     "cast_column",
+    "merge_levels",
     "bin_interval_labels",
     "cut_into_bins",
     "default_bin_labels",

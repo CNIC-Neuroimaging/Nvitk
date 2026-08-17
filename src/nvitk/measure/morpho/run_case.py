@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 import nvitk.measure.morphometrics_config as _config
+from nvitk.measure.morpho.anatomy_axes import MorphoContext, resolve_anatomical_axes
 from nvitk.measure.morpho.io_utils import (
     clean_generated_vtp_dir,
     clean_legacy_centerline_vtp_names,
@@ -42,6 +43,7 @@ from nvitk.measure.morpho.labels_util import (
 from nvitk.measure.morpho.orchestration import process_component_tree_vmtk
 from nvitk.measure.morpho.export_utils.summaries import (
     branchpoint_export_dataframe,
+    compute_volumetry_summary,
     build_vessel_points_dataframe,
     compute_hemispheric_summary,
     compute_lr_asymmetry,
@@ -81,7 +83,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
     (
         label, component_id, mask_cc,
         multilabel, spacing, vessel_info, mapping,
-        dirs, case_id,
+        dirs, case_id, ctx,
     ) = args
 
     try:
@@ -90,6 +92,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
         (
             path_results, point_sheets, tree_summary, branch_df,
             region_summaries, region_sheets, recursive_segments, donut_loop_df,
+            split_results,
         ) = process_component_tree_vmtk(
             label=label,
             component_id=component_id,
@@ -102,12 +105,22 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             centerline_radius_dir=dirs["centerline_radius_dir"] if _config.SAVE_CENTERLINES and _config.SAVE_CENTERLINE_RADIUS else None,
             region_centerline_dir=None,
             surface_dir=dirs["surface_dir"] if _config.SAVE_SURFACES else None,
+            ctx=ctx,
         )
 
+        # Non-overlapping rows are the primary output; the measured root->terminal
+        # paths re-traverse shared trunks and are kept only for traceability.
         path_summaries = []
-        for res in path_results:
+        for res in split_results:
             res["case_id"] = case_id
             path_summaries.append(compute_vessel_summary_row(case_id, label, vessel_info, res))
+
+        root_to_terminal_summaries = []
+        for res in path_results:
+            res["case_id"] = case_id
+            root_to_terminal_summaries.append(
+                compute_vessel_summary_row(case_id, label, vessel_info, res)
+            )
 
         tree_summary["case_id"] = case_id
         for row in region_summaries:
@@ -131,6 +144,7 @@ def _worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
             "ok": True,
             "label": label, "component_id": component_id,
             "path_summaries": path_summaries,
+            "root_to_terminal_summaries": root_to_terminal_summaries,
             "tree_summary": tree_summary,
             "tree_region_summaries": region_summaries,
             "tree_segment_summaries": seg_summaries,
@@ -181,6 +195,29 @@ def _setup_output_dirs(case_out_dir: str) -> Dict[str, Optional[str]]:
     return dirs
 
 
+def label_input_volumetry(multilabel: np.ndarray, labels: List[int], spacing) -> Dict[int, dict]:
+    """Voxel count / volume / component count per label for the mask handed to the pipeline.
+
+    Reported alongside the measured per-component volumetry so the gap between
+    them is visible: components too small to skeletonize never reach a
+    ``tree_summary`` row.
+    """
+    voxel_mm3 = float(np.prod(np.asarray(spacing, dtype=float)[:3]))
+    out: Dict[int, dict] = {}
+    for label in labels:
+        mask = multilabel == label
+        n_voxels = int(np.count_nonzero(mask))
+        if not n_voxels:
+            continue
+        out[int(label)] = {
+            "n_voxels": n_voxels,
+            "volume_mm3": float(n_voxels) * voxel_mm3,
+            "n_components": int(len(connected_components(mask)))
+            if _config.PROCESS_ALL_CONNECTED_COMPONENTS else 1,
+        }
+    return out
+
+
 def _make_jobs(
     multilabel: np.ndarray,
     labels: List[int],
@@ -188,6 +225,7 @@ def _make_jobs(
     dirs: dict,
     case_id: str,
     spacing: np.ndarray,
+    ctx: MorphoContext,
 ) -> List[Tuple]:
     """Build the per-(label, component) argument tuples that :func:`_worker` will process.
 
@@ -208,7 +246,7 @@ def _make_jobs(
             vessel_info = mapping.get(label, empty_vessel_info(label))
             jobs.append((
                 int(label), int(component_id), mask_cc.astype(bool),
-                multilabel, spacing, vessel_info, mapping, dirs, case_id,
+                multilabel, spacing, vessel_info, mapping, dirs, case_id, ctx,
             ))
     return jobs
 
@@ -221,13 +259,25 @@ def _write_excel(
     branch_dfs: List[pd.DataFrame],
     donut_loop_dfs: List[pd.DataFrame],
     vessel_sheets: Dict[str, pd.DataFrame],
+    input_volumetry: Optional[Dict[int, dict]] = None,
+    tree_segment_summaries: Optional[List[dict]] = None,
+    root_to_terminal_summaries: Optional[List[dict]] = None,
 ) -> str:
-    """Assemble every result table into the multi-sheet ``case_metrics_donut_tree.xlsx`` workbook."""
+    """Assemble every result table into the multi-sheet ``case_metrics_donut_tree.xlsx`` workbook.
+
+    ``00_Path_Summary`` holds the **non-overlapping** vessel rows: each piece of
+    vessel is measured once. The raw root→terminal paths, which re-traverse every
+    shared trunk, are kept in ``07_Root_To_Terminal_Paths`` for traceability —
+    summing their lengths overestimates the vessel tree.
+    """
     path_summary_df = pd.DataFrame(path_summaries)
+    tree_segment_df = pd.DataFrame(tree_segment_summaries or [])
+    root_to_terminal_df = pd.DataFrame(root_to_terminal_summaries or [])
     tree_summary_df = pd.DataFrame(tree_summaries)
     branchpoints_df = pd.concat(branch_dfs, ignore_index=True) if branch_dfs else pd.DataFrame()
     lr_df = compute_lr_asymmetry(path_summary_df)
     hemisphere_df = compute_hemispheric_summary(path_summary_df)
+    volumetry_df = compute_volumetry_summary(tree_summary_df, input_volumetry)
 
     out_xlsx = os.path.join(case_out_dir, "case_metrics_donut_tree.xlsx")
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
@@ -240,8 +290,21 @@ def _write_excel(
             lr_df.to_excel(writer, sheet_name="03_LR_Asymmetry", index=False)
         if not hemisphere_df.empty:
             hemisphere_df.to_excel(writer, sheet_name="05_Hemisphere", index=False)
+        if not tree_segment_df.empty:
+            tree_segment_df.to_excel(writer, sheet_name="04_Tree_Segments", index=False)
+        if not volumetry_df.empty:
+            volumetry_df.to_excel(writer, sheet_name="06_Volumetry", index=False)
+        if not root_to_terminal_df.empty:
+            path_summary_export_dataframe(root_to_terminal_df).to_excel(
+                writer, sheet_name="07_Root_To_Terminal_Paths", index=False
+            )
         for sheet_name in sorted(vessel_sheets, key=vessel_sheet_sort_key):
             vessel_sheets[sheet_name].to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+    # Plain CSV alongside the workbook so consumers (Slicer UI, scripts) can read
+    # the volumetry without an openpyxl dependency.
+    if not volumetry_df.empty:
+        volumetry_df.to_csv(os.path.join(case_out_dir, "volumetry.csv"), index=False)
     return out_xlsx
 
 
@@ -256,15 +319,29 @@ def run_case(
     mapping: Optional[dict] = None,
     case_out_dir_override: Optional[str] = None,
     n_workers: Optional[int] = None,
+    species: Optional[str] = None,
+    axes_override: Optional[str] = None,
+    length_scale: float = 1.0,
 ) -> str:
-    """Process one segmentation file in parallel.  Returns the Excel path."""
+    """Process one segmentation file in parallel.  Returns the Excel path.
+
+    *species* / *axes_override* / *length_scale* describe the subject the label
+    ids belong to; they are normally taken from the topology JSON's ``_meta``
+    block by :func:`nvitk.measure.morphometrics.run_morphometrics_case`. They
+    control how ``no_upstream_start`` rules resolve onto array axes and how the
+    human-calibrated millimetre thresholds are rescaled.
+    """
     _headless()
     n_workers = int(n_workers) if n_workers is not None else int(N_WORKERS)
 
     if not os.path.exists(seg_path):
         raise FileNotFoundError(f"Segmentation not found: {seg_path}")
 
-    multilabel, _affine, spacing = load_multilabel_nifti(seg_path)
+    multilabel, affine, spacing = load_multilabel_nifti(seg_path)
+    ctx = MorphoContext(
+        axes=resolve_anatomical_axes(affine, species=species, axes_override=axes_override),
+        length_scale=float(length_scale),
+    )
     if bool(getattr(_config, "BRIDGE_LABEL_GAPS_BEFORE_CENTERLINES", False)):
         from nvitk.morphology.mst_bridge import fill_multilabel_gaps_mst
 
@@ -299,7 +376,8 @@ def run_case(
     case_out_dir = case_out_dir_override or os.path.join(out_dir, case_id)
     dirs = _setup_output_dirs(case_out_dir)
 
-    jobs = _make_jobs(multilabel, labels, resolved_mapping, dirs, case_id, spacing)
+    input_volumetry = label_input_volumetry(multilabel, labels, spacing)
+    jobs = _make_jobs(multilabel, labels, resolved_mapping, dirs, case_id, spacing, ctx)
 
     print(f"Parallel pipeline")
     print(f"  Case    : {case_id}")
@@ -307,6 +385,7 @@ def run_case(
     print(f"  Jobs    : {len(jobs)} label/component task(s)")
     print(f"  Workers : {n_workers}")
     print(f"  Output  : {case_out_dir}")
+    print(f"  Anatomy : {ctx.describe()}")
 
     if n_workers <= 1:
         results = [_worker(args) for args in jobs]
@@ -331,6 +410,7 @@ def run_case(
     results.sort(key=lambda r: (int(r.get("label", 0)), int(r.get("component_id", 0))))
 
     path_summaries, tree_summaries, tree_region_summaries = [], [], []
+    root_to_terminal_summaries, tree_segment_summaries = [], []
     branch_dfs, donut_loop_dfs = [], []
     vessel_sheets: Dict[str, pd.DataFrame] = {}
     errors = []
@@ -342,8 +422,10 @@ def run_case(
             print(result["traceback"])
             continue
         path_summaries.extend(result["path_summaries"])
+        root_to_terminal_summaries.extend(result.get("root_to_terminal_summaries", []))
         tree_summaries.append(result["tree_summary"])
         tree_region_summaries.extend(result["tree_region_summaries"])
+        tree_segment_summaries.extend(result.get("tree_segment_summaries", []))
         if not result["branch_df"].empty:
             branch_dfs.append(result["branch_df"])
         if not result["donut_loop_df"].empty:
@@ -352,7 +434,9 @@ def run_case(
 
     out_xlsx = _write_excel(
         case_out_dir, path_summaries, tree_summaries, tree_region_summaries,
-        branch_dfs, donut_loop_dfs, vessel_sheets,
+        branch_dfs, donut_loop_dfs, vessel_sheets, input_volumetry,
+        tree_segment_summaries=tree_segment_summaries,
+        root_to_terminal_summaries=root_to_terminal_summaries,
     )
 
     if _config.SAVE_CENTERLINES:

@@ -51,7 +51,8 @@ TREE_SUMMARY_EXPORT_DROP_COLUMNS = [
     "n_branchpoints",
     "n_centerline_paths_discarded_short",
     "min_centerline_path_length_mm",
-    "unique_skeleton_graph_length_mm",
+    # unique_skeleton_graph_length_mm is kept in the export: it is the reference
+    # for checking that centerline_total_length_mm has not over-counted shared trunks.
     "root_skeleton_index",
     "root_x_mm",
     "root_y_mm",
@@ -547,3 +548,86 @@ def compute_hemispheric_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
         rows.append(row)
     return pd.DataFrame(rows)
 
+
+
+def compute_volumetry_summary(
+    tree_summary_df: pd.DataFrame,
+    input_volumetry: dict | None = None,
+) -> pd.DataFrame:
+    """Per-label volumetry rolled up from the per-component tree summaries.
+
+    One row per label (components summed), plus a ``TOTAL`` row. Volumes come
+    from voxel counts × voxel volume; ``mesh_volume_mm3`` / ``surface_area_mm2``
+    come from the reconstructed surface and are ``NaN`` where VTK could not
+    evaluate a closed mesh.
+
+    ``input_volumetry`` (label -> ``{n_voxels, volume_mm3, n_components}``, as
+    built by :func:`nvitk.measure.morpho.run_case.label_input_volumetry`) adds
+    ``input_*`` columns describing the mask the pipeline was handed. The
+    measured columns are always lower: they exclude components too small to
+    skeletonize, and the mask itself has been Taubin-smoothed upstream.
+    """
+    if tree_summary_df is None or tree_summary_df.empty or "volume_mm3" not in tree_summary_df.columns:
+        return pd.DataFrame()
+
+    df = tree_summary_df.copy()
+
+    def _first_str(values) -> str:
+        for value in values:
+            if pd.notna(value) and str(value):
+                return str(value)
+        return ""
+
+    rows = []
+    for label, group in df.groupby("label", dropna=False, sort=True):
+        rows.append({
+            "label": int(label),
+            "vessel_name": _first_str(group.get("vessel_name", [])),
+            "full_name": _first_str(group.get("full_name", [])),
+            "side": _first_str(group.get("side", [])),
+            "territory": _first_str(group.get("territory", [])),
+            "species": _first_str(group.get("species", [])),
+            "n_components": int(len(group)),
+            "n_voxels": int(np.nansum(pd.to_numeric(group.get("n_voxels"), errors="coerce"))),
+            "volume_mm3": float(np.nansum(pd.to_numeric(group.get("volume_mm3"), errors="coerce"))),
+            "volume_ul": float(np.nansum(pd.to_numeric(group.get("volume_ul"), errors="coerce"))),
+            "volume_cc": float(np.nansum(pd.to_numeric(group.get("volume_cc"), errors="coerce"))),
+            "mesh_volume_mm3": float(np.nansum(pd.to_numeric(group.get("mesh_volume_mm3"), errors="coerce"))),
+            "surface_area_mm2": float(np.nansum(pd.to_numeric(group.get("surface_area_mm2"), errors="coerce"))),
+            "skeleton_length_mm": float(
+                np.nansum(pd.to_numeric(group.get("unique_skeleton_graph_length_mm"), errors="coerce"))
+            ),
+            "equivalent_radius_mm": float(
+                np.nanmean(pd.to_numeric(group.get("equivalent_radius_mm"), errors="coerce"))
+            ),
+        })
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+
+    if input_volumetry:
+        out["input_n_components"] = [
+            int(input_volumetry.get(int(lab), {}).get("n_components", 0)) for lab in out["label"]
+        ]
+        out["input_n_voxels"] = [
+            int(input_volumetry.get(int(lab), {}).get("n_voxels", 0)) for lab in out["label"]
+        ]
+        out["input_volume_mm3"] = [
+            float(input_volumetry.get(int(lab), {}).get("volume_mm3", np.nan)) for lab in out["label"]
+        ]
+        out["measured_volume_fraction"] = out["volume_mm3"] / out["input_volume_mm3"].replace(0, np.nan)
+
+    total = {"label": "TOTAL", "vessel_name": "", "full_name": "", "side": "", "territory": ""}
+    total["species"] = _first_str(out["species"])
+    for column in (
+        "n_components", "n_voxels", "volume_mm3", "volume_ul", "volume_cc",
+        "mesh_volume_mm3", "surface_area_mm2", "skeleton_length_mm",
+        "input_n_components", "input_n_voxels", "input_volume_mm3",
+    ):
+        if column in out.columns:
+            total[column] = out[column].sum()
+    total["equivalent_radius_mm"] = np.nan
+    if "input_volume_mm3" in out.columns and total.get("input_volume_mm3"):
+        total["measured_volume_fraction"] = total["volume_mm3"] / total["input_volume_mm3"]
+    return pd.concat([out, pd.DataFrame([total])], ignore_index=True)

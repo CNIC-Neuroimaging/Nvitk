@@ -13,6 +13,7 @@ from scipy.spatial import cKDTree
 from vtk.util import numpy_support
 
 from .anatomy import choose_root_endpoint, make_loop_region_path_id, make_path_id
+from .anatomy_axes import MorphoContext, default_morpho_context
 from .caliber import (
     detect_enlargement_segments,
     detect_stenosis_segments,
@@ -27,6 +28,7 @@ from .caliber import (
 from .centerlines import (
     analyze_centerline_poly,
     centerline_points_from_result,
+    deduplicate_path_results,
     prune_overlapping_final_centerlines,
     reference_centerline_points_from_results,
     run_vmtk_centerline_for_path_with_tip_retries,
@@ -73,6 +75,7 @@ from .metrics import compute_branchpoint_metrics, discrete_curvature, discrete_t
 from .models import SkeletonTree, VesselInfo
 from .skeleton import dijkstra_dist_from_root, skeleton_total_graph_length_mm
 from .export_utils.summaries import build_vessel_points_dataframe
+from .volumetry import anatomy_provenance_fields, component_volumetry_fields
 from .surface import (
     add_string_point_array,
     build_donut_loop_debug_polydata,
@@ -337,7 +340,11 @@ def process_donut_loop_component_vmtk(
     centerline_radius_dir: Optional[str],
     region_centerline_dir: Optional[str],
     surface_dir: Optional[str],
-) -> Tuple[List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict], Dict[str, pd.DataFrame], List[dict], pd.DataFrame]:
+    ctx: Optional[MorphoContext] = None,
+) -> Tuple[
+    List[dict], Dict[str, pd.DataFrame], dict, pd.DataFrame, List[dict],
+    Dict[str, pd.DataFrame], List[dict], pd.DataFrame, List[dict],
+]:
     """Full donut-loop-aware processing of one component: root selection, per-terminal centerlines,
     and per-loop selected/alternate-arm isolation, metrics, and export.
 
@@ -349,6 +356,8 @@ def process_donut_loop_component_vmtk(
     :func:`orchestration.process_component_tree_vmtk`.
     """
     spacing = np.asarray(spacing, dtype=float)
+    ctx = ctx or default_morpho_context()
+    axes = ctx.axes
     path_results = []
     point_sheets = {}
     loop_rows = []
@@ -358,7 +367,10 @@ def process_donut_loop_component_vmtk(
     loop_sidecar_reference_points = []
 
     if tree.endpoints and tree.root is None:
-        tree.root = choose_root_endpoint(tree, vessel_info, multilabel, spacing, mapping, mask_bool=mask_cc.astype(bool))
+        tree.root = choose_root_endpoint(
+            tree, vessel_info, multilabel, spacing, mapping,
+            mask_bool=mask_cc.astype(bool), axes=axes,
+        )
         tree.dist_from_root_mm = dijkstra_dist_from_root(tree, tree.root, spacing)
 
     if tree.root is None:
@@ -425,6 +437,7 @@ def process_donut_loop_component_vmtk(
             preferred_start_mm=actual_seed_start_mm,
             save_centerline_vtp=cl_path,
             save_centerline_radius_vtp=cl_radius_path,
+            axes=axes,
         )
         res.update({
             "label": int(label),
@@ -665,14 +678,17 @@ def process_donut_loop_component_vmtk(
         save_vtp(debug_poly, os.path.join(region_centerline_dir, safe_filename(f"{label}_{vessel_info.name}_comp{component_id:02d}_loop_debug_skeleton.vtp")))
 
     saved_anatomic = []
+    split_results: List[dict] = []
     if EXPORT_ANATOMIC_SPLIT_CENTERLINES and centerline_dir:
         expected_anatomic = int(len(path_results))
-        saved_anatomic = save_anatomic_fallback_centerlines(
+        saved_anatomic, split_results = save_anatomic_fallback_centerlines(
             vessel_info=vessel_info,
             component_id=component_id,
             path_results=path_results,
             centerline_dir=centerline_dir,
             centerline_radius_dir=centerline_radius_dir,
+            axes=axes,
+            spacing=spacing,
         )
         if len(saved_anatomic) < expected_anatomic:
             print(
@@ -714,6 +730,24 @@ def process_donut_loop_component_vmtk(
         "n_anatomic_centerline_vtps_written": int(len(saved_anatomic)),
         "anatomic_centerline_vtps_written": ";".join(saved_anatomic),
     }
+    tree_summary.update(anatomy_provenance_fields(ctx, vessel_info))
+    tree_summary.update(component_volumetry_fields(
+        mask_cc, spacing, surface,
+        skeleton_length_mm=tree_summary["unique_skeleton_graph_length_mm"],
+    ))
 
-    return path_results, point_sheets, tree_summary, branch_df, loop_region_summaries, loop_region_sheets, [], loop_debug_df
+    if not split_results:
+        # No anatomic export ran; deduplicate the measured paths so the shared
+        # trunk of a loop component is still only counted once.
+        split_results, _dropped = deduplicate_path_results(path_results, spacing)
+        split_results = [dict(res, non_overlapping=True) for res in split_results]
+    tree_summary["n_non_overlapping_segments"] = int(len(split_results))
+    tree_summary["centerline_total_length_mm"] = float(
+        np.nansum([r.get("length_mm", np.nan) for r in split_results])
+    ) if split_results else np.nan
+
+    return (
+        path_results, point_sheets, tree_summary, branch_df, loop_region_summaries,
+        loop_region_sheets, [], loop_debug_df, split_results,
+    )
 

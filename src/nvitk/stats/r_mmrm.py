@@ -52,6 +52,7 @@ import numpy as np
 import pandas as pd
 
 from nvitk.core.logger import Logger
+from .frame_ops import _as_factor_preserving_order
 
 from .mixedlm import significance_stars
 
@@ -591,7 +592,7 @@ def fit_mmrm(
     # holds whatever rpy2 version is installed.
     factor_columns = [c for c in (visit, subject, group) if c and c in df.columns]
     for column in factor_columns:
-        df[column] = pd.Categorical(df[column].astype(str))
+        df[column] = _as_factor_preserving_order(df[column])
 
     problems = validate_mmrm_data(df, visit=visit, subject=subject, structure=structure)
     hard = [p for p in problems if "assumes" not in p and "will be unstable" not in p]
