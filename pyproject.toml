@@ -30,47 +30,82 @@ dependencies = [
   # -----------------------------------------------------------------------------
   # Core dependencies
   # -----------------------------------------------------------------------------
-  "numpy>=2.3.3",
-  "scipy>=1.15.3",
-  "click>=8.2.1",
-  "openpyxl>=3.1.5",
-  "seaborn>=0.13.2",
-  "pandas>=2.3.2",
-  "pyarrow>=21.0.0",
-  "debugpy>=1.8.16",
-  "jupyter>=1.1.1",
-  "pingouin>=0.6.1",
+  "numpy>=2.3.3",                 # Array processing
+  "scipy>=1.15.3",                # Scientific computing + Image processing
+  "pandas>=2.3.2",                # Dataframe processing
+  "pyarrow>=21.0.0",              # Arrow file format
+  "click>=8.2.1",                 # Command line interface
+  "jupyter>=1.1.1",               # Jupyter Notebook
+  "ipywidgets>=8.1.5",            # Interactive widgets for Jupyter
+  "openpyxl>=3.1.5",              # Excel file processing
+  "lazy-loader>=0.4",             # Lazy loading of modules
+
+  # -----------------------------------------------------------------------------
+  # Visualization/Plotting/Logging dependencies
+  # -----------------------------------------------------------------------------
+  "matplotlib>=3.8.0",            # Plotting
+  "plotly>=6.3.0",                # Interactive Plotting
+  "kaleido>=1.0.0",               # Plotly image renderer
+  "pyvista>=0.48.0",              # 3D plotting
+  "seaborn>=0.13.2",              # Statistical data visualization
+  "rich>=14.1.0",                 # Rich text formatting for logging
+  "trame>=3.6.0",                 # Trame for web-based visualization
+  "trame-vtk>=2.5.8,<2.11.9",     # Trame VTK for 3D plotting
 
   # -----------------------------------------------------------------------------
   # Image processing dependencies
   # -----------------------------------------------------------------------------
-  "nibabel>=5.3.2",
-  "nilearn>=0.10.4",
-  "tifffile>=2025.5.26",
-  "pillow>=11.0.0",
-  "imageio>=2.37.0",
-  "nd2>=0.10.3",
-  "antspyx>=0.6.1",
-  "dicom2nifti>=2.6.1",
-  "pydicom>=2.4.5,<=3",
-  # "pydicom>=3.0.1",
-  "pylibjpeg>=2.0.1",
-  "vtk>=9.3.1",
-  # "pyradiomics>=3.0.1",
-  # "SimpleITK>=2.5.2",
-  "SimpleITK==2.2.1",
-  "scikit-image>=0.25.2",
-  "opencv-python>=4.11",
-  
-  "totalsegmentator>=2.11.0",
-  "nnunetv2>=2.6.2",
+  # ────────────────────────────── IO dependencies ──────────────────────────────
+  "imageio>=2.37.0",               # Image IO
+  "pillow>=11.0.0",                # Simple image processing (PNG / JPEG / TIFF / etc.)
+  "nibabel>=5.3.2",                # NIfTI file processing
+  "tifffile>=2025.5.26",           # TIFF file processing
+  "nd2>=0.10.3",                   # ND2 file processing
+  "dicom2nifti>=2.6.1",            # DICOM to NIfTI conversion
+  "pydicom>=2.4.5,<=3",            # DICOM file processing
+  "pylibjpeg>=2.0.1",              # JPEG image processing
+  "h5py>=3.16.0",                  # HDF5 file processing
 
-  "nilearn>=0.11.0",
-  "nipype>=1.11.0",
-  "gudhi>=3.12.0",
-  "fireants>=1.5.0",
-  "antspynet>=0.3.2",
-  "antspyx>=0.6.3",
+  # ─────────────────────────── General dependencies ────────────────────────────
+  "scikit-image>=0.25.2",          # Scikit-image for image processing
+  "opencv-python>=4.11",           # OpenCV for image processing
+  "vtk>=9.3.1",                    # VTK image processing
+  "SimpleITK==2.2.1",              # SimpleITK for SimpleITK-based image processing
+  
+  # ────────────────────────── Neuroimaging tools ───────────────────────────────
+  "antspyx>=0.6.3",                # ANTsPy for ANTs-based image processing
+  "nilearn>=0.11.0",               # Neuroimaging data analysis
+  "nipype>=1.11.0",                # Neuroimaging data analysis
+  "gudhi>=3.12.0",                 # Gudhi for topological data analysis
+  "antspynet>=0.3.2",              # AntsPyNet for ANTs-based image processing
+  # "pyradiomics>=3.0.1",          # Radiomics analysis
+
+  # ────────────────────────── Segmentation tools ───────────────────────────────
+  "totalsegmentator>=2.11.0",      # TotalSegmentator nnUNetv2-based segmentation
+  "nnunetv2>=2.6.2",               # nnUNetv2 segmentation
+
+  # ────────────────────────── Registration tools ───────────────────────────────
+  "fireants>=1.5.0",               # Fireants for ANTs-based image processing
+
+  # -----------------------------------------------------------------------------
+  # Machine Learning / Statistics dependencies
+  # -----------------------------------------------------------------------------
+  "pingouin>=0.6.1",               # Statistical analysis
+  "networkx>=3.3",                 # Graph processing
+  "scikit-learn>=1.7.1",           # Machine learning
+  "scikit-posthocs>=0.14.0",       # Statistical post-hoc tests
+  "semopy>=2.3.11",                # Structural Equation Modeling
+  
+
+  # -----------------------------------------------------------------------------
+  # API / Database dependencies
+  # -----------------------------------------------------------------------------
+  "xnat>=0.7.2",                   # XNAT API
+  "pyyaml>=6.0",                   # YAML file processing
+  "paramiko>=3.4.0",               # SSH client for remote server access
+  "fastapi>=0.110.0",              # FastAPI for API development
+  "uvicorn>=0.27.0",               # ASGI server for FastAPI
+  "keyring>=24.0.0",               # Password management for keyring
 
   # -----------------------------------------------------------------------------
   # Mesh processing dependencies
@@ -78,72 +113,74 @@ dependencies = [
   # "trimesh>=",
   # "open3d>=",
   # "pymeshlab>=",
-
-  # -----------------------------------------------------------------------------
-  # GUI/visualization/logging dependencies
-  # -----------------------------------------------------------------------------
-  "rich>=14.1.0",
-  "lazy-loader>=0.4",
-  "networkx>=3.3",
-  "ipywidgets>=8.1.5",
-  "matplotlib>=3.8.0",
-  "plotly>=6.3.0",
-  "kaleido>=1.0.0",
-  "pyvista>=0.48.0",
-  "trame>=3.6.0",
-  "trame-vtk>=2.5.8,<2.11.9",
-
-  # -----------------------------------------------------------------------------
-  # Experimental dependencies
-  # -----------------------------------------------------------------------------
-  "scikit-learn>=1.7.1",
-  "h5py>=3.16.0",
-  "scikit-posthocs>=0.14.0",
-
-  # -----------------------------------------------------------------------------
-  # MATLAB dependencies
-  # -----------------------------------------------------------------------------
-  # "matlabengine==25.2.2", # For MATLAB version 2025b
-
-  # -----------------------------------------------------------------------------
-  # XNAT dependencies
-  # -----------------------------------------------------------------------------
-  "xnat>=0.7.2",
-  "pyyaml>=6.0",
-  "keyring>=24.0.0",
-
-  # -----------------------------------------------------------------------------
-  # Paramiko dependencies
-  # -----------------------------------------------------------------------------
-  "paramiko>=3.4.0",
-
-  # -----------------------------------------------------------------------------
-  # Napari dependencies
-  # -----------------------------------------------------------------------------
-  "napari[all]>=0.5.0",
-  "magicgui>=0.8.0",
-  "superqt>=0.6.0",
-  "PyQt6-WebEngine>=6.11.0",
-  "semopy>=2.3.11",
-
-  # -----------------------------------------------------------------------------
-  # FastAPI dependencies
-  # -----------------------------------------------------------------------------
-  "fastapi>=0.110.0",
-  "uvicorn>=0.27.0",
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Optional dependencies
 # ──────────────────────────────────────────────────────────────────────────────
 [project.optional-dependencies]
-gpu = [
-  "cupy-cuda13x>=13.6.0",
-  "pytorch>=2.9.0", # +cu130
-  "torchvision>=0.24.0", # +cu130
-  "cutensor-cu13>=2.3.0",
-  "nvidia-nccl-cu13>=2.27.0",
+# ──────────────────────── Debug and Testing tools ─────────────────────────────
+dev = [
+  "pytest>=9.0.3",
+  "debugpy>=1.8.16",
+  "sphinx>=9.0.4",
+  "sphinx-autoapi>=3.8.0",
+  "myst-parser>=5.1.0",
+  "sphinx-click>=6.2.0",
+  "pydata-sphinx-theme>=0.20.0",
+  "interrogate>=1.7.0",
 ]
+# ──────────────────────── GPU dependencies ──────────────────────────────────────
+gpu = [
+  "torch>=2.9.0", # +cu130
+  "torchvision>=0.24.0", # +cu130
+  "cupy-cuda13x>=13.6.0",
+  "cutensor-cu13>=2.6.0",
+  "nvidia-nccl-cu13>=2.27.7",
+  "nvidia-cublas>=13.0.0.19",
+  "nvidia-cuda-cupti>=13.0.48",
+  "nvidia-cuda-nvrtc>=13.0.48",
+  "nvidia-cuda-runtime>=13.0.48",
+  "nvidia-cudnn-cu13>=9.13.0.50",
+  "nvidia-cufft>=12.0.0.15",
+  "nvidia-cufile>=1.15.0.42",
+  "nvidia-curand>=10.4.0.35",
+  "nvidia-cusolver>=12.0.3.29",
+  "nvidia-cusparse>=12.6.2.49",
+  "nvidia-cusparselt-cu13>=0.8.0",
+  "nvidia-nvjitlink>=13.0.39",
+  "nvidia-nvshmem-cu13>=3.3.24",
+  "nvidia-nvtx>=13.0.39",
+]
+# ──────────────────────── GUI dependencies ──────────────────────────────────────
+gui = [
+  "napari[all]>=0.7.0",
+  "magicgui>=0.8.0",
+  "superqt>=0.6.0",
+  "PyQt6-WebEngine>=6.11.0",
+]
+# ────────────────────────── R dependencies ──────────────────────────────────────
+r = [
+  "r-base>=4.3.0",                 # R base
+  "r-lme4>=1.1.31",                # R lme4
+  "r-lmertest>=3.1.2",             # R lmertest
+  "r-mmrm>=1.1.2",                 # R mmrm
+  "r-emmeans>=1.7.0",              # R emmeans
+  "r-lmertest>=3.1.2",             # R lmertest
+  "r-parameters>=1.1.2",           # R parameters
+  "r-performance>=1.1.2",          # R performance
+  "r-report>=1.1.2",               # R report
+  "r-tibble>=1.1.2",               # R tibble
+  "r-broom>=1.1.2",                # R broom
+  "r-broom.mixed>=1.1.2",          # R broom.mixed
+  "r-insight>=1.1.2",              # R insight
+  "rpy2>=3.6.0",                   # R interface for Python
+]
+# ──────────────────────── MATLAB dependencies ──────────────────────────────────
+matlab = [
+  "matlabengine==25.2.2",      # MATLAB engine for MATLAB version 2025b
+]
+# ──────────────────────── Conda dependencies ────────────────────────────────────
 conda-packages = [
   # NOTE: pip extras cannot express "install from conda channels".
   # Use the repo's `environment.yml` to install these conda-only deps:
@@ -151,6 +188,7 @@ conda-packages = [
   # - mrtrix3>=3.0.8 (mrtrix3)
   # - libstdcxx-ng>=15.2.0 (conda-forge)
 ]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Scripts
@@ -191,8 +229,6 @@ nvitk-transform = "nvitk.cli.transform:main"
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
-nvitk-gui = "nvitk.gui.main:main"
-nvitk-statsmodels = "nvitk.gui.panels.statmodels.cli:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
 nvitk-xnat-pipeline-sync = "nvitk.db.xnat_pipeline_resources:main"
 
@@ -208,7 +244,7 @@ nvitk-pesa-fat-qc = "nvitk.pipes.pesa_fat.common.stage4_qc:main"
 nvitk-pesa-fat-qc-portal = "nvitk.pipes.pesa_fat.qc.portal_cli:main"
 nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 
-# ────────────────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─
+# ────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─────────────
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
@@ -218,11 +254,21 @@ nvitk-qvtpy-autoqc = "nvitk.pipes.qvtpy.stage9_autoqc:main"
 # -----------------------------------------------------------------------------
 # GUI scripts
 # -----------------------------------------------------------------------------
+nvitk-gui = "nvitk.gui.main:main"
+nvitk-statsmodels = "nvitk.gui.panels.statmodels.cli:main"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Napari manifest
+# ──────────────────────────────────────────────────────────────────────────────
 [project.entry-points."napari.manifest"]
 nvitk = "nvitk.gui:napari.yaml"
 
-[project.gui-scripts]
-# nvitk-gui = "gui.main:main"
+# ──────────────────────────────────────────────────────────────────────────────
+# pytest configuration
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests", "test"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Setuptools configuration
@@ -230,9 +276,6 @@ nvitk = "nvitk.gui:napari.yaml"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests", "test"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -9,10 +9,10 @@ data/
 *.jpeg
 *.dcm
 
-test/
-tests/
-!tests/
-!tests/**/*.py
+# test/
+# tests/
+# !tests/
+# !tests/**/*.py
 # docs/
 .config/
 .config/*
@@ -30,7 +30,6 @@ notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
 # .nvitk/sge.json
 
 src/nvitk.egg-info/
-docs/
 tests/
 test/
 skills/

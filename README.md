@@ -1,6 +1,8 @@
-# Nvitk
+# Nvitk | Neuro-Vascular Imaging ToolKit
 
-## Neuro-Vascular Imaging ToolKit
+**nvitk** is a research toolkit for neurological and vascular biomedical image processing — CT, PET, and MRI/MRA — covering I/O, filtering, restoration, segmentation, registration, imaging metrics, mesh reconstruction, statistics, and full research pipelines, with an optional Napari-based GUI and a NumPy/CuPy dual backend for CPU/GPU execution.
+ 
+Developed at CNIC for intracranial and neuro-vascular hemodynamics research, including specific image processing pipelines such as 4D flow MRI Hemodynamics, TOF Morphometrics, whole-body PET/CT quantification.
 
 ## Installation (conda recommended)
 
