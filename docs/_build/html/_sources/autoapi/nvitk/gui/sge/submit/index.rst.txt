@@ -1,0 +1,27 @@
+nvitk.gui.sge.submit
+====================
+
+.. py:module:: nvitk.gui.sge.submit
+
+.. autoapi-nested-parse::
+
+   Orchestrate GUI SGE export, upload, and remote submission.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.sge.submit.submit_gui_sge
+
+
+Module Contents
+---------------
+
+.. py:function:: submit_gui_sge(viewer: Any, tool_panel: Any, app_state: dict[str, Any], *, get_label_ids=None, get_totalseg_roi=None, parent=None) -> bool
+
+   Validate tool/layer, stage locally, upload, and SSH-run ``submit.sh``.
+
+

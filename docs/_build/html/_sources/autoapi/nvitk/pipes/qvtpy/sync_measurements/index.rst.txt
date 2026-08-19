@@ -1,0 +1,38 @@
+nvitk.pipes.qvtpy.sync_measurements
+===================================
+
+.. py:module:: nvitk.pipes.qvtpy.sync_measurements
+
+.. autoapi-nested-parse::
+
+   Publish qvtpy stage-6 measurements into ``image_measurements`` (pipeline ``4dflow_v3``).
+
+   Scans an ``--output-root`` for subjects with stage-6 CSV outputs and upserts them into
+   the DB. Use ``--from-sge`` to SFTP ``loc_measurements.csv`` and
+   ``vessel_hemodynamics.csv`` from the cluster results tree into a temporary local
+   directory (removed after publish). ``--from-source`` selects which DataRepo to write
+   to (``local`` settings repo vs. the ``sge`` cluster dataset root).
+
+   PITC/PWV metrics are published from ``vessel_hemodynamics.csv`` via
+   :func:`nvitk.pipes.qvtpy.common.db_publish.publish_stage6`
+   (``pitc_slope``, ``pitc_intercept``, ``pwv``, ``pwv_fielding_xcor``, ``damping_index``).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.sync_measurements.main
+
+
+Module Contents
+---------------
+
+.. py:function:: main(output_root: pathlib.Path | None, subjects: str, from_source: str, from_sge: bool, remote_host: str | None, remote_user: str | None, cluster_results_root: pathlib.Path | None, build_sqlite_index: bool) -> None
+
+   CLI entry point (``qvtpy-sync-measurements``): publish stage-6 measurement CSVs (optionally
+   fetched from the cluster over SFTP first) into ``image_measurements``.
+
+

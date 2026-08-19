@@ -1,0 +1,156 @@
+nvitk.gui.panels.statmodels.combinations_dialog
+===============================================
+
+.. py:module:: nvitk.gui.panels.statmodels.combinations_dialog
+
+.. autoapi-nested-parse::
+
+   Editor for region combinations — arithmetic across the rows of one measurement.
+
+   Description
+   -----------
+   The derived-columns editor works *within* a row: ``log(pi)``, ``pi / flow_mean``. The quantities a
+   vascular analysis actually needs are sums *over* rows of one subject — ``TCBF = RICA + LICA + BASI``,
+   or the mass-balance residual ``LVA + RVA − BASI`` — because the analysis frame is long, one row per
+   subject × territory.
+
+   This dialog builds those. Pick a measurement, tick the regions, give each a coefficient, and choose
+   whether the result becomes a **column** (the subject's value on every one of their rows, usable as a
+   covariate) or a **row** (a synthetic territory modelled alongside the real ones).
+
+   Two prefill buttons cover the cases worth having ready: the standard composites (TCBF and friends)
+   and the conservation balances from :mod:`~nvitk.stats.vessel_network`, which is what makes
+   "conservation residuals as derived columns" a two-click operation.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.combinations_dialog.RegionCombinationsDialog
+
+
+Module Contents
+---------------
+
+.. py:class:: RegionCombinationsDialog(parent: qtpy.QtWidgets.QWidget | None, *, frame: pandas.DataFrame, combinations: Sequence[nvitk.stats.region_algebra.RegionCombination] = (), region_column: str = 'territory')
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Add, edit and remove the region combinations applied to the analysis frame.
+
+   The list on the left holds the definitions; the form on the right edits the selected one. A live
+   preview evaluates it against the real frame, so a combination that resolves to nothing says so
+   before it reaches a model.
+
+
+   .. py:attribute:: _frame
+
+
+   .. py:attribute:: _combinations
+
+
+   .. py:attribute:: _region_column
+      :value: 'territory'
+
+
+
+   .. py:attribute:: _preview
+
+
+   .. py:method:: _build_list() -> qtpy.QtWidgets.QWidget
+
+      The definitions list plus its add/remove/prefill buttons.
+
+
+
+   .. py:method:: _build_form() -> qtpy.QtWidgets.QWidget
+
+      The editor for the selected combination.
+
+
+
+   .. py:method:: _numeric_columns() -> list[str]
+
+      Measurement columns a combination can operate on.
+
+
+
+   .. py:method:: _populate_regions() -> None
+
+      One checkable row per region level, each with a coefficient spinner.
+
+
+
+   .. py:method:: _checks() -> dict[str, qtpy.QtWidgets.QCheckBox]
+
+      Region name → its checkbox, read back out of the list's item widgets.
+
+
+
+   .. py:method:: _current() -> nvitk.stats.region_algebra.RegionCombination | None
+
+      The selected combination, or ``None`` when the list is empty.
+
+
+
+   .. py:method:: _on_selected(_row: int) -> None
+
+      Load the selected definition into the form.
+
+
+
+   .. py:method:: _sync_form(combo: nvitk.stats.region_algebra.RegionCombination | None) -> None
+
+      Show *combo* in the form, or clear and disable it when there is none.
+
+
+
+   .. py:method:: _commit(*_args: Any) -> None
+
+      Write the form back onto the selected combination and re-preview.
+
+
+
+   .. py:method:: _refresh_list(*, keep: int | None = None) -> None
+
+      Redraw the definitions list, optionally keeping the selection.
+
+
+
+   .. py:method:: _update_preview() -> None
+
+      Evaluate the selected combination against the real frame and report the outcome.
+
+
+
+   .. py:method:: _on_add() -> None
+
+      Append an empty definition and select it.
+
+
+
+   .. py:method:: _on_remove() -> None
+
+      Delete the selected definition.
+
+
+
+   .. py:method:: _prefill(factory: Any) -> None
+
+      Add a ready-made family, skipping any whose regions this frame does not carry.
+
+      Silently adding a balance that cannot be evaluated would put a permanently-failing entry in
+      the list; the ones that do not apply are reported instead.
+
+
+
+   .. py:method:: combinations() -> list[nvitk.stats.region_algebra.RegionCombination]
+
+      The edited definitions, dropping any that are not usable.
+
+
+

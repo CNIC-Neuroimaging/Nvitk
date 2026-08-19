@@ -1,0 +1,104 @@
+nvitk.pipes.bbtpy.util.bb_vessel_segmentation
+=============================================
+
+.. py:module:: nvitk.pipes.bbtpy.util.bb_vessel_segmentation
+
+.. autoapi-nested-parse::
+
+   Black-blood lumen segmentation from warped eICAB labels.
+
+   Per vessel: dilate the eICAB label on ``vwi_bb``, estimate a hypointense threshold from
+   intensities inside that dilated ROI only, and paste ``wvi < threshold`` voxels into
+   ``seg_bb``. No region growing.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.log
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.SEG_BB_NIFTI
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.SEGMENTATION_META_JSON
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.SEG_STRATEGY
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.ThrAlgorithm
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.BbSegResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation._dilate_label_mask
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation._hypointense_threshold_in_roi
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation._paste_vessel_mask
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.build_seg_bb
+   nvitk.pipes.bbtpy.util.bb_vessel_segmentation.run_bb_segmentation
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: SEG_BB_NIFTI
+   :value: 'seg_bb.nii.gz'
+
+
+.. py:data:: SEGMENTATION_META_JSON
+   :value: 'segmentation_meta.json'
+
+
+.. py:data:: SEG_STRATEGY
+   :value: 'eicab_mask_hypointense_threshold'
+
+
+.. py:data:: ThrAlgorithm
+
+.. py:class:: BbSegResult
+
+   Segmentation result before NIfTI write.
+
+
+   .. py:attribute:: seg
+      :type:  np.ndarray
+
+
+   .. py:attribute:: stats
+      :type:  list[dict[str, Any]]
+
+
+.. py:function:: _dilate_label_mask(mask: np.ndarray, *, radius: int) -> np.ndarray
+
+   Binary-dilate *mask* by *radius* voxels (connectivity 1); no-op for radius <= 0 or an empty mask.
+
+
+.. py:function:: _hypointense_threshold_in_roi(wvi: np.ndarray, roi_mask: np.ndarray, algorithm: ThrAlgorithm) -> tuple[np.ndarray, float | None, str | None]
+
+   Threshold dark voxels inside *roi_mask* using ROI intensities only.
+
+
+.. py:function:: _paste_vessel_mask(seg: np.ndarray, vessel_mask: np.ndarray, label_id: int) -> int
+
+   Write *vessel_mask* into empty voxels of *seg*.
+
+
+.. py:function:: build_seg_bb(wvi: np.ndarray, eicab_bb: np.ndarray, *, eicab_dilate: int = 4, thr_algorithm: ThrAlgorithm = 'lsthr', min_component_frac: float = 0.005) -> BbSegResult
+
+   Per-vessel dilated eICAB ROI + hypointense threshold → ``seg_bb``.
+
+
+.. py:function:: run_bb_segmentation(wvi: np.ndarray, eicab_bb: np.ndarray, out_dir: pathlib.Path, *, eicab_dilate: int = 4, thr_algorithm: ThrAlgorithm = 'lsthr', min_component_frac: float = 0.005, metadata: dict[str, Any] | None = None, skip_existing: bool = False) -> pathlib.Path
+
+   Write ``seg_bb.nii.gz`` and ``segmentation_meta.json``.
+
+

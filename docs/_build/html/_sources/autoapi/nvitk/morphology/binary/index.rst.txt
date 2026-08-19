@@ -1,0 +1,68 @@
+nvitk.morphology.binary
+=======================
+
+.. py:module:: nvitk.morphology.binary
+
+.. autoapi-nested-parse::
+
+   Binary (and gray) morphological operators: dilate, erode, open, close, fill_holes.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.binary.dilate
+   nvitk.morphology.binary.erode
+   nvitk.morphology.binary.open
+   nvitk.morphology.binary.close
+   nvitk.morphology.binary.fill_holes
+
+
+Module Contents
+---------------
+
+.. py:function:: dilate(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 2) -> nvitk.types.Image | Any
+
+   Morphological dilation.
+
+   :param img: Input mask (:class:`Image` or array).
+   :param footprint: Structuring element. ``None`` → unit ball; ``int`` → iterated unit ball
+                     of that radius; array → used as-is (cast to the active backend).
+   :param iterations: Passed to ``ndi.binary_dilation`` (integer ≥ 1).
+   :param mode: ``"binary"`` or ``"gray"``.
+   :param isotropic: When ``footprint`` is ``int`` and ``isotropic=True``, resample the
+                     ball to isotropic voxels using ``spacing``.
+   :param spacing: When ``footprint`` is ``int`` and ``isotropic=True``, resample the
+                   ball to isotropic voxels using ``spacing``.
+   :param connectivity: Base connectivity for the unit structure (1 = face, 2 = edge, ...).
+
+
+.. py:function:: erode(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological erosion (counterpart to :func:`dilate`).
+
+
+.. py:function:: open(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological opening = erode followed by dilate.
+
+
+.. py:function:: close(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological closing = dilate followed by erode.
+
+
+.. py:function:: fill_holes(img: nvitk.types.Image | Any, *, axis: int | None = None, structure: Any | None = None, mode: str = 'binary') -> nvitk.types.Image | Any
+
+   Fill holes in a binary mask.
+
+   :param img: Input binary mask.
+   :param axis: If provided, apply slicewise along *axis* (useful for axial fills that
+                should not close inter-slice voids). If ``None``, fill in 3D.
+   :param structure: See ``scipy.ndimage.binary_fill_holes``.
+   :param mode: See ``scipy.ndimage.binary_fill_holes``.
+
+

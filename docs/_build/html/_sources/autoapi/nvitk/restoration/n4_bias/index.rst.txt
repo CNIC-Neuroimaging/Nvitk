@@ -1,0 +1,37 @@
+nvitk.restoration.n4_bias
+=========================
+
+.. py:module:: nvitk.restoration.n4_bias
+
+.. autoapi-nested-parse::
+
+   N4 bias-field correction via ANTsPy (``ants.n4_bias_field_correction``).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.restoration.n4_bias.n4_bias_field_correction
+
+
+Module Contents
+---------------
+
+.. py:function:: n4_bias_field_correction(image: nvitk.types.Image | numpy.ndarray, mask: nvitk.types.Image | numpy.ndarray | None = None, *, shrink_factor: int = 4, spline_param: float | int | None = None, rescale_intensities: bool = False, convergence_iters: tuple[int, Ellipsis] | list[int] | None = None, convergence_tol: float = 1e-07, return_bias_field: bool = False, verbose: bool = False) -> numpy.ndarray | tuple[numpy.ndarray, numpy.ndarray]
+
+   Correct intensity inhomogeneity with ANTs N4.
+
+   :param image: Input intensity volume (typically MRI).
+   :param mask: Optional soft-tissue / brain mask restricting the bias estimate.
+   :param shrink_factor: Downsampling factor for the bias estimate (ANTs default 4).
+   :param spline_param: B-spline fitting distance (voxels); ``None`` uses ANTs default.
+   :param rescale_intensities: Rescale intensities into ``[0, 1]`` before correction.
+   :param return_bias_field: When true, also return the estimated bias field volume.
+
+   :returns: * *corrected* -- Bias-corrected intensity array (NumPy).
+             * *(corrected, bias_field)* -- When ``return_bias_field`` is true.
+
+

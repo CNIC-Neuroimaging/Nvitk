@@ -1,0 +1,27 @@
+nvitk.io.readers.pil
+====================
+
+.. py:module:: nvitk.io.readers.pil
+
+.. autoapi-nested-parse::
+
+   Raster images via Pillow (PNG, JPEG, …): ``YX`` or ``YXC`` arrays.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.readers.pil.read_pil
+
+
+Module Contents
+---------------
+
+.. py:function:: read_pil(path: str, *, axes: str | None = None, **_: Any)
+
+   Load image file as array and metadata (``mode``, ``axes``, ``shape``).
+
+

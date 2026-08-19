@@ -1,0 +1,88 @@
+nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree
+======================================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree
+
+.. autoapi-nested-parse::
+
+   eICAB-inspired distal vessel tree — thin re-export of :mod:`nvitk.segmentation.blood_flood`.
+
+   Kept for qvtpy import stability. New code should import from
+   ``nvitk.segmentation.blood_flood`` directly.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree._DISTAL_FRANGI_SIGMAS_DEFAULT
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree._DISTAL_HYST_HIGH_FACTOR_DEFAULT
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree._DISTAL_HYST_LOW_FACTOR_DEFAULT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.apply_hysteresis_threshold_3d
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.cd_vesselness
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.hysteresis_vessel_tree
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.keep_tree_components_touching_markers
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.thicken_tree_in_cd
+   nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree.watershed_labels_into_vessels
+
+
+Module Contents
+---------------
+
+.. py:data:: _DISTAL_FRANGI_SIGMAS_DEFAULT
+   :type:  tuple[float, Ellipsis]
+   :value: (0.5, 1.0, 1.5, 2.0, 2.5)
+
+
+.. py:data:: _DISTAL_HYST_HIGH_FACTOR_DEFAULT
+   :type:  float
+   :value: 0.5
+
+
+.. py:data:: _DISTAL_HYST_LOW_FACTOR_DEFAULT
+   :type:  float
+   :value: 3.0
+
+
+.. py:function:: apply_hysteresis_threshold_3d(image: np.ndarray, low: float, high: float) -> np.ndarray
+
+   Keep ``>low`` CCs that touch any ``>high`` voxel (26-connectivity).
+
+
+.. py:function:: cd_vesselness(cd: np.ndarray, *, sigmas: tuple[float, Ellipsis] | list[float] = FRANGI_SIGMAS_DEFAULT) -> tuple[np.ndarray, str]
+
+   Alias of :func:`intensity_vesselness` (qvtpy / CD naming).
+
+
+.. py:function:: hysteresis_vessel_tree(vesselness: np.ndarray, mask: np.ndarray | None = None, *, low_factor: float = HYST_LOW_FACTOR_DEFAULT, high_factor: float = HYST_HIGH_FACTOR_DEFAULT, min_cc_voxels: int = MIN_TREE_CC_VOXELS_DEFAULT, fit_positive_percentile: float = 50.0) -> tuple[np.ndarray, dict[str, Any]]
+
+   GMM + hysteresis binary vessel tree (eICAB ``hysteresis_thresholding_brain``).
+
+   GMM is fit on the upper half of positive vesselness inside ``mask`` so near-zero
+   Frangi noise does not pull ``lowt`` toward zero (which floods parenchyma).
+
+
+.. py:function:: keep_tree_components_touching_markers(tree: np.ndarray, markers: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]
+
+   Retain only vessel-tree CCs that touch at least one marker voxel.
+
+
+.. py:function:: thicken_tree_in_cd(tree: np.ndarray, cd: np.ndarray, *, iterations: int = 1, gate_percentile: float = 70.0) -> tuple[np.ndarray, dict[str, Any]]
+
+   Alias of :func:`thicken_tree_in_intensity` (qvtpy / CD naming).
+
+
+.. py:function:: watershed_labels_into_vessels(vessels_bin: np.ndarray, markers: np.ndarray, *, connectivity: int = 3, erode_markers: bool = True) -> np.ndarray
+
+   Watershed markers into the binary vessel tree (eICAB ``watershed_segment``).
+
+

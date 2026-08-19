@@ -1,0 +1,32 @@
+nvitk.segmentation.eicab.run_job
+================================
+
+.. py:module:: nvitk.segmentation.eicab.run_job
+
+.. autoapi-nested-parse::
+
+   In-container entry point for eICAB (used by SGE ``singularity exec`` jobs).
+
+   Paths are under the outer pipeline container mounts (``/nvitk/data/``,
+   ``/nvitk/output/``, etc.). :func:`run_eicab` runs the inner eICAB ``singularity run``
+   with the same bind layout as legacy ``run_eicab_inference.sh`` (TOF bind, output,
+   ``/tmp``, vasculature on ``PATH``).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.run_job.main
+
+
+Module Contents
+---------------
+
+.. py:function:: main(argv: list[str] | None = None) -> int
+
+   CLI entry point for a single eICAB job (parse args, run, return an exit code).
+
+

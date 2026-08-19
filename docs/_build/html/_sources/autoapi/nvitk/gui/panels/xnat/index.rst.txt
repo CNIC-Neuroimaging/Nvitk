@@ -1,0 +1,376 @@
+nvitk.gui.panels.xnat
+=====================
+
+.. py:module:: nvitk.gui.panels.xnat
+
+.. autoapi-nested-parse::
+
+   Backward-compatible re-export; use :mod:`nvitk.gui.panels.data_browser`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.xnat.XnatDownloadPanel
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.xnat.DataBrowserPanel
+
+
+Module Contents
+---------------
+
+.. py:class:: DataBrowserPanel(viewer: Any, app_state: dict[str, Any], *, on_inputs_opened=None, parent=None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Load data from the XNAT catalog or from local pipeline directory presets.
+
+
+   .. py:attribute:: _viewer
+
+
+   .. py:attribute:: _app_state
+
+
+   .. py:attribute:: _on_inputs_opened
+      :value: None
+
+
+
+   .. py:attribute:: _all_subjects
+      :type:  list[str]
+      :value: []
+
+
+
+   .. py:attribute:: _xnat_subject_slots
+      :type:  dict[str, set[str]]
+
+
+   .. py:attribute:: _xnat_scan_filter_checks
+      :type:  dict[str, qtpy.QtWidgets.QCheckBox]
+
+
+   .. py:attribute:: _local_roots
+      :type:  nvitk.gui.pipeline.data_presets.PipelineRoots | None
+      :value: None
+
+
+
+   .. py:attribute:: _worker
+      :type:  _XnatDownloadWorker | None
+      :value: None
+
+
+
+   .. py:attribute:: _temp_session_root
+      :type:  pathlib.Path | None
+      :value: None
+
+
+
+   .. py:attribute:: _source_combo
+
+
+   .. py:attribute:: _header_label
+
+
+   .. py:attribute:: _stack
+
+
+   .. py:attribute:: _xnat_scan_filter_group
+
+
+   .. py:attribute:: _subject_search
+
+
+   .. py:attribute:: _subject_list
+
+
+   .. py:attribute:: _resource_label
+
+
+   .. py:attribute:: _resource_list
+
+
+   .. py:attribute:: _action_btn
+
+
+   .. py:attribute:: _status
+
+
+   .. py:method:: _build_xnat_page() -> qtpy.QtWidgets.QWidget
+
+      Build the XNAT-source page: project picker, config path, download folder/temp-cache
+      toggle, and raw-scan reader format selector.
+
+
+
+   .. py:method:: _build_xnat_scan_filter_group() -> qtpy.QtWidgets.QGroupBox
+
+      Build the collapsible group of scan-type checkboxes used to filter the XNAT subject list.
+
+
+
+   .. py:method:: _build_local_page() -> qtpy.QtWidgets.QWidget
+
+      Build the local-source page: pipeline preset, cohort/batch, DICOM/NIfTI/results root
+      fields, and asset-type include checkboxes.
+
+
+
+   .. py:method:: _path_row(edit: qtpy.QtWidgets.QLineEdit) -> qtpy.QtWidgets.QWidget
+
+      Wrap *edit* with a "…" browse button that fills it from a directory picker.
+
+
+
+   .. py:method:: _browse_into(edit: qtpy.QtWidgets.QLineEdit) -> None
+
+      Open a directory picker and set *edit*'s text to the chosen path.
+
+
+
+   .. py:method:: cleanup_temp_dirs() -> None
+
+      Delete every temporary XNAT download directory recorded in app state.
+
+
+
+   .. py:method:: _is_xnat() -> bool
+
+      True if the currently selected data source is XNAT (vs. a local pipeline preset).
+
+
+
+   .. py:method:: _on_source_changed() -> None
+
+      Switch the stacked page and re-label the action button/lists for the newly selected
+      source, then reload its catalog/preset data.
+
+
+
+   .. py:method:: _on_preset_changed() -> None
+
+      Load the newly selected pipeline preset's default roots into the local-page fields and
+      refresh the subject list.
+
+
+
+   .. py:method:: _set_batch_combo_text(batch: str) -> None
+
+      Select *batch* in the cohort combo if it's a listed item, else set it as free-text.
+
+
+
+   .. py:method:: _refresh_cohort_combo(pesa_fat_layout: bool) -> None
+
+      Populate cohort dropdown from NIfTI/DICOM/RESULTS roots (PESA-Fat).
+
+
+
+   .. py:method:: _apply_local_roots() -> None
+
+      Resolve the local DICOM/NIfTI/results roots and current batch from the form fields, then
+      rescan and repopulate the subject list.
+
+
+
+   .. py:method:: _local_subjects_status_text(preset_id: str) -> str
+
+      Build the status label summarizing subject count and which asset sources are included for
+      the current local preset.
+
+
+
+   .. py:method:: _on_local_resource_filter_changed() -> None
+
+      Rescan and refilter the subject list when the DICOM/NIfTI/results include checkboxes
+      change, and refresh the resource list for the currently selected subject.
+
+
+
+   .. py:method:: _browse_config() -> None
+
+      Open a file picker for the XNAT config file and set the config-path field.
+
+
+
+   .. py:method:: _browse_download_folder() -> None
+
+      Open a directory picker for the persistent download folder and disable temp-only mode.
+
+
+
+   .. py:method:: _on_temp_only_toggled(checked: bool) -> None
+
+      Enable/disable (and clear) the persistent download-path field based on the temp-only toggle.
+
+
+
+   .. py:method:: _current_project_id() -> str
+
+      Currently selected XNAT project id.
+
+
+
+   .. py:method:: _reload_xnat_catalog() -> None
+
+      Reload the subject list and per-subject asset-slot map from the dataset catalog for the
+      currently selected XNAT project, and rebuild the scan-filter checkboxes.
+
+
+
+   .. py:method:: _rebuild_xnat_scan_filter_checkboxes(project_id: str, slots: list[str]) -> None
+
+      Rebuild the scan-filter checkbox grid from *slots*, ordering the project's default
+      sequences and pipeline resources first.
+
+
+
+   .. py:method:: _selected_xnat_scan_slots() -> set[str]
+
+      Asset slots whose filter checkbox is currently checked.
+
+
+
+   .. py:method:: _clear_xnat_scan_filters() -> None
+
+      Uncheck every scan-filter checkbox and refresh the subject list.
+
+
+
+   .. py:method:: _xnat_subjects_matching_scan_filter() -> list[str]
+
+      All subjects, or (if any scan-filter checkboxes are checked) only subjects whose indexed
+      assets satisfy the selected slots (all or any, per the match-all toggle).
+
+
+
+   .. py:method:: _filter_subjects() -> None
+
+      Rebuild the subject list widget applying the scan filter (XNAT) and search text.
+
+
+
+   .. py:method:: _on_subject_selected(current: qtpy.QtWidgets.QListWidgetItem | None, _previous: qtpy.QtWidgets.QListWidgetItem | None) -> None
+
+      Repopulate the resource list for the newly selected subject.
+
+
+
+   .. py:method:: _populate_xnat_resources(subject_uid: str) -> None
+
+      List *subject_uid*'s indexed raw scans and pipeline (eicab/qvtpy/4dflows) resources as
+      checkable resource-list items.
+
+
+
+   .. py:method:: _populate_local_resources(subject: str) -> None
+
+      List *subject*'s local assets, requiring the pipeline roots to already be applied.
+
+
+
+   .. py:method:: _refresh_resources() -> None
+
+      Re-list local assets for the currently selected subject.
+
+
+
+   .. py:method:: _refresh_resources_for_subject(subject: str) -> None
+
+      List *subject*'s local DICOM/NIfTI/results assets (per the include checkboxes) as
+      checkable resource-list items.
+
+
+
+   .. py:method:: _selected_xnat_rows() -> list[dict[str, Any]]
+
+      Payload dicts for every checked item in the resource list (XNAT mode).
+
+
+
+   .. py:method:: _selected_local_assets() -> list[nvitk.gui.pipeline.data_presets.LocalAsset]
+
+      :class:`LocalAsset` entries for every checked item in the resource list (local mode).
+
+
+
+   .. py:method:: _on_action() -> None
+
+      Dispatch the action button to the XNAT download or local load handler based on the current
+      source.
+
+
+
+   .. py:method:: _scan_reader_is_dicom() -> bool
+
+      True if the raw-scan reader format is currently set to DICOM (vs. NIfTI).
+
+
+
+   .. py:method:: _uncheck_selected_resources() -> None
+
+      Clear checkboxes for series/assets just retrieved.
+
+
+
+   .. py:method:: _on_local_load() -> None
+
+      Open every checked local asset into Napari and record the opened paths.
+
+
+
+   .. py:method:: _on_xnat_download() -> None
+
+      Validate the XNAT config/selection, prompt for the password, and start an
+      :class:`_XnatDownloadWorker` to fetch the checked resources in the background (to a temp
+      cache or the configured download folder).
+
+
+
+   .. py:method:: _on_progress(message: str) -> None
+
+      Show a background-worker progress *message* in the status label and log panel.
+
+
+
+   .. py:method:: _record_opened(paths: list[str]) -> None
+
+      Notify the ``on_inputs_opened`` callback (if given) or append *paths* to the app's input
+      registry directly.
+
+
+
+   .. py:method:: _on_download_ok(payloads: list) -> None
+
+      Open every downloaded resource into Napari (expanding NIfTI directories to their files) and
+      record the opened paths.
+
+
+
+   .. py:method:: _on_download_failed(message: str) -> None
+
+      Show the background worker's failure *message* in the status label and as a notification.
+
+
+
+   .. py:method:: _on_worker_finished() -> None
+
+      Re-enable the action button and drop the finished worker reference.
+
+
+
+.. py:data:: XnatDownloadPanel
+

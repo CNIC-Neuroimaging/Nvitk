@@ -1,0 +1,511 @@
+nvitk.morphology
+================
+
+.. py:module:: nvitk.morphology
+
+.. autoapi-nested-parse::
+
+   Morphological operators (dilation, erosion, opening, closing, fill-holes).
+
+   All functions are backend-aware (NumPy or CuPy), accept either an
+   :class:`~nvitk.types.Image` or a raw array, and return the same type as the
+   input (no in-place mutation of the caller's data).
+
+   This package re-exports the public API from :mod:`nvitk.morphology.binary` and
+   :mod:`nvitk.morphology._common`; implementation lives in those submodules.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/morphology/_common/index
+   /autoapi/nvitk/morphology/binary/index
+   /autoapi/nvitk/morphology/centerline/index
+   /autoapi/nvitk/morphology/centerline_siphon/index
+   /autoapi/nvitk/morphology/components/index
+   /autoapi/nvitk/morphology/mst_bridge/index
+   /autoapi/nvitk/morphology/polyline_graph/index
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.morphology.GenusReport
+   nvitk.morphology.SiphonCorrectionResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.make_ball_footprint
+   nvitk.morphology.close
+   nvitk.morphology.dilate
+   nvitk.morphology.erode
+   nvitk.morphology.fill_holes
+   nvitk.morphology.open
+   nvitk.morphology.compute_centerline_branches
+   nvitk.morphology.compute_centerlines
+   nvitk.morphology.compute_connected_centerline_tree
+   nvitk.morphology.skeletonize_binary
+   nvitk.morphology.skeletonize_labeled
+   nvitk.morphology.unique_skeleton_edge_polylines
+   nvitk.morphology.clean_ica_mask_after_centerline
+   nvitk.morphology.clean_mask_geodesic_cl
+   nvitk.morphology.compute_corrected_centerline
+   nvitk.morphology.compute_mask_genus
+   nvitk.morphology.correct_siphon_centerlines
+   nvitk.morphology.prune_skeleton_shortest_arc
+   nvitk.morphology.recover_lumen_thickness
+   nvitk.morphology.recover_lumen_thickness_symmetric
+   nvitk.morphology.refine_mask_lumen_gaps
+   nvitk.morphology.keep_component_closest_to_center
+   nvitk.morphology.keep_components_touching_seeds
+   nvitk.morphology.keep_largest_components
+   nvitk.morphology.label_connected
+   nvitk.morphology.remove_small_components
+   nvitk.morphology.remove_small_components_by_fraction
+   nvitk.morphology.bridge_binary_components_mst
+   nvitk.morphology.draw_tube_3d
+   nvitk.morphology.fill_multilabel_gaps_mst
+
+
+Package Contents
+----------------
+
+.. py:function:: make_ball_footprint(ndim: int, radius: int = 1, *, connectivity: int = 2) -> Any
+
+   Return an ``ndi.generate_binary_structure``-based ball of *radius*.
+
+   The result is on the current backend.
+
+
+.. py:function:: close(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological closing = dilate followed by erode.
+
+
+.. py:function:: dilate(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 2) -> nvitk.types.Image | Any
+
+   Morphological dilation.
+
+   :param img: Input mask (:class:`Image` or array).
+   :param footprint: Structuring element. ``None`` → unit ball; ``int`` → iterated unit ball
+                     of that radius; array → used as-is (cast to the active backend).
+   :param iterations: Passed to ``ndi.binary_dilation`` (integer ≥ 1).
+   :param mode: ``"binary"`` or ``"gray"``.
+   :param isotropic: When ``footprint`` is ``int`` and ``isotropic=True``, resample the
+                     ball to isotropic voxels using ``spacing``.
+   :param spacing: When ``footprint`` is ``int`` and ``isotropic=True``, resample the
+                   ball to isotropic voxels using ``spacing``.
+   :param connectivity: Base connectivity for the unit structure (1 = face, 2 = edge, ...).
+
+
+.. py:function:: erode(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological erosion (counterpart to :func:`dilate`).
+
+
+.. py:function:: fill_holes(img: nvitk.types.Image | Any, *, axis: int | None = None, structure: Any | None = None, mode: str = 'binary') -> nvitk.types.Image | Any
+
+   Fill holes in a binary mask.
+
+   :param img: Input binary mask.
+   :param axis: If provided, apply slicewise along *axis* (useful for axial fills that
+                should not close inter-slice voids). If ``None``, fill in 3D.
+   :param structure: See ``scipy.ndimage.binary_fill_holes``.
+   :param mode: See ``scipy.ndimage.binary_fill_holes``.
+
+
+.. py:function:: open(img: nvitk.types.Image | Any, footprint: int | Any | None = None, *, iterations: int = 1, mode: str = 'binary', isotropic: bool = False, spacing: Sequence[float] | None = None, connectivity: int = 1) -> nvitk.types.Image | Any
+
+   Morphological opening = erode followed by dilate.
+
+
+.. py:function:: compute_centerline_branches(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 20, min_branch_points: int = 3, prefer_points_by_label: dict[int, np.ndarray] | None = None, keep_all_components: bool = True, bridge_max_gap: int = 0, bridge_tube_radius: int = 1, connected_edges: bool = False) -> dict[int, list[np.ndarray]]
+
+   Per-label list of branch polylines.
+
+   Default (*connected_edges=False*): trunk + bifurcation side branches per
+   skeleton CC (legacy qvtpy / vertebral-split semantics).
+
+   With *connected_edges=True*: unique junction-split edges from
+   :func:`compute_connected_centerline_tree` (preferred for morphometrics and
+   any export that must stay connected at bifurcations without overlapping
+   trunks).
+
+   All skeleton CCs are kept by default (*keep_all_components*).
+
+
+.. py:function:: compute_centerlines(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 20, prefer_points_by_label: dict[int, np.ndarray] | None = None, keep_all_components: bool = False, bridge_max_gap: int = 0, bridge_tube_radius: int = 1) -> dict[int, np.ndarray]
+
+   Return per-label ordered centerline points in voxel coordinates.
+
+   For a single main path per label (graph diameter on the largest skeleton CC
+   by default). For branched vessels that must stay connected at bifurcations
+   without overlapping trunks, use :func:`compute_connected_centerline_tree`.
+
+   :param vessel_mask: 3D integer label mask (NumPy or CuPy).
+   :param centerline_mask: Optional 3D mask where centerline voxels are >0. If provided, this mask is
+                           intersected with each `vessel_mask == label` region and ordered.
+   :param labels: Optional explicit label list. Default: all non-zero labels in `vessel_mask`.
+   :param min_points: Skip labels whose centerline has fewer than this many voxels.
+   :param prefer_points_by_label: Optional prior polylines (e.g. stage-3) used to keep proximal trunks on
+                                  branched skeletons instead of a distal-only graph diameter.
+   :param keep_all_components: If True, concatenate diameter paths from every skeleton CC (first = largest).
+                               Default False preserves historical single-path behaviour.
+   :param bridge_max_gap: If >0, MST-bridge nearby mask CCs of each label before skeletonize.
+
+
+.. py:function:: compute_connected_centerline_tree(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 2, min_edge_points: int = 2, keep_all_components: bool = True, bridge_max_gap: int = 0, bridge_tube_radius: int = 1, prune_short_spurs: bool = True, prune_spur_points: int = 3) -> dict[int, list[np.ndarray]]
+
+   Per-label connected centerline tree as unique skeleton-edge polylines.
+
+   This is the **default branched centerline representation** for nvitk:
+   skeletonize each label, optionally MST-bridge nearby mask CCs, then extract
+   every unique junction↔endpoint / junction↔junction chain. Edges share only
+   junction voxels (no overlapping trunks). All meaningful skeleton CCs are
+   kept by default so proximal roots are not dropped.
+
+   :returns: Label → list of ordered ``(N, 3)`` polylines in voxel coordinates.
+   :rtype: dict[int, list[np.ndarray]]
+
+
+.. py:function:: skeletonize_binary(mask) -> Any
+
+   3D/2D skeletonization (CPU skimage; returns backend array of bool).
+
+
+.. py:function:: skeletonize_labeled(mask, *, labels: Sequence[int] | None = None, min_points: int = 1) -> Any
+
+   Skeletonize each label region independently; output keeps original label ids.
+
+   For a binary mask (labels ``[1]``), skeleton voxels are written as ``1``.
+   For multilabel masks, each label's skeleton voxels carry that label's id.
+
+
+.. py:function:: unique_skeleton_edge_polylines(coords_xyz: np.ndarray, *, min_points: int = 2, prune_short_spurs: bool = False, prune_spur_points: int = 3) -> list[np.ndarray]
+
+   Unique centerline edges between endpoints and junctions (no interior overlap).
+
+   Each returned polyline is a chain between skeleton specials (deg≤1 endpoints
+   and deg≥3 junction clusters). Chains share only their junction endpoints so
+   the union is a connected tree/graph without duplicated trunks.
+
+
+.. py:class:: GenusReport
+
+   Topology summary for a 3D binary mask.
+
+   For a tube-like vessel we assume :math:`\beta_2 \approx 0` (no internal
+   cavities), so :math:`\beta_1 = \beta_0 - \chi`. ``suspect`` flips True
+   iff :math:`\beta_1 > 0` (a topological handle / donut).
+
+
+   .. py:attribute:: label_name
+      :type:  str
+
+
+   .. py:attribute:: n_voxels
+      :type:  int
+
+
+   .. py:attribute:: n_components
+      :type:  int
+
+
+   .. py:attribute:: euler_chi
+      :type:  float
+
+
+   .. py:attribute:: beta0
+      :type:  int
+
+
+   .. py:attribute:: beta1
+      :type:  int
+
+
+   .. py:attribute:: skeleton_cycles
+      :type:  int
+
+
+   .. py:attribute:: skeleton_voxels
+      :type:  int
+
+
+   .. py:attribute:: beta1_raw
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: max_cycle_len
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: noise_filtered
+      :type:  bool
+      :value: False
+
+
+
+   .. py:property:: suspect
+      :type: bool
+
+
+      True when the mask has ≥1 topological loop (``beta1 > 0``) — a likely siphon donut.
+
+
+   .. py:method:: to_dict() -> dict
+
+      JSON-serializable dict of the genus report (adds the derived ``suspect`` flag).
+
+
+
+.. py:class:: SiphonCorrectionResult
+
+   Per-label outcome of :func:`correct_siphon_centerlines`.
+
+
+   .. py:attribute:: label
+      :type:  int
+
+
+   .. py:attribute:: label_name
+      :type:  str
+
+
+   .. py:attribute:: n_skel
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_skel_pruned
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_bridge
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_pts
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: base
+      :type:  tuple[int, int, int] | None
+      :value: None
+
+
+
+   .. py:attribute:: tip
+      :type:  tuple[int, int, int] | None
+      :value: None
+
+
+
+   .. py:attribute:: cycles
+      :type:  list[dict]
+      :value: []
+
+
+
+   .. py:attribute:: bridge_voxels
+      :type:  list[tuple[int, int, int]]
+      :value: []
+
+
+
+   .. py:attribute:: warning
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:method:: to_dict() -> dict
+
+      JSON-serializable summary of the per-label siphon-correction outcome.
+
+
+
+.. py:function:: clean_ica_mask_after_centerline(repaired_mask: Any, prep_info: dict, centerline_path: Any, bridge_voxels: Sequence[tuple[int, int, int]], seed_bool: Any, *, label_name: str, clean_mask: bool = True, recover_lumen_thickness_flag: bool = True) -> tuple[Any, dict]
+
+   Post-centerline ICA mask cleaning: bridge cut, geodesic, thickness recovery.
+
+
+.. py:function:: clean_mask_geodesic_cl(roi: Any, centerline_path: Any, bridge_voxels: Sequence[tuple[int, int, int]], *, label_name: str = 'vessel', bridge_dilate_r: int = BRIDGE_DILATE_R) -> tuple[Any, dict]
+
+   Remove mask voxels on the bridge side of a geodesic CL vs bridge partition.
+
+
+.. py:function:: compute_corrected_centerline(mask: Any, *, label_name: str = 'vessel') -> tuple[Any, Any, dict]
+
+   Corrected centerline as ``min-Z leaf → max-Z leaf`` shortest path.
+
+   1. :func:`prune_skeleton_shortest_arc` removes false bridges.
+   2. ``base = min-Z degree-1 leaf``, ``tip = max-Z degree-1 leaf`` in the
+      pruned skeleton (fallback: extremal-Z over all nodes if no leaf).
+   3. ``networkx.shortest_path(G, base, tip)`` is unique on a tree, so the
+      centerline always terminates at the vessel's anatomical extremes
+      (skull-base entry and ICA bifurcation tip).
+
+   :returns: * **path** (*array (current backend, float32, shape (N, 3))*) -- Ordered voxel coords (i, j, k), base → tip.
+             * **sk_pruned** (*array (current backend, bool)*) -- Skeleton with bridge voxels removed.
+             * **info** (*dict*) -- Pruning + endpoint metadata.
+
+
+.. py:function:: compute_mask_genus(mask: Any, *, label_name: str = 'vessel', connectivity: int = 1, min_cycle_len: int = MIN_SIPHON_CYCLE_LEN, filter_small_handles: bool = True) -> GenusReport
+
+   Return :class:`GenusReport` for *mask* (3D bool / int, NumPy or CuPy).
+
+   When ``filter_small_handles`` is True, β₁ is zeroed if the largest skeleton
+   cycle is shorter than ``min_cycle_len`` (noise handle vs cavernous siphon).
+
+   The mask is moved to NumPy internally (``skimage`` / ``networkx`` are CPU
+   only). The returned report is JSON-serialisable via ``report.to_dict()``.
+
+
+.. py:function:: correct_siphon_centerlines(tof: Any, vessel_mask: Any, *, correction_ids: Sequence[int] = (1, 2), out_dir: str | pathlib.Path | None = None, save_qc: bool = False, min_points: int = 3, clean_mask: bool = True, recover_lumen_thickness: bool = True) -> dict[str, Any]
+
+   End-to-end siphon centerline correction (matches ``eicab_reseg.ipynb``).
+
+   For each label in *correction_ids*, the notebook's pipeline:
+
+   1. Seed centerlines from input multilabel *vessel_mask*.
+   2. Per-ICA local Otsu on TOF inside the seed-CL bbox (+2-iter erosion).
+   3. Optional 3D donut cut when β₁ > 0 after erosion.
+   4. Topological bridge prune + ``min-Z → max-Z`` centerline on the
+      **repaired Otsu mask** (not the raw vessel label).
+
+   Labels outside *correction_ids* keep the default
+   :func:`~nvitk.morphology.centerline.compute_centerlines` on *vessel_mask*.
+   When *out_dir* is set, a merged ``vessel_mask_corrected.nii.gz`` replaces
+   each corrected ICA with its final Otsu lumen mask (eroded, or donut-cut
+   when needed); non-ICA labels are copied unchanged from *vessel_mask*.
+
+   :param tof: TOF MRA (``Image``, path, or array); drives Otsu. Spatial metadata (affine, zooms, axes)
+               is copied to all NIfTI outputs.
+   :param vessel_mask: Multilabel vessel mask on the same grid as *tof*.
+   :param correction_ids: Label IDs to siphon-correct (default ``(1, 2)`` = RICA/LICA).
+   :param out_dir: If set, writes centerlines, bridges, corrected vessel/ICA masks,
+                   ``siphon_correction.json``, and optionally QC figures.
+   :param save_qc: Save 3D QC and ICA overview figures; always prints the summary table.
+   :param min_points: Minimum centerline length (voxels) for inclusion.
+   :param clean_mask: Run post-centerline mask cleaning (bridge-anchored cut, geodesic, thickness).
+   :param recover_lumen_thickness: Dilate cleaned mask toward Otsu ceiling with a β₁ watchdog (default on).
+
+   :returns: ``centerlines``, ``bridges``, ``details``, rasterised masks, and
+             ``output_paths``.
+   :rtype: dict
+
+
+.. py:function:: prune_skeleton_shortest_arc(mask: Any, *, label_name: str = 'vessel') -> tuple[Any, list[tuple[int, int, int]], dict]
+
+   Skeleton with each cycle's *shortest* arc removed (the false bridge).
+
+   Operates on a NumPy or CuPy mask; the returned skeleton is moved back to
+   the active backend via :func:`as_backend_array`.
+
+   :returns: * **sk_pruned** (*array (current backend, bool)*) -- Skeleton with bridge voxels deleted (mask itself is **not** modified).
+             * **bridge_voxels** (*list[(i, j, k)]*) -- Deleted voxel coordinates (union across cycles).
+             * **info** (*dict*) -- Per-cycle arc lengths, anchors, Y/Z ranges.
+
+
+.. py:function:: recover_lumen_thickness(mask: Any, ceiling_mask: Any, *, label_name: str = 'vessel', max_extra_iters: int | None = None, cl_seeds: np.ndarray | None = None, n_micro_steps: int | None = None) -> tuple[Any, dict]
+
+   Dilate *mask* toward *ceiling* with fractional shells; stop before β₁ > 0.
+
+
+.. py:function:: recover_lumen_thickness_symmetric(items: Sequence[dict[str, Any]]) -> tuple[dict[int, Any], dict[str, Any]]
+
+   Apply the same number of thickness micro-steps to all ICA masks in *items*.
+
+   Each entry: ``lid``, ``mask``, ``ceiling``, ``label_name``, optional ``cl_seeds``.
+   Uses the minimum safe step count across ICAs so hemispheres stay matched.
+
+
+.. py:function:: refine_mask_lumen_gaps(mask: Any, ceiling: Any, centerline_path: Any, *, label_name: str = 'vessel', close_iters: int = LUMEN_GAP_CLOSE_ITERS) -> Any
+
+   Reconnect lumen along the corrected CL and fill small internal gaps.
+
+
+.. py:function:: keep_component_closest_to_center(labeled: Any, *, center: tuple[float, float] | None = None) -> Any
+
+   Binary mask of the labeled component whose centroid is nearest *center*.
+
+
+.. py:function:: keep_components_touching_seeds(mask: nvitk.types.Image | Any, seed_mask: nvitk.types.Image | Any, *, connectivity: int = 1) -> Any
+
+   Keep only connected components of *mask* that overlap *seed_mask*.
+
+
+.. py:function:: keep_largest_components(mask: nvitk.types.Image | Any, *, n: int = 1, connectivity: int = 1, structure: Any = None) -> Any
+
+   Keep the *n* largest connected components of a binary *mask* (by voxel count).
+
+   Components are ranked by size; ties keep lower label ids first after the
+   size sort. If fewer than *n* components exist, all are kept.
+
+
+.. py:function:: label_connected(mask: nvitk.types.Image | Any, *, connectivity: int = 1) -> tuple[Any, int]
+
+   Label connected components of a binary *mask*.
+
+   Returns ``(labeled_array, num_features)`` on the active backend.
+
+
+.. py:function:: remove_small_components(mask: nvitk.types.Image | Any, *, min_size: int, connectivity: int = 1) -> Any
+
+   Drop connected components with fewer than *min_size* voxels.
+
+
+.. py:function:: remove_small_components_by_fraction(mask: nvitk.types.Image | Any, *, min_fraction: float, connectivity: int = 1) -> Any
+
+   Area-opening: remove components smaller than *min_fraction* of foreground.
+
+
+.. py:function:: bridge_binary_components_mst(mask: numpy.ndarray | Any, *, max_gap: int = DEFAULT_BRIDGE_MAX_GAP, tube_radius: int = DEFAULT_BRIDGE_RADIUS) -> numpy.ndarray
+
+   Connect nearby CCs of a binary mask with short tubes (MST of min distances).
+
+   :param mask: Binary volume.
+   :param max_gap: Maximum nearest-voxel distance (voxels) for an MST edge to be drawn.
+   :param tube_radius: Dilation radius of each bridge polyline.
+
+   :returns: Boolean mask with bridges OR-ed into the original foreground.
+   :rtype: np.ndarray
+
+
+.. py:function:: draw_tube_3d(shape: tuple[int, Ellipsis], p0: numpy.ndarray | Sequence[float], p1: numpy.ndarray | Sequence[float], *, radius: int = 1) -> numpy.ndarray
+
+   Binary mask of a thick 3-D line segment from *p0* to *p1*.
+
+
+.. py:function:: fill_multilabel_gaps_mst(labels: numpy.ndarray | Any, *, close_radius: int = DEFAULT_CLOSE_RADIUS, bridge_max_gap: int = DEFAULT_BRIDGE_MAX_GAP, bridge_radius: int = DEFAULT_BRIDGE_RADIUS, label_ids: Sequence[int] | None = None) -> numpy.ndarray
+
+   Per-label close + MST CC bridging; never overwrite other label ids.
+
+   :param labels: Integer label volume (``0`` = background).
+   :param close_radius: Morphological close footprint radius before bridging (``0`` disables).
+   :param bridge_max_gap: Passed to :func:`bridge_binary_components_mst`.
+   :param bridge_radius: Passed to :func:`bridge_binary_components_mst`.
+   :param label_ids: Labels to process; default = all positive ids present in *labels*.
+
+

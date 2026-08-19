@@ -1,0 +1,62 @@
+nvitk.gui.core.backend
+======================
+
+.. py:module:: nvitk.gui.core.backend
+
+.. autoapi-nested-parse::
+
+   GUI helpers aligned with the global nvitk backend (:mod:`nvitk.core.backend`).
+
+   The active backend is set by ``nvitk-gui --backend cpu|gpu``, the dock GPU toggle
+   (:mod:`nvitk.gui.tools.gpu_toggle`), or :func:`~nvitk.core.backend.set_default_backend`.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.core.backend.gpu_enabled
+   nvitk.gui.core.backend.layer_data_for_tool
+   nvitk.gui.core.backend.napari_array
+   nvitk.gui.core.backend.napari_label_array
+   nvitk.gui.core.backend.run_with_backend
+
+
+Module Contents
+---------------
+
+.. py:function:: gpu_enabled() -> bool
+
+   True when the global backend is CuPy.
+
+
+.. py:function:: layer_data_for_tool(data: Any) -> Any
+
+   Coerce layer data for tool input using the global backend.
+
+
+.. py:function:: napari_array(out: Any) -> numpy.ndarray
+
+   Always return a NumPy array suitable for Napari (no implicit CuPy conversion).
+
+
+.. py:function:: napari_label_array(out: Any) -> numpy.ndarray
+
+   NumPy array for Napari that **keeps its integer dtype**, for label-map results.
+
+   :func:`napari_array` casts to ``float64``, which is right for intensities and wrong for a label
+   map: the ids survive the round trip numerically, but the layer can no longer be added as a
+   Napari ``Labels`` layer without a second cast, and every downstream ``unique`` comes back as
+   floats. Tools that return a parcellation use this instead.
+
+   A non-integer result is left alone rather than rounded — silently quantising a float map into
+   label ids would invent a parcellation that the operation never produced.
+
+
+.. py:function:: run_with_backend()
+
+   Context manager scoped to the current global backend.
+
+

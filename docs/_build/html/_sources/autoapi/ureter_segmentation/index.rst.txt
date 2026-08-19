@@ -1,0 +1,193 @@
+ureter_segmentation
+===================
+
+.. py:module:: ureter_segmentation
+
+.. autoapi-nested-parse::
+
+   Ureter exclusion mask for CT-PET (PESA-Fat ct-pet-v5 conventions) — v2.
+
+   Key changes versus v1
+   ---------------------
+   * ``anchor_bladder_entry_per_side`` — each ureter now ends at the ipsilateral
+     trigone corner (superior bladder face, same lateral hemisphere as its
+     kidney), rather than both sharing a single posterior mid-bladder point.
+   * ``build_cost_volume`` — PET-primary cost; CT hard barriers removed.
+     Three components:
+       - inverse of a *gap-filled* SUV envelope (dark spots healed by smoothing);
+       - an anatomical *corridor prior* (distance to the straight kidney→bladder
+         line) that keeps the path in the expected para-spinal region;
+       - a soft *lateral hemisphere* constraint that prevents the path from
+         crossing to the contralateral side.
+   * ``run_ureter_segmentation`` updated to use both new primitives; original
+     helpers kept for backward compatibility.
+
+   Array / axis conventions (consistent with the rest of this module)
+   ------------------------------------------------------------------
+   The volume is stored **XYZ in memory** (axis 0 = Lateral/X, axis 1 = AP/Y,
+   axis 2 = IS/Z).  This matches:
+     - ``_convex_hull_slicewise_z`` iterating over ``shape[-1]`` for Z;
+     - ``anchor_kidney_pelvis_concavity`` using axis 0 for ``midline_x_index``;
+     - ``anchor_bladder_mid_posterior`` having ``axis_z = -1``.
+   All new functions expose explicit ``axis_x`` / ``axis_z`` parameters so the
+   caller can override for any resampled grid that differs from this default.
+
+   I/O: nvitk.io (not SimpleITK).  Arrays: backend ``np`` / ``ndi`` after
+   ``setup(globals())``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   ureter_segmentation.log
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   ureter_segmentation._convex_hull_slicewise_z
+   ureter_segmentation.anchor_kidney_pelvis_concavity
+   ureter_segmentation.anchor_bladder_entry_per_side
+   ureter_segmentation.build_cost_volume
+   ureter_segmentation.minimum_cost_path_zyx
+   ureter_segmentation.spline_resample_zyx
+   ureter_segmentation.line_mask_from_path
+   ureter_segmentation.edt_tube_mm
+   ureter_segmentation.segment_ureter
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:function:: _convex_hull_slicewise_z(vol_uint8: np.ndarray) -> np.ndarray
+
+   Hull each axial (IS) slice along the last axis — same as stage2.
+
+
+.. py:function:: anchor_kidney_pelvis_concavity(kidney_mask: np.ndarray, *, spacing: tuple[float, float, float] = (1.0, 1.0, 1.0), midline_x_index: float | None = None, medial_half_width_vox: float | None = None, structure: np.ndarray | None = None) -> tuple[float, float, float]
+
+   Anchor in (hull − kidney) per axial slice → 3D largest CC → centroid.
+   Unchanged from v1 — starting points are already correct.
+
+   ``midline_x_index`` / ``medial_half_width_vox``: restrict the cavity to
+   the medial half of the kidney (lateral axis = axis 0).
+
+
+.. py:function:: anchor_bladder_entry_per_side(bladder_mask: np.ndarray, kidney_mask: np.ndarray, *, axis_x: int = 0, axis_z: int = -1, superior_fraction: float = 0.35, structure: np.ndarray | None = None) -> tuple[float, float, float]
+
+   Bladder ureter-entry anchor ipsilateral to *kidney_mask*.
+
+   Anatomy
+   -------
+   Each ureter enters the bladder at the *ureteral orifice*, located at the
+   lateral corners of the trigone — superior face of the bladder, on the same
+   lateral side as its kidney.  Both orifices are separated by ~5 cm in an
+   adult.  Using a shared mid-bladder point for both ureters causes the MCP
+   to route both paths into the midline well before the actual entry point.
+
+   Strategy
+   --------
+   1. Identify the lateral centroid of the kidney to determine which half of
+      the volume it occupies.
+   2. Restrict bladder voxels to the same lateral hemisphere (ipsilateral).
+   3. Keep only the top ``superior_fraction`` of those voxels in the IS
+      direction — the trigone is at the superior–posterior face.
+   4. Return the centroid of the largest connected component.
+
+   :param axis_x: Array axis for the Lateral (L-R) direction.
+                  Default 0 — matches ``anchor_kidney_pelvis_concavity`` convention
+                  where ``midline_x_index`` is applied along axis 0.
+   :type axis_x: int
+   :param axis_z: Array axis for the IS direction.
+                  Default -1 (last axis) — matches ``_convex_hull_slicewise_z`` and
+                  ``anchor_bladder_mid_posterior`` conventions.
+   :type axis_z: int
+   :param superior_fraction: Fraction of IS extent to keep from the top; 0.35 → top 35 %.
+   :type superior_fraction: float
+
+
+.. py:function:: build_cost_volume(suv: Any, spacing_xyz_mm: Tuple[float, float, float], body: nvitk.types.Image, *, w_pet: float = 1.0, suv_clip_l: float = 0.01, suv_clip_h: float = 15.0, suv_fill_sigma_vox: float = 4.0, suv_fill_blend: float = 0.5, eps: float = 0.001) -> Any
+
+   PET-primary cost volume for ureter MCP routing — v2.1.
+
+   What changed from v2
+   --------------------
+   The corridor prior (distance to the straight kidney→bladder segment) has
+   been **removed**.  It was structurally wrong: because it is zero on the
+   straight line and grows everywhere else, the MCP minimised it by routing
+   straight, producing a linear cylindrical mask regardless of the PET signal.
+   A path prior that rewards the straight line *is* the straight line.
+
+   Components
+   ----------
+   pet_term
+       Inverse of a gap-filled SUV envelope — the primary and dominant cost.
+       High uptake = low cost = preferred.  Dark spots are healed by blending
+       the raw map with a smoothed version (element-wise maximum), so short
+       low-uptake gaps along the ureter do not reroute the path.
+
+   :param w_lateral: Maximum penalty added by the lateral guardrail (plateau value).
+                     In the same units as pet_term.  Default 1.5 ≈ cost of a near-zero
+                     SUV voxel — enough to block, not enough to reshape the path.
+   :type w_lateral: float
+   :param lateral_free_mm: Half-width of the zero-penalty lateral band around the kidney x.
+   :type lateral_free_mm: float
+   :param lateral_slope_mm: Width of the linear ramp from free band to plateau.  The full
+                            guardrail spans ``lateral_free_mm + lateral_slope_mm`` in mm.
+   :type lateral_slope_mm: float
+   :param axis_x: Array axis for the Lateral (L-R) direction (default 0).
+   :type axis_x: int
+
+
+.. py:function:: minimum_cost_path_zyx(cost: Any, start_zyx: Tuple[int, int, int], end_zyx: Tuple[int, int, int]) -> Any
+
+   Least-cost voxel path from *start_zyx* to *end_zyx* through a cost volume.
+
+   Uses skimage's ``route_through_array`` (26-connected, geometric step weights).
+   Returns the path as an ``(N, 3)`` int array of ``(z, y, x)`` indices.
+
+
+.. py:function:: spline_resample_zyx(path_zyx: Any, n_points: int, s_smooth: float, bounds_lo: Any, bounds_hi: Any) -> Any
+
+   Fit a smoothing cubic B-spline to a ``(z, y, x)`` path and resample to *n_points*.
+
+   Points are clipped to ``[bounds_lo, bounds_hi]`` so the smoothed curve cannot
+   leave the volume. Short paths (<4 points) are padded before the fit.
+
+
+.. py:function:: line_mask_from_path(shape: Tuple[int, Ellipsis], path_zyx_float: Any) -> Any
+
+   Rasterize a float ``(z, y, x)`` path to a 1-voxel-wide binary line mask of *shape*.
+
+
+.. py:function:: edt_tube_mm(line_mask: Any, spacing_xyz_mm: Tuple[float, float, float], radius_mm: float) -> Any
+
+   Dilate a line mask into a tube of physical *radius_mm* using a spacing-aware EDT.
+
+
+.. py:function:: segment_ureter(pet_suv: nvitk.types.Image, kidney_r: nvitk.types.Image, kidney_l: nvitk.types.Image, bladder: nvitk.types.Image, body: nvitk.types.Image, *, radius_mm: float = 6.0, w_pet: float = 5.0, suv_fill_sigma_vox: float = 0.5, suv_fill_blend: float = 0.05, spline_s: float = 1.5, axis_x: int = 0, axis_z: int = -1) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]
+
+   Build bilateral ureter exclusion masks from kidney + bladder segmentations
+   and the registered SUV map.
+
+   :returns: * **mask_ureter** (*Image*) -- Binary mask (uint8) in the PET SUV grid.
+             * **paths** (*dict {"R": array, "L": array}*) -- Raw MCP voxel paths.
+             * **paths_sp** (*dict {"R": array, "L": array}*) -- B-spline-smoothed paths.
+             * *Design notes*
+             * *------------*
+             * *\* Starting points (kidney pelvis concavity) are unchanged from v1.*
+             * **\* Ending points are now **ipsilateral**** (*each ureter routes to the*) -- superior corner of the bladder on the same lateral side as its kidney.
+               This avoids the artificial convergence at a single mid-bladder point
+               that caused both paths to merge and deviate from the true anatomy.
+             * *\* The cost volume uses only SUV (gap-filled) plus soft anatomical priors.* -- CT barriers are omitted: at whole-body resolution the ureter is not
+               visible on CT, and hard bone/air penalties deflected the MCP onto
+               incorrect routes running along fascial planes far from the true path.
+
+

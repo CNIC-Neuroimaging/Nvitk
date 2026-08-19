@@ -1,0 +1,107 @@
+nvitk.pipes.pesa_fat.common.db_publish
+======================================
+
+.. py:module:: nvitk.pipes.pesa_fat.common.db_publish
+
+.. autoapi-nested-parse::
+
+   Publish PESA-Fat derived measurements into the NVITK DB.
+
+   Current policy:
+   - On successful stage3 per-subject measurement export, upsert long-form rows
+     into the ``image_measurements`` table.
+   - Re-runs overwrite existing values for the same (subject, pipeline, variable, region, frame).
+
+   Measurement versioning/history can be added later by expanding the key and/or
+   adding a version column; for now we keep only the latest value.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.db_publish.PESA_FAT_QC_REVIEWS_TABLE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.db_publish.resolve_repo
+   nvitk.pipes.pesa_fat.common.db_publish.maybe_publish_stage3_on_sge
+   nvitk.pipes.pesa_fat.common.db_publish.rebuild_sge_sqlite_index_if_configured
+   nvitk.pipes.pesa_fat.common.db_publish.build_image_measurement_rows_from_stage3_excel
+   nvitk.pipes.pesa_fat.common.db_publish.publish_stage3_excel
+   nvitk.pipes.pesa_fat.common.db_publish._variable_matches_structure
+   nvitk.pipes.pesa_fat.common.db_publish.publish_qc_review
+   nvitk.pipes.pesa_fat.common.db_publish.sync_qc_reviews_for_report
+   nvitk.pipes.pesa_fat.common.db_publish.try_sync_qc_reviews_for_report
+   nvitk.pipes.pesa_fat.common.db_publish.try_publish_qc_review
+
+
+Module Contents
+---------------
+
+.. py:function:: resolve_repo(repo: nvitk.db.repo.DataRepo | None = None, *, prefer_sge: bool | None = None) -> nvitk.db.repo.DataRepo
+
+   Return *repo* if given, else open the cluster dataset repo when running under SGE with a
+   reachable cluster root, else the repo from local settings.
+
+
+.. py:function:: maybe_publish_stage3_on_sge(*, subject_uid: str, excel_path: pathlib.Path, pipeline: str, batch: str) -> None
+
+   Upsert stage-3 measurements into the cluster DB when running under SGE.
+
+
+.. py:function:: rebuild_sge_sqlite_index_if_configured() -> None
+
+   Rebuild the SQLite catalog on the cluster dataset root after batch stage 3.
+
+
+.. py:function:: build_image_measurement_rows_from_stage3_excel(*, subject_uid: str, excel_path: pathlib.Path, pipeline: str) -> pandas.DataFrame
+
+   Read a 1-row stage3 Excel file and return long-form ``image_measurements`` rows.
+
+
+.. py:function:: publish_stage3_excel(*, subject_uid: str, excel_path: pathlib.Path, pipeline: str, repo: nvitk.db.repo.DataRepo | None = None, prefer_sge: bool | None = None, build_sqlite_index: bool = True, source_batch_id: str | None = None) -> pandas.DataFrame
+
+   Upsert rows into ``image_measurements`` with overwrite semantics.
+
+
+.. py:data:: PESA_FAT_QC_REVIEWS_TABLE
+   :value: 'pesa_fat_qc_reviews'
+
+
+.. py:function:: _variable_matches_structure(variable_id: str, structure: str) -> bool
+
+   True when *variable_id* belongs to the QC structure label (e.g. HIGADO, DIXON_LIVER).
+
+
+.. py:function:: publish_qc_review(*, batch: str, subject: str, pipeline: str, structure: str, review_aspect: str = 'MEASUREMENT', qc_status: str, reviewer: str = '', reviewed_at: str | None = None, comment: str = '', report_relpath: str = '', repo: nvitk.db.repo.DataRepo | None = None, build_sqlite_index: bool = False) -> dict[str, int]
+
+   Persist a QC review to DB tables (``image_measurements`` + ``pesa_fat_qc_reviews``).
+
+   - For ``review_aspect=MEASUREMENT``, sets ``qc_status`` on matching ``image_measurements``.
+   - ``review_aspect=SEGMENTATION`` is audit-only in ``pesa_fat_qc_reviews``.
+   - Upserts one audit row into ``pesa_fat_qc_reviews`` (created on first use if absent).
+
+
+.. py:function:: sync_qc_reviews_for_report(*, batch: str, subject: str, pipeline: str, rows: list[dict[str, Any]], repo: nvitk.db.repo.DataRepo | None = None) -> dict[str, Any]
+
+   Push all reviews for one report to DB tables; rebuild SQLite index once at the end.
+
+
+.. py:function:: try_sync_qc_reviews_for_report(**kwargs: Any) -> tuple[dict[str, Any] | None, str | None]
+
+   Best-effort :func:`sync_qc_reviews_for_report`; returns ``(result, error_message)``, catching
+   unconfigured/missing-table/unexpected errors instead of raising.
+
+
+.. py:function:: try_publish_qc_review(**kwargs: Any) -> tuple[dict[str, int] | None, str | None]
+
+   Best-effort :func:`publish_qc_review`; returns ``(stats, error_message)``.
+
+

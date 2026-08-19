@@ -1,0 +1,59 @@
+nvitk.io.conversors._phase2volume_bg
+====================================
+
+.. py:module:: nvitk.io.conversors._phase2volume_bg
+
+.. autoapi-nested-parse::
+
+   Spatial polynomial background correction for PC-MRI velocity (QVTplus-style).
+
+   Fits a low-order polynomial in normalized voxel coordinates to each velocity
+   component using voxels with low speed on the **temporal mean** field, evaluates
+   the fit on the full grid, then subtracts that 3D background from the mean
+   field and from **each** time frame (MATLAB-style: correct vMean and each frame).
+
+   Uses :func:`nvitk.core.backend.setup` so ``np`` follows the active NumPy or CuPy
+   backend (see :mod:`nvitk.core.backend`).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors._phase2volume_bg._poly_design_matrix
+   nvitk.io.conversors._phase2volume_bg.fit_polynomial_background_3vector
+   nvitk.io.conversors._phase2volume_bg.fit_polynomial_background_scalar
+   nvitk.io.conversors._phase2volume_bg.subtract_polynomial_background_4d_scalar
+   nvitk.io.conversors._phase2volume_bg.subtract_mean_background_from_temporal
+
+
+Module Contents
+---------------
+
+.. py:function:: _poly_design_matrix(xyz, order: int)
+
+   xyz: (N, 3) in [-1, 1]. Returns (N, n_terms).
+
+
+.. py:function:: fit_polynomial_background_3vector(vx_mean, vy_mean, vz_mean, *, spatial_order: int = 2, static_percentile: float = 25.0, max_voxels: int = 12000)
+
+   Return (bg_x, bg_y, bg_z) same shape as inputs, fitted on low-speed voxels.
+
+
+.. py:function:: fit_polynomial_background_scalar(volume, *, spatial_order: int = 2, static_percentile: float = 25.0, max_voxels: int = 12000)
+
+   Return a 3D polynomial background field fitted on low-intensity voxels of *volume*.
+
+
+.. py:function:: subtract_polynomial_background_4d_scalar(volume_4d, *, spatial_order: int = 2, static_percentile: float = 25.0)
+
+   Per-frame spatial polynomial background subtraction on a 4D scalar stack.
+
+
+.. py:function:: subtract_mean_background_from_temporal(vx, vy, vz, bg_x, bg_y, bg_z)
+
+   Subtract 3D (bg_*) from each frame of 4D velocity components.
+
+

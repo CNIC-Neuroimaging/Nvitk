@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.pipeline.data_presets &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.pipeline.form" href="../form/index.html" />
+    <link rel="prev" title="nvitk.gui.pipeline.catalog" href="../catalog/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.pipeline.data_presets">
+<span id="nvitk-gui-pipeline-data-presets"></span><h1>nvitk.gui.pipeline.data_presets<a class="headerlink" href="#module-nvitk.gui.pipeline.data_presets" title="Link to this heading">¶</a></h1>
+<p>Pipeline filesystem presets for the Napari data browser (local mode).</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.NIFTI_SUFFIXES" title="nvitk.gui.pipeline.data_presets.NIFTI_SUFFIXES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NIFTI_SUFFIXES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.QVTPY_PIPELINE_BUNDLE_DIRS" title="nvitk.gui.pipeline.data_presets.QVTPY_PIPELINE_BUNDLE_DIRS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_PIPELINE_BUNDLE_DIRS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PESA_FAT_SUBJECT_GLOBS" title="nvitk.gui.pipeline.data_presets.PESA_FAT_SUBJECT_GLOBS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PESA_FAT_SUBJECT_GLOBS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._COHORT_WEEK_RE" title="nvitk.gui.pipeline.data_presets._COHORT_WEEK_RE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_COHORT_WEEK_RE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PRESET_REGISTRY" title="nvitk.gui.pipeline.data_presets.PRESET_REGISTRY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PRESET_REGISTRY</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="nvitk.gui.pipeline.data_presets.PipelinePresetSpec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PipelinePresetSpec</span></code></a></p></td>
+<td><p>Registered pipeline with default data roots from its config module.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PipelineRoots</span></code></a></p></td>
+<td><p>Resolved roots for browsing a pipeline on disk.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="nvitk.gui.pipeline.data_presets.LocalAsset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LocalAsset</span></code></a></p></td>
+<td><p>One openable file or DICOM directory for a subject.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.list_pipeline_preset_ids" title="nvitk.gui.pipeline.data_presets.list_pipeline_preset_ids"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list_pipeline_preset_ids</span></code></a>(→ list[str])</p></td>
+<td><p>Ids of every registered pipeline data-browser preset, in registry order.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.get_pipeline_preset" title="nvitk.gui.pipeline.data_presets.get_pipeline_preset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_pipeline_preset</span></code></a>(→ PipelinePresetSpec)</p></td>
+<td><p>Look up the registered <a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="nvitk.gui.pipeline.data_presets.PipelinePresetSpec"><code class="xref py py-class docutils literal notranslate"><span class="pre">PipelinePresetSpec</span></code></a> for <em>preset_id</em>; raises <code class="docutils literal notranslate"><span class="pre">KeyError</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._path_from_config" title="nvitk.gui.pipeline.data_presets._path_from_config"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_path_from_config</span></code></a>(→ pathlib.Path | None)</p></td>
+<td><p>Read a path-valued attribute <em>name</em> off a pipeline config module <em>mod</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if unset.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._is_cohort_dir_name" title="nvitk.gui.pipeline.data_presets._is_cohort_dir_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_is_cohort_dir_name</span></code></a>(→ bool)</p></td>
+<td><p>Cohort folder under NIFTI/DICOM/RESULTS roots (not a PESA subject).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.list_local_cohorts" title="nvitk.gui.pipeline.data_presets.list_local_cohorts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list_local_cohorts</span></code></a>(→ list[str])</p></td>
+<td><p>Discover cohort folders (e.g. <code class="docutils literal notranslate"><span class="pre">202602_Week1</span></code>) at the roots of a PESA-Fat tree.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._cohort_has_pesa_subjects" title="nvitk.gui.pipeline.data_presets._cohort_has_pesa_subjects"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_cohort_has_pesa_subjects</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>cohort</em>'s NIfTI folder contains any PESA-Fat subject directories.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.resolve_pesa_fat_batch" title="nvitk.gui.pipeline.data_presets.resolve_pesa_fat_batch"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_pesa_fat_batch</span></code></a>(→ str | None)</p></td>
+<td><p>Pick a cohort folder when batch is missing or points at a non-existent path.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.load_preset_roots" title="nvitk.gui.pipeline.data_presets.load_preset_roots"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_preset_roots</span></code></a>(→ PipelineRoots)</p></td>
+<td><p>Load default roots from a pipeline config, with optional overrides.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._is_subject_dir_name" title="nvitk.gui.pipeline.data_presets._is_subject_dir_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_is_subject_dir_name</span></code></a>(→ bool)</p></td>
+<td><p>Exclude pipeline stage folders and hidden entries.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._matches_subject_globs" title="nvitk.gui.pipeline.data_presets._matches_subject_globs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_matches_subject_globs</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>name</em> looks like a real subject directory (not junk) and matches any of <em>globs</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._list_subject_dirs" title="nvitk.gui.pipeline.data_presets._list_subject_dirs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_list_subject_dirs</span></code></a>(→ set[str])</p></td>
+<td><p>PESA* (etc.) folder names directly under <em>root</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._batch_bases" title="nvitk.gui.pipeline.data_presets._batch_bases"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_batch_bases</span></code></a>(→ tuple[pathlib.Path, pathlib.Path, ...)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">(nifti,</span> <span class="pre">dicom,</span> <span class="pre">results)</span></code> base directories, nested under the current batch for batch layouts.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._subjects_from_results_tree" title="nvitk.gui.pipeline.data_presets._subjects_from_results_tree"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_subjects_from_results_tree</span></code></a>(→ set[str])</p></td>
+<td><p>Collect PESA* under <code class="docutils literal notranslate"><span class="pre">&lt;cohort&gt;/res_*</span></code> (skip <code class="docutils literal notranslate"><span class="pre">per_subject</span></code> leaves).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.list_local_subjects" title="nvitk.gui.pipeline.data_presets.list_local_subjects"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list_local_subjects</span></code></a>(→ list[str])</p></td>
+<td><p>Discover subject folder names from enabled roots (independent of asset filters).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._is_nifti_file" title="nvitk.gui.pipeline.data_presets._is_nifti_file"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_is_nifti_file</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>path</em> has a <code class="docutils literal notranslate"><span class="pre">.nii</span></code> or <code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> extension.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._discover_dicom_assets" title="nvitk.gui.pipeline.data_presets._discover_dicom_assets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_discover_dicom_assets</span></code></a>(→ list[LocalAsset])</p></td>
+<td><p>List DICOM assets under <em>subject_dir</em>: one per subdirectory (assumed one series each), or the</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._discover_nifti_assets" title="nvitk.gui.pipeline.data_presets._discover_nifti_assets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_discover_nifti_assets</span></code></a>(→ list[LocalAsset])</p></td>
+<td><p>List every NIfTI file found anywhere under <em>subject_dir</em> (capped at <em>max_files</em>), labeled by</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets._discover_results_assets" title="nvitk.gui.pipeline.data_presets._discover_results_assets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_discover_results_assets</span></code></a>(→ list[LocalAsset])</p></td>
+<td><p>List <em>subject</em>'s pipeline output files under <em>roots</em> (batch-layout <code class="docutils literal notranslate"><span class="pre">res_*</span></code> stage</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.list_local_assets" title="nvitk.gui.pipeline.data_presets.list_local_assets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">list_local_assets</span></code></a>(→ list[LocalAsset])</p></td>
+<td><p>List openable DICOM series, NIfTI files, and result masks for <em>subject</em>.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.NIFTI_SUFFIXES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">NIFTI_SUFFIXES</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('.nii.gz',</span> <span class="pre">'.nii')</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.NIFTI_SUFFIXES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.QVTPY_PIPELINE_BUNDLE_DIRS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">QVTPY_PIPELINE_BUNDLE_DIRS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('eicab',</span> <span class="pre">'qvtpy')</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.QVTPY_PIPELINE_BUNDLE_DIRS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PESA_FAT_SUBJECT_GLOBS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">PESA_FAT_SUBJECT_GLOBS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('PESA*',)</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PESA_FAT_SUBJECT_GLOBS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._COHORT_WEEK_RE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_COHORT_WEEK_RE</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._COHORT_WEEK_RE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">PipelinePresetSpec</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="Link to this definition">¶</a></dt>
+<dd><p>Registered pipeline with default data roots from its config module.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.preset_id">
+<span class="sig-name descname"><span class="pre">preset_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.preset_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.config_module">
+<span class="sig-name descname"><span class="pre">config_module</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.config_module" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.layout">
+<span class="sig-name descname"><span class="pre">layout</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.layout" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.subject_globs">
+<span class="sig-name descname"><span class="pre">subject_globs</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.subject_globs" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.show_batch">
+<span class="sig-name descname"><span class="pre">show_batch</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.show_batch" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.default_batch">
+<span class="sig-name descname"><span class="pre">default_batch</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.default_batch" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelinePresetSpec.pesa_fat_layout">
+<span class="sig-name descname"><span class="pre">pesa_fat_layout</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec.pesa_fat_layout" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">PipelineRoots</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="Link to this definition">¶</a></dt>
+<dd><p>Resolved roots for browsing a pipeline on disk.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.preset_id">
+<span class="sig-name descname"><span class="pre">preset_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.preset_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.dicom_root">
+<span class="sig-name descname"><span class="pre">dicom_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.dicom_root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.nifti_root">
+<span class="sig-name descname"><span class="pre">nifti_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.nifti_root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.results_root">
+<span class="sig-name descname"><span class="pre">results_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.results_root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.layout">
+<span class="sig-name descname"><span class="pre">layout</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.layout" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.batch">
+<span class="sig-name descname"><span class="pre">batch</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.batch" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.subject_globs">
+<span class="sig-name descname"><span class="pre">subject_globs</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.subject_globs" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.pesa_fat_layout">
+<span class="sig-name descname"><span class="pre">pesa_fat_layout</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.pesa_fat_layout" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.subject_dicom_dir">
+<span class="sig-name descname"><span class="pre">subject_dicom_dir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.subject_dicom_dir" title="Link to this definition">¶</a></dt>
+<dd><p><em>subject</em>’s DICOM directory under this preset’s DICOM root.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.subject_nifti_dir">
+<span class="sig-name descname"><span class="pre">subject_nifti_dir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.subject_nifti_dir" title="Link to this definition">¶</a></dt>
+<dd><p><em>subject</em>’s NIfTI directory under this preset’s NIfTI root.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots.subject_results_base">
+<span class="sig-name descname"><span class="pre">subject_results_base</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots.subject_results_base" title="Link to this definition">¶</a></dt>
+<dd><p>Base results directory for <em>subject</em> (the batch subfolder for batch layouts).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PipelineRoots._subject_base">
+<span class="sig-name descname"><span class="pre">_subject_base</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PipelineRoots._subject_base" title="Link to this definition">¶</a></dt>
+<dd><p><em>subject</em>’s directory under <em>root</em>, nested under the current batch for batch layouts.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.LocalAsset">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">LocalAsset</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="Link to this definition">¶</a></dt>
+<dd><p>One openable file or DICOM directory for a subject.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.LocalAsset.kind">
+<span class="sig-name descname"><span class="pre">kind</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.LocalAsset.kind" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.LocalAsset.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.LocalAsset.label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.LocalAsset.path">
+<span class="sig-name descname"><span class="pre">path</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.LocalAsset.path" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.PRESET_REGISTRY">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">PRESET_REGISTRY</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="nvitk.gui.pipeline.data_presets.PipelinePresetSpec"><span class="pre">PipelinePresetSpec</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.PRESET_REGISTRY" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.list_pipeline_preset_ids">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">list_pipeline_preset_ids</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.list_pipeline_preset_ids" title="Link to this definition">¶</a></dt>
+<dd><p>Ids of every registered pipeline data-browser preset, in registry order.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.get_pipeline_preset">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">get_pipeline_preset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">preset_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="nvitk.gui.pipeline.data_presets.PipelinePresetSpec"><span class="pre">PipelinePresetSpec</span></a></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.get_pipeline_preset" title="Link to this definition">¶</a></dt>
+<dd><p>Look up the registered <a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelinePresetSpec" title="nvitk.gui.pipeline.data_presets.PipelinePresetSpec"><code class="xref py py-class docutils literal notranslate"><span class="pre">PipelinePresetSpec</span></code></a> for <em>preset_id</em>; raises <code class="docutils literal notranslate"><span class="pre">KeyError</span></code>
+(listing known ids) if unregistered.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._path_from_config">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_path_from_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mod</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._path_from_config" title="Link to this definition">¶</a></dt>
+<dd><p>Read a path-valued attribute <em>name</em> off a pipeline config module <em>mod</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if unset.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._is_cohort_dir_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_is_cohort_dir_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._is_cohort_dir_name" title="Link to this definition">¶</a></dt>
+<dd><p>Cohort folder under NIFTI/DICOM/RESULTS roots (not a PESA subject).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.list_local_cohorts">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">list_local_cohorts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.list_local_cohorts" title="Link to this definition">¶</a></dt>
+<dd><p>Discover cohort folders (e.g. <code class="docutils literal notranslate"><span class="pre">202602_Week1</span></code>) at the roots of a PESA-Fat tree.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._cohort_has_pesa_subjects">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_cohort_has_pesa_subjects</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cohort</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._cohort_has_pesa_subjects" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>cohort</em>’s NIfTI folder contains any PESA-Fat subject directories.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.resolve_pesa_fat_batch">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">resolve_pesa_fat_batch</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.resolve_pesa_fat_batch" title="Link to this definition">¶</a></dt>
+<dd><p>Pick a cohort folder when batch is missing or points at a non-existent path.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.load_preset_roots">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">load_preset_roots</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">preset_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><span class="pre">PipelineRoots</span></a></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.load_preset_roots" title="Link to this definition">¶</a></dt>
+<dd><p>Load default roots from a pipeline config, with optional overrides.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._is_subject_dir_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_is_subject_dir_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._is_subject_dir_name" title="Link to this definition">¶</a></dt>
+<dd><p>Exclude pipeline stage folders and hidden entries.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._matches_subject_globs">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_matches_subject_globs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">globs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._matches_subject_globs" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>name</em> looks like a real subject directory (not junk) and matches any of <em>globs</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._list_subject_dirs">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_list_subject_dirs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">globs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._list_subject_dirs" title="Link to this definition">¶</a></dt>
+<dd><p>PESA* (etc.) folder names directly under <em>root</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._batch_bases">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_batch_bases</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><span class="pre">PipelineRoots</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._batch_bases" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(nifti,</span> <span class="pre">dicom,</span> <span class="pre">results)</span></code> base directories, nested under the current batch for batch layouts.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._subjects_from_results_tree">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_subjects_from_results_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">r_base</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">globs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._subjects_from_results_tree" title="Link to this definition">¶</a></dt>
+<dd><p>Collect PESA* under <code class="docutils literal notranslate"><span class="pre">&lt;cohort&gt;/res_*</span></code> (skip <code class="docutils literal notranslate"><span class="pre">per_subject</span></code> leaves).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.list_local_subjects">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">list_local_subjects</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><span class="pre">PipelineRoots</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_dicom</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_nifti</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_results</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.list_local_subjects" title="Link to this definition">¶</a></dt>
+<dd><p>Discover subject folder names from enabled roots (independent of asset filters).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._is_nifti_file">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_is_nifti_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._is_nifti_file" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>path</em> has a <code class="docutils literal notranslate"><span class="pre">.nii</span></code> or <code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> extension.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._discover_dicom_assets">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_discover_dicom_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="nvitk.gui.pipeline.data_presets.LocalAsset"><span class="pre">LocalAsset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._discover_dicom_assets" title="Link to this definition">¶</a></dt>
+<dd><p>List DICOM assets under <em>subject_dir</em>: one per subdirectory (assumed one series each), or the
+directory itself if it directly contains files.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._discover_nifti_assets">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_discover_nifti_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="nvitk.gui.pipeline.data_presets.LocalAsset"><span class="pre">LocalAsset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._discover_nifti_assets" title="Link to this definition">¶</a></dt>
+<dd><p>List every NIfTI file found anywhere under <em>subject_dir</em> (capped at <em>max_files</em>), labeled by
+their path relative to <em>subject_dir</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets._discover_results_assets">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">_discover_results_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><span class="pre">PipelineRoots</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="nvitk.gui.pipeline.data_presets.LocalAsset"><span class="pre">LocalAsset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets._discover_results_assets" title="Link to this definition">¶</a></dt>
+<dd><p>List <em>subject</em>’s pipeline output files under <em>roots</em> (batch-layout <code class="docutils literal notranslate"><span class="pre">res_*</span></code> stage
+subdirectories, including a <code class="docutils literal notranslate"><span class="pre">per_subject</span></code> fallback, or the flat results tree otherwise).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.pipeline.data_presets.list_local_assets">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.pipeline.data_presets.</span></span><span class="sig-name descname"><span class="pre">list_local_assets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.PipelineRoots" title="nvitk.gui.pipeline.data_presets.PipelineRoots"><span class="pre">PipelineRoots</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_dicom</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_nifti</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_results</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.gui.pipeline.data_presets.LocalAsset" title="nvitk.gui.pipeline.data_presets.LocalAsset"><span class="pre">LocalAsset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.pipeline.data_presets.list_local_assets" title="Link to this definition">¶</a></dt>
+<dd><p>List openable DICOM series, NIfTI files, and result masks for <em>subject</em>.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.gui</a><ul>
+  <li><a href="../index.html">nvitk.gui.pipeline</a><ul>
+      <li>Previous: <a href="../catalog/index.html" title="previous chapter">nvitk.gui.pipeline.catalog</a></li>
+      <li>Next: <a href="../form/index.html" title="next chapter">nvitk.gui.pipeline.form</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/gui/pipeline/data_presets/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

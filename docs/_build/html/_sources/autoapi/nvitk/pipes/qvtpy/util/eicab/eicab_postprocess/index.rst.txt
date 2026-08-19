@@ -1,0 +1,45 @@
+nvitk.pipes.qvtpy.util.eicab.eicab_postprocess
+==============================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.eicab.eicab_postprocess
+
+.. autoapi-nested-parse::
+
+   ICA Otsu resegmentation and region growing after eICAB (stage 1).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.resegment_icas_otsu
+   nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.region_grow_icas
+   nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.postprocess_eicab_labels
+   nvitk.pipes.qvtpy.util.eicab.eicab_postprocess.postprocess_eicab_directory
+
+
+Module Contents
+---------------
+
+.. py:function:: resegment_icas_otsu(intensity: Any, labels: np.ndarray, *, ica_ids: Sequence[int] = _DEFAULT_ICA_IDS, cl_mask: np.ndarray | None = None) -> dict[int, np.ndarray]
+
+   Otsu-resegment each ICA; erode only when the raw eICAB ICA mask is suspect.
+
+
+.. py:function:: region_grow_icas(intensity: Any, labels: np.ndarray, *, ica_ids: Sequence[int] = _DEFAULT_ICA_IDS, rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS, intensity_frac: float = _ICA_RG_INTENSITY_FRAC) -> dict[int, int]
+
+   Grow ICA labels into empty voxels; barriers are other labels dilated by *rg_barrier_radius*.
+
+
+.. py:function:: postprocess_eicab_labels(intensity: Any, labels: np.ndarray, *, ica_ids: Sequence[int] = _DEFAULT_ICA_IDS, rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS, rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC, otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO) -> dict[str, Any]
+
+   Otsu ICA masks (volume guard) then hyperintense ICA region growing.
+
+
+.. py:function:: postprocess_eicab_directory(eicab_dir: pathlib.Path, *, tof_path: pathlib.Path | None = None, preference: str = 'cw', ica_ids: Sequence[int] = _DEFAULT_ICA_IDS, rg_barrier_radius: int = _ICA_RG_BARRIER_RADIUS, rg_intensity_frac: float = _ICA_RG_INTENSITY_FRAC, otsu_max_volume_ratio: float = _OTSU_MAX_VOLUME_RATIO) -> dict[str, Any]
+
+   Load eICAB mask + TOF, write ``*_pp`` mask and ``centerlines_mask_pp.nii.gz``.
+
+

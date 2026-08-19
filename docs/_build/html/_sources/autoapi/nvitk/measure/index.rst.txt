@@ -1,0 +1,423 @@
+nvitk.measure
+=============
+
+.. py:module:: nvitk.measure
+
+.. autoapi-nested-parse::
+
+   Image measurements: volume, intensity, SUV, voxel-based overlap, surface
+   distance, radiomics, and intensity correlation.
+
+   Two APIs are provided:
+
+   1. **Functional primitives** (the public core). Each one takes a
+      :class:`~nvitk.types.Image` (or raw array + spacing) and returns a ``dict``
+      (or ``Image`` when it returns derived voxels). They are pure functions
+      and backend-aware.
+   2. **A thin :class:`Measurer` orchestrator** (see :mod:`nvitk.measure.measurer`)
+      that binds an (image, mask) pair once, optionally aligns them, and lets you
+      chain ``.volume()``, ``.intensity()``, ``.suv()``, ``.voxel_metrics(ref)``
+      etc. without retyping the inputs.
+
+   Example::
+
+       from nvitk.measure import volume_cc, masked_stats, Measurer
+
+       vol = volume_cc(mask)
+       stats = masked_stats(pet, mask, stats=("mean", "max", "p95"))
+
+       m = Measurer(pet, mask).align("raw_to_mask")
+       df = (
+           m.volume()
+            | m.intensity(stats=("mean", "max"))
+            | m.suv(kinds=("bw",))
+       )
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/measure/_common/index
+   /autoapi/nvitk/measure/compare/index
+   /autoapi/nvitk/measure/cross_section/index
+   /autoapi/nvitk/measure/hemodynamics/index
+   /autoapi/nvitk/measure/intensity/index
+   /autoapi/nvitk/measure/mask_hemodynamics/index
+   /autoapi/nvitk/measure/measurer/index
+   /autoapi/nvitk/measure/morpho/index
+   /autoapi/nvitk/measure/morphometrics/index
+   /autoapi/nvitk/measure/morphometrics_config/index
+   /autoapi/nvitk/measure/radiomics/index
+   /autoapi/nvitk/measure/surface/index
+   /autoapi/nvitk/measure/suv/index
+   /autoapi/nvitk/measure/volume/index
+   /autoapi/nvitk/measure/voxel/index
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.measure.Measurer
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.correlation_stats
+   nvitk.measure.pearson
+   nvitk.measure.rmse
+   nvitk.measure.sample_at_physical_points
+   nvitk.measure.spearman
+   nvitk.measure.masked_stats
+   nvitk.measure.compute_radiomics
+   nvitk.measure.integrated_intensity
+   nvitk.measure.hausdorff
+   nvitk.measure.hausdorff95
+   nvitk.measure.mdsd
+   nvitk.measure.msd
+   nvitk.measure.stdsd
+   nvitk.measure.surface_metrics
+   nvitk.measure.suv_image
+   nvitk.measure.suv_stats
+   nvitk.measure.volume_cc
+   nvitk.measure.volume_mm3
+   nvitk.measure.mean_flow_ml_s
+   nvitk.measure.pulsatility_index
+   nvitk.measure.resistivity_index
+   nvitk.measure.through_plane_velocity_series
+   nvitk.measure.velocity_mm_s_from_phases
+   nvitk.measure.confusion_counts
+   nvitk.measure.dice
+   nvitk.measure.fnr
+   nvitk.measure.fpr
+   nvitk.measure.jaccard
+   nvitk.measure.precision
+   nvitk.measure.recall
+   nvitk.measure.volume_similarity
+   nvitk.measure.voxel_metrics
+
+
+Package Contents
+----------------
+
+.. py:function:: correlation_stats(a: Any, b: Any) -> dict[str, float]
+
+   Return Pearson r/p, Spearman r/p, MAE, RMSE, mean % difference, and per-array summaries.
+
+   Arithmetic (diff / means / std) runs on the active backend; ``scipy.stats``
+   is the single host hop.
+
+
+.. py:function:: pearson(a: Any, b: Any) -> tuple[float, float]
+
+   Return ``(pearson_r, pearson_p)`` for two 1-D arrays.
+
+
+.. py:function:: rmse(a: Any, b: Any) -> float
+
+   Root mean squared error.
+
+
+.. py:function:: sample_at_physical_points(image: nvitk.types.Image | Any, affine: Any | None = None, physical_points: Any = None, *, order: int = 3, mode: str = 'constant', cval: float = 0.0) -> Any
+
+   Sample *image* at *physical_points* (world coordinates) using the provided *affine*.
+
+   When *image* is an :class:`Image` and *affine* is None, ``image.affine`` is used.
+   *physical_points* is an ``(N, 3)`` array-like of world coordinates.
+
+   Returns an ``(N,)`` NumPy array of sampled values (cubic interpolation by default).
+
+   .. rubric:: Notes
+
+   The 4×4 affine inversion runs on the host (trivial cost) using
+   ``numpy.linalg.inv``. The heavy voxel sampling (``ndi.map_coordinates``) uses
+   the proxy ``ndi``, so it runs on GPU when the active backend is CuPy.
+
+
+.. py:function:: spearman(a: Any, b: Any) -> tuple[float, float]
+
+   Return ``(spearman_r, spearman_p)`` for two 1-D arrays.
+
+
+.. py:function:: masked_stats(image: nvitk.types.Image | Any, mask: nvitk.types.Image | Any, *, stats: Iterable[str] = ('mean', 'median', 'max', 'p95', 'std', 'sum')) -> dict[str, float]
+
+   Compute a set of intensity statistics for *image* restricted to ``mask > 0``.
+
+   :param image: Intensity image.
+   :param mask: Label or binary mask image/array with same shape as *image*.
+   :param stats: Iterable of stat names to compute. Supported:
+                 ``mean``, ``median``, ``max``, ``min``, ``p95``, ``p5``, ``std``, ``sum``, ``count``.
+
+   :returns: Plain Python floats (CuPy arrays are materialized to host at the tail of the pipeline).
+   :rtype: dict[str, float]
+
+
+.. py:class:: Measurer
+
+   Bind an intensity/raw image and a segmentation mask together.
+
+   Instances are immutable; transformations like :meth:`align` return a new
+   :class:`Measurer`. All measurement methods return plain :class:`dict`\s.
+
+
+   .. py:attribute:: image
+      :type:  nvitk.types.Image
+
+
+   .. py:attribute:: mask
+      :type:  nvitk.types.Image
+
+
+   .. py:method:: align(direction: str = 'mask_to_raw', *, method: str = 'affine', order: int | None = None) -> Measurer
+
+      Resample image or mask so both share a grid.
+
+      :param direction: ``'raw_to_mask'`` (default) -> image resampled to mask's grid.
+                        ``'mask_to_raw'`` -> mask resampled to image's grid.
+      :param method: Currently only ``'affine'``.
+      :param order: Interpolation order. Defaults to 1 for image and 0 for mask.
+
+
+
+   .. py:method:: with_mask(mask: nvitk.types.Image) -> Measurer
+
+      Return a new :class:`Measurer` with *mask* swapped in (same image).
+
+
+
+   .. py:method:: with_image(image: nvitk.types.Image) -> Measurer
+
+      Return a new :class:`Measurer` with *image* swapped in (same mask).
+
+
+
+   .. py:method:: volume() -> dict[str, float]
+
+      Physical volume of the mask in mm³ and cc.
+
+
+
+   .. py:method:: intensity(*, stats: Iterable[str] = ('mean', 'median', 'max', 'p95', 'std', 'sum')) -> dict[str, float]
+
+      Requested intensity statistics of the image within the mask.
+
+
+
+   .. py:method:: suv(*, kinds: Iterable[str] = ('bw', ), stats: Iterable[str] = ('mean', 'median', 'max', 'min', 'std', 'p95', 'p5', 'p99'), philips: bool = True, revert_scaling: bool = False, metadata: dict[str, Any] | None = None) -> dict[str, float]
+
+      SUV statistics within the mask (BW/BSA/LBM kinds), from the image's PET metadata.
+
+
+
+   .. py:method:: suv_image(*, kind: str = 'bw', philips: bool = True, revert_scaling: bool = False) -> nvitk.types.Image
+
+      Return the full SUV-converted :class:`Image` (unmasked).
+
+
+
+   .. py:method:: integrated_intensity() -> float
+
+      Sum of intensity × voxel-volume over the mask (e.g. total lesion glycolysis).
+
+
+
+   .. py:method:: voxel_metrics(reference: nvitk.types.Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+      Overlap metrics (dice/jaccard/…) of this mask against a *reference* mask.
+
+
+
+   .. py:method:: surface_metrics(reference: nvitk.types.Image, *, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+      Surface-distance metrics (hausdorff/msd/…) of this mask against a *reference* mask.
+
+
+
+   .. py:method:: radiomics(*, feature_classes: Iterable[str] | None = None) -> dict[str, float]
+
+      PyRadiomics feature values for the image within the mask.
+
+
+
+   .. py:method:: correlation(other: nvitk.types.Image) -> dict[str, float]
+
+      Pearson/Spearman/MAE/RMSE between self.image and *other* on ``self.mask > 0``.
+
+
+
+.. py:function:: compute_radiomics(image: nvitk.types.Image | Any, mask: nvitk.types.Image | Any, *, feature_classes: Iterable[str] | None = None, spacing: tuple[float, Ellipsis] | None = None) -> dict[str, float]
+
+   Compute PyRadiomics first-order / shape features for (*image*, *mask*).
+
+   :param image: Intensity image. May be ``None`` only when ``feature_classes == {'shape'}``.
+   :param mask: Binary/label mask with the same shape as *image*.
+   :param feature_classes: Iterable of class names. Defaults to ``('firstorder', 'shape')``.
+   :param spacing: Explicit spacing in mm. Defaults to the mask's :attr:`Image.spacing`.
+
+   :returns: Feature names are normalized to ``fo_...`` / ``s_...`` prefixes.
+   :rtype: dict[str, float]
+
+
+.. py:function:: integrated_intensity(raw: nvitk.types.Image | Any, mask: nvitk.types.Image | Any) -> float
+
+   Integrated intensity of *raw* over ``mask > 0`` (unit-less sum).
+
+
+.. py:function:: hausdorff(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Hausdorff distance (mm): the worst-case surface-to-surface distance between two masks.
+
+
+.. py:function:: hausdorff95(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   95th-percentile Hausdorff distance (mm): robust to a few outlier surface voxels.
+
+
+.. py:function:: mdsd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Median surface distance (mm) between the two mask boundaries.
+
+
+.. py:function:: msd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Mean surface distance (mm) between the two mask boundaries.
+
+
+.. py:function:: stdsd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Standard deviation of surface distances (mm) — boundary agreement spread.
+
+
+.. py:function:: surface_metrics(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+   Compute multiple surface metrics in one pass (all sharing the same distance array).
+
+
+.. py:function:: suv_image(pet: nvitk.types.Image | Any, metadata: Dict[str, Any] | None = None, *, kind: str = 'bw', philips: bool = False, revert_scaling: bool = False) -> nvitk.types.Image | Any
+
+   Convert a raw PET image to an SUV image.
+
+   :param pet: PET image. If an :class:`Image`, *metadata* defaults to ``pet.metadata``.
+   :param metadata: DICOM-style metadata. Required if *pet* is a bare array.
+   :param kind: ``bw``, ``lbm``, ``bsa``, or ``ibw`` (also accepts legacy ``SUVbw``...).
+   :param philips: If True (default) and the Philips ``(7053,1000)`` SUV factor is present,
+                   use that as a direct multiplier. Set to False to always compute from
+                   half-life/weight.
+   :param revert_scaling: If True, undo scanner-applied ``RescaleSlope/Intercept`` per slice before
+                          applying the SUV factor.
+
+   :returns: SUV image. Matches the input type (``Image`` in -> ``Image`` out).
+   :rtype: Image | ndarray
+
+
+.. py:function:: suv_stats(pet: nvitk.types.Image | Any, mask: nvitk.types.Image | Any, metadata: Dict[str, Any] | None = None, *, kinds: Iterable[str] = ('bw', ), stats: Iterable[str] = ('mean', 'median', 'max', 'min', 'std', 'p95', 'p5', 'p99'), philips: bool = False, revert_scaling: bool = False) -> Dict[str, float]
+
+   Compute SUV statistics restricted to ``mask > 0``.
+
+   :param pet: PET image (raw scanner counts unless *revert_scaling* is used).
+   :param mask: Mask image/array with same shape as *pet*.
+   :param metadata: DICOM-style metadata. Defaults to ``pet.metadata`` when available.
+   :param kinds: Iterable of SUV kinds (``bw``/``lbm``/``bsa``/``ibw``).
+   :param stats: Per-kind stats to compute (same names as :func:`nvitk.measure.masked_stats`).
+   :param philips: Enable the Philips ``(7053,1000)`` short-circuit for SUVbw.
+   :param revert_scaling: If True, undo per-slice rescaling before applying the SUV factor.
+
+   :returns: ``{'SUVbw_mean': ..., 'SUVbw_max': ..., 'SUVlbm_mean': ...}``.
+   :rtype: dict[str, float]
+
+
+.. py:function:: volume_cc(mask: nvitk.types.Image | Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Return the mask's volume in cubic centimetres (mL).
+
+
+.. py:function:: volume_mm3(mask: nvitk.types.Image | Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Return the number of non-zero voxels in *mask* × voxel volume (mm^3).
+
+
+.. py:function:: mean_flow_ml_s(flow_t, temporal_resolution_s: float | None = None)
+
+   Time-mean flow proxy (same units as *flow_t* per frame).
+
+
+.. py:function:: pulsatility_index(flow_t, *, eps: float = 1e-09)
+
+   PI = (max_t - min_t) / mean(Q) per row on non-negative flow.
+
+   Absolute value is applied so signed through-plane polarity does not invert
+   the denominator. Prefer abs'ing ``Q(t)`` once upstream when possible.
+
+
+.. py:function:: resistivity_index(flow_t, *, eps: float = 1e-09)
+
+   RI = (max_t - min_t) / max(|flow|) per row.
+
+
+.. py:function:: through_plane_velocity_series(vx, vy, vz, *, i: int, j: int, k: int, tangent)
+
+   Time series of velocity projected onto unit *tangent* at voxel (i,j,k).
+
+
+.. py:function:: velocity_mm_s_from_phases(ap, rl, fh)
+
+   PC velocity components in mm/s (same convention as :mod:`nvitk.io.conversors.phase2volume`).
+
+
+.. py:function:: confusion_counts(label_true: Any, label_pred: Any) -> dict[str, int]
+
+   Return ``{'TP','TN','FP','FN'}`` counts from two binary masks.
+
+
+.. py:function:: dice(label_true: Any, label_pred: Any) -> float
+
+   Dice overlap ``2·TP / (2·TP + FP + FN)`` in ``[0, 1]`` (``0.0`` when both masks are empty).
+
+
+.. py:function:: fnr(label_true: Any, label_pred: Any) -> float
+
+   False-negative rate ``FN / (FN + TP)``.
+
+
+.. py:function:: fpr(label_true: Any, label_pred: Any) -> float
+
+   False-positive rate ``FP / (FP + TN)``.
+
+
+.. py:function:: jaccard(label_true: Any, label_pred: Any) -> float
+
+   Jaccard / IoU ``TP / (TP + FP + FN)`` in ``[0, 1]``.
+
+
+.. py:function:: precision(label_true: Any, label_pred: Any) -> float
+
+   Fraction of predicted-positive voxels that are correct ``TP / (TP + FP)``.
+
+
+.. py:function:: recall(label_true: Any, label_pred: Any) -> float
+
+   Fraction of true-positive voxels that were recovered ``TP / (TP + FN)`` (sensitivity).
+
+
+.. py:function:: volume_similarity(label_true: Any, label_pred: Any) -> float
+
+   Relative volume difference ``|n_pred − n_true| / n_true`` (0 = identical volumes).
+
+
+.. py:function:: voxel_metrics(label_true: Any, label_pred: Any, *, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+   Compute a named subset of voxel-based metrics.
+
+   :param metrics: Iterable of names from
+                   ``{'TP','TN','FP','FN','dice','jaccard','precision','recall','fpr','fnr','vs'}``.
+                   Default: all of them.
+
+

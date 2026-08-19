@@ -1,0 +1,161 @@
+nvitk.viz.atlas_sources
+=======================
+
+.. py:module:: nvitk.viz.atlas_sources
+
+.. autoapi-nested-parse::
+
+   Where the brain parcellations used for rendering come from.
+
+   Description
+   -----------
+   :mod:`nvitk.viz.brainshow` can paint region values onto any atlas it is handed, but two of the
+   atlases this project reports measurements in are not fetchable from anywhere:
+
+   ``desikan``
+       The Desikan–Killiany cortical parcellation. It is what FreeSurfer's ``aparc`` produces and what
+       the ASL and T1 pipelines publish their ``ctx-lh-…`` / ``left_…`` region ids against — but
+       ``nilearn.datasets`` ships Destrieux, not Desikan, so there is nothing to download.
+
+   ``vascular``
+       The arterial-territory / watershed atlas the ASL pipeline uses for its ``left_mca_8``-style
+       parcels. A lab-specific file with no public distribution.
+
+   So the geometry has to be *located* rather than fetched. This module answers "where is it", in one
+   place, with the same precedence for both:
+
+   1. an explicit environment variable — the escape hatch for a one-off run or a cluster job;
+   2. the ``atlas`` block of ``.nvitk/settings.json``, found by the same search
+      :func:`~nvitk.db.settings_paths.settings_json_path` already uses for the ``db`` block;
+   3. an ``ATLAS/`` directory beside the configured dataset root, since that is where these files
+      actually live in the lab tree;
+   4. for Desikan only, a FreeSurfer installation's ``fsaverage`` surface labels.
+
+   Nothing here reads the atlas — that is :mod:`~nvitk.viz.brainshow`'s job. These functions return
+   paths (or ``None``) and never raise, so a caller can report *every* place it looked when nothing is
+   configured, which is the difference between an actionable error and "atlas not found".
+
+   Settings example
+   ----------------
+   .. code-block:: json
+
+       {
+         "atlas": {
+           "root":     "…/DB/ATLAS/",
+           "desikan":  "…/ATLAS/aparc+aseg_MNI.nii.gz",
+           "vascular": "…/ATLAS/arterial_atlas_watershed_tpm_correct_space.nii.gz"
+         }
+       }
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.viz.atlas_sources.ENV_DESIKAN
+   nvitk.viz.atlas_sources.ENV_VASCULAR
+   nvitk.viz.atlas_sources.ENV_ATLAS_ROOT
+   nvitk.viz.atlas_sources.ATLAS_SUFFIXES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.viz.atlas_sources.load_atlas_settings_block
+   nvitk.viz.atlas_sources.atlas_root
+   nvitk.viz.atlas_sources.desikan_atlas_path
+   nvitk.viz.atlas_sources.vascular_atlas_path
+   nvitk.viz.atlas_sources.freesurfer_home
+   nvitk.viz.atlas_sources.fsaverage_aparc_annot
+   nvitk.viz.atlas_sources.atlas_cache_dir
+   nvitk.viz.atlas_sources.describe_search
+
+
+Module Contents
+---------------
+
+.. py:data:: ENV_DESIKAN
+   :type:  str
+   :value: 'NVITK_DESIKAN_ATLAS'
+
+
+.. py:data:: ENV_VASCULAR
+   :type:  str
+   :value: 'NVITK_VASCULAR_ATLAS'
+
+
+.. py:data:: ENV_ATLAS_ROOT
+   :type:  str
+   :value: 'NVITK_ATLAS_ROOT'
+
+
+.. py:data:: ATLAS_SUFFIXES
+   :type:  tuple[str, Ellipsis]
+   :value: ('.nii', '.nii.gz', '.mgz', '.annot')
+
+
+.. py:function:: load_atlas_settings_block() -> dict[str, Any]
+
+   Parse the ``atlas`` section of ``.nvitk/settings.json``, or return ``{}``.
+
+
+.. py:function:: atlas_root() -> pathlib.Path | None
+
+   Directory the parcellation files live in.
+
+   ``NVITK_ATLAS_ROOT`` → ``atlas.root`` in settings → an ``ATLAS`` directory beside the configured
+   dataset root, which is where the lab tree keeps them (``…/DB/ATLAS`` next to
+   ``…/DB/nvitk-dataset``).
+
+
+.. py:function:: desikan_atlas_path() -> pathlib.Path | None
+
+   Configured Desikan–Killiany parcellation (a NIfTI volume or a FreeSurfer ``.annot``).
+
+
+.. py:function:: vascular_atlas_path() -> pathlib.Path | None
+
+   Configured arterial-territory / watershed parcellation (a NIfTI volume).
+
+
+.. py:function:: freesurfer_home() -> pathlib.Path | None
+
+   A usable FreeSurfer installation, from ``FREESURFER_HOME`` or the conventional locations.
+
+
+.. py:function:: fsaverage_aparc_annot() -> tuple[pathlib.Path, pathlib.Path, str] | None
+
+   ``(lh, rh, subject)`` paths to an fsaverage ``?h.aparc.annot`` — the canonical Desikan labels.
+
+   Searched under ``$SUBJECTS_DIR`` first, then a FreeSurfer install's own ``subjects`` directory,
+   trying each entry of :data:`_FSAVERAGE_SUBJECTS` in turn.
+
+   *subject* matters to the caller: an annot file has one label per **vertex**, so it is only valid
+   against the mesh with that vertex count. Returning it lets the caller mesh against the same
+   resolution instead of silently producing a texture the mesh cannot index.
+
+   Returns ``None`` unless **both** hemispheres are present: half a parcellation would draw a brain
+   with one blank side, which reads as a result rather than as a missing file.
+
+
+.. py:function:: atlas_cache_dir() -> pathlib.Path
+
+   Directory for parcellations nvitk generates itself, created on demand.
+
+   Under ``$XDG_CACHE_HOME`` (or ``~/.cache``), *not* in the repo: a generated atlas is a build
+   product of this machine, and committing one would ship a file whose provenance the repo cannot
+   describe.
+
+
+.. py:function:: describe_search(kind: str) -> str
+
+   Every place *kind* (``"desikan"`` / ``"vascular"``) was looked for, for an error message.
+
+   A resolver that fails should say where it looked. "No Desikan atlas configured" sends the reader
+   to the documentation; this sends them to the line they need to add.
+
+

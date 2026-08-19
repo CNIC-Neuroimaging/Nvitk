@@ -1,0 +1,111 @@
+nvitk.registration.ants
+=======================
+
+.. py:module:: nvitk.registration.ants
+
+.. autoapi-nested-parse::
+
+   ANTsPy registration backend.
+
+   This module wraps `ants.registration` / `ants.apply_transforms` behind a small,
+   file-path oriented API for use in pipelines and CLIs.
+
+   Supported `type_of_transform` values (from ANTsPy docs):
+
+   - Translation
+   - Rigid
+   - Similarity
+   - QuickRigid
+   - DenseRigid
+   - BOLDRigid
+   - Affine
+   - AffineFast
+   - BOLDAffine
+   - TRSAA
+   - Elastic
+   - ElasticSyN
+   - SyN
+   - SyNRA
+   - SyNOnly
+   - SyNCC
+   - SyNabp
+   - SyNBold
+   - SyNBoldAff
+   - SyNAggro
+   - SyNLessAggro
+   - TV[n]
+   - TVMSQ
+   - TVMSQC
+   - antsRegistrationSyN[x]
+   - antsRegistrationSyNQuick[x]
+   - antsRegistrationSyNRepro[x]
+   - antsRegistrationSyNQuickRepro[x]
+
+   See the upstream documentation for full details and parameter meanings.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.registration.ants.ANTSPY_TYPE_OF_TRANSFORM
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.registration.ants.AntsRegistrationResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.registration.ants.ants_register
+   nvitk.registration.ants.ants_apply
+
+
+Module Contents
+---------------
+
+.. py:data:: ANTSPY_TYPE_OF_TRANSFORM
+   :type:  tuple[str, Ellipsis]
+   :value: ('Translation', 'Rigid', 'Similarity', 'QuickRigid', 'DenseRigid', 'BOLDRigid', 'Affine',...
+
+
+.. py:class:: AntsRegistrationResult
+
+   Paths produced by an ANTs registration: warped moving image and forward/inverse transforms.
+
+
+   .. py:attribute:: warped_moving_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: fwd_transforms
+      :type:  tuple[pathlib.Path, Ellipsis]
+
+
+   .. py:attribute:: inv_transforms
+      :type:  tuple[pathlib.Path, Ellipsis]
+
+
+   .. py:attribute:: out_prefix
+      :type:  str
+
+
+.. py:function:: ants_register(*, fixed_path: pathlib.Path, moving_path: pathlib.Path, out_dir: pathlib.Path, type_of_transform: str = 'SyN', write_composite_transform: bool = False, verbose: bool = False) -> AntsRegistrationResult
+
+   Register MOVING to FIXED and write outputs under *out_dir*.
+
+
+.. py:function:: ants_apply(*, fixed_path: pathlib.Path, moving_path: pathlib.Path, out_path: pathlib.Path, transforms: list[pathlib.Path], interpolator: str = 'linear', whichtoinvert: list[bool] | None = None, verbose: bool = False) -> pathlib.Path
+
+   Apply transforms to map MOVING into FIXED space.
+
+

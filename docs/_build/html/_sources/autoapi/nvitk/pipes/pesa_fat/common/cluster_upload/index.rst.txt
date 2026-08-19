@@ -1,0 +1,47 @@
+nvitk.pipes.pesa_fat.common.cluster_upload
+==========================================
+
+.. py:module:: nvitk.pipes.pesa_fat.common.cluster_upload
+
+.. autoapi-nested-parse::
+
+   SFTP upload of PESA-Fat DICOM trees to cluster storage.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.cluster_upload.remote_subject_dicom_dir
+   nvitk.pipes.pesa_fat.common.cluster_upload.local_subject_has_dicoms
+   nvitk.pipes.pesa_fat.common.cluster_upload.upload_subject_dicoms
+   nvitk.pipes.pesa_fat.common.cluster_upload.upload_batch_dicoms
+
+
+Module Contents
+---------------
+
+.. py:function:: remote_subject_dicom_dir(remote_dicom_root: pathlib.Path, batch: str, subject: str) -> str
+
+   POSIX path ``<remote_dicom_root>/<batch>/<subject>`` on the cluster.
+
+
+.. py:function:: local_subject_has_dicoms(local_subject_dir: pathlib.Path) -> bool
+
+   True if *local_subject_dir* exists and contains at least one entry.
+
+
+.. py:function:: upload_subject_dicoms(local_subject_dir: pathlib.Path, remote_dicom_root: pathlib.Path, batch: str, subject: str, *, host: str, user: str, password: str, port: int = 22, skip_if_remote_nonempty: bool = True) -> bool
+
+   Upload one subject's DICOM tree to the cluster PESA-Fat layout.
+
+   Returns ``True`` if data is present on the cluster (uploaded or skipped).
+
+
+.. py:function:: upload_batch_dicoms(local_lay, cluster_lay, subjects: list[str], *, host: str, user: str, password: str, port: int = 22, skip_if_remote_nonempty: bool = True) -> None
+
+   Upload DICOM trees for all *subjects* in a batch.
+
+

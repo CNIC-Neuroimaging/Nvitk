@@ -1,0 +1,75 @@
+nvitk.transform.oblique
+=======================
+
+.. py:module:: nvitk.transform.oblique
+
+.. autoapi-nested-parse::
+
+   Oblique reslicing utilities (backend-aware map_coordinates).
+
+   This module uses `nvitk.core.backend.setup` to expose `np` and `ndi` for either
+   NumPy+SciPy or CuPy+cupyx.scipy.ndimage depending on the current backend.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.transform.oblique.ObliquePlaneCoords
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.transform.oblique.oblique_plane_coords
+   nvitk.transform.oblique.oblique_slice_with_coords
+   nvitk.transform.oblique.oblique_slice
+
+
+Module Contents
+---------------
+
+.. py:class:: ObliquePlaneCoords
+
+   Precomputed ``map_coordinates`` sampling grid for one oblique plane.
+
+
+   .. py:attribute:: coords
+      :type:  Any
+
+
+   .. py:attribute:: radius_vox
+      :type:  float
+
+
+   .. py:attribute:: res
+      :type:  int
+
+
+.. py:function:: oblique_plane_coords(center_xyz, u_xyz, v_xyz, *, radius_vox: float, res: int) -> ObliquePlaneCoords
+
+   Build a reusable coordinate grid for :func:`oblique_slice_with_coords`.
+
+
+.. py:function:: oblique_slice_with_coords(vol, plane: ObliquePlaneCoords, *, order: int, mode: str = 'constant', cval: float = 0.0)
+
+   Sample *vol* on a plane using a precomputed :class:`ObliquePlaneCoords` grid.
+
+
+.. py:function:: oblique_slice(vol, *, center_xyz, u_xyz, v_xyz, radius_vox: float, res: int, order: int, mode: str = 'constant', cval: float = 0.0)
+
+   Sample `vol` on an oblique plane in voxel coordinates (x,y,z).
+
+   :param vol: 3D array (NumPy or CuPy).
+   :param center_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param u_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param v_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param radius_vox: Half-size of the square plane in voxels.
+   :param res: Output resolution (res × res).
+   :param order: Interpolation order (0 for masks, 1 for images).
+
+

@@ -1,0 +1,218 @@
+nvitk.pipes.pesa_fat.dixon_v5.config
+====================================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5.config
+
+.. autoapi-nested-parse::
+
+   DIXON v5 configuration.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.config.PIPELINE_NAME
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_JOB_PREFIX
+   nvitk.pipes.pesa_fat.dixon_v5.config.STAGE1_DIR
+   nvitk.pipes.pesa_fat.dixon_v5.config.STAGE2_DIR
+   nvitk.pipes.pesa_fat.dixon_v5.config.STAGE3_DIR
+   nvitk.pipes.pesa_fat.dixon_v5.config.INPUT_PREFIX
+   nvitk.pipes.pesa_fat.dixon_v5.config.INPUT_SUFFIXES
+   nvitk.pipes.pesa_fat.dixon_v5.config.HEAD_TASKS
+   nvitk.pipes.pesa_fat.dixon_v5.config.THORAX_TASKS
+   nvitk.pipes.pesa_fat.dixon_v5.config.LEGS_TASKS
+   nvitk.pipes.pesa_fat.dixon_v5.config.REGIONS
+   nvitk.pipes.pesa_fat.dixon_v5.config.REGION_ORDER
+   nvitk.pipes.pesa_fat.dixon_v5.config.MEASURE_SPECS
+   nvitk.pipes.pesa_fat.dixon_v5.config.WF_REFERENCE_LABELS
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_PROJECT
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_ACCOUNT
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_NGPU
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_H_VMEM
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_QUEUE
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_CPU_H_VMEM
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_CPU_NGPU
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_LOG_DIR
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_ERR_DIR
+   nvitk.pipes.pesa_fat.dixon_v5.config.CONTAINER_PATH
+   nvitk.pipes.pesa_fat.dixon_v5.config.MODELS_PATH
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_PROJECT
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_ACCOUNT
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_NGPU
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_H_VMEM
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_QUEUE
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_CPU_H_VMEM
+   nvitk.pipes.pesa_fat.dixon_v5.config.SGE_CPU_NGPU
+   nvitk.pipes.pesa_fat.dixon_v5.config.CONTAINER_PATH
+   nvitk.pipes.pesa_fat.dixon_v5.config.MODELS_PATH
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.config.MrTask
+   nvitk.pipes.pesa_fat.dixon_v5.config.DixonMeasureSpec
+
+
+Module Contents
+---------------
+
+.. py:data:: PIPELINE_NAME
+   :value: 'dixon-v5'
+
+
+.. py:data:: SGE_JOB_PREFIX
+   :value: 'PESAFat_DIXON'
+
+
+.. py:data:: STAGE1_DIR
+   :value: 'res_segmentation_dixon'
+
+
+.. py:data:: STAGE2_DIR
+   :value: 'res_post_processing_dixon'
+
+
+.. py:data:: STAGE3_DIR
+   :value: 'res_measure_dixon'
+
+
+.. py:data:: INPUT_PREFIX
+   :value: 'DIXON'
+
+
+.. py:data:: INPUT_SUFFIXES
+   :value: ('FAT', 'WATER', 'FAT_FRACTION', 'T2STAR')
+
+
+.. py:class:: MrTask
+
+   MR TotalSegmentator task and which DIXON sequence it uses.
+
+
+   .. py:attribute:: name
+      :type:  str
+
+
+   .. py:attribute:: input_suffix
+      :type:  str
+
+
+   .. py:attribute:: roi_subset
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+.. py:data:: HEAD_TASKS
+
+.. py:data:: THORAX_TASKS
+
+.. py:data:: LEGS_TASKS
+
+.. py:data:: REGIONS
+
+.. py:data:: REGION_ORDER
+   :value: ('HEAD', 'THORAX', 'LEGS')
+
+
+.. py:class:: DixonMeasureSpec
+
+   DIXON stage-3 measurement definition.
+
+   ``prefix`` is the Excel column prefix; each metric in ``metrics`` becomes
+     a column ``f"{prefix}_{metric}"``.
+   ``region`` selects which stage-2 mask and which Dixon-contrast maps are used;
+   ``mask_file`` is the stage-2 label file
+     (under ``RESULTS/<batch>/res_post_processing_dixon/<SUBJECT>``)
+   ``label_ids`` are the integer labels contributing to the mask
+     (atuple with >1 entries is treated as the union).
+
+
+   .. py:attribute:: prefix
+      :type:  str
+
+
+   .. py:attribute:: region
+      :type:  str
+
+
+   .. py:attribute:: mask_file
+      :type:  str
+
+
+   .. py:attribute:: label_ids
+      :type:  tuple[int, Ellipsis]
+
+
+   .. py:attribute:: metrics
+      :type:  tuple[str, Ellipsis]
+      :value: ('VOL', 'FF', 'T2', 'R2', 'NSlices')
+
+
+
+.. py:data:: MEASURE_SPECS
+
+.. py:data:: WF_REFERENCE_LABELS
+   :value: (('THORAX', 'THORAX.nii', 'T_PVM_L'), ('THORAX', 'THORAX.nii', 'T_PVM_R'))
+
+
+.. py:data:: SGE_PROJECT
+   :value: 'GPU'
+
+
+.. py:data:: SGE_ACCOUNT
+   :value: 'Prod'
+
+
+.. py:data:: SGE_NGPU
+   :value: 1
+
+
+.. py:data:: SGE_H_VMEM
+   :value: '50G'
+
+
+.. py:data:: SGE_QUEUE
+   :value: None
+
+
+.. py:data:: SGE_CPU_H_VMEM
+   :value: '32G'
+
+
+.. py:data:: SGE_CPU_NGPU
+   :value: 0
+
+
+.. py:data:: SGE_LOG_DIR
+
+.. py:data:: SGE_ERR_DIR
+
+.. py:data:: CONTAINER_PATH
+
+.. py:data:: MODELS_PATH
+
+.. py:data:: SGE_PROJECT
+
+.. py:data:: SGE_ACCOUNT
+
+.. py:data:: SGE_NGPU
+
+.. py:data:: SGE_H_VMEM
+
+.. py:data:: SGE_QUEUE
+
+.. py:data:: SGE_CPU_H_VMEM
+
+.. py:data:: SGE_CPU_NGPU
+
+.. py:data:: CONTAINER_PATH
+
+.. py:data:: MODELS_PATH
+

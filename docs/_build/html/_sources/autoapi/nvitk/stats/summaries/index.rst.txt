@@ -1,0 +1,94 @@
+nvitk.stats.summaries
+=====================
+
+.. py:module:: nvitk.stats.summaries
+
+.. autoapi-nested-parse::
+
+   Per-group descriptive statistics for one measurement.
+
+   Description
+   -----------
+   The question "what is the mean flow per territory, and how variable is it?" comes up constantly, and
+   answering it currently means exporting the whole frame and pivoting it in a spreadsheet. This module
+   is that table: one row per group, the statistics a methods section actually reports, computed once
+   and identically whether they are read on screen or written to Excel.
+
+   What is reported, and why
+   -------------------------
+   =================  ============================================================================
+   Statistic          Why it is here
+   =================  ============================================================================
+   ``n`` / ``n_missing``  A mean over 8 subjects and a mean over 300 are different claims.
+   ``mean`` / ``sd``  What gets reported, and what a normal-ish distribution needs.
+   ``sem`` / ``ci_low`` / ``ci_high``  Precision of the mean, which the SD alone does not give.
+   ``median`` / ``q1`` / ``q3`` / ``iqr``  What to report instead when the distribution is skewed.
+   ``min`` / ``max``  Where to look for the segmentation failures.
+   ``cv``             Scale-free spread, so territories at very different flows stay comparable.
+   ``skew``           Whether the mean or the median is the honest summary.
+   =================  ============================================================================
+
+   Both the parametric and the robust summaries are always produced rather than one being chosen for
+   you: 4D-flow measurements are frequently skewed by a handful of bad segmentations, and a table that
+   silently reported only the mean would hide exactly that.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.summaries.SUMMARY_COLUMNS
+   nvitk.stats.summaries.OVERALL_LABEL
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.summaries.summarize_by_group
+   nvitk.stats.summaries.summary_provenance
+
+
+Module Contents
+---------------
+
+.. py:data:: SUMMARY_COLUMNS
+   :type:  tuple[str, Ellipsis]
+   :value: ('group', 'n', 'n_missing', 'mean', 'sd', 'sem', 'ci_low', 'ci_high', 'median', 'q1', 'q3',...
+
+
+.. py:data:: OVERALL_LABEL
+   :value: 'ALL'
+
+
+.. py:function:: summarize_by_group(frame: pandas.DataFrame, column: str, *, by: str | Sequence[str] = '', ci: float = 0.95, include_overall: bool = True, sort_by: str = 'group') -> pandas.DataFrame
+
+   Descriptive statistics of *column*, one row per group of *by*.
+
+   :param by: Grouping column(s). Several are combined into one label (``Left_ICA | male``) rather than a
+              MultiIndex, so the sheet stays flat and readable. Empty summarises the column as a whole.
+   :type by: str or sequence of str
+   :param include_overall: Append an :data:`OVERALL_LABEL` row over every group. Worth having in the same table — a
+                           per-territory mean is usually read against the whole-cohort one.
+   :type include_overall: bool
+   :param sort_by: Row order. ``"group"`` sorts naturally, so ``g2`` precedes ``g10``.
+   :type sort_by: {"group", "mean", "median", "n"}
+
+   :returns: Columns as in :data:`SUMMARY_COLUMNS`. ``frame.attrs`` carries ``column``, ``by`` and
+             ``ci`` so an exporter can label the sheet without being told again.
+   :rtype: pandas.DataFrame
+
+   :raises ValueError: When *column* or a grouping column is absent, or *column* holds nothing numeric.
+
+
+.. py:function:: summary_provenance(summary: pandas.DataFrame, *, dataset: str = '', n_rows_source: int | None = None) -> pandas.DataFrame
+
+   Two-column record of what a summary describes, for the export's second sheet.
+
+   A table of means with no note of which column, which grouping, which confidence level or how
+   many rows it came from is unreconstructable a month later — including by its author.
+
+

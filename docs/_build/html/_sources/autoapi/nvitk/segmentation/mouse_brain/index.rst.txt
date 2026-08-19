@@ -1,0 +1,65 @@
+nvitk.segmentation.mouse_brain
+==============================
+
+.. py:module:: nvitk.segmentation.mouse_brain
+
+.. autoapi-nested-parse::
+
+   Mouse brain extraction / parcellation via ANTsPyNet.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.mouse_brain.MouseBrainMode
+   nvitk.segmentation.mouse_brain.MOUSE_EXTRACTION_MODALITIES
+   nvitk.segmentation.mouse_brain.MouseModality
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.mouse_brain.mouse_brain_segmentation
+
+
+Module Contents
+---------------
+
+.. py:data:: MouseBrainMode
+
+.. py:data:: MOUSE_EXTRACTION_MODALITIES
+   :type:  tuple[str, Ellipsis]
+   :value: ('t2', 'ex5coronal', 'ex5sagittal')
+
+
+.. py:data:: MouseModality
+
+.. py:function:: mouse_brain_segmentation(image: nvitk.types.Image | numpy.ndarray, *, mode: MouseBrainMode = 'extraction', modality: str = 't2', which_parcellation: str = 'nick', mask: nvitk.types.Image | numpy.ndarray | None = None, do_n4: bool = True, binarize: bool = True, threshold: float = 0.5, return_isotropic_output: bool = False, which_axis: int = 2, fix_spacing: bool = True, target_fov_mm: float = 20.0, verbose: bool = False) -> numpy.ndarray
+
+   Segment a mouse brain MRI with ANTsPyNet deep models.
+
+   :param image: Input intensity volume. **T2-weighted mouse MRI** for ``t2`` / nick / tct;
+                 histology stacks for ``ex5*``. Correct voxel spacing (mm) is required.
+   :param mode: ``extraction`` → brain mask (probability, optionally binarized).
+                ``parcellation`` → regional labels (nick / tct / jay).
+   :param modality: Extraction only: ``t2``, ``ex5coronal``, or ``ex5sagittal``.
+                    There is **no T1 mouse extraction model** in ANTsPyNet.
+   :param which_parcellation: ``nick``, ``tct``, or ``jay``.
+   :param mask: Optional brain mask for parcellation; estimated via T2 extraction if omitted.
+   :param do_n4: Run ANTs N4 bias correction first (recommended; matches ANTsX examples).
+   :param binarize: For extraction, threshold the probability map (default True).
+   :param threshold: Probability cutoff when *binarize* is True.
+   :param return_isotropic_output: Forwarded to ANTsPyNet (resample output to isotropic min-spacing).
+   :param which_axis: Slice axis for ``ex5*`` modalities.
+   :param fix_spacing: If True (default), when spacing looks like unit voxels, rescale so the
+                       max FOV matches *target_fov_mm* (~mouse template size).
+   :param target_fov_mm: Target max FOV in mm used by *fix_spacing* (default 20).
+   :param verbose: Forwarded to ANTsPyNet (prints internal preprocess / predict steps).
+                   N4 always runs quietly to avoid flooding the log.
+
+

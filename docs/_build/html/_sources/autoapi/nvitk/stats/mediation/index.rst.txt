@@ -1,0 +1,344 @@
+nvitk.stats.mediation
+=====================
+
+.. py:module:: nvitk.stats.mediation
+
+.. autoapi-nested-parse::
+
+   Mediation analysis — three engines over one common result shape.
+
+   Description
+   -----------
+   Given an exposure ``x``, a mediator ``m`` and an outcome ``y``, mediation decomposes the effect of
+   ``x`` on ``y`` into an *indirect* path through ``m`` (``a·b``) and a *direct* path (``c'``). Three
+   engines are provided, trading statistical fidelity against runtime:
+
+   ``mixedlm_bootstrap``
+       Fits the mediator and outcome models as MixedLMs (``y`` nested in ``group_col``, subjects as a
+       variance component) and resamples **whole subjects** with replacement. Respects the
+       subject × territory nesting of the analysis frames, at the cost of ``2 × n_boot`` model fits.
+   ``pingouin_by_level``
+       ``pingouin.mediation_analysis`` run separately within each level of a grouping column. Fast and
+       gives a per-territory picture, but each fit is an OLS that ignores the nesting.
+   ``statsmodels_parametric``
+       ``statsmodels.stats.mediation.Mediation`` over the pooled frame with OLS mediator/outcome models.
+       Standard and quick, but pooling subject × territory rows treats them as independent, so its
+       intervals are anti-conservative for these data.
+
+   All three funnel into :func:`mediation_result_frame`, a tidy table with columns
+   ``path, coef, ci_low, ci_high, pval, n, engine, level`` (plus the ``CI2.5`` / ``CI97.5`` aliases the
+   notebook plots use), so the plotting helpers and the GUI treat them interchangeably.
+
+   Conventions
+   -----------
+   Paths are labeled ``a`` (x → m), ``b`` (m → y | x), ``c'`` (x → y | m, the direct effect),
+   ``Indirect`` (a·b), ``Direct`` (= c'), and ``Total`` (indirect + direct). Bootstrap p-values are
+   two-sided percentile p-values: ``2 · min(P(θ ≤ 0), P(θ ≥ 0))``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.mediation.MEDIATION_ENGINES
+   nvitk.stats.mediation.ENGINE_LABELS
+   nvitk.stats.mediation.POOLED_OLS_NOTE
+   nvitk.stats.mediation.RESULT_COLUMNS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats.mediation.MediationSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.mediation.bootstrap_mediation_mixedlm_by_subject
+   nvitk.stats.mediation.mediation_boot_to_stats_df
+   nvitk.stats.mediation.pingouin_mediation
+   nvitk.stats.mediation.pingouin_mediation_by_level
+   nvitk.stats.mediation.statsmodels_mediation
+   nvitk.stats.mediation.mediation_result_frame
+   nvitk.stats.mediation.run_mediation
+   nvitk.stats.mediation.render_mediation_info
+   nvitk.stats.mediation.plot_mediation_forest
+   nvitk.stats.mediation.plot_indirect_bootstrap
+   nvitk.stats.mediation.plot_indirect_by_level
+   nvitk.stats.mediation.plot_partial_paths_mediation
+   nvitk.stats.mediation.bootstrap_mediation_by_subject
+
+
+Module Contents
+---------------
+
+.. py:data:: MEDIATION_ENGINES
+   :type:  tuple[str, Ellipsis]
+   :value: ('mixedlm_bootstrap', 'pingouin_by_level', 'statsmodels_parametric')
+
+
+.. py:data:: ENGINE_LABELS
+   :type:  dict[str, str]
+
+.. py:data:: POOLED_OLS_NOTE
+   :value: 'This engine fits pooled OLS models: repeated (subject × territory) rows are treated as...
+
+
+.. py:data:: RESULT_COLUMNS
+   :value: ('path', 'coef', 'ci_low', 'ci_high', 'pval', 'n', 'engine', 'level')
+
+
+.. py:class:: MediationSpec
+
+   One mediation analysis: which columns play which role, and how to estimate it.
+
+   :param x: Exposure, mediator, outcome column names. These must be bare frame columns — a transformed
+             term belongs in a derived column, not here, because the engines look coefficients up by name.
+   :type x: str
+   :param m: Exposure, mediator, outcome column names. These must be bare frame columns — a transformed
+             term belongs in a derived column, not here, because the engines look coefficients up by name.
+   :type m: str
+   :param y: Exposure, mediator, outcome column names. These must be bare frame columns — a transformed
+             term belongs in a derived column, not here, because the engines look coefficients up by name.
+   :type y: str
+   :param covariates: Adjusted for in both the mediator and the outcome model.
+   :type covariates: tuple of str
+   :param group_col: Nesting level: the MixedLM ``groups`` for ``mixedlm_bootstrap``, the split column for
+                     ``pingouin_by_level``. Ignored by ``statsmodels_parametric``.
+   :type group_col: str
+   :param subject_col: Cluster resampled by ``mixedlm_bootstrap`` and used as its variance component.
+   :type subject_col: str
+   :param n_boot: Bootstrap draws (``n_rep`` for ``statsmodels_parametric``).
+   :type n_boot: int
+
+
+   .. py:attribute:: x
+      :type:  str
+
+
+   .. py:attribute:: m
+      :type:  str
+
+
+   .. py:attribute:: y
+      :type:  str
+
+
+   .. py:attribute:: covariates
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:attribute:: group_col
+      :type:  str
+      :value: 'territory'
+
+
+
+   .. py:attribute:: subject_col
+      :type:  str
+      :value: 'subject_uid'
+
+
+
+   .. py:attribute:: engine
+      :type:  str
+      :value: 'mixedlm_bootstrap'
+
+
+
+   .. py:attribute:: n_boot
+      :type:  int
+      :value: 500
+
+
+
+   .. py:attribute:: seed
+      :type:  int
+      :value: 42
+
+
+
+   .. py:attribute:: ci
+      :type:  float
+      :value: 0.95
+
+
+
+   .. py:method:: formulas() -> tuple[str, str]
+
+      ``(mediator_formula, outcome_formula)`` — ``m ~ x + covars`` and ``y ~ m + x + covars``.
+
+
+
+   .. py:method:: required_columns() -> list[str]
+
+      Every column the analysis touches, de-duplicated in a stable order.
+
+
+
+   .. py:method:: validate(df: pandas.DataFrame | None = None) -> str
+
+      Return why this spec cannot be run, or ``""`` if it is usable.
+
+
+
+   .. py:method:: to_dict() -> dict[str, Any]
+
+      Serialize to a JSON-safe dict.
+
+
+
+   .. py:method:: from_dict(data: Mapping[str, Any]) -> MediationSpec
+      :classmethod:
+
+
+      Rebuild from :meth:`to_dict` output, tolerating missing keys.
+
+
+
+.. py:function:: bootstrap_mediation_mixedlm_by_subject(df: pandas.DataFrame, *, formula_m: str, formula_y: str, x: str, m: str, y: str, group_col: str = 'territory', subject_col: str = 'subject_uid', required_columns: Sequence[str] | None = None, n_boot: int = 500, seed: int = 42, re_formula: str = '1', vc_formula: dict[str, str] | None = None, fit_kwargs: dict[str, Any] | None = None, ci: float = 0.95, return_dist: bool = True, progress: Callable[[int, int], None] | None = None, should_cancel: Callable[[], bool] | None = None) -> dict[str, Any]
+
+   Cluster-bootstrap mediation for MixedLM models, resampling whole subjects.
+
+   Strategy
+   --------
+   1. Fit both models once on the observed data for the point estimates
+      (``a = coef of x in M``, ``b = coef of m in Y``, ``c' = coef of x in Y``).
+   2. For each draw, resample *subjects* with replacement and keep **all** of each subject's rows
+      (its territories), relabeling the ids so a repeated subject forms a distinct variance-component
+      group. Refit both models and record ``a·b``, ``c'`` and their sum.
+   3. Summarize each path by its percentile interval and a two-sided bootstrap p-value.
+
+   Resampling whole subjects — rather than rows — is what keeps the within-subject correlation in
+   the resampled data; row-wise resampling would understate the uncertainty.
+
+   :param formula_m: Mediator and outcome model formulas, e.g. ``"pi ~ pp + age_c + sex"`` and
+                     ``"att_mean ~ pi + pp + age_c + sex"``. See :meth:`MediationSpec.formulas`.
+   :type formula_m: str
+   :param formula_y: Mediator and outcome model formulas, e.g. ``"pi ~ pp + age_c + sex"`` and
+                     ``"att_mean ~ pi + pp + age_c + sex"``. See :meth:`MediationSpec.formulas`.
+   :type formula_y: str
+   :param vc_formula: Variance components. Defaults to ``{"subject": f"0 + C({subject_col})"}``.
+   :type vc_formula: dict, optional
+   :param progress: Called as ``progress(done, total)`` after every draw.
+   :type progress: callable, optional
+   :param should_cancel: Polled every draw; when it returns ``True`` the run stops early and the result carries
+                         ``cancelled=True`` with whatever draws completed.
+   :type should_cancel: callable, optional
+
+   :returns: ``point_estimate`` (a, b, c_prime, indirect, direct, total), ``bootstrap`` (per-path
+             ``mean``/``ci_low``/``ci_high``/``p_value``/``n``), ``dist`` (draw arrays, when
+             *return_dist*), ``n_boot``, ``n_failed_draws``, ``cancelled``.
+   :rtype: dict
+
+   :raises ValueError: If the observed-data fits do not expose *x* / *m* as named parameters — which happens when a
+       term is wrapped (``C(x)``) or transformed in the formula. The message lists what is available.
+
+
+.. py:function:: mediation_boot_to_stats_df(boot_res: dict[str, Any], *, include_total: bool = True) -> pandas.DataFrame
+
+   Convert :func:`bootstrap_mediation_mixedlm_by_subject` output into a tidy path table.
+
+
+.. py:function:: pingouin_mediation(df: pandas.DataFrame, *, x: str, m: str, y: str, covar: Sequence[str] = (), n_boot: int = 5000, seed: int = 42, alpha: float = 0.05) -> pandas.DataFrame
+
+   Single ``pingouin.mediation_analysis`` run, normalized to the tidy path table.
+
+
+.. py:function:: pingouin_mediation_by_level(df: pandas.DataFrame, *, x: str, m: str, y: str, covar: Sequence[str] = (), level_col: str = 'territory', n_boot: int = 5000, seed: int = 42, alpha: float = 0.05, min_rows: int | None = None, dropna: bool = True, progress: Callable[[int, int], None] | None = None, should_cancel: Callable[[], bool] | None = None) -> tuple[dict[str, pandas.DataFrame], pandas.DataFrame]
+
+   Run :func:`pingouin_mediation` separately within each level of *level_col*.
+
+   Levels with too few complete rows to fit the models are skipped: with *min_rows* unset the
+   threshold is ``max(20, 5 + 3·len(covar))``, which scales with the number of parameters.
+
+   :returns: *by_level* maps each level to its tidy path table; *summary* has one row per level with the
+             indirect / direct / total effects and their intervals, sorted by indirect effect.
+   :rtype: (by_level, summary)
+
+
+.. py:function:: statsmodels_mediation(df: pandas.DataFrame, *, x: str, m: str, y: str, covariates: Sequence[str] = (), method: str = 'parametric', n_rep: int = 1000, seed: int = 42) -> pandas.DataFrame
+
+   ``statsmodels.stats.mediation.Mediation`` with OLS mediator and outcome models.
+
+   The models are fitted on the pooled frame, so repeated (subject × territory) rows count as
+   independent observations — see :data:`POOLED_OLS_NOTE`, which is attached to the returned frame
+   as ``frame.attrs["note"]``.
+
+   :param method: Passed to ``Mediation.fit``.
+   :type method: {"parametric", "bootstrap"}
+
+
+.. py:function:: mediation_result_frame(result: Any, *, engine: str, level: str | None = None) -> pandas.DataFrame
+
+   Normalize any engine's output to the tidy path table.
+
+   Accepts the bootstrap result *dict* from :func:`bootstrap_mediation_mixedlm_by_subject` or an
+   already-tidy frame from the pingouin / statsmodels engines.
+
+
+.. py:function:: run_mediation(df: pandas.DataFrame, spec: MediationSpec, *, progress: Callable[[int, int], None] | None = None, should_cancel: Callable[[], bool] | None = None) -> dict[str, Any]
+
+   Run the engine named by *spec* and return a uniform result bundle.
+
+   :returns: ``spec``, ``engine``, ``paths`` (the tidy table), ``by_level`` and ``summary`` (per-level
+             engine only), ``raw`` (the engine's native output), and ``note`` (a caveat to surface, or
+             ``""``).
+   :rtype: dict
+
+
+.. py:function:: render_mediation_info(bundle: Mapping[str, Any]) -> str
+
+   Fixed-width text report of a :func:`run_mediation` bundle, for the report panel's Raw tab.
+
+
+.. py:function:: plot_mediation_forest(stats_df: pandas.DataFrame, *, ax: Any | None = None, title: str = 'Mediation path estimates', order: Sequence[str] = _PATH_ORDER) -> Any
+
+   Forest plot of path coefficients with their confidence intervals.
+
+
+.. py:function:: plot_indirect_bootstrap(dist: Sequence[float], *, ci_low: float | None = None, ci_high: float | None = None, ax: Any | None = None, bins: int = 50) -> Any
+
+   Histogram + KDE of the bootstrap distribution of the indirect effect, with CI markers.
+
+
+.. py:function:: plot_indirect_by_level(summary_df: pandas.DataFrame, *, ax: Any | None = None, level_col: str = 'level') -> Any
+
+   Forest plot of the indirect effect within each grouping level.
+
+
+.. py:function:: plot_partial_paths_mediation(df: pandas.DataFrame, *, x: str, m: str, y: str, covars: Sequence[str] = (), figsize: tuple[float, float] = (12, 5)) -> Any
+
+   Partial-regression plots of the ``a`` and ``b`` paths.
+
+   Left: ``m`` against ``x``, both residualized on the covariates. Right: ``y`` against ``m``, both
+   residualized on ``x`` + covariates — the adjusted relationship the ``b`` coefficient describes.
+   These are OLS partial plots, offered as a visual check rather than as the mixed-model estimate.
+
+
+.. py:function:: bootstrap_mediation_by_subject(df, formula_m, formula_y, model_cols, n_boot=500, seed=42)
+
+   Mediation bootstrap (a*b) resampling at the subject level.
+
+   Deprecated
+   ----------
+   Kept for the ``nvitk.stats.mediation`` catalog entry and existing notebooks. It hardcodes
+   ``x="pi"``, ``m="pp"`` and ``groups="territory"``; prefer
+   :func:`bootstrap_mediation_mixedlm_by_subject`, which takes them as arguments.
+
+   :returns:     - indirect_dist (np.array)
+                 - ci_low, ci_high
+                 - mean
+                 - p_value (two-sided bootstrap)
+   :rtype: dict with
+
+

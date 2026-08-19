@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats.region_groups &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats.regression" href="../regression/index.html" />
+    <link rel="prev" title="nvitk.stats.region_algebra" href="../region_algebra/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats.region_groups">
+<span id="nvitk-stats-region-groups"></span><h1>nvitk.stats.region_groups<a class="headerlink" href="#module-nvitk.stats.region_groups" title="Link to this heading">¶</a></h1>
+<p>Anatomical panel groups — partition plot levels into small multiples.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>A model over 13 vessels draws 13 curves on one pair of axes, where a Left_ICA line at <code class="docutils literal notranslate"><span class="pre">log(PI)</span> <span class="pre">≈</span>
+<span class="pre">-0.2</span></code> and a Sagital_Sinus line at <code class="docutils literal notranslate"><span class="pre">≈</span> <span class="pre">-1.0</span></code> share a y range that flattens both. Splitting them
+into anatomically coherent panels — carotids, anterior, posterior, venous — lets each panel scale to
+its own range while keeping the population line comparable across all of them.</p>
+<p>This module answers one question: <em>which panel does this level belong to?</em> It works on whatever the
+grouping column happens to contain, because the analysis frame’s <code class="docutils literal notranslate"><span class="pre">group_key</span></code> takes several shapes
+depending on the <code class="docutils literal notranslate"><span class="pre">grouping</span></code> used to build it:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Level shape</p></th>
+<th class="head"><p>Example</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>qvtpy vessel ids</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Left_ICA</span></code>, <code class="docutils literal notranslate"><span class="pre">RMCA</span></code>, <code class="docutils literal notranslate"><span class="pre">Sagital_Sinus</span></code>, <code class="docutils literal notranslate"><span class="pre">LPCOMM</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>ASL vascular-8 parcels</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">left_mca_8</span></code>, <code class="docutils literal notranslate"><span class="pre">right_pca_8</span></code>, <code class="docutils literal notranslate"><span class="pre">watershed_0</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>ASL / T1 Desikan parcels</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ctx-lh-superiorfrontal</span></code>, <code class="docutils literal notranslate"><span class="pre">rh_precuneus</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>FreeSurfer subcortical structures</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Left-Hippocampus</span></code>, <code class="docutils literal notranslate"><span class="pre">Brain-Stem</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>hemisphere keys (melted L/R)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ICA</span></code>, <code class="docutils literal notranslate"><span class="pre">MCA</span></code>, <code class="docutils literal notranslate"><span class="pre">PCA</span></code>, <code class="docutils literal notranslate"><span class="pre">Basilar</span></code>, <code class="docutils literal notranslate"><span class="pre">Watershed</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>territory keys (already melted)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Anterior</span> <span class="pre">Circulation</span></code>, <code class="docutils literal notranslate"><span class="pre">Venous</span> <span class="pre">Drainage</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p>Vascular levels reuse <a class="reference internal" href="../_vessel_territory_map/index.html#nvitk.stats._vessel_territory_map.REGION_TO_TERRITORY_FLOW" title="nvitk.stats._vessel_territory_map.REGION_TO_TERRITORY_FLOW"><code class="xref py py-data docutils literal notranslate"><span class="pre">REGION_TO_TERRITORY_FLOW</span></code></a> so the
+panels agree with the <code class="docutils literal notranslate"><span class="pre">territory</span></code> grouping — a level that melts into “Posterior Circulation” also
+<em>panels</em> into it. Cortical parcels have no vascular territory, so they group by lobe instead.</p>
+<p>Levels already equal to a panel name pass through unchanged: a frame grouped by territory gets one
+panel per territory, which is the small-multiples view of the same data.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.PANEL_OTHER" title="nvitk.stats.region_groups.PANEL_OTHER"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PANEL_OTHER</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.VASCULAR_PANELS" title="nvitk.stats.region_groups.VASCULAR_PANELS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VASCULAR_PANELS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.LOBE_PANELS" title="nvitk.stats.region_groups.LOBE_PANELS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOBE_PANELS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.PANEL_ORDER" title="nvitk.stats.region_groups.PANEL_ORDER"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PANEL_ORDER</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.DESIKAN_LOBES" title="nvitk.stats.region_groups.DESIKAN_LOBES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DESIKAN_LOBES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.GRANULARITY_PARCEL" title="nvitk.stats.region_groups.GRANULARITY_PARCEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRANULARITY_PARCEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.GRANULARITY_LOBE" title="nvitk.stats.region_groups.GRANULARITY_LOBE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRANULARITY_LOBE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.GRANULARITY_HEMISPHERE" title="nvitk.stats.region_groups.GRANULARITY_HEMISPHERE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRANULARITY_HEMISPHERE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.GRANULARITY_WHOLE" title="nvitk.stats.region_groups.GRANULARITY_WHOLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRANULARITY_WHOLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.GRANULARITY_ORDER" title="nvitk.stats.region_groups.GRANULARITY_ORDER"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GRANULARITY_ORDER</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.region_granularity" title="nvitk.stats.region_groups.region_granularity"><code class="xref py py-obj docutils literal notranslate"><span class="pre">region_granularity</span></code></a>(→ str)</p></td>
+<td><p>How coarse <em>level</em> is — <code class="docutils literal notranslate"><span class="pre">parcel</span></code> / <code class="docutils literal notranslate"><span class="pre">lobe</span></code> / <code class="docutils literal notranslate"><span class="pre">hemisphere</span></code> / <code class="docutils literal notranslate"><span class="pre">whole</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.region_side" title="nvitk.stats.region_groups.region_side"><code class="xref py py-obj docutils literal notranslate"><span class="pre">region_side</span></code></a>(→ str)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;Left&quot;</span></code> / <code class="docutils literal notranslate"><span class="pre">&quot;Right&quot;</span></code> / <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for a published region id.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.region_lobe_key" title="nvitk.stats.region_groups.region_lobe_key"><code class="xref py py-obj docutils literal notranslate"><span class="pre">region_lobe_key</span></code></a>(→ str)</p></td>
+<td><p>Lobe a region belongs to, <strong>keeping its side</strong> — <code class="docutils literal notranslate"><span class="pre">Left</span> <span class="pre">Frontal</span></code>, <code class="docutils literal notranslate"><span class="pre">Right</span> <span class="pre">Parietal</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.split_by_granularity" title="nvitk.stats.region_groups.split_by_granularity"><code class="xref py py-obj docutils literal notranslate"><span class="pre">split_by_granularity</span></code></a>(→ dict[str, list[str]])</p></td>
+<td><p>Group <em>levels</em> by <a class="reference internal" href="#nvitk.stats.region_groups.region_granularity" title="nvitk.stats.region_groups.region_granularity"><code class="xref py py-func docutils literal notranslate"><span class="pre">region_granularity()</span></code></a>, preserving order within each class.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.region_display_panel" title="nvitk.stats.region_groups.region_display_panel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">region_display_panel</span></code></a>(→ str | None)</p></td>
+<td><p>Anatomical panel a grouping level belongs to, or <code class="docutils literal notranslate"><span class="pre">None</span></code> when it is not recognized.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.group_levels_into_panels" title="nvitk.stats.region_groups.group_levels_into_panels"><code class="xref py py-obj docutils literal notranslate"><span class="pre">group_levels_into_panels</span></code></a>(→ dict[str, list[str]])</p></td>
+<td><p>Partition grouping levels into anatomical panels, in display order.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.resolve_panels" title="nvitk.stats.region_groups.resolve_panels"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_panels</span></code></a>(→ dict[str, list[str]])</p></td>
+<td><p><a class="reference internal" href="#nvitk.stats.region_groups.group_levels_into_panels" title="nvitk.stats.region_groups.group_levels_into_panels"><code class="xref py py-func docutils literal notranslate"><span class="pre">group_levels_into_panels()</span></code></a>, raising a caller-ready message when nothing maps.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.panel_grid" title="nvitk.stats.region_groups.panel_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">panel_grid</span></code></a>(, n_cols, title, list[Any]])</p></td>
+<td><p>A figure holding one visible axes per panel, two per row.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.natural_level_key" title="nvitk.stats.region_groups.natural_level_key"><code class="xref py py-obj docutils literal notranslate"><span class="pre">natural_level_key</span></code></a>(→ tuple)</p></td>
+<td><p>Sort key placing <code class="docutils literal notranslate"><span class="pre">region_2</span></code> before <code class="docutils literal notranslate"><span class="pre">region_10</span></code> — digit runs compare numerically.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.region_groups.panel_summary" title="nvitk.stats.region_groups.panel_summary"><code class="xref py py-obj docutils literal notranslate"><span class="pre">panel_summary</span></code></a>(→ str)</p></td>
+<td><p>One-line description of a partition, for a status bar (<code class="docutils literal notranslate"><span class="pre">ICA</span> <span class="pre">(2)</span> <span class="pre">·</span> <span class="pre">Anterior</span> <span class="pre">(4)</span></code>).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.PANEL_OTHER">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">PANEL_OTHER</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'Other'</span></span><a class="headerlink" href="#nvitk.stats.region_groups.PANEL_OTHER" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.VASCULAR_PANELS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">VASCULAR_PANELS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('Internal</span> <span class="pre">Carotid</span> <span class="pre">Arteries',</span> <span class="pre">'Anterior</span> <span class="pre">Circulation',</span> <span class="pre">'Posterior</span> <span class="pre">Circulation',</span> <span class="pre">'Communicating',...</span></span><a class="headerlink" href="#nvitk.stats.region_groups.VASCULAR_PANELS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.LOBE_PANELS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">LOBE_PANELS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('Frontal',</span> <span class="pre">'Parietal',</span> <span class="pre">'Temporal',</span> <span class="pre">'Occipital',</span> <span class="pre">'Cingulate',</span> <span class="pre">'Insula',</span> <span class="pre">'Subcortical',...</span></span><a class="headerlink" href="#nvitk.stats.region_groups.LOBE_PANELS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.PANEL_ORDER">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">PANEL_ORDER</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('Internal</span> <span class="pre">Carotid</span> <span class="pre">Arteries',</span> <span class="pre">'Anterior</span> <span class="pre">Circulation',</span> <span class="pre">'Posterior</span> <span class="pre">Circulation',</span> <span class="pre">'Communicating',...</span></span><a class="headerlink" href="#nvitk.stats.region_groups.PANEL_ORDER" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.DESIKAN_LOBES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">DESIKAN_LOBES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.DESIKAN_LOBES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.GRANULARITY_PARCEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">GRANULARITY_PARCEL</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'parcel'</span></span><a class="headerlink" href="#nvitk.stats.region_groups.GRANULARITY_PARCEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.GRANULARITY_LOBE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">GRANULARITY_LOBE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'lobe'</span></span><a class="headerlink" href="#nvitk.stats.region_groups.GRANULARITY_LOBE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.GRANULARITY_HEMISPHERE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">GRANULARITY_HEMISPHERE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'hemisphere'</span></span><a class="headerlink" href="#nvitk.stats.region_groups.GRANULARITY_HEMISPHERE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.GRANULARITY_WHOLE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">GRANULARITY_WHOLE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'whole'</span></span><a class="headerlink" href="#nvitk.stats.region_groups.GRANULARITY_WHOLE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.GRANULARITY_ORDER">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">GRANULARITY_ORDER</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.GRANULARITY_ORDER" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.region_granularity">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">region_granularity</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.region_granularity" title="Link to this definition">¶</a></dt>
+<dd><p>How coarse <em>level</em> is — <code class="docutils literal notranslate"><span class="pre">parcel</span></code> / <code class="docutils literal notranslate"><span class="pre">lobe</span></code> / <code class="docutils literal notranslate"><span class="pre">hemisphere</span></code> / <code class="docutils literal notranslate"><span class="pre">whole</span></code>.</p>
+<p>Only the aggregates are detected by name; everything else is a parcel, which is the right
+default because an unrecognised id is far more likely to be a parcellation this function has
+never heard of than a summary of one.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">region_granularity</span><span class="p">(</span><span class="s2">&quot;ctx-lh-precuneus&quot;</span><span class="p">)</span>
+<span class="go">&#39;parcel&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_granularity</span><span class="p">(</span><span class="s2">&quot;ctx-Left-Frontal-Lobe&quot;</span><span class="p">)</span>
+<span class="go">&#39;lobe&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_granularity</span><span class="p">(</span><span class="s2">&quot;ctx_left_hemisphere&quot;</span><span class="p">),</span> <span class="n">region_granularity</span><span class="p">(</span><span class="s2">&quot;ctx-whole-brain&quot;</span><span class="p">)</span>
+<span class="go">(&#39;hemisphere&#39;, &#39;whole&#39;)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.region_side">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">region_side</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.region_side" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">&quot;Left&quot;</span></code> / <code class="docutils literal notranslate"><span class="pre">&quot;Right&quot;</span></code> / <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for a published region id.</p>
+<p>Reads the side token wherever it sits — <code class="docutils literal notranslate"><span class="pre">ctx-lh-precuneus</span></code>, <code class="docutils literal notranslate"><span class="pre">left_precuneus</span></code>,
+<code class="docutils literal notranslate"><span class="pre">ctx-Left-Frontal-Lobe</span></code> and <code class="docutils literal notranslate"><span class="pre">precuneus_lh</span></code> all answer the same. <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for anything
+bilateral (<code class="docutils literal notranslate"><span class="pre">ctx_bh_insula</span></code>) or midline, which is the honest answer: those genuinely have no
+side, and inventing one would put a bilateral mean on half a brain.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.region_lobe_key">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">region_lobe_key</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.region_lobe_key" title="Link to this definition">¶</a></dt>
+<dd><p>Lobe a region belongs to, <strong>keeping its side</strong> — <code class="docutils literal notranslate"><span class="pre">Left</span> <span class="pre">Frontal</span></code>, <code class="docutils literal notranslate"><span class="pre">Right</span> <span class="pre">Parietal</span></code>.</p>
+<p>Different from <a class="reference internal" href="#nvitk.stats.region_groups.region_display_panel" title="nvitk.stats.region_groups.region_display_panel"><code class="xref py py-func docutils literal notranslate"><span class="pre">region_display_panel()</span></code></a>, which deliberately drops the side: that one groups
+levels into <em>panels</em> for small multiples, where the left and right curves of one lobe belong on
+the same axes. As a grouping key the side has to survive, because a lobe analysis that averages
+the two hemispheres together cannot answer a lateralized question at all — and hemispheric
+asymmetry is most of what a lobe-level perfusion or volumetry analysis is looking for.</p>
+<p>Falls back to the bare panel name when the region carries no side, so bilateral and midline
+structures keep one level rather than being duplicated onto both.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">region_lobe_key</span><span class="p">(</span><span class="s2">&quot;ctx-lh-superiorfrontal&quot;</span><span class="p">),</span> <span class="n">region_lobe_key</span><span class="p">(</span><span class="s2">&quot;ctx-Right-Parietal-Lobe&quot;</span><span class="p">)</span>
+<span class="go">(&#39;Left Frontal&#39;, &#39;Right Parietal&#39;)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_lobe_key</span><span class="p">(</span><span class="s2">&quot;ctx_bh_insula&quot;</span><span class="p">)</span>
+<span class="go">&#39;Insula&#39;</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.split_by_granularity">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">split_by_granularity</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">levels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">object</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.split_by_granularity" title="Link to this definition">¶</a></dt>
+<dd><p>Group <em>levels</em> by <a class="reference internal" href="#nvitk.stats.region_groups.region_granularity" title="nvitk.stats.region_groups.region_granularity"><code class="xref py py-func docutils literal notranslate"><span class="pre">region_granularity()</span></code></a>, preserving order within each class.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.region_display_panel">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">region_display_panel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.region_display_panel" title="Link to this definition">¶</a></dt>
+<dd><p>Anatomical panel a grouping level belongs to, or <code class="docutils literal notranslate"><span class="pre">None</span></code> when it is not recognized.</p>
+<p>Resolution order — most specific first, so a vessel never falls through to a lobe:</p>
+<ol class="arabic simple">
+<li><p>the level is already a panel name (a territory-grouped frame);</p></li>
+<li><p>watershed parcels, which have no feeding vessel of their own;</p></li>
+<li><p>the 4D-flow vessel table, side prefixes included (<code class="docutils literal notranslate"><span class="pre">left_ica</span></code> → carotids);</p></li>
+<li><p>hemisphere-melted keys, which carry no side (<code class="docutils literal notranslate"><span class="pre">MCA</span></code> → anterior circulation);</p></li>
+<li><p>published aggregates (<code class="docutils literal notranslate"><span class="pre">ctx-Left-Frontal-Lobe</span></code>, <code class="docutils literal notranslate"><span class="pre">ctx-whole-brain</span></code>);</p></li>
+<li><p>Desikan / aseg parcels by lobe, after stripping the hemisphere prefix.</p></li>
+</ol>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">region_display_panel</span><span class="p">(</span><span class="s2">&quot;Left_ICA&quot;</span><span class="p">)</span>
+<span class="go">&#39;Internal Carotid Arteries&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_display_panel</span><span class="p">(</span><span class="s2">&quot;right_pca_8&quot;</span><span class="p">)</span>
+<span class="go">&#39;Posterior Circulation&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_display_panel</span><span class="p">(</span><span class="s2">&quot;ctx-lh-superiorfrontal&quot;</span><span class="p">)</span>
+<span class="go">&#39;Frontal&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">region_display_panel</span><span class="p">(</span><span class="s2">&quot;mystery_region&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.group_levels_into_panels">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">group_levels_into_panels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">levels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">other_label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">PANEL_OTHER</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.group_levels_into_panels" title="Link to this definition">¶</a></dt>
+<dd><p>Partition grouping levels into anatomical panels, in display order.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>levels</strong> (<em>iterable</em><em> of </em><em>str</em>) – Levels of the grouping column, in the order the caller wants them within a panel.</p></li>
+<li><p><strong>other_label</strong> (<em>str</em>) – Panel collecting levels <a class="reference internal" href="#nvitk.stats.region_groups.region_display_panel" title="nvitk.stats.region_groups.region_display_panel"><code class="xref py py-func docutils literal notranslate"><span class="pre">region_display_panel()</span></code></a> does not recognize.</p></li>
+<li><p><strong>include_other</strong> (<em>bool</em>) – Drop unrecognized levels entirely when <code class="docutils literal notranslate"><span class="pre">False</span></code>, instead of collecting them.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">{panel:</span> <span class="pre">[level,</span> <span class="pre">...]}</span></code> — only non-empty panels, ordered by <a class="reference internal" href="#nvitk.stats.region_groups.PANEL_ORDER" title="nvitk.stats.region_groups.PANEL_ORDER"><code class="xref py py-data docutils literal notranslate"><span class="pre">PANEL_ORDER</span></code></a> with
+unknown panels alphabetically after them and <code class="docutils literal notranslate"><span class="pre">other_label</span></code> always last. Empty when no
+level was recognized, which the caller should treat as “grouped display not applicable”.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.resolve_panels">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">resolve_panels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">levels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'group'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.resolve_panels" title="Link to this definition">¶</a></dt>
+<dd><p><a class="reference internal" href="#nvitk.stats.region_groups.group_levels_into_panels" title="nvitk.stats.region_groups.group_levels_into_panels"><code class="xref py py-func docutils literal notranslate"><span class="pre">group_levels_into_panels()</span></code></a>, raising a caller-ready message when nothing maps.</p>
+<p>Every grouped plot needs the same refusal — panelling levels that carry no anatomy would produce
+one “Other” panel identical to the overview — so the wording lives here rather than in each
+plotting function.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – When no level resolves to a panel.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.panel_grid">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">panel_grid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n_panels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">panel_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">(8.5,</span> <span class="pre">4.8)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.panel_grid" title="Link to this definition">¶</a></dt>
+<dd><p>A figure holding one visible axes per panel, two per row.</p>
+<p>Constrained layout rather than <code class="docutils literal notranslate"><span class="pre">tight_layout</span></code>: a grid with a suptitle needs to re-flow on every
+draw as the canvas is resized, and it also signals the plot pane not to re-fit on top of it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Exactly <em>n_panels</em> axes in reading order; any spare cell in the last row is hidden.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>(figure, <a class="reference internal" href="../../index.html#nvitk.Image.axes" title="nvitk.Image.axes">axes</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.natural_level_key">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">natural_level_key</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.natural_level_key" title="Link to this definition">¶</a></dt>
+<dd><p>Sort key placing <code class="docutils literal notranslate"><span class="pre">region_2</span></code> before <code class="docutils literal notranslate"><span class="pre">region_10</span></code> — digit runs compare numerically.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.region_groups.panel_summary">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.region_groups.</span></span><span class="sig-name descname"><span class="pre">panel_summary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">panels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.region_groups.panel_summary" title="Link to this definition">¶</a></dt>
+<dd><p>One-line description of a partition, for a status bar (<code class="docutils literal notranslate"><span class="pre">ICA</span> <span class="pre">(2)</span> <span class="pre">·</span> <span class="pre">Anterior</span> <span class="pre">(4)</span></code>).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../region_algebra/index.html" title="previous chapter">nvitk.stats.region_algebra</a></li>
+      <li>Next: <a href="../regression/index.html" title="next chapter">nvitk.stats.regression</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/region_groups/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

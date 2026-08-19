@@ -1,0 +1,160 @@
+nvitk.measure.morpho.tree_segments
+==================================
+
+.. py:module:: nvitk.measure.morpho.tree_segments
+
+.. autoapi-nested-parse::
+
+   Recursive tree segment construction, assignment, and anatomical exports.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.tree_segments._ATTR_TRANSFER_KEYS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.tree_segments._path_results_attribute_cloud
+   nvitk.measure.morpho.tree_segments._transfer_attrs_to_points
+   nvitk.measure.morpho.tree_segments.build_recursive_tree_segments
+   nvitk.measure.morpho.tree_segments.build_connected_skeleton_edge_segments
+   nvitk.measure.morpho.tree_segments.superior_axis
+   nvitk.measure.morpho.tree_segments.segment_child_z_score
+   nvitk.measure.morpho.tree_segments.branch_suffixes_by_superior_inferior
+   nvitk.measure.morpho.tree_segments.annotate_anatomic_tree_segments
+   nvitk.measure.morpho.tree_segments.assign_points_to_recursive_segments
+   nvitk.measure.morpho.tree_segments.save_recursive_labeled_tree_path_centerlines
+   nvitk.measure.morpho.tree_segments.remove_root_to_terminal_centerline_outputs
+   nvitk.measure.morpho.tree_segments.collapse_unary_supported_anatomic_segments
+   nvitk.measure.morpho.tree_segments.save_anatomic_split_tree_centerlines
+   nvitk.measure.morpho.tree_segments.save_anatomic_fallback_centerlines
+
+
+Module Contents
+---------------
+
+.. py:data:: _ATTR_TRANSFER_KEYS
+   :value: ('is_stenotic', 'is_enlarged', 'is_enlarged_cs', 'is_enlarged_mis', 'radius_mm',...
+
+
+.. py:function:: _path_results_attribute_cloud(path_results: List[dict]) -> tuple[numpy.ndarray, dict[str, numpy.ndarray]]
+
+   Stack all path-result points + per-point attributes for nearest-neighbor transfer.
+
+
+.. py:function:: _transfer_attrs_to_points(query_pts: numpy.ndarray, cloud_pts: numpy.ndarray, cloud_vals: dict[str, numpy.ndarray], *, max_dist_mm: float) -> dict[str, numpy.ndarray]
+
+   Nearest-neighbor transfer of point attributes from *cloud_pts* to *query_pts* within *max_dist_mm*.
+
+   Query points with no cloud point closer than *max_dist_mm* get NaN for every attribute.
+
+
+.. py:function:: build_recursive_tree_segments(tree: nvitk.measure.morpho.models.SkeletonTree, spacing) -> List[dict]
+
+   Recursively split a skeleton tree into branch segments at every branchpoint cluster.
+
+   Nearby branchpoints (directly adjacent in the graph) are merged into a single
+   "junction" so a cluster of skeleton voxels at one anatomical bifurcation
+   doesn't get split into spurious micro-segments. Segments are numbered
+   hierarchically (``S.1``, ``S.1.2``, ...) breadth-first from the root, with
+   siblings at each junction ordered by their subtree's reach. Each segment
+   dict carries its chain of node indices, world points, length, and tree
+   role/depth/path metadata consumed by the export layer.
+
+
+.. py:function:: build_connected_skeleton_edge_segments(tree: nvitk.measure.morpho.models.SkeletonTree, spacing) -> List[dict]
+
+   Build anatomic segments from unique morphology skeleton edges.
+
+   Uses :func:`~nvitk.morphology.centerline.unique_skeleton_edge_polylines` so
+   every endpoint (including proximal roots) and every junction-to-junction
+   edge is covered exactly once. Edges are oriented away from the tree root
+   when distances are available so anatomic naming still works.
+
+
+.. py:function:: superior_axis(axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> Tuple[int, int]
+
+   ``(array_axis, sign)`` whose increasing coordinate is *superior*.
+
+   Without *axes* this is the legacy hardcoded ``(2, +1)`` — i.e. array axis 2
+   assumed to run inferior→superior.
+
+
+.. py:function:: segment_child_z_score(segment: dict, lookahead_points: int = ANATOMIC_BRANCH_Z_LOOKAHEAD_POINTS, axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> float
+
+   Mean superior-inferior coordinate over the segment's first few points, for sibling ordering.
+
+   Increasing score always means *more superior*, whichever array axis the
+   volume's affine puts S/I on.
+
+
+.. py:function:: branch_suffixes_by_superior_inferior(child_segments: List[dict], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> Dict[int, str]
+
+   Assign anatomic suffixes (``i``/``s``/``b01``, ``b02``, ...) to sibling branches by Z ordering.
+
+   The most inferior sibling gets ``i``, the most superior gets ``s``, and any
+   in between get numbered ``bNN`` — matching conventional M2 branch naming.
+
+
+.. py:function:: annotate_anatomic_tree_segments(tree: nvitk.measure.morpho.models.SkeletonTree, segments: List[dict], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> List[dict]
+
+   Assign M1/M2s/M2i/... labels to directed skeleton segments.
+
+
+.. py:function:: assign_points_to_recursive_segments(points: numpy.ndarray, segments: List[dict], assign_tol_mm: float) -> dict
+
+   Label each centerline point with the recursive tree segment it belongs to (nearest within *assign_tol_mm*).
+
+
+.. py:function:: save_recursive_labeled_tree_path_centerlines(path_results: List[dict], segments: List[dict], centerline_dir: Optional[str], spacing, skip_path_ids: Optional[set] = None) -> None
+
+   Overwrite each path's centerline VTP with per-point recursive tree-segment id/name labels.
+
+
+.. py:function:: remove_root_to_terminal_centerline_outputs(path_results: List[dict], centerline_dir: Optional[str], centerline_radius_dir: Optional[str], keep_path_ids: Optional[set] = None) -> None
+
+   Delete the original root-to-terminal centerline VTPs once their content is superseded by tree-segment exports.
+
+
+.. py:function:: collapse_unary_supported_anatomic_segments(segments: List[dict], best_chunks: Dict[int, dict], root_idx: Optional[int], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> List[dict]
+
+   Collapse skeleton splits that are not supported by final kept paths.
+
+
+.. py:function:: save_anatomic_split_tree_centerlines(label: int, component_id: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, path_results: List[dict], segments: List[dict], centerline_dir: Optional[str], centerline_radius_dir: Optional[str], spacing, root_idx: Optional[int] = None, mask_cc: Optional[numpy.ndarray] = None, axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> Tuple[List[str], List[dict]]
+
+   Export unique skeleton-edge centerlines that stay connected at bifurcations.
+
+   Returns ``(saved_path_ids, segment_results)``. The segment results are
+   path-result-shaped dicts over the **non-overlapping** geometry, so the
+   export layer can summarise each piece of vessel exactly once instead of
+   once per root→terminal path that happens to traverse it.
+
+   Geometry comes from the recursive skeleton segments (exact shared junction
+   voxels). Caliber / stenosis attributes are transferred from the measured
+   root→terminal paths by nearest-neighbor lookup so junctions are never
+   dropped by overlap pruning or path-assignment gaps.
+
+
+.. py:function:: save_anatomic_fallback_centerlines(vessel_info: nvitk.measure.morpho.models.VesselInfo, component_id: int, path_results: List[dict], centerline_dir: Optional[str], centerline_radius_dir: Optional[str], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None, spacing=None) -> Tuple[List[str], List[dict]]
+
+   Export M1/M2-style anatomic-named centerlines when the recursive tree-segment split doesn't apply
+   (e.g. a simple single- or few-terminal vessel, or a donut/loop component whose
+   cyclic skeleton has no tree decomposition). Longest path becomes M1; remaining paths are named
+   by superior/inferior ordering.
+
+   Root→terminal paths of one component share their proximal trunk, so they are
+   deduplicated first (:func:`deduplicate_path_results`) — otherwise the shared
+   trunk is exported, and its length counted, once per terminal.
+
+   Returns ``(saved_path_ids, exported_results)``.
+
+

@@ -1,0 +1,92 @@
+nvitk.pipes.bbtpy.util.eicab_masks
+==================================
+
+.. py:module:: nvitk.pipes.bbtpy.util.eicab_masks
+
+.. autoapi-nested-parse::
+
+   Resolve eICAB Circle-of-Willis (CW) or whole-brain (WB) multilabel masks (local copy; no qvtpy import).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.eicab_masks.log
+   nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskKind
+   nvitk.pipes.bbtpy.util.eicab_masks._CW_PATTERNS
+   nvitk.pipes.bbtpy.util.eicab_masks._WB_PATTERNS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskResolution
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.eicab_masks._glob_first
+   nvitk.pipes.bbtpy.util.eicab_masks.resolve_eicab_mask
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: EicabMaskKind
+
+.. py:data:: _CW_PATTERNS
+   :value: ('*_eICAB_CW.nii.gz', '*_eICAB_CW.nii')
+
+
+.. py:data:: _WB_PATTERNS
+   :value: ('*_eICAB_WB.nii.gz', '*_eICAB_WB.nii')
+
+
+.. py:class:: EicabMaskResolution
+
+   Result of :func:`resolve_eicab_mask`.
+
+
+   .. py:attribute:: path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: requested
+      :type:  EicabMaskKind
+
+
+   .. py:attribute:: used
+      :type:  EicabMaskKind
+
+
+   .. py:attribute:: fallback
+      :type:  bool
+
+
+   .. py:attribute:: fallback_reason
+      :type:  str | None
+
+
+.. py:function:: _glob_first(eicab_dir: pathlib.Path, patterns: tuple[str, Ellipsis]) -> pathlib.Path | None
+
+   First sorted glob hit under *eicab_dir* (direct, then recursive).
+
+
+.. py:function:: resolve_eicab_mask(eicab_dir: pathlib.Path, preference: EicabMaskKind = 'cw') -> EicabMaskResolution
+
+   Return the eICAB label NIfTI path for *preference*, with warn-and-fallback.
+
+   If the requested mask is missing but the alternate exists, logs a warning and
+   uses the alternate. Raises :class:`FileNotFoundError` if neither exists.
+
+

@@ -1,0 +1,407 @@
+nvitk.gui.panels.statmodels.measurements
+========================================
+
+.. py:module:: nvitk.gui.panels.statmodels.measurements
+
+.. autoapi-nested-parse::
+
+   Measurement selection — one or several image measurements per analysis frame.
+
+   Description
+   -----------
+   A model like ``att_mean ~ pi + age_c`` needs 4D-flow and ASL measurements side by side in one frame.
+   Each measurement carries its *own* pipeline kind, pipeline, feature, atlas and grouping, and the
+   frames are joined on ``(subject_uid, territory)`` — so the groupings must be chosen to produce
+   commensurate keys (qvtpy ``hemisphere`` → ``MCA``/``ACA``/``PCA`` lines up with ASL ``territory``;
+   qvtpy ``vessel`` → ``LMCA``/``RMCA`` does not).
+
+   ``MeasurementForm`` is the reusable selector: the window shows one inline for the primary
+   measurement, and :class:`MeasurementDialog` wraps another for adding/editing the rest.
+   Loading runs on :class:`FrameLoadWorker` because it issues one ``repo.image()`` query per
+   measurement.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.measurements.MeasurementForm
+   nvitk.gui.panels.statmodels.measurements.MeasurementDialog
+   nvitk.gui.panels.statmodels.measurements.MeasurementsWidget
+   nvitk.gui.panels.statmodels.measurements.FrameLoadWorker
+
+
+Module Contents
+---------------
+
+.. py:class:: MeasurementForm(repo: Any, parent: qtpy.QtWidgets.QWidget | None = None, *, show_alias: bool = False)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Pipeline-kind / pipeline / feature / atlas / grouping selector for one measurement.
+
+   Every combo is repopulated from the one above it, so the offered features and groupings are
+   always valid for the selected pipeline kind. The ASL atlas row only appears for ASL.
+
+
+   .. py:attribute:: changed
+
+
+   .. py:attribute:: _repo
+
+
+   .. py:attribute:: _pipeline_kind
+
+
+   .. py:attribute:: _pipeline
+
+
+   .. py:attribute:: _feature
+
+
+   .. py:attribute:: _grouping
+
+
+   .. py:attribute:: _atlas
+
+
+   .. py:attribute:: _atlas_label
+
+
+   .. py:attribute:: _alias
+
+
+   .. py:attribute:: _alias_label
+
+
+   .. py:attribute:: _composites_host
+
+
+   .. py:attribute:: _composites_layout
+
+
+   .. py:attribute:: _composite_boxes
+      :type:  dict[str, qtpy.QtWidgets.QCheckBox]
+
+
+   .. py:attribute:: _composites_label
+
+
+   .. py:attribute:: _regions_host
+
+
+   .. py:attribute:: _regions
+
+
+   .. py:attribute:: _btn_pick_regions
+
+
+   .. py:attribute:: _regions_label
+
+
+   .. py:attribute:: _hint
+
+
+   .. py:method:: _current_kind() -> str
+
+      The selected pipeline kind.
+
+
+
+   .. py:method:: _current_feature() -> str
+
+      Entered/selected feature, falling back to the first available for the kind.
+
+
+
+   .. py:method:: _populate_pipeline_combo() -> None
+
+      Repopulate the pipeline combo with entries registered for the current modality.
+
+
+
+   .. py:method:: _populate_feature_combo() -> None
+
+      Repopulate the feature combo for the current kind, preserving a still-valid choice.
+
+
+
+   .. py:method:: _populate_grouping_combo() -> None
+
+      Repopulate the grouping combo with choices valid for the current kind/feature.
+
+
+
+   .. py:method:: _populate_composites() -> None
+
+      Rebuild the composite-label checkboxes for the current kind/feature, preserving ticks.
+
+      Composites are aggregates over raw vessels (TCBF = RICA + LICA + BASILAR), so they only
+      exist for the pipelines and features that publish those vessels — the row hides entirely
+      when nothing applies.
+
+
+
+   .. py:method:: _sync_atlas_visibility() -> None
+
+      Show the ASL-atlas picker only when the current pipeline kind is ASL.
+
+
+
+   .. py:method:: _sync_hint() -> None
+
+      Update the explanatory hint for the current pipeline kind/feature.
+
+
+
+   .. py:method:: _on_kind_changed() -> None
+
+      Repopulate every dependent combo and sync visibility/hints for the new kind.
+
+
+
+   .. py:method:: _on_feature_changed(*_args: Any) -> None
+
+      Repopulate the grouping/composite options and refresh the hint for the new feature.
+
+
+
+   .. py:method:: spec() -> nvitk.stats.MeasurementSpec
+
+      The measurement currently described by the form.
+
+
+
+   .. py:method:: _on_pick_regions() -> None
+
+      Offer the measurement's published regions as a checkable list.
+
+
+
+   .. py:method:: apply_spec(spec: nvitk.stats.MeasurementSpec) -> None
+
+      Load *spec* into the form without emitting intermediate change signals.
+
+
+
+   .. py:method:: validation_error() -> str
+
+      Why the current form cannot be used, or ``""``.
+
+
+
+.. py:class:: MeasurementDialog(parent: qtpy.QtWidgets.QWidget | None, repo: Any, *, spec: nvitk.stats.MeasurementSpec | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Modal wrapper around a :class:`MeasurementForm`, used to add or edit a list entry.
+
+
+   .. py:attribute:: _form
+
+
+   .. py:attribute:: _error
+
+
+   .. py:method:: _on_accept() -> None
+
+      Accept only when the form validates.
+
+
+
+   .. py:method:: spec() -> nvitk.stats.MeasurementSpec
+
+      The configured measurement.
+
+
+
+.. py:class:: MeasurementsWidget(repo: Any, parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QGroupBox`
+
+
+   The measurements that make up the analysis frame, plus the join mode and load diagnostics.
+
+   Entry 0 is the *primary* measurement — it is the one the window's inline Data-selection form
+   edits, the one whose column the default formulas and plots fall back to, and the one every other
+   measurement's ``(subject_uid, territory)`` keys are compared against.
+
+
+   .. py:attribute:: changed
+
+
+   .. py:attribute:: _repo
+
+
+   .. py:attribute:: _specs
+      :type:  list[nvitk.stats.MeasurementSpec]
+      :value: []
+
+
+
+   .. py:attribute:: _list
+
+
+   .. py:attribute:: _join
+
+
+   .. py:attribute:: _grain
+
+
+   .. py:attribute:: _attach_qc
+
+
+   .. py:attribute:: _diagnostics
+
+
+   .. py:method:: specs() -> list[nvitk.stats.MeasurementSpec]
+
+      The configured measurements, primary first.
+
+
+
+   .. py:method:: set_specs(specs: Sequence[nvitk.stats.MeasurementSpec]) -> None
+
+      Replace the measurement list (always keeping at least one entry).
+
+
+
+   .. py:method:: set_primary(spec: nvitk.stats.MeasurementSpec) -> None
+
+      Update entry 0 in place, from the window's inline Data-selection form.
+
+
+
+   .. py:method:: join() -> str
+
+      The selected join mode.
+
+
+
+   .. py:method:: set_join(mode: str) -> None
+
+      Select the join mode named *mode*, if known.
+
+
+
+   .. py:method:: attach_qc() -> bool
+
+      Whether the automatic QC columns should be merged onto the frame.
+
+
+
+   .. py:method:: set_attach_qc(enabled: bool) -> None
+
+      Set the automatic-QC toggle without emitting an intermediate change signal.
+
+
+
+   .. py:method:: grain() -> str
+
+      The selected join grain (``"territory"`` or ``"subject"``).
+
+
+
+   .. py:method:: set_grain(grain: str) -> None
+
+      Select the join grain named *grain*, if known.
+
+
+
+   .. py:method:: columns() -> list[str]
+
+      Output column name of every measurement.
+
+
+
+   .. py:method:: _refresh() -> None
+
+      Redraw the list, marking the primary entry.
+
+
+
+   .. py:method:: set_diagnostics(meta: dict[str, Any] | None) -> None
+
+      Report per-measurement counts, key overlap, and any warnings from the last load.
+
+
+
+   .. py:method:: _on_add() -> None
+
+      Append a measurement configured in a modal dialog.
+
+
+
+   .. py:method:: _on_edit() -> None
+
+      Edit the selected measurement.
+
+
+
+   .. py:method:: _on_duplicate() -> None
+
+      Copy the selected measurement, giving the copy a distinct alias.
+
+
+
+   .. py:method:: _on_remove() -> None
+
+      Drop the selected measurement (never the last remaining one).
+
+
+
+.. py:class:: FrameLoadWorker(repo: Any, *, measurements: Sequence[nvitk.stats.MeasurementSpec], clinical_vars: list[str], cognitive_vars: list[str], join: str, grain: str = 'territory', attach_qc: bool = True)
+
+   Bases: :py:obj:`qtpy.QtCore.QThread`
+
+
+   Background thread that builds the analysis frame, so the GUI stays responsive.
+
+   One ``repo.image()`` query runs per measurement plus the covariate queries, which is seconds on
+   a large dataset. Emits ``finished_ok((frame, meta))`` or ``failed(message)``.
+
+
+   .. py:attribute:: finished_ok
+
+
+   .. py:attribute:: failed
+
+
+   .. py:attribute:: progress
+
+
+   .. py:attribute:: _repo
+
+
+   .. py:attribute:: _measurements
+
+
+   .. py:attribute:: _clinical_vars
+
+
+   .. py:attribute:: _cognitive_vars
+
+
+   .. py:attribute:: _join
+
+
+   .. py:attribute:: _grain
+      :value: 'territory'
+
+
+
+   .. py:attribute:: _attach_qc
+      :value: True
+
+
+
+   .. py:method:: run() -> None
+
+      Build the frame and emit it, or report the failure.
+
+
+

@@ -1,0 +1,53 @@
+nvitk.io.writers.nifti
+======================
+
+.. py:module:: nvitk.io.writers.nifti
+
+.. autoapi-nested-parse::
+
+   Write volumes to NIfTI (and optional JSON sidecar / header extension) via nibabel.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.io.writers.nifti._NIFTI_RESERVED_KEYS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.writers.nifti._jsonable
+   nvitk.io.writers.nifti._extract_zooms
+   nvitk.io.writers.nifti.write_nifti
+
+
+Module Contents
+---------------
+
+.. py:data:: _NIFTI_RESERVED_KEYS
+
+.. py:function:: _jsonable(value: Any) -> Any
+
+   Recursively coerce a metadata value to a JSON-serializable type (arrays → lists, bytes → str, else ``str()``).
+
+
+.. py:function:: _extract_zooms(metadata: dict[str, Any], ndim: int) -> tuple[float, Ellipsis]
+
+   Per-axis voxel sizes for the NIfTI header, from metadata spacing keys (defaults to 1.0 when absent).
+
+
+.. py:function:: write_nifti(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, save_metadata_extension: bool = True, **_: Any) -> None
+
+   Save *data* to *path* as NIfTI; writes a sibling ``.json`` when extra metadata is JSON-safe.
+
+   Reorders from ``metadata['axes']`` to *axes* when both differ. Zooms come from ``x_res`` /
+   ``y_res`` / ``z_res`` / ``t_res`` (or aliases). With ``save_metadata_extension=True``, a
+   nibabel header extension may embed additional JSON metadata.
+
+

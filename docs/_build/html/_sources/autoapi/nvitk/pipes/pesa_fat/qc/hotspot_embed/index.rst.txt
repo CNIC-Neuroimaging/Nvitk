@@ -1,0 +1,47 @@
+nvitk.pipes.pesa_fat.qc.hotspot_embed
+=====================================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.hotspot_embed
+
+.. autoapi-nested-parse::
+
+   Precompute PyVista hotspot HTML exports for QC gallery.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.hotspot_embed.export_hotspot_gallery_for_batch
+   nvitk.pipes.pesa_fat.qc.hotspot_embed.hotspot_gallery_control_html
+   nvitk.pipes.pesa_fat.qc.hotspot_embed.hotspot_gallery_control_srcdoc
+
+
+Module Contents
+---------------
+
+.. py:function:: export_hotspot_gallery_for_batch(lay, subjects: list[str], out_dir: pathlib.Path, *, rel_assets_root: str, notebook: bool = True) -> tuple[list[tuple[str, str, str]], list[str]]
+
+   For each subject and each voxelwise measure, write ``hotspot_<subj>_<meas>.html``.
+
+   :returns: * *entries* -- ``(subject, measure, rel_html_path)`` for the parent page selectors.
+             * *errors* -- Human-readable skip messages.
+
+
+.. py:function:: hotspot_gallery_control_html(entries: list[tuple[str, str, str]], *, dom_prefix: str) -> str
+
+   Two ``<select>`` elements + ``<iframe>``; measure list depends on subject.
+
+   dom_prefix is required so CT-PET and Dixon widgets don't collide in the same page.
+
+
+.. py:function:: hotspot_gallery_control_srcdoc(html_map: dict[str, dict[str, str]], *, dom_prefix: str) -> str
+
+   Hotspot gallery where each (subject,measure) maps to an iframe srcdoc HTML string.
+
+   NOTE: raw HTML must NOT be embedded directly into JS literals (it can contain quotes and
+   even `</script>`). We base64-encode values and store them in a JSON blob.
+
+

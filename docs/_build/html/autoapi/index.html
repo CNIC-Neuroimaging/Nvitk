@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>API Reference &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/graphviz.css?v=4ae1632d" />
+    <script src="../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="nvitk" href="nvitk/index.html" />
+    <link rel="prev" title="Nvitk documentation" href="../index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="api-reference">
+<h1>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading">¶</a></h1>
+<p>This page contains auto-generated API reference documentation <a class="footnote-reference brackets" href="#f1" id="id1" role="doc-noteref"><span class="fn-bracket">[</span>1<span class="fn-bracket">]</span></a>.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="nvitk/index.html">nvitk</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/cli/index.html">nvitk.cli</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/_common/index.html">nvitk.cli._common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/_sge/index.html">nvitk.cli._sge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/ants/index.html">nvitk.cli.ants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/catalog/index.html">nvitk.cli.catalog</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/config/index.html">nvitk.cli.config</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/filters/index.html">nvitk.cli.filters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/fireants/index.html">nvitk.cli.fireants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/measure/index.html">nvitk.cli.measure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/morphology/index.html">nvitk.cli.morphology</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/restoration/index.html">nvitk.cli.restoration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/segmentation/index.html">nvitk.cli.segmentation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cli/transform/index.html">nvitk.cli.transform</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/cluster/index.html">nvitk.cluster</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/remote_submit/index.html">nvitk.cluster.remote_submit</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/remote_transfer/index.html">nvitk.cluster.remote_transfer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/sge/index.html">nvitk.cluster.sge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/sge_chunk/index.html">nvitk.cluster.sge_chunk</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/sge_json/index.html">nvitk.cluster.sge_json</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/cluster/sge_remote/index.html">nvitk.cluster.sge_remote</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/core/index.html">nvitk.core</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/array/index.html">nvitk.core.array</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/backend/index.html">nvitk.core.backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/click_backend/index.html">nvitk.core.click_backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/config/index.html">nvitk.core.config</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/exceptions/index.html">nvitk.core.exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/logger/index.html">nvitk.core.logger</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/patterns/index.html">nvitk.core.patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/core/proxy/index.html">nvitk.core.proxy</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/db/index.html">nvitk.db</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/asl_atlases/index.html">nvitk.db.asl_atlases</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/catalog/index.html">nvitk.db.catalog</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/derived_measurements/index.html">nvitk.db.derived_measurements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/exceptions/index.html">nvitk.db.exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/filters/index.html">nvitk.db.filters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/importers/index.html">nvitk.db.importers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/local_dicom_assets/index.html">nvitk.db.local_dicom_assets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/local_nifti_assets/index.html">nvitk.db.local_nifti_assets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/pipeline_assets/index.html">nvitk.db.pipeline_assets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/qvtpy_anatomy/index.html">nvitk.db.qvtpy_anatomy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/qvtpy_qc/index.html">nvitk.db.qvtpy_qc</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/repo/index.html">nvitk.db.repo</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/settings_paths/index.html">nvitk.db.settings_paths</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/sqlite_index/index.html">nvitk.db.sqlite_index</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/storage/index.html">nvitk.db.storage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/t1_atlases/index.html">nvitk.db.t1_atlases</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/variable_units/index.html">nvitk.db.variable_units</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat/index.html">nvitk.db.xnat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_4dflows_assets/index.html">nvitk.db.xnat_4dflows_assets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_config/index.html">nvitk.db.xnat_config</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_pipeline_resources/index.html">nvitk.db.xnat_pipeline_resources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_projects/index.html">nvitk.db.xnat_projects</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_scan_nifti_assets/index.html">nvitk.db.xnat_scan_nifti_assets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/db/xnat_upload/index.html">nvitk.db.xnat_upload</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/filters/index.html">nvitk.filters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/filters/hessian/index.html">nvitk.filters.hessian</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/filters/jerman/index.html">nvitk.filters.jerman</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/filters/sliding_threshold/index.html">nvitk.filters.sliding_threshold</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/filters/snakes/index.html">nvitk.filters.snakes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/graphs/index.html">nvitk.graphs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/gui/index.html">nvitk.gui</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/app/index.html">nvitk.gui.app</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/core/index.html">nvitk.gui.core</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/backend/index.html">nvitk.gui.core.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/flow_layout/index.html">nvitk.gui.core.flow_layout</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/geometry/index.html">nvitk.gui.core.geometry</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/label_pick/index.html">nvitk.gui.core.label_pick</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/log_panel/index.html">nvitk.gui.core.log_panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/orientation/index.html">nvitk.gui.core.orientation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/spatial/index.html">nvitk.gui.core.spatial</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/core/warnings/index.html">nvitk.gui.core.warnings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/io/index.html">nvitk.gui.io</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/io/export/index.html">nvitk.gui.io.export</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/io/napari_io/index.html">nvitk.gui.io.napari_io</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/lab/index.html">nvitk.gui.lab</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/lab/mouse_tof_cow/index.html">nvitk.gui.lab.mouse_tof_cow</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/labels/index.html">nvitk.gui.labels</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/labels/catalog/index.html">nvitk.gui.labels.catalog</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/labels/selector/index.html">nvitk.gui.labels.selector</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/labels/visibility/index.html">nvitk.gui.labels.visibility</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/main/index.html">nvitk.gui.main</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/panels/index.html">nvitk.gui.panels</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/data_browser/index.html">nvitk.gui.panels.data_browser</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/dicom_tags/index.html">nvitk.gui.panels.dicom_tags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/image_properties/index.html">nvitk.gui.panels.image_properties</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/qc/index.html">nvitk.gui.panels.qc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/statmodels/index.html">nvitk.gui.panels.statmodels</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/cli/index.html">nvitk.gui.panels.statmodels.cli</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/column_plot_dialog/index.html">nvitk.gui.panels.statmodels.column_plot_dialog</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/combinations_dialog/index.html">nvitk.gui.panels.statmodels.combinations_dialog</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/constants/index.html">nvitk.gui.panels.statmodels.constants</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/db_publish/index.html">nvitk.gui.panels.statmodels.db_publish</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/derived/index.html">nvitk.gui.panels.statmodels.derived</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/export/index.html">nvitk.gui.panels.statmodels.export</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/figure_host/index.html">nvitk.gui.panels.statmodels.figure_host</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/frame_table/index.html">nvitk.gui.panels.statmodels.frame_table</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/helpers/index.html">nvitk.gui.panels.statmodels.helpers</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/measurements/index.html">nvitk.gui.panels.statmodels.measurements</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/mediation_panel/index.html">nvitk.gui.panels.statmodels.mediation_panel</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/panel/index.html">nvitk.gui.panels.statmodels.panel</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/plot_view/index.html">nvitk.gui.panels.statmodels.plot_view</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/plotly_view/index.html">nvitk.gui.panels.statmodels.plotly_view</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/publish_dialog/index.html">nvitk.gui.panels.statmodels.publish_dialog</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/report/index.html">nvitk.gui.panels.statmodels.report</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/subject_plot_dialog/index.html">nvitk.gui.panels.statmodels.subject_plot_dialog</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/theme/index.html">nvitk.gui.panels.statmodels.theme</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/gui/panels/statmodels/window/index.html">nvitk.gui.panels.statmodels.window</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/panels/xnat/index.html">nvitk.gui.panels.xnat</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/pipeline/index.html">nvitk.gui.pipeline</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/pipeline/catalog/index.html">nvitk.gui.pipeline.catalog</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/pipeline/data_presets/index.html">nvitk.gui.pipeline.data_presets</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/pipeline/form/index.html">nvitk.gui.pipeline.form</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/pipeline/qvtpy_stages/index.html">nvitk.gui.pipeline.qvtpy_stages</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/pipeline/stages/index.html">nvitk.gui.pipeline.stages</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/sge/index.html">nvitk.gui.sge</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/dialog/index.html">nvitk.gui.sge.dialog</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/job/index.html">nvitk.gui.sge.job</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/models/index.html">nvitk.gui.sge.models</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/poll/index.html">nvitk.gui.sge.poll</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/retrieve/index.html">nvitk.gui.sge.retrieve</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/submit/index.html">nvitk.gui.sge.submit</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/sge/worker/index.html">nvitk.gui.sge.worker</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/tools/index.html">nvitk.gui.tools</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/descriptions/index.html">nvitk.gui.tools.descriptions</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/dock/index.html">nvitk.gui.tools.dock</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/gpu_toggle/index.html">nvitk.gui.tools.gpu_toggle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/panel/index.html">nvitk.gui.tools.panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/presets/index.html">nvitk.gui.tools.presets</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/registry/index.html">nvitk.gui.tools.registry</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/runner/index.html">nvitk.gui.tools.runner</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/tools/totalseg_selector/index.html">nvitk.gui.tools.totalseg_selector</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/gui/viz/index.html">nvitk.gui.viz</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/centerline/index.html">nvitk.gui.viz.centerline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/cohort_violin_panel/index.html">nvitk.gui.viz.cohort_violin_panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/cross_section_panel/index.html">nvitk.gui.viz.cross_section_panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/flow_streamlines/index.html">nvitk.gui.viz.flow_streamlines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/hemo_geometry/index.html">nvitk.gui.viz.hemo_geometry</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/hemo_plot_panel/index.html">nvitk.gui.viz.hemo_plot_panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/layers/index.html">nvitk.gui.viz.layers</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/left_dock/index.html">nvitk.gui.viz.left_dock</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/loc_points/index.html">nvitk.gui.viz.loc_points</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/morpho_viz/index.html">nvitk.gui.viz.morpho_viz</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/qc_loader/index.html">nvitk.gui.viz.qc_loader</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/qc_review_panel/index.html">nvitk.gui.viz.qc_review_panel</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/vessel_cross_sections/index.html">nvitk.gui.viz.vessel_cross_sections</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/gui/viz/view_capture/index.html">nvitk.gui.viz.view_capture</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/io/index.html">nvitk.io</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/_common/index.html">nvitk.io._common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/ants_bridge/index.html">nvitk.io.ants_bridge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/brainshow/index.html">nvitk.io.brainshow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/conversors/index.html">nvitk.io.conversors</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_dicom_conversion/index.html">nvitk.io.conversors._dicom_conversion</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_dicom_rtstructs/index.html">nvitk.io.conversors._dicom_rtstructs</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_dicom_tissue/index.html">nvitk.io.conversors._dicom_tissue</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_dicom_zeiss/index.html">nvitk.io.conversors._dicom_zeiss</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_phase2volume_bg/index.html">nvitk.io.conversors._phase2volume_bg</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/_poly_stencil/index.html">nvitk.io.conversors._poly_stencil</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/dcm2nii/index.html">nvitk.io.conversors.dcm2nii</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/nikon2nifti/index.html">nvitk.io.conversors.nikon2nifti</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/phase2volume/index.html">nvitk.io.conversors.phase2volume</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/conversors/stl2nifti/index.html">nvitk.io.conversors.stl2nifti</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/imageio/index.html">nvitk.io.imageio</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/readers/index.html">nvitk.io.readers</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/dicom/index.html">nvitk.io.readers.dicom</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/mha/index.html">nvitk.io.readers.mha</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/nd2/index.html">nvitk.io.readers.nd2</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/nifti/index.html">nvitk.io.readers.nifti</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/pil/index.html">nvitk.io.readers.pil</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/readers/tiff/index.html">nvitk.io.readers.tiff</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/io/writers/index.html">nvitk.io.writers</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/writers/mha/index.html">nvitk.io.writers.mha</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/writers/nifti/index.html">nvitk.io.writers.nifti</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/writers/pil/index.html">nvitk.io.writers.pil</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/io/writers/tiff/index.html">nvitk.io.writers.tiff</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/measure/index.html">nvitk.measure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/_common/index.html">nvitk.measure._common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/compare/index.html">nvitk.measure.compare</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/cross_section/index.html">nvitk.measure.cross_section</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/hemodynamics/index.html">nvitk.measure.hemodynamics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/intensity/index.html">nvitk.measure.intensity</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/mask_hemodynamics/index.html">nvitk.measure.mask_hemodynamics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/measurer/index.html">nvitk.measure.measurer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/morpho/index.html">nvitk.measure.morpho</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/anatomy/index.html">nvitk.measure.morpho.anatomy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/anatomy_axes/index.html">nvitk.measure.morpho.anatomy_axes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/caliber/index.html">nvitk.measure.morpho.caliber</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/centerlines/index.html">nvitk.measure.morpho.centerlines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/donut_loops/index.html">nvitk.measure.morpho.donut_loops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/export_utils/index.html">nvitk.measure.morpho.export_utils</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/measure/morpho/export_utils/compute_tortuosity_metrics/index.html">nvitk.measure.morpho.export_utils.compute_tortuosity_metrics</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/measure/morpho/export_utils/generate_pvsm/index.html">nvitk.measure.morpho.export_utils.generate_pvsm</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/measure/morpho/export_utils/generate_radius_histograms/index.html">nvitk.measure.morpho.export_utils.generate_radius_histograms</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/measure/morpho/export_utils/summaries/index.html">nvitk.measure.morpho.export_utils.summaries</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/geometry/index.html">nvitk.measure.morpho.geometry</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/io_utils/index.html">nvitk.measure.morpho.io_utils</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/labels_util/index.html">nvitk.measure.morpho.labels_util</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/metrics/index.html">nvitk.measure.morpho.metrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/models/index.html">nvitk.measure.morpho.models</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/orchestration/index.html">nvitk.measure.morpho.orchestration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/preprocess_taubin/index.html">nvitk.measure.morpho.preprocess_taubin</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/run_case/index.html">nvitk.measure.morpho.run_case</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/skeleton/index.html">nvitk.measure.morpho.skeleton</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/surface/index.html">nvitk.measure.morpho.surface</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/topology_io/index.html">nvitk.measure.morpho.topology_io</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/tree_regions/index.html">nvitk.measure.morpho.tree_regions</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/tree_segments/index.html">nvitk.measure.morpho.tree_segments</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/measure/morpho/volumetry/index.html">nvitk.measure.morpho.volumetry</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/morphometrics/index.html">nvitk.measure.morphometrics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/morphometrics_config/index.html">nvitk.measure.morphometrics_config</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/radiomics/index.html">nvitk.measure.radiomics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/surface/index.html">nvitk.measure.surface</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/suv/index.html">nvitk.measure.suv</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/volume/index.html">nvitk.measure.volume</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/measure/voxel/index.html">nvitk.measure.voxel</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/meshlab/index.html">nvitk.meshlab</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/meshlab/marching_cubes/index.html">nvitk.meshlab.marching_cubes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/morphology/index.html">nvitk.morphology</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/_common/index.html">nvitk.morphology._common</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/binary/index.html">nvitk.morphology.binary</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/centerline/index.html">nvitk.morphology.centerline</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/centerline_siphon/index.html">nvitk.morphology.centerline_siphon</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/components/index.html">nvitk.morphology.components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/mst_bridge/index.html">nvitk.morphology.mst_bridge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/morphology/polyline_graph/index.html">nvitk.morphology.polyline_graph</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/normalization/index.html">nvitk.normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/pipes/index.html">nvitk.pipes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/pipes/bbtpy/index.html">nvitk.pipes.bbtpy</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/config/index.html">nvitk.pipes.bbtpy.config</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/labels/index.html">nvitk.pipes.bbtpy.labels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/run/index.html">nvitk.pipes.bbtpy.run</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/stage0_convert/index.html">nvitk.pipes.bbtpy.stage0_convert</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/stage0_download/index.html">nvitk.pipes.bbtpy.stage0_download</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/stage1_registration/index.html">nvitk.pipes.bbtpy.stage1_registration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/stage2_bb_segmentation/index.html">nvitk.pipes.bbtpy.stage2_bb_segmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/bbtpy/util/index.html">nvitk.pipes.bbtpy.util</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/bbtpy/util/bb_vessel_segmentation/index.html">nvitk.pipes.bbtpy.util.bb_vessel_segmentation</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/bbtpy/util/centerlines_from_eicab/index.html">nvitk.pipes.bbtpy.util.centerlines_from_eicab</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/bbtpy/util/eicab_masks/index.html">nvitk.pipes.bbtpy.util.eicab_masks</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/bbtpy/util/paths/index.html">nvitk.pipes.bbtpy.util.paths</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/bbtpy/util/vwi_preprocess/index.html">nvitk.pipes.bbtpy.util.vwi_preprocess</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/pipes/pesa_fat/index.html">nvitk.pipes.pesa_fat</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/index.html">nvitk.pipes.pesa_fat.common</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/batch_stage3_aggregate/index.html">nvitk.pipes.pesa_fat.common.batch_stage3_aggregate</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/cluster_upload/index.html">nvitk.pipes.pesa_fat.common.cluster_upload</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/db_publish/index.html">nvitk.pipes.pesa_fat.common.db_publish</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/dixon_regions/index.html">nvitk.pipes.pesa_fat.common.dixon_regions</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/paths/index.html">nvitk.pipes.pesa_fat.common.paths</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/sge_array/index.html">nvitk.pipes.pesa_fat.common.sge_array</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/sge_db/index.html">nvitk.pipes.pesa_fat.common.sge_db</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/stage0_convert/index.html">nvitk.pipes.pesa_fat.common.stage0_convert</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/stage3_batch_summary/index.html">nvitk.pipes.pesa_fat.common.stage3_batch_summary</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/stage4_qc/index.html">nvitk.pipes.pesa_fat.common.stage4_qc</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/common/xnat_inputs/index.html">nvitk.pipes.pesa_fat.common.xnat_inputs</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/index.html">nvitk.pipes.pesa_fat.ct_pet_v5</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/config/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.config</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/labels/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.labels</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/run/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.run</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/stage1_segment/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.stage1_segment</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/stage2_postprocess/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/ct_pet_v5/stage3_measure/index.html">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/index.html">nvitk.pipes.pesa_fat.dixon_v5</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/config/index.html">nvitk.pipes.pesa_fat.dixon_v5.config</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/labels/index.html">nvitk.pipes.pesa_fat.dixon_v5.labels</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/run/index.html">nvitk.pipes.pesa_fat.dixon_v5.run</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/stage1_segment/index.html">nvitk.pipes.pesa_fat.dixon_v5.stage1_segment</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/stage2_postprocess/index.html">nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/dixon_v5/stage3_measure/index.html">nvitk.pipes.pesa_fat.dixon_v5.stage3_measure</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/index.html">nvitk.pipes.pesa_fat.qc</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/dixon_heatmap/index.html">nvitk.pipes.pesa_fat.qc.dixon_heatmap</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/embed/index.html">nvitk.pipes.pesa_fat.qc.embed</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/expected_ranges/index.html">nvitk.pipes.pesa_fat.qc.expected_ranges</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/headless/index.html">nvitk.pipes.pesa_fat.qc.headless</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/hotspot_embed/index.html">nvitk.pipes.pesa_fat.qc.hotspot_embed</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/html_builder/index.html">nvitk.pipes.pesa_fat.qc.html_builder</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/measurements_table/index.html">nvitk.pipes.pesa_fat.qc.measurements_table</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/pet_axial/index.html">nvitk.pipes.pesa_fat.qc.pet_axial</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/portal/index.html">nvitk.pipes.pesa_fat.qc.portal</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/portal_cli/index.html">nvitk.pipes.pesa_fat.qc.portal_cli</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/pyvista_scenes/index.html">nvitk.pipes.pesa_fat.qc.pyvista_scenes</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/review_policy/index.html">nvitk.pipes.pesa_fat.qc.review_policy</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/pesa_fat/qc/slice_review/index.html">nvitk.pipes.pesa_fat.qc.slice_review</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/run_batch/index.html">nvitk.pipes.pesa_fat.run_batch</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/run_hotspot/index.html">nvitk.pipes.pesa_fat.run_hotspot</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/pesa_fat/sync_measurements/index.html">nvitk.pipes.pesa_fat.sync_measurements</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/pipes/qvtpy/index.html">nvitk.pipes.qvtpy</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/autoqc_sources/index.html">nvitk.pipes.qvtpy.autoqc_sources</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/common/index.html">nvitk.pipes.qvtpy.common</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/common/db_publish/index.html">nvitk.pipes.qvtpy.common.db_publish</a></li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/common/morpho_db_publish/index.html">nvitk.pipes.qvtpy.common.morpho_db_publish</a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/config/index.html">nvitk.pipes.qvtpy.config</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/labels/index.html">nvitk.pipes.qvtpy.labels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/run/index.html">nvitk.pipes.qvtpy.run</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/run_flowshow/index.html">nvitk.pipes.qvtpy.run_flowshow</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage0_convert/index.html">nvitk.pipes.qvtpy.stage0_convert</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage0_download/index.html">nvitk.pipes.qvtpy.stage0_download</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage1_eicab/index.html">nvitk.pipes.qvtpy.stage1_eicab</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage2_registration/index.html">nvitk.pipes.qvtpy.stage2_registration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage3_centerline/index.html">nvitk.pipes.qvtpy.stage3_centerline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage4_4dflow_segmentation/index.html">nvitk.pipes.qvtpy.stage4_4dflow_segmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage4t_4dflow_t_segmentation/index.html">nvitk.pipes.qvtpy.stage4t_4dflow_t_segmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage5_loc_generation/index.html">nvitk.pipes.qvtpy.stage5_loc_generation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage6_measure/index.html">nvitk.pipes.qvtpy.stage6_measure</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage7_morphometrics/index.html">nvitk.pipes.qvtpy.stage7_morphometrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stage9_autoqc/index.html">nvitk.pipes.qvtpy.stage9_autoqc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/stages/index.html">nvitk.pipes.qvtpy.stages</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/sync_measurements/index.html">nvitk.pipes.qvtpy.sync_measurements</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/util/index.html">nvitk.pipes.qvtpy.util</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/index.html">nvitk.pipes.qvtpy.util.centerline</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/centerline_io/index.html">nvitk.pipes.qvtpy.util.centerline.centerline_io</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/flow_volume_masks/index.html">nvitk.pipes.qvtpy.util.centerline.flow_volume_masks</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/mask_cleaning/index.html">nvitk.pipes.qvtpy.util.centerline.mask_cleaning</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/venous_flexion/index.html">nvitk.pipes.qvtpy.util.centerline.venous_flexion</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/centerline/venous_heuristics/index.html">nvitk.pipes.qvtpy.util.centerline.venous_heuristics</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/index.html">nvitk.pipes.qvtpy.util.eicab</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/brain_mask/index.html">nvitk.pipes.qvtpy.util.eicab.brain_mask</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/eicab_masks/index.html">nvitk.pipes.qvtpy.util.eicab.eicab_masks</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/eicab_postprocess/index.html">nvitk.pipes.qvtpy.util.eicab.eicab_postprocess</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/morpho_paths/index.html">nvitk.pipes.qvtpy.util.eicab.morpho_paths</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/eicab/morpho_topology/index.html">nvitk.pipes.qvtpy.util.eicab.morpho_topology</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/hemodynamics/index.html">nvitk.pipes.qvtpy.util.hemodynamics</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/hemodynamics/hemo_viz_io/index.html">nvitk.pipes.qvtpy.util.hemodynamics.hemo_viz_io</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/hemodynamics/measure_plots/index.html">nvitk.pipes.qvtpy.util.hemodynamics.measure_plots</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/hemodynamics/measure_qc/index.html">nvitk.pipes.qvtpy.util.hemodynamics.measure_qc</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/hemodynamics/vessel_hemodynamics/index.html">nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/index.html">nvitk.pipes.qvtpy.util.io</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/cluster_upload/index.html">nvitk.pipes.qvtpy.util.io.cluster_upload</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/db_subject_filter/index.html">nvitk.pipes.qvtpy.util.io.db_subject_filter</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/paths/index.html">nvitk.pipes.qvtpy.util.io.paths</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/qc_report/index.html">nvitk.pipes.qvtpy.util.io.qc_report</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/sge_backend/index.html">nvitk.pipes.qvtpy.util.io.sge_backend</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/sge_chunk/index.html">nvitk.pipes.qvtpy.util.io.sge_chunk</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/io/xnat_upload/index.html">nvitk.pipes.qvtpy.util.io.xnat_upload</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/loc/index.html">nvitk.pipes.qvtpy.util.loc</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/loc/loc_measure/index.html">nvitk.pipes.qvtpy.util.loc.loc_measure</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/loc/loc_selection/index.html">nvitk.pipes.qvtpy.util.loc.loc_selection</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="nvitk/pipes/qvtpy/util/segmentation/index.html">nvitk.pipes.qvtpy.util.segmentation</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/segmentation/aca_sequential_grow/index.html">nvitk.pipes.qvtpy.util.segmentation.aca_sequential_grow</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/segmentation/distal_vessel_tree/index.html">nvitk.pipes.qvtpy.util.segmentation.distal_vessel_tree</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/segmentation/vertebral_split/index.html">nvitk.pipes.qvtpy.util.segmentation.vertebral_split</a></li>
+<li class="toctree-l6"><a class="reference internal" href="nvitk/pipes/qvtpy/util/segmentation/vessel_cd_segmentation/index.html">nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/pipes/qvtpy/xnat_upload/index.html">nvitk.pipes.qvtpy.xnat_upload</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/registration/index.html">nvitk.registration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registration/ants/index.html">nvitk.registration.ants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registration/cli/index.html">nvitk.registration.cli</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registration/fireants/index.html">nvitk.registration.fireants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registration/fsl/index.html">nvitk.registration.fsl</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/registration/fsl/flirt/index.html">nvitk.registration.fsl.flirt</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/registration/fsl/points/index.html">nvitk.registration.fsl.points</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/registry/index.html">nvitk.registry</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registry/cli_sync_sge/index.html">nvitk.registry.cli_sync_sge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/registry/containers/index.html">nvitk.registry.containers</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/restoration/index.html">nvitk.restoration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/restoration/_cuda_kernels/index.html">nvitk.restoration._cuda_kernels</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/restoration/bilateral/index.html">nvitk.restoration.bilateral</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/restoration/mri_super_resolution/index.html">nvitk.restoration.mri_super_resolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/restoration/n4_bias/index.html">nvitk.restoration.n4_bias</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/segmentation/index.html">nvitk.segmentation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/blood_flood/index.html">nvitk.segmentation.blood_flood</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/brain_extraction/index.html">nvitk.segmentation.brain_extraction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/dkt/index.html">nvitk.segmentation.dkt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/eicab/index.html">nvitk.segmentation.eicab</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/cli/index.html">nvitk.segmentation.eicab.cli</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/cluster/index.html">nvitk.segmentation.eicab.cluster</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/config/index.html">nvitk.segmentation.eicab.config</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/cpu_limit_runner/index.html">nvitk.segmentation.eicab.cpu_limit_runner</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/run_job/index.html">nvitk.segmentation.eicab.run_job</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/eicab/runner/index.html">nvitk.segmentation.eicab.runner</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/hemisphere/index.html">nvitk.segmentation.hemisphere</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/hull_edt/index.html">nvitk.segmentation.hull_edt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/labels/index.html">nvitk.segmentation.labels</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/mask_ops/index.html">nvitk.segmentation.mask_ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/mouse_brain/index.html">nvitk.segmentation.mouse_brain</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/mra_vessel/index.html">nvitk.segmentation.mra_vessel</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/protrusion_filter/index.html">nvitk.segmentation.protrusion_filter</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/region_growing/index.html">nvitk.segmentation.region_growing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/segmentation/total_segmentator/index.html">nvitk.segmentation.total_segmentator</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/class_maps/index.html">nvitk.segmentation.total_segmentator.class_maps</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/cli/index.html">nvitk.segmentation.total_segmentator.cli</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/cluster/index.html">nvitk.segmentation.total_segmentator.cluster</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/config/index.html">nvitk.segmentation.total_segmentator.config</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/runner/index.html">nvitk.segmentation.total_segmentator.runner</a></li>
+<li class="toctree-l4"><a class="reference internal" href="nvitk/segmentation/total_segmentator/sge_stage/index.html">nvitk.segmentation.total_segmentator.sge_stage</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/stats/index.html">nvitk.stats</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/_hemodynamic_frames/index.html">nvitk.stats._hemodynamic_frames</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/_model_values/index.html">nvitk.stats._model_values</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/_statmodels_frames/index.html">nvitk.stats._statmodels_frames</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/_vessel_territory_map/index.html">nvitk.stats._vessel_territory_map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/brain_map/index.html">nvitk.stats.brain_map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/distribution_plots/index.html">nvitk.stats.distribution_plots</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/frame_ops/index.html">nvitk.stats.frame_ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/interactive/index.html">nvitk.stats.interactive</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/interactive_adapters/index.html">nvitk.stats.interactive_adapters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/mediation/index.html">nvitk.stats.mediation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/mixedlm/index.html">nvitk.stats.mixedlm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/qc_filters/index.html">nvitk.stats.qc_filters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/r_gam/index.html">nvitk.stats.r_gam</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/r_mixedlm/index.html">nvitk.stats.r_mixedlm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/r_mmrm/index.html">nvitk.stats.r_mmrm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/r_robust/index.html">nvitk.stats.r_robust</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/region_algebra/index.html">nvitk.stats.region_algebra</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/region_groups/index.html">nvitk.stats.region_groups</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/regression/index.html">nvitk.stats.regression</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/sem/index.html">nvitk.stats.sem</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/summaries/index.html">nvitk.stats.summaries</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/vascular_map/index.html">nvitk.stats.vascular_map</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/vessel_network/index.html">nvitk.stats.vessel_network</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/stats/violin_hemodynamics/index.html">nvitk.stats.violin_hemodynamics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/transform/index.html">nvitk.transform</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/isotropy/index.html">nvitk.transform.isotropy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/oblique/index.html">nvitk.transform.oblique</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/projection/index.html">nvitk.transform.projection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/reorient/index.html">nvitk.transform.reorient</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/resampling/index.html">nvitk.transform.resampling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/rotate/index.html">nvitk.transform.rotate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/rotation/index.html">nvitk.transform.rotation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/transform/swap_axes/index.html">nvitk.transform.swap_axes</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/types/index.html">nvitk.types</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/types/image/index.html">nvitk.types.image</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/types/mesh/index.html">nvitk.types.mesh</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/util/index.html">nvitk.util</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/util/colors/index.html">nvitk.util.colors</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/util/lazy_timer/index.html">nvitk.util.lazy_timer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/util/list_cli_commands/index.html">nvitk.util.list_cli_commands</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/util/pyhelp_tree/index.html">nvitk.util.pyhelp_tree</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/values/index.html">nvitk.values</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/viz/index.html">nvitk.viz</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/atlas_sources/index.html">nvitk.viz.atlas_sources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/brainshow/index.html">nvitk.viz.brainshow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/centerline_pick/index.html">nvitk.viz.centerline_pick</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/flowshow/index.html">nvitk.viz.flowshow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/pet_hotspots/index.html">nvitk.viz.pet_hotspots</a></li>
+<li class="toctree-l3"><a class="reference internal" href="nvitk/viz/streamlines/index.html">nvitk.viz.streamlines</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="config/index.html">config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l1"><a class="reference internal" href="2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</div>
+<aside class="footnote-list brackets">
+<aside class="footnote brackets" id="f1" role="doc-footnote">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">1</a><span class="fn-bracket">]</span></span>
+<p>Created with <a class="reference external" href="https://github.com/readthedocs/sphinx-autoapi">sphinx-autoapi</a></p>
+</aside>
+</aside>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="nvitk/index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="../index.html" title="previous chapter">Nvitk documentation</a></li>
+      <li>Next: <a href="nvitk/index.html" title="next chapter">nvitk</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../_sources/autoapi/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

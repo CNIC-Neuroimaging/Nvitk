@@ -1,0 +1,51 @@
+nvitk.cli.filters
+=================
+
+.. py:module:: nvitk.cli.filters
+
+.. autoapi-nested-parse::
+
+   ``nvitk-filter`` CLI — image filters.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.filters.main
+   nvitk.cli.filters.cmd_sliding_threshold
+   nvitk.cli.filters.cmd_hessian
+   nvitk.cli.filters.cmd_jerman
+   nvitk.cli.filters.cmd_snakes
+
+
+Module Contents
+---------------
+
+.. py:function:: main() -> None
+
+   Image filtering tools.
+
+
+.. py:function:: cmd_sliding_threshold(input_path: pathlib.Path, output_path: pathlib.Path, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, dim: str, step: float, up_thresh: float) -> None
+
+   Sliding-threshold binary segmentation.
+
+
+.. py:function:: cmd_hessian(input_path: pathlib.Path, output_path: pathlib.Path, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, sigmas: str | None, black_ridges: bool, alpha: float, beta: float, gamma: float, mode: str) -> None
+
+   Hybrid Hessian ridge / vessel filter (skimage).
+
+
+.. py:function:: cmd_jerman(input_path: pathlib.Path, output_path: pathlib.Path, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, sigmas: str | None, tau: float, black_ridges: bool, mode: str) -> None
+
+   Jerman vesselness / ridge filter (IEEE TMI 2016).
+
+
+.. py:function:: cmd_snakes(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, alpha: float, beta: float, w_line: float, w_edge: float, gamma: float, max_iter: int, sigma: float, n_points: int, axis: int, boundary: str) -> None
+
+   Kass snakes / active contours (IJCV 1988); needs --mask init contour.
+
+

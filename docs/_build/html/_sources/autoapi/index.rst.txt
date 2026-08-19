@@ -1,0 +1,17 @@
+API Reference
+=============
+
+This page contains auto-generated API reference documentation [#f1]_.
+
+.. toctree::
+   :titlesonly:
+
+   /autoapi/nvitk/index
+   /autoapi/config/index
+   /autoapi/sitecustomize/index
+   /autoapi/3_run_analysis/index
+   /autoapi/ureter_segmentation/index
+   /autoapi/1_build_manual_table/index
+   /autoapi/2_build_combined_table/index
+
+.. [#f1] Created with `sphinx-autoapi <https://github.com/readthedocs/sphinx-autoapi>`_

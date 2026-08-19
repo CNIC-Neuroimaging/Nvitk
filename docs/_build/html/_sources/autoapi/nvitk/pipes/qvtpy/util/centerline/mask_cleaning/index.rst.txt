@@ -1,0 +1,90 @@
+nvitk.pipes.qvtpy.util.centerline.mask_cleaning
+===============================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.centerline.mask_cleaning
+
+.. autoapi-nested-parse::
+
+   Morphological cleaning for eICAB multilabel and CD binary masks.
+
+   Used in stage 3 (eICAB island removal, venous slab opening) and stage 4
+   (:func:`keep_largest_component_per_label` after local thresholding).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_multilabel_islands
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_binary_mask
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_venous_slab_mask
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.keep_largest_component_per_label
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.keep_largest_component_label_inplace
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.keep_component_touching_seed_inplace
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_volume_seg_for_pitc
+   nvitk.pipes.qvtpy.util.centerline.mask_cleaning.keep_seed_connected_per_label
+
+
+Module Contents
+---------------
+
+.. py:function:: clean_multilabel_islands(labels: np.ndarray, *, min_fraction: float = 0.005, connectivity: int = 1, bridge_open_radius: int = 0, min_fraction_for_label: dict[int, float] | None = None) -> np.ndarray
+
+   Remove per-label connected components smaller than *min_fraction* of label foreground.
+
+   :param bridge_open_radius: If > 0, apply binary opening with a ball footprint of this radius (voxels)
+                              on each label hull before CC filtering (reduces thin communicating bridges).
+   :param min_fraction_for_label: Optional per-label overrides (e.g. ``0.0`` for PCA/comm so small vessels
+                                  are not wiped before centerline extraction).
+
+
+.. py:function:: clean_binary_mask(mask: np.ndarray, *, min_fraction: float = 0.005, connectivity: int = 1) -> np.ndarray
+
+   Area-opening on a boolean 3D mask.
+
+
+.. py:function:: clean_venous_slab_mask(venous_mask: np.ndarray, *, min_fraction: float = 0.005, connectivity: int = 1) -> np.ndarray
+
+   Second-pass area opening on venous-slab-restricted foreground.
+
+
+.. py:function:: keep_largest_component_per_label(labels: np.ndarray) -> np.ndarray
+
+   Keep only the largest connected component for each positive label id.
+
+
+.. py:function:: keep_largest_component_label_inplace(seg: np.ndarray, label_id: int) -> int
+
+   In-place: keep only the largest CC of *label_id* in *seg*; clear stray islands.
+
+   Returns the remaining voxel count for *label_id*.
+
+
+.. py:function:: keep_component_touching_seed_inplace(seg: np.ndarray, label_id: int, seed_mask: np.ndarray) -> int
+
+   In-place: keep the *label_id* CC that touches *seed_mask* (largest if several).
+
+   Use when a distal disconnected blob can out-vote the true vessel under a plain
+   largest-CC rule (e.g. ACA A2 island vs eICAB A1-anchored trunk). If no CC
+   touches the seed, falls back to :func:`keep_largest_component_label_inplace`.
+
+   Returns the remaining voxel count for *label_id*.
+
+
+.. py:function:: clean_volume_seg_for_pitc(volume_seg: np.ndarray, centerlines: dict[int, np.ndarray] | None = None, *, seed_dilate: int = 2) -> np.ndarray
+
+   Remove isolated label islands before PITC/PWV station sampling.
+
+   1. Keep the largest 6-connected component per label (drops speckles).
+   2. When *centerlines* are given, further keep only components that touch a
+      dilated centerline seed for that label (drops remote islands). If the
+      seed does not touch the mask, the largest-CC result is retained.
+
+
+.. py:function:: keep_seed_connected_per_label(labels: np.ndarray, seed_mask: np.ndarray, *, label_ids: frozenset[int] | set[int]) -> np.ndarray
+
+   Per-label cleanup: seed-connected CCs for *label_ids*, largest CC elsewhere.
+
+

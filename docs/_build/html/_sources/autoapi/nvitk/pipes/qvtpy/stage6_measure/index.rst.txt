@@ -1,0 +1,55 @@
+nvitk.pipes.qvtpy.stage6_measure
+================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage6_measure
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 6: LOC-wise velocity / PI / RI from PC phase volumes.
+
+   **Inputs**
+
+   - Stage-5 ``locs.csv``, AP/RL/FH phase NIfTIs (:func:`~nvitk.io.conversors.phase2volume.discover_phase_inputs`),
+     optional stage-4 ``seg_4dflow`` when not re-segmenting in-plane.
+
+   **Outputs**
+
+   - ``loc_measurements.csv``, optional cross-section QC PNGs under ``stage6_measure/``.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage6_measure.run_subject
+   nvitk.pipes.qvtpy.stage6_measure.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage6_measure.submit_subject_sge
+   nvitk.pipes.qvtpy.stage6_measure.main
+
+
+Module Contents
+---------------
+
+.. py:function:: run_subject(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool = False, cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX, measure_resegment: bool = False, measure_thr_algorithm: nvitk.measure.cross_section.ThrAlgorithm = 'lsthr', cross_section_res: int = 0, cross_section_plane_interp: int = 1, cs_supersampling: bool = True, write_cross_section_qc: bool = True, skip_pitc: bool = False, pitc_stride: int = 1, pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT, pitc_quality_metric: str = 'stdv_from_mean', pitc_measure_resegment: bool = False, pitc_label_constrain: bool = True, save_plots: bool = False) -> pathlib.Path
+
+   Measure flow metrics at each LOC; return stage-6 output directory.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX, measure_resegment: bool = False, measure_thr_algorithm: str = 'lsthr', cross_section_res: int = 0, cross_section_plane_interp: int = 1, cs_supersampling: bool = True, skip_pitc: bool = False, pitc_stride: int = 1, pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT, pitc_quality_metric: str = 'stdv_from_mean', pitc_measure_resegment: bool = False, pitc_label_constrain: bool = True, save_plots: bool = False, backend: str = 'gpu') -> str
+
+   Return the host shell command for one stage6 array/SGE task.
+
+
+.. py:function:: submit_subject_sge(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, hold_jid: str | None = None, emit: TextIO | None = None, cross_section_radius_vox: float = _DEFAULT_RADIUS_VOX, measure_resegment: bool = False, measure_thr_algorithm: str = 'lsthr', cross_section_res: int = 0, cross_section_plane_interp: int = 1, cs_supersampling: bool = True, skip_pitc: bool = False, pitc_stride: int = 1, pitc_quality_thresh: float = QUALITY_THRESH_DEFAULT, pitc_quality_metric: str = 'stdv_from_mean', pitc_measure_resegment: bool = False, pitc_label_constrain: bool = True, save_plots: bool = False, backend: str = 'gpu') -> str
+
+   Emit or submit one stage-6 SGE job. Returns qsub job id.
+
+
+.. py:function:: main(subject: str, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool, cross_section_radius_vox: float, measure_resegment: bool, measure_thr_algorithm: str, cross_section_res: int, cross_section_plane_interp: int, cs_supersampling: bool, skip_pitc: bool, pitc_stride: int, pitc_quality_thresh: float, pitc_quality_metric: str, pitc_measure_resegment: bool, pitc_label_constrain: bool, save_plots: bool) -> None
+
+   CLI entry point (``qvtpy-stage6-measure``): run stage 6 vessel/hemodynamic measurement
+   for one subject.
+
+

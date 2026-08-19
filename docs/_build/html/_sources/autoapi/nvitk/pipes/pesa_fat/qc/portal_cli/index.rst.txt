@@ -1,0 +1,27 @@
+nvitk.pipes.pesa_fat.qc.portal_cli
+==================================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.portal_cli
+
+.. autoapi-nested-parse::
+
+   CLI: run the PESA-Fat QC portal (static HTML + Excel/DB-backed reviews).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.portal_cli.main
+
+
+Module Contents
+---------------
+
+.. py:function:: main(batch: str | None, results_root: pathlib.Path | None, host: str, port: int, reviews_xlsx: pathlib.Path | None, no_db: bool, log_level: str) -> None
+
+   Serve QC HTML and accept review updates via POST /review (Excel + DB).
+
+

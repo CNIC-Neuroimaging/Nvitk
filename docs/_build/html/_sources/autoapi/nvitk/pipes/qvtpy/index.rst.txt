@@ -1,0 +1,52 @@
+nvitk.pipes.qvtpy
+=================
+
+.. py:module:: nvitk.pipes.qvtpy
+
+.. autoapi-nested-parse::
+
+   Python-native QVT+ cerebrovascular pipeline (qvtpy).
+
+   Orchestrates DICOM acquisition, NIfTI conversion, eICAB CoW segmentation, 4D-flow
+   registration, centerline extraction, local complex-difference segmentation, LOC
+   placement, and phase-based hemodynamics. Entry points:
+
+   - :mod:`nvitk.pipes.qvtpy.run` — master CLI ``nvitk-qvtpy`` (local or SGE).
+   - :mod:`nvitk.pipes.qvtpy.run_flowshow` — interactive 4D-flow viewer ``nvitk-qvtpy-flowshow``.
+   - :mod:`nvitk.pipes.qvtpy.config` — host paths, stage directory names, cluster defaults.
+   - :mod:`nvitk.pipes.qvtpy.labels` — eICAB vs qvtpy multilabel id tables.
+
+   Per-subject results live under ``<output_root>/<subject>/qvtpy/<stage_dir>/`` (see
+   :data:`~nvitk.pipes.qvtpy.config.QVT_SUBDIR` and ``STAGE*_DIR`` constants).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/pipes/qvtpy/autoqc_sources/index
+   /autoapi/nvitk/pipes/qvtpy/common/index
+   /autoapi/nvitk/pipes/qvtpy/config/index
+   /autoapi/nvitk/pipes/qvtpy/labels/index
+   /autoapi/nvitk/pipes/qvtpy/run/index
+   /autoapi/nvitk/pipes/qvtpy/run_flowshow/index
+   /autoapi/nvitk/pipes/qvtpy/stage0_convert/index
+   /autoapi/nvitk/pipes/qvtpy/stage0_download/index
+   /autoapi/nvitk/pipes/qvtpy/stage1_eicab/index
+   /autoapi/nvitk/pipes/qvtpy/stage2_registration/index
+   /autoapi/nvitk/pipes/qvtpy/stage3_centerline/index
+   /autoapi/nvitk/pipes/qvtpy/stage4_4dflow_segmentation/index
+   /autoapi/nvitk/pipes/qvtpy/stage4t_4dflow_t_segmentation/index
+   /autoapi/nvitk/pipes/qvtpy/stage5_loc_generation/index
+   /autoapi/nvitk/pipes/qvtpy/stage6_measure/index
+   /autoapi/nvitk/pipes/qvtpy/stage7_morphometrics/index
+   /autoapi/nvitk/pipes/qvtpy/stage9_autoqc/index
+   /autoapi/nvitk/pipes/qvtpy/stages/index
+   /autoapi/nvitk/pipes/qvtpy/sync_measurements/index
+   /autoapi/nvitk/pipes/qvtpy/util/index
+   /autoapi/nvitk/pipes/qvtpy/xnat_upload/index
+
+

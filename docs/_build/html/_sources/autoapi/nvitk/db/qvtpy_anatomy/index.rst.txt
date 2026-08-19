@@ -1,0 +1,181 @@
+nvitk.db.qvtpy_anatomy
+======================
+
+.. py:module:: nvitk.db.qvtpy_anatomy
+
+.. autoapi-nested-parse::
+
+   Manual anatomical-configuration annotations for the qvtpy (4D-Flow) pipeline.
+
+   Description
+   -----------
+   Two subject-level variables that no pipeline stage can measure: the
+   Circle-of-Willis configuration (``cow_config``) and the venous drainage
+   configuration (``venous_config``). A reviewer picks them in the QC measurements
+   panel while looking at the subject's vessels, and marking the subject as revised
+   publishes them alongside the automatic measurements.
+
+   Storage
+   -------
+   Rows land in ``image_measurements`` under the qvtpy pipeline id, as *categorical*
+   values (``value_text``, ``value_num`` empty) with **no** ``region_id``: they
+   describe the whole subject, not one vessel. That is what lets the Statmodels tool
+   offer them as subject-level factors next to the clinical covariates — see
+   :func:`nvitk.stats._statmodels_frames.subject_image_annotation_entries`.
+
+   The vocabularies are closed. A value outside a variable's choices is rejected
+   rather than stored, because a level created by a typo does not announce itself in
+   a model summary — it silently splits a cell in two.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_anatomy.ANATOMY_SOURCE_FILE
+   nvitk.db.qvtpy_anatomy.ANATOMY_SOURCE_SHEET
+   nvitk.db.qvtpy_anatomy.ANATOMY_UPSERT_KEY
+   nvitk.db.qvtpy_anatomy.COW_CONFIG
+   nvitk.db.qvtpy_anatomy.VENOUS_CONFIG
+   nvitk.db.qvtpy_anatomy.ANATOMY_CONFIG_VARIABLES
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_anatomy.AnatomyConfigVariable
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_anatomy.anatomy_config_variable_ids
+   nvitk.db.qvtpy_anatomy.normalize_anatomy_value
+   nvitk.db.qvtpy_anatomy.normalize_anatomy_values
+   nvitk.db.qvtpy_anatomy.anatomy_variable_registration
+   nvitk.db.qvtpy_anatomy.register_anatomy_config_variables
+   nvitk.db.qvtpy_anatomy.publish_anatomy_configs
+   nvitk.db.qvtpy_anatomy.load_anatomy_configs
+
+
+Module Contents
+---------------
+
+.. py:data:: ANATOMY_SOURCE_FILE
+   :value: 'qc_anatomy_review'
+
+
+.. py:data:: ANATOMY_SOURCE_SHEET
+   :value: 'manual'
+
+
+.. py:data:: ANATOMY_UPSERT_KEY
+   :value: ['subject_uid', 'pipeline_id', 'variable_id', 'region_id', 'frame_index']
+
+
+.. py:class:: AnatomyConfigVariable
+
+   One manually annotated anatomical configuration and its closed vocabulary.
+
+
+   .. py:attribute:: variable_id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: region_label
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+   .. py:attribute:: choices
+      :type:  tuple[tuple[str, str], Ellipsis]
+
+
+   .. py:property:: codes
+      :type: tuple[str, Ellipsis]
+
+
+      The allowed values, in dropdown order.
+
+
+   .. py:method:: label_for(code: str) -> str
+
+      Human label for *code*, falling back to the code itself when it is unknown.
+
+
+
+.. py:data:: COW_CONFIG
+
+.. py:data:: VENOUS_CONFIG
+
+.. py:data:: ANATOMY_CONFIG_VARIABLES
+   :type:  dict[str, AnatomyConfigVariable]
+
+.. py:function:: anatomy_config_variable_ids() -> tuple[str, Ellipsis]
+
+   The manual configuration ``variable_id``s, in QC-table order.
+
+
+.. py:function:: normalize_anatomy_value(variable_id: str, value: Any) -> str
+
+   Canonical code for *value*, or ``""`` when nothing was chosen.
+
+   Case and surrounding whitespace are forgiven (a code pasted from a report, a label copied from
+   the dropdown); anything else raises, because an unlisted level is a data error, not a new
+   category.
+
+
+.. py:function:: normalize_anatomy_values(values: Mapping[str, Any]) -> dict[str, str]
+
+   Normalize a ``{variable_id: value}`` mapping, dropping the entries left blank.
+
+
+.. py:function:: anatomy_variable_registration(var: AnatomyConfigVariable) -> nvitk.db.derived_measurements.DerivedVariableRegistration
+
+   Catalog entry for one configuration variable.
+
+   ``scope="subject"`` is what marks it as an image variable carrying one value per subject rather
+   than one per vessel; the Statmodels covariate list keys off that flag. ``choices`` travels with
+   the entry so a consumer can render the vocabulary without importing this module.
+
+
+.. py:function:: register_anatomy_config_variables(repo: nvitk.db.repo.DataRepo | None = None) -> int
+
+   Register both configuration variables in the dataset catalog; returns how many were written.
+
+
+.. py:function:: publish_anatomy_configs(*, subject_uid: str, values: Mapping[str, Any], repo: nvitk.db.repo.DataRepo | None = None, pipeline_id: str = QVTPY_PIPELINE_ID, build_sqlite_index: bool = True) -> dict[str, str]
+
+   Upsert one subject's manual configurations into ``image_measurements``.
+
+   :param subject_uid: Subject the annotations belong to.
+   :param values: ``{variable_id: code}``; blank entries are skipped, unknown codes raise (see
+                  :func:`normalize_anatomy_value`). Skipping rather than writing an empty row keeps
+                  "not annotated yet" distinguishable from ``undetermined``, which is a reviewer's verdict.
+
+   :returns: The ``{variable_id: code}`` actually published (empty when nothing was chosen).
+   :rtype: dict
+
+
+.. py:function:: load_anatomy_configs(subject_uid: str, *, repo: nvitk.db.repo.DataRepo | None = None, pipeline_id: str = QVTPY_PIPELINE_ID) -> dict[str, str]
+
+   Configurations already stored for *subject_uid*, as ``{variable_id: code}``.
+
+   Never raises: no dataset, no table, or an unreadable one all mean "nothing annotated yet",
+   which is the normal state for a subject reaching QC for the first time and must not stop the
+   panel from opening.
+
+

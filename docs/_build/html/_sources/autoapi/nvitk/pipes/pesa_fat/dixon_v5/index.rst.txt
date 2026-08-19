@@ -1,0 +1,25 @@
+nvitk.pipes.pesa_fat.dixon_v5
+=============================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5
+
+.. autoapi-nested-parse::
+
+   PESA-Fat Dixon v5 pipeline.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/config/index
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/labels/index
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/run/index
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/stage1_segment/index
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/stage2_postprocess/index
+   /autoapi/nvitk/pipes/pesa_fat/dixon_v5/stage3_measure/index
+
+

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.cluster.sge &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.cluster.sge_chunk" href="../sge_chunk/index.html" />
+    <link rel="prev" title="nvitk.cluster.remote_transfer" href="../remote_transfer/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.cluster.sge">
+<span id="nvitk-cluster-sge"></span><h1>nvitk.cluster.sge<a class="headerlink" href="#module-nvitk.cluster.sge" title="Link to this heading">¶</a></h1>
+<p>SGE + Singularity helpers shared across nvitk pipelines and segmentation CLIs.</p>
+<p>Generalises the <code class="docutils literal notranslate"><span class="pre">echo</span> <span class="pre">&lt;singularity</span> <span class="pre">exec</span> <span class="pre">...&gt;</span> <span class="pre">|</span> <span class="pre">qsub</span> <span class="pre">...</span></code> pattern so each stage
+(conversion, segmentation, post-processing, measurement) can be submitted as a
+self-contained Singularity job on an SGE cluster.</p>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SingularityBinds</span></code></a></p></td>
+<td><p>Container bind-points used by cluster pipelines.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.SgeResources" title="nvitk.cluster.sge.SgeResources"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SgeResources</span></code></a></p></td>
+<td><p>SGE submission resources.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ClusterPaths</span></code></a></p></td>
+<td><p>Host-side paths that must exist before submission.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">StageSpec</span></code></a></p></td>
+<td><p>A single SGE-submitted pipeline stage.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.ArrayTaskSpec" title="nvitk.cluster.sge.ArrayTaskSpec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ArrayTaskSpec</span></code></a></p></td>
+<td><p>One task inside an SGE array job (<code class="docutils literal notranslate"><span class="pre">SGE_TASK_ID</span></code> maps 1-based to order).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.sge_virtual_gpu_resource_name" title="nvitk.cluster.sge.sge_virtual_gpu_resource_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sge_virtual_gpu_resource_name</span></code></a>(→ str | None)</p></td>
+<td><p>Virtual-GPU <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-l</span></code> resource for <em>project</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> for classic <code class="docutils literal notranslate"><span class="pre">ngpu</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource" title="nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sge_project_uses_virtual_gpu_resource</span></code></a>(→ bool)</p></td>
+<td><p>True when <code class="docutils literal notranslate"><span class="pre">qsub</span></code> must use <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">lgpu|sgpu|xsgpu=0</span></code> instead of <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">ngpu</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.sge_project_uses_xsgpu_resource" title="nvitk.cluster.sge.sge_project_uses_xsgpu_resource"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sge_project_uses_xsgpu_resource</span></code></a>(→ bool)</p></td>
+<td><p>True when <em>project</em> is an XS* virtual-GPU queue (<code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">xsgpu=0</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.sge_project_omits_ngpu_request" title="nvitk.cluster.sge.sge_project_omits_ngpu_request"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sge_project_omits_ngpu_request</span></code></a>(→ bool)</p></td>
+<td><p>Alias for <a class="reference internal" href="#nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource" title="nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource"><code class="xref py py-func docutils literal notranslate"><span class="pre">sge_project_uses_virtual_gpu_resource()</span></code></a>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.qsub_l_resource_args" title="nvitk.cluster.sge.qsub_l_resource_args"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qsub_l_resource_args</span></code></a>(→ list[str])</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">qsub</span></code> <code class="docutils literal notranslate"><span class="pre">-l</span></code> option pairs derived from <em>resources</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.python_module_argv" title="nvitk.cluster.sge.python_module_argv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">python_module_argv</span></code></a>(→ list[str])</p></td>
+<td><p>Argv prefix for in-container workers: <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">&lt;module&gt;</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.python_script_argv" title="nvitk.cluster.sge.python_script_argv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">python_script_argv</span></code></a>(→ list[str])</p></td>
+<td><p>Argv prefix to run a <code class="docutils literal notranslate"><span class="pre">.py</span></code> file by absolute path inside the container.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.gui_sge_worker_script_path" title="nvitk.cluster.sge.gui_sge_worker_script_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">gui_sge_worker_script_path</span></code></a>(→ str)</p></td>
+<td><p>Absolute in-container path to <a class="reference internal" href="../../gui/sge/worker/index.html#module-nvitk.gui.sge.worker" title="nvitk.gui.sge.worker"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.gui.sge.worker</span></code></a> (bind-mounted source).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.gui_sge_worker_argv" title="nvitk.cluster.sge.gui_sge_worker_argv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">gui_sge_worker_argv</span></code></a>(→ list[str])</p></td>
+<td><p>Argv prefix for the Napari GUI SGE headless worker.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.build_singularity_command" title="nvitk.cluster.sge.build_singularity_command"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_singularity_command</span></code></a>(→ str)</p></td>
+<td><p>Wrap <code class="docutils literal notranslate"><span class="pre">spec.python_cmd</span></code> in <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">exec</span></code> with the standard binds.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.build_qsub_command" title="nvitk.cluster.sge.build_qsub_command"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_qsub_command</span></code></a>(→ list[str])</p></td>
+<td><p>Build the <code class="docutils literal notranslate"><span class="pre">qsub</span></code> argv for <em>spec</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.build_array_worker_script" title="nvitk.cluster.sge.build_array_worker_script"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_array_worker_script</span></code></a>(→ str)</p></td>
+<td><p>Bash worker body for <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-t</span></code>: dispatch by <code class="docutils literal notranslate"><span class="pre">SGE_TASK_ID</span></code> with done-markers.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.emit_array_job_block" title="nvitk.cluster.sge.emit_array_job_block"><code class="xref py py-obj docutils literal notranslate"><span class="pre">emit_array_job_block</span></code></a>(→ str)</p></td>
+<td><p>Emit one <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-t</span> <span class="pre">1-N</span> <span class="pre">-tc</span> <span class="pre">…</span></code> block; return shell <code class="docutils literal notranslate"><span class="pre">$jid_…</span></code> reference.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.submit_array_job" title="nvitk.cluster.sge.submit_array_job"><code class="xref py py-obj docutils literal notranslate"><span class="pre">submit_array_job</span></code></a>(→ str)</p></td>
+<td><p>Submit or emit one SGE array job; return jid (or <code class="docutils literal notranslate"><span class="pre">$jid_…</span></code> / <code class="docutils literal notranslate"><span class="pre">DRY_RUN</span></code>).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.format_sge_submission_summary" title="nvitk.cluster.sge.format_sge_submission_summary"><code class="xref py py-obj docutils literal notranslate"><span class="pre">format_sge_submission_summary</span></code></a>(→ str)</p></td>
+<td><p>Human-readable lines for logging (qsub argv, resources, bind mounts).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.emit_sge_submission_summary_to_terminal" title="nvitk.cluster.sge.emit_sge_submission_summary_to_terminal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">emit_sge_submission_summary_to_terminal</span></code></a>(→ None)</p></td>
+<td><p>Print <a class="reference internal" href="#nvitk.cluster.sge.format_sge_submission_summary" title="nvitk.cluster.sge.format_sge_submission_summary"><code class="xref py py-func docutils literal notranslate"><span class="pre">format_sge_submission_summary()</span></code></a> to stderr unless silenced.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.format_sge_driver_script_variables" title="nvitk.cluster.sge.format_sge_driver_script_variables"><code class="xref py py-obj docutils literal notranslate"><span class="pre">format_sge_driver_script_variables</span></code></a>(→ str)</p></td>
+<td><p>Extract <code class="docutils literal notranslate"><span class="pre">log_dir</span></code> / <code class="docutils literal notranslate"><span class="pre">err_dir</span></code> / first <code class="docutils literal notranslate"><span class="pre">qsub_*=(…)</span></code> flags for terminal echo.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.write_script_header" title="nvitk.cluster.sge.write_script_header"><code class="xref py py-obj docutils literal notranslate"><span class="pre">write_script_header</span></code></a>(→ None)</p></td>
+<td><p>Write the common preamble for an emitted submission script.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.submit_stage" title="nvitk.cluster.sge.submit_stage"><code class="xref py py-obj docutils literal notranslate"><span class="pre">submit_stage</span></code></a>(→ str)</p></td>
+<td><p>Submit <em>spec</em> to SGE by piping the Singularity command into <code class="docutils literal notranslate"><span class="pre">qsub</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cluster.sge.submit_host_stage" title="nvitk.cluster.sge.submit_host_stage"><code class="xref py py-obj docutils literal notranslate"><span class="pre">submit_host_stage</span></code></a>(→ str)</p></td>
+<td><p>Submit <em>host_shell_cmd</em> to SGE directly (no outer <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">exec</span></code> wrapper).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cluster.sge.submit_chain" title="nvitk.cluster.sge.submit_chain"><code class="xref py py-obj docutils literal notranslate"><span class="pre">submit_chain</span></code></a>(→ list[str])</p></td>
+<td><p>Submit a linear chain of <em>stages</em> for a single subject.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.sge_virtual_gpu_resource_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">sge_virtual_gpu_resource_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">project</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.sge_virtual_gpu_resource_name" title="Link to this definition">¶</a></dt>
+<dd><p>Virtual-GPU <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-l</span></code> resource for <em>project</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> for classic <code class="docutils literal notranslate"><span class="pre">ngpu</span></code>.</p>
+<p>Projects whose <code class="docutils literal notranslate"><span class="pre">-P</span></code> name starts with <code class="docutils literal notranslate"><span class="pre">L</span></code>, <code class="docutils literal notranslate"><span class="pre">S</span></code>, or <code class="docutils literal notranslate"><span class="pre">XS</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">LGPU</span></code>,
+<code class="docutils literal notranslate"><span class="pre">SGPU</span></code>, <code class="docutils literal notranslate"><span class="pre">XSGPU</span></code>) use <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">lgpu=0</span></code>, <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">sgpu=0</span></code>, or <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">xsgpu=0</span></code> instead of
+<code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">ngpu=…</span></code>. The original <code class="docutils literal notranslate"><span class="pre">GPU</span></code> / <code class="docutils literal notranslate"><span class="pre">MCC_GPU</span></code> projects keep <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">ngpu</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">sge_project_uses_virtual_gpu_resource</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">project</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource" title="Link to this definition">¶</a></dt>
+<dd><p>True when <code class="docutils literal notranslate"><span class="pre">qsub</span></code> must use <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">lgpu|sgpu|xsgpu=0</span></code> instead of <code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">ngpu</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.sge_project_uses_xsgpu_resource">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">sge_project_uses_xsgpu_resource</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">project</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.sge_project_uses_xsgpu_resource" title="Link to this definition">¶</a></dt>
+<dd><p>True when <em>project</em> is an XS* virtual-GPU queue (<code class="docutils literal notranslate"><span class="pre">-l</span> <span class="pre">xsgpu=0</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.sge_project_omits_ngpu_request">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">sge_project_omits_ngpu_request</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">project</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.sge_project_omits_ngpu_request" title="Link to this definition">¶</a></dt>
+<dd><p>Alias for <a class="reference internal" href="#nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource" title="nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource"><code class="xref py py-func docutils literal notranslate"><span class="pre">sge_project_uses_virtual_gpu_resource()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.qsub_l_resource_args">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">qsub_l_resource_args</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resources</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.SgeResources" title="nvitk.cluster.sge.SgeResources"><span class="pre">SgeResources</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.qsub_l_resource_args" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">qsub</span></code> <code class="docutils literal notranslate"><span class="pre">-l</span></code> option pairs derived from <em>resources</em>.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SingularityBinds">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">SingularityBinds</span></span><a class="headerlink" href="#nvitk.cluster.sge.SingularityBinds" title="Link to this definition">¶</a></dt>
+<dd><p>Container bind-points used by cluster pipelines.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SingularityBinds.src">
+<span class="sig-name descname"><span class="pre">src</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/nvitk/src/'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SingularityBinds.src" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SingularityBinds.data">
+<span class="sig-name descname"><span class="pre">data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/nvitk/data/'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SingularityBinds.data" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SingularityBinds.output">
+<span class="sig-name descname"><span class="pre">output</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/nvitk/output/'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SingularityBinds.output" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SingularityBinds.models">
+<span class="sig-name descname"><span class="pre">models</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/models/'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SingularityBinds.models" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">SgeResources</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources" title="Link to this definition">¶</a></dt>
+<dd><p>SGE submission resources.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.project">
+<span class="sig-name descname"><span class="pre">project</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'GPU'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.project" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.account">
+<span class="sig-name descname"><span class="pre">account</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'Prod'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.account" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.ngpu">
+<span class="sig-name descname"><span class="pre">ngpu</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.ngpu" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.h_vmem">
+<span class="sig-name descname"><span class="pre">h_vmem</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'50G'</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.h_vmem" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.queue">
+<span class="sig-name descname"><span class="pre">queue</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.queue" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.SgeResources.pe_smp">
+<span class="sig-name descname"><span class="pre">pe_smp</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.cluster.sge.SgeResources.pe_smp" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">ClusterPaths</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths" title="Link to this definition">¶</a></dt>
+<dd><p>Host-side paths that must exist before submission.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.src">
+<span class="sig-name descname"><span class="pre">src</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.src" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.container">
+<span class="sig-name descname"><span class="pre">container</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.container" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.models">
+<span class="sig-name descname"><span class="pre">models</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.models" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.data_root">
+<span class="sig-name descname"><span class="pre">data_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.data_root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.output_root">
+<span class="sig-name descname"><span class="pre">output_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.output_root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.log_dir">
+<span class="sig-name descname"><span class="pre">log_dir</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.log_dir" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.err_dir">
+<span class="sig-name descname"><span class="pre">err_dir</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.err_dir" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ClusterPaths.ensure_dirs">
+<span class="sig-name descname"><span class="pre">ensure_dirs</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.ClusterPaths.ensure_dirs" title="Link to this definition">¶</a></dt>
+<dd><p>Create the SGE stdout/stderr log directories for this run if they don’t exist.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">StageSpec</span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec" title="Link to this definition">¶</a></dt>
+<dd><p>A single SGE-submitted pipeline stage.</p>
+<p><code class="docutils literal notranslate"><span class="pre">python_cmd</span></code> is the literal command run <em>inside</em> the Singularity
+container. Host paths referenced inside the command must fall within the
+bind mounts defined by <a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><code class="xref py py-class docutils literal notranslate"><span class="pre">ClusterPaths</span></code></a> and <a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><code class="xref py py-class docutils literal notranslate"><span class="pre">SingularityBinds</span></code></a>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.job_name">
+<span class="sig-name descname"><span class="pre">job_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.job_name" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.python_cmd">
+<span class="sig-name descname"><span class="pre">python_cmd</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.python_cmd" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.resources">
+<span class="sig-name descname"><span class="pre">resources</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#nvitk.cluster.sge.SgeResources" title="nvitk.cluster.sge.SgeResources"><span class="pre">SgeResources</span></a></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.resources" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.binds">
+<span class="sig-name descname"><span class="pre">binds</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><span class="pre">SingularityBinds</span></a></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.binds" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.extra_env">
+<span class="sig-name descname"><span class="pre">extra_env</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.extra_env" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.use_nv">
+<span class="sig-name descname"><span class="pre">use_nv</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.use_nv" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.StageSpec.extra_host_binds">
+<span class="sig-name descname"><span class="pre">extra_host_binds</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.cluster.sge.StageSpec.extra_host_binds" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.python_module_argv">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">python_module_argv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">module</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">python</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'python'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.python_module_argv" title="Link to this definition">¶</a></dt>
+<dd><p>Argv prefix for in-container workers: <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">&lt;module&gt;</span></code>.</p>
+<p>Use with relative-import package modules (e.g. <code class="docutils literal notranslate"><span class="pre">nvitk.pipes.qvtpy.stage0_convert</span></code>).
+Requires <code class="docutils literal notranslate"><span class="pre">PYTHONPATH</span></code> to include the tree that contains the <code class="docutils literal notranslate"><span class="pre">nvitk</span></code> package
+(typically <code class="docutils literal notranslate"><span class="pre">/nvitk/src/</span></code> via <a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><code class="xref py py-class docutils literal notranslate"><span class="pre">SingularityBinds</span></code></a>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.python_script_argv">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">python_script_argv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">script_path_in_container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">python</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'python'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.python_script_argv" title="Link to this definition">¶</a></dt>
+<dd><p>Argv prefix to run a <code class="docutils literal notranslate"><span class="pre">.py</span></code> file by absolute path inside the container.</p>
+<p>Prefer this over <a class="reference internal" href="#nvitk.cluster.sge.python_module_argv" title="nvitk.cluster.sge.python_module_argv"><code class="xref py py-func docutils literal notranslate"><span class="pre">python_module_argv()</span></code></a> when the cluster image does not ship
+optional subpackages (e.g. <code class="docutils literal notranslate"><span class="pre">nvitk.gui.sge</span></code>) but the repo is bind-mounted at
+<code class="docutils literal notranslate"><span class="pre">SingularityBinds.src</span></code>. <code class="docutils literal notranslate"><span class="pre">PYTHONPATH</span></code> must still include that src root.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.gui_sge_worker_script_path">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">gui_sge_worker_script_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">binds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><span class="pre">SingularityBinds</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.gui_sge_worker_script_path" title="Link to this definition">¶</a></dt>
+<dd><p>Absolute in-container path to <a class="reference internal" href="../../gui/sge/worker/index.html#module-nvitk.gui.sge.worker" title="nvitk.gui.sge.worker"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.gui.sge.worker</span></code></a> (bind-mounted source).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.gui_sge_worker_argv">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">gui_sge_worker_argv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">binds</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.SingularityBinds" title="nvitk.cluster.sge.SingularityBinds"><span class="pre">SingularityBinds</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">python</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'python'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.gui_sge_worker_argv" title="Link to this definition">¶</a></dt>
+<dd><p>Argv prefix for the Napari GUI SGE headless worker.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.build_singularity_command">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">build_singularity_command</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.build_singularity_command" title="Link to this definition">¶</a></dt>
+<dd><p>Wrap <code class="docutils literal notranslate"><span class="pre">spec.python_cmd</span></code> in <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">exec</span></code> with the standard binds.</p>
+<p>Injects a small BLAS/OMP thread-cap preamble (<code class="docutils literal notranslate"><span class="pre">NSLOTS</span></code> / <code class="docutils literal notranslate"><span class="pre">NVITK_CPU_LIMIT</span></code>,
+capped at 64) before <code class="docutils literal notranslate"><span class="pre">extra_env</span></code> exports so OpenBLAS/MKL never spawn
+unbounded threads on fat SGE nodes (avoids known segfaults).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.build_qsub_command">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">build_qsub_command</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">array_tasks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">task_concurrency</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.build_qsub_command" title="Link to this definition">¶</a></dt>
+<dd><p>Build the <code class="docutils literal notranslate"><span class="pre">qsub</span></code> argv for <em>spec</em>.</p>
+<p>When <em>array_tasks</em> is set, emit <code class="docutils literal notranslate"><span class="pre">-t</span> <span class="pre">1-N</span></code> (and optional <code class="docutils literal notranslate"><span class="pre">-tc</span></code>) with
+per-task log/err paths using SGE’s <code class="docutils literal notranslate"><span class="pre">$TASK_ID</span></code>.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ArrayTaskSpec">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">ArrayTaskSpec</span></span><a class="headerlink" href="#nvitk.cluster.sge.ArrayTaskSpec" title="Link to this definition">¶</a></dt>
+<dd><p>One task inside an SGE array job (<code class="docutils literal notranslate"><span class="pre">SGE_TASK_ID</span></code> maps 1-based to order).</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ArrayTaskSpec.stage_id">
+<span class="sig-name descname"><span class="pre">stage_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.cluster.sge.ArrayTaskSpec.stage_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.ArrayTaskSpec.shell_cmd">
+<span class="sig-name descname"><span class="pre">shell_cmd</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.cluster.sge.ArrayTaskSpec.shell_cmd" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.build_array_worker_script">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">build_array_worker_script</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tasks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.cluster.sge.ArrayTaskSpec" title="nvitk.cluster.sge.ArrayTaskSpec"><span class="pre">ArrayTaskSpec</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">marker_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">marker_wait_timeout_sec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1800</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.build_array_worker_script" title="Link to this definition">¶</a></dt>
+<dd><p>Bash worker body for <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-t</span></code>: dispatch by <code class="docutils literal notranslate"><span class="pre">SGE_TASK_ID</span></code> with done-markers.</p>
+<p>Task <code class="docutils literal notranslate"><span class="pre">k</span></code> waits for <code class="docutils literal notranslate"><span class="pre">${JOB_ID}.(k-1).done</span></code> before running (except task 1).
+With <code class="docutils literal notranslate"><span class="pre">-tc</span> <span class="pre">1</span></code> the predecessor has already left the queue when task <code class="docutils literal notranslate"><span class="pre">k</span></code>
+starts, so the wait is only for NFS/marker visibility — not the predecessor
+runtime. An <code class="docutils literal notranslate"><span class="pre">EXIT</span></code> trap always writes a marker when possible; <code class="docutils literal notranslate"><span class="pre">SIGKILL</span></code>
+(OOM killer) cannot run the trap, so the wait has a hard timeout to avoid
+sleeping forever with empty logs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.emit_array_job_block">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">emit_array_job_block</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">job_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resources</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.SgeResources" title="nvitk.cluster.sge.SgeResources"><span class="pre">SgeResources</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">tasks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.cluster.sge.ArrayTaskSpec" title="nvitk.cluster.sge.ArrayTaskSpec"><span class="pre">ArrayTaskSpec</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">marker_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">task_concurrency</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_nv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.emit_array_job_block" title="Link to this definition">¶</a></dt>
+<dd><p>Emit one <code class="docutils literal notranslate"><span class="pre">qsub</span> <span class="pre">-t</span> <span class="pre">1-N</span> <span class="pre">-tc</span> <span class="pre">…</span></code> block; return shell <code class="docutils literal notranslate"><span class="pre">$jid_…</span></code> reference.</p>
+<p><em>hold_jid</em> is applied to the whole array (classic <code class="docutils literal notranslate"><span class="pre">-hold_jid</span></code>), e.g. so a
+per-subject stage0 job completes before the stage1–3 array starts.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.submit_array_job">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">submit_array_job</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">job_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resources</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.SgeResources" title="nvitk.cluster.sge.SgeResources"><span class="pre">SgeResources</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">tasks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.cluster.sge.ArrayTaskSpec" title="nvitk.cluster.sge.ArrayTaskSpec"><span class="pre">ArrayTaskSpec</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">marker_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">task_concurrency</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_nv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.submit_array_job" title="Link to this definition">¶</a></dt>
+<dd><p>Submit or emit one SGE array job; return jid (or <code class="docutils literal notranslate"><span class="pre">$jid_…</span></code> / <code class="docutils literal notranslate"><span class="pre">DRY_RUN</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.format_sge_submission_summary">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">format_sge_submission_summary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qsub_argv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">singularity_cmd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_singularity_chars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">4000</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.format_sge_submission_summary" title="Link to this definition">¶</a></dt>
+<dd><p>Human-readable lines for logging (qsub argv, resources, bind mounts).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.emit_sge_submission_summary_to_terminal">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">emit_sge_submission_summary_to_terminal</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">qsub_argv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">singularity_cmd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.emit_sge_submission_summary_to_terminal" title="Link to this definition">¶</a></dt>
+<dd><p>Print <a class="reference internal" href="#nvitk.cluster.sge.format_sge_submission_summary" title="nvitk.cluster.sge.format_sge_submission_summary"><code class="xref py py-func docutils literal notranslate"><span class="pre">format_sge_submission_summary()</span></code></a> to stderr unless silenced.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.format_sge_driver_script_variables">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">format_sge_driver_script_variables</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">script_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">script_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.format_sge_driver_script_variables" title="Link to this definition">¶</a></dt>
+<dd><p>Extract <code class="docutils literal notranslate"><span class="pre">log_dir</span></code> / <code class="docutils literal notranslate"><span class="pre">err_dir</span></code> / first <code class="docutils literal notranslate"><span class="pre">qsub_*=(…)</span></code> flags for terminal echo.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.write_script_header">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">write_script_header</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">err_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extra_dirs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.write_script_header" title="Link to this definition">¶</a></dt>
+<dd><p>Write the common preamble for an emitted submission script.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.submit_stage">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">submit_stage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.submit_stage" title="Link to this definition">¶</a></dt>
+<dd><p>Submit <em>spec</em> to SGE by piping the Singularity command into <code class="docutils literal notranslate"><span class="pre">qsub</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.submit_host_stage">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">submit_host_stage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">host_shell_cmd</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.cluster.sge.submit_host_stage" title="Link to this definition">¶</a></dt>
+<dd><p>Submit <em>host_shell_cmd</em> to SGE directly (no outer <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">exec</span></code> wrapper).</p>
+<p>Use when the job must invoke <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> on the cluster host itself
+(e.g. eICAB inference), avoiding nested Singularity inside a pipeline container.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cluster.sge.submit_chain">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cluster.sge.</span></span><span class="sig-name descname"><span class="pre">submit_chain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stages</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.cluster.sge.StageSpec" title="nvitk.cluster.sge.StageSpec"><span class="pre">StageSpec</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">ClusterPaths</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">base_hold</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.cluster.sge.submit_chain" title="Link to this definition">¶</a></dt>
+<dd><p>Submit a linear chain of <em>stages</em> for a single subject.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.cluster</a><ul>
+      <li>Previous: <a href="../remote_transfer/index.html" title="previous chapter">nvitk.cluster.remote_transfer</a></li>
+      <li>Next: <a href="../sge_chunk/index.html" title="next chapter">nvitk.cluster.sge_chunk</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/cluster/sge/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

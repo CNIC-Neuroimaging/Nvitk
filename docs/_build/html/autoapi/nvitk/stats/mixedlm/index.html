@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats.mixedlm &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats.qc_filters" href="../qc_filters/index.html" />
+    <link rel="prev" title="nvitk.stats.mediation" href="../mediation/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats.mixedlm">
+<span id="nvitk-stats-mixedlm"></span><h1>nvitk.stats.mixedlm<a class="headerlink" href="#module-nvitk.stats.mixedlm" title="Link to this heading">¶</a></h1>
+<p>General mixed-effects modeling utilities built on top of statsmodels.</p>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.formula_columns" title="nvitk.stats.mixedlm.formula_columns"><code class="xref py py-obj docutils literal notranslate"><span class="pre">formula_columns</span></code></a>(→ list[str])</p></td>
+<td><p>Columns of <em>columns</em> referenced by the fixed-effects <em>formula</em> and the random-effects /</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.fit_or_load_mixedlm" title="nvitk.stats.mixedlm.fit_or_load_mixedlm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fit_or_load_mixedlm</span></code></a>(→ tuple[Any, pandas.DataFrame, ...)</p></td>
+<td><p>Fit or load a statsmodels MixedLM result.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.significance_stars" title="nvitk.stats.mixedlm.significance_stars"><code class="xref py py-obj docutils literal notranslate"><span class="pre">significance_stars</span></code></a>(→ str)</p></td>
+<td><p>Conventional significance marker: <code class="docutils literal notranslate"><span class="pre">***</span></code> &lt;0.001, <code class="docutils literal notranslate"><span class="pre">**</span></code> &lt;0.01, <code class="docutils literal notranslate"><span class="pre">*</span></code> &lt;0.05, <code class="docutils literal notranslate"><span class="pre">.</span></code> &lt;0.1,</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_coef_frame" title="nvitk.stats.mixedlm.mixedlm_coef_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">mixedlm_coef_frame</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Fixed-effects table of a fitted model (MixedLM, OLS or GLM).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_random_effects_frame" title="nvitk.stats.mixedlm.mixedlm_random_effects_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">mixedlm_random_effects_frame</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Variance structure of a MixedLM fit, one row per component.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_info_dict" title="nvitk.stats.mixedlm.mixedlm_info_dict"><code class="xref py py-obj docutils literal notranslate"><span class="pre">mixedlm_info_dict</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Everything <a class="reference internal" href="#nvitk.stats.mixedlm.print_mixedlm_info" title="nvitk.stats.mixedlm.print_mixedlm_info"><code class="xref py py-func docutils literal notranslate"><span class="pre">print_mixedlm_info()</span></code></a> reports, as structured data.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.render_mixedlm_info" title="nvitk.stats.mixedlm.render_mixedlm_info"><code class="xref py py-obj docutils literal notranslate"><span class="pre">render_mixedlm_info</span></code></a>(→ str)</p></td>
+<td><p>Render <a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_info_dict" title="nvitk.stats.mixedlm.mixedlm_info_dict"><code class="xref py py-func docutils literal notranslate"><span class="pre">mixedlm_info_dict()</span></code></a> output as the classic fixed-width MixedLM report.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.print_mixedlm_info" title="nvitk.stats.mixedlm.print_mixedlm_info"><code class="xref py py-obj docutils literal notranslate"><span class="pre">print_mixedlm_info</span></code></a>(→ str)</p></td>
+<td><p>Print and optionally save a generic MixedLM summary report.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.plot_mixedlm_params" title="nvitk.stats.mixedlm.plot_mixedlm_params"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_mixedlm_params</span></code></a>(→ Any)</p></td>
+<td><p>Generic plotting utility for continuous or grouped/categorical predictors.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.mixedlm.build_mixedlm_frame_from_repo" title="nvitk.stats.mixedlm.build_mixedlm_frame_from_repo"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_mixedlm_frame_from_repo</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Lightweight adapter from DataRepo query outputs to model-ready dataframes.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.formula_columns">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">formula_columns</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">re_formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vc_formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">groups</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.formula_columns" title="Link to this definition">¶</a></dt>
+<dd><p>Columns of <em>columns</em> referenced by the fixed-effects <em>formula</em> and the random-effects /
+variance-component specs.</p>
+<p>Used to align the NA-drop set with the rows patsy will actually keep: patsy silently drops rows
+with missing values in formula terms, while <code class="docutils literal notranslate"><span class="pre">groups</span></code> / <code class="docutils literal notranslate"><span class="pre">exog_re</span></code> keep their full length,
+which makes statsmodels raise <code class="docutils literal notranslate"><span class="pre">Shape</span> <span class="pre">mismatch</span> <span class="pre">between</span> <span class="pre">endog/exog</span> <span class="pre">and</span> <span class="pre">extra</span> <span class="pre">2d</span> <span class="pre">arrays</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.fit_or_load_mixedlm">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">fit_or_load_mixedlm</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">groups</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">re_formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'1'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vc_formula</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">required_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dropna_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome_transform</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">pandas.DataFrame</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pandas.DataFrame</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fit_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fit_fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="pre">Ellipsis</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">load_fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pandas.DataFrame</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.fit_or_load_mixedlm" title="Link to this definition">¶</a></dt>
+<dd><p>Fit or load a statsmodels MixedLM result.</p>
+<p>Rows with missing values in any column referenced by <em>formula</em> / <em>re_formula</em> / <em>vc_formula</em>
+are dropped before fitting, so the returned <code class="docutils literal notranslate"><span class="pre">model_df</span></code> has the same grain as the fit and can
+be reused for prediction / plotting. Pass <em>dropna_columns</em> to restrict the NA-drop to an
+explicit column set instead.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>(result, model_df, <a class="reference internal" href="../../index.html#nvitk.Image.metadata" title="nvitk.Image.metadata">metadata</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.significance_stars">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">significance_stars</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pval</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.significance_stars" title="Link to this definition">¶</a></dt>
+<dd><p>Conventional significance marker: <code class="docutils literal notranslate"><span class="pre">***</span></code> &lt;0.001, <code class="docutils literal notranslate"><span class="pre">**</span></code> &lt;0.01, <code class="docutils literal notranslate"><span class="pre">*</span></code> &lt;0.05, <code class="docutils literal notranslate"><span class="pre">.</span></code> &lt;0.1,
+<code class="docutils literal notranslate"><span class="pre">NS</span></code> otherwise, and <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for a missing p-value.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.mixedlm_coef_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">mixedlm_coef_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">alpha</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.05</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.mixedlm_coef_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Fixed-effects table of a fitted model (MixedLM, OLS or GLM).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Columns <code class="docutils literal notranslate"><span class="pre">parameter,</span> <span class="pre">coef,</span> <span class="pre">std_err,</span> <span class="pre">z,</span> <span class="pre">p_value,</span> <span class="pre">ci_low,</span> <span class="pre">ci_high,</span> <span class="pre">sig</span></code>. <code class="docutils literal notranslate"><span class="pre">z</span></code> and the
+confidence bounds are derived from the coefficient and its standard error (a Wald interval),
+so they are present even for results that do not expose <code class="docutils literal notranslate"><span class="pre">conf_int</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.mixedlm_random_effects_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">mixedlm_random_effects_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.mixedlm_random_effects_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Variance structure of a MixedLM fit, one row per component.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Columns <code class="docutils literal notranslate"><span class="pre">component,</span> <span class="pre">kind,</span> <span class="pre">var,</span> <span class="pre">sd</span></code>. <code class="docutils literal notranslate"><span class="pre">kind</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;cov_re&quot;</span></code> for the group random-effects
+covariance diagonal, <code class="docutils literal notranslate"><span class="pre">&quot;vcomp&quot;</span></code> for variance components, and <code class="docutils literal notranslate"><span class="pre">&quot;residual&quot;</span></code> for the scale.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.mixedlm_info_dict">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">mixedlm_info_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Outcome'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Group'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vc_group_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Variance</span> <span class="pre">Components'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.mixedlm_info_dict" title="Link to this definition">¶</a></dt>
+<dd><p>Everything <a class="reference internal" href="#nvitk.stats.mixedlm.print_mixedlm_info" title="nvitk.stats.mixedlm.print_mixedlm_info"><code class="xref py py-func docutils literal notranslate"><span class="pre">print_mixedlm_info()</span></code></a> reports, as structured data.</p>
+<p>This is the single source of truth for model reporting: <a class="reference internal" href="#nvitk.stats.mixedlm.render_mixedlm_info" title="nvitk.stats.mixedlm.render_mixedlm_info"><code class="xref py py-func docutils literal notranslate"><span class="pre">render_mixedlm_info()</span></code></a> turns it back
+into the classic fixed-width text, and the GUI renders the same dict as tables.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">header</span></code>  — <code class="docutils literal notranslate"><span class="pre">formula</span></code> (<code class="docutils literal notranslate"><span class="pre">None</span></code> when the model does not expose one), <code class="docutils literal notranslate"><span class="pre">n_obs</span></code>,
+<code class="docutils literal notranslate"><span class="pre">n_groups</span></code>, <code class="docutils literal notranslate"><span class="pre">group_name</span></code>, <code class="docutils literal notranslate"><span class="pre">outcome_name</span></code>, <code class="docutils literal notranslate"><span class="pre">vc_group_name</span></code>;
+<code class="docutils literal notranslate"><span class="pre">fixed_effects</span></code>  — <a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_coef_frame" title="nvitk.stats.mixedlm.mixedlm_coef_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">mixedlm_coef_frame()</span></code></a> output;
+<code class="docutils literal notranslate"><span class="pre">random_effects</span></code> — <a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_random_effects_frame" title="nvitk.stats.mixedlm.mixedlm_random_effects_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">mixedlm_random_effects_frame()</span></code></a> output;
+<code class="docutils literal notranslate"><span class="pre">cov_re</span></code>         — the raw group covariance matrix (empty frame when absent);
+<code class="docutils literal notranslate"><span class="pre">fit_statistics</span></code> — <code class="docutils literal notranslate"><span class="pre">llf</span></code>, <code class="docutils literal notranslate"><span class="pre">aic</span></code>, <code class="docutils literal notranslate"><span class="pre">bic</span></code>, <code class="docutils literal notranslate"><span class="pre">converged</span></code>, <code class="docutils literal notranslate"><span class="pre">scale</span></code>, <code class="docutils literal notranslate"><span class="pre">resid_sd</span></code>
+(keys are omitted when the result does not expose them).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>dict</p>
+</dd>
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – If <em>result</em> does not look like a <code class="docutils literal notranslate"><span class="pre">MixedLMResults</span></code>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.render_mixedlm_info">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">render_mixedlm_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">info</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.render_mixedlm_info" title="Link to this definition">¶</a></dt>
+<dd><p>Render <a class="reference internal" href="#nvitk.stats.mixedlm.mixedlm_info_dict" title="nvitk.stats.mixedlm.mixedlm_info_dict"><code class="xref py py-func docutils literal notranslate"><span class="pre">mixedlm_info_dict()</span></code></a> output as the classic fixed-width MixedLM report.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.print_mixedlm_info">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">print_mixedlm_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Outcome'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Group'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vc_group_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Variance</span> <span class="pre">Components'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.print_mixedlm_info" title="Link to this definition">¶</a></dt>
+<dd><p>Print and optionally save a generic MixedLM summary report.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.plot_mixedlm_params">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">plot_mixedlm_params</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df_fit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">group</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'auto'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">categorical_order</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_order</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hue</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hue_order</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">palette</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'tab10'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">restrict_to_orders</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">errorbar</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ci_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.95</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariate_refs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">excluded_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">display</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'overview'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'MixedLM</span> <span class="pre">parameter</span> <span class="pre">plot'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y_label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.plot_mixedlm_params" title="Link to this definition">¶</a></dt>
+<dd><p>Generic plotting utility for continuous or grouped/categorical predictors.</p>
+<p>In <code class="docutils literal notranslate"><span class="pre">mode=&quot;categorical&quot;</span></code>, fixed-effects EMM uses a prediction grid at
+<code class="docutils literal notranslate"><span class="pre">covariate_refs</span></code>. If the model formula includes a second categorical factor
+(e.g. <code class="docutils literal notranslate"><span class="pre">C(x)</span> <span class="pre">*</span> <span class="pre">C(territory)</span></code>), pass that factor as <code class="docutils literal notranslate"><span class="pre">hue</span></code> or as <code class="docutils literal notranslate"><span class="pre">group</span></code>
+when it differs from <code class="docutils literal notranslate"><span class="pre">x</span></code>; the grid is then the factorial <code class="docutils literal notranslate"><span class="pre">x</span></code> × factor so
+patsy can evaluate all terms.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>restrict_to_orders</strong> (<em>bool</em>) – By default <code class="docutils literal notranslate"><span class="pre">group_order</span></code> / <code class="docutils literal notranslate"><span class="pre">hue_order</span></code> / <code class="docutils literal notranslate"><span class="pre">categorical_order</span></code> only select which model
+curves are drawn — the raw observations still show every level. Set this to also subset
+<code class="docutils literal notranslate"><span class="pre">df_fit</span></code> to the listed levels, so hiding a group hides its points and lets the axes
+autoscale to what remains. The fit itself is untouched: the fixed-effect line is still the
+all-group estimate.</p></li>
+<li><p><strong>errorbar</strong> (<em>bool</em>) – Draw the confidence interval of the model predictions. In categorical mode these are
+whiskers on each marginal mean, from the delta-method standard error of the fixed-effects
+prediction; in continuous mode a shaded band around the fixed-effect line.</p></li>
+<li><p><strong>ci_level</strong> (<em>float</em>) – Confidence level for those intervals.</p></li>
+<li><p><strong>include_points</strong> (<em>bool</em>) – Overlay the observed data. In continuous mode this is a scatter of individual rows; in
+categorical mode it is the <strong>mean of y within each (x, hue) cell</strong> — an unadjusted
+counterpart to the model’s marginal means, drawn dashed and in a lighter tone.</p></li>
+<li><p><strong>excluded_points</strong> (<em>pandas.DataFrame</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Observations a filter removed, drawn in grey beneath the kept ones. They are <strong>not</strong> in
+<em>df_fit</em> — the fit was run on the filtered frame — so they have to be supplied separately;
+showing them is what tells you whether a filter took out a coherent cluster or scattered
+noise. They never affect the axes’ autoscale-driving data or the model curves.</p></li>
+<li><p><strong>display</strong> (<em>{&quot;overview&quot;</em><em>, </em><em>&quot;grouped&quot;}</em>) – <code class="docutils literal notranslate"><span class="pre">&quot;overview&quot;</span></code> draws every level on one pair of axes. <code class="docutils literal notranslate"><span class="pre">&quot;grouped&quot;</span></code> splits them into a grid
+of anatomical panels (carotids / anterior / posterior / venous for vessels, lobes for
+cortical parcels — see <a class="reference internal" href="../region_groups/index.html#module-nvitk.stats.region_groups" title="nvitk.stats.region_groups"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats.region_groups</span></code></a>), each autoscaled to its own range.
+The model is untouched: the panels are a view of one fit, and the dashed population line is
+the same all-level estimate in each of them. Raises when no level maps to a known region.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.mixedlm.build_mixedlm_frame_from_repo">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.mixedlm.</span></span><span class="sig-name descname"><span class="pre">build_mixedlm_frame_from_repo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">source</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rename_map</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">melt_to_long</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">var_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'variable'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'value'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dropna_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sex_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">center_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.mixedlm.build_mixedlm_frame_from_repo" title="Link to this definition">¶</a></dt>
+<dd><p>Lightweight adapter from DataRepo query outputs to model-ready dataframes.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../mediation/index.html" title="previous chapter">nvitk.stats.mediation</a></li>
+      <li>Next: <a href="../qc_filters/index.html" title="next chapter">nvitk.stats.qc_filters</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/mixedlm/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,66 @@
+config
+======
+
+.. py:module:: config
+
+.. autoapi-nested-parse::
+
+   Configuración compartida — PESA Fat Analysis
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   config.BASE
+   config.BASE_LOCAL
+   config.OUT_DIR
+   config.MANUAL_PATH
+   config.MANUAL_PATH2
+   config.AUTO_BASE
+   config.AUTO_MONTH
+   config.AUTO_WEEKS
+   config.AUTO_WEEK_FMT
+   config.MANUAL_TABLE_PATH
+   config.COMBINED_TABLE_PATH
+   config.METRICS_PATH
+   config.REPORT_PATH
+
+
+Module Contents
+---------------
+
+.. py:data:: BASE
+
+.. py:data:: BASE_LOCAL
+
+.. py:data:: OUT_DIR
+
+.. py:data:: MANUAL_PATH
+
+.. py:data:: MANUAL_PATH2
+
+.. py:data:: AUTO_BASE
+
+.. py:data:: AUTO_MONTH
+   :value: '202602'
+
+
+.. py:data:: AUTO_WEEKS
+   :value: [1, 2, 3, 4]
+
+
+.. py:data:: AUTO_WEEK_FMT
+   :value: '202602_Week{w}'
+
+
+.. py:data:: MANUAL_TABLE_PATH
+
+.. py:data:: COMBINED_TABLE_PATH
+
+.. py:data:: METRICS_PATH
+
+.. py:data:: REPORT_PATH
+

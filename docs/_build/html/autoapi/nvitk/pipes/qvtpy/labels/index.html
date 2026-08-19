@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.qvtpy.labels &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.qvtpy.run" href="../run/index.html" />
+    <link rel="prev" title="nvitk.pipes.qvtpy.config" href="../config/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.qvtpy.labels">
+<span id="nvitk-pipes-qvtpy-labels"></span><h1>nvitk.pipes.qvtpy.labels<a class="headerlink" href="#module-nvitk.pipes.qvtpy.labels" title="Link to this heading">¶</a></h1>
+<p>Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.</p>
+<p><strong>eICAB (input)</strong> — integers in <code class="docutils literal notranslate"><span class="pre">*_eICAB_CW.nii(.gz)</span></code> / <code class="docutils literal notranslate"><span class="pre">*_eICAB_WB.nii(.gz)</span></code> (0–18).
+Morphometrics topology for these ids: <code class="docutils literal notranslate"><span class="pre">measure/morpho/topology/eicab_topology.json</span></code>.</p>
+<p><strong>qvtpy (pipeline)</strong> — integers in <code class="docutils literal notranslate"><span class="pre">centerlines_mask</span></code>, <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>, LOCs, and
+measurement tables. Arterial ids come from <a class="reference internal" href="#nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy" title="nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy"><code class="xref py py-func docutils literal notranslate"><span class="pre">relabel_eicab_mask_to_qvtpy()</span></code></a>
+(merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31–34.
+Reference morphometrics topology (unused by stage-7):
+<code class="docutils literal notranslate"><span class="pre">measure/morpho/topology/qvtpy_topology.json</span></code>.</p>
+<p><strong>Outputs</strong></p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID"><code class="xref py py-data docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID</span></code></a> — combined arterial + venous id→name map.</p></li>
+<li><p>Group frozensets (<code class="docutils literal notranslate"><span class="pre">QVTPY_ACA_IDS</span></code>, <code class="docutils literal notranslate"><span class="pre">QVTPY_RG_SKIP_LABEL_IDS</span></code>, …) for stage-4 heuristics.</p></li>
+</ul>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_BACKGROUND" title="nvitk.pipes.qvtpy.labels.EICAB_BACKGROUND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_BACKGROUND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LICA" title="nvitk.pipes.qvtpy.labels.EICAB_LICA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LICA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RICA" title="nvitk.pipes.qvtpy.labels.EICAB_RICA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RICA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_BASILAR" title="nvitk.pipes.qvtpy.labels.EICAB_BASILAR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_BASILAR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_ACOMM" title="nvitk.pipes.qvtpy.labels.EICAB_ACOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_ACOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LACA" title="nvitk.pipes.qvtpy.labels.EICAB_LACA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LACA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RACA" title="nvitk.pipes.qvtpy.labels.EICAB_RACA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RACA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LMCA" title="nvitk.pipes.qvtpy.labels.EICAB_LMCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LMCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RMCA" title="nvitk.pipes.qvtpy.labels.EICAB_RMCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RMCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCOMM" title="nvitk.pipes.qvtpy.labels.EICAB_LPCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LPCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCOMM" title="nvitk.pipes.qvtpy.labels.EICAB_RPCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RPCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCA_P1" title="nvitk.pipes.qvtpy.labels.EICAB_LPCA_P1"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LPCA_P1</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCA_P1" title="nvitk.pipes.qvtpy.labels.EICAB_RPCA_P1"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RPCA_P1</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCA_P2" title="nvitk.pipes.qvtpy.labels.EICAB_LPCA_P2"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LPCA_P2</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCA_P2" title="nvitk.pipes.qvtpy.labels.EICAB_RPCA_P2"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RPCA_P2</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LSCA" title="nvitk.pipes.qvtpy.labels.EICAB_LSCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LSCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RSCA" title="nvitk.pipes.qvtpy.labels.EICAB_RSCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RSCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LACHA" title="nvitk.pipes.qvtpy.labels.EICAB_LACHA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LACHA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RACHA" title="nvitk.pipes.qvtpy.labels.EICAB_RACHA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RACHA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_BASI" title="nvitk.pipes.qvtpy.labels.EICAB_BASI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_BASI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LABEL_4_UNDOCUMENTED" title="nvitk.pipes.qvtpy.labels.EICAB_LABEL_4_UNDOCUMENTED"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LABEL_4_UNDOCUMENTED</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_ID_TO_NAME" title="nvitk.pipes.qvtpy.labels.EICAB_ID_TO_NAME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_ID_TO_NAME</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_VESSEL_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.EICAB_VESSEL_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_VESSEL_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_QVTPLUS_DOCUMENTED_COW" title="nvitk.pipes.qvtpy.labels.EICAB_QVTPLUS_DOCUMENTED_COW"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_QVTPLUS_DOCUMENTED_COW</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_NAME_TO_ID" title="nvitk.pipes.qvtpy.labels.EICAB_NAME_TO_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_NAME_TO_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_BACKGROUND" title="nvitk.pipes.qvtpy.labels.QVTPY_BACKGROUND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_BACKGROUND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LICA" title="nvitk.pipes.qvtpy.labels.QVTPY_LICA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LICA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RICA" title="nvitk.pipes.qvtpy.labels.QVTPY_RICA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RICA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_BASILAR" title="nvitk.pipes.qvtpy.labels.QVTPY_BASILAR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_BASILAR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LACA" title="nvitk.pipes.qvtpy.labels.QVTPY_LACA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LACA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RACA" title="nvitk.pipes.qvtpy.labels.QVTPY_RACA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RACA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LMCA" title="nvitk.pipes.qvtpy.labels.QVTPY_LMCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LMCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RMCA" title="nvitk.pipes.qvtpy.labels.QVTPY_RMCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RMCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LPCA" title="nvitk.pipes.qvtpy.labels.QVTPY_LPCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LPCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RPCA" title="nvitk.pipes.qvtpy.labels.QVTPY_RPCA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RPCA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LPCOMM" title="nvitk.pipes.qvtpy.labels.QVTPY_LPCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LPCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RPCOMM" title="nvitk.pipes.qvtpy.labels.QVTPY_RPCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RPCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ACOMM" title="nvitk.pipes.qvtpy.labels.QVTPY_ACOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ACOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LVA" title="nvitk.pipes.qvtpy.labels.QVTPY_LVA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LVA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RVA" title="nvitk.pipes.qvtpy.labels.QVTPY_RVA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RVA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_ID_TO_NAME" title="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_ID_TO_NAME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ARTERIAL_ID_TO_NAME</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_NAME_TO_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_NAME_TO_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ARTERIAL_NAME_TO_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ARTERIAL_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ICA_BASILAR_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_ICA_BASILAR_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ICA_BASILAR_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_ACA_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_ACA_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_ACA_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_MCA_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_MCA_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_MCA_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_PCA_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_PCA_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_PCA_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_COMM_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_COMM_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_COMM_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_PCOMM_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_PCOMM_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_PCOMM_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_VERTEBRAL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_VERTEBRAL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_VERTEBRAL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_NON_COMM_ARTERIAL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_NON_COMM_ARTERIAL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_NON_COMM_ARTERIAL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_SMALL_ARTERIAL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_SMALL_ARTERIAL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_SMALL_ARTERIAL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_SSSV" title="nvitk.pipes.qvtpy.labels.NAME_SSSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_SSSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_STRV" title="nvitk.pipes.qvtpy.labels.NAME_STRV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_STRV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_LTSV" title="nvitk.pipes.qvtpy.labels.NAME_LTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_LTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_RTSV" title="nvitk.pipes.qvtpy.labels.NAME_RTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_RTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_RCOMM" title="nvitk.pipes.qvtpy.labels.NAME_RCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_RCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_LCOMM" title="nvitk.pipes.qvtpy.labels.NAME_LCOMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_LCOMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.NAME_COMM" title="nvitk.pipes.qvtpy.labels.NAME_COMM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NAME_COMM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_SSSV" title="nvitk.pipes.qvtpy.labels.QVTPY_SSSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_SSSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_STRV" title="nvitk.pipes.qvtpy.labels.QVTPY_STRV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_STRV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_LTSV" title="nvitk.pipes.qvtpy.labels.QVTPY_LTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_LTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RTSV" title="nvitk.pipes.qvtpy.labels.QVTPY_RTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_SSSV" title="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_SSSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_LABEL_SSSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_STRV" title="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_STRV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_LABEL_STRV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_LTSV" title="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_LTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_LABEL_LTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_RTSV" title="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_RTSV"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_LABEL_RTSV</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_BY_NAME" title="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_BY_NAME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_LABEL_BY_NAME</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_NAME_BY_LABEL" title="nvitk.pipes.qvtpy.labels.VENOUS_NAME_BY_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_NAME_BY_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.MATLAB_QVT_VENOUS_VESSEL_NAMES" title="nvitk.pipes.qvtpy.labels.MATLAB_QVT_VENOUS_VESSEL_NAMES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MATLAB_QVT_VENOUS_VESSEL_NAMES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_VENOUS_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_EXPLORE_MORE_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_EXPLORE_MORE_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_EXPLORE_MORE_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_MCA_PCA_EXPLORE_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_MCA_PCA_EXPLORE_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_MCA_PCA_EXPLORE_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_PCOMM_EICAB_BARRIER_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_PCOMM_EICAB_BARRIER_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_PCOMM_EICAB_BARRIER_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_RG_BARRIER_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.EICAB_RG_BARRIER_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_RG_BARRIER_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_SKIP_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_SKIP_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_SKIP_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_INTENSITY_FRAC_VENOUS" title="nvitk.pipes.qvtpy.labels.QVTPY_RG_INTENSITY_FRAC_VENOUS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RG_INTENSITY_FRAC_VENOUS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_UNKNOWN_LABEL" title="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_UNKNOWN_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_VENOUS_UNKNOWN_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_REGION_BASE" title="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_REGION_BASE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_VENOUS_REGION_BASE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_UNKNOWN_LABEL" title="nvitk.pipes.qvtpy.labels.QVTPY_UNKNOWN_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_UNKNOWN_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_UNKNOWN_LABEL" title="nvitk.pipes.qvtpy.labels.VENOUS_UNKNOWN_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_UNKNOWN_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.VENOUS_REGION_BASE" title="nvitk.pipes.qvtpy.labels.VENOUS_REGION_BASE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VENOUS_REGION_BASE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.UNKNOWN_LABEL" title="nvitk.pipes.qvtpy.labels.UNKNOWN_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">UNKNOWN_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_RESERVED_LABEL_BY_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_RESERVED_LABEL_BY_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_RESERVED_LABEL_BY_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_LABEL_IDS_OMITTED" title="nvitk.pipes.qvtpy.labels.EICAB_LABEL_IDS_OMITTED"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_LABEL_IDS_OMITTED</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.EICAB_TO_QVTPY_LABEL" title="nvitk.pipes.qvtpy.labels.EICAB_TO_QVTPY_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EICAB_TO_QVTPY_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_TO_EICAB_LABELS" title="nvitk.pipes.qvtpy.labels.QVTPY_TO_EICAB_LABELS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_TO_EICAB_LABELS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_LABEL_BY_ID" title="nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_LABEL_BY_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_SEG_4DFLOW_LABEL_BY_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_NAME_TO_LABEL" title="nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_NAME_TO_LABEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_SEG_4DFLOW_NAME_TO_LABEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_CENTERLINE_AND_SEG_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_BRANCH_SEGMENT_LETTER" title="nvitk.pipes.qvtpy.labels.QVTPY_BRANCH_SEGMENT_LETTER"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_BRANCH_SEGMENT_LETTER</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.QVTPY_BRANCHED_LABEL_IDS" title="nvitk.pipes.qvtpy.labels.QVTPY_BRANCHED_LABEL_IDS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">QVTPY_BRANCHED_LABEL_IDS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy" title="nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">relabel_eicab_mask_to_qvtpy</span></code></a>(→ np.ndarray)</p></td>
+<td><p>Map warped eICAB labels to qvtpy arterial ids (merge PCA; drop SCA/AChA).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.eicab_vessel_name" title="nvitk.pipes.qvtpy.labels.eicab_vessel_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">eicab_vessel_name</span></code></a>(→ str)</p></td>
+<td><p>Name for an <strong>eICAB</strong> mask integer.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.eicab_label_from_name" title="nvitk.pipes.qvtpy.labels.eicab_label_from_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">eicab_label_from_name</span></code></a>(→ int | None)</p></td>
+<td><p>eICAB label id for a known input-mask vessel name, or None.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.qvtpy_vessel_name" title="nvitk.pipes.qvtpy.labels.qvtpy_vessel_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qvtpy_vessel_name</span></code></a>(→ str)</p></td>
+<td><p>Name for a qvtpy label in <code class="docutils literal notranslate"><span class="pre">centerlines_mask</span></code> / <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.qvtpy_label_from_name" title="nvitk.pipes.qvtpy.labels.qvtpy_label_from_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qvtpy_label_from_name</span></code></a>(→ int | None)</p></td>
+<td><p>qvtpy label id for a pipeline vessel name (arterial or venous), or None.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.qvtpy_branch_names" title="nvitk.pipes.qvtpy.labels.qvtpy_branch_names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qvtpy_branch_names</span></code></a>(→ list[str])</p></td>
+<td><p>Anatomical names for the branches of one arterial label.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.labels.qvtpy_branch_parent_label" title="nvitk.pipes.qvtpy.labels.qvtpy_branch_parent_label"><code class="xref py py-obj docutils literal notranslate"><span class="pre">qvtpy_branch_parent_label</span></code></a>(→ int | None)</p></td>
+<td><p>Parent qvtpy label id for a branch name like <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code> (or bare name).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_BACKGROUND">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_BACKGROUND</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_BACKGROUND" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LICA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LICA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LICA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RICA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RICA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RICA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_BASILAR">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_BASILAR</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_BASILAR" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_ACOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_ACOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_ACOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LACA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LACA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">5</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LACA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RACA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RACA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">6</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RACA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LMCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LMCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">7</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LMCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RMCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RMCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">8</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RMCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LPCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LPCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">9</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RPCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RPCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">10</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LPCA_P1">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LPCA_P1</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">11</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCA_P1" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RPCA_P1">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RPCA_P1</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">12</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCA_P1" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LPCA_P2">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LPCA_P2</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">13</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LPCA_P2" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RPCA_P2">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RPCA_P2</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">14</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RPCA_P2" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LSCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LSCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">15</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LSCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RSCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RSCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">16</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RSCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LACHA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LACHA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">17</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LACHA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RACHA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RACHA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">18</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RACHA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_BASI">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_BASI</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_BASI" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LABEL_4_UNDOCUMENTED">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LABEL_4_UNDOCUMENTED</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LABEL_4_UNDOCUMENTED" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_ID_TO_NAME">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_ID_TO_NAME</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_ID_TO_NAME" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_VESSEL_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_VESSEL_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_VESSEL_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_QVTPLUS_DOCUMENTED_COW">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_QVTPLUS_DOCUMENTED_COW</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_QVTPLUS_DOCUMENTED_COW" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_NAME_TO_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_NAME_TO_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_NAME_TO_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_BACKGROUND">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_BACKGROUND</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_BACKGROUND" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LICA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LICA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LICA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RICA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RICA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RICA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_BASILAR">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_BASILAR</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_BASILAR" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LACA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LACA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">4</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LACA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RACA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RACA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">5</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RACA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LMCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LMCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">6</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LMCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RMCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RMCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">7</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RMCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LPCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LPCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">8</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LPCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RPCA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RPCA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">9</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RPCA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LPCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LPCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">10</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LPCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RPCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RPCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">11</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RPCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ACOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ACOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">12</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ACOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LVA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LVA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">13</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LVA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RVA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RVA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">14</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RVA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_ID_TO_NAME">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ARTERIAL_ID_TO_NAME</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_ID_TO_NAME" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_NAME_TO_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ARTERIAL_NAME_TO_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_NAME_TO_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ARTERIAL_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ICA_BASILAR_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ICA_BASILAR_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ICA_BASILAR_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_ACA_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_ACA_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_ACA_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_MCA_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_MCA_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_MCA_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_PCA_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_PCA_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_PCA_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_COMM_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_COMM_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_COMM_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_PCOMM_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_PCOMM_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_PCOMM_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_VERTEBRAL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_VERTEBRAL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_VERTEBRAL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_NON_COMM_ARTERIAL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_NON_COMM_ARTERIAL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_NON_COMM_ARTERIAL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_SMALL_ARTERIAL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_SMALL_ARTERIAL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_SMALL_ARTERIAL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_SSSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_SSSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'SSSV'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_SSSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_STRV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_STRV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'STRV'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_STRV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_LTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_LTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'LTSV'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_LTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_RTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_RTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'RTSV'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_RTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_RCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_RCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'RCOMM'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_RCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_LCOMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_LCOMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'LCOMM'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_LCOMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.NAME_COMM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">NAME_COMM</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'COMM'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.NAME_COMM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_SSSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_SSSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">31</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_SSSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_STRV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_STRV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">32</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_STRV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_LTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_LTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">33</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_LTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">34</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_SSSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_LABEL_SSSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">31</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_SSSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_STRV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_LABEL_STRV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">32</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_STRV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_LTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_LABEL_LTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">33</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_LTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_RTSV">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_LABEL_RTSV</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">34</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_RTSV" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_LABEL_BY_NAME">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_LABEL_BY_NAME</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_LABEL_BY_NAME" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_NAME_BY_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_NAME_BY_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_NAME_BY_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.MATLAB_QVT_VENOUS_VESSEL_NAMES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">MATLAB_QVT_VENOUS_VESSEL_NAMES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.MATLAB_QVT_VENOUS_VESSEL_NAMES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_VENOUS_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_EXPLORE_MORE_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_EXPLORE_MORE_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_EXPLORE_MORE_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_MCA_PCA_EXPLORE_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_MCA_PCA_EXPLORE_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_MCA_PCA_EXPLORE_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_PCOMM_EICAB_BARRIER_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_PCOMM_EICAB_BARRIER_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_PCOMM_EICAB_BARRIER_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_RG_BARRIER_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_RG_BARRIER_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_RG_BARRIER_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_SKIP_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_SKIP_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_SKIP_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RG_INTENSITY_FRAC_VENOUS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RG_INTENSITY_FRAC_VENOUS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RG_INTENSITY_FRAC_VENOUS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_UNKNOWN_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_VENOUS_UNKNOWN_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">30</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_UNKNOWN_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_REGION_BASE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_VENOUS_REGION_BASE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">31</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_REGION_BASE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_UNKNOWN_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_UNKNOWN_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">35</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_UNKNOWN_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_UNKNOWN_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_UNKNOWN_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">30</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_UNKNOWN_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.VENOUS_REGION_BASE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">VENOUS_REGION_BASE</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">31</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.VENOUS_REGION_BASE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.UNKNOWN_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">UNKNOWN_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">35</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.UNKNOWN_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_RESERVED_LABEL_BY_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_RESERVED_LABEL_BY_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_RESERVED_LABEL_BY_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_LABEL_IDS_OMITTED">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_LABEL_IDS_OMITTED</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_LABEL_IDS_OMITTED" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.EICAB_TO_QVTPY_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">EICAB_TO_QVTPY_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.EICAB_TO_QVTPY_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_TO_EICAB_LABELS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_TO_EICAB_LABELS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_TO_EICAB_LABELS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_LABEL_BY_ID">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_SEG_4DFLOW_LABEL_BY_ID</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_LABEL_BY_ID" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_NAME_TO_LABEL">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_SEG_4DFLOW_NAME_TO_LABEL</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_NAME_TO_LABEL" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_CENTERLINE_AND_SEG_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">relabel_eicab_mask_to_qvtpy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">volume</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">np.ndarray</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy" title="Link to this definition">¶</a></dt>
+<dd><p>Map warped eICAB labels to qvtpy arterial ids (merge PCA; drop SCA/AChA).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.eicab_vessel_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">eicab_vessel_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">label_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.eicab_vessel_name" title="Link to this definition">¶</a></dt>
+<dd><p>Name for an <strong>eICAB</strong> mask integer.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.eicab_label_from_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">eicab_label_from_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.eicab_label_from_name" title="Link to this definition">¶</a></dt>
+<dd><p>eICAB label id for a known input-mask vessel name, or None.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.qvtpy_vessel_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">qvtpy_vessel_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">label_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.qvtpy_vessel_name" title="Link to this definition">¶</a></dt>
+<dd><p>Name for a qvtpy label in <code class="docutils literal notranslate"><span class="pre">centerlines_mask</span></code> / <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.qvtpy_label_from_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">qvtpy_label_from_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.qvtpy_label_from_name" title="Link to this definition">¶</a></dt>
+<dd><p>qvtpy label id for a pipeline vessel name (arterial or venous), or None.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_BRANCH_SEGMENT_LETTER">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_BRANCH_SEGMENT_LETTER</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_BRANCH_SEGMENT_LETTER" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.QVTPY_BRANCHED_LABEL_IDS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">QVTPY_BRANCHED_LABEL_IDS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">frozenset</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.QVTPY_BRANCHED_LABEL_IDS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.qvtpy_branch_names">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">qvtpy_branch_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">label_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_branches</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.qvtpy_branch_names" title="Link to this definition">¶</a></dt>
+<dd><p>Anatomical names for the branches of one arterial label.</p>
+<p>Branched vessels (MCA/ACA/PCA) name the trunk <code class="docutils literal notranslate"><span class="pre">{vessel}-{L}1</span></code> (e.g.
+<code class="docutils literal notranslate"><span class="pre">LACA-A1</span></code>) and each side branch a generation-2 segment <code class="docutils literal notranslate"><span class="pre">{vessel}-{L}2a</span></code>,
+<code class="docutils literal notranslate"><span class="pre">{vessel}-{L}2b</span></code>, … (e.g. <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code>). Non-branched vessels
+(ICA/basilar/comm/vertebral) use the bare vessel name for the trunk and a
+<code class="docutils literal notranslate"><span class="pre">{vessel}-b2</span></code> … suffix for any extra branches.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.labels.qvtpy_branch_parent_label">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.labels.</span></span><span class="sig-name descname"><span class="pre">qvtpy_branch_parent_label</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">branch_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.labels.qvtpy_branch_parent_label" title="Link to this definition">¶</a></dt>
+<dd><p>Parent qvtpy label id for a branch name like <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code> (or bare name).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../index.html">nvitk.pipes.qvtpy</a><ul>
+      <li>Previous: <a href="../config/index.html" title="previous chapter">nvitk.pipes.qvtpy.config</a></li>
+      <li>Next: <a href="../run/index.html" title="next chapter">nvitk.pipes.qvtpy.run</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/pipes/qvtpy/labels/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

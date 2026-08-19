@@ -1,0 +1,153 @@
+nvitk.measure.morpho.models
+===========================
+
+.. py:module:: nvitk.measure.morpho.models
+
+.. autoapi-nested-parse::
+
+   Dataclasses and typed containers for the cleaned centerline pipeline.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.models.VesselInfo
+   nvitk.measure.morpho.models.StenosisResult
+   nvitk.measure.morpho.models.EnlargementResult
+   nvitk.measure.morpho.models.SkeletonTree
+
+
+Module Contents
+---------------
+
+.. py:class:: VesselInfo
+
+   Static vessel metadata (naming, laterality, territory, flow topology) from the label map.
+
+
+   .. py:attribute:: name
+      :type:  str
+
+
+   .. py:attribute:: full_name
+      :type:  str
+
+
+   .. py:attribute:: side
+      :type:  str
+
+
+   .. py:attribute:: pair
+      :type:  Optional[str]
+
+
+   .. py:attribute:: territory
+      :type:  str
+
+
+   .. py:attribute:: flow_from
+      :type:  str
+
+
+   .. py:attribute:: flow_to
+      :type:  List[str]
+
+
+   .. py:attribute:: no_upstream_start
+      :type:  Optional[str]
+
+
+.. py:class:: StenosisResult
+
+   Per-vessel stenosis detection: reference/minimum radius and flagged segments.
+
+
+   .. py:attribute:: r_ref
+      :type:  float
+
+
+   .. py:attribute:: r_min
+      :type:  float
+
+
+   .. py:attribute:: percent_stenosis_max
+      :type:  float
+
+
+   .. py:attribute:: segments_s_mm
+      :type:  List[Tuple[float, float]]
+
+
+   .. py:attribute:: segments_point_idx
+      :type:  List[Tuple[int, int]]
+
+
+   .. py:attribute:: r_ref_per_point
+      :type:  numpy.ndarray
+
+
+.. py:class:: EnlargementResult
+
+   Per-vessel enlargement (aneurysm-like) detection: reference/max radius and flagged segments.
+
+
+   .. py:attribute:: r_ref
+      :type:  float
+
+
+   .. py:attribute:: r_max
+      :type:  float
+
+
+   .. py:attribute:: percent_enlargement_max
+      :type:  float
+
+
+   .. py:attribute:: segments_s_mm
+      :type:  List[Tuple[float, float]]
+
+
+   .. py:attribute:: segments_point_idx
+      :type:  List[Tuple[int, int]]
+
+
+   .. py:attribute:: r_ref_per_point
+      :type:  numpy.ndarray
+
+
+.. py:class:: SkeletonTree
+
+   Skeleton graph: voxel points, adjacency/degree, endpoints/branchpoints, and root distances.
+
+
+   .. py:attribute:: pts_vox
+      :type:  numpy.ndarray
+
+
+   .. py:attribute:: neighbors
+      :type:  List[List[int]]
+
+
+   .. py:attribute:: degree
+      :type:  numpy.ndarray
+
+
+   .. py:attribute:: endpoints
+      :type:  List[int]
+
+
+   .. py:attribute:: branchpoints
+      :type:  List[int]
+
+
+   .. py:attribute:: root
+      :type:  Optional[int]
+
+
+   .. py:attribute:: dist_from_root_mm
+      :type:  Optional[numpy.ndarray]
+
+

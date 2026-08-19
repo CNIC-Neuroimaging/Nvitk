@@ -1,0 +1,66 @@
+nvitk.measure.morpho.labels_util
+================================
+
+.. py:module:: nvitk.measure.morpho.labels_util
+
+.. autoapi-nested-parse::
+
+   Label selection and connected-component helpers.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.labels_util.normalized_vessel_token
+   nvitk.measure.morpho.labels_util.is_acoa_vessel
+   nvitk.measure.morpho.labels_util.empty_vessel_info
+   nvitk.measure.morpho.labels_util.resolve_labels_to_process
+   nvitk.measure.morpho.labels_util.keep_largest_component
+   nvitk.measure.morpho.labels_util.connected_components
+   nvitk.measure.morpho.labels_util.keep_largest_component_per_label
+
+
+Module Contents
+---------------
+
+.. py:function:: normalized_vessel_token(value: Any) -> str
+
+   Lowercase *value* and strip non-alphanumeric characters, for fuzzy vessel-name matching.
+
+
+.. py:function:: is_acoa_vessel(vessel_info: nvitk.measure.morpho.models.VesselInfo) -> bool
+
+   True when *vessel_info* names the anterior communicating artery (ACoA), by any known alias.
+
+
+.. py:function:: empty_vessel_info(label: int) -> nvitk.measure.morpho.models.VesselInfo
+
+   Placeholder :class:`VesselInfo` for a label id with no anatomical metadata.
+
+
+.. py:function:: resolve_labels_to_process(labels_all: List[int]) -> List[int]
+
+   Intersect the requested label set (config ``SELECTED_TAGS``/``LABELS``) with what's present.
+
+   Warns (prints) about requested labels missing from the segmentation and raises
+   if the resulting intersection is empty.
+
+
+.. py:function:: keep_largest_component(mask: numpy.ndarray) -> numpy.ndarray
+
+   Boolean mask of only the largest 26-connected component of *mask*.
+
+
+.. py:function:: connected_components(mask: numpy.ndarray) -> List[numpy.ndarray]
+
+   26-connected components of *mask* as separate boolean masks, largest first.
+
+
+.. py:function:: keep_largest_component_per_label(multilabel: numpy.ndarray) -> numpy.ndarray
+
+   Per label id, keep only its largest connected component; drop stray islands.
+
+

@@ -1,0 +1,47 @@
+nvitk.pipes.pesa_fat.common.stage4_qc
+=====================================
+
+.. py:module:: nvitk.pipes.pesa_fat.common.stage4_qc
+
+.. autoapi-nested-parse::
+
+   PESA-Fat stage 4: HTML QC report (CT-PET + Dixon).
+
+   v2: one report per subject + batch index.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.stage4_qc.RES_QC_DIR
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.stage4_qc.run_qc
+   nvitk.pipes.pesa_fat.common.stage4_qc.main
+
+
+Module Contents
+---------------
+
+.. py:data:: RES_QC_DIR
+   :value: 'res_qc'
+
+
+.. py:function:: run_qc(batch: str, subjects: list[str], *, pipelines: list[str], nifti_root: pathlib.Path | None = None, results_root: pathlib.Path | None = None, margin_vox: int = 3) -> pathlib.Path
+
+   Build per-subject QC reports and a batch index; returns the index path.
+
+
+.. py:function:: main(batch: str, subjects: str | None, pipelines: str, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, margin_vox: int, log_level: str) -> None
+
+   Build HTML QC report for a PESA-Fat batch (or subset of subjects).
+
+

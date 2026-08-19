@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.pesa_fat.common.stage0_convert &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.pesa_fat.common.stage3_batch_summary" href="../stage3_batch_summary/index.html" />
+    <link rel="prev" title="nvitk.pipes.pesa_fat.common.sge_db" href="../sge_db/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.pesa_fat.common.stage0_convert">
+<span id="nvitk-pipes-pesa-fat-common-stage0-convert"></span><h1>nvitk.pipes.pesa_fat.common.stage0_convert<a class="headerlink" href="#module-nvitk.pipes.pesa_fat.common.stage0_convert" title="Link to this heading">¶</a></h1>
+<p>PESA-Fat stage 0 (shared): per-subject DICOM -&gt; NIfTI conversion and renaming.</p>
+<p>Port of <code class="code docutils literal notranslate"><span class="pre">BioImaging/src/pesa_fat/ct_pet/0_conversion_and_organization.sh</span></code>.</p>
+<p>Responsibilities (applied to a single <code class="docutils literal notranslate"><span class="pre">PESA*</span></code> subject at a time):</p>
+<ol class="arabic">
+<li><p>Invoke <a class="reference internal" href="../../../../io/conversors/dcm2nii/index.html#nvitk.io.conversors.dcm2nii.dcm2nii" title="nvitk.io.conversors.dcm2nii.dcm2nii"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.io.conversors.dcm2nii.dcm2nii()</span></code></a> with the flags the
+legacy shell script used (<code class="docutils literal notranslate"><span class="pre">--force-ras</span> <span class="pre">--multifile</span> <span class="pre">--naming</span>
+<span class="pre">Modality_SeriesNumber</span></code>). The call produces
+<code class="docutils literal notranslate"><span class="pre">NIFTI_ROOT/&lt;batch&gt;/&lt;SUBJECT&gt;/</span></code> with files named
+<code class="docutils literal notranslate"><span class="pre">&lt;Modality&gt;_&lt;SeriesNumber&gt;[_&lt;suffix&gt;].nii[.gz]</span></code>.</p></li>
+<li><p>Rename the per-subject NIfTI files into the canonical stage-0 layout:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CT_&lt;series&gt;.nii</span></code>           -&gt; <code class="docutils literal notranslate"><span class="pre">CT.nii</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PT_&lt;series&gt;.nii</span></code>           -&gt; <code class="docutils literal notranslate"><span class="pre">PT.nii</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MR_&lt;series&gt;_&lt;metric&gt;.nii</span></code>  -&gt; <code class="docutils literal notranslate"><span class="pre">DIXON_&lt;REGION&gt;_&lt;metric&gt;.nii</span></code>
+(region from DICOM slice location: lowest→HEAD, middle→THORAX, highest→LEGS)</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ol>
+<p>The script is idempotent: converted subject folders that already contain
+NIfTI files are skipped; already-renamed targets are kept (<code class="docutils literal notranslate"><span class="pre">Path.replace</span></code> is
+only invoked when the destination does not yet exist).</p>
+<p>Runnable as a standalone CLI
+(<code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert</span> <span class="pre">--batch</span> <span class="pre">X</span> <span class="pre">--subject</span> <span class="pre">PESA001</span></code>)
+and importable as <a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.run_subject" title="nvitk.pipes.pesa_fat.common.stage0_convert.run_subject"><code class="xref py py-func docutils literal notranslate"><span class="pre">run_subject()</span></code></a> by the batch master.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.log" title="nvitk.pipes.pesa_fat.common.stage0_convert.log"><code class="xref py py-obj docutils literal notranslate"><span class="pre">log</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult" title="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RenameResult</span></code></a></p></td>
+<td><p>Outcome of <a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename" title="nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename"><code class="xref py py-func docutils literal notranslate"><span class="pre">_plan_rename()</span></code></a> for a single file.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename" title="nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_plan_rename</span></code></a>(→ RenameResult)</p></td>
+<td><p>Decide the target filename for a converted DICOM-to-NIfTI <em>src</em>: normalize CT/PT files, and for</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._iter_nifti_files" title="nvitk.pipes.pesa_fat.common.stage0_convert._iter_nifti_files"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_iter_nifti_files</span></code></a>(→ Iterable[pathlib.Path])</p></td>
+<td><p>Sorted list of <code class="docutils literal notranslate"><span class="pre">.nii</span></code>/<code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> files directly under <em>folder</em> (empty if it doesn't exist).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._mr_series_numbers_from_folder" title="nvitk.pipes.pesa_fat.common.stage0_convert._mr_series_numbers_from_folder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_mr_series_numbers_from_folder</span></code></a>(→ set[str])</p></td>
+<td><p>Distinct MR series numbers parsed from <code class="docutils literal notranslate"><span class="pre">MR_&lt;series&gt;_&lt;suffix&gt;</span></code> NIfTI filenames in <em>folder</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.rename_subject_folder" title="nvitk.pipes.pesa_fat.common.stage0_convert.rename_subject_folder"><code class="xref py py-obj docutils literal notranslate"><span class="pre">rename_subject_folder</span></code></a>(→ dict[str, int])</p></td>
+<td><p>Apply the stage-0 rename policy to every NIfTI file in <code class="docutils literal notranslate"><span class="pre">folder</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._subject_has_nifti_outputs" title="nvitk.pipes.pesa_fat.common.stage0_convert._subject_has_nifti_outputs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_subject_has_nifti_outputs</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>folder</em> exists and directly contains at least one <code class="docutils literal notranslate"><span class="pre">.nii</span></code>/<code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.run_subject" title="nvitk.pipes.pesa_fat.common.stage0_convert.run_subject"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run_subject</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Run stage 0 for a single PESA* subject.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.run_batch" title="nvitk.pipes.pesa_fat.common.stage0_convert.run_batch"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run_batch</span></code></a>(→ nvitk.pipes.pesa_fat.common.paths.BatchLayout)</p></td>
+<td><p>Run stage 0 for every PESA* subject in <code class="docutils literal notranslate"><span class="pre">batch</span></code> (local / sequential).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.main" title="nvitk.pipes.pesa_fat.common.stage0_convert.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>(→ None)</p></td>
+<td><p>Convert and re-organise a PESA-Fat DICOM batch (single-subject or full batch).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.log">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">log</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.log" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">RenameResult</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult" title="Link to this definition">¶</a></dt>
+<dd><p>Outcome of <a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename" title="nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename"><code class="xref py py-func docutils literal notranslate"><span class="pre">_plan_rename()</span></code></a> for a single file.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.src">
+<span class="sig-name descname"><span class="pre">src</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.src" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.dst">
+<span class="sig-name descname"><span class="pre">dst</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.dst" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.reason">
+<span class="sig-name descname"><span class="pre">reason</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult.reason" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">_plan_rename</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">src</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">series_region_map</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult" title="nvitk.pipes.pesa_fat.common.stage0_convert.RenameResult"><span class="pre">RenameResult</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert._plan_rename" title="Link to this definition">¶</a></dt>
+<dd><p>Decide the target filename for a converted DICOM-to-NIfTI <em>src</em>: normalize CT/PT files, and for
+MR files resolve the Dixon region from <em>series_region_map</em> to build <code class="docutils literal notranslate"><span class="pre">DIXON_&lt;region&gt;_&lt;suffix&gt;</span></code>;
+returns a no-rename result if the naming convention or series mapping is unrecognized.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert._iter_nifti_files">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">_iter_nifti_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert._iter_nifti_files" title="Link to this definition">¶</a></dt>
+<dd><p>Sorted list of <code class="docutils literal notranslate"><span class="pre">.nii</span></code>/<code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> files directly under <em>folder</em> (empty if it doesn’t exist).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert._mr_series_numbers_from_folder">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">_mr_series_numbers_from_folder</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert._mr_series_numbers_from_folder" title="Link to this definition">¶</a></dt>
+<dd><p>Distinct MR series numbers parsed from <code class="docutils literal notranslate"><span class="pre">MR_&lt;series&gt;_&lt;suffix&gt;</span></code> NIfTI filenames in <em>folder</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.rename_subject_folder">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">rename_subject_folder</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.rename_subject_folder" title="Link to this definition">¶</a></dt>
+<dd><p>Apply the stage-0 rename policy to every NIfTI file in <code class="docutils literal notranslate"><span class="pre">folder</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert._subject_has_nifti_outputs">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">_subject_has_nifti_outputs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert._subject_has_nifti_outputs" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>folder</em> exists and directly contains at least one <code class="docutils literal notranslate"><span class="pre">.nii</span></code>/<code class="docutils literal notranslate"><span class="pre">.nii.gz</span></code> file.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.run_subject">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">run_subject</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">naming</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Modality_SeriesNumber'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force_ras</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_existing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.run_subject" title="Link to this definition">¶</a></dt>
+<dd><p>Run stage 0 for a single PESA* subject.</p>
+<p>Returns the subject NIfTI directory (created if missing). Raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> if the DICOM subject directory does not exist.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.run_batch">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">run_batch</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">naming</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Modality_SeriesNumber'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force_ras</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_existing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.run_batch" title="Link to this definition">¶</a></dt>
+<dd><p>Run stage 0 for every PESA* subject in <code class="docutils literal notranslate"><span class="pre">batch</span></code> (local / sequential).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.common.stage0_convert.main">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.common.stage0_convert.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">naming</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_force_ras</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_skip_existing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_compress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.common.stage0_convert.main" title="Link to this definition">¶</a></dt>
+<dd><p>Convert and re-organise a PESA-Fat DICOM batch (single-subject or full batch).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../../index.html">nvitk.pipes.pesa_fat</a><ul>
+  <li><a href="../index.html">nvitk.pipes.pesa_fat.common</a><ul>
+      <li>Previous: <a href="../sge_db/index.html" title="previous chapter">nvitk.pipes.pesa_fat.common.sge_db</a></li>
+      <li>Next: <a href="../stage3_batch_summary/index.html" title="next chapter">nvitk.pipes.pesa_fat.common.stage3_batch_summary</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/pipes/pesa_fat/common/stage0_convert/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

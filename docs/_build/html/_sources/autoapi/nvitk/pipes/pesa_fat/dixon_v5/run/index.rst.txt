@@ -1,0 +1,115 @@
+nvitk.pipes.pesa_fat.dixon_v5.run
+=================================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5.run
+
+.. autoapi-nested-parse::
+
+   Dixon v5 pipeline master.
+
+   Entry point for the whole Dixon v5 pipeline (stages 1-3). Same shape as
+   :mod:`nvitk.pipes.pesa_fat.ct_pet_v5.run`: dispatches each stage either
+   locally (in-process loop) or on SGE (one array job per subject; tasks =
+   stages with ``-tc 1`` + done-markers). ``--base-hold`` should be set when a
+   stage 0 job is already in queue so every subject's array waits on its stage 0.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.run.log
+   nvitk.pipes.pesa_fat.dixon_v5.run.INPUT_SOURCE_CHOICES
+   nvitk.pipes.pesa_fat.dixon_v5.run.STAGE_MODULES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.run._local_runner
+   nvitk.pipes.pesa_fat.dixon_v5.run._stage_resources
+   nvitk.pipes.pesa_fat.dixon_v5.run._run_local
+   nvitk.pipes.pesa_fat.dixon_v5.run._aggregate_stage3
+   nvitk.pipes.pesa_fat.dixon_v5.run._build_python_cmd
+   nvitk.pipes.pesa_fat.dixon_v5.run._cluster_paths
+   nvitk.pipes.pesa_fat.dixon_v5.run.submit_subject_chain
+   nvitk.pipes.pesa_fat.dixon_v5.run._run_sge
+   nvitk.pipes.pesa_fat.dixon_v5.run.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: INPUT_SOURCE_CHOICES
+   :value: ('paths', 'xnat')
+
+
+.. py:data:: STAGE_MODULES
+   :type:  dict[str, str]
+
+.. py:function:: _local_runner(stage: str) -> Callable[Ellipsis, Any]
+
+   Return the local ``run_subject`` callable for *stage*; raises ``ValueError`` for unknown stages.
+
+
+.. py:function:: _stage_resources(stage: str, *, device: str = 'gpu') -> nvitk.cluster.sge.SgeResources
+
+   Per-stage SGE resource request.
+
+   Stage 1 always uses the GPU h_vmem config. When *device* is ``"gpu"``,
+   every stage requests ``ngpu=SGE_NGPU`` (so stages 2/3 run on a GPU node
+   too); when ``"cpu"``, every stage requests ``ngpu=SGE_CPU_NGPU``.
+
+
+.. py:function:: _run_local(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subjects: list[str], stages_sel: list[str], *, backend: str, device: str, model_dir: pathlib.Path | None, overwrite: bool, regions: tuple[str, Ellipsis]) -> None
+
+   Run the requested Dixon v5 stages for every subject sequentially in-process, publishing stage-3
+   results to the DB and aggregating the batch summary once stage-3 has run.
+
+
+.. py:function:: _aggregate_stage3(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subjects: list[str]) -> pathlib.Path | None
+
+   Concatenate per-subject Dixon v5 stage-3 xlsx files into ``<batch>_SummaryCodebook.xlsx``.
+
+
+.. py:function:: _build_python_cmd(stage: str, subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, *, binds: nvitk.cluster.sge.SingularityBinds, backend: str, device: str, overwrite: bool, regions: tuple[str, Ellipsis], log_level: str) -> str
+
+   Build the per-stage ``python -m ...`` command using *in-container* paths.
+
+   See :func:`nvitk.pipes.pesa_fat.ct_pet_v5.run._build_python_cmd` for the
+   path remapping rationale.
+
+
+.. py:function:: _cluster_paths(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, container: pathlib.Path, src_dir: pathlib.Path) -> nvitk.cluster.sge.ClusterPaths
+
+   Build the :class:`~nvitk.cluster.sge.ClusterPaths` (container/model/data/output roots) for
+   submitting Dixon v5 SGE jobs from *lay*.
+
+
+.. py:function:: submit_subject_chain(subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, stages_sel: list[str], *, container: pathlib.Path, src_dir: pathlib.Path, backend: str = 'cupy', device: str = 'gpu', model_dir: pathlib.Path | None = None, overwrite: bool = False, regions: tuple[str, Ellipsis] = cfg.REGION_ORDER, base_hold: str | None = None, dry_run: bool = False, log_level: str = 'INFO', emit: TextIO | None = None) -> list[str]
+
+   Submit one Dixon v5 SGE array job for a *single* subject.
+
+   Array tasks are the selected stages in order (``-tc 1`` + done-markers).
+   *base_hold* is applied to the whole array (e.g. the subject's stage-0 jid).
+
+   Returns ``[jid]`` (one array job id) so batch aggregate/QC can hold on it.
+
+
+.. py:function:: _run_sge(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subjects: list[str], stages_sel: list[str], *, backend: str, device: str, model_dir: pathlib.Path | None, overwrite: bool, regions: tuple[str, Ellipsis], container: pathlib.Path, src_dir: pathlib.Path, base_hold: str | None, dry_run: bool, log_level: str, emit: TextIO | None = None) -> dict[str, list[str]]
+
+   Submit an SGE job chain for the requested stages for every subject; returns
+   ``{subject: [job_id, ...]}``.
+
+
+.. py:function:: main(batch: str, subjects: str | None, stages: str, regions: str, submit: str, base_hold: str | None, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, input_source: str, xnat_config: pathlib.Path | None, xnat_session: str | None, backend: str, device: str, model_dir: pathlib.Path | None, overwrite: bool, container: pathlib.Path | None, src_dir: pathlib.Path | None, dry_run: bool, emit_script: pathlib.Path | None, log_level: str, debug: bool) -> None
+
+   Dixon v5 pipeline master (local or SGE dispatch).
+
+

@@ -1,0 +1,136 @@
+nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess
+================================================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess
+
+.. autoapi-nested-parse::
+
+   Dixon v5 stage 2 (per-subject): post-process TotalSegmentator outputs.
+
+   Port of :code:`BioImaging/src/pesa_fat/dixon/__post_process.py` /
+   :code:`2_post_processing.py`.
+
+   Produces three per-subject, per-region label files under
+   ``RESULTS/<batch>/res_post_processing_dixon/<SUBJECT>/``::
+
+       HEAD.nii.gz    H_PVM_L=1, H_PVM_R=2
+       THORAX.nii.gz  LIVER=1, PANCREAS=2, KIDNEY_L=3, KIDNEY_R=4,
+                      T_PVM_L=5, T_PVM_R=6,
+                      BN_L3=7, BN_L4=8
+       LEGS.nii.gz    L_QM_L=1, L_QM_R=2
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.log
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._BN_ERODE
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._KIDNEY_ERODE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._imread_opt
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._vertebra_narrow
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._biggest_cc_or_empty
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._muscles_keep_biggest_cc_per_label
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._kidney_erode
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._kidney_remove_pelvis
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.build_head_mask
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.build_thorax_mask
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.build_legs_mask
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess._process
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.run_subject
+   nvitk.pipes.pesa_fat.dixon_v5.stage2_postprocess.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: _BN_ERODE
+   :value: 3
+
+
+.. py:data:: _KIDNEY_ERODE
+   :value: 1
+
+
+.. py:function:: _imread_opt(parent: pathlib.Path, stem: str, axes: str = 'XYZ') -> nvitk.types.Image | None
+
+   Read the ``<stem>.nii[.gz]`` file resolved under *parent*, or ``None`` if it doesn't exist.
+
+
+.. py:function:: _vertebra_narrow(vertebra: nvitk.types.Image, radius: int = _BN_ERODE) -> nvitk.types.Image
+
+   Erode the vertebra mask by *radius* voxels and keep only its largest connected component
+   (empty mask if erosion removes everything).
+
+
+.. py:function:: _biggest_cc_or_empty(label_img: nvitk.types.Image, label_id: int) -> nvitk.types.Image
+
+   Extract *label_id* from *label_img* and keep only its largest connected component (empty mask
+   if the label is absent).
+
+
+.. py:function:: _muscles_keep_biggest_cc_per_label(base_img: nvitk.types.Image, out_labels: nvitk.types.Image) -> nvitk.types.Image
+
+   Per muscle label ID, keep only the largest 3D connected component.
+
+
+.. py:function:: _kidney_erode(kidney: nvitk.types.Image, iterations: int = _KIDNEY_ERODE) -> nvitk.types.Image
+
+   Erode the kidney mask by *iterations*, falling back to the original (unwarned-empty) mask if
+   erosion removes everything.
+
+
+.. py:function:: _kidney_remove_pelvis(kidney: nvitk.types.Image, *, dilate_iters: int = 1) -> nvitk.types.Image
+
+   Remove estimated renal pelvis from a kidney mask.
+
+   Steps:
+   - Compute 3D convex hull of the kidney
+   - Pelvis candidate = hull \ kidney
+   - Keep biggest CC of candidate (if any)
+   - Dilate candidate one iter
+   - Subtract candidate from kidney
+
+
+.. py:function:: build_head_mask(head_total_mr: nvitk.types.Image) -> nvitk.types.Image
+
+   HEAD: H_PVM_L / H_PVM_R (autochthon L/R, largest CC each).
+
+
+.. py:function:: build_thorax_mask(thorax_total_mr: nvitk.types.Image, thorax_vertebrae_mr: nvitk.types.Image) -> nvitk.types.Image
+
+   THORAX: liver, pancreas, kidneys L/R, paravertebral L/R and BN_L3/L4.
+
+
+.. py:function:: build_legs_mask(legs_muscles_mr: nvitk.types.Image) -> nvitk.types.Image
+
+   LEGS: quadriceps L/R (``L_QM_L`` / ``L_QM_R``, largest CC each).
+
+
+.. py:function:: _process(segmentation_dir: pathlib.Path, output_dir: pathlib.Path) -> None
+
+   Build and write the per-region (HEAD/THORAX/LEGS) post-processed Dixon masks for one subject
+   from its TotalSegmentator outputs, skipping any region whose inputs are missing.
+
+
+.. py:function:: run_subject(subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, *, backend: str = 'cupy') -> pathlib.Path
+
+   Build HEAD/THORAX/LEGS stage-2 outputs for a single subject.
+
+
+.. py:function:: main(batch: str, subject: str, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, backend: str, log_level: str) -> None
+
+   Dixon v5 stage 2 worker (single subject).
+
+

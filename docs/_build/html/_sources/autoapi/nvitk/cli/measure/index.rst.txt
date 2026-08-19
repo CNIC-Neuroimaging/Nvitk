@@ -1,0 +1,68 @@
+nvitk.cli.measure
+=================
+
+.. py:module:: nvitk.cli.measure
+
+.. autoapi-nested-parse::
+
+   ``nvitk-measure`` CLI — measurement tools.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.cli.measure.log
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.measure.main
+   nvitk.cli.measure._write_metrics
+   nvitk.cli.measure.cmd_volume
+   nvitk.cli.measure.cmd_suv
+   nvitk.cli.measure.cmd_dice
+   nvitk.cli.measure.cmd_surface
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:function:: main() -> None
+
+   Measurement tools.
+
+
+.. py:function:: _write_metrics(output_path: pathlib.Path, data: dict) -> None
+
+   Write *data* to *output_path* as pretty JSON (``.json`` suffix) or plain ``key: value`` lines
+   otherwise.
+
+
+.. py:function:: cmd_volume(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None) -> None
+
+   Compute mask volume (mm³ and cc).
+
+
+.. py:function:: cmd_suv(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None) -> None
+
+   SUV statistics inside a mask.
+
+
+.. py:function:: cmd_dice(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None, reference: pathlib.Path) -> None
+
+   Dice coefficient between mask and reference.
+
+
+.. py:function:: cmd_surface(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None, reference: pathlib.Path) -> None
+
+   Surface distance metrics vs reference.
+
+

@@ -1,0 +1,218 @@
+nvitk.stats.region_algebra
+==========================
+
+.. py:module:: nvitk.stats.region_algebra
+
+.. autoapi-nested-parse::
+
+   Arithmetic *across* regions — combining a measurement's rows into a new quantity.
+
+   Description
+   -----------
+   The derived columns in :mod:`~nvitk.stats.frame_ops` operate **within a row**: ``log(pi)``, ``pi /
+   flow_mean``, a binned ``tacsctot``. That covers everything expressible from one row's own values,
+   and none of the quantities that matter most in a vascular analysis, because those are sums *over*
+   rows:
+
+   .. code-block:: text
+
+       TCBF          = flow(RICA) + flow(LICA) + flow(BASI)
+       basilar gap   = flow(LVA) + flow(RVA) − flow(BASI)
+       MCA share     = flow(LMCA) / (flow(LMCA) + flow(LACA))
+
+   The analysis frame is long — one row per subject × territory — so all three are combinations of
+   several rows of one subject. This module is that operation: pick a measurement, pick regions, give
+   each a coefficient, and get back either a new **column** (the same value on every row of the
+   subject, ready to use as a covariate) or a new **row** (a synthetic territory, ready to model
+   alongside the real ones).
+
+   Relationship to the rest
+   ------------------------
+   :data:`~nvitk.stats.vessel_network.CONSERVATION_RULES` are exactly the combinations whose
+   coefficients encode mass balance, so :func:`conservation_combinations` turns them into
+   :class:`RegionCombination` objects and the same machinery evaluates them. Nothing here knows about
+   anatomy; it is the arithmetic, and the anatomy lives in
+   :mod:`~nvitk.stats.vessel_network`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.region_algebra.COMBINE_OPS
+   nvitk.stats.region_algebra.COMBINE_MODES
+   nvitk.stats.region_algebra.NAME_RE
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats.region_algebra.RegionCombination
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.region_algebra.evaluate_region_combination
+   nvitk.stats.region_algebra.apply_region_combinations
+   nvitk.stats.region_algebra.conservation_combinations
+   nvitk.stats.region_algebra.composite_combinations
+
+
+Module Contents
+---------------
+
+.. py:data:: COMBINE_OPS
+   :type:  dict[str, str]
+
+.. py:data:: COMBINE_MODES
+   :type:  dict[str, str]
+
+.. py:data:: NAME_RE
+
+.. py:class:: RegionCombination
+
+   One quantity built by combining a measurement across regions.
+
+   ``terms`` maps a region label to its coefficient, so ``{"Left_ICA": 1, "Right_ICA": 1,
+   "Basilar": 1}`` with ``op="sum"`` is total cerebral blood flow, and ``{"Left_VA": 1,
+   "Right_VA": 1, "Basilar": -1}`` is the vertebrobasilar mass-balance residual.
+
+
+   .. py:attribute:: name
+      :type:  str
+
+
+   .. py:attribute:: value_column
+      :type:  str
+
+
+   .. py:attribute:: terms
+      :type:  Mapping[str, float]
+
+
+   .. py:attribute:: op
+      :type:  str
+      :value: 'sum'
+
+
+
+   .. py:attribute:: mode
+      :type:  str
+      :value: 'column'
+
+
+
+   .. py:attribute:: region_column
+      :type:  str
+      :value: 'territory'
+
+
+
+   .. py:attribute:: subject_column
+      :type:  str
+      :value: 'subject_uid'
+
+
+
+   .. py:attribute:: require_all
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: unit
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: description
+      :type:  str
+      :value: ''
+
+
+
+   .. py:method:: validate() -> str
+
+      Empty when the combination is well-formed, otherwise the reason it is not.
+
+
+
+   .. py:method:: expression() -> str
+
+      The combination as readable text, for a label or a tooltip.
+
+
+
+   .. py:method:: to_dict() -> dict[str, Any]
+
+      Config-serializable form.
+
+
+
+   .. py:method:: from_dict(data: Mapping[str, Any]) -> RegionCombination
+      :classmethod:
+
+
+      Rebuild from :meth:`to_dict`, tolerating keys an older config did not have.
+
+
+
+.. py:function:: evaluate_region_combination(df: pandas.DataFrame, combo: RegionCombination) -> tuple[pandas.Series, dict[str, Any]]
+
+   Compute one combination, returning a per-subject series and a report of what it used.
+
+   :returns: *values* is indexed by subject. *report* carries ``matched``, ``missing``,
+             ``n_subjects``, ``n_incomplete`` and ``expression``.
+   :rtype: (values, report)
+
+   :raises ValueError: When the combination is malformed, its columns are absent, or no listed region is in the
+       frame at all.
+
+
+.. py:function:: apply_region_combinations(df: pandas.DataFrame, combinations: Sequence[RegionCombination]) -> tuple[pandas.DataFrame, list[str], list[dict[str, Any]]]
+
+   Apply each combination to a copy of *df*, in order.
+
+   ``mode="column"`` merges the per-subject value back onto every row of that subject, so it can be
+   used as a covariate beside the per-territory outcome. ``mode="row"`` appends synthetic rows
+   carrying the combination's name as their region, so it can be modelled as another territory —
+   note those rows are **not independent** of the ones they were built from, which matters if the
+   model treats territories as replicates.
+
+   A combination that fails is skipped with its error collected, so one bad definition does not
+   cost the rest.
+
+   :rtype: (frame, errors, reports)
+
+
+.. py:function:: conservation_combinations(value_column: str = 'flow_mean', *, region_column: str = 'territory', subject_column: str = 'subject_uid', rules: Sequence[str] | None = None, relative: bool = False) -> list[RegionCombination]
+
+   The mass-balance rules as ready-to-apply combinations.
+
+   This is the answer to "how do I get conservation residuals as derived columns": each rule in
+   :data:`~nvitk.stats.vessel_network.CONSERVATION_RULES` is already a weighted sum over regions,
+   so it maps directly onto a :class:`RegionCombination` with ``op="sum"``. The result is one
+   column per balance, on every row of the subject, ready to use as an outcome or a covariate.
+
+   :param relative: Emit the balance as a *share* of the rule's inflow instead of an absolute residual.
+                    Absolute residuals scale with cardiac output; relative ones are comparable between subjects.
+   :type relative: bool
+
+
+.. py:function:: composite_combinations(value_column: str = 'flow_mean', *, region_column: str = 'territory', subject_column: str = 'subject_uid') -> list[RegionCombination]
+
+   The standard whole-brain composites: total inflow, and the anterior/posterior split.
+
+   ``TCBF`` is the one asked for most often — total cerebral blood flow as the sum of both internal
+   carotids and the basilar. It is a *column*, not a territory: it is the subject's total, so it
+   belongs beside the per-territory rows rather than among them.
+
+

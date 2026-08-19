@@ -1,0 +1,32 @@
+nvitk.pipes.pesa_fat.qc
+=======================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc
+
+.. autoapi-nested-parse::
+
+   PESA-Fat stage-4 QC HTML report builders.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/pipes/pesa_fat/qc/dixon_heatmap/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/embed/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/expected_ranges/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/headless/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/hotspot_embed/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/html_builder/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/measurements_table/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/pet_axial/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/portal/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/portal_cli/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/pyvista_scenes/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/review_policy/index
+   /autoapi/nvitk/pipes/pesa_fat/qc/slice_review/index
+
+

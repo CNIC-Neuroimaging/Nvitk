@@ -1,0 +1,210 @@
+nvitk.transform
+===============
+
+.. py:module:: nvitk.transform
+
+.. autoapi-nested-parse::
+
+   Geometric transform utilities for 3D/4D clinical imaging.
+
+   Submodules:
+
+   - :mod:`nvitk.transform.isotropy` — make an image voxel-isotropic by zooming the
+     anisotropic axis.
+   - :mod:`nvitk.transform.resampling` — affine-based voxel resampling between two
+     :class:`~nvitk.types.Image` grids.
+   - :mod:`nvitk.transform.rotate` — rotate a volume around a spatial axis.
+   - :mod:`nvitk.transform.reorient` — permute / flip / match reference or mouse preset.
+   - :mod:`nvitk.transform.swap_axes` — swap or permute array axes.
+   - :mod:`nvitk.transform.rotation` — detect and correct rigid Z-rotation between
+     image grids.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/transform/isotropy/index
+   /autoapi/nvitk/transform/oblique/index
+   /autoapi/nvitk/transform/projection/index
+   /autoapi/nvitk/transform/reorient/index
+   /autoapi/nvitk/transform/resampling/index
+   /autoapi/nvitk/transform/rotate/index
+   /autoapi/nvitk/transform/rotation/index
+   /autoapi/nvitk/transform/swap_axes/index
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.transform.isotropy
+   nvitk.transform.oblique_slice
+   nvitk.transform.mouse_reorient_volume
+   nvitk.transform.reorient_volume
+   nvitk.transform.resample_mask_to_pet
+   nvitk.transform.resample_pet_to_mask
+   nvitk.transform.resample_to
+   nvitk.transform.rotate_volume
+   nvitk.transform.check_and_correct_rotation
+   nvitk.transform.correct_z_rotation
+   nvitk.transform.permute_axes
+   nvitk.transform.swap_axes
+
+
+Package Contents
+----------------
+
+.. py:function:: isotropy(image: nvitk.types.Image, *, axis: int | None = None, factor: float | None = None, order: int = 1, mode: str = 'nearest', prefilter: bool = True) -> nvitk.types.Image
+
+   Resample *image* along the anisotropic axis to make voxels isotropic.
+
+   :param image: 3D :class:`~nvitk.types.Image` carrying a spacing triplet.
+   :param axis: Explicit axis (0, 1, 2) to resample. When omitted, uses the axis with
+                the **largest** spacing (i.e. lowest sampling density), matching the
+                legacy BioImaging behavior.
+   :param factor: Explicit zoom factor on the chosen axis. When omitted, uses
+                  ``max(spacing) / min(spacing)``.
+   :param order: Spline interpolation order for ``ndi.zoom``. Use 0 for label masks.
+   :param mode: Boundary mode (``'nearest'`` by default).
+   :param prefilter: Passed through to ``ndi.zoom``.
+
+   :returns: A new image with updated data and spacing/affine. Axes/orientation
+             are preserved.
+   :rtype: Image
+
+
+.. py:function:: oblique_slice(vol, *, center_xyz, u_xyz, v_xyz, radius_vox: float, res: int, order: int, mode: str = 'constant', cval: float = 0.0)
+
+   Sample `vol` on an oblique plane in voxel coordinates (x,y,z).
+
+   :param vol: 3D array (NumPy or CuPy).
+   :param center_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param u_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param v_xyz: 3-vectors in voxel coordinates. `u` and `v` span the plane.
+   :param radius_vox: Half-size of the square plane in voxels.
+   :param res: Output resolution (res × res).
+   :param order: Interpolation order (0 for masks, 1 for images).
+
+
+.. py:function:: mouse_reorient_volume(image: nvitk.types.Image | Any) -> nvitk.types.Image
+
+   Apply the lab mouse / ANTsPy-gallery axis convention (see :data:`MOUSE_TARGET_ORIENTATION`).
+
+
+.. py:function:: reorient_volume(image: nvitk.types.Image | Any, *, mode: str = 'manual', reference: nvitk.types.Image | Any | None = None, target_orientation: str | None = None, permute_order: str | Sequence[int] | None = None, flip_axes: Sequence[bool] | None = None, reset_affine: bool = False) -> nvitk.types.Image
+
+   Reorient a 3D volume via optional axis permute/flips and target axis codes.
+
+   :param image: Input :class:`~nvitk.types.Image` (or array coerced via metadata-less Image).
+   :param mode: ``manual`` — permute / flip / target codes from arguments.
+                ``reference`` — match *reference* orientation codes (after optional permute/flips).
+                ``mouse`` — preclinical preset: permute ``(0,2,1)`` then canonical ``LAS``
+                (AP moves from Z→Y; SI ends on Z), matching the ANTsPy mouse gallery layout.
+   :param reference: Reference image whose orientation codes are the target when ``mode='reference'``.
+   :param target_orientation: Three-letter codes (e.g. ``LAS``, ``RAS``). Used in manual mode, and as
+                              fallback when reference has no readable affine.
+   :param permute_order: Spatial axis permutation (e.g. ``"0,2,1"`` or ``(0, 2, 1)``).
+   :param flip_axes: Length-3 booleans for flipping array axes 0/1/2 after permute.
+   :param reset_affine: If True, after permute/flips assign a fresh canonical affine for
+                        *target_orientation* (use when the header axes do not match anatomy).
+                        Forced True for ``mode='mouse'``.
+
+
+.. py:function:: resample_mask_to_pet(mask: nvitk.types.Image, pet: nvitk.types.Image, *, order: int = 0) -> nvitk.types.Image
+
+   Nearest-neighbor resample of a mask onto a PET image's grid.
+
+
+.. py:function:: resample_pet_to_mask(pet: nvitk.types.Image, mask: nvitk.types.Image, *, order: int = 1) -> nvitk.types.Image
+
+   Trilinear resample of a PET image onto a mask's grid.
+
+
+.. py:function:: resample_to(source: nvitk.types.Image, target: nvitk.types.Image, *, order: int = 0, mode: str = 'constant', cval: float = 0.0, prefilter: bool | None = None) -> nvitk.types.Image
+
+   Resample *source* onto *target*'s voxel grid via affine composition.
+
+   The mapping is ``T = inv(target.affine) @ source.affine``; scipy's
+   ``affine_transform`` expects the output→input map so we invert it.
+
+   :param source: Image whose voxels are resampled.
+   :param target: Image whose grid (shape + affine) defines the output.
+   :param order: Spline interpolation order. **Use 0 for label/mask data** (nearest
+                 neighbor) and 1 for intensity data.
+   :param mode: Boundary handling passed to ``ndi.affine_transform``.
+   :param cval: Boundary handling passed to ``ndi.affine_transform``.
+   :param prefilter: Defaults to ``False`` when ``order == 0`` and ``True`` otherwise.
+
+   :returns: A new image whose data lives on ``target``'s grid and carries
+             ``target``'s affine/spacing/orientation but ``source``'s other metadata.
+   :rtype: Image
+
+
+.. py:function:: rotate_volume(image: nvitk.types.Image | Any, angle_degrees: float, *, axis: int = 2, order: int = 1, reshape: bool = False, mode: str = 'constant', cval: float = 0.0) -> nvitk.types.Image | Any
+
+   Rotate a 2D or 3D image by *angle_degrees* around *axis*.
+
+   :param image: :class:`~nvitk.types.Image` or ndarray-like volume.
+   :param angle_degrees: Counter-clockwise rotation (degrees) in the plane orthogonal to *axis*
+                         (``scipy.ndimage.rotate`` convention).
+   :param axis: Axis to rotate around for 3D data (``0``, ``1``, or ``2``; default Z).
+                Ignored for 2D (always in-plane).
+   :param order: Spline interpolation order. Use ``0`` for label masks.
+   :param reshape: If ``True``, expand the canvas to fit the rotated content (affine is
+                   left unchanged). If ``False`` (default), keep the original shape and
+                   update the affine when present.
+   :param mode: Boundary fill for ``scipy.ndimage.rotate``.
+   :param cval: Boundary fill for ``scipy.ndimage.rotate``.
+
+
+.. py:function:: check_and_correct_rotation(pet_affine: numpy.ndarray | Any, mri_affine: numpy.ndarray | Any, pet_image: nvitk.types.Image | None = None, *, threshold_deg: float = 5.0) -> RotationAnalysis
+
+   Compare two affines and optionally correct Z-rotation on *pet_image*.
+
+   Uses the normalized-column relative rotation ``R_mri @ R_pet.T``; the Z
+   rotation is the ``arctan2`` of the 2x2 upper-left block. A near-180°
+   reflection case is detected via the signs of ``R_relative``.
+
+   :param pet_affine: 4x4 voxel-to-world affines. CuPy arrays are materialized to NumPy.
+   :param mri_affine: 4x4 voxel-to-world affines. CuPy arrays are materialized to NumPy.
+   :param pet_image: Optional PET image to correct when rotation exceeds *threshold_deg*.
+   :param threshold_deg: Tolerance (degrees) under which correction is skipped.
+
+
+.. py:function:: correct_z_rotation(image: nvitk.types.Image | None, affine: numpy.ndarray, rotation_degrees: float)
+
+   Rotate *image* and its *affine* by ``-rotation_degrees`` around the Z axis.
+
+   :param image: Optional :class:`~nvitk.types.Image` to rotate. If ``None`` only the
+                 affine is updated.
+   :param affine: 4x4 voxel-to-world affine (NumPy).
+   :param rotation_degrees: Rotation to undo (the function applies ``-rotation_degrees``). A fast
+                            path is used for |180°|.
+
+   :returns: Rotated image (or ``None``) and updated affine.
+   :rtype: (Image | None, np.ndarray)
+
+
+.. py:function:: permute_axes(image: nvitk.types.Image | Any, order: Sequence[int]) -> nvitk.types.Image | Any
+
+   Reorder array axes to *order*.
+
+   :param image: :class:`~nvitk.types.Image` or ndarray-like.
+   :param order: New axis order. Must be a permutation of ``0..ndim-1``, or of
+                 ``0..k-1`` to permute only the leading *k* axes (e.g. spatial of 4D).
+
+
+.. py:function:: swap_axes(image: nvitk.types.Image | Any, axis0: int, axis1: int) -> nvitk.types.Image | Any
+
+   Swap two axes of a 2D/3D/4D image.
+
+   :param image: :class:`~nvitk.types.Image` or ndarray-like.
+   :param axis0: Axis indices to exchange (no-op if equal).
+   :param axis1: Axis indices to exchange (no-op if equal).
+
+

@@ -1,0 +1,247 @@
+nvitk.gui.pipeline.form
+=======================
+
+.. py:module:: nvitk.gui.pipeline.form
+
+.. autoapi-nested-parse::
+
+   Stage-based pipeline form for the Napari GUI.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.form.PIPELINE_FORM_SCROLL_MIN
+   nvitk.gui.pipeline.form.PipelineCliForm
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.form._ParamField
+   nvitk.gui.pipeline.form._StageRow
+   nvitk.gui.pipeline.form.PipelineStageForm
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.form._cli_long_option
+   nvitk.gui.pipeline.form._load_click_command
+
+
+Module Contents
+---------------
+
+.. py:data:: PIPELINE_FORM_SCROLL_MIN
+   :value: 120
+
+
+.. py:function:: _cli_long_option(param: click.Parameter) -> str
+
+   The longest ``--flag`` name registered for a Click *param* (or a derived ``--param-name``).
+
+
+.. py:function:: _load_click_command(script_name: str) -> click.Command | None
+
+   Resolve an installed console-script's underlying Click command/group by its entry-point name.
+
+
+.. py:class:: _ParamField(param: click.Parameter, widget: qtpy.QtWidgets.QWidget)
+
+   Pairs a Click CLI parameter with the Qt widget collecting its value in the pipeline form.
+
+
+   .. py:attribute:: param
+
+
+   .. py:attribute:: widget
+
+
+   .. py:method:: value() -> Any
+
+      Read and type-coerce the widget's current value per the Click parameter's type; raises
+      ``ValueError`` if a required text field is empty.
+
+
+
+.. py:class:: _StageRow(stage: nvitk.gui.pipeline.stages.PipelineStageSpec, checkbox: qtpy.QtWidgets.QCheckBox, inputs_host: qtpy.QtWidgets.QWidget, inputs_form: qtpy.QtWidgets.QFormLayout, input_widgets: dict[str, qtpy.QtWidgets.QWidget])
+
+   One pipeline stage's row in the form: its enable checkbox, input-widget container, and the
+   per-slot input widgets themselves.
+
+
+   .. py:attribute:: stage
+
+
+   .. py:attribute:: checkbox
+
+
+   .. py:attribute:: inputs_host
+
+
+   .. py:attribute:: inputs_form
+
+
+   .. py:attribute:: input_widgets
+
+
+.. py:class:: PipelineStageForm(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QGroupBox`
+
+
+   Pipeline stages, layer inputs, and global CLI options.
+
+
+   .. py:attribute:: _viewer
+      :type:  Any | None
+      :value: None
+
+
+
+   .. py:attribute:: _script
+      :value: ''
+
+
+
+   .. py:attribute:: _pipeline_def
+      :type:  nvitk.gui.pipeline.stages.PipelineStageDef | None
+      :value: None
+
+
+
+   .. py:attribute:: _stage_rows
+      :type:  list[_StageRow]
+      :value: []
+
+
+
+   .. py:attribute:: _param_fields
+      :type:  list[_ParamField]
+      :value: []
+
+
+
+   .. py:attribute:: _hint
+
+
+   .. py:attribute:: _scroll
+
+
+   .. py:attribute:: _content
+
+
+   .. py:attribute:: _content_layout
+
+
+   .. py:attribute:: _stages_host
+
+
+   .. py:attribute:: _stages_layout
+
+
+   .. py:attribute:: _params_host
+
+
+   .. py:attribute:: _params_form
+
+
+   .. py:method:: set_viewer(viewer: Any | None) -> None
+
+      Bind the Napari viewer used to populate layer-selection combo boxes.
+
+
+
+   .. py:method:: set_expanded(expanded: bool) -> None
+
+      Fill remaining dock height when visible; collapse when hidden.
+
+
+
+   .. py:method:: set_script(script_name: str) -> None
+
+      Rebuild the form for *script_name*'s registered pipeline stages and CLI parameters.
+
+
+
+   .. py:method:: _clear_form() -> None
+
+      Remove every stage-row and parameter widget from the form.
+
+
+
+   .. py:method:: _build_stage_rows(stages: tuple[nvitk.gui.pipeline.stages.PipelineStageSpec, Ellipsis]) -> None
+
+      Add one enable-checkbox group box (with an empty inputs sub-form) per stage in *stages*.
+
+
+
+   .. py:method:: _build_param_fields(script_name: str, pipeline_def: nvitk.gui.pipeline.stages.PipelineStageDef) -> None
+
+      Build a form row (checkbox for flags, line edit with optional file/dir browse button
+      otherwise) for every visible CLI parameter of *script_name*'s Click command.
+
+
+
+   .. py:method:: _enabled_stages() -> dict[str, bool]
+
+      ``{stage_id: is_checked}`` for every stage row in the form.
+
+
+
+   .. py:method:: _layer_names() -> list[str]
+
+      Names of every layer in the bound viewer, or ``[]`` if no viewer is bound.
+
+
+
+   .. py:method:: refresh_layer_combos() -> None
+
+      Repopulate every layer-selection combo box (and active-layer labels) with the current
+      viewer layer names, preserving each combo's selection where still valid.
+
+
+
+   .. py:method:: _active_layer_name() -> str | None
+
+      Name of the viewer's active (or last) layer, or ``None`` if there are no layers/viewer.
+
+
+
+   .. py:method:: _refresh_stage_inputs() -> None
+
+      Rebuild each stage row's input-slot widgets (layer combo boxes or an active-layer label)
+      based on which stages are currently enabled.
+
+
+
+   .. py:method:: _layer_selections() -> dict[tuple[str, str], str | None]
+
+      Current ``{(stage_id, slot): selected_layer_name}`` mapping from every layer combo box.
+
+
+
+   .. py:method:: build_layer_bindings(*, active_layer=None) -> list[nvitk.gui.pipeline.stages.StageInputBinding]
+
+      Resolve every stage's input slot to a concrete layer-name binding, given the current form
+      selections and the viewer's active layer.
+
+
+
+   .. py:method:: build_argv(exe: str, *, active_layer=None) -> list[str]
+
+      Build the full CLI argv for *exe*: enabled ``--stages``, every filled CLI parameter, and
+      resolved layer-input bindings.
+
+
+
+.. py:data:: PipelineCliForm
+

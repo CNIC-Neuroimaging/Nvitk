@@ -1,0 +1,271 @@
+nvitk.gui.panels.statmodels.db_publish
+======================================
+
+.. py:module:: nvitk.gui.panels.statmodels.db_publish
+
+.. autoapi-nested-parse::
+
+   Publish a derived analysis column back into the dataset as a first-class variable.
+
+   Description
+   -----------
+   A derived column — ``log_pi``, ``cp_group``, ``asl_vs_flow_diff`` — lives only inside one Statmodels
+   session. Recomputing it in the next session, or in a notebook, means retyping the definition and
+   hoping it matches. Writing it back to the dataset makes it a variable like any other: it appears in
+   the covariate lists, it can be loaded as a measurement, and it carries provenance saying which
+   column and which expression produced it.
+
+   Which table
+   -----------
+   A derived value belongs wherever its **source** lives, because that is what determines the key it is
+   measured on:
+
+   =========================  ==========================  ===========================================
+   Source                     Table                       Key
+   =========================  ==========================  ===========================================
+   image measurement          ``image_measurements``      ``subject_uid`` × ``region_id``
+   clinical variable          ``clinical_measurements``   ``subject_uid`` (× ``visit_id``)
+   cognitive variable         ``cognitive_measurements``  ``subject_uid`` (× ``visit_id``)
+   =========================  ==========================  ===========================================
+
+   The row building and the upsert are :mod:`nvitk.db.derived_measurements`' job; this module only
+   works out *which* of its entry points applies and assembles the aggregate frame it expects.
+
+   Region identity
+   ---------------
+   The analysis frame is keyed on the **melted** territory, not on the published ``region_id``: a frame
+   built with ``grouping="territory"`` has one row for "Anterior Circulation", aggregated over four
+   vessels. There is no single region id to attribute that value to, so the group key is written as the
+   ``region_id`` and the grouping that produced it is recorded in ``region_label`` and in the
+   provenance. A value derived from a vessel-wise frame round-trips exactly; one derived from a melted
+   frame round-trips to the same melted key, which is the honest answer rather than inventing a
+   component vessel.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.db_publish.IMAGE_TABLE
+   nvitk.gui.panels.statmodels.db_publish.CLINICAL_TABLE
+   nvitk.gui.panels.statmodels.db_publish.COGNITIVE_TABLE
+   nvitk.gui.panels.statmodels.db_publish.PUBLISH_TABLES
+   nvitk.gui.panels.statmodels.db_publish.VARIABLE_ID_RE
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.db_publish.PublishTarget
+   nvitk.gui.panels.statmodels.db_publish.PublishRequest
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.db_publish.resolve_publish_target
+   nvitk.gui.panels.statmodels.db_publish.build_publish_frame
+   nvitk.gui.panels.statmodels.db_publish.publish_derived_column
+
+
+Module Contents
+---------------
+
+.. py:data:: IMAGE_TABLE
+   :value: 'image_measurements'
+
+
+.. py:data:: CLINICAL_TABLE
+   :value: 'clinical_measurements'
+
+
+.. py:data:: COGNITIVE_TABLE
+   :value: 'cognitive_measurements'
+
+
+.. py:data:: PUBLISH_TABLES
+   :type:  tuple[tuple[str, str, str], Ellipsis]
+
+.. py:data:: VARIABLE_ID_RE
+
+.. py:class:: PublishTarget
+
+   Where a derived column goes and what identifies each of its rows.
+
+
+   .. py:attribute:: table
+      :type:  str
+
+
+   .. py:attribute:: domain
+      :type:  str
+
+
+   .. py:attribute:: key_columns
+      :type:  tuple[str, Ellipsis]
+
+
+   .. py:attribute:: reason
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: modality
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: pipeline_id
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: grouping
+      :type:  str
+      :value: ''
+
+
+
+   .. py:method:: is_image() -> bool
+
+      Whether rows carry a region, and therefore go to ``image_measurements``.
+
+
+
+.. py:function:: resolve_publish_target(column: str, *, derived: Sequence[nvitk.stats.frame_ops.DerivedColumn], measurement_columns: Mapping[str, Any] | None = None, clinical_columns: Sequence[str] = (), cognitive_columns: Sequence[str] = (), frame_columns: Sequence[str] = ()) -> PublishTarget
+
+   Work out which table a derived column belongs to, by following it back to its source.
+
+   Resolution walks the derived chain: a column derived from a column derived from ``pi`` is still
+   an image measurement. An expression that mixes domains cannot be attributed, so it falls back to
+   the image table when the frame is region-keyed and to clinical otherwise — and says so in
+   :attr:`PublishTarget.reason`, because that is exactly the case where the caller should look.
+
+   :param measurement_columns: ``{column: MeasurementSpec}`` for the image measurements currently loaded.
+   :type measurement_columns: mapping
+   :param clinical_columns: Covariate columns resolved from those domains.
+   :param cognitive_columns: Covariate columns resolved from those domains.
+   :param frame_columns: Columns of the analysis frame, used to detect whether it is region-keyed at all.
+
+
+.. py:class:: PublishRequest
+
+   Everything the write needs, as edited in the dialog.
+
+
+   .. py:attribute:: column
+      :type:  str
+
+
+   .. py:attribute:: variable_id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: table
+      :type:  str
+
+
+   .. py:attribute:: domain
+      :type:  str
+
+
+   .. py:attribute:: unit
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: aliases
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:attribute:: modality
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: pipeline_id
+      :type:  str
+      :value: 'latest'
+
+
+
+   .. py:attribute:: grouping
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: region_column
+      :type:  str
+      :value: 'territory'
+
+
+
+   .. py:attribute:: definition
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: register
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: extra_provenance
+      :type:  dict[str, Any]
+
+
+   .. py:method:: validate() -> str
+
+      Empty when the request can be written, otherwise the reason it cannot.
+
+
+
+.. py:function:: build_publish_frame(df: pandas.DataFrame, request: PublishRequest) -> pandas.DataFrame
+
+   Reduce the analysis frame to the rows that will be written.
+
+   Image rows keep one value per ``(subject_uid, region)``; clinical and cognitive rows collapse to
+   one value per subject, since a subject-level variable repeated across territories is the same
+   number written N times. Rows whose value is missing are dropped — writing NaN would shadow a real
+   value on the next read.
+
+   :raises ValueError: When the frame lacks ``subject_uid``, the value column, or (for image rows) the region
+       column, or when nothing survives.
+
+
+.. py:function:: publish_derived_column(repo: Any, df: pandas.DataFrame, request: PublishRequest, *, dry_run: bool = False) -> dict[str, Any]
+
+   Write a derived analysis column into the dataset.
+
+   Delegates the actual row construction and upsert to
+   :mod:`nvitk.db.derived_measurements`, so the rows land with the same schema, provenance and
+   catalog registration as any importer-produced variable.
+
+   :param dry_run: Build and validate everything, but do not touch the dataset. Returns the same summary with
+                   ``written=False``, which is what the dialog previews.
+   :type dry_run: bool
+
+   :returns: ``{"rows": DataFrame, "n_rows": int, "n_subjects": int, "table": str, "written": bool}``.
+   :rtype: dict
+
+

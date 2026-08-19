@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.db.catalog &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.db.derived_measurements" href="../derived_measurements/index.html" />
+    <link rel="prev" title="nvitk.db.asl_atlases" href="../asl_atlases/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.db.catalog">
+<span id="nvitk-db-catalog"></span><h1>nvitk.db.catalog<a class="headerlink" href="#module-nvitk.db.catalog" title="Link to this heading">¶</a></h1>
+<p>Dataset catalog: <code class="docutils literal notranslate"><span class="pre">repository.json</span></code>, table manifests, variable registry, scaffold helpers.</p>
+<p><a class="reference internal" href="#nvitk.db.catalog.DatasetCatalog" title="nvitk.db.catalog.DatasetCatalog"><code class="xref py py-class docutils literal notranslate"><span class="pre">DatasetCatalog</span></code></a> is the source of truth for paths and schemas under the dataset root.</p>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TableDefinition</span></code></a></p></td>
+<td><p>Static description of one Parquet-backed table (columns, keys, wide pivot settings).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.db.catalog.DatasetCatalog" title="nvitk.db.catalog.DatasetCatalog"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DatasetCatalog</span></code></a></p></td>
+<td><p>Load and update <code class="docutils literal notranslate"><span class="pre">catalog/repository.json</span></code>, resolve table paths, variables, and pipelines.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.db.catalog.</span></span><span class="sig-name descname"><span class="pre">TableDefinition</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition" title="Link to this definition">¶</a></dt>
+<dd><p>Static description of one Parquet-backed table (columns, keys, wide pivot settings).</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.name">
+<span class="sig-name descname"><span class="pre">name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.name" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.path">
+<span class="sig-name descname"><span class="pre">path</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.path" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.kind">
+<span class="sig-name descname"><span class="pre">kind</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.kind" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.description">
+<span class="sig-name descname"><span class="pre">description</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.description" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.key_columns">
+<span class="sig-name descname"><span class="pre">key_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.key_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.index_columns">
+<span class="sig-name descname"><span class="pre">index_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.index_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.wide_index_columns">
+<span class="sig-name descname"><span class="pre">wide_index_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.wide_index_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.wide_key_columns">
+<span class="sig-name descname"><span class="pre">wide_key_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.wide_key_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.value_columns">
+<span class="sig-name descname"><span class="pre">value_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.value_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.columns">
+<span class="sig-name descname"><span class="pre">columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.row_count">
+<span class="sig-name descname"><span class="pre">row_count</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.row_count" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.TableDefinition.provenance">
+<span class="sig-name descname"><span class="pre">provenance</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.TableDefinition.provenance" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.db.catalog.</span></span><span class="sig-name descname"><span class="pre">DatasetCatalog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog" title="Link to this definition">¶</a></dt>
+<dd><p>Load and update <code class="docutils literal notranslate"><span class="pre">catalog/repository.json</span></code>, resolve table paths, variables, and pipelines.</p>
+<p>Use <a class="reference internal" href="#nvitk.db.catalog.DatasetCatalog.get_table" title="nvitk.db.catalog.DatasetCatalog.get_table"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_table()</span></code></a> for <a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><code class="xref py py-class docutils literal notranslate"><span class="pre">TableDefinition</span></code></a> rows and <a class="reference internal" href="#nvitk.db.catalog.DatasetCatalog.list_tables" title="nvitk.db.catalog.DatasetCatalog.list_tables"><code class="xref py py-meth docutils literal notranslate"><span class="pre">list_tables()</span></code></a> for names.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.REQUIRED_REPOSITORY_KEYS">
+<span class="sig-name descname"><span class="pre">REQUIRED_REPOSITORY_KEYS</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.REQUIRED_REPOSITORY_KEYS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.REQUIRED_TABLE_KEYS">
+<span class="sig-name descname"><span class="pre">REQUIRED_TABLE_KEYS</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.REQUIRED_TABLE_KEYS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.REQUIRED_VARIABLE_KEYS">
+<span class="sig-name descname"><span class="pre">REQUIRED_VARIABLE_KEYS</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.REQUIRED_VARIABLE_KEYS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.root">
+<span class="sig-name descname"><span class="pre">root</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.root" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.repository_path">
+<span class="sig-name descname"><span class="pre">repository_path</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.repository_path" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.repository_manifest">
+<span class="sig-name descname"><span class="pre">repository_manifest</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.repository_manifest" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.tables_manifest">
+<span class="sig-name descname"><span class="pre">tables_manifest</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.tables_manifest" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.variables_manifest">
+<span class="sig-name descname"><span class="pre">variables_manifest</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.variables_manifest" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.pipelines_manifest">
+<span class="sig-name descname"><span class="pre">pipelines_manifest</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.pipelines_manifest" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.pipelines_manifest_path">
+<span class="sig-name descname"><span class="pre">pipelines_manifest_path</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.pipelines_manifest_path" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog._tables">
+<span class="sig-name descname"><span class="pre">_tables</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><span class="pre">TableDefinition</span></a><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog._tables" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.create_scaffold">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">create_scaffold</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.create_scaffold" title="Link to this definition">¶</a></dt>
+<dd><p>Create a minimal dataset tree at <em>root</em> by copying the packaged catalog templates
+(manifests + schema) and creating empty <code class="docutils literal notranslate"><span class="pre">tables/</span></code>/<code class="docutils literal notranslate"><span class="pre">cache/</span></code> directories.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.refresh">
+<span class="sig-name descname"><span class="pre">refresh</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.refresh" title="Link to this definition">¶</a></dt>
+<dd><p>Re-read all manifest JSON files from disk and rebuild the in-memory <a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><code class="xref py py-class docutils literal notranslate"><span class="pre">TableDefinition</span></code></a>
+cache. Called after every catalog mutation to keep this instance consistent with disk.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.sqlite_index_path">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">sqlite_index_path</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.sqlite_index_path" title="Link to this definition">¶</a></dt>
+<dd><p>Absolute path to the SQLite query-cache database declared in the repository manifest.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.table_root">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">table_root</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.table_root" title="Link to this definition">¶</a></dt>
+<dd><p>Absolute path to the directory holding this dataset’s Parquet table files.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.list_tables">
+<span class="sig-name descname"><span class="pre">list_tables</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.list_tables" title="Link to this definition">¶</a></dt>
+<dd><p>Sorted names of every table registered in the manifest.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.get_table">
+<span class="sig-name descname"><span class="pre">get_table</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><span class="pre">TableDefinition</span></a></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.get_table" title="Link to this definition">¶</a></dt>
+<dd><p>Return <em>name</em>’s <a class="reference internal" href="#nvitk.db.catalog.TableDefinition" title="nvitk.db.catalog.TableDefinition"><code class="xref py py-class docutils literal notranslate"><span class="pre">TableDefinition</span></code></a>, raising <code class="docutils literal notranslate"><span class="pre">TableNotFoundError</span></code> if unregistered.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.table_exists">
+<span class="sig-name descname"><span class="pre">table_exists</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.table_exists" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>name</em> is a registered table.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.ensure_table_definition">
+<span class="sig-name descname"><span class="pre">ensure_table_definition</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">clone_from</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.ensure_table_definition" title="Link to this definition">¶</a></dt>
+<dd><p>Register <em>name</em> in <code class="docutils literal notranslate"><span class="pre">tables.json</span></code> by cloning manifest metadata from <em>clone_from</em>,
+pointing at <code class="docutils literal notranslate"><span class="pre">&lt;table_root&gt;/{name}.parquet</span></code>. Creates an empty Parquet file if missing.</p>
+<p>No-op (returns existing Parquet path) when <em>name</em> is already registered.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.ensure_cognitive_measurements_table">
+<span class="sig-name descname"><span class="pre">ensure_cognitive_measurements_table</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.ensure_cognitive_measurements_table" title="Link to this definition">¶</a></dt>
+<dd><p>Register <code class="docutils literal notranslate"><span class="pre">cognitive_measurements</span></code> with the canonical long-form schema.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.list_pipelines">
+<span class="sig-name descname"><span class="pre">list_pipelines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">modality</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.list_pipelines" title="Link to this definition">¶</a></dt>
+<dd><p>All pipeline entries, or just those matching <em>modality</em> (case-insensitive) if given.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.default_pipeline_id">
+<span class="sig-name descname"><span class="pre">default_pipeline_id</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">modality</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.default_pipeline_id" title="Link to this definition">¶</a></dt>
+<dd><p>The <code class="docutils literal notranslate"><span class="pre">pipeline_id</span></code> flagged <code class="docutils literal notranslate"><span class="pre">is_default</span></code> for <em>modality</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if none is set.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.pipeline_ids_for_role">
+<span class="sig-name descname"><span class="pre">pipeline_ids_for_role</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">role</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.pipeline_ids_for_role" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">pipeline_id</span></code> values for every pipeline entry tagged with <em>role</em>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.all_pipeline_ids">
+<span class="sig-name descname"><span class="pre">all_pipeline_ids</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.all_pipeline_ids" title="Link to this definition">¶</a></dt>
+<dd><p>Set of every registered <code class="docutils literal notranslate"><span class="pre">pipeline_id</span></code> across all modalities.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog._pipeline_entries_for_modality">
+<span class="sig-name descname"><span class="pre">_pipeline_entries_for_modality</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">modality</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog._pipeline_entries_for_modality" title="Link to this definition">¶</a></dt>
+<dd><p>Pipeline entries for <em>modality</em> (case-insensitive), or all entries if <em>modality</em> is unset.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog._normalize_pipeline_tokens">
+<span class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">_normalize_pipeline_tokens</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">selector</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog._normalize_pipeline_tokens" title="Link to this definition">¶</a></dt>
+<dd><p>Coerce a pipeline <em>selector</em> (a single str/int or an iterable of them) into a flat list of
+non-empty stripped string tokens.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.resolve_pipeline_selector">
+<span class="sig-name descname"><span class="pre">resolve_pipeline_selector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">selector</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">modality</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.resolve_pipeline_selector" title="Link to this definition">¶</a></dt>
+<dd><p>Return None to apply catalog defaults per modality in <code class="docutils literal notranslate"><span class="pre">DataRepo.image</span></code>.
+Otherwise return an explicit <code class="docutils literal notranslate"><span class="pre">pipeline_id</span></code> list.</p>
+<p>Aliases from <code class="docutils literal notranslate"><span class="pre">measurement_pipelines.json</span></code> (including integers like <code class="docutils literal notranslate"><span class="pre">1</span></code> / <code class="docutils literal notranslate"><span class="pre">2</span></code>) resolve
+within the pipelines for <code class="docutils literal notranslate"><span class="pre">modality</span></code> when provided; without <code class="docutils literal notranslate"><span class="pre">modality</span></code>, ambiguous aliases
+raise <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.validate_pipelines_manifest">
+<span class="sig-name descname"><span class="pre">validate_pipelines_manifest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.validate_pipelines_manifest" title="Link to this definition">¶</a></dt>
+<dd><p>Validate the pipelines manifest structure and reject duplicate <code class="docutils literal notranslate"><span class="pre">is_default</span></code> pipelines within
+the same modality; raises <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code> on any violation.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.variable_entries">
+<span class="sig-name descname"><span class="pre">variable_entries</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">domain</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">table</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.variable_entries" title="Link to this definition">¶</a></dt>
+<dd><p>Registered variable entries, optionally filtered by <code class="docutils literal notranslate"><span class="pre">domain</span></code> and/or <code class="docutils literal notranslate"><span class="pre">table</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.resolve_variable_ids">
+<span class="sig-name descname"><span class="pre">resolve_variable_ids</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">requested</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">domain</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.resolve_variable_ids" title="Link to this definition">¶</a></dt>
+<dd><p>Resolve <em>requested</em> names/aliases/source-column names/labels to canonical <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>
+values (case- and normalization-insensitive), leaving any unmatched entries unchanged.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.register_variables">
+<span class="sig-name descname"><span class="pre">register_variables</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">entries</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">merge</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.register_variables" title="Link to this definition">¶</a></dt>
+<dd><p>Add or update <em>entries</em> in the variables manifest (merging into existing entries with the same
+<code class="docutils literal notranslate"><span class="pre">variable_id</span></code> when <code class="docutils literal notranslate"><span class="pre">merge</span></code> is True, otherwise overwriting), then persist and reload.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog._merge_variable_entry">
+<span class="sig-name descname"><span class="pre">_merge_variable_entry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">existing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog._merge_variable_entry" title="Link to this definition">¶</a></dt>
+<dd><p>Merge <em>new</em> onto <em>existing</em>: union+de-dupe <code class="docutils literal notranslate"><span class="pre">aliases</span></code>, and for every other key skip empty
+strings/lists/None in <em>new</em> so a partial update never blanks out existing metadata.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.update_table_schema">
+<span class="sig-name descname"><span class="pre">update_table_schema</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">provenance</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.update_table_schema" title="Link to this definition">¶</a></dt>
+<dd><p>Update (or create) <em>name</em>’s entry in the tables manifest from <em>df</em>’s inferred dtypes, row
+count, and optional <em>provenance</em>/<code class="docutils literal notranslate"><span class="pre">path</span></code>, then persist and reload.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.clear_table">
+<span class="sig-name descname"><span class="pre">clear_table</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.clear_table" title="Link to this definition">¶</a></dt>
+<dd><p>Delete the Parquet file for <code class="docutils literal notranslate"><span class="pre">name</span></code> if present and set <code class="docutils literal notranslate"><span class="pre">row_count</span></code> to 0 in the manifest.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.validate_repository_manifest">
+<span class="sig-name descname"><span class="pre">validate_repository_manifest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.validate_repository_manifest" title="Link to this definition">¶</a></dt>
+<dd><p>Raise <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code> if <em>payload</em> is missing any <code class="docutils literal notranslate"><span class="pre">REQUIRED_REPOSITORY_KEYS</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.validate_tables_manifest">
+<span class="sig-name descname"><span class="pre">validate_tables_manifest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.validate_tables_manifest" title="Link to this definition">¶</a></dt>
+<dd><p>Raise <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code> if <em>payload</em>’s <code class="docutils literal notranslate"><span class="pre">tables</span></code> object or any entry is malformed.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog.validate_variables_manifest">
+<span class="sig-name descname"><span class="pre">validate_variables_manifest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog.validate_variables_manifest" title="Link to this definition">¶</a></dt>
+<dd><p>Raise <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code> if <em>payload</em> lacks a <code class="docutils literal notranslate"><span class="pre">variables</span></code> list, or if any entry is invalid.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.db.catalog.DatasetCatalog._validate_variable_entry">
+<span class="sig-name descname"><span class="pre">_validate_variable_entry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">entry</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.db.catalog.DatasetCatalog._validate_variable_entry" title="Link to this definition">¶</a></dt>
+<dd><p>Raise <code class="docutils literal notranslate"><span class="pre">ManifestError</span></code>/<code class="docutils literal notranslate"><span class="pre">ValidationError</span></code> if <em>entry</em> is missing required keys or has a
+blank <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.db</a><ul>
+      <li>Previous: <a href="../asl_atlases/index.html" title="previous chapter">nvitk.db.asl_atlases</a></li>
+      <li>Next: <a href="../derived_measurements/index.html" title="next chapter">nvitk.db.derived_measurements</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/db/catalog/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

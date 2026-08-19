@@ -1,0 +1,130 @@
+nvitk.measure.morpho.export_utils.generate_radius_histograms
+============================================================
+
+.. py:module:: nvitk.measure.morpho.export_utils.generate_radius_histograms
+
+.. autoapi-nested-parse::
+
+   Generate one vessel-radius histogram per centerline sheet in a metrics workbook.
+
+   All sheets are processed together so the x-axis range, bin edges, and y-axis
+   limit are shared — making histograms directly comparable across vessels.
+
+   Edit the CONFIG block below for direct single-case runs; the batch runner
+   patches EXCEL_PATH and OUTPUT_DIR at runtime.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.EXCEL_PATH
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.OUTPUT_DIR
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.RADIUS_COLUMN
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.BIN_METHOD
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.MIN_BINS
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.MAX_BINS
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.FIG_DPI
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.SUMMARY_SHEET_RE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.safe_filename
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.vessel_sheet_sort_key
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.is_candidate_centerline_sheet
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.read_radius_sheets
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.choose_bin_edges
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.histogram_plan
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.plot_histograms
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.run
+   nvitk.measure.morpho.export_utils.generate_radius_histograms.main
+
+
+Module Contents
+---------------
+
+.. py:data:: EXCEL_PATH
+   :value: None
+
+
+.. py:data:: OUTPUT_DIR
+   :value: None
+
+
+.. py:data:: RADIUS_COLUMN
+   :value: 'radius_mm'
+
+
+.. py:data:: BIN_METHOD
+   :value: 'fd'
+
+
+.. py:data:: MIN_BINS
+   :value: 12
+
+
+.. py:data:: MAX_BINS
+   :value: 80
+
+
+.. py:data:: FIG_DPI
+   :value: 180
+
+
+.. py:data:: SUMMARY_SHEET_RE
+
+.. py:function:: safe_filename(name: str) -> str
+
+   Sanitize *name* into a filesystem-safe filename fragment (falls back to ``"centerline"``).
+
+
+.. py:function:: vessel_sheet_sort_key(sheet_name: str) -> Tuple[int, str]
+
+   Sort key ordering workbook sheets by their leading label id, then name.
+
+
+.. py:function:: is_candidate_centerline_sheet(sheet_name: str, columns: List[str], radius_column: str) -> bool
+
+   True for a per-centerline data sheet (not a numbered summary sheet) that has the radius column.
+
+
+.. py:function:: read_radius_sheets(excel_path: str, radius_column: str) -> Dict[str, numpy.ndarray]
+
+   Read the positive, finite radius values from every per-centerline sheet of the morphometrics workbook.
+
+
+.. py:function:: choose_bin_edges(all_radii: numpy.ndarray, bin_method: str, min_bins: int, max_bins: int) -> numpy.ndarray
+
+   Pick shared histogram bin edges across all vessels, so every sheet's plot uses the same x-axis.
+
+   *bin_method* is either an explicit bin count or a NumPy binning strategy
+   name (e.g. ``"auto"``); the resulting bin count is clamped to
+   ``[min_bins, max_bins]``. A small padding is added around the data range.
+
+
+.. py:function:: histogram_plan(radii_by_sheet: Dict[str, numpy.ndarray], bin_edges: numpy.ndarray) -> Tuple[int, pandas.DataFrame]
+
+   Compute each sheet's histogram counts/summary stats and the shared peak count (for a common y-axis).
+
+
+.. py:function:: plot_histograms(radii_by_sheet: Dict[str, numpy.ndarray], bin_edges: numpy.ndarray, y_max: int, output_dir: str) -> None
+
+   Render and save one radius-histogram PNG per sheet, using shared x/y limits across all plots.
+
+
+.. py:function:: run(excel_path: str, output_dir: str) -> None
+
+   Full pipeline: read radii from the morphometrics workbook, plot per-vessel histograms, and write a CSV summary.
+
+
+.. py:function:: main() -> None
+
+   Direct-run entry point: run the histogram pipeline per the module-level ``EXCEL_PATH``/``OUTPUT_DIR`` config.
+
+

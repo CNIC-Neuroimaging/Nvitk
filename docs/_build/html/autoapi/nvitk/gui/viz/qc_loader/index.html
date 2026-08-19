@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.viz.qc_loader &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.viz.qc_review_panel" href="../qc_review_panel/index.html" />
+    <link rel="prev" title="nvitk.gui.viz.morpho_viz" href="../morpho_viz/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.viz.qc_loader">
+<span id="nvitk-gui-viz-qc-loader"></span><h1>nvitk.gui.viz.qc_loader<a class="headerlink" href="#module-nvitk.gui.viz.qc_loader" title="Link to this heading">¶</a></h1>
+<p>Locate and load QC assets for qvtpy / eicab pipelines into Napari.</p>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.resolve_qvtpy_tree" title="nvitk.gui.viz.qc_loader.resolve_qvtpy_tree"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_qvtpy_tree</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Return the directory that contains <code class="docutils literal notranslate"><span class="pre">qvtpy/</span></code> stage folders.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.resolve_stage6_dir" title="nvitk.gui.viz.qc_loader.resolve_stage6_dir"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_stage6_dir</span></code></a>(→ pathlib.Path | None)</p></td>
+<td><p>Locate <code class="docutils literal notranslate"><span class="pre">stage6_measure</span></code> under a subject / qvtpy / XNAT download tree.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.resolve_eicab_tree" title="nvitk.gui.viz.qc_loader.resolve_eicab_tree"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_eicab_tree</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Locate the <code class="docutils literal notranslate"><span class="pre">eicab</span></code> output directory under <em>resource_root</em> (direct child, the root itself, or</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.find_phase_paths" title="nvitk.gui.viz.qc_loader.find_phase_paths"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_phase_paths</span></code></a>(→ dict[str, pathlib.Path])</p></td>
+<td><p>Discover AP/RL/FH phase NIfTIs under download trees.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.find_cd_path" title="nvitk.gui.viz.qc_loader.find_cd_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">find_cd_path</span></code></a>(→ pathlib.Path | None)</p></td>
+<td><p>Find a 3D complex-difference NIfTI under any of <em>search_roots</em>; <code class="docutils literal notranslate"><span class="pre">None</span></code> if none is found.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.load_eicab_qc_layers" title="nvitk.gui.viz.qc_loader.load_eicab_qc_layers"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_eicab_qc_layers</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Load TOF + eICAB resampled / CW / WB outputs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.load_qvtpy_qc_layers" title="nvitk.gui.viz.qc_loader.load_qvtpy_qc_layers"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_qvtpy_qc_layers</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Load qvtpy QC layers and auxiliary docks for one subject.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.download_pipeline_resource_for_qc" title="nvitk.gui.viz.qc_loader.download_pipeline_resource_for_qc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">download_pipeline_resource_for_qc</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Download an XNAT experiment resource into a cache directory.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.qc_loader.download_phase_niftis_for_qc" title="nvitk.gui.viz.qc_loader.download_phase_niftis_for_qc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">download_phase_niftis_for_qc</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Download 4DFLOW AP/RL/FH scan NIfTIs into <code class="docutils literal notranslate"><span class="pre">{root}/{subject}/4DFlow/{AP,RL,FH}</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.resolve_qvtpy_tree">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">resolve_qvtpy_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.resolve_qvtpy_tree" title="Link to this definition">¶</a></dt>
+<dd><p>Return the directory that contains <code class="docutils literal notranslate"><span class="pre">qvtpy/</span></code> stage folders.</p>
+<p>Accepts a subject root, a <code class="docutils literal notranslate"><span class="pre">qvtpy/</span></code> folder, or an XNAT unpack that still has
+<code class="docutils literal notranslate"><span class="pre">…/resources/qvtpy/files/stage*</span></code> nesting.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.resolve_stage6_dir">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">resolve_stage6_dir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.resolve_stage6_dir" title="Link to this definition">¶</a></dt>
+<dd><p>Locate <code class="docutils literal notranslate"><span class="pre">stage6_measure</span></code> under a subject / qvtpy / XNAT download tree.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.resolve_eicab_tree">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">resolve_eicab_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.resolve_eicab_tree" title="Link to this definition">¶</a></dt>
+<dd><p>Locate the <code class="docutils literal notranslate"><span class="pre">eicab</span></code> output directory under <em>resource_root</em> (direct child, the root itself, or
+found by recursive search); falls back to <em>resource_root</em> if nothing matches.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.find_phase_paths">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">find_phase_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">search_roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.find_phase_paths" title="Link to this definition">¶</a></dt>
+<dd><p>Discover AP/RL/FH phase NIfTIs under download trees.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.find_cd_path">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">find_cd_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">search_roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.find_cd_path" title="Link to this definition">¶</a></dt>
+<dd><p>Find a 3D complex-difference NIfTI under any of <em>search_roots</em>; <code class="docutils literal notranslate"><span class="pre">None</span></code> if none is found.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.load_eicab_qc_layers">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">load_eicab_qc_layers</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resource_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">tof_search_roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.load_eicab_qc_layers" title="Link to this definition">¶</a></dt>
+<dd><p>Load TOF + eICAB resampled / CW / WB outputs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.load_qvtpy_qc_layers">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">load_qvtpy_qc_layers</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">app_state</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resource_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">extra_search_roots</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.load_qvtpy_qc_layers" title="Link to this definition">¶</a></dt>
+<dd><p>Load qvtpy QC layers and auxiliary docks for one subject.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.download_pipeline_resource_for_qc">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">download_pipeline_resource_for_qc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">config_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">project_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_uid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resource_label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">password</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">download_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">app_state</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.download_pipeline_resource_for_qc" title="Link to this definition">¶</a></dt>
+<dd><p>Download an XNAT experiment resource into a cache directory.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.qc_loader.download_phase_niftis_for_qc">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.qc_loader.</span></span><span class="sig-name descname"><span class="pre">download_phase_niftis_for_qc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">config_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">project_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_uid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">password</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">download_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">app_state</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.viz.qc_loader.download_phase_niftis_for_qc" title="Link to this definition">¶</a></dt>
+<dd><p>Download 4DFLOW AP/RL/FH scan NIfTIs into <code class="docutils literal notranslate"><span class="pre">{root}/{subject}/4DFlow/{AP,RL,FH}</span></code>.</p>
+<p>Layout matches <a class="reference internal" href="#nvitk.gui.viz.qc_loader.find_phase_paths" title="nvitk.gui.viz.qc_loader.find_phase_paths"><code class="xref py py-func docutils literal notranslate"><span class="pre">find_phase_paths()</span></code></a> so QC loading discovers phases the same
+way as the local NIfTI tree.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.gui</a><ul>
+  <li><a href="../index.html">nvitk.gui.viz</a><ul>
+      <li>Previous: <a href="../morpho_viz/index.html" title="previous chapter">nvitk.gui.viz.morpho_viz</a></li>
+      <li>Next: <a href="../qc_review_panel/index.html" title="next chapter">nvitk.gui.viz.qc_review_panel</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/gui/viz/qc_loader/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

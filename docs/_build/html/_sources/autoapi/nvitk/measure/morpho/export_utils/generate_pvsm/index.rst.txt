@@ -1,0 +1,104 @@
+nvitk.measure.morpho.export_utils.generate_pvsm
+===============================================
+
+.. py:module:: nvitk.measure.morpho.export_utils.generate_pvsm
+
+.. autoapi-nested-parse::
+
+   Generate a ParaView state (.pvsm) for a case folder.
+
+   Creates two side-by-side render views:
+     - View 1: surfaces (opacity 0.3) + centerlines coloured by StenosisBinary
+     - View 2: surfaces (opacity 0.3) + centerlines coloured by EnlargementBinary
+
+   Edit the CONFIG block below for direct single-case runs.
+   The batch runner sets CASE_DIR / OUTPUT_PVSM via environment variables or
+   calls main() after patching the module-level variables directly.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.generate_pvsm.CASE_DIR
+   nvitk.measure.morpho.export_utils.generate_pvsm.OUTPUT_PVSM
+   nvitk.measure.morpho.export_utils.generate_pvsm.QUIET
+   nvitk.measure.morpho.export_utils.generate_pvsm.PRINT_FINAL_STATUS
+   nvitk.measure.morpho.export_utils.generate_pvsm.CASE_DIR
+   nvitk.measure.morpho.export_utils.generate_pvsm.OUTPUT_PVSM
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.generate_pvsm.suppress_console_output
+   nvitk.measure.morpho.export_utils.generate_pvsm.log
+   nvitk.measure.morpho.export_utils.generate_pvsm.find_vtps
+   nvitk.measure.morpho.export_utils.generate_pvsm.extract_vessel_name
+   nvitk.measure.morpho.export_utils.generate_pvsm._show_surface
+   nvitk.measure.morpho.export_utils.generate_pvsm._show_centerline
+   nvitk.measure.morpho.export_utils.generate_pvsm.main
+
+
+Module Contents
+---------------
+
+.. py:data:: CASE_DIR
+   :value: None
+
+
+.. py:data:: OUTPUT_PVSM
+   :value: None
+
+
+.. py:data:: QUIET
+   :value: True
+
+
+.. py:data:: PRINT_FINAL_STATUS
+   :value: True
+
+
+.. py:data:: CASE_DIR
+
+.. py:data:: OUTPUT_PVSM
+
+.. py:function:: suppress_console_output(enabled=True)
+
+   Context manager: redirect stdout/stderr to ``/dev/null`` while active (silences noisy ParaView calls).
+
+
+.. py:function:: log(message)
+
+   Print *message* unless the module-level ``QUIET`` flag is set.
+
+
+.. py:function:: find_vtps(folder)
+
+   Sorted list of ``.vtp`` file paths directly under *folder* (empty if it doesn't exist).
+
+
+.. py:function:: extract_vessel_name(filename)
+
+   Derive a vessel display name from a centerline VTP filename (strips ``_radius`` and old numeric prefixes).
+
+
+.. py:function:: _show_surface(pv, src, view)
+
+   Display a surface source in a ParaView view as a translucent shaded surface.
+
+
+.. py:function:: _show_centerline(pv, src, view, color_array)
+
+   Display a centerline source in a ParaView view, colored by *color_array* with a visible scalar bar.
+
+
+.. py:function:: main()
+
+   Direct-run entry point: build and save a ParaView ``.pvsm`` scene for a stage7 case folder.
+
+

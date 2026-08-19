@@ -1,0 +1,71 @@
+nvitk.registration.fsl
+======================
+
+.. py:module:: nvitk.registration.fsl
+
+.. autoapi-nested-parse::
+
+   FSL-backed registration (NiPype interfaces).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/registration/fsl/flirt/index
+   /autoapi/nvitk/registration/fsl/points/index
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.registration.fsl.FlirtRigidResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.registration.fsl.flirt_apply_rigid
+   nvitk.registration.fsl.flirt_register_rigid
+
+
+Package Contents
+----------------
+
+.. py:function:: flirt_apply_rigid(in_file: str | pathlib.Path, reference: str | pathlib.Path, mat_file: str | pathlib.Path, out_file: str | pathlib.Path, *, interp: str = 'trilinear') -> pathlib.Path
+
+   Apply an existing FLIRT ``*.mat`` transform (``-applyxfm``).
+
+
+.. py:function:: flirt_register_rigid(moving: str | pathlib.Path, fixed: str | pathlib.Path, out_dir: str | pathlib.Path, *, dof: int = 6, cost: str = 'corratio', warped_name: str = 'moving_warped.nii.gz', matrix_name: str = 'affine.mat', searchr_x: float | None = None) -> FlirtRigidResult
+
+   Run FLIRT rigid alignment of *moving* towards *fixed* reference image.
+
+   Writes ``matrix_name`` under *out_dir* and optionally a warped moving image.
+   Requires FSL on ``PATH`` and ``FSLDIR`` set (NiPype delegates to ``flirt``).
+
+
+.. py:class:: FlirtRigidResult
+
+   Paths and NiPype runtime from a FLIRT rigid run.
+
+
+   .. py:attribute:: matrix_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: warped_path
+      :type:  pathlib.Path | None
+
+
+   .. py:attribute:: runtime
+      :type:  Any
+
+

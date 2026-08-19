@@ -1,0 +1,141 @@
+nvitk.measure.morpho.geometry
+=============================
+
+.. py:module:: nvitk.measure.morpho.geometry
+
+.. autoapi-nested-parse::
+
+   Generic geometry, arc-length, tangent, resampling, and polyline helpers.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.geometry.unit_vector
+   nvitk.measure.morpho.geometry.point_inside_mask_mm
+   nvitk.measure.morpho.geometry.sample_edt_mm
+   nvitk.measure.morpho.geometry.estimate_path_endpoint_tangent
+   nvitk.measure.morpho.geometry.march_endpoint_to_wall
+   nvitk.measure.morpho.geometry.extend_path_to_walls
+   nvitk.measure.morpho.geometry.arc_length
+   nvitk.measure.morpho.geometry.resample_polyline_by_arclength
+   nvitk.measure.morpho.geometry.resample_generated_centerline_points
+   nvitk.measure.morpho.geometry.chord_length
+   nvitk.measure.morpho.geometry.cumulative_s
+   nvitk.measure.morpho.geometry.point_at_arc_length
+   nvitk.measure.morpho.geometry.trimmed_seed_pair_from_path
+   nvitk.measure.morpho.geometry.mean_distance_to_polyline_points
+   nvitk.measure.morpho.geometry.trim_polyline_overlap_with_reference_ends
+   nvitk.measure.morpho.geometry.splice_skeleton_end_connectors
+   nvitk.measure.morpho.geometry.trim_polyline_ends_by_length
+   nvitk.measure.morpho.geometry.contiguous_true_runs
+
+
+Module Contents
+---------------
+
+.. py:function:: unit_vector(v: numpy.ndarray) -> Optional[numpy.ndarray]
+
+   Normalize *v* to unit length; ``None`` if it is (near) zero.
+
+
+.. py:function:: point_inside_mask_mm(pt_mm: numpy.ndarray, mask_bool: numpy.ndarray, spacing) -> bool
+
+   True when world point *pt_mm* falls on a foreground voxel of *mask_bool*.
+
+
+.. py:function:: sample_edt_mm(dist_mm: numpy.ndarray, pt_mm: numpy.ndarray, spacing) -> float
+
+   Nearest-voxel lookup of a precomputed distance-transform volume at world point *pt_mm*.
+
+
+.. py:function:: estimate_path_endpoint_tangent(path_mm: numpy.ndarray, at_start: bool = True, n_pts: int = 5)
+
+   Outward-pointing unit tangent at a path endpoint, averaged over its first/last *n_pts* points.
+
+
+.. py:function:: march_endpoint_to_wall(start_pt_mm, tangent_out, mask_bool, spacing, step_mm=None, wall_tol_mm=0.35, max_steps=200)
+
+   Step outward from *start_pt_mm* along *tangent_out* until near the mask wall or leaving the mask.
+
+   Returns the marched-through points (extending the centerline endpoint to the vessel wall).
+
+
+.. py:function:: extend_path_to_walls(path_mm, mask_bool, spacing, tangent_pts=5, step_mm=None, wall_tol_mm=0.35, max_steps=200)
+
+   Extend both ends of a centerline path outward to the mask wall (:func:`march_endpoint_to_wall`).
+
+
+.. py:function:: arc_length(pts: numpy.ndarray) -> float
+
+   Total polyline length (sum of consecutive-point distances); NaN for <2 points.
+
+
+.. py:function:: resample_polyline_by_arclength(pts_mm: numpy.ndarray, step_mm: Optional[float]) -> numpy.ndarray
+
+   Resample a polyline to near-equal arc-length steps of *step_mm* via binary-search chord fitting.
+
+   Drops NaN/duplicate-adjacent points first, then walks the path picking points
+   at (approximately) constant chord length, adjusting the chord by bisection so
+   the last segment isn't badly under/oversized.
+
+
+.. py:function:: resample_generated_centerline_points(pts_mm: numpy.ndarray) -> numpy.ndarray
+
+   Apply the configured arc-length resampling (:func:`resample_polyline_by_arclength`) if enabled.
+
+
+.. py:function:: chord_length(pts: numpy.ndarray) -> float
+
+   Straight-line distance from the first to the last point; NaN for <2 points.
+
+
+.. py:function:: cumulative_s(pts: numpy.ndarray) -> numpy.ndarray
+
+   Cumulative arc length at each point along the polyline, starting at 0.
+
+
+.. py:function:: point_at_arc_length(pts: numpy.ndarray, target_s: float) -> numpy.ndarray
+
+   Linearly interpolate the polyline point at arc-length *target_s* (clamped to the path extent).
+
+
+.. py:function:: trimmed_seed_pair_from_path(path_mm: numpy.ndarray, trim_start_mm: float, trim_end_mm: Optional[float] = None) -> Optional[Tuple[numpy.ndarray, numpy.ndarray]]
+
+   New (start, end) seed points trimmed inward from the path ends by the given mm amounts.
+
+   ``None`` if the remaining span would be shorter than the minimum retry separation.
+
+
+.. py:function:: mean_distance_to_polyline_points(query_pts: numpy.ndarray, ref_pts: numpy.ndarray) -> float
+
+   Mean nearest-neighbor distance from each of *query_pts* to the point set *ref_pts* (KD-tree).
+
+
+.. py:function:: trim_polyline_overlap_with_reference_ends(pts: numpy.ndarray, reference_centerline_points: Optional[List[numpy.ndarray]], spacing, min_points_after_trim: Optional[int] = None, keep_original_if_too_short: bool = True) -> Tuple[numpy.ndarray, int, int, int, float]
+
+   Trim leading/trailing points of a donut-loop arm that overlap the main reference centerline(s).
+
+   Returns ``(trimmed_points, n_trimmed_start, n_trimmed_end, n_kept, overlap_tol_mm)``.
+   If the trim would leave fewer than *min_points_after_trim* points, keeps the
+   original path (or empties it) per *keep_original_if_too_short*.
+
+
+.. py:function:: splice_skeleton_end_connectors(pts: numpy.ndarray, arm_pts_mm: numpy.ndarray, blend_mm: float) -> numpy.ndarray
+
+   Reconnect a trimmed path's ends to the nearest points on the raw skeleton arm when the gap exceeds *blend_mm*.
+
+
+.. py:function:: trim_polyline_ends_by_length(pts: numpy.ndarray, trim_start_mm: float, trim_end_mm: Optional[float] = None) -> numpy.ndarray
+
+   Trim a fixed arc-length amount off each end of a polyline (no-op if that would remove ≥80% of it).
+
+
+.. py:function:: contiguous_true_runs(mask: numpy.ndarray) -> List[Tuple[int, int]]
+
+   List of ``[start, stop)`` index ranges covering each contiguous run of ``True`` in *mask*.
+
+

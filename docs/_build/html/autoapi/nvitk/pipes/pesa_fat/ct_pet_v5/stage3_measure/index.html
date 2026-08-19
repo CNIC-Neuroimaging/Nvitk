@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.pesa_fat.dixon_v5" href="../../dixon_v5/index.html" />
+    <link rel="prev" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess" href="../stage2_postprocess/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure">
+<span id="nvitk-pipes-pesa-fat-ct-pet-v5-stage3-measure"></span><h1>nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure<a class="headerlink" href="#module-nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure" title="Link to this heading">¶</a></h1>
+<p>CT-PET v5 stage 3 (per-subject): SUV and volume measurements.</p>
+<p>Port of <code class="code docutils literal notranslate"><span class="pre">BioImaging/src/pesa_fat/ct_pet/3_measure_SUV.py</span></code>.</p>
+<p>For a PESA* subject with stage-2 outputs (<code class="docutils literal notranslate"><span class="pre">MO</span></code>, <code class="docutils literal notranslate"><span class="pre">FAT</span></code>, <code class="docutils literal notranslate"><span class="pre">BODY</span></code>,
+<code class="docutils literal notranslate"><span class="pre">ORGANS</span></code>, <code class="docutils literal notranslate"><span class="pre">MUSCLES</span></code>) the stage resamples the PET volume onto each mask
+grid (via <a class="reference internal" href="../../../../measure/index.html#nvitk.measure.Measurer" title="nvitk.measure.Measurer"><code class="xref py py-class docutils literal notranslate"><span class="pre">nvitk.measure.Measurer</span></code></a> alignment) and records:</p>
+<ul class="simple">
+<li><p>SUV stats (bw, max/mean/p95) for L3, L4, L3+L4 (MO), fat depots, organs
+and hemisphere-split muscles.</p></li>
+<li><p>Volumes (cc) for fat, body, and per-hemisphere muscles.</p></li>
+</ul>
+<p>The CLI writes a per-subject Excel row as a single-row file; the batch
+master (<code class="docutils literal notranslate"><span class="pre">run_batch.py</span></code>) concatenates all subjects’ rows into
+<code class="docutils literal notranslate"><span class="pre">&lt;batch&gt;_SummaryCodebook.xlsx</span></code>.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.log" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.log"><code class="xref py py-obj docutils literal notranslate"><span class="pre">log</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.SUV_SPECS" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.SUV_SPECS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SUV_SPECS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.VOL_SPECS" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.VOL_SPECS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VOL_SPECS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._SUV_STATS" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._SUV_STATS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_SUV_STATS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.column_order" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.column_order"><code class="xref py py-obj docutils literal notranslate"><span class="pre">column_order</span></code></a>(→ list[str])</p></td>
+<td><p>Full stage-3 output column order: <code class="docutils literal notranslate"><span class="pre">pesa_id</span></code>, SUV stat columns per ROI, then volume/slice-</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._nslices_axial_xyz" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._nslices_axial_xyz"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_nslices_axial_xyz</span></code></a>(→ int)</p></td>
+<td><p>Number of axial (Z) slices in <em>mask</em> containing at least one foreground voxel.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._build_binary_mask" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._build_binary_mask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_build_binary_mask</span></code></a>(→ nvitk.types.Image)</p></td>
+<td><p>Union of <em>label_ids</em> in <em>label_img</em> as a binary mask image.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_mask" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_mask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_load_mask</span></code></a>(→ nvitk.types.Image)</p></td>
+<td><p>Read a stage-2 mask NIfTI named <em>filename</em> (extension optional) from <em>subject_stage2_dir</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_pet" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_pet"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_load_pet</span></code></a>(→ nvitk.types.Image)</p></td>
+<td><p>Read the subject's PET NIfTI from <em>subject_nifti_dir</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.process_subject" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.process_subject"><code class="xref py py-obj docutils literal notranslate"><span class="pre">process_subject</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Return <code class="docutils literal notranslate"><span class="pre">{column:</span> <span class="pre">value,</span> <span class="pre">...}</span></code> for one subject.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.run_subject" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.run_subject"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run_subject</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Run stage 3 for a single subject and write a one-row Excel file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.main" title="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>(→ None)</p></td>
+<td><p>CT-PET v5 stage 3 worker (single subject).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.log">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">log</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.log" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.SUV_SPECS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">SUV_SPECS</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.SUV_SPECS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.VOL_SPECS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">VOL_SPECS</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.VOL_SPECS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._SUV_STATS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">_SUV_STATS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(('SUVMAX',</span> <span class="pre">'max'),</span> <span class="pre">('SUVmean',</span> <span class="pre">'mean'),</span> <span class="pre">('SUV95p',</span> <span class="pre">'p95'),</span> <span class="pre">('SUV99p',</span> <span class="pre">'p99'))</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._SUV_STATS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.column_order">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">column_order</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.column_order" title="Link to this definition">¶</a></dt>
+<dd><p>Full stage-3 output column order: <code class="docutils literal notranslate"><span class="pre">pesa_id</span></code>, SUV stat columns per ROI, then volume/slice-
+count columns per ROI.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._nslices_axial_xyz">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">_nslices_axial_xyz</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._nslices_axial_xyz" title="Link to this definition">¶</a></dt>
+<dd><p>Number of axial (Z) slices in <em>mask</em> containing at least one foreground voxel.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._build_binary_mask">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">_build_binary_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">label_img</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">label_ids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._build_binary_mask" title="Link to this definition">¶</a></dt>
+<dd><p>Union of <em>label_ids</em> in <em>label_img</em> as a binary mask image.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_mask">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">_load_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject_stage2_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_mask" title="Link to this definition">¶</a></dt>
+<dd><p>Read a stage-2 mask NIfTI named <em>filename</em> (extension optional) from <em>subject_stage2_dir</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_pet">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">_load_pet</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject_nifti_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure._load_pet" title="Link to this definition">¶</a></dt>
+<dd><p>Read the subject’s PET NIfTI from <em>subject_nifti_dir</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.process_subject">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">process_subject</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">stage2_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_kind</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'bw'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">philips</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.process_subject" title="Link to this definition">¶</a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">{column:</span> <span class="pre">value,</span> <span class="pre">...}</span></code> for one subject.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.run_subject">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">run_subject</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cupy'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_kind</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'bw'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">philips</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.run_subject" title="Link to this definition">¶</a></dt>
+<dd><p>Run stage 3 for a single subject and write a one-row Excel file.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.main">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_kind</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_philips</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.ct_pet_v5.stage3_measure.main" title="Link to this definition">¶</a></dt>
+<dd><p>CT-PET v5 stage 3 worker (single subject).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../../index.html">nvitk.pipes.pesa_fat</a><ul>
+  <li><a href="../index.html">nvitk.pipes.pesa_fat.ct_pet_v5</a><ul>
+      <li>Previous: <a href="../stage2_postprocess/index.html" title="previous chapter">nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess</a></li>
+      <li>Next: <a href="../../dixon_v5/index.html" title="next chapter">nvitk.pipes.pesa_fat.dixon_v5</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/pipes/pesa_fat/ct_pet_v5/stage3_measure/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

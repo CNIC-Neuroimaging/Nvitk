@@ -1,0 +1,61 @@
+nvitk.io.writers
+================
+
+.. py:module:: nvitk.io.writers
+
+.. autoapi-nested-parse::
+
+   Writers for NIfTI, TIFF, MetaImage, and PIL-supported formats (used by :func:`nvitk.io.imsave`).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/io/writers/mha/index
+   /autoapi/nvitk/io/writers/nifti/index
+   /autoapi/nvitk/io/writers/pil/index
+   /autoapi/nvitk/io/writers/tiff/index
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.writers.write_mha
+   nvitk.io.writers.write_nifti
+   nvitk.io.writers.write_pil
+   nvitk.io.writers.write_tiff
+
+
+Package Contents
+----------------
+
+.. py:function:: write_mha(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Save *data* as ``.mha`` / ``.mhd``; expects ``ZYX`` (or reordered) for 3D volumes.
+
+
+.. py:function:: write_nifti(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, save_metadata_extension: bool = True, **_: Any) -> None
+
+   Save *data* to *path* as NIfTI; writes a sibling ``.json`` when extra metadata is JSON-safe.
+
+   Reorders from ``metadata['axes']`` to *axes* when both differ. Zooms come from ``x_res`` /
+   ``y_res`` / ``z_res`` / ``t_res`` (or aliases). With ``save_metadata_extension=True``, a
+   nibabel header extension may embed additional JSON metadata.
+
+
+.. py:function:: write_pil(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Write raster image; floats are scaled to uint8 when needed.
+
+
+.. py:function:: write_tiff(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Save *data* to *path* as TIFF; reorders axes when *metadata* contains ``axes`` and *axes* differs.
+
+

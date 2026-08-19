@@ -1,0 +1,110 @@
+nvitk.morphology.centerline
+===========================
+
+.. py:module:: nvitk.morphology.centerline
+
+.. autoapi-nested-parse::
+
+   Centerline utilities (skeletonize + polyline ordering).
+
+   These helpers are **not** GPU-native: scikit-image's 3D skeletonization is CPU
+   only. We accept CuPy arrays by converting to NumPy via :func:`nvitk.core.array.to_numpy`.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.centerline.skeletonize_binary
+   nvitk.morphology.centerline.skeletonize_labeled
+   nvitk.morphology.centerline.unique_skeleton_edge_polylines
+   nvitk.morphology.centerline.compute_connected_centerline_tree
+   nvitk.morphology.centerline.compute_centerline_branches
+   nvitk.morphology.centerline.compute_centerlines
+   nvitk.morphology.centerline.centerline_tangents
+
+
+Module Contents
+---------------
+
+.. py:function:: skeletonize_binary(mask) -> Any
+
+   3D/2D skeletonization (CPU skimage; returns backend array of bool).
+
+
+.. py:function:: skeletonize_labeled(mask, *, labels: Sequence[int] | None = None, min_points: int = 1) -> Any
+
+   Skeletonize each label region independently; output keeps original label ids.
+
+   For a binary mask (labels ``[1]``), skeleton voxels are written as ``1``.
+   For multilabel masks, each label's skeleton voxels carry that label's id.
+
+
+.. py:function:: unique_skeleton_edge_polylines(coords_xyz: np.ndarray, *, min_points: int = 2, prune_short_spurs: bool = False, prune_spur_points: int = 3) -> list[np.ndarray]
+
+   Unique centerline edges between endpoints and junctions (no interior overlap).
+
+   Each returned polyline is a chain between skeleton specials (deg≤1 endpoints
+   and deg≥3 junction clusters). Chains share only their junction endpoints so
+   the union is a connected tree/graph without duplicated trunks.
+
+
+.. py:function:: compute_connected_centerline_tree(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 2, min_edge_points: int = 2, keep_all_components: bool = True, bridge_max_gap: int = 0, bridge_tube_radius: int = 1, prune_short_spurs: bool = True, prune_spur_points: int = 3) -> dict[int, list[np.ndarray]]
+
+   Per-label connected centerline tree as unique skeleton-edge polylines.
+
+   This is the **default branched centerline representation** for nvitk:
+   skeletonize each label, optionally MST-bridge nearby mask CCs, then extract
+   every unique junction↔endpoint / junction↔junction chain. Edges share only
+   junction voxels (no overlapping trunks). All meaningful skeleton CCs are
+   kept by default so proximal roots are not dropped.
+
+   :returns: Label → list of ordered ``(N, 3)`` polylines in voxel coordinates.
+   :rtype: dict[int, list[np.ndarray]]
+
+
+.. py:function:: compute_centerline_branches(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 20, min_branch_points: int = 3, prefer_points_by_label: dict[int, np.ndarray] | None = None, keep_all_components: bool = True, bridge_max_gap: int = 0, bridge_tube_radius: int = 1, connected_edges: bool = False) -> dict[int, list[np.ndarray]]
+
+   Per-label list of branch polylines.
+
+   Default (*connected_edges=False*): trunk + bifurcation side branches per
+   skeleton CC (legacy qvtpy / vertebral-split semantics).
+
+   With *connected_edges=True*: unique junction-split edges from
+   :func:`compute_connected_centerline_tree` (preferred for morphometrics and
+   any export that must stay connected at bifurcations without overlapping
+   trunks).
+
+   All skeleton CCs are kept by default (*keep_all_components*).
+
+
+.. py:function:: compute_centerlines(vessel_mask: np.ndarray, *, centerline_mask: np.ndarray | None = None, labels: Sequence[int] | None = None, min_points: int = 20, prefer_points_by_label: dict[int, np.ndarray] | None = None, keep_all_components: bool = False, bridge_max_gap: int = 0, bridge_tube_radius: int = 1) -> dict[int, np.ndarray]
+
+   Return per-label ordered centerline points in voxel coordinates.
+
+   For a single main path per label (graph diameter on the largest skeleton CC
+   by default). For branched vessels that must stay connected at bifurcations
+   without overlapping trunks, use :func:`compute_connected_centerline_tree`.
+
+   :param vessel_mask: 3D integer label mask (NumPy or CuPy).
+   :param centerline_mask: Optional 3D mask where centerline voxels are >0. If provided, this mask is
+                           intersected with each `vessel_mask == label` region and ordered.
+   :param labels: Optional explicit label list. Default: all non-zero labels in `vessel_mask`.
+   :param min_points: Skip labels whose centerline has fewer than this many voxels.
+   :param prefer_points_by_label: Optional prior polylines (e.g. stage-3) used to keep proximal trunks on
+                                  branched skeletons instead of a distal-only graph diameter.
+   :param keep_all_components: If True, concatenate diameter paths from every skeleton CC (first = largest).
+                               Default False preserves historical single-path behaviour.
+   :param bridge_max_gap: If >0, MST-bridge nearby mask CCs of each label before skeletonize.
+
+
+.. py:function:: centerline_tangents(points_xyz: Any, *, k_half: int = 2) -> Any
+
+   Unit tangent vectors along an ordered polyline (voxel coordinates).
+
+   Uses central differences with ``k_half`` samples on each side; endpoints
+   use one-sided differences. ``points_xyz`` shape ``(N, 3)``.
+
+

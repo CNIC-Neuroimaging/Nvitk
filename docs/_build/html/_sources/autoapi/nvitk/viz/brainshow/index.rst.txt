@@ -1,0 +1,307 @@
+nvitk.viz.brainshow
+===================
+
+.. py:module:: nvitk.viz.brainshow
+
+.. autoapi-nested-parse::
+
+   Atlas-based brain visualization via Nilearn (:func:`brainshow`).
+
+   Supports volumetric atlases (custom NIfTI or Nilearn presets such as Destrieux 2009)
+   and Destrieux fsaverage5 surface atlases. Values are mapped to atlas regions using an
+   explicit ``region_order`` (sequence alignment) or a mapping keyed by region label /
+   atlas index.
+
+   Desikan and vascular presets
+   ----------------------------
+   Nilearn ships no Desikan–Killiany atlas, and the arterial-territory atlas the ASL pipeline uses is
+   lab-specific, so both are *located* rather than fetched — see :mod:`nvitk.viz.atlas_sources` for the
+   search order. Both are registered here as ordinary presets, so a caller says ``atlas="desikan"``
+   and never learns where the file came from.
+
+   Region naming
+   -------------
+   The same parcel is spelled several ways across this project — ``ctx-lh-precuneus`` in a published
+   table, ``ctx_lh_precuneus`` once normalized into the database, ``left_precuneus`` by the T1
+   pipeline, and just ``precuneus`` inside a FreeSurfer ``.annot``. :func:`normalize_region_key` reduces
+   all of them to ``(side, stem)``, and :func:`atlas_indices_for_region` resolves that onto atlas
+   indices — returning a **list**, because an aggregate level such as ``ctx-Left-Frontal-Lobe``,
+   ``ctx-left-hemisphere`` or a hemisphere-melted parcel belongs on several parcels at once.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.viz.brainshow.RIGHT_HEMI_INDEX_OFFSET
+   nvitk.viz.brainshow.VASCULAR_ATLAS_LABELS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.viz.brainshow.ResolvedAtlas
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.viz.brainshow.build_index_to_value
+   nvitk.viz.brainshow.resolve_atlas_desikan_annot
+   nvitk.viz.brainshow.resolve_atlas_preset_desikan
+   nvitk.viz.brainshow.merge_atlas_regions
+   nvitk.viz.brainshow.resolve_atlas_preset_desikan_lobes
+   nvitk.viz.brainshow.resolve_atlas_preset_vascular
+   nvitk.viz.brainshow.resolve_atlas
+   nvitk.viz.brainshow.normalize_region_key
+   nvitk.viz.brainshow.region_index_resolver
+   nvitk.viz.brainshow.atlas_indices_for_region
+   nvitk.viz.brainshow.build_volume_stat_image
+   nvitk.viz.brainshow.brainshow
+
+
+Module Contents
+---------------
+
+.. py:class:: ResolvedAtlas
+
+   Unified atlas representation after resolving presets or user specs.
+
+
+   .. py:attribute:: flavor
+      :type:  Flavor
+
+
+   .. py:attribute:: index_to_label
+      :type:  dict[int, str]
+
+
+   .. py:attribute:: atlas_img
+      :type:  nibabel.nifti1.Nifti1Image | None
+      :value: None
+
+
+
+   .. py:attribute:: map_left
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: map_right
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: surf_mesh
+      :type:  str
+      :value: 'fsaverage5'
+
+
+
+.. py:function:: build_index_to_value(values: Any, *, region_order: Sequence[Any] | None, index_to_label: Mapping[int, str]) -> dict[int, float]
+
+   Turn *values* + *region_order* (or mapping *values*) into atlas index -> float.
+
+   Atlas indices follow the integer labels stored in the volume or surface parcel maps
+   (same convention as Nilearn Destrieux atlases).
+
+
+.. py:data:: RIGHT_HEMI_INDEX_OFFSET
+   :type:  int
+   :value: 1000
+
+
+.. py:data:: VASCULAR_ATLAS_LABELS
+   :type:  dict[int, str]
+
+.. py:function:: resolve_atlas_desikan_annot(left_path: Any, right_path: Any, *, surf_mesh: str = 'fsaverage5') -> ResolvedAtlas
+
+   Desikan surface parcellation from a pair of FreeSurfer ``?h.aparc.annot`` files.
+
+   The right hemisphere's indices are shifted by :data:`RIGHT_HEMI_INDEX_OFFSET` so each parcel is
+   individually addressable through one ``index_to_label``; labels are emitted in the published
+   ``ctx-lh-…`` / ``ctx-rh-…`` spelling so they match the measurement vocabulary directly.
+
+   Vertices belonging to no parcel (``unknown``, ``corpuscallosum``) are left out of the label map
+   and therefore never painted — the medial wall is not a region with a value.
+
+
+.. py:function:: resolve_atlas_preset_desikan(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   Resolve the Desikan–Killiany parcellation from wherever this machine has one.
+
+   Order — see :mod:`nvitk.viz.atlas_sources` for what each step reads:
+
+   1. an explicit ``maps=`` / ``annot=`` kwarg, or the configured atlas path (env or settings). A
+      ``.annot`` becomes a surface atlas, a NIfTI a volumetric one;
+   2. a FreeSurfer install's fsaverage ``?h.aparc.annot`` — the canonical Desikan surface labels;
+   3. a cached DKT parcellation of the MNI152 template, generated on demand.
+
+   :raises ValidationError: When none of the three resolve, naming every place that was searched — the fix is a path,
+       and an error that does not say which path to set is not actionable.
+
+
+.. py:function:: merge_atlas_regions(resolved: ResolvedAtlas, groups: Mapping[str, Sequence[int]], *, name: str = 'merged') -> ResolvedAtlas
+
+   Collapse an atlas's regions into coarser ones by relabelling its maps.
+
+   The parcels are merged, not merely painted alike: each group becomes a single region with one
+   index, so a value lands on it once. That matters because painting a lobe by writing its value
+   onto each member parcel makes the *boundaries between members* disappear only if every member
+   got the same value — which is true for a lobe-grouped fit and false the moment a caller mixes
+   granularities. Merging removes the possibility.
+
+   :param groups: ``{new region label: [source atlas index, …]}``. Source indices not named in any group are
+                  dropped from the merged atlas, so they render as "no estimate" rather than as an
+                  unnamed leftover region.
+   :type groups: mapping
+
+
+.. py:function:: resolve_atlas_preset_desikan_lobes(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   The Desikan parcellation merged into lobes, one region per lobe per hemisphere.
+
+   What a lobe-grouped analysis is actually about: 68 parcels reduced to a handful of structures,
+   each drawn as one region with one boundary. Built from the Desikan atlas rather than shipped
+   separately, so it follows whatever Desikan source this machine resolved and can never disagree
+   with the parcel-level map about where a lobe is.
+
+   Labels are emitted in the pipeline's own published spelling — ``ctx-Left-Frontal-Lobe`` — so a
+   frame grouped by the published lobe rows resolves without a translation table. The side-less
+   panel name (``Frontal``) also resolves, onto both hemispheres, because that is what the
+   ``lobe`` grouping produces.
+
+
+.. py:function:: resolve_atlas_preset_vascular(atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   Resolve the arterial-territory / watershed atlas the ASL pipeline parcellates against.
+
+   A single labelled NIfTI with the published index map :data:`VASCULAR_ATLAS_LABELS`. There is no
+   fallback: unlike Desikan this atlas has no standard equivalent to approximate it with, and a
+   substitute would silently redraw the territories.
+
+
+.. py:function:: resolve_atlas(atlas: AtlasLike, atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   Normalize *atlas* spec into :class:`ResolvedAtlas`.
+
+   Presets (volume): ``destrieux_2009``, ``destrieux_vol`` →
+   :func:`nilearn.datasets.fetch_atlas_destrieux_2009`.
+
+   Presets (surface): ``destrieux_surface``, ``surf_destrieux`` →
+   :func:`nilearn.datasets.fetch_atlas_surf_destrieux`.
+
+   Presets (located, not fetched): ``desikan`` / ``aparc`` →
+   :func:`resolve_atlas_preset_desikan`; ``vascular`` / ``arterial`` →
+   :func:`resolve_atlas_preset_vascular`. See :mod:`nvitk.viz.atlas_sources` for where they are
+   searched for.
+
+   Custom mapping atlas::
+
+       {"kind": "volume", "maps": path_or_img, "labels": {1: "L_MCA", ...}}
+       # labels optional; list[str] uses integer indices 0..n-1 as atlas IDs.
+
+   Aliases: ``kind`` may be omitted if ``maps`` is present (infer volume).
+
+
+.. py:function:: normalize_region_key(name: Any) -> tuple[str, str]
+
+   Reduce a region name to ``(side, stem)``, whichever vocabulary it was written in.
+
+   *side* is ``"l"``, ``"r"``, or ``""`` for something bilateral or midline; *stem* is the parcel
+   with every separator, side token and smoothing suffix removed, so it compares across spellings.
+
+   .. rubric:: Examples
+
+   >>> normalize_region_key("ctx-lh-precuneus")
+   ('l', 'precuneus')
+   >>> normalize_region_key("ctx_lh_precuneus") == normalize_region_key("lh.precuneus")
+   True
+   >>> normalize_region_key("left_precuneus")          # T1 spelling
+   ('l', 'precuneus')
+   >>> normalize_region_key("ctx_bh_precuneus")        # bilateral: belongs on both sides
+   ('', 'precuneus')
+   >>> normalize_region_key("Left_MCA-8")              # ASL vascular parcel + smoothing kernel
+   ('l', 'mca')
+   >>> normalize_region_key("ctx-Left-Frontal-Lobe")
+   ('l', 'frontallobe')
+
+
+.. py:function:: region_index_resolver(index_to_label: Mapping[int, str])
+
+   A resolver closure with the atlas's inverse index built **once**.
+
+   :func:`atlas_indices_for_region` is called per model term, and rebuilding a 68-entry inverse map
+   on each of those made resolving a single fit the most expensive thing the brain map did — it
+   dominated the draw. Callers that resolve many names against one atlas should use this instead.
+
+   :returns: ``resolve(label) -> list[int]``, with the same semantics as
+             :func:`atlas_indices_for_region`.
+   :rtype: callable
+
+
+.. py:function:: atlas_indices_for_region(name: Any, index_to_label: Mapping[int, str]) -> list[int]
+
+   Atlas indices a region level refers to — **one, several, or none**.
+
+   Several, because the grouping levels a model is fitted at are not all single parcels. A frame
+   grouped by hemisphere reports ``precuneus`` for the average of both, a lobe-grouped one reports
+   ``ctx-Left-Frontal-Lobe``, and the ASL tables publish ``ctx-whole-brain``. Each is one number
+   that belongs on every parcel it was averaged from — painting it on none, which an exact-match
+   lookup does, leaves a lobe-grouped fit with an empty brain. This mirrors
+   :func:`nvitk.stats.vascular_map.nodes_for_label`, which expands a hemisphere-melted ``ICA`` onto
+   both carotids for the same reason.
+
+   Resolution order: exact parcel → whole-brain / hemisphere → Desikan lobe → nothing.
+
+   Returns ``[]`` for anything the atlas does not cover, which is how a caller tells a region that
+   was measured but cannot be drawn (a FLAIR white-matter zone, a whole-head scalar such as
+   ``etiv``) from one that simply has no value.
+
+
+.. py:function:: build_volume_stat_image(atlas_img: nibabel.nifti1.Nifti1Image, index_to_value: Mapping[int, float], *, hemisphere: Hemisphere = 'both', background: float = np.nan) -> nibabel.nifti1.Nifti1Image
+
+   Paint voxel-wise stat map from integer atlas labels.
+
+
+.. py:function:: brainshow(values: Any, *, atlas: AtlasLike, mode: Mode = 'surface', region_order: Sequence[Any] | None = None, labels: Sequence[Any] | None = None, hemisphere: Hemisphere = 'both', cmap: str = 'coolwarm', vmin: float | None = None, vmax: float | None = None, threshold: float | None = None, title: str | None = None, axes: Any | None = None, output_file: str | pathlib.Path | None = None, show: bool = True, atlas_kwargs: Mapping[str, Any] | None = None, plot_kwargs: Mapping[str, Any] | None = None) -> Any
+
+   Render brain regions colored by *values* on *atlas* using Nilearn.
+
+   :param values: Per-region numeric values: sequence aligned with ``region_order`` / ``labels``,
+                  or mapping from region label (str) or atlas index (int) -> float.
+   :param atlas: Preset name or mapping. Volume presets: ``destrieux_2009``, ``destrieux_vol``.
+                 Surface presets: ``destrieux_surface``, ``surf_destrieux``.
+                 Custom volume: ``{"kind": "volume", "maps": path_or_Nifti1Image, "labels": ...}``.
+   :param mode: ``surface`` (mesh / projected volume) or ``volume`` (glass brain / ortho stat map).
+   :param region_order: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                        ``region_order``.
+   :param labels: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                  ``region_order``.
+   :param hemisphere: ``both``, ``left``, or ``right`` (masks volumetric painting by MNI x sign).
+   :param cmap: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmin: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmax: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param threshold: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param title: Figure title where supported.
+   :param axes: Optional matplotlib axes for volumetric ``plot_stat_map`` only.
+   :param output_file: Save figure path when supported by Nilearn.
+   :param show: Call matplotlib.pyplot.show() when True and backend allows.
+   :param atlas_kwargs: Extra kwargs for Nilearn fetch functions when using presets.
+   :param plot_kwargs: Additional kwargs forwarded to Nilearn plotting functions.
+
+   :returns: Nilearn figure handle(s); exact type depends on mode and atlas flavor.
+   :rtype: Figure or list
+
+   :raises ImportError: If Nilearn is not installed.
+   :raises ValidationError: If inputs are inconsistent with the atlas or mapping rules.
+
+

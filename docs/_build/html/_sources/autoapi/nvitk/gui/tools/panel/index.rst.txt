@@ -1,0 +1,74 @@
+nvitk.gui.tools.panel
+=====================
+
+.. py:module:: nvitk.gui.tools.panel
+
+.. autoapi-nested-parse::
+
+   Magicgui Tools tab with category/operation pickers and per-tool parameters.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.panel._LAYER_NONE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.panel._collect_params
+   nvitk.gui.tools.panel._set_param_visibility
+   nvitk.gui.tools.panel._update_reference_layers
+   nvitk.gui.tools.panel._prefill_vessel_cross_section_layers
+   nvitk.gui.tools.panel._update_phase_layers
+   nvitk.gui.tools.panel.build_tool_panel
+
+
+Module Contents
+---------------
+
+.. py:function:: _collect_params(widget: Any, tool_id: str) -> dict[str, Any]
+
+   Read the current values of *tool_id*'s parameter widgets off *widget* into a plain dict
+   (layer-picker params are coerced to their layer-name string).
+
+
+.. py:function:: _set_param_visibility(widget: Any, tool_id: str) -> None
+
+   Show only the parameter widgets on *widget* that *tool_id* actually uses; hide the rest of the
+   shared parameter pool.
+
+
+.. py:data:: _LAYER_NONE
+   :value: '(none)'
+
+
+.. py:function:: _update_reference_layers(widget: Any, viewer: Any) -> None
+
+   Refresh every reference/barrier/mask layer-picker widget on *widget* with the viewer's current
+   layer names, adding a "(none)" option for the optional pickers and re-validating each widget's
+   current selection against the new choice list.
+
+
+.. py:function:: _prefill_vessel_cross_section_layers(widget: Any, viewer: Any) -> None
+
+   Default CD layer dropdown from the active layer (centerline = active layer).
+
+
+.. py:function:: _update_phase_layers(widget: Any, viewer: Any) -> None
+
+   Alias for :func:`_update_reference_layers`, kept for call sites conceptually refreshing
+   per-phase layer pickers.
+
+
+.. py:function:: build_tool_panel(viewer: Any, app_state: dict[str, Any], *, layer_display_kwargs: Callable[Ellipsis, dict[str, Any]], on_layers_changed: Callable[[], None], record_step=None, get_label_ids=None, get_pipeline_argv_builder=None, get_totalseg_roi=None, label_selector=None) -> Any
+
+   Return magicgui FunctionGui for the Tools tab.
+
+

@@ -1,0 +1,48 @@
+nvitk.cluster.sge_remote
+========================
+
+.. py:module:: nvitk.cluster.sge_remote
+
+.. autoapi-nested-parse::
+
+   Stage SGE driver scripts locally and publish them on the cluster via SFTP.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.sge_remote.is_path_writable_locally
+   nvitk.cluster.sge_remote.local_sge_staging_dir
+   nvitk.cluster.sge_remote.resolve_sge_script_paths
+   nvitk.cluster.sge_remote.publish_sge_driver_script
+
+
+Module Contents
+---------------
+
+.. py:function:: is_path_writable_locally(path: pathlib.Path) -> bool
+
+   Return True when *path* (or its parent) can be created/written on this host.
+
+
+.. py:function:: local_sge_staging_dir() -> pathlib.Path
+
+   Writable directory for emitted bash scripts on the workstation.
+
+
+.. py:function:: resolve_sge_script_paths(emit_script: pathlib.Path | None, *, remote_scripts_dir: pathlib.Path, default_basename: str | None = None) -> tuple[pathlib.Path, str]
+
+   Return ``(local_write_path, remote_cluster_path)`` for an SGE driver script.
+
+   *local_write_path* is always on the current machine. *remote_cluster_path* is the
+   path passed to ``bash`` on the cluster login node.
+
+
+.. py:function:: publish_sge_driver_script(local_path: pathlib.Path, remote_path: str, *, host: str, user: str, password: str, no_remote: bool = False, port: int = 22) -> str
+
+   Upload *local_path* to *remote_path* when needed; return cluster ``bash`` target.
+
+

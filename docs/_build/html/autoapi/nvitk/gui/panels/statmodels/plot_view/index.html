@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.panels.statmodels.plot_view &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.panels.statmodels.plotly_view" href="../plotly_view/index.html" />
+    <link rel="prev" title="nvitk.gui.panels.statmodels.panel" href="../panel/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.panels.statmodels.plot_view">
+<span id="nvitk-gui-panels-statmodels-plot-view"></span><h1>nvitk.gui.panels.statmodels.plot_view<a class="headerlink" href="#module-nvitk.gui.panels.statmodels.plot_view" title="Link to this heading">¶</a></h1>
+<p>Plot pane — Matplotlib canvas, group include/exclude checklist, and axis-limit sliders.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>Three controls sit around the figure:</p>
+<dl class="simple">
+<dt><em>Groups</em>      one checkbox per level of the grouping column. Unchecking a level removes both its</dt><dd><p>model curve and its raw points, and lets the axes rescale to what remains. The fit is
+untouched — the black fixed-effect line stays the all-group estimate — so this is a
+display filter, not a re-analysis. Use a <code class="docutils literal notranslate"><span class="pre">territory</span></code> filter on the analysis frame
+when the levels should actually leave the model.</p>
+</dd>
+</dl>
+<p><em>Axis limits</em> sliders that rescale the current figure without recomputing anything.
+<em>Show legend</em> toggles the legend in place.
+<em>Export PNG</em>  writes the figure exactly as displayed, to a location the user picks.</p>
+<p>The figure itself is always drawn white (see <a class="reference internal" href="../theme/index.html#nvitk.gui.panels.statmodels.theme.whiten_figure" title="nvitk.gui.panels.statmodels.theme.whiten_figure"><code class="xref py py-func docutils literal notranslate"><span class="pre">whiten_figure()</span></code></a>) so it stays readable
+against the dark chrome and exports cleanly.</p>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel" title="nvitk.gui.panels.statmodels.plot_view.PlotPanel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PlotPanel</span></code></a></p></td>
+<td><p>The plot pane: canvas + group checklist + axis controls.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.plot_view.</span></span><span class="sig-name descname"><span class="pre">PlotPanel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">qtpy.QtWidgets.QWidget</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">qtpy.QtWidgets.QGroupBox</span></code></p>
+<p>The plot pane: canvas + group checklist + axis controls.</p>
+<section id="signals">
+<h3>Signals<a class="headerlink" href="#signals" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>optionsChanged</dt><dd><p>A control that requires the plot to be <em>redrawn</em> changed (the group selection). Axis sliders
+and the legend toggle act on the existing figure and do not emit.</p>
+</dd>
+<dt>exportRequested</dt><dd><p>The user pressed <em>Export PNG…</em>. The window owns the dialog, because it knows the dataset
+root and the model name the file should be suggested under.</p>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.optionsChanged">
+<span class="sig-name descname"><span class="pre">optionsChanged</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.optionsChanged" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.exportRequested">
+<span class="sig-name descname"><span class="pre">exportRequested</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.exportRequested" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._canvas">
+<span class="sig-name descname"><span class="pre">_canvas</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._canvas" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._fig">
+<span class="sig-name descname"><span class="pre">_fig</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._fig" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._axes">
+<span class="sig-name descname"><span class="pre">_axes</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._axes" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._plotly">
+<span class="sig-name descname"><span class="pre">_plotly</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._plotly" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._interactive">
+<span class="sig-name descname"><span class="pre">_interactive</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._interactive" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._linked_axes">
+<span class="sig-name descname"><span class="pre">_linked_axes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">[]</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._linked_axes" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_base">
+<span class="sig-name descname"><span class="pre">_axis_base</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_base" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_span">
+<span class="sig-name descname"><span class="pre">_axis_span</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_span" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._panel_base">
+<span class="sig-name descname"><span class="pre">_panel_base</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">[]</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._panel_base" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._group_column">
+<span class="sig-name descname"><span class="pre">_group_column</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._group_column" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._group_boxes">
+<span class="sig-name descname"><span class="pre">_group_boxes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">qtpy.QtWidgets.QCheckBox</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._group_boxes" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._suspend_group_signal">
+<span class="sig-name descname"><span class="pre">_suspend_group_signal</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._suspend_group_signal" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._top_row">
+<span class="sig-name descname"><span class="pre">_top_row</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._top_row" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._options_slot">
+<span class="sig-name descname"><span class="pre">_options_slot</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._options_slot" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._kind_row">
+<span class="sig-name descname"><span class="pre">_kind_row</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._kind_row" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._kind">
+<span class="sig-name descname"><span class="pre">_kind</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._kind" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._btn_export">
+<span class="sig-name descname"><span class="pre">_btn_export</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._btn_export" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._map_row">
+<span class="sig-name descname"><span class="pre">_map_row</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._map_row" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._map_slot">
+<span class="sig-name descname"><span class="pre">_map_slot</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._map_slot" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._status">
+<span class="sig-name descname"><span class="pre">_status</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._status" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_canvas_host">
+<span class="sig-name descname"><span class="pre">_build_canvas_host</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">qtpy.QtWidgets.QWidget</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_canvas_host" title="Link to this definition">¶</a></dt>
+<dd><p>Container the figure is swapped into.</p>
+<p>Two backends live here. Interactive figures (Plotly) go to a web view and own their own
+zoom, pan and hover; static ones (Matplotlib) go to a canvas and use the axis sliders below.
+Which one a plot uses is decided by the plot, not by this pane, so an engine that has not
+been migrated keeps working unchanged.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._is_interactive">
+<span class="sig-name descname"><span class="pre">_is_interactive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">figure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._is_interactive" title="Link to this definition">¶</a></dt>
+<dd><p>Whether <em>figure</em> is a Plotly figure rather than a Matplotlib one.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_groups_box">
+<span class="sig-name descname"><span class="pre">_build_groups_box</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">qtpy.QtWidgets.QWidget</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_groups_box" title="Link to this definition">¶</a></dt>
+<dd><p>Scrollable checklist of the grouping column’s levels.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_axis_controls">
+<span class="sig-name descname"><span class="pre">_build_axis_controls</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">qtpy.QtWidgets.QWidget</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._build_axis_controls" title="Link to this definition">¶</a></dt>
+<dd><p>Legend toggle plus sliders that rescale the current figure without recomputing.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.kind_combo">
+<span class="sig-name descname"><span class="pre">kind_combo</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">qtpy.QtWidgets.QComboBox</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.kind_combo" title="Link to this definition">¶</a></dt>
+<dd><p>The optional figure picker, for analyses that produce several plots.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_kind_row_visible">
+<span class="sig-name descname"><span class="pre">set_kind_row_visible</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">visible</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_kind_row_visible" title="Link to this definition">¶</a></dt>
+<dd><p>Show or hide the figure picker row.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_options_widget">
+<span class="sig-name descname"><span class="pre">set_options_widget</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">widget</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">qtpy.QtWidgets.QWidget</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_options_widget" title="Link to this definition">¶</a></dt>
+<dd><p>Place the window’s plot-option controls on the pane’s top row.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_map_options_widget">
+<span class="sig-name descname"><span class="pre">set_map_options_widget</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">widget</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">qtpy.QtWidgets.QWidget</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_map_options_widget" title="Link to this definition">¶</a></dt>
+<dd><p>Place the display-specific controls on the pane’s second row.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_map_options_visible">
+<span class="sig-name descname"><span class="pre">set_map_options_visible</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">visible</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_map_options_visible" title="Link to this definition">¶</a></dt>
+<dd><p>Show or hide the second options row.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_groups_visible">
+<span class="sig-name descname"><span class="pre">set_groups_visible</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">visible</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_groups_visible" title="Link to this definition">¶</a></dt>
+<dd><p>Show or hide the group checklist (it only applies to grouped model plots).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_levels">
+<span class="sig-name descname"><span class="pre">set_levels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">levels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_levels" title="Link to this definition">¶</a></dt>
+<dd><p>Rebuild the group checklist for <em>column</em>, preserving which levels were unchecked.</p>
+<p>Levels that disappear (a reload changed the frame) lose their state; new ones start checked.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.checked_levels">
+<span class="sig-name descname"><span class="pre">checked_levels</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.checked_levels" title="Link to this definition">¶</a></dt>
+<dd><p>Levels currently checked, in the order they were added.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_checked_levels">
+<span class="sig-name descname"><span class="pre">set_checked_levels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">levels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_checked_levels" title="Link to this definition">¶</a></dt>
+<dd><p>Check exactly <em>levels</em> (<code class="docutils literal notranslate"><span class="pre">None</span></code> checks everything).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._set_all_groups">
+<span class="sig-name descname"><span class="pre">_set_all_groups</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">state</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._set_all_groups" title="Link to this definition">¶</a></dt>
+<dd><p>Check or uncheck every level, then request a redraw once.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._on_group_toggled">
+<span class="sig-name descname"><span class="pre">_on_group_toggled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">_args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._on_group_toggled" title="Link to this definition">¶</a></dt>
+<dd><p>Request a redraw unless we are mid-rebuild.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.clear">
+<span class="sig-name descname"><span class="pre">clear</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.clear" title="Link to this definition">¶</a></dt>
+<dd><p>Remove the current plot widget and release its figure.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_figure">
+<span class="sig-name descname"><span class="pre">show_figure</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fig</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_figure" title="Link to this definition">¶</a></dt>
+<dd><p>Embed <em>fig</em> as the current plot and reset the axis sliders to its limits.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.has_figure">
+<span class="sig-name descname"><span class="pre">has_figure</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.has_figure" title="Link to this definition">¶</a></dt>
+<dd><p>Whether a figure is currently displayed and can be exported.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.save_figure">
+<span class="sig-name descname"><span class="pre">save_figure</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dpi</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.save_figure" title="Link to this definition">¶</a></dt>
+<dd><p>Write the displayed figure to <em>path</em> as it currently looks.</p>
+<p>Everything the user changed after the plot was drawn is part of the file: hidden groups,
+dragged axis limits, the legend toggle. The figure was whitened on embed, so the export has
+a white background rather than the explorer’s dark chrome.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>RuntimeError</strong> – When no figure is displayed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._show_interactive">
+<span class="sig-name descname"><span class="pre">_show_interactive</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">figure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._show_interactive" title="Link to this definition">¶</a></dt>
+<dd><p>Hand a Plotly figure to the web view, and stand the axis sliders down.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._fit_layout">
+<span class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">_fit_layout</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fig</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._fit_layout" title="Link to this definition">¶</a></dt>
+<dd><p>Re-fit the figure’s layout so nothing spills outside the canvas.</p>
+<p>Skipped when the figure already carries a layout engine of its own (<code class="docutils literal notranslate"><span class="pre">constrained</span></code>, which
+some plots set because they re-flow on every draw) — calling <code class="docutils literal notranslate"><span class="pre">tight_layout</span></code> on top of one
+of those fights it and matplotlib warns.</p>
+<p>Also skipped for 3-D axes. <code class="docutils literal notranslate"><span class="pre">tight_layout</span></code> has no notion of a projected axes’ true extent,
+so on the brain map it warns once per panel and then lays the figure out worse than the
+plotter already had — the surface panels are sized by the plotter itself.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_error">
+<span class="sig-name descname"><span class="pre">show_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_error" title="Link to this definition">¶</a></dt>
+<dd><p>Replace the plot with an error message.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_status">
+<span class="sig-name descname"><span class="pre">set_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_status" title="Link to this definition">¶</a></dt>
+<dd><p>Show a note above the canvas (e.g. an EMM grid that could not be evaluated).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_legend">
+<span class="sig-name descname"><span class="pre">show_legend</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.show_legend" title="Link to this definition">¶</a></dt>
+<dd><p>Whether the legend toggle is on.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_show_legend">
+<span class="sig-name descname"><span class="pre">set_show_legend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.set_show_legend" title="Link to this definition">¶</a></dt>
+<dd><p>Set the legend toggle without triggering a redraw of the data.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.apply_legend_visibility">
+<span class="sig-name descname"><span class="pre">apply_legend_visibility</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.apply_legend_visibility" title="Link to this definition">¶</a></dt>
+<dd><p>Show or hide the current axes legends according to the toggle.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._disable_axis_sliders">
+<span class="sig-name descname"><span class="pre">_disable_axis_sliders</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._disable_axis_sliders" title="Link to this definition">¶</a></dt>
+<dd><p>Grey out the axis-limit controls (no single-axes figure to rescale).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._sync_axis_sliders">
+<span class="sig-name descname"><span class="pre">_sync_axis_sliders</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._sync_axis_sliders" title="Link to this definition">¶</a></dt>
+<dd><p>Capture the freshly drawn axes limits as the slider baseline and move the handles to match.</p>
+<p>Each slider spans the plotted range padded by <code class="xref py py-data docutils literal notranslate"><span class="pre">AXIS_SLIDER_MARGIN</span></code> on both sides, so
+the handles start inset and the user can zoom out as well as in.</p>
+<p>With several linked panels the baseline is their <strong>union</strong>, and moving a slider puts every
+panel on that one common scale — which is how you compare magnitudes between panels that
+each autoscaled to their own range. <em>Reset</em> restores the individual ranges.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_slider_to_value">
+<span class="sig-name descname"><span class="pre">_axis_slider_to_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">position</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_slider_to_value" title="Link to this definition">¶</a></dt>
+<dd><p>Map a slider position to a data coordinate on <em>axis</em>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_value_to_slider">
+<span class="sig-name descname"><span class="pre">_axis_value_to_slider</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._axis_value_to_slider" title="Link to this definition">¶</a></dt>
+<dd><p>Map a data coordinate on <em>axis</em> back to a slider position.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel._on_axis_slider_changed">
+<span class="sig-name descname"><span class="pre">_on_axis_slider_changed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">_args</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel._on_axis_slider_changed" title="Link to this definition">¶</a></dt>
+<dd><p>Rescale every linked axes to the slider positions and redraw the canvas.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.plot_view.PlotPanel.reset_axes">
+<span class="sig-name descname"><span class="pre">reset_axes</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.plot_view.PlotPanel.reset_axes" title="Link to this definition">¶</a></dt>
+<dd><p>Restore the autoscaled limits captured when the plot was drawn, panel by panel.</p>
+</dd></dl>
+
+</section>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.gui</a><ul>
+  <li><a href="../../index.html">nvitk.gui.panels</a><ul>
+  <li><a href="../index.html">nvitk.gui.panels.statmodels</a><ul>
+      <li>Previous: <a href="../panel/index.html" title="previous chapter">nvitk.gui.panels.statmodels.panel</a></li>
+      <li>Next: <a href="../plotly_view/index.html" title="next chapter">nvitk.gui.panels.statmodels.plotly_view</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/gui/panels/statmodels/plot_view/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,58 @@
+nvitk.gui.core.log_panel
+========================
+
+.. py:module:: nvitk.gui.core.log_panel
+
+.. autoapi-nested-parse::
+
+   Scrollable log area for tool and pipeline subprocess output.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.core.log_panel._log_widget
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.core.log_panel.set_log_widget
+   nvitk.gui.core.log_panel.gui_log
+   nvitk.gui.core.log_panel.build_log_dock_widget
+   nvitk.gui.core.log_panel.run_subprocess_logged
+
+
+Module Contents
+---------------
+
+.. py:data:: _log_widget
+   :type:  qtpy.QtWidgets.QPlainTextEdit | None
+   :value: None
+
+
+.. py:function:: set_log_widget(widget: qtpy.QtWidgets.QPlainTextEdit | None) -> None
+
+   Register *widget* as the log panel that :func:`gui_log` appends to (module-level singleton).
+
+
+.. py:function:: gui_log(message: str, *, error: bool = False) -> None
+
+   Append a timestamped log line to the registered log widget (if any) and stdout.
+
+
+.. py:function:: build_log_dock_widget() -> qtpy.QtWidgets.QWidget
+
+   Bottom dock: plain-text log of tools and pipelines.
+
+
+.. py:function:: run_subprocess_logged(argv: list[str], *, cwd=None, on_line=None) -> int
+
+   Run a command and stream stdout/stderr into :func:`gui_log`.
+
+

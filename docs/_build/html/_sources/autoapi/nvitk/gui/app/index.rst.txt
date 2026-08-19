@@ -1,0 +1,47 @@
+nvitk.gui.app
+=============
+
+.. py:module:: nvitk.gui.app
+
+.. autoapi-nested-parse::
+
+   Napari application shell for the nvitk GUI.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.app._record_step
+   nvitk.gui.app._layer_display_kwargs
+   nvitk.gui.app._refresh_layer_list
+   nvitk.gui.app.run_app
+
+
+Module Contents
+---------------
+
+.. py:function:: _record_step(state: dict[str, Any], step: dict[str, Any]) -> None
+
+   Append a timestamped *step* to the app's pipeline recording, if recording is enabled.
+
+
+.. py:function:: _layer_display_kwargs(layer: Any, *, name: str) -> dict[str, Any]
+
+   Preserve spatial metadata from a source layer when adding tool outputs.
+
+
+.. py:function:: _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> None
+
+   Rebuild the Layers tab's summary list widget from the viewer's layers and the app's input/
+   output/mesh registry.
+
+
+.. py:function:: run_app() -> None
+
+   Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
+   assembles the Tools/Data/QC/Statmodels/Layers/Export/Pipeline dock tabs.
+
+

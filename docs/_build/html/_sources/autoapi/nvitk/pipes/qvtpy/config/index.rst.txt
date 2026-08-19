@@ -1,0 +1,213 @@
+nvitk.pipes.qvtpy.config
+========================
+
+.. py:module:: nvitk.pipes.qvtpy.config
+
+.. autoapi-nested-parse::
+
+   qvtpy host configuration: data roots, stage paths, and SGE defaults.
+
+   **Inputs (environment / JSON)**
+
+   - Default DICOM, NIfTI, and results roots on the analysis host.
+   - Optional ``.nvitk/sge.json`` ``pipelines.qvtpy`` block (see :mod:`nvitk.cluster.sge_json`).
+
+   **Outputs (constants consumed by stages)**
+
+   - ``STAGE*_DIR`` — subdirectory names under ``<results>/<subject>/qvtpy/``.
+   - ``SGE_*`` — project, queue, log/err dirs, and ``CONTAINER_PATH`` for cluster jobs.
+
+   Stage 0 conversion and stage 1 eICAB use these paths; later stages read/write under
+   ``DEFAULT_RESULTS_ROOT`` / ``DEFAULT_NIFTI_ROOT`` unless overridden on the CLI.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.config.PIPELINE_NAME
+   nvitk.pipes.qvtpy.config.SGE_JOB_PREFIX
+   nvitk.pipes.qvtpy.config.CLUSTER_HOST_ALIASES
+   nvitk.pipes.qvtpy.config.DEFAULT_DICOM_ROOT
+   nvitk.pipes.qvtpy.config.DEFAULT_NIFTI_ROOT
+   nvitk.pipes.qvtpy.config.DEFAULT_RESULTS_ROOT
+   nvitk.pipes.qvtpy.config.LOCAL_DEFAULT_DICOM_ROOT
+   nvitk.pipes.qvtpy.config.LOCAL_DEFAULT_NIFTI_ROOT
+   nvitk.pipes.qvtpy.config.LOCAL_DEFAULT_RESULTS_ROOT
+   nvitk.pipes.qvtpy.config.LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT
+   nvitk.pipes.qvtpy.config.STAGE0_DIR
+   nvitk.pipes.qvtpy.config.STAGE1_EICAB_DIR
+   nvitk.pipes.qvtpy.config.QVT_SUBDIR
+   nvitk.pipes.qvtpy.config.STAGE2_REGISTRATION_DIR
+   nvitk.pipes.qvtpy.config.STAGE3_CENTERLINE_DIR
+   nvitk.pipes.qvtpy.config.STAGE4_SEG_DIR
+   nvitk.pipes.qvtpy.config.STAGE4T_SEG_DIR
+   nvitk.pipes.qvtpy.config.STAGE5_LOC_DIR
+   nvitk.pipes.qvtpy.config.STAGE6_MEASURE_DIR
+   nvitk.pipes.qvtpy.config.STAGE7_MORPHOMETRICS_DIR
+   nvitk.pipes.qvtpy.config.SGE_PROJECT
+   nvitk.pipes.qvtpy.config.SGE_ACCOUNT
+   nvitk.pipes.qvtpy.config.SGE_NGPU
+   nvitk.pipes.qvtpy.config.SGE_H_VMEM
+   nvitk.pipes.qvtpy.config.SGE_QUEUE
+   nvitk.pipes.qvtpy.config.SGE_LOG_DIR
+   nvitk.pipes.qvtpy.config.SGE_ERR_DIR
+   nvitk.pipes.qvtpy.config.SGE_SCRIPTS_DIR
+   nvitk.pipes.qvtpy.config.CONTAINER_PATH
+   nvitk.pipes.qvtpy.config.SGE_PROJECT
+   nvitk.pipes.qvtpy.config.SGE_ACCOUNT
+   nvitk.pipes.qvtpy.config.SGE_NGPU
+   nvitk.pipes.qvtpy.config.SGE_H_VMEM
+   nvitk.pipes.qvtpy.config.SGE_QUEUE
+   nvitk.pipes.qvtpy.config.SGE_SCRIPTS_DIR
+   nvitk.pipes.qvtpy.config.CONTAINER_PATH
+   nvitk.pipes.qvtpy.config.DEFAULT_TOTALSEG_MODEL_ROOT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.config.resolve_totalseg_model_dir
+
+
+Module Contents
+---------------
+
+.. py:data:: PIPELINE_NAME
+   :type:  str
+   :value: 'qvtpy'
+
+
+.. py:data:: SGE_JOB_PREFIX
+   :type:  str
+   :value: 'QVTPY'
+
+
+.. py:data:: CLUSTER_HOST_ALIASES
+
+.. py:data:: DEFAULT_DICOM_ROOT
+
+.. py:data:: DEFAULT_NIFTI_ROOT
+
+.. py:data:: DEFAULT_RESULTS_ROOT
+
+.. py:data:: LOCAL_DEFAULT_DICOM_ROOT
+
+.. py:data:: LOCAL_DEFAULT_NIFTI_ROOT
+
+.. py:data:: LOCAL_DEFAULT_RESULTS_ROOT
+
+.. py:data:: LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT
+
+.. py:function:: resolve_totalseg_model_dir(*, model_dir: pathlib.Path | None = None, prefer_cluster: bool | None = None) -> pathlib.Path
+
+   Return TotalSegmentator weights root (qvtpy cluster/local layout).
+
+
+.. py:data:: STAGE0_DIR
+   :type:  str
+   :value: 'res_convert_qvtpy'
+
+
+.. py:data:: STAGE1_EICAB_DIR
+   :type:  str
+   :value: 'eicab'
+
+
+.. py:data:: QVT_SUBDIR
+   :type:  str
+   :value: 'qvtpy'
+
+
+.. py:data:: STAGE2_REGISTRATION_DIR
+   :type:  str
+   :value: 'stage2_registration'
+
+
+.. py:data:: STAGE3_CENTERLINE_DIR
+   :type:  str
+   :value: 'stage3_centerline'
+
+
+.. py:data:: STAGE4_SEG_DIR
+   :type:  str
+   :value: 'stage4_4dflow_segmentation'
+
+
+.. py:data:: STAGE4T_SEG_DIR
+   :type:  str
+   :value: 'stage4t_4dflow_t_segmentation'
+
+
+.. py:data:: STAGE5_LOC_DIR
+   :type:  str
+   :value: 'stage5_loc_generation'
+
+
+.. py:data:: STAGE6_MEASURE_DIR
+   :type:  str
+   :value: 'stage6_measure'
+
+
+.. py:data:: STAGE7_MORPHOMETRICS_DIR
+   :type:  str
+   :value: 'stage7_morphometrics'
+
+
+.. py:data:: SGE_PROJECT
+   :type:  str
+   :value: 'MCC_GPU'
+
+
+.. py:data:: SGE_ACCOUNT
+   :type:  str
+   :value: 'MCC_GPU'
+
+
+.. py:data:: SGE_NGPU
+   :type:  int
+   :value: 0
+
+
+.. py:data:: SGE_H_VMEM
+   :type:  str
+   :value: '30G'
+
+
+.. py:data:: SGE_QUEUE
+   :type:  str | None
+   :value: None
+
+
+.. py:data:: SGE_LOG_DIR
+   :type:  pathlib.Path
+
+.. py:data:: SGE_ERR_DIR
+   :type:  pathlib.Path
+
+.. py:data:: SGE_SCRIPTS_DIR
+   :type:  pathlib.Path
+
+.. py:data:: CONTAINER_PATH
+   :type:  pathlib.Path
+
+.. py:data:: SGE_PROJECT
+
+.. py:data:: SGE_ACCOUNT
+
+.. py:data:: SGE_NGPU
+
+.. py:data:: SGE_H_VMEM
+
+.. py:data:: SGE_QUEUE
+
+.. py:data:: SGE_SCRIPTS_DIR
+
+.. py:data:: CONTAINER_PATH
+
+.. py:data:: DEFAULT_TOTALSEG_MODEL_ROOT
+

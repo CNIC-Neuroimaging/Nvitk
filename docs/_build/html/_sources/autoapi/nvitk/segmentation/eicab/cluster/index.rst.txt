@@ -1,0 +1,45 @@
+nvitk.segmentation.eicab.cluster
+================================
+
+.. py:module:: nvitk.segmentation.eicab.cluster
+
+.. autoapi-nested-parse::
+
+   SGE submission for eICAB (host ``singularity run``, optional nvitk post-steps).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.cluster.build_run_job_python_cmd
+   nvitk.segmentation.eicab.cluster.build_eicab_host_shell_cmd
+   nvitk.segmentation.eicab.cluster.cluster_paths
+   nvitk.segmentation.eicab.cluster.submit_eicab_job
+
+
+Module Contents
+---------------
+
+.. py:function:: build_run_job_python_cmd(*, input_container_path: str, output_container_path: str, tmp_container_path: str, eicab_container_container_path: str, resolution: float, device: str, simple_segmentation: bool, attention: bool, keep_aux_outputs: bool, post_process_eicab: bool, backend: str, binds: nvitk.cluster.sge.SingularityBinds) -> str
+
+   Legacy in-container ``run_job`` argv string (nested Singularity; prefer host path).
+
+
+.. py:function:: build_eicab_host_shell_cmd(*, input_nifti: pathlib.Path, output_dir: pathlib.Path, tmp_dir: pathlib.Path, eicab_container: pathlib.Path, src_dir: pathlib.Path, pipeline_container: pathlib.Path, input_root: pathlib.Path, output_root: pathlib.Path, vasculature_host: pathlib.Path, resolution: float, device: str, simple_segmentation: bool, attention: bool, keep_aux_outputs: bool, post_process_eicab: bool, backend: str, thread_limit: int | None = None, sge_pe_smp: int | None = None, local_metric_scratch: bool = False) -> str
+
+   Full stage1 host command: eICAB ``singularity run`` + optional nvitk follow-ups.
+
+
+.. py:function:: cluster_paths(*, src_dir: pathlib.Path, pipeline_container: pathlib.Path, input_root: pathlib.Path, output_root: pathlib.Path, log_dir: pathlib.Path, err_dir: pathlib.Path) -> nvitk.cluster.sge.ClusterPaths
+
+   Cluster log/bind metadata for eICAB SGE jobs.
+
+
+.. py:function:: submit_eicab_job(*, job_name: str, input_nifti: pathlib.Path, output_dir: pathlib.Path, tmp_dir: pathlib.Path, eicab_container: pathlib.Path, src_dir: pathlib.Path, pipeline_container: pathlib.Path, input_root: pathlib.Path, output_root: pathlib.Path, vasculature_host: pathlib.Path, log_dir: pathlib.Path, err_dir: pathlib.Path, resolution: float, device: str, simple_segmentation: bool, attention: bool, keep_aux_outputs: bool, post_process_eicab: bool = True, backend: str = 'gpu', resources: nvitk.cluster.sge.SgeResources, thread_limit: int | None = None, sge_pe_smp: int | None = None, local_metric_scratch: bool = False, hold_jid: str | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   Submit one eICAB job on the cluster host (or emit a bash block when *emit* is set).
+
+

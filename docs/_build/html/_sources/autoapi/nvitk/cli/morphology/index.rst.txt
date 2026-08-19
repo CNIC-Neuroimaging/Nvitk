@@ -1,0 +1,82 @@
+nvitk.cli.morphology
+====================
+
+.. py:module:: nvitk.cli.morphology
+
+.. autoapi-nested-parse::
+
+   ``nvitk-morph`` CLI — morphological image tools.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.morphology.main
+   nvitk.cli.morphology._morph_op
+   nvitk.cli.morphology.cmd_dilate
+   nvitk.cli.morphology.cmd_erode
+   nvitk.cli.morphology.cmd_open
+   nvitk.cli.morphology.cmd_close
+   nvitk.cli.morphology.cmd_fill_holes
+   nvitk.cli.morphology.cmd_label_cc
+   nvitk.cli.morphology.cmd_centerline
+   nvitk.cli.morphology.cmd_siphon
+
+
+Module Contents
+---------------
+
+.. py:function:: main() -> None
+
+   Morphology tools (binary ops, centerlines, ICA siphon correction).
+
+
+.. py:function:: _morph_op(op)
+
+   Wrap a base morphology *op* (e.g. :func:`~nvitk.morphology.dilate`) as a CLI runner that
+   operates on the mask if one was supplied, else the input image itself.
+
+
+.. py:function:: cmd_dilate(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, footprint)
+
+   Binary dilation.
+
+
+.. py:function:: cmd_erode(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, footprint)
+
+   Binary erosion.
+
+
+.. py:function:: cmd_open(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, footprint)
+
+   Binary opening (erode then dilate).
+
+
+.. py:function:: cmd_close(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, footprint)
+
+   Binary closing (dilate then erode).
+
+
+.. py:function:: cmd_fill_holes(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run)
+
+   Fill interior holes in a binary mask.
+
+
+.. py:function:: cmd_label_cc(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run)
+
+   Label connected components in a binary mask.
+
+
+.. py:function:: cmd_centerline(input_path, output_path, mask_path, backend, submit, emit_script, direct_submit, no_remote, dry_run)
+
+   Compute a binary centerline/skeleton from a vessel mask.
+
+
+.. py:function:: cmd_siphon(input_path, output_path, mask_path, tof_path, backend, submit, emit_script, direct_submit, no_remote, dry_run)
+
+   Correct ICA siphon centerline geometry using a TOF MRA reference volume.
+
+

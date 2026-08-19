@@ -1,0 +1,27 @@
+nvitk.cli.ants
+==============
+
+.. py:module:: nvitk.cli.ants
+
+.. autoapi-nested-parse::
+
+   ANTsPy CLI: `nvitk-ants register|apply`.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.ants.main
+
+
+Module Contents
+---------------
+
+.. py:function:: main(ctx: click.Context, backend: str) -> None
+
+   ANTsPy registration helpers.
+
+

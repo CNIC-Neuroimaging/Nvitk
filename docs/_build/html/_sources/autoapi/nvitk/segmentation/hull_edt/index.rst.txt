@@ -1,0 +1,44 @@
+nvitk.segmentation.hull_edt
+===========================
+
+.. py:module:: nvitk.segmentation.hull_edt
+
+.. autoapi-nested-parse::
+
+   Convex hull and Euclidean distance transform helpers for binary masks.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.hull_edt.convex_hull_slicewise
+   nvitk.segmentation.hull_edt.convex_hull_3d
+   nvitk.segmentation.hull_edt.distance_transform
+
+
+Module Contents
+---------------
+
+.. py:function:: convex_hull_slicewise(mask: nvitk.types.Image | Any, *, axis: int = -1) -> nvitk.types.Image | Any
+
+   Apply a 2D convex hull independently on each slice orthogonal to *axis*.
+
+   Non-zero voxels in each slice are filled to their planar convex hull.
+
+
+.. py:function:: convex_hull_3d(mask: nvitk.types.Image | Any) -> nvitk.types.Image | Any
+
+   Fill the 3D convex hull of all foreground voxels.
+
+
+.. py:function:: distance_transform(mask: nvitk.types.Image | Any, *, spacing: Tuple[float, float, float] | None = None, radius_mm: float | None = None) -> nvitk.types.Image | Any
+
+   Euclidean distance transform of the background (outside foreground).
+
+   When *radius_mm* is set, return a binary tube (distance ≤ *radius_mm*).
+   Otherwise return float32 distance (mm if *spacing* is provided).
+
+

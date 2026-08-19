@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.pesa_fat.qc.review_policy &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.pesa_fat.qc.slice_review" href="../slice_review/index.html" />
+    <link rel="prev" title="nvitk.pipes.pesa_fat.qc.pyvista_scenes" href="../pyvista_scenes/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.pesa_fat.qc.review_policy">
+<span id="nvitk-pipes-pesa-fat-qc-review-policy"></span><h1>nvitk.pipes.pesa_fat.qc.review_policy<a class="headerlink" href="#module-nvitk.pipes.pesa_fat.qc.review_policy" title="Link to this heading">¶</a></h1>
+<p>Shared PESA-Fat QC review structure lists and status aggregation.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECTS" title="nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECTS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">REVIEW_ASPECTS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECT_LABELS" title="nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECT_LABELS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">REVIEW_ASPECT_LABELS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.DEFAULT_REVIEW_ASPECT" title="nvitk.pipes.pesa_fat.qc.review_policy.DEFAULT_REVIEW_ASPECT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_REVIEW_ASPECT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.filter_review_structures" title="nvitk.pipes.pesa_fat.qc.review_policy.filter_review_structures"><code class="xref py py-obj docutils literal notranslate"><span class="pre">filter_review_structures</span></code></a>(→ list[str])</p></td>
+<td><p>Remove unwanted review labels (shared policy for CT-PET and Dixon).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_structure" title="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_structure"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_reviewable_structure</span></code></a>(→ bool)</p></td>
+<td><p>True when <em>name</em> participates in QC review (excludes <code class="docutils literal notranslate"><span class="pre">*_LR</span></code> composites).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_aspect" title="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_aspect"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_reviewable_aspect</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>aspect</em> is one of the recognized review aspects (<code class="docutils literal notranslate"><span class="pre">SEGMENTATION</span></code>/<code class="docutils literal notranslate"><span class="pre">MEASUREMENT</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry" title="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_reviewable_entry</span></code></a>(→ bool)</p></td>
+<td><p>True when <em>(structure, aspect)</em> is a valid QC review target.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.expected_review_structures" title="nvitk.pipes.pesa_fat.qc.review_policy.expected_review_structures"><code class="xref py py-obj docutils literal notranslate"><span class="pre">expected_review_structures</span></code></a>(→ list[str])</p></td>
+<td><p>All structures that must be reviewed for dashboard overall OK.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.expected_review_entries" title="nvitk.pipes.pesa_fat.qc.review_policy.expected_review_entries"><code class="xref py py-obj docutils literal notranslate"><span class="pre">expected_review_entries</span></code></a>(→ list[tuple[str, str]])</p></td>
+<td><p>All (structure, aspect) pairs required for a complete review.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.reviews_dict_to_entries" title="nvitk.pipes.pesa_fat.qc.review_policy.reviews_dict_to_entries"><code class="xref py py-obj docutils literal notranslate"><span class="pre">reviews_dict_to_entries</span></code></a>(→ dict[tuple[str, str], str])</p></td>
+<td><p>Normalize nested or flat review state into <code class="docutils literal notranslate"><span class="pre">(structure,</span> <span class="pre">aspect)</span> <span class="pre">-&gt;</span> <span class="pre">status</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.overall_status" title="nvitk.pipes.pesa_fat.qc.review_policy.overall_status"><code class="xref py py-obj docutils literal notranslate"><span class="pre">overall_status</span></code></a>(→ str)</p></td>
+<td><p>Legacy aggregate: PENDING / OK / FAIL.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.qc.review_policy.portal_display_status" title="nvitk.pipes.pesa_fat.qc.review_policy.portal_display_status"><code class="xref py py-obj docutils literal notranslate"><span class="pre">portal_display_status</span></code></a>(→ tuple[str, str])</p></td>
+<td><p>Return <code class="docutils literal notranslate"><span class="pre">(label,</span> <span class="pre">tone)</span></code> for dashboard cells.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECTS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">REVIEW_ASPECTS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('SEGMENTATION',</span> <span class="pre">'MEASUREMENT')</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECTS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECT_LABELS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">REVIEW_ASPECT_LABELS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECT_LABELS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.DEFAULT_REVIEW_ASPECT">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_REVIEW_ASPECT</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'MEASUREMENT'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.DEFAULT_REVIEW_ASPECT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.filter_review_structures">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">filter_review_structures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">structures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.filter_review_structures" title="Link to this definition">¶</a></dt>
+<dd><p>Remove unwanted review labels (shared policy for CT-PET and Dixon).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_structure">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">is_reviewable_structure</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">reviewable_structures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_structure" title="Link to this definition">¶</a></dt>
+<dd><p>True when <em>name</em> participates in QC review (excludes <code class="docutils literal notranslate"><span class="pre">*_LR</span></code> composites).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_aspect">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">is_reviewable_aspect</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">aspect</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_aspect" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>aspect</em> is one of the recognized review aspects (<code class="docutils literal notranslate"><span class="pre">SEGMENTATION</span></code>/<code class="docutils literal notranslate"><span class="pre">MEASUREMENT</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">is_reviewable_entry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">aspect</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry" title="Link to this definition">¶</a></dt>
+<dd><p>True when <em>(structure, aspect)</em> is a valid QC review target.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.expected_review_structures">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">expected_review_structures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pipeline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.expected_review_structures" title="Link to this definition">¶</a></dt>
+<dd><p>All structures that must be reviewed for dashboard overall OK.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.expected_review_entries">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">expected_review_entries</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pipeline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.expected_review_entries" title="Link to this definition">¶</a></dt>
+<dd><p>All (structure, aspect) pairs required for a complete review.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.reviews_dict_to_entries">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">reviews_dict_to_entries</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">reviews_by_structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.reviews_dict_to_entries" title="Link to this definition">¶</a></dt>
+<dd><p>Normalize nested or flat review state into <code class="docutils literal notranslate"><span class="pre">(structure,</span> <span class="pre">aspect)</span> <span class="pre">-&gt;</span> <span class="pre">status</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.overall_status">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">overall_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">reviews_by_structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">expected_structures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.overall_status" title="Link to this definition">¶</a></dt>
+<dd><p>Legacy aggregate: PENDING / OK / FAIL.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.qc.review_policy.portal_display_status">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.qc.review_policy.</span></span><span class="sig-name descname"><span class="pre">portal_display_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">reviews_by_structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">expected_structures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.qc.review_policy.portal_display_status" title="Link to this definition">¶</a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(label,</span> <span class="pre">tone)</span></code> for dashboard cells.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">PENDING</span></code> / <code class="docutils literal notranslate"><span class="pre">pending</span></code> — any expected (structure, aspect) still pending.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">REVISED</span></code> / <code class="docutils literal notranslate"><span class="pre">ok</span></code> — all reviewed, not all FAIL (green).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">REVISED</span></code> / <code class="docutils literal notranslate"><span class="pre">fail</span></code> — all reviewed and all FAIL (red).</p></li>
+</ul>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../../index.html">nvitk.pipes.pesa_fat</a><ul>
+  <li><a href="../index.html">nvitk.pipes.pesa_fat.qc</a><ul>
+      <li>Previous: <a href="../pyvista_scenes/index.html" title="previous chapter">nvitk.pipes.pesa_fat.qc.pyvista_scenes</a></li>
+      <li>Next: <a href="../slice_review/index.html" title="next chapter">nvitk.pipes.pesa_fat.qc.slice_review</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/pipes/pesa_fat/qc/review_policy/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

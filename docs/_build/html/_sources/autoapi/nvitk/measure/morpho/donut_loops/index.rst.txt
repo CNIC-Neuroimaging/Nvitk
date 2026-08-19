@@ -1,0 +1,56 @@
+nvitk.measure.morpho.donut_loops
+================================
+
+.. py:module:: nvitk.measure.morpho.donut_loops
+
+.. autoapi-nested-parse::
+
+   Donut-loop detection, isolated-arm VMTK, and loop component processing.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.donut_loops.isolate_donut_arm_mask
+   nvitk.measure.morpho.donut_loops.run_isolated_donut_arm_vmtk
+   nvitk.measure.morpho.donut_loops.process_donut_loop_component_vmtk
+
+
+Module Contents
+---------------
+
+.. py:function:: isolate_donut_arm_mask(mask_cc: numpy.ndarray, tree: nvitk.measure.morpho.models.SkeletonTree, arm_nodes: List[int], competing_arm_nodes: List[int], spacing) -> numpy.ndarray
+
+   Split *mask_cc* into the arm containing *arm_nodes*, by nearest-skeleton-node voting.
+
+   Assigns each foreground voxel to whichever of the two competing arms'
+   skeleton points is closer (with a small margin so ties favor the arm), then
+   keeps only the connected component containing the arm's own seed voxels
+   (majority vote if the seeds span more than one component).
+
+
+.. py:function:: run_isolated_donut_arm_vmtk(mask_cc: numpy.ndarray, tree: nvitk.measure.morpho.models.SkeletonTree, arm_nodes: List[int], competing_arm_nodes: List[int], spacing, path: str, loop_i: int, arm_i: int, region_name: str, reference_centerline_points: Optional[List[numpy.ndarray]] = None) -> Tuple[float, int, int, numpy.ndarray, dict]
+
+   Extract a VMTK centerline for one donut-loop arm in isolation (its own surface, not the shared trunk mask).
+
+   Isolating the arm mask (:func:`isolate_donut_arm_mask`) before running VMTK
+   avoids the centerline snapping across the loop through the competing arm.
+   Returns ``(length_mm, n_points, arm_mask_voxels, points, metrics_dict)``.
+
+
+.. py:function:: process_donut_loop_component_vmtk(label: int, component_id: int, mask_cc: numpy.ndarray, multilabel: numpy.ndarray, spacing, vessel_info: nvitk.measure.morpho.models.VesselInfo, mapping: dict, tree: nvitk.measure.morpho.models.SkeletonTree, surface, loops: List[Tuple[int, int, List[int], List[int]]], centerline_dir: Optional[str], centerline_radius_dir: Optional[str], region_centerline_dir: Optional[str], surface_dir: Optional[str], ctx: Optional[nvitk.measure.morpho.anatomy_axes.MorphoContext] = None) -> Tuple[List[dict], Dict[str, pandas.DataFrame], dict, pandas.DataFrame, List[dict], Dict[str, pandas.DataFrame], List[dict], pandas.DataFrame, List[dict]]
+
+   Full donut-loop-aware processing of one component: root selection, per-terminal centerlines,
+   and per-loop selected/alternate-arm isolation, metrics, and export.
+
+   Component skeletons whose topology includes cycles (from :func:`find_loop_branches`)
+   need special handling because a plain root-to-terminal BFS path can only
+   traverse one side of each loop; this function additionally runs isolated
+   VMTK extraction on the losing ("alternate") arm of every loop so both sides
+   get their own centerline and metrics. Same return shape as
+   :func:`orchestration.process_component_tree_vmtk`.
+
+

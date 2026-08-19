@@ -1,0 +1,39 @@
+nvitk.segmentation.mra_vessel
+=============================
+
+.. py:module:: nvitk.segmentation.mra_vessel
+
+.. autoapi-nested-parse::
+
+   MRA-TOF vessel segmentation via ANTsPyNet (memory-safe patch streaming).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.mra_vessel.mra_vessel_segmentation
+
+
+Module Contents
+---------------
+
+.. py:function:: mra_vessel_segmentation(image: nvitk.types.Image | numpy.ndarray, mask: nvitk.types.Image | numpy.ndarray | None = None, *, prediction_batch_size: int = _DEFAULT_BATCH, patch_stride_length: int = _DEFAULT_STRIDE, verbose: bool = False) -> numpy.ndarray
+
+   ANTsPyNet MRA-TOF vessel segmentation (probability image).
+
+   Uses a **streaming** patch predictor (same model/weights as ANTsPyNet) so
+   large TOFs do not allocate all ``160³`` patches at once — the stock
+   ``antspynet.brain_mra_vessel_segmentation`` path can need tens of GiB at
+   small strides (e.g. stride 16 ≈ 25–50 GiB) and get OOM-killed.
+
+   :param image: MRA / TOF intensity volume.
+   :param mask: Optional brain mask (any positive foreground is accepted; binarized to
+                ``0/1``). If omitted, ANTsPyNet estimates an MRA brain mask.
+   :param prediction_batch_size: Patches per ``model.predict`` call (keep small on CPU / limited RAM).
+   :param patch_stride_length: Stride (voxels) for overlapping patch prediction. Smaller → denser
+                               overlap and more compute; does **not** inflate RAM in the streaming path.
+
+

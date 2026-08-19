@@ -1,0 +1,319 @@
+nvitk.gui.panels.statmodels.derived
+===================================
+
+.. py:module:: nvitk.gui.panels.statmodels.derived
+
+.. autoapi-nested-parse::
+
+   Derived-column editor.
+
+   Description
+   -----------
+   Lets the analysis frame carry transformed measurements — ``log_pi``, a z-scored covariate, a ratio
+   between two pipelines' measurements — as **real columns**. That matters because a formula-level
+   transform (``log(pi) ~ …``) only exists inside patsy: it cannot be plotted, filtered on, or used as
+   a mediation variable. A derived column can do all three.
+
+   Three kinds:
+
+   ``transform``   a canned function (:data:`~nvitk.stats.frame_ops.TRANSFORMS`) applied to one column
+   ``expression``  a free-form expression over the frame's columns, e.g. ``pi / flow_mean``
+   ``bins``        a continuous column cut into labelled groups — the ``tacsctot`` → ``tacsctot_group``
+                   pattern, e.g. left carotid plaque volume into ``cp0`` (= 0), ``cp1`` (0–25],
+                   ``cp2`` (25–100], ``cp3`` (> 100)
+
+   Names are constrained to Python identifiers because
+   :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names before fitting — a column
+   called ``log(pi)`` would silently become ``log_pi_`` in the model frame and stop matching.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.derived.DerivedColumnsDialog
+   nvitk.gui.panels.statmodels.derived.SplineTermDialog
+   nvitk.gui.panels.statmodels.derived.CovarianceTermDialog
+
+
+Module Contents
+---------------
+
+.. py:class:: DerivedColumnsDialog(parent: qtpy.QtWidgets.QWidget | None, *, frame: pandas.DataFrame, columns: Sequence[nvitk.stats.frame_ops.DerivedColumn] = (), bin_column: str | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Add, edit, reorder and remove the frame's derived columns.
+
+   The preview pane evaluates the whole list against the current frame every time it changes, so a
+   broken expression or an out-of-domain transform is visible before the dialog is accepted.
+
+
+   .. py:attribute:: _frame
+
+
+   .. py:attribute:: _columns
+      :type:  list[nvitk.stats.frame_ops.DerivedColumn]
+      :value: []
+
+
+
+   .. py:attribute:: _base_columns
+
+
+   .. py:attribute:: _preview_frame
+
+
+   .. py:method:: _build_list_side() -> qtpy.QtWidgets.QWidget
+
+      Left column: the ordered list of derived columns plus its reorder/remove controls.
+
+
+
+   .. py:method:: _build_editor_side() -> qtpy.QtWidgets.QWidget
+
+      Right column: the definition form for a single derived column.
+
+
+
+   .. py:method:: _build_merge_page() -> qtpy.QtWidgets.QWidget
+
+      Pool the levels of a categorical column into fewer groups.
+
+      The categorical counterpart of the bins page. Each level of the source column gets a text
+      box holding the group it belongs to; levels sharing a group name are merged. Typing the
+      same name in two boxes is the whole interface — there is no separate "create group" step,
+      because the group *is* its name.
+
+
+
+   .. py:method:: _on_merge_source_changed() -> None
+
+      Rebuild one row per level of the selected column.
+
+
+
+   .. py:method:: _on_merge_changed() -> None
+
+      Summarize the grouping the boxes currently describe.
+
+
+
+   .. py:method:: _build_bins_page() -> qtpy.QtWidgets.QWidget
+
+      Cut a continuous column into labelled groups.
+
+      The cut points are stored as explicit numbers rather than as a rule (“quartiles”): a rule
+      would be recomputed against whatever rows are loaded, so the same label would mean a
+      different range after a filter changed. The suggest buttons write numbers into the field,
+      which you can then edit.
+
+
+
+   .. py:method:: _numeric_columns() -> list[str]
+
+      Columns that can be binned — base columns plus any numeric derived ones.
+
+
+
+   .. py:method:: _categorical_columns(*, max_levels: int = 60) -> list[str]
+
+      Columns whose levels can be merged: discrete, and few enough to lay out one row each.
+
+      A float column is excluded — its "levels" are its values, and merging those is what the
+      bins page is for. So is anything past *max_levels*: a subject id has nothing to pool.
+
+
+
+   .. py:method:: _on_bin_source_changed() -> None
+
+      Suggest a name from the source, mirroring ``tacsctot`` → ``tacsctot_group``.
+
+
+
+   .. py:method:: _on_suggest_cuts(method: str, n_bins: int) -> None
+
+      Fill the cut-point field with values derived from the source column's distribution.
+
+
+
+   .. py:method:: _on_bins_changed(*_args) -> None
+
+      Refresh the interval/count preview for the bin definition being edited.
+
+
+
+   .. py:method:: columns() -> list[nvitk.stats.frame_ops.DerivedColumn]
+
+      The configured derived columns, in application order.
+
+
+
+   .. py:method:: _available_columns(up_to: int | None = None) -> list[str]
+
+      Base columns plus every derived column defined before index *up_to*.
+
+
+
+   .. py:method:: _refresh_sources() -> None
+
+      Repopulate the transform source combo, preserving the current pick.
+
+
+
+   .. py:method:: _refresh_list() -> None
+
+      Redraw the list of derived columns.
+
+
+
+   .. py:method:: _refresh_preview() -> None
+
+      Evaluate the whole list against the frame and report the outcome.
+
+
+
+   .. py:method:: _current_spec() -> nvitk.stats.frame_ops.DerivedColumn
+
+      Build a :class:`DerivedColumn` from the editor form.
+
+      :raises ValueError: If the bin cut points cannot be parsed.
+
+
+
+   .. py:method:: _on_kind_changed() -> None
+
+      Swap the definition page and refresh the suggested name.
+
+
+
+   .. py:method:: _suggest_name() -> None
+
+      Fill the name field with the conventional name while the user has not typed one.
+
+
+
+   .. py:method:: _validate(spec: nvitk.stats.frame_ops.DerivedColumn, *, ignore_index: int | None = None) -> str
+
+      Return why *spec* cannot be added, or ``""``.
+
+
+
+   .. py:method:: _on_add() -> None
+
+      Append the form's column to the list.
+
+
+
+   .. py:method:: _on_update() -> None
+
+      Replace the selected column with the form's definition.
+
+
+
+   .. py:method:: _on_remove() -> None
+
+      Drop the selected column.
+
+
+
+   .. py:method:: _on_move(delta: int) -> None
+
+      Move the selected column by *delta* positions (order matters: later ones may use it).
+
+
+
+   .. py:method:: _on_select(row: int) -> None
+
+      Load the selected column back into the editor form.
+
+
+
+.. py:class:: SplineTermDialog(parent: qtpy.QtWidgets.QWidget | None, *, columns: Sequence[str])
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Build a spline or polynomial formula term.
+
+   Curvature in a predictor does not need a different engine: a spline basis is still linear in its
+   parameters, so ``bs(age_c, df=4)`` fits inside OLS, GLM and MixedLM alike and the coefficient
+   table and marginal-means plot keep working. This just spares you the patsy syntax.
+
+
+   .. py:attribute:: _column
+
+
+   .. py:attribute:: _kind
+
+
+   .. py:attribute:: _df
+
+
+   .. py:attribute:: _df_label
+
+
+   .. py:attribute:: _hint
+
+
+   .. py:attribute:: _preview
+
+
+   .. py:method:: _sync(*_args) -> None
+
+      Update the description and the rendered term.
+
+
+
+   .. py:method:: term() -> str
+
+      The patsy term to insert.
+
+
+
+.. py:class:: CovarianceTermDialog(parent: qtpy.QtWidgets.QWidget | None, *, columns: Sequence[str], visit: str = '', subject: str = '')
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Build an ``mmrm`` covariance term for insertion into a formula.
+
+   The MMRM engine takes its covariance structure from the formula itself, the way R does. This
+   spares you memorising the nine structure names and the ``visit | subject`` notation, and shows
+   what each structure costs in parameters before you commit to it — an unstructured covariance
+   over many levels needs a lot of subjects to support.
+
+
+   .. py:attribute:: _structure
+
+
+   .. py:attribute:: _visit
+
+
+   .. py:attribute:: _subject
+
+
+   .. py:attribute:: _group
+
+
+   .. py:attribute:: _hint
+
+
+   .. py:attribute:: _preview
+
+
+   .. py:method:: _sync(*_args) -> None
+
+      Update the structure's description and the rendered term.
+
+
+
+   .. py:method:: term() -> str
+
+      The covariance term to insert.
+
+
+

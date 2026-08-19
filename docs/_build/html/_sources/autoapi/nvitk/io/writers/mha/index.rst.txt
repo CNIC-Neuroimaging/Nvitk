@@ -1,0 +1,39 @@
+nvitk.io.writers.mha
+====================
+
+.. py:module:: nvitk.io.writers.mha
+
+.. autoapi-nested-parse::
+
+   Write arrays as MetaImage via SimpleITK (spacing, origin, direction from metadata).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.io.writers.mha.sitk
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.writers.mha.write_mha
+
+
+Module Contents
+---------------
+
+.. py:data:: sitk
+   :value: None
+
+
+.. py:function:: write_mha(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Save *data* as ``.mha`` / ``.mhd``; expects ``ZYX`` (or reordered) for 3D volumes.
+
+

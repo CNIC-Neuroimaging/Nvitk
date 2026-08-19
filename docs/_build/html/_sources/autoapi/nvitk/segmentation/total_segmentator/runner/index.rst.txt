@@ -1,0 +1,52 @@
+nvitk.segmentation.total_segmentator.runner
+===========================================
+
+.. py:module:: nvitk.segmentation.total_segmentator.runner
+
+.. autoapi-nested-parse::
+
+   Thin wrapper around the ``TotalSegmentator`` command-line executable.
+
+   Intentionally does **not** import the ``totalsegmentator`` Python API; the CLI
+   is what we run inside Singularity on the cluster and in pip installs locally.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.total_segmentator.runner.run_totalsegmentator
+   nvitk.segmentation.total_segmentator.runner.run_totalsegmentator_batch
+
+
+Module Contents
+---------------
+
+.. py:function:: run_totalsegmentator(input: str | pathlib.Path, output: str | pathlib.Path, task: str, *, device: str = 'gpu', roi_subset: Iterable[str] | None = None, multilabel: bool = True, statistics: bool = True, fast: bool = False, preview: bool = False, model_dir: str | pathlib.Path | None = None, extra_env: dict[str, str] | None = None, check: bool = True, capture_output: bool = True) -> subprocess.CompletedProcess
+
+   Invoke the ``TotalSegmentator`` CLI on *input* and write to *output*.
+
+   :param input: Single NIfTI file or a directory of NIfTI files.
+   :param output: Output directory. Created if absent.
+   :param task: One of :data:`AVAILABLE_TASKS` (passed via ``-ta``).
+   :param device: ``'gpu'`` or ``'cpu'`` (passed via ``--device``).
+   :param roi_subset: ROI whitelist appended via ``-rs`` (``None`` means all ROIs).
+   :param multilabel: Pass ``--ml`` (single multilabel NIfTI output). Default True.
+   :param statistics: Pass ``--statistics``. Default True.
+   :param fast: Forwarded to ``--fast`` / ``--preview``.
+   :param preview: Forwarded to ``--fast`` / ``--preview``.
+   :param model_dir: Optional path exported as ``TOTALSEG_HOME_DIR`` for the subprocess.
+   :param extra_env: Additional environment variables for the subprocess.
+
+   :returns: The completed process. Raises :class:`subprocess.CalledProcessError`
+             when *check* is True and the CLI exits non-zero.
+   :rtype: subprocess.CompletedProcess
+
+
+.. py:function:: run_totalsegmentator_batch(inputs_outputs: Sequence[tuple[str | pathlib.Path, str | pathlib.Path]], task: str, **kwargs) -> list[subprocess.CompletedProcess]
+
+   Convenience: run :func:`run_totalsegmentator` over a list of (input, output) pairs.
+
+

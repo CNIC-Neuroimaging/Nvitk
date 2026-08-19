@@ -1,0 +1,266 @@
+nvitk.pipes.qvtpy.util.io.xnat_upload
+=====================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.io.xnat_upload
+
+.. autoapi-nested-parse::
+
+   QVTpy XNAT upload: completion checks and per-subject orchestration.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.xnat_upload.ResultsSource
+   nvitk.pipes.qvtpy.util.io.xnat_upload.DEFAULT_XNAT_UPLOAD_STAGES
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.xnat_upload.UploadStatus
+   nvitk.pipes.qvtpy.util.io.xnat_upload.ResourceUploadOutcome
+   nvitk.pipes.qvtpy.util.io.xnat_upload.UploadResult
+   nvitk.pipes.qvtpy.util.io.xnat_upload.BatchUploadSummary
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.xnat_upload.ensure_full_pipeline_require_stages
+   nvitk.pipes.qvtpy.util.io.xnat_upload.parse_require_stages
+   nvitk.pipes.qvtpy.util.io.xnat_upload.eicab_dir
+   nvitk.pipes.qvtpy.util.io.xnat_upload.qvtpy_dir
+   nvitk.pipes.qvtpy.util.io.xnat_upload.eicab_complete
+   nvitk.pipes.qvtpy.util.io.xnat_upload.qvtpy_stage_complete
+   nvitk.pipes.qvtpy.util.io.xnat_upload.qvtpy_all_required_complete
+   nvitk.pipes.qvtpy.util.io.xnat_upload.upload_subject_to_xnat
+   nvitk.pipes.qvtpy.util.io.xnat_upload.format_batch_upload_report
+   nvitk.pipes.qvtpy.util.io.xnat_upload.run_xnat_upload
+
+
+Module Contents
+---------------
+
+.. py:data:: ResultsSource
+
+.. py:data:: DEFAULT_XNAT_UPLOAD_STAGES
+   :type:  tuple[str, Ellipsis]
+
+.. py:class:: UploadStatus
+
+   Bases: :py:obj:`str`, :py:obj:`enum.Enum`
+
+
+   Outcome status for one resource upload attempt.
+
+
+   .. py:attribute:: UPLOADED
+      :value: 'uploaded'
+
+
+
+   .. py:attribute:: SKIPPED
+      :value: 'skipped'
+
+
+
+   .. py:attribute:: INCOMPLETE
+      :value: 'incomplete'
+
+
+
+   .. py:attribute:: ERROR
+      :value: 'error'
+
+
+
+   .. py:attribute:: DRY_RUN
+      :value: 'dry_run'
+
+
+
+.. py:class:: ResourceUploadOutcome
+
+   Result of uploading one named resource (eicab/qvtpy) for a subject.
+
+
+   .. py:attribute:: resource
+      :type:  str
+
+
+   .. py:attribute:: status
+      :type:  UploadStatus
+
+
+   .. py:attribute:: detail
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: n_files
+      :type:  int
+      :value: 0
+
+
+
+.. py:class:: UploadResult
+
+   Combined eicab + qvtpy upload outcome for one subject.
+
+
+   .. py:attribute:: subject
+      :type:  str
+
+
+   .. py:attribute:: experiment_label
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: eicab
+      :type:  ResourceUploadOutcome | None
+      :value: None
+
+
+
+   .. py:attribute:: qvtpy
+      :type:  ResourceUploadOutcome | None
+      :value: None
+
+
+
+   .. py:attribute:: error
+      :type:  str
+      :value: ''
+
+
+
+   .. py:property:: ok
+      :type: bool
+
+
+      True if there was no top-level error and no resource outcome errored.
+
+
+.. py:function:: ensure_full_pipeline_require_stages(stages: list[str]) -> list[str]
+
+   Ensure the upload gate includes stage-7 morphometrics for a complete bundle.
+
+
+.. py:function:: parse_require_stages(spec: str) -> list[str]
+
+   Parse ``--require-stages`` into canonical qvtpy stage ids.
+
+   Always includes ``stage7`` (morphometrics) so uploaded ``qvtpy`` resources
+   reflect the complete pipeline, not hemodynamics-only outputs.
+
+
+.. py:function:: eicab_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Stage 1 (eICAB) output directory for *subject* under *output_root*.
+
+
+.. py:function:: qvtpy_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   qvtpy stage output root for *subject* under *output_root*.
+
+
+.. py:function:: eicab_complete(output_root: pathlib.Path, subject: str) -> bool
+
+   True if *subject*'s stage-1 eICAB output contains a segmentation.
+
+
+.. py:function:: qvtpy_stage_complete(output_root: pathlib.Path, subject: str, stage_id: str) -> bool
+
+   True if *subject*'s *stage_id* QC check reports it complete.
+
+
+.. py:function:: qvtpy_all_required_complete(output_root: pathlib.Path, subject: str, required_stages: list[str]) -> tuple[bool, list[str]]
+
+   (all complete?, list of incomplete stage ids) for *subject* over *required_stages*.
+
+
+.. py:function:: upload_subject_to_xnat(subject: str, *, output_root: pathlib.Path, xnat_session: Any, project_id: str, required_stages: list[str], upload_eicab: bool = True, upload_qvtpy: bool = True, overwrite: bool = False, skip_existing: bool = True, dry_run: bool = False) -> UploadResult
+
+   Upload eicab/qvtpy resources for one subject.
+
+
+.. py:class:: BatchUploadSummary
+
+   Aggregate counts and per-subject results for a batch XNAT upload run.
+
+
+   .. py:attribute:: subjects
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: eicab_uploaded
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: eicab_skipped
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: eicab_incomplete
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: qvtpy_uploaded
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: qvtpy_skipped
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: qvtpy_incomplete
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: errors
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: results
+      :type:  list[UploadResult]
+      :value: []
+
+
+
+.. py:function:: format_batch_upload_report(summary: BatchUploadSummary) -> str
+
+   Human-readable uploaded / incomplete / failed report for one batch.
+
+
+.. py:function:: run_xnat_upload(subjects: list[str], *, output_root: pathlib.Path, xnat_config: nvitk.db.xnat_config.XnatConnectionConfig, required_stages: list[str] | None = None, upload_eicab: bool = True, upload_qvtpy: bool = True, overwrite: bool = False, skip_existing: bool = True, dry_run: bool = False, results_source: ResultsSource = 'local', ssh_host: str | None = None, ssh_user: str | None = None, ssh_password: str | None = None, remote_results_root: pathlib.Path | None = None) -> BatchUploadSummary
+
+   Upload qvtpy/eicab results for *subjects* to XNAT.
+
+

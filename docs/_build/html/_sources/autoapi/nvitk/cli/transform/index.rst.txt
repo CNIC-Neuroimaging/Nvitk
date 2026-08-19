@@ -1,0 +1,57 @@
+nvitk.cli.transform
+===================
+
+.. py:module:: nvitk.cli.transform
+
+.. autoapi-nested-parse::
+
+   ``nvitk-transform`` CLI — geometric transforms.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.transform.main
+   nvitk.cli.transform.cmd_resample
+   nvitk.cli.transform.cmd_isotropy
+   nvitk.cli.transform.cmd_rotate
+   nvitk.cli.transform.cmd_swap_axes
+   nvitk.cli.transform.cmd_oblique
+
+
+Module Contents
+---------------
+
+.. py:function:: main() -> None
+
+   Geometric transform tools.
+
+
+.. py:function:: cmd_resample(input_path, output_path, reference, backend, submit, emit_script, direct_submit, no_remote, dry_run, order)
+
+   Resample a volume onto the grid of a reference image.
+
+
+.. py:function:: cmd_isotropy(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run)
+
+   Resample a volume to isotropic voxel spacing.
+
+
+.. py:function:: cmd_rotate(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, angle, axis, order, reshape)
+
+   Rotate a 2D/3D volume around a spatial axis.
+
+
+.. py:function:: cmd_swap_axes(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, axis0, axis1, perm_order)
+
+   Swap two axes, or apply a full axis permutation with --order.
+
+
+.. py:function:: cmd_oblique(input_path, output_path, backend, submit, emit_script, direct_submit, no_remote, dry_run, point, normal)
+
+   Sample an oblique 2D slice through a volume defined by a point and normal vector.
+
+

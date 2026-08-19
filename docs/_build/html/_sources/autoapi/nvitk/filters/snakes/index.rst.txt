@@ -1,0 +1,142 @@
+nvitk.filters.snakes
+====================
+
+.. py:module:: nvitk.filters.snakes
+
+.. autoapi-nested-parse::
+
+   Kass snakes (parametric active contours).
+
+   Wraps :func:`skimage.segmentation.active_contour`, the discrete
+   implementation of Kass, Witkin & Terzopoulos (IJCV 1988). An initial
+   contour (from a binary / label mask) is deformed under internal
+   smoothness forces and image line/edge energies.
+
+   Reference
+   ---------
+   M. Kass, A. Witkin, D. Terzopoulos,
+   "Snakes: Active Contour Models",
+   International Journal of Computer Vision, 1(4):321–331, 1988.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.filters.snakes.SNAKES_ALPHA_DEFAULT
+   nvitk.filters.snakes.SNAKES_BETA_DEFAULT
+   nvitk.filters.snakes.SNAKES_W_LINE_DEFAULT
+   nvitk.filters.snakes.SNAKES_W_EDGE_DEFAULT
+   nvitk.filters.snakes.SNAKES_GAMMA_DEFAULT
+   nvitk.filters.snakes.SNAKES_MAX_ITER_DEFAULT
+   nvitk.filters.snakes.SNAKES_CONVERGENCE_DEFAULT
+   nvitk.filters.snakes.SNAKES_SIGMA_DEFAULT
+   nvitk.filters.snakes.SNAKES_N_POINTS_DEFAULT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.filters.snakes.resample_snake
+   nvitk.filters.snakes.snake_from_mask
+   nvitk.filters.snakes.mask_from_snake
+   nvitk.filters.snakes.active_contour_2d
+   nvitk.filters.snakes.snakes_filter
+
+
+Module Contents
+---------------
+
+.. py:data:: SNAKES_ALPHA_DEFAULT
+   :type:  float
+   :value: 0.01
+
+
+.. py:data:: SNAKES_BETA_DEFAULT
+   :type:  float
+   :value: 0.1
+
+
+.. py:data:: SNAKES_W_LINE_DEFAULT
+   :type:  float
+   :value: 0.0
+
+
+.. py:data:: SNAKES_W_EDGE_DEFAULT
+   :type:  float
+   :value: 1.0
+
+
+.. py:data:: SNAKES_GAMMA_DEFAULT
+   :type:  float
+   :value: 0.01
+
+
+.. py:data:: SNAKES_MAX_ITER_DEFAULT
+   :type:  int
+   :value: 2500
+
+
+.. py:data:: SNAKES_CONVERGENCE_DEFAULT
+   :type:  float
+   :value: 0.1
+
+
+.. py:data:: SNAKES_SIGMA_DEFAULT
+   :type:  float
+   :value: 1.0
+
+
+.. py:data:: SNAKES_N_POINTS_DEFAULT
+   :type:  int
+   :value: 400
+
+
+.. py:function:: resample_snake(snake: numpy.ndarray, n_points: int) -> numpy.ndarray
+
+   Arc-length resample a closed contour to *n_points* (row, col).
+
+
+.. py:function:: snake_from_mask(mask: numpy.ndarray, *, n_points: int = SNAKES_N_POINTS_DEFAULT, level: float | None = None) -> numpy.ndarray
+
+   Largest iso-contour of a 2-D binary / label mask as a snake (row, col).
+
+
+.. py:function:: mask_from_snake(snake: numpy.ndarray, shape: tuple[int, int]) -> numpy.ndarray
+
+   Rasterize a closed snake into a boolean mask of *shape* (H, W).
+
+
+.. py:function:: active_contour_2d(image: numpy.ndarray, snake: numpy.ndarray, *, alpha: float = SNAKES_ALPHA_DEFAULT, beta: float = SNAKES_BETA_DEFAULT, w_line: float = SNAKES_W_LINE_DEFAULT, w_edge: float = SNAKES_W_EDGE_DEFAULT, gamma: float = SNAKES_GAMMA_DEFAULT, max_num_iter: int = SNAKES_MAX_ITER_DEFAULT, convergence: float = SNAKES_CONVERGENCE_DEFAULT, boundary_condition: str = 'periodic', gaussian_sigma: float = SNAKES_SIGMA_DEFAULT) -> numpy.ndarray
+
+   Run Kass active contour on a single 2-D image; return refined snake.
+
+
+.. py:function:: snakes_filter(image: nvitk.types.Image | numpy.ndarray, init_mask: nvitk.types.Image | numpy.ndarray, *, alpha: float = SNAKES_ALPHA_DEFAULT, beta: float = SNAKES_BETA_DEFAULT, w_line: float = SNAKES_W_LINE_DEFAULT, w_edge: float = SNAKES_W_EDGE_DEFAULT, gamma: float = SNAKES_GAMMA_DEFAULT, max_num_iter: int = SNAKES_MAX_ITER_DEFAULT, convergence: float = SNAKES_CONVERGENCE_DEFAULT, boundary_condition: str = 'periodic', gaussian_sigma: float = SNAKES_SIGMA_DEFAULT, n_points: int = SNAKES_N_POINTS_DEFAULT, axis: int = 0) -> nvitk.types.Image | numpy.ndarray
+
+   Kass snakes from an initial mask contour; returns a binary mask.
+
+   * 2-D: deform the largest contour of *init_mask* on *image*.
+   * 3-D: apply 2-D snakes independently on each slice along *axis*
+     where the init mask is nonempty (Kass snakes are 2-D).
+
+   :param image: Intensity image / volume guiding the external energy.
+   :param init_mask: Binary or label mask whose contour seeds the snake (required).
+   :param alpha: Tension (length) weight — higher contracts faster.
+   :param beta: Rigidity (smoothness) weight — higher → smoother snake.
+   :param w_line: Attraction to intensity (negative → dark regions).
+   :param w_edge: Attraction to edges (negative → repel from edges).
+   :param gamma: Explicit time-step size.
+   :param max_num_iter: Optimization stopping criteria.
+   :param convergence: Optimization stopping criteria.
+   :param boundary_condition: ``periodic`` (closed), ``free``, ``fixed``, or mixed
+                              (``free-fixed`` / ``fixed-free``).
+   :param gaussian_sigma: Pre-smoothing of the image energy (0 disables).
+   :param n_points: Number of snake control points (resampled from init contour).
+   :param axis: Slice axis for 3-D volumes (ignored for 2-D).
+
+

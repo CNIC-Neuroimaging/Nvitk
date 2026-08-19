@@ -1,0 +1,214 @@
+nvitk.pipes.qvtpy.util.centerline.centerline_io
+===============================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.centerline.centerline_io
+
+.. autoapi-nested-parse::
+
+   Load and write ordered vessel centerlines from stage-3 / stage-4 outputs.
+
+   **Inputs**
+
+   - ``centerlines_mask.nii.gz`` + ``centerline_meta.json`` (stage 3).
+   - Optional ``centerlines_mask_4dflow.nii.gz`` from stage-4 ``seg_4dflow`` skeletonization.
+
+   **Outputs**
+
+   - Polylines keyed by qvtpy arterial label id or venous name (SSSV, …).
+   - Rasterized multilabel masks via :func:`rasterize_centerlines_mask`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_NIFTI
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_META_JSON
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_SEG_NIFTI
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_META_JSON
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_BRANCHES_JSON
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_BRANCH_VTP_DIR
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.main_path_of
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.arterial_main_paths
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.flatten_branches
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.parent_label_of
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.export_branch_vtps
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_mask_path
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.centerline_meta_path
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerline_meta
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.smooth_centerline_polyline
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.export_centerlines_from_segmentation
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_centerlines
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_venous_centerlines
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines
+   nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines_branches
+
+
+Module Contents
+---------------
+
+.. py:data:: CENTERLINES_MASK_NIFTI
+   :value: 'centerlines_mask.nii.gz'
+
+
+.. py:data:: CENTERLINE_META_JSON
+   :value: 'centerline_meta.json'
+
+
+.. py:data:: CENTERLINES_MASK_SEG_NIFTI
+   :value: 'centerlines_mask_4dflow.nii.gz'
+
+
+.. py:data:: CENTERLINE_SEG_META_JSON
+   :value: 'centerlines_seg_meta.json'
+
+
+.. py:data:: CENTERLINE_SEG_BRANCHES_JSON
+   :value: 'centerlines_seg_branches.json'
+
+
+.. py:function:: main_path_of(branches: list[tuple[str, Any]]) -> Any | None
+
+   Trunk (main) polyline of a per-label branch list, or ``None`` if empty.
+
+
+.. py:function:: arterial_main_paths(arterial: dict[int, list[tuple[str, Any]]]) -> dict[int, Any]
+
+   Legacy view: parent label id -> trunk polyline (drops side branches).
+
+
+.. py:function:: flatten_branches(arterial: dict[int, list[tuple[str, Any]]]) -> dict[str, Any]
+
+   Name-keyed view: branch name -> polyline (across all parent labels).
+
+
+.. py:function:: parent_label_of(branch_name: str) -> int | None
+
+   Parent qvtpy label id for a branch name like ``LMCA-M2a``.
+
+
+.. py:data:: CENTERLINE_BRANCH_VTP_DIR
+   :value: 'branch_vtps'
+
+
+.. py:function:: export_branch_vtps(arterial: dict[int, list[tuple[str, Any]]], out_dir: pathlib.Path) -> list[pathlib.Path]
+
+   Write one ``.vtp`` polyline per named branch (for tortuosity metrics).
+
+   Files are named ``{parent_label}_{branch_name}.vtp`` (e.g. ``6_LMCA-M2a.vtp``)
+   so :func:`nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_vtp_folder`
+   keys each metrics row by the branch name. Points are the (voxel-space)
+   centerline coordinates. Best-effort: returns an empty list when VTK is
+   unavailable.
+
+
+.. py:function:: centerlines_mask_path(stage_dir: pathlib.Path, *, from_segmentation: bool = False) -> pathlib.Path
+
+   Path to the centerline multilabel NIfTI in *stage_dir*.
+
+
+.. py:function:: centerline_meta_path(stage_dir: pathlib.Path, *, from_segmentation: bool = False) -> pathlib.Path
+
+   Path to the JSON sidecar listing arterial / venous label ids.
+
+
+.. py:function:: load_centerline_meta(stage_dir: pathlib.Path, *, from_segmentation: bool = False) -> dict[str, Any]
+
+   Parse centerline JSON metadata from *stage_dir*.
+
+
+.. py:function:: rasterize_centerlines_mask(shape: tuple[int, int, int], arterial: dict[int, Any], venous: dict[str, Any] | None = None, *, venous_label_by_name: dict[str, int] | None = None) -> np.ndarray
+
+   Voxel mask with qvtpy label id on each centerline point.
+
+
+.. py:function:: smooth_centerline_polyline(points: Any, *, window: int = _DEFAULT_SMOOTH_WINDOW, use_spline: bool = _DEFAULT_SMOOTH_SPLINE) -> Any
+
+   Light smoothing of an ordered centerline polyline (voxel coords).
+
+   Uses a centered moving average; optionally resamples with a mild spline
+   (``s>0``) so small distal branches remain continuous without sharp kinks.
+
+
+.. py:function:: centerlines_from_segmentation(seg: np.ndarray, *, min_points: int = 3, min_branch_points: int = _DEFAULT_ARTERIAL_BRANCH_MIN_POINTS, pcomm_min_points: int = _DEFAULT_PCOMM_MIN_POINTS, prefer_polylines: dict[int, Any] | None = None, labels: list[int] | None = None, smooth: bool = True, smooth_window: int = _DEFAULT_SMOOTH_WINDOW) -> dict[int, list[tuple[str, Any]]]
+
+   Named arterial branch polylines from ``seg_4dflow``.
+
+   Returns ``{parent_label: [(branch_name, (N,3) points), ...]}`` with the trunk
+   first. Branched territories (MCA/ACA/PCA) are decomposed into a trunk plus
+   bifurcation side branches (named e.g. ``LMCA-M1`` / ``LMCA-M2a`` via
+   :func:`~nvitk.pipes.qvtpy.labels.qvtpy_branch_names`); ICA/basilar/comm/vertebral
+   stay single-path (one branch = the bare vessel name).
+
+   *pcomm_min_points* drops very short LPCOMM/RPCOMM skeletons (false positives).
+   *min_branch_points* drops short MCA/ACA/PCA bifurcation side branches.
+   *prefer_polylines* (typically stage-3 arterial CLs) bias branched vessels so
+   proximal trunks are not dropped by a distal-only graph diameter. When absent,
+   MCA/ACA/PCA use a parent-contact seed from the segmentation. Optional light
+   smoothing is applied per branch by default.
+
+
+.. py:function:: export_centerlines_from_segmentation(seg: np.ndarray, out_dir: pathlib.Path, *, metadata: dict[str, Any] | None = None, min_points: int = 3, min_branch_points: int = _DEFAULT_ARTERIAL_BRANCH_MIN_POINTS, pcomm_min_points: int = _DEFAULT_PCOMM_MIN_POINTS, venous_polylines: dict[str, Any] | None = None, venous_label_by_name: dict[str, int] | None = None, prefer_polylines: dict[int, Any] | None = None, smooth: bool = True, smooth_window: int = _DEFAULT_SMOOTH_WINDOW) -> tuple[pathlib.Path, pathlib.Path]
+
+   Build centerlines from ``seg_4dflow`` and write mask + meta under *out_dir*.
+
+   *prefer_polylines* (typically stage-3 arterial CLs) bias branched vessels so
+   proximal trunks are not dropped by a distal-only graph diameter. When absent,
+   MCA/ACA/PCA use a parent-contact seed from the segmentation.
+
+
+.. py:function:: load_arterial_branches(stage_dir: pathlib.Path, *, min_points: int = 3, meta: dict[str, Any] | None = None, from_segmentation: bool = False) -> dict[int, list[tuple[str, Any]]]
+
+   Named arterial branches keyed by parent qvtpy label id.
+
+   Prefers the ``centerlines_seg_branches.json`` sidecar (multi-branch, named).
+   Falls back to reconstructing one trunk polyline per label from the multilabel
+   centerline mask (wrapped as ``[(vessel_name, pts)]``) when the sidecar is
+   absent (e.g. stage-3, or older stage-4 outputs).
+
+
+.. py:function:: load_arterial_centerlines(stage_dir: pathlib.Path, *, min_points: int = 3, meta: dict[str, Any] | None = None, from_segmentation: bool = False) -> dict[int, Any]
+
+   Arterial trunk (main-path) polylines keyed by qvtpy label id.
+
+   Legacy single-polyline view: returns only the trunk of each vessel. Use
+   :func:`load_arterial_branches` for the full named bifurcation set.
+
+
+.. py:function:: load_venous_centerlines(stage_dir: pathlib.Path, *, min_points: int = 3, meta: dict[str, Any] | None = None, from_segmentation: bool = False) -> dict[str, Any]
+
+   Venous centerlines keyed by vessel name (SSSV, STRV, …).
+
+
+.. py:function:: load_centerlines(stage3_dir: pathlib.Path, *, min_points: int = 3, stage4_dir: pathlib.Path | None = None, truncate_length_ratio: float = 0.6) -> tuple[dict[int, Any], dict[str, Any], dict[str, Any]]
+
+   Return ``(arterial, venous, meta)``.
+
+   Arterial polylines prefer stage-4 segmentation centerlines when available; venous
+   still come from stage-3 (not present in ``seg_4dflow``). Stage-3 is used when a
+   stage-4 label is missing, or when the stage-4 polyline is much shorter than
+   stage-3 (truncated diameter path), controlled by *truncate_length_ratio*.
+
+
+.. py:function:: load_centerlines_branches(stage3_dir: pathlib.Path, *, min_points: int = 3, stage4_dir: pathlib.Path | None = None, truncate_length_ratio: float = 0.6) -> tuple[dict[int, list[tuple[str, Any]]], dict[str, Any], dict[str, Any]]
+
+   Return ``(arterial_branches, venous, meta)`` (named multi-branch arterial).
+
+   Like :func:`load_centerlines` but keeps every named branch per vessel. Stage-4
+   branches are preferred when present; a vessel whose stage-4 trunk is missing or
+   much shorter than stage-3 (see *truncate_length_ratio*) falls back to the
+   stage-3 single polyline (wrapped as the vessel's trunk).
+
+

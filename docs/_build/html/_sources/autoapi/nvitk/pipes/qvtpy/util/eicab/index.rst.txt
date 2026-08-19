@@ -1,0 +1,24 @@
+nvitk.pipes.qvtpy.util.eicab
+============================
+
+.. py:module:: nvitk.pipes.qvtpy.util.eicab
+
+.. autoapi-nested-parse::
+
+   eICAB mask resolution, postprocess, brain mask, and morphometrics paths.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/pipes/qvtpy/util/eicab/brain_mask/index
+   /autoapi/nvitk/pipes/qvtpy/util/eicab/eicab_masks/index
+   /autoapi/nvitk/pipes/qvtpy/util/eicab/eicab_postprocess/index
+   /autoapi/nvitk/pipes/qvtpy/util/eicab/morpho_paths/index
+   /autoapi/nvitk/pipes/qvtpy/util/eicab/morpho_topology/index
+
+

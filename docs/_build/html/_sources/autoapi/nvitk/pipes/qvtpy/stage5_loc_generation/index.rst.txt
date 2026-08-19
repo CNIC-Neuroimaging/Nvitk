@@ -1,0 +1,53 @@
+nvitk.pipes.qvtpy.stage5_loc_generation
+=======================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage5_loc_generation
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 5: per-vessel LOC (voxel + tangent) from centerlines.
+
+   **Inputs**
+
+   - Stage-3/4 centerlines, contrast volumes (CD, angio, velocity magnitude).
+
+   **Outputs**
+
+   - ``locs.csv``, ``loc_meta.json`` under ``stage5_loc_generation/``.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage5_loc_generation.run_subject
+   nvitk.pipes.qvtpy.stage5_loc_generation.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage5_loc_generation.submit_subject_sge
+   nvitk.pipes.qvtpy.stage5_loc_generation.main
+
+
+Module Contents
+---------------
+
+.. py:function:: run_subject(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool = False, tangent_k_half: int = 2, loc_arterial_strategy: str = 'qvtpy', cross_section_radius_vox: float = 10.0, venous_min_component_frac: float = 0.005, loc_endpoint_inset_frac: float = 0.08, distal_locs: bool = False) -> pathlib.Path
+
+   Place arterial and venous LOCs; return stage-5 output directory.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, loc_arterial_strategy: str = 'qvtpy', cross_section_radius_vox: float = 10.0, venous_min_component_frac: float = 0.005, loc_endpoint_inset_frac: float = 0.08, distal_locs: bool = False, backend: str = 'gpu') -> str
+
+   Return the host shell command for one stage5 array/SGE task.
+
+
+.. py:function:: submit_subject_sge(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, hold_jid: str | None = None, emit: TextIO | None = None, loc_arterial_strategy: str = 'qvtpy', cross_section_radius_vox: float = 10.0, venous_min_component_frac: float = 0.005, loc_endpoint_inset_frac: float = 0.08, distal_locs: bool = False, backend: str = 'gpu') -> str
+
+   Emit or submit one stage-5 SGE job. Returns qsub job id.
+
+
+.. py:function:: main(subject: str, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool, tangent_k_half: int, loc_arterial_strategy: str, cross_section_radius_vox: float, venous_min_component_frac: float, loc_endpoint_inset_frac: float, distal_locs: bool) -> None
+
+   CLI entry point (``qvtpy-stage5-loc``): generate arterial and venous LOCs for one subject.
+
+

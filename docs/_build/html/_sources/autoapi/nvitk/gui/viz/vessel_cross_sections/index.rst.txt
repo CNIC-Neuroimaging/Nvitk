@@ -1,0 +1,114 @@
+nvitk.gui.viz.vessel_cross_sections
+===================================
+
+.. py:module:: nvitk.gui.viz.vessel_cross_sections
+
+.. autoapi-nested-parse::
+
+   Napari vessel cross-section viewer (centerline pick + oblique 2D panel).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.vessel_cross_sections.XS_CENTERLINES
+   nvitk.gui.viz.vessel_cross_sections.XS_CL_POINTS
+   nvitk.gui.viz.vessel_cross_sections.XS_PICK
+   nvitk.gui.viz.vessel_cross_sections.XS_PLANE
+   nvitk.gui.viz.vessel_cross_sections.XS_NORMAL
+   nvitk.gui.viz.vessel_cross_sections.XS_TANGENT
+   nvitk.gui.viz.vessel_cross_sections.XS_SEG
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.vessel_cross_sections.centerlines_dict_from_arterial_branches
+   nvitk.gui.viz.vessel_cross_sections.append_venous_centerlines
+   nvitk.gui.viz.vessel_cross_sections.build_centerlines_dict
+   nvitk.gui.viz.vessel_cross_sections.shutdown_vessel_cross_sections
+   nvitk.gui.viz.vessel_cross_sections.install_vessel_cross_sections
+
+
+Module Contents
+---------------
+
+.. py:data:: XS_CENTERLINES
+   :value: 'Vessel centerlines (xs)'
+
+
+.. py:data:: XS_CL_POINTS
+   :value: 'Centerline points (xs)'
+
+
+.. py:data:: XS_PICK
+   :value: 'Cross-section pick'
+
+
+.. py:data:: XS_PLANE
+   :value: 'Cross-section plane (xs)'
+
+
+.. py:data:: XS_NORMAL
+   :value: 'Cross-section normal (xs)'
+
+
+.. py:data:: XS_TANGENT
+   :value: 'Tangent segment (xs)'
+
+
+.. py:data:: XS_SEG
+   :value: 'Vessel seg (xs)'
+
+
+.. py:function:: centerlines_dict_from_arterial_branches(arterial: dict[int, list[tuple[str, Any]]], *, min_points: int = 3) -> tuple[dict[int, numpy.ndarray], dict[int, int], dict[int, str]]
+
+   Flatten stage-4/6 named branches into pickable centerline keys.
+
+   :returns: * *centerlines* -- Synthetic int key → polyline (exact stage polylines, not re-extracted).
+             * *volume_label_by_key* -- Synthetic key → parent qvtpy seg label (for plane label constraints).
+             * *branch_name_by_key* -- Synthetic key → branch name (``LMCA-M2a``, …).
+
+
+.. py:function:: append_venous_centerlines(centerlines: dict[int, numpy.ndarray], volume_label_by_key: dict[int, int], branch_name_by_key: dict[int, str], venous: dict[str, Any] | None, *, venous_label_by_name: dict[str, int] | None = None, min_points: int = 3) -> int
+
+   Append named venous polylines onto an existing XS centerline map.
+
+   Returns the number of venous vessels added.
+
+
+.. py:function:: build_centerlines_dict(centerline_mask: numpy.ndarray, *, segmentation: numpy.ndarray | None = None, min_points: int = 5) -> dict[int, numpy.ndarray]
+
+   Ordered polylines per label from centerline (+ optional seg) masks.
+
+   Fallback when stage-4 ``centerlines_seg_branches.json`` is unavailable.
+   Prefer :func:`centerlines_dict_from_arterial_branches` so overlays match
+   stage 4/6 bifurcation geometry.
+
+
+.. py:function:: shutdown_vessel_cross_sections(app_state: dict[str, Any]) -> None
+
+   Disconnect pick callback and drop dock reference.
+
+
+.. py:function:: install_vessel_cross_sections(viewer: Any, app_state: dict[str, Any], *, intensity_layer: Any, centerline_mask: numpy.ndarray, segmentation: numpy.ndarray | None, params: dict[str, Any], vx: numpy.ndarray | None = None, vy: numpy.ndarray | None = None, vz: numpy.ndarray | None = None, arterial_branches: dict[int, list[tuple[str, Any]]] | None = None, venous_centerlines: dict[str, Any] | None = None, venous_label_by_name: dict[str, int] | None = None, locs: Sequence[Mapping[str, Any]] | Sequence[nvitk.gui.viz.loc_points.LocPose] | None = None, mag: numpy.ndarray | None = None, vel_mag: numpy.ndarray | None = None) -> None
+
+   Register Napari layers, dock, and 3D click-to-inspect behavior.
+
+   When *arterial_branches* is provided (stage-4/6 ``centerlines_seg_branches``),
+   those exact named polylines are used so the overlay coincides with pipeline
+   centerlines. Otherwise polylines are re-extracted from *centerline_mask*.
+
+   Optional *venous_centerlines* (stage-3 name → polyline) are always appended
+   when present so venous vessels are pickable alongside arterial branches.
+
+   Optional *locs* (stage-5 ``locs.csv`` rows or :class:`LocPose` list) enables
+   snapping to the exact LOC pose stage 6 measured — used by the QC tab loader.
+   The standalone visualization tool omits *locs* and keeps centerline-only picks.
+
+

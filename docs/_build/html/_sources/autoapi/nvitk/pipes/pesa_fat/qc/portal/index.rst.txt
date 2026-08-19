@@ -1,0 +1,110 @@
+nvitk.pipes.pesa_fat.qc.portal
+==============================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.portal
+
+.. autoapi-nested-parse::
+
+   PESA-Fat QC portal (static HTML + Excel and DB-backed review endpoint).
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.portal.ReviewRow
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.portal.review_widget_html
+   nvitk.pipes.pesa_fat.qc.portal.upsert_review_row_excel
+   nvitk.pipes.pesa_fat.qc.portal.create_qc_portal_app
+
+
+Module Contents
+---------------
+
+.. py:function:: review_widget_html(*, batch: str, subject: str, pipeline: str, structures: Iterable[str], report_relpath: str) -> str
+
+   Self-contained HTML/JS review widget (per-structure QC status/comment rows, Excel
+   autosave, DB sync button) embedded into a subject's QC report.
+
+
+.. py:class:: ReviewRow
+
+   One QC review entry (structure/aspect status + reviewer metadata) for the reviews sheet.
+
+
+   .. py:attribute:: batch
+      :type:  str
+
+
+   .. py:attribute:: subject
+      :type:  str
+
+
+   .. py:attribute:: pipeline
+      :type:  str
+
+
+   .. py:attribute:: structure
+      :type:  str
+
+
+   .. py:attribute:: review_aspect
+      :type:  str
+
+
+   .. py:attribute:: qc_status
+      :type:  QcStatus
+
+
+   .. py:attribute:: reviewer
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: reviewed_at
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: comment
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: report_relpath
+      :type:  str
+      :value: ''
+
+
+
+.. py:function:: upsert_review_row_excel(path: pathlib.Path, row: ReviewRow) -> None
+
+   Insert or update *row* in the ``reviews.xlsx`` workbook at *path*, keyed on
+   (batch, subject, pipeline, structure, review_aspect).
+
+
+.. py:function:: create_qc_portal_app(*, qc_root: pathlib.Path, reviews_xlsx: pathlib.Path, results_root: pathlib.Path | None = None, default_batch: str | None = None, publish_db: bool = True)
+
+   Return a FastAPI app serving QC HTML and POST /review.
+
+   The app serves:
+   - `GET /` dashboard (when `results_root` is provided by the CLI wrapper)
+   - `GET /batch/{batch}` convenience redirect to a batch QC index
+   - `GET /files/...` static file server rooted at `results_root`
+   - `POST /review` upserts reviews.xlsx only (fast)
+   - `GET /review/state` returns saved reviews for a report
+   - `POST /review/sync-db` batch-publishes a report to NVITK DB + SQLite index
+
+

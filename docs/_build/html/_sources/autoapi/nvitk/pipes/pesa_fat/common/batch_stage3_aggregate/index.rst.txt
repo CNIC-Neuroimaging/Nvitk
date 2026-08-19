@@ -1,0 +1,42 @@
+nvitk.pipes.pesa_fat.common.batch_stage3_aggregate
+==================================================
+
+.. py:module:: nvitk.pipes.pesa_fat.common.batch_stage3_aggregate
+
+.. autoapi-nested-parse::
+
+   Batch stage-3 Excel aggregation (invoked inside Singularity on the cluster).
+
+   Concatenates per-subject ``per_subject/<subj>.xlsx`` files into
+   ``<batch>_SummaryCodebook.xlsx`` for each requested pipeline, mirroring
+   local :func:`nvitk.pipes.pesa_fat.common.stage3_batch_summary.aggregate_stage3_summary`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.batch_stage3_aggregate.log
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.batch_stage3_aggregate.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:function:: main(batch: str, subjects: str, pipelines: str, dicom_root: pathlib.Path, nifti_root: pathlib.Path, results_root: pathlib.Path, model_dir: pathlib.Path, log_level: str) -> None
+
+   CLI entry point: aggregate a batch's per-subject stage-3 Excel exports for each requested
+   pipeline into a single ``<batch>_SummaryCodebook.xlsx``.
+
+

@@ -1,0 +1,81 @@
+nvitk.pipes.qvtpy.util.eicab.brain_mask
+=======================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.eicab.brain_mask
+
+.. autoapi-nested-parse::
+
+   Brain mask from TotalSegmentator for qvtpy venous centerline filtering.
+
+   Runs ``total_mr`` on ``Angiography_3D`` with ROI subset ``brain``, using
+   qvtpy-configured TotalSegmentator model roots (see :mod:`nvitk.pipes.qvtpy.config`).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.TOTAL_MR_TASK
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.BRAIN_ROI
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.BRAIN_MASK_NIFTI
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.TOTAL_MR_MULTILABEL_NIFTI
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.find_angio_volume
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.extract_brain_binary
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.align_brain_mask_to_target
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.segment_brain_mask_from_angio
+   nvitk.pipes.qvtpy.util.eicab.brain_mask.brain_mask_for_reference
+
+
+Module Contents
+---------------
+
+.. py:data:: TOTAL_MR_TASK
+   :value: 'total_mr'
+
+
+.. py:data:: BRAIN_ROI
+   :value: ('brain',)
+
+
+.. py:data:: BRAIN_MASK_NIFTI
+   :value: 'brain_mask_from_angio.nii.gz'
+
+
+.. py:data:: TOTAL_MR_MULTILABEL_NIFTI
+   :value: 'total_mr_brain_subset.nii.gz'
+
+
+.. py:function:: find_angio_volume(nifti_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Locate ``4DFlow/Angiography_3D.nii[.gz]`` for *subject*.
+
+
+.. py:function:: extract_brain_binary(multilabel: np.ndarray) -> np.ndarray
+
+   Binary brain mask from a ``total_mr`` multilabel volume.
+
+
+.. py:function:: align_brain_mask_to_target(brain_mask: np.ndarray, *, source_img: nvitk.types.Image, target_img: nvitk.types.Image) -> np.ndarray
+
+   Resample *brain_mask* onto *target_img* grid when shape/affine differ.
+
+
+.. py:function:: segment_brain_mask_from_angio(angio_path: pathlib.Path, out_dir: pathlib.Path, *, device: str = 'gpu', model_dir: pathlib.Path | None = None, overwrite: bool = True) -> tuple[np.ndarray, nvitk.types.Image]
+
+   Run TotalSegmentator (``total_mr`` / ``brain``) and return a binary brain mask.
+
+
+.. py:function:: brain_mask_for_reference(nifti_root: pathlib.Path, subject: str, out_dir: pathlib.Path, target_img: nvitk.types.Image, *, device: str = 'gpu', model_dir: pathlib.Path | None = None, overwrite: bool = True) -> np.ndarray
+
+   Brain mask resampled onto *target_img* (typically ComplexDifference_3D).
+
+

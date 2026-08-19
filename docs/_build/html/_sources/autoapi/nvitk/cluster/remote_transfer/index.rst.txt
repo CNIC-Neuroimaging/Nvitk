@@ -1,0 +1,111 @@
+nvitk.cluster.remote_transfer
+=============================
+
+.. py:module:: nvitk.cluster.remote_transfer
+
+.. autoapi-nested-parse::
+
+   SSH/SFTP helpers for uploading GUI SGE jobs to a cluster login node.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.remote_transfer.resolve_cluster_host
+   nvitk.cluster.remote_transfer.sftp_session
+   nvitk.cluster.remote_transfer.ensure_remote_dir
+   nvitk.cluster.remote_transfer.remote_path_exists
+   nvitk.cluster.remote_transfer.read_remote_text
+   nvitk.cluster.remote_transfer.upload_file
+   nvitk.cluster.remote_transfer.download_remote_file
+   nvitk.cluster.remote_transfer.download_directory_sftp
+   nvitk.cluster.remote_transfer.download_directory
+   nvitk.cluster.remote_transfer.download_remote_files
+   nvitk.cluster.remote_transfer.upload_directory
+   nvitk.cluster.remote_transfer.upload_staged_job
+   nvitk.cluster.remote_transfer.ssh_exec
+   nvitk.cluster.remote_transfer.is_safe_gui_job_root
+   nvitk.cluster.remote_transfer.remove_remote_job_tree
+
+
+Module Contents
+---------------
+
+.. py:function:: resolve_cluster_host(host: str) -> str
+
+   Resolve short names (e.g. ``samwise``) via ``.nvitk/sge.json`` aliases.
+
+
+.. py:function:: sftp_session(*, host: str, user: str, password: str, port: int = 22, timeout: float | None = None) -> Iterator[tuple[Any, Any]]
+
+   Yield ``(ssh_client, sftp)`` connected to the cluster login node.
+
+
+.. py:function:: ensure_remote_dir(sftp: Any, remote_path: str) -> None
+
+   Create *remote_path* on the server if missing (POSIX, best-effort).
+
+
+.. py:function:: remote_path_exists(sftp: Any, remote_path: str) -> bool
+
+   True if *remote_path* exists on the SFTP server.
+
+
+.. py:function:: read_remote_text(sftp: Any, remote_path: str) -> str
+
+   Read a remote text file's full contents (UTF-8, replacing undecodable bytes).
+
+
+.. py:function:: upload_file(sftp: Any, local_path: pathlib.Path, remote_path: str) -> None
+
+   Upload *local_path* to *remote_path*, creating the remote parent directory if needed.
+
+
+.. py:function:: download_remote_file(sftp: Any, remote_path: str, local_path: pathlib.Path) -> None
+
+   Download *remote_path* to *local_path*, creating the local parent directory if needed.
+
+
+.. py:function:: download_directory_sftp(sftp: Any, remote_root: str, local_root: pathlib.Path) -> int
+
+   Recursively download *remote_root* into *local_root*. Returns file count.
+
+
+.. py:function:: download_directory(*, host: str, user: str, password: str, remote_root: str, local_root: pathlib.Path, port: int = 22, timeout: float | None = None) -> int
+
+   Recursively download *remote_root* to *local_root* via SFTP.
+
+
+.. py:function:: download_remote_files(*, host: str, user: str, password: str, remote_files: list[tuple[str, pathlib.Path]], port: int = 22) -> None
+
+   Download ``(remote_path, local_path)`` pairs via SFTP.
+
+
+.. py:function:: upload_directory(*, host: str, user: str, password: str, local_root: pathlib.Path, remote_root: str, port: int = 22, timeout: float | None = None) -> None
+
+   Recursively upload *local_root* to *remote_root* via SFTP.
+
+
+.. py:function:: upload_staged_job(*, host: str, user: str, password: str, local_staging: pathlib.Path, remote_job_root: str, port: int = 22) -> None
+
+   Upload a GUI job staging tree to the cluster job directory.
+
+
+.. py:function:: ssh_exec(*, host: str, user: str, password: str, command: str, port: int = 22, timeout: float | None = None) -> tuple[int, str, str]
+
+   Run *command* on the login node; return ``(exit_code, stdout, stderr)``.
+
+
+.. py:function:: is_safe_gui_job_root(remote_job_root: str) -> bool
+
+   Return True when *remote_job_root* is under configured ``gui_sge_job_root``.
+
+
+.. py:function:: remove_remote_job_tree(*, host: str, user: str, password: str, remote_job_root: str, port: int = 22) -> tuple[int, str, str]
+
+   Delete a remote job directory after verified retrieval (path guard enforced).
+
+

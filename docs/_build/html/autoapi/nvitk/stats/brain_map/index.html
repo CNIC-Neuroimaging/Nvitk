@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats.brain_map &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats.distribution_plots" href="../distribution_plots/index.html" />
+    <link rel="prev" title="nvitk.stats._vessel_territory_map" href="../_vessel_territory_map/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats.brain_map">
+<span id="nvitk-stats-brain-map"></span><h1>nvitk.stats.brain_map<a class="headerlink" href="#module-nvitk.stats.brain_map" title="Link to this heading">¶</a></h1>
+<p>Model estimates painted on the cortical surface.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>The parenchymal counterpart of <a class="reference internal" href="../vascular_map/index.html#module-nvitk.stats.vascular_map" title="nvitk.stats.vascular_map"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats.vascular_map</span></code></a>. That module answers “which vessel”
+on a schematic of the circulation; this one answers “where in the cortex” on an actual
+parcellation — ASL perfusion (CBF / ATT) and T1 volumetry are measured per Desikan parcel, and a
+forest plot of sixty-eight coefficients is a list that hides every spatial pattern in it.</p>
+<p>It is a <em>view of a fit</em>, not a new analysis: the numbers are whatever the caller passes in —
+estimated marginal means, model coefficients, per-subject measurements, QC scores.</p>
+</section>
+<section id="atlases">
+<h2>Atlases<a class="headerlink" href="#atlases" title="Link to this heading">¶</a></h2>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">desikan</span></code></dt><dd><p>The Desikan–Killiany cortical parcellation the ASL and T1 pipelines report against. Located
+rather than fetched — see <a class="reference internal" href="../../viz/atlas_sources/index.html#module-nvitk.viz.atlas_sources" title="nvitk.viz.atlas_sources"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.viz.atlas_sources</span></code></a>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">vascular</span></code></dt><dd><p>The arterial-territory / watershed atlas the ASL pipeline uses by default. Same figure, coarser
+parcels, and the one that makes an ASL result comparable to a 4D-flow one.</p>
+</dd>
+</dl>
+</section>
+<section id="aggregate-levels">
+<h2>Aggregate levels<a class="headerlink" href="#aggregate-levels" title="Link to this heading">¶</a></h2>
+<p>A frame grouped by hemisphere reports <code class="docutils literal notranslate"><span class="pre">precuneus</span></code>, a lobe-grouped one <code class="docutils literal notranslate"><span class="pre">ctx-Left-Frontal-Lobe</span></code>:
+one number averaged over several parcels. It is painted on <strong>every parcel it was averaged from</strong>,
+because that is what it describes. Painting it on none — which an exact-match lookup does — leaves a
+lobe-grouped fit with an empty brain. Same rule, and the same reason, as
+<code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.stats.vascular_map.nodes_for_label()</span></code> mirroring a hemisphere-melted <code class="docutils literal notranslate"><span class="pre">ICA</span></code> onto both
+carotids.</p>
+</section>
+<section id="significance">
+<h2>Significance<a class="headerlink" href="#significance" title="Link to this heading">¶</a></h2>
+<p>Three states, and they must not look alike:</p>
+<table class="docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p>Coloured by the colormap</p></td>
+<td><p>an estimate that reached <em>alpha</em></p></td>
+</tr>
+<tr class="row-even"><td><p>Flat grey</p></td>
+<td><p>measured, but did not reach <em>alpha</em></p></td>
+</tr>
+<tr class="row-odd"><td><p>Not painted (background)</p></td>
+<td><p>no estimate for that parcel at all</p></td>
+</tr>
+</tbody>
+</table>
+<p>The last row is the one that is easy to get wrong. A parcel the model has nothing to say about is
+not the same as one it says nothing significant about, and a figure that draws them identically
+invites the reader to count the second as evidence of the first.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.COLOR_ABSENT" title="nvitk.stats.brain_map.COLOR_ABSENT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COLOR_ABSENT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.COLOR_NONSIGNIFICANT" title="nvitk.stats.brain_map.COLOR_NONSIGNIFICANT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COLOR_NONSIGNIFICANT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.DEFAULT_ALPHA" title="nvitk.stats.brain_map.DEFAULT_ALPHA"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_ALPHA</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.BRAIN_ATLASES" title="nvitk.stats.brain_map.BRAIN_ATLASES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BRAIN_ATLASES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.BRAIN_SURFACES" title="nvitk.stats.brain_map.BRAIN_SURFACES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BRAIN_SURFACES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.BRAIN_VIEWS" title="nvitk.stats.brain_map.BRAIN_VIEWS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BRAIN_VIEWS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.parcel_resolver" title="nvitk.stats.brain_map.parcel_resolver"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parcel_resolver</span></code></a>(→ tuple[Any, Any])</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">(resolver,</span> <span class="pre">resolved_atlas)</span></code> for <em>atlas</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.regions_without_geometry" title="nvitk.stats.brain_map.regions_without_geometry"><code class="xref py py-obj docutils literal notranslate"><span class="pre">regions_without_geometry</span></code></a>(→ list[str])</p></td>
+<td><p>Which of <em>labels</em> this atlas cannot draw — for telling the user <em>why</em> the map would be empty.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.parcel_values_from_frame" title="nvitk.stats.brain_map.parcel_values_from_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parcel_values_from_frame</span></code></a>(→ tuple[dict[int, float], ...)</p></td>
+<td><p>Map a per-region table onto atlas indices.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.parcel_values_from_result" title="nvitk.stats.brain_map.parcel_values_from_result"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parcel_values_from_result</span></code></a>(→ tuple[dict[int, float], ...)</p></td>
+<td><p>Pull per-parcel numbers off a fitted model.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.brain_interaction_contrasts" title="nvitk.stats.brain_map.brain_interaction_contrasts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">brain_interaction_contrasts</span></code></a>(→ list[str])</p></td>
+<td><p>Levels of the <em>other</em> factor in interactions with the parcel term, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;sex[T.M]&quot;]</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.brain_group_coefficient_terms" title="nvitk.stats.brain_map.brain_group_coefficient_terms"><code class="xref py py-obj docutils literal notranslate"><span class="pre">brain_group_coefficient_terms</span></code></a>(→ list[str])</p></td>
+<td><p>Per-group terms this fit estimates for <em>group_column</em> (an <code class="docutils literal notranslate"><span class="pre">lme4</span></code> random structure).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.fsaverage_meshes" title="nvitk.stats.brain_map.fsaverage_meshes"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fsaverage_meshes</span></code></a>([mesh])</p></td>
+<td><p>Cached <code class="docutils literal notranslate"><span class="pre">fetch_surf_fsaverage</span></code> result.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.brain_map.plot_brain_map" title="nvitk.stats.brain_map.plot_brain_map"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_brain_map</span></code></a>(values, *[, pvalues, mode, alpha, ...])</p></td>
+<td><p>Draw <em>values</em> on the cortical surface.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.COLOR_ABSENT">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">COLOR_ABSENT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'#d9d9d9'</span></span><a class="headerlink" href="#nvitk.stats.brain_map.COLOR_ABSENT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.COLOR_NONSIGNIFICANT">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">COLOR_NONSIGNIFICANT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'#9e9e9e'</span></span><a class="headerlink" href="#nvitk.stats.brain_map.COLOR_NONSIGNIFICANT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.DEFAULT_ALPHA">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_ALPHA</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0.05</span></span><a class="headerlink" href="#nvitk.stats.brain_map.DEFAULT_ALPHA" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.BRAIN_ATLASES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">BRAIN_ATLASES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(('Desikan</span> <span class="pre">(cortical</span> <span class="pre">parcels)',</span> <span class="pre">'desikan'),</span> <span class="pre">('Desikan</span> <span class="pre">lobes',</span> <span class="pre">'desikan_lobes'),</span> <span class="pre">('Vascular...</span></span><a class="headerlink" href="#nvitk.stats.brain_map.BRAIN_ATLASES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.BRAIN_SURFACES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">BRAIN_SURFACES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(('pial</span> <span class="pre">(folded)',</span> <span class="pre">'pial'),</span> <span class="pre">('inflated',</span> <span class="pre">'infl'),</span> <span class="pre">('flat',</span> <span class="pre">'flat'))</span></span><a class="headerlink" href="#nvitk.stats.brain_map.BRAIN_SURFACES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.BRAIN_VIEWS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">BRAIN_VIEWS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(('lateral</span> <span class="pre">+</span> <span class="pre">medial',</span> <span class="pre">'lateral,medial'),</span> <span class="pre">('lateral',</span> <span class="pre">'lateral'),</span> <span class="pre">('medial',</span> <span class="pre">'medial'),...</span></span><a class="headerlink" href="#nvitk.stats.brain_map.BRAIN_VIEWS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.parcel_resolver">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">parcel_resolver</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.parcel_resolver" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(resolver,</span> <span class="pre">resolved_atlas)</span></code> for <em>atlas</em>.</p>
+<p>The resolver maps a published region label onto the atlas indices it refers to — see
+<a class="reference internal" href="../../viz/brainshow/index.html#nvitk.viz.brainshow.atlas_indices_for_region" title="nvitk.viz.brainshow.atlas_indices_for_region"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.viz.brainshow.atlas_indices_for_region()</span></code></a>. It is the only thing
+<a class="reference internal" href="../_model_values/index.html#module-nvitk.stats._model_values" title="nvitk.stats._model_values"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats._model_values</span></code></a> needs to know about anatomy.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.regions_without_geometry">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">regions_without_geometry</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">labels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.regions_without_geometry" title="Link to this definition">¶</a></dt>
+<dd><p>Which of <em>labels</em> this atlas cannot draw — for telling the user <em>why</em> the map would be empty.</p>
+<p>A FLAIR frame is the motivating case: its regions are white-matter zones (<code class="docutils literal notranslate"><span class="pre">frperiv</span></code>,
+<code class="docutils literal notranslate"><span class="pre">juxta</span></code>, <code class="docutils literal notranslate"><span class="pre">bgit</span></code>), not cortical parcels, so none of them resolve and the honest answer is
+“this measurement is not parcellated by this atlas”, not a blank brain.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.parcel_values_from_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">parcel_values_from_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">key_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pvalue_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.parcel_values_from_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Map a per-region table onto atlas indices.</p>
+<p>Accepts whatever spelling the frame uses (<code class="docutils literal notranslate"><span class="pre">ctx-lh-precuneus</span></code>, <code class="docutils literal notranslate"><span class="pre">ctx_lh_precuneus</span></code>,
+<code class="docutils literal notranslate"><span class="pre">left_precuneus</span></code>). Rows that are not parcels of this atlas — a vessel, a whole-head scalar
+such as <code class="docutils literal notranslate"><span class="pre">etiv</span></code>, an intercept term — are dropped silently: a mixed result table is the normal
+case, and only the rows this figure can draw belong on it.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.parcel_values_from_result">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">parcel_values_from_result</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'coefficient'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">contrast</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.parcel_values_from_result" title="Link to this definition">¶</a></dt>
+<dd><p>Pull per-parcel numbers off a fitted model.</p>
+<p>Sources and their meanings are shared with the vascular map — see
+<a class="reference internal" href="../_model_values/index.html#nvitk.stats._model_values.values_from_result" title="nvitk.stats._model_values.values_from_result"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.stats._model_values.values_from_result()</span></code></a> for what <code class="docutils literal notranslate"><span class="pre">coefficient</span></code>, <code class="docutils literal notranslate"><span class="pre">emmeans</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mean</span></code> and <code class="docutils literal notranslate"><span class="pre">group:&lt;term&gt;</span></code> each report and why they are read differently.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Keyed by atlas index; <em>note</em> describes what was extracted, for the figure subtitle.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>(<a class="reference internal" href="../frame_ops/index.html#nvitk.stats.frame_ops.FilterRule.values" title="nvitk.stats.frame_ops.FilterRule.values">values</a>, pvalues, <a class="reference internal" href="../../measure/mask_hemodynamics/index.html#nvitk.measure.mask_hemodynamics.MaskHemodynamicsResult.note" title="nvitk.measure.mask_hemodynamics.MaskHemodynamicsResult.note">note</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.brain_interaction_contrasts">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">brain_interaction_contrasts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.brain_interaction_contrasts" title="Link to this definition">¶</a></dt>
+<dd><p>Levels of the <em>other</em> factor in interactions with the parcel term, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;sex[T.M]&quot;]</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.brain_group_coefficient_terms">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">brain_group_coefficient_terms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.brain_map.brain_group_coefficient_terms" title="Link to this definition">¶</a></dt>
+<dd><p>Per-group terms this fit estimates for <em>group_column</em> (an <code class="docutils literal notranslate"><span class="pre">lme4</span></code> random structure).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.fsaverage_meshes">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">fsaverage_meshes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'fsaverage5'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.stats.brain_map.fsaverage_meshes" title="Link to this definition">¶</a></dt>
+<dd><p>Cached <code class="docutils literal notranslate"><span class="pre">fetch_surf_fsaverage</span></code> result.</p>
+<p>The fetch re-checks the download cache on every call, and the brain map asks for it once per
+draw <em>and</em> once per texture build — several times a second while a user drags a control.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.brain_map.plot_brain_map">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.brain_map.</span></span><span class="sig-name descname"><span class="pre">plot_brain_map</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">pvalues</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'estimate'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">alpha</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DEFAULT_ALPHA</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask_nonsignificant</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cmap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">center</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vmin</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vmax</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'desikan'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">atlas_kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hemisphere</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'both'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">views</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">('lateral',</span> <span class="pre">'medial')</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">surface</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'pial'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interactive</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shading</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">opacity</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">threshold</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hide</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.stats.brain_map.plot_brain_map" title="Link to this definition">¶</a></dt>
+<dd><p>Draw <em>values</em> on the cortical surface.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>values</strong> (<a class="reference internal" href="../frame_ops/index.html#nvitk.stats.frame_ops.DerivedColumn.mapping" title="nvitk.stats.frame_ops.DerivedColumn.mapping"><em>mapping</em></a>) – <code class="docutils literal notranslate"><span class="pre">{atlas</span> <span class="pre">index:</span> <span class="pre">value}</span></code>, as <a class="reference internal" href="#nvitk.stats.brain_map.parcel_values_from_result" title="nvitk.stats.brain_map.parcel_values_from_result"><code class="xref py py-func docutils literal notranslate"><span class="pre">parcel_values_from_result()</span></code></a> returns. Indices absent from
+the mapping are left unpainted.</p></li>
+<li><p><strong>pvalues</strong> (<a class="reference internal" href="../frame_ops/index.html#nvitk.stats.frame_ops.DerivedColumn.mapping" title="nvitk.stats.frame_ops.DerivedColumn.mapping"><em>mapping</em></a><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – <code class="docutils literal notranslate"><span class="pre">{atlas</span> <span class="pre">index:</span> <span class="pre">p}</span></code>. Required for <em>mode</em> <code class="docutils literal notranslate"><span class="pre">&quot;pvalue&quot;</span></code> and for significance masking.</p></li>
+<li><p><strong>mode</strong> (<em>{&quot;estimate&quot;</em><em>, </em><em>&quot;pvalue&quot;}</em>) – What colour encodes. <code class="docutils literal notranslate"><span class="pre">&quot;estimate&quot;</span></code> maps the value through a diverging or sequential
+colormap; <code class="docutils literal notranslate"><span class="pre">&quot;pvalue&quot;</span></code> maps −log₁₀(p), which spreads the small p-values that matter instead
+of compressing them all against zero.</p></li>
+<li><p><strong>mask_nonsignificant</strong> (<em>bool</em>) – Draw parcels with <code class="docutils literal notranslate"><span class="pre">p</span> <span class="pre">&gt;=</span> <span class="pre">alpha</span></code> in flat grey. Has no effect without <em>pvalues</em> — and is
+skipped with a warning rather than silently colouring everything, since an unmasked map
+looks identical to one where everything is significant.</p></li>
+<li><p><strong>center</strong> (<em>float</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Value the diverging colormap centres on. Defaults to 0 when the values straddle it (an
+effect), and to no centring when they do not (a mean).</p></li>
+<li><p><strong>vmin</strong> (<em>float</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Pin the colour scale instead of taking it from these values, so a series of figures can be
+compared frame to frame.</p></li>
+<li><p><strong>vmax</strong> (<em>float</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Pin the colour scale instead of taking it from these values, so a series of figures can be
+compared frame to frame.</p></li>
+<li><p><strong>hemisphere</strong> (<em>{&quot;both&quot;</em><em>, </em><em>&quot;left&quot;</em><em>, </em><em>&quot;right&quot;}</em>)</p></li>
+<li><p><strong>views</strong> (<em>sequence</em><em> of </em><em>str</em><em> or </em><em>comma-separated str</em>) – nilearn surface views — <code class="docutils literal notranslate"><span class="pre">lateral</span></code>, <code class="docutils literal notranslate"><span class="pre">medial</span></code>, <code class="docutils literal notranslate"><span class="pre">dorsal</span></code>, <code class="docutils literal notranslate"><span class="pre">ventral</span></code>, …</p></li>
+<li><p><strong>interactive</strong> (<em>bool</em>) – Return a rotatable 3-D Plotly figure instead of a static Matplotlib one, with both
+hemispheres in a single scene. Same values, same colour scale and the same three-state
+encoding — nilearn’s Plotly engine computes per-vertex colours through the colormap, so
+<code class="docutils literal notranslate"><span class="pre">set_under</span></code> and <code class="docutils literal notranslate"><span class="pre">set_bad</span></code> survive and non-significant still reads differently from
+no-estimate. There are no separate view panels because the view is whatever you rotate it
+to, and no <em>flat</em> surface because a flat map has no 3-D structure to explore.</p></li>
+<li><p><strong>surface</strong> (<em>{&quot;infl&quot;</em><em>, </em><em>&quot;pial&quot;</em><em>, </em><em>&quot;flat&quot;}</em>) – Which fsaverage surface to paint on. Inflated exposes the parcels buried in sulci, which on
+a folded pial surface are simply not visible — roughly two thirds of the cortex.</p></li>
+<li><p><strong>shading</strong> (<em>bool</em>) – Shade the unpainted surface with its own curvature. Off gives a flat silhouette, which is
+cleaner for a figure and makes the parcel boundaries the only structure on the page.</p></li>
+<li><p><strong>blend</strong> (<em>bool</em>) – Shade the <em>painted</em> parcels with the curvature too, rather than only the bare surface. The
+sulcal pattern then shows through the colours, which keeps the anatomy legible where a
+parcel covers a whole gyrus — at the cost of darkening the colours unevenly, so a value
+read off the colourbar is no longer exact.</p></li>
+<li><p><strong>opacity</strong> (<em>float</em>) – <p>Opacity of the painted parcels, <code class="docutils literal notranslate"><span class="pre">0</span></code>–<code class="docutils literal notranslate"><span class="pre">1</span></code>. Below 1 the surface shows through, which is
+the other way to keep the folding visible under a dense parcellation. Like <em>blend</em>, it
+shifts the rendered colour away from the colourbar, so it is a reading aid rather than a
+setting to publish at.</p>
+<p>Named <em>opacity</em> rather than <em>alpha</em> on purpose: in this module <code class="docutils literal notranslate"><span class="pre">alpha</span></code> already means the
+significance level, and one symbol for “how transparent” and “what counts as significant”
+would be a genuinely dangerous overload.</p>
+</p></li>
+<li><p><strong>threshold</strong> (<em>float</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Leave parcels whose |value| is below this unpainted, the way a stat map is thresholded.
+Distinct from the significance mask: this one is about effect <em>size</em>, and a parcel hidden
+by it is reported in the caption so it is never confused with one that has no estimate.</p></li>
+<li><p><strong>hide</strong> (<em>sequence</em><em> of </em><em>int</em>) – Atlas indices to leave off entirely — not painted and <strong>not counted in the colour scale</strong>.
+That last part is the point: hiding the one parcel that dominates the range is how you see
+the structure among the rest. Distinct from a parcel with no estimate, which is unpainted
+because “not measured” is information.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>matplotlib.figure.Figure</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../_vessel_territory_map/index.html" title="previous chapter">nvitk.stats._vessel_territory_map</a></li>
+      <li>Next: <a href="../distribution_plots/index.html" title="next chapter">nvitk.stats.distribution_plots</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/brain_map/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

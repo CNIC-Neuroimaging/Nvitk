@@ -1,0 +1,40 @@
+nvitk.gui.tools.dock
+====================
+
+.. py:module:: nvitk.gui.tools.dock
+
+.. autoapi-nested-parse::
+
+   Tools dock: magicgui panel + label picker + pipeline CLI form + TotalSeg ROIs.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.dock._compact_magicgui_panel
+   nvitk.gui.tools.dock._show_label_picker
+   nvitk.gui.tools.dock.build_tools_dock
+
+
+Module Contents
+---------------
+
+.. py:function:: _compact_magicgui_panel(native: qtpy.QtWidgets.QWidget) -> None
+
+   Keep tool controls compact; the parent scroll area caps total height.
+
+
+.. py:function:: _show_label_picker(category: str, tool_id: str, layer: Any | None) -> bool
+
+   True if the label-selector widget should be shown for *tool_id* given the active *layer* and
+   its category (label-picker tools always; certain categories when the layer is label-like).
+
+
+.. py:function:: build_tools_dock(viewer: Any, app_state: dict[str, Any], *, layer_display_kwargs: Callable[Ellipsis, dict[str, Any]], on_layers_changed: Callable[[], None], record_step=None) -> tuple[qtpy.QtWidgets.QWidget, Any]
+
+   Return (dock widget, magicgui tool_panel).
+
+

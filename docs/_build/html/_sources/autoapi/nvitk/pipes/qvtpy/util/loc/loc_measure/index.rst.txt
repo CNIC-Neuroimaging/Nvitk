@@ -1,0 +1,33 @@
+nvitk.pipes.qvtpy.util.loc.loc_measure
+======================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.loc.loc_measure
+
+.. autoapi-nested-parse::
+
+   Shared LOC-wise hemodynamic measurement (stage-6 core).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.loc.loc_measure.measure_loc_row
+   nvitk.pipes.qvtpy.util.loc.loc_measure.run_loc_measurements
+
+
+Module Contents
+---------------
+
+.. py:function:: measure_loc_row(row: dict[str, Any], *, mag: numpy.ndarray, cd: numpy.ndarray, vel_mag: numpy.ndarray, vx: numpy.ndarray, vy: numpy.ndarray, vz: numpy.ndarray, voxel_spacing: tuple[float, float, float], cross_section_radius_vox: float = 10.0, measure_resegment: bool = False, thr_algorithm: nvitk.measure.cross_section.ThrAlgorithm = 'lsthr', cross_section_res: int = 0, cross_section_plane_interp: int = 1, cs_supersampling: bool = True, volume_seg: numpy.ndarray | None = None) -> dict[str, float | int | str]
+
+   PI/RI and time series for one LOC row (stage-5 ``locs.csv`` format).
+
+
+.. py:function:: run_loc_measurements(loc_rows: list[dict[str, Any]], *, mag: numpy.ndarray, cd: numpy.ndarray, vel_mag: numpy.ndarray, vx: numpy.ndarray, vy: numpy.ndarray, vz: numpy.ndarray, voxel_spacing: tuple[float, float, float], cross_section_radius_vox: float = 10.0, measure_resegment: bool = False, thr_algorithm: nvitk.measure.cross_section.ThrAlgorithm = 'lsthr', cross_section_res: int = 0, cross_section_plane_interp: int = 1, cs_supersampling: bool = True, volume_seg: numpy.ndarray | None = None) -> list[dict[str, float | int | str]]
+
+   Measure all LOCs; returns rows suitable for ``loc_measurements.csv``.
+
+

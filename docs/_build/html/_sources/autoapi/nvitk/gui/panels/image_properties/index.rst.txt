@@ -1,0 +1,58 @@
+nvitk.gui.panels.image_properties
+=================================
+
+.. py:module:: nvitk.gui.panels.image_properties
+
+.. autoapi-nested-parse::
+
+   Live spatial / affine properties for the active Napari layer.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.image_properties.ImagePropertiesPanel
+
+
+Module Contents
+---------------
+
+.. py:class:: ImagePropertiesPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Show spacing, FOV, origin, orientation, and affine for the selected layer.
+
+
+   .. py:attribute:: _status
+
+
+   .. py:attribute:: _text
+
+
+   .. py:attribute:: _btn_refresh
+
+
+   .. py:attribute:: _last_layer
+      :type:  Any | None
+      :value: None
+
+
+
+   .. py:method:: _refresh_last_layer() -> None
+
+      Re-render spatial properties for whichever layer was last shown.
+
+
+
+   .. py:method:: refresh_from_layer(layer: Any | None) -> None
+
+      Display *layer*'s spatial properties (spacing, FOV, origin, affine), or a placeholder
+      message if *layer* is ``None`` or its properties can't be read.
+
+
+

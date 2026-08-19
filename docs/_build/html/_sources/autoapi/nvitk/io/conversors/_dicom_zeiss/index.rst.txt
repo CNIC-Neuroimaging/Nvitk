@@ -1,0 +1,33 @@
+nvitk.io.conversors._dicom_zeiss
+================================
+
+.. py:module:: nvitk.io.conversors._dicom_zeiss
+
+.. autoapi-nested-parse::
+
+   Zeiss OCT raw DICOM storage: extract B-scans / volumes for the conversion pipeline.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors._dicom_zeiss.is_zeiss_raw_storage
+   nvitk.io.conversors._dicom_zeiss.extract_zeiss_raw_oct
+
+
+Module Contents
+---------------
+
+.. py:function:: is_zeiss_raw_storage(ds: Any) -> bool
+
+   Public alias of :func:`_is_zeiss_raw_storage` — True when *ds* is a Zeiss private raw-OCT storage object.
+
+
+.. py:function:: extract_zeiss_raw_oct(ds_list: list[Any], md: dict[str, Any], debug_mode: bool = False)
+
+   Public alias of :func:`_extract_zeiss_raw_oct` — decode a Zeiss raw-OCT series into a volume.
+
+

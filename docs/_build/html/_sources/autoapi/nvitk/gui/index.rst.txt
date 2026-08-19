@@ -1,0 +1,56 @@
+nvitk.gui
+=========
+
+.. py:module:: nvitk.gui
+
+.. autoapi-nested-parse::
+
+   Napari GUI for nvitk (``nvitk-gui`` console script).
+
+   Package layout:
+
+   - ``core/`` — backend, spatial metadata, orientation, logging, warnings
+   - ``io/`` — Napari open/export integration
+   - ``labels/`` — label catalog, selector, visibility
+   - ``tools/`` — registry, panels, runner, presets
+   - ``pipeline/`` — pipeline catalog, stages, form UI
+   - ``panels/`` — data browser, DICOM tags, XNAT
+   - ``sge/`` — cluster job submit/retrieve/worker
+   - ``viz/`` — vectors, centerline, loc points
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/gui/app/index
+   /autoapi/nvitk/gui/core/index
+   /autoapi/nvitk/gui/io/index
+   /autoapi/nvitk/gui/lab/index
+   /autoapi/nvitk/gui/labels/index
+   /autoapi/nvitk/gui/main/index
+   /autoapi/nvitk/gui/panels/index
+   /autoapi/nvitk/gui/pipeline/index
+   /autoapi/nvitk/gui/sge/index
+   /autoapi/nvitk/gui/tools/index
+   /autoapi/nvitk/gui/viz/index
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.__version__
+
+
+Package Contents
+----------------
+
+.. py:data:: __version__
+   :value: '0.1.0'
+
+

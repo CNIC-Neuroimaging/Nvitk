@@ -1,0 +1,94 @@
+nvitk.measure.morpho.anatomy
+============================
+
+.. py:module:: nvitk.measure.morpho.anatomy
+
+.. autoapi-nested-parse::
+
+   Vessel anatomy, root selection, flow orientation, and anatomical naming.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.anatomy.nearest_dist_to_vessel_names
+   nvitk.measure.morpho.anatomy.anatomical_endpoint_score
+   nvitk.measure.morpho.anatomy.anatomical_endpoint_scores
+   nvitk.measure.morpho.anatomy.choose_root_endpoint
+   nvitk.measure.morpho.anatomy.orient_centerline_points_by_flow
+   nvitk.measure.morpho.anatomy.make_path_id
+   nvitk.measure.morpho.anatomy.display_anatomic_segment_path
+   nvitk.measure.morpho.anatomy.make_loop_region_path_id
+   nvitk.measure.morpho.anatomy.make_tree_region_id
+   nvitk.measure.morpho.anatomy.tree_region_metadata
+
+
+Module Contents
+---------------
+
+.. py:function:: nearest_dist_to_vessel_names(vessel_names: List[str], pt_mm: numpy.ndarray, multilabel: numpy.ndarray, spacing, mapping: dict) -> float
+
+   Distance (mm) from *pt_mm* to the nearest voxel of any label named in *vessel_names*.
+
+
+.. py:function:: anatomical_endpoint_score(pt_mm: numpy.ndarray, rule: Optional[str], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> float
+
+   Ranking score for *pt_mm* under an anatomical direction *rule* (lower = more extreme in that direction).
+
+   With *axes* the rule is resolved against the volume's real orientation and
+   the subject's species (see :mod:`nvitk.measure.morpho.anatomy_axes`).
+   Without it the legacy hardcoded axes are used: array axis 2 = S/I, axis 1 =
+   A/P, axis 0 increasing toward L — i.e. an implicit LAS volume.
+
+
+.. py:function:: anatomical_endpoint_scores(pts_mm: numpy.ndarray, rule: Optional[str], axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> numpy.ndarray
+
+   Vectorised :func:`anatomical_endpoint_score` (needed to normalise combined ``a+b`` rules).
+
+
+.. py:function:: choose_root_endpoint(tree: nvitk.measure.morpho.models.SkeletonTree, vessel_info: nvitk.measure.morpho.models.VesselInfo, multilabel: numpy.ndarray, spacing, mapping: dict, mask_bool: Optional[numpy.ndarray] = None, axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> int
+
+   Choose proximal/root endpoint among all skeleton terminals.
+
+
+.. py:function:: orient_centerline_points_by_flow(pts: numpy.ndarray, vessel_info: nvitk.measure.morpho.models.VesselInfo, multilabel: numpy.ndarray, spacing, mapping: dict, axes: Optional[nvitk.measure.morpho.anatomy_axes.AnatomicalAxes] = None) -> Tuple[numpy.ndarray, bool]
+
+   Orient a centerline so it runs upstream→downstream per *vessel_info* flow topology.
+
+   Returns ``(points, was_reversed)``. Falls back through downstream-only, then
+   upstream-only proximity when one side of the topology is unavailable, and
+   finally onto the vessel's ``no_upstream_start`` anatomical rule. That last
+   fallback matters for root vessels whose topology has no usable
+   ``flow_from``/``flow_to`` (``"systemic"`` upstream, empty downstream) — e.g.
+   every entry in ``mouse_root_topology.json`` — which otherwise get no
+   orientation at all when the component is unbranched.
+
+
+.. py:function:: make_path_id(label: int, vessel_name: str, component_id: int, path_i: int, terminal_i: int, tree_label: Optional[str] = None) -> str
+
+   Build the export filename stem for one centerline path (trunk/arm/anatomic-M1 naming).
+
+
+.. py:function:: display_anatomic_segment_path(segment_path: str) -> str
+
+   Strip a redundant leading ``M1_`` prefix from a segment path for display.
+
+
+.. py:function:: make_loop_region_path_id(label: int, vessel_name: str, component_id: int, loop_i: int, region_name: str, region_i: int = 1) -> str
+
+   Build the export filename stem for a donut-loop region (selected/alternate arm).
+
+
+.. py:function:: make_tree_region_id(label: int, vessel_name: str, component_id: int, role: str) -> str
+
+   Build the export filename stem for a recursive tree-region segment.
+
+
+.. py:function:: tree_region_metadata(region_name: str) -> dict
+
+   Classify a region name into its tree role, branch depth/index/path metadata.
+
+

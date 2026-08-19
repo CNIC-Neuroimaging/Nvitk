@@ -1,0 +1,215 @@
+nvitk.stats.vascular_map
+========================
+
+.. py:module:: nvitk.stats.vascular_map
+
+.. autoapi-nested-parse::
+
+   Model estimates drawn on a schematic of the cerebral circulation.
+
+   Description
+   -----------
+   A forest plot of nineteen vessel coefficients is a list. It answers "which vessel has the largest
+   effect" and nothing else — the reader cannot see that the two carotids moved together, that the
+   effect is confined to the posterior circulation, or that the venous side is untouched, because a
+   forest plot has no notion of which vessel feeds which.
+
+   This module draws the same numbers on a top-down schematic of the circle of Willis and the dural
+   sinuses, so those patterns are visible at a glance. It is a *view of a fit*, not a new analysis:
+   the numbers are whatever the caller passes in — estimated marginal means, model coefficients,
+   conservation residuals, QC scores.
+
+   Geometry
+   --------
+   The layout is schematic, not registered to any atlas: vessels are drawn where a reader expects them
+   in a top-down projection (anterior at the top), with the anastomotic ring closed by the anterior and
+   posterior communicating arteries. Coordinates live in a fixed ``[0, 1]²`` space in
+   :data:`VESSEL_PATHS`, keyed by the same canonical node names as
+   :mod:`nvitk.stats.vessel_network`, so anything that speaks that vocabulary can be mapped without a
+   translation table.
+
+   Significance
+   ------------
+   Two ways to show it, and they answer different questions. Colouring by **estimate** with the
+   non-significant vessels greyed asks "where is the effect, and is it credible" — the default,
+   because a coloured map that ignores uncertainty invites reading noise as signal. Colouring by
+   **p-value** asks only "where is the evidence", and deliberately says nothing about direction or
+   size; it is the right view when comparing coverage across models, and the wrong one for reporting
+   an effect.
+
+   A vessel with no value is drawn in outline. That is different from a vessel that was measured and
+   found non-significant, and the two must not look alike.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.vascular_map.COLOR_ABSENT
+   nvitk.stats.vascular_map.COLOR_NONSIGNIFICANT
+   nvitk.stats.vascular_map.DEFAULT_ALPHA
+   nvitk.stats.vascular_map.VESSEL_PATHS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.vascular_map.is_perfusion_territory
+   nvitk.stats.vascular_map.unmapped_vessel_labels
+   nvitk.stats.vascular_map.vascular_values_from_frame
+   nvitk.stats.vascular_map.vascular_values_from_result
+   nvitk.stats.vascular_map.interaction_contrasts
+   nvitk.stats.vascular_map.group_coefficient_terms
+   nvitk.stats.vascular_map.plot_vascular_map
+
+
+Module Contents
+---------------
+
+.. py:data:: COLOR_ABSENT
+   :type:  str
+   :value: '#d9d9d9'
+
+
+.. py:data:: COLOR_NONSIGNIFICANT
+   :type:  str
+   :value: '#9e9e9e'
+
+
+.. py:data:: DEFAULT_ALPHA
+   :type:  float
+   :value: 0.05
+
+
+.. py:data:: VESSEL_PATHS
+   :type:  dict[str, tuple[tuple[tuple[float, float], Ellipsis], float, tuple[float, float], str]]
+
+.. py:function:: is_perfusion_territory(label: Any) -> bool
+
+   Whether *label* names an ASL perfusion territory rather than a vessel.
+
+   ``left_mca_8`` is the parenchyma the left MCA supplies, measured in mL/100 g/min. ``LMCA`` is
+   the artery itself, measured in mL/min. They share a name and are not the same structure, and the
+   trailing smoothing kernel is the only thing in the published id that tells them apart.
+
+
+.. py:function:: unmapped_vessel_labels(labels: Sequence[Any]) -> list[str]
+
+   Which of *labels* this schematic cannot draw — for telling the user *why* it would be empty.
+
+   Mirrors :func:`nvitk.stats.brain_map.regions_without_geometry`, and exists for the same reason:
+   an empty figure is a worse answer than a sentence naming the levels that did not resolve.
+
+
+.. py:function:: vascular_values_from_frame(frame: pandas.DataFrame, *, key_column: str, value_column: str, pvalue_column: str | None = None) -> tuple[dict[str, float], dict[str, float]]
+
+   Map a per-region result table onto canonical vessel nodes.
+
+   Accepts whatever spelling the frame uses — ``LICA``, ``left_ica``, ``Left-ICA`` all resolve —
+   through :func:`nodes_for_label`. Rows that are not vessels (a lobe, a cortical parcel, an
+   intercept term) are dropped silently: a mixed result table is the normal case, and only its
+   vessel rows belong on this figure.
+
+   :returns: Both keyed by canonical node; *pvalues* is empty when *pvalue_column* is ``None``.
+   :rtype: (values, pvalues)
+
+
+.. py:function:: vascular_values_from_result(result: Any, *, group_column: str = 'territory', source: str = 'coefficient', data: pandas.DataFrame | None = None, outcome: str = '', contrast: str = '') -> tuple[dict[str, float], dict[str, float], str]
+
+   Pull per-vessel numbers off a fitted model.
+
+   Two sources, because they answer different questions and are read differently:
+
+   ``coefficient``
+       The fixed effect of each vessel level, read from the parameter table — patsy names them
+       ``territory[T.LICA]``, so the level is recovered from the term. These are contrasts
+       *against the reference level*, which is therefore absent from the map by construction: it
+       is the zero everything else is measured from, not a vessel with no effect.
+
+   ``mean``
+       The observed mean of *outcome* within each vessel, from *data*. Not a model estimate at
+       all — no covariate adjustment, no p-values — but it is what "estimated marginal means"
+       reduces to for a model whose only term is the vessel, and it is the honest fallback when
+       the fit has no per-vessel parameter to read.
+
+   contrast : str
+       A level of an interacting factor, as :func:`interaction_contrasts` names it (``sex[T.M]``).
+       The vessel's value becomes its **simple effect at that level** — main effect plus the
+       interaction — which is the profile actually seen in that group. Left empty, the map shows
+       the main effect, i.e. the profile at the interacting factor's *reference* level; on a model
+       with an interaction that is one group's answer presented as if it were everyone's.
+
+       The p-value reported alongside stays the **interaction** term's: it tests whether this
+       vessel's effect differs between the groups, which is the question a contrast view raises.
+       A simple effect's own test needs a linear combination the coefficient table does not carry.
+
+   :returns: *note* describes what was extracted, for the figure subtitle.
+   :rtype: (values, pvalues, note)
+
+
+.. py:function:: interaction_contrasts(result: Any, *, group_column: str = 'territory', data: pandas.DataFrame | None = None) -> list[str]
+
+   Levels of the *other* factor in interactions with the vessel term, e.g. ``["sex[T.M]"]``.
+
+   A model with ``territory * sex`` estimates a different vessel profile for each sex, and the
+   coefficient table holds them as ``territory[T.LICA]:sex[T.M]``. Without naming which side of
+   the interaction to draw, the map would show only the main effect — the profile at the *other*
+   factor's reference level — and quietly present it as the whole story.
+
+   Empty when the model has no interaction on the vessel term, which is the signal a caller needs
+   to hide the selector rather than offer one with nothing in it.
+
+
+.. py:function:: group_coefficient_terms(result: Any, *, group_column: str = 'territory') -> list[str]
+
+   Per-group terms this fit estimates for *group_column*, e.g. ``["(Intercept)", "age_c"]``.
+
+   Empty when the model has no random structure over that factor — which is the signal a caller
+   needs to fall back to the fixed effects instead of offering a menu with nothing in it.
+
+
+.. py:function:: plot_vascular_map(values: Mapping[str, float], *, pvalues: Mapping[str, float] | None = None, mode: str = 'estimate', alpha: float = DEFAULT_ALPHA, mask_nonsignificant: bool = True, cmap: str | None = None, center: float | None = None, vmin: float | None = None, vmax: float | None = None, label: str = '', title: str = '', annotate: bool = True, hide: Sequence[str] = (), ax: Any = None)
+
+   Draw *values* on the cerebral vasculature.
+
+   :param values: ``{canonical node: value}``. Nodes absent from the mapping are drawn as empty outlines.
+   :type values: mapping
+   :param pvalues: ``{canonical node: p}``. Required for *mode* ``"pvalue"`` and for significance masking.
+   :type pvalues: mapping, optional
+   :param mode: What colour encodes. ``"estimate"`` maps the value through a diverging or sequential
+                colormap; ``"pvalue"`` maps −log₁₀(p), which spreads the small p-values that matter instead
+                of compressing them all against zero.
+   :type mode: {"estimate", "pvalue"}
+   :param mask_nonsignificant: In ``"estimate"`` mode, draw vessels with ``p >= alpha`` in grey. Has no effect without
+                               *pvalues* — and is skipped with a warning rather than silently colouring everything, since
+                               an unmasked map looks identical to one where everything is significant.
+   :type mask_nonsignificant: bool
+   :param center: Value the diverging colormap centres on. Defaults to 0 when the values straddle it (an
+                  effect), and to no centring when they do not (a mean).
+   :type center: float, optional
+   :param vmin: Pin the colour scale instead of taking it from these values. Needed whenever several
+                figures have to be *compared* — the frames of a cardiac animation above all, where a scale
+                refitted per frame animates the scale rather than the flow, and systole and diastole come
+                out looking identical because each saturates its own range.
+   :type vmin: float, optional
+   :param vmax: Pin the colour scale instead of taking it from these values. Needed whenever several
+                figures have to be *compared* — the frames of a cardiac animation above all, where a scale
+                refitted per frame animates the scale rather than the flow, and systole and diastole come
+                out looking identical because each saturates its own range.
+   :type vmax: float, optional
+   :param annotate: Print each vessel's value beside it.
+   :type annotate: bool
+   :param hide: Vessels to leave off the figure entirely — not drawn, not labelled, and **not counted in
+                the colour scale**. That last part is the point: hiding the one vessel that dominates the
+                range is how you see the structure among the rest, which a figure that merely blanked it
+                would not give you. Distinct from a vessel with no estimate, which is drawn as an outline
+                because "not measured" is information.
+   :type hide: sequence of str
+
+   :rtype: matplotlib.figure.Figure
+
+

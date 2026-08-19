@@ -1,0 +1,21 @@
+nvitk.gui.io
+============
+
+.. py:module:: nvitk.gui.io
+
+.. autoapi-nested-parse::
+
+   Napari I/O integration (open paths, export layers).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/gui/io/export/index
+   /autoapi/nvitk/gui/io/napari_io/index
+
+

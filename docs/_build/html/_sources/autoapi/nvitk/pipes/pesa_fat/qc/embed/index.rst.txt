@@ -1,0 +1,34 @@
+nvitk.pipes.pesa_fat.qc.embed
+=============================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.embed
+
+.. autoapi-nested-parse::
+
+   HTML embedding helpers for portability (single-file reports).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.embed.escape_srcdoc
+   nvitk.pipes.pesa_fat.qc.embed.iframe_srcdoc
+
+
+Module Contents
+---------------
+
+.. py:function:: escape_srcdoc(text: str) -> str
+
+   Escape HTML so it can be placed inside an iframe ``srcdoc="..."`` attribute.
+
+
+.. py:function:: iframe_srcdoc(html_text: str, *, height_px: int = 420, title: str = 'embedded') -> str
+
+   Embed *html_text* as a self-contained ``<iframe srcdoc="...">`` at the given height, for
+   portable single-file QC reports.
+
+

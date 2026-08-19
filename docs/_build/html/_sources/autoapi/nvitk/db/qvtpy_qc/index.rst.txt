@@ -1,0 +1,119 @@
+nvitk.db.qvtpy_qc
+=================
+
+.. py:module:: nvitk.db.qvtpy_qc
+
+.. autoapi-nested-parse::
+
+   Write QVTPY QC review status onto ``image_measurements.qc_status``.
+
+   Each review decision updates matching rows for the latest qvtpy pipeline
+   (``4dflow_v3`` / aliases ``latest`` / ``qvtpy``) keyed by
+   ``subject_uid`` + ``pipeline_id`` + ``variable_id`` (+ optional ``region_id``).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_qc.QC_STATUS_VALUES
+   nvitk.db.qvtpy_qc.QC_METRIC_VARIABLES
+
+
+Exceptions
+----------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_qc.TableMissingError
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_qc.QcReviewDecision
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.qvtpy_qc.normalize_qc_status
+   nvitk.db.qvtpy_qc.publish_qvtpy_qc_reviews
+   nvitk.db.qvtpy_qc.try_publish_qvtpy_qc_reviews
+   nvitk.db.qvtpy_qc.subject_qc_status_summary
+
+
+Module Contents
+---------------
+
+.. py:data:: QC_STATUS_VALUES
+
+.. py:data:: QC_METRIC_VARIABLES
+   :type:  dict[str, tuple[str, Ellipsis]]
+
+.. py:exception:: TableMissingError
+
+   Bases: :py:obj:`RuntimeError`
+
+
+   Raised when a required catalog table is absent.
+
+
+.. py:class:: QcReviewDecision
+
+   One OK/FAIL decision for a subject measurement.
+
+
+   .. py:attribute:: variable_id
+      :type:  str
+
+
+   .. py:attribute:: region_id
+      :type:  str
+
+
+   .. py:attribute:: qc_status
+      :type:  str
+
+
+   .. py:attribute:: comment
+      :type:  str
+      :value: ''
+
+
+
+.. py:function:: normalize_qc_status(value: str) -> str
+
+   Upper-case and validate *value* against ``QC_STATUS_VALUES``; raises ``ValueError`` if unknown.
+
+
+.. py:function:: publish_qvtpy_qc_reviews(*, subject_uid: str, decisions: Sequence[QcReviewDecision] | Iterable[dict[str, Any]], repo: nvitk.db.repo.DataRepo | None = None, reviewer: str = '', build_sqlite_index: bool = False, pipeline_id: str = QVTPY_PIPELINE_ID) -> dict[str, int]
+
+   Set ``qc_status`` on matching ``image_measurements`` rows.
+
+   :param subject_uid: Subject to update.
+   :param decisions: Iterable of :class:`QcReviewDecision` or dicts with keys
+                     ``variable_id``, ``region_id``, ``qc_status``, optional ``comment``.
+
+
+.. py:function:: try_publish_qvtpy_qc_reviews(**kwargs: Any) -> dict[str, int] | None
+
+   Best-effort wrapper around :func:`publish_qvtpy_qc_reviews`.
+
+
+.. py:function:: subject_qc_status_summary(repo: nvitk.db.repo.DataRepo | None = None, *, pipeline_id: str = QVTPY_PIPELINE_ID) -> dict[str, str]
+
+   Per-subject revision status from ``image_measurements.qc_status``.
+
+   Returns a dict mapping ``subject_uid`` to one of:
+   - ``"revised"``  — every QC-relevant row for the subject has OK or FAIL.
+   - ``"partial"``  — some rows are reviewed, others still PENDING / blank.
+   - ``"pending"``  — no rows have been reviewed yet (all PENDING or no rows).
+
+

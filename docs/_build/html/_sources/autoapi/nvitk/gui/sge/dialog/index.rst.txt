@@ -1,0 +1,77 @@
+nvitk.gui.sge.dialog
+====================
+
+.. py:module:: nvitk.gui.sge.dialog
+
+.. autoapi-nested-parse::
+
+   Qt dialog for SSH credentials and remote job directory.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.sge.dialog.SgeConnectionSettings
+   nvitk.gui.sge.dialog.SgeSubmitDialog
+
+
+Module Contents
+---------------
+
+.. py:class:: SgeConnectionSettings
+
+   SSH connection details and remote job directory collected from :class:`SgeSubmitDialog`.
+
+
+   .. py:attribute:: host
+      :type:  str
+
+
+   .. py:attribute:: user
+      :type:  str
+
+
+   .. py:attribute:: password
+      :type:  str
+
+
+   .. py:attribute:: remote_job_root
+      :type:  str
+
+
+.. py:class:: SgeSubmitDialog(parent=None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Collect SSH host, credentials, and remote job root.
+
+
+   .. py:attribute:: host
+
+
+   .. py:attribute:: user
+
+
+   .. py:attribute:: password
+
+
+   .. py:attribute:: remote_job_root
+
+
+   .. py:method:: settings() -> SgeConnectionSettings
+
+      Read the current form field values into an :class:`SgeConnectionSettings`.
+
+
+
+   .. py:method:: accept() -> None
+
+      Validate required fields (host, user, remote job root — falling back to the default root
+      when blank) before closing the dialog as accepted; focuses the first invalid field otherwise.
+
+
+

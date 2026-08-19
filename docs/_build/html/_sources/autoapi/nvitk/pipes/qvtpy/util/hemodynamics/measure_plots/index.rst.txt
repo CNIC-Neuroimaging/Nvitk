@@ -1,0 +1,104 @@
+nvitk.pipes.qvtpy.util.hemodynamics.measure_plots
+=================================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.hemodynamics.measure_plots
+
+.. autoapi-nested-parse::
+
+   Paper-style stage-6 measurement figures and PITC branch masks.
+
+   Renders the four figures used to report vessel-level 4D-flow hemodynamics:
+
+   - **PITC** — per-root pulsatility quality ``Q`` and pulsatility index ``p_pi`` vs
+     distance-from-root with the transmission-coefficient fit line.
+   - **PWV** — per-root cross-correlation ``XCor`` time and time-to-upstroke vs
+     distance with Bjornfoot area-weighted (\(W_1\)) and Dempsey quality-weighted
+     (\(W_2\)) fits (QVTplus ``enc_PWV_XCor`` tag 0/1), plus the weights.
+   - **Bjornfoot QC** — per-station weighted template residual, XCor-minus-model
+     delay residual, and observed-versus-fitted waveform correlation.
+   - **Flow waveforms** — per-vessel mean +/- std flow over the cardiac cycle.
+
+   Also writes, per root region, a NIfTI mask of the vessels (root + downstream
+   branches) contributing to that region's PITC fit.
+
+   All figures are opt-in via the stage-6 ``--save-plots`` flag; nothing here runs
+   by default.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.make_pitc_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.plot_pitc_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.make_pwv_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.plot_pwv_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.make_bjornfoot_qc_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.plot_bjornfoot_qc_figure
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.plot_flow_waveforms
+   nvitk.pipes.qvtpy.util.hemodynamics.measure_plots.save_pitc_region_masks
+
+
+Module Contents
+---------------
+
+.. py:function:: make_pitc_figure(region_plot_data: dict[str, dict[str, Any]], *, show_legend: bool = True, fig=None)
+
+   Build a live Matplotlib PITC diagnostics figure.
+
+   Pass an existing *fig* (e.g. a QtAgg canvas figure) to redraw in place
+   without replacing the canvas figure / breaking zoom-pan.
+
+
+.. py:function:: plot_pitc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: pathlib.Path) -> pathlib.Path | None
+
+   Two-row PITC figure: quality Q and pulsatility index vs distance per root.
+
+
+.. py:function:: make_pwv_figure(region_plot_data: dict[str, dict[str, Any]], *, show_legend: bool = True, fig=None)
+
+   Build a live Matplotlib PWV diagnostics figure.
+
+   Quality-excluded stations are shown in grey (same style as PITC); fits and
+   colored markers use only stations with ``Q > quality_thresh``.
+
+   Pass an existing *fig* to redraw in place (GUI dock) without replacing the
+   canvas figure.
+
+
+.. py:function:: plot_pwv_figure(region_plot_data: dict[str, dict[str, Any]], out_path: pathlib.Path) -> pathlib.Path | None
+
+   Three-row PWV figure: XCor time, time-to-upstroke, and per-station weights.
+
+
+.. py:function:: make_bjornfoot_qc_figure(region_plot_data: dict[str, dict[str, Any]], *, show_legend: bool = True, fig=None)
+
+   Build a three-row Bjornfoot shared-template fit QC figure.
+
+   Pass an existing *fig* to redraw in place (GUI dock) without replacing the
+   canvas figure.
+
+
+.. py:function:: plot_bjornfoot_qc_figure(region_plot_data: dict[str, dict[str, Any]], out_path: pathlib.Path) -> pathlib.Path | None
+
+   Save standalone Bjornfoot options A/B/C QC as one PNG.
+
+
+.. py:function:: plot_flow_waveforms(region_plot_data: dict[str, dict[str, Any]], out_path: pathlib.Path, *, all_label_waveforms: dict[int, dict[str, Any]] | None = None) -> pathlib.Path | None
+
+   Grid of per-vessel mean +/- std flow waveforms over the cardiac cycle.
+
+
+.. py:function:: save_pitc_region_masks(volume_seg: numpy.ndarray, out_dir: pathlib.Path, *, metadata: dict | None = None) -> list[str]
+
+   Write one multilabel NIfTI per root region with the vessels used for PITC.
+
+   Each mask keeps the ``seg_4dflow`` labels of the region's root and downstream
+   branches, so a reviewer can see exactly which branches fed each PITC fit.
+   Isolated islands should already be removed by
+   :func:`~nvitk.pipes.qvtpy.util.centerline.mask_cleaning.clean_volume_seg_for_pitc`; this
+   export also keeps the largest component per label as a safety net.
+
+

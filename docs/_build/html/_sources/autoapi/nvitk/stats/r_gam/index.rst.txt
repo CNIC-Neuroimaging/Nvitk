@@ -1,0 +1,241 @@
+nvitk.stats.r_gam
+=================
+
+.. py:module:: nvitk.stats.r_gam
+
+.. autoapi-nested-parse::
+
+   Markov-random-field smoothing over the vessel adjacency graph, through R's ``mgcv``.
+
+   Description
+   -----------
+   Every model so far has treated territories as exchangeable levels. A fixed effect per territory
+   estimates each one from its own rows alone; a random intercept shrinks them all toward a common
+   mean, as if the basilar and the left MCA were two draws from one population of vessels. Neither uses
+   the fact that the basilar is *adjacent to* the vertebrals and the posterior cerebrals and to nothing
+   else.
+
+   A Markov random field does. ``s(territory, bs="mrf", xt=list(nb=...))`` penalises differences
+   between **neighbouring** vessels, so each territory's estimate borrows strength from the ones it is
+   anatomically connected to and not from the rest. The neighbourhood comes from
+   :func:`~nvitk.stats.vessel_network.neighbour_list`, and the smoothing parameter — how much
+   neighbours are pulled together — is estimated by REML rather than chosen.
+
+   What it does and does not model
+   -------------------------------
+   The graph is **undirected**. An MRF says "adjacent vessels should resemble one another"; it does not
+   say blood flows from the carotid to the middle cerebral. When the direction is the point, that is a
+   path model — see :mod:`~nvitk.stats.sem`. The two answer different questions and are worth running
+   together: the MRF gives a smoothed spatial field over the tree, the SEM gives the edges.
+
+   Requirements
+   ------------
+   R with ``mgcv``, which ships with almost every R installation as a recommended package. Python:
+   ``rpy2``. Nothing else.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.r_gam.ANALYSIS_MRF
+   nvitk.stats.r_gam.REQUIRED_R_PACKAGES
+   nvitk.stats.r_gam.INSTALL_HINT
+   nvitk.stats.r_gam.GAM_FAMILIES
+   nvitk.stats.r_gam.GAM_METHODS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats.r_gam.GamBackendStatus
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.r_gam.gam_backend_status
+   nvitk.stats.r_gam.mrf_formula
+   nvitk.stats.r_gam.fit_mrf
+   nvitk.stats.r_gam.mrf_coef_frame
+   nvitk.stats.r_gam.mrf_smooth_frame
+   nvitk.stats.r_gam.mrf_field_frame
+   nvitk.stats.r_gam.mrf_info_dict
+   nvitk.stats.r_gam.plot_mrf_field
+   nvitk.stats.r_gam.plot_mrf_graph
+
+
+Module Contents
+---------------
+
+.. py:data:: ANALYSIS_MRF
+   :value: 'mrf'
+
+
+.. py:data:: REQUIRED_R_PACKAGES
+   :type:  tuple[str, Ellipsis]
+   :value: ('mgcv',)
+
+
+.. py:data:: INSTALL_HINT
+   :value: Multiline-String
+
+   .. raw:: html
+
+      <details><summary>Show Value</summary>
+
+   .. code-block:: python
+
+      """mgcv ships with R as a recommended package; if it is genuinely missing:
+          R -e "install.packages('mgcv', repos='https://cloud.r-project.org')"
+      and the Python bridge with:
+          pip install 'rpy2>=3.5'"""
+
+   .. raw:: html
+
+      </details>
+
+
+
+.. py:data:: GAM_FAMILIES
+   :type:  dict[str, str]
+
+.. py:data:: GAM_METHODS
+   :type:  dict[str, str]
+
+.. py:class:: GamBackendStatus
+
+   What the MRF engine found when it probed rpy2 → R → mgcv.
+
+
+   .. py:attribute:: available
+      :type:  bool
+
+
+   .. py:attribute:: rpy2_version
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: r_version
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: r_packages
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: missing
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:attribute:: reason
+      :type:  str
+      :value: ''
+
+
+
+   .. py:method:: summary() -> str
+
+      One-line description for a status bar.
+
+
+
+   .. py:method:: install_hint() -> str
+
+      What to install to make the engine work.
+
+
+
+.. py:function:: gam_backend_status(*, check_r_packages: bool = True) -> GamBackendStatus
+
+   Probe rpy2 → R → ``mgcv``. Never raises, and never imports R as an import side effect.
+
+
+.. py:function:: mrf_formula(outcome: str, *, region_column: str = 'territory', covariates: Sequence[str] = (), k: int | None = None, extra_terms: Sequence[str] = ()) -> str
+
+   Build the ``gam`` formula for an MRF smooth over the vessel graph.
+
+   ``k`` is the basis dimension: at most one fewer than the number of regions, since the smooth is
+   identifiable only up to an intercept. Left unset it is chosen as ``n_regions - 1``, which lets
+   the penalty rather than the basis size decide how much smoothing happens.
+
+
+.. py:function:: fit_mrf(*, data: pandas.DataFrame, formula: str = '', outcome: str = '', region_column: str = 'territory', covariates: Sequence[str] = (), neighbours: Mapping[str, Sequence[str]] | None = None, family: str = 'gaussian', method: str = 'REML', select: bool = False, k: int | None = None) -> tuple[Any, pandas.DataFrame, dict[str, Any]]
+
+   Fit a GAM with a Markov-random-field smooth over the vessel adjacency graph.
+
+   :param formula: A complete ``gam`` formula, which must reference ``nb`` inside the MRF term. Leave empty to
+                   have one built from *outcome*, *region_column* and *covariates*.
+   :type formula: str
+   :param neighbours: ``{vessel: [neighbour, ...]}``. Defaults to
+                      :func:`~nvitk.stats.vessel_network.neighbour_list` restricted to the regions present.
+   :type neighbours: mapping, optional
+   :param select: Add an extra penalty that can shrink a smooth to exactly zero, so the fit can conclude the
+                  graph structure explains nothing.
+   :type select: bool
+
+   :returns: *fit* is the R ``gam`` object; *metadata* matches the other engines and additionally carries
+             ``neighbours`` and ``levels``.
+   :rtype: (fit, model_df, metadata)
+
+
+.. py:function:: mrf_coef_frame(fit: Any, *, ci_level: float = 0.95) -> pandas.DataFrame
+
+   Parametric (non-smooth) coefficients, in the shared report shape.
+
+
+.. py:function:: mrf_smooth_frame(fit: Any) -> pandas.DataFrame
+
+   The smooth term's summary: effective degrees of freedom and its test against a flat field.
+
+   ``edf`` is what the MRF actually bought. An edf near 1 means the penalty collapsed the field
+   almost to a constant — neighbouring vessels were pulled together so hard that the graph adds
+   nothing over a single intercept. An edf near ``k`` means the vessels differ so much that the
+   smoothing barely constrained them, which is a fixed effect per territory in all but name.
+
+
+.. py:function:: mrf_field_frame(fit: Any, model_df: pandas.DataFrame, meta: Mapping[str, Any]) -> pandas.DataFrame
+
+   The smoothed spatial field: each vessel's estimated departure from the overall level.
+
+   This is the MRF's actual output — a value per vessel, shrunk toward its *neighbours* rather than
+   toward the grand mean. Comparing it against a plain per-territory fixed effect shows how much
+   the anatomy changed the estimate, which is the whole reason for running one.
+
+
+.. py:function:: mrf_info_dict(fit: Any, *, outcome_name: str = 'Outcome', group_name: str = 'Group', meta: Mapping[str, Any] | None = None) -> dict[str, Any]
+
+   Structured report in the shape the GUI report panel expects from every engine.
+
+
+.. py:function:: plot_mrf_field(field: pandas.DataFrame, *, node_labels: Mapping[str, str] | None = None, title: str = 'Smoothed field over the vessel graph') -> Any
+
+   The fitted field, vessel by vessel, with its confidence interval.
+
+   Vessels are ordered by their estimated effect rather than alphabetically, so the gradient across
+   the network is what the eye picks up. The annotation on each row is that vessel's neighbour
+   count — a vessel with one neighbour is shrunk toward that single partner and its interval is
+   correspondingly wide.
+
+
+.. py:function:: plot_mrf_graph(field: pandas.DataFrame, neighbours: Mapping[str, Sequence[str]], *, node_labels: Mapping[str, str] | None = None, title: str = 'Vessel adjacency graph') -> Any
+
+   The adjacency graph itself, nodes coloured by their fitted effect.
+
+   Shows what the smooth was actually working with: which vessels are connected, and whether the
+   fitted field varies smoothly across the graph or jumps between neighbours. A sharp jump between
+   two adjacent vessels is the interesting case — the penalty resisted it, so the data insisted.
+
+

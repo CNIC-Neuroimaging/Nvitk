@@ -1,0 +1,33 @@
+nvitk.io.writers.pil
+====================
+
+.. py:module:: nvitk.io.writers.pil
+
+.. autoapi-nested-parse::
+
+   Save 2D or ``YXC`` arrays with Pillow (format from file extension).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.writers.pil._to_uint8
+   nvitk.io.writers.pil.write_pil
+
+
+Module Contents
+---------------
+
+.. py:function:: _to_uint8(arr: numpy.ndarray) -> numpy.ndarray
+
+   Coerce an array to uint8 for image writers: floats are treated as ``[0, 1]``, ints are clipped to ``[0, 255]``.
+
+
+.. py:function:: write_pil(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Write raster image; floats are scaled to uint8 when needed.
+
+

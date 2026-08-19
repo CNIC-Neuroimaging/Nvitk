@@ -1,0 +1,51 @@
+nvitk.io.ants_bridge
+====================
+
+.. py:module:: nvitk.io.ants_bridge
+
+.. autoapi-nested-parse::
+
+   Convert nvitk :class:`~nvitk.types.Image` / arrays ↔ ANTsPy images.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.ants_bridge.require_ants
+   nvitk.io.ants_bridge.require_antspynet
+   nvitk.io.ants_bridge.to_ants_image
+   nvitk.io.ants_bridge.from_ants_image
+   nvitk.io.ants_bridge.ants_result_to_array
+
+
+Module Contents
+---------------
+
+.. py:function:: require_ants()
+
+   Import ``ants`` or raise :class:`BackendUnavailableError`.
+
+
+.. py:function:: require_antspynet()
+
+   Import ``antspynet`` or raise :class:`BackendUnavailableError`.
+
+
+.. py:function:: to_ants_image(image: Any, *, dtype: Any = np.float32)
+
+   Build an ANTsPy image from an :class:`~nvitk.types.Image` or ndarray.
+
+
+.. py:function:: from_ants_image(ants_image: Any) -> numpy.ndarray
+
+   Return a NumPy view/copy of an ANTsPy image array.
+
+
+.. py:function:: ants_result_to_array(result: Any) -> numpy.ndarray
+
+   Coerce an ANTsPyNet return value (image, list, or dict) to a NumPy array.
+
+

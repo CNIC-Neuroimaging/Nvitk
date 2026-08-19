@@ -1,0 +1,133 @@
+nvitk.pipes.pesa_fat.sync_measurements
+======================================
+
+.. py:module:: nvitk.pipes.pesa_fat.sync_measurements
+
+.. autoapi-nested-parse::
+
+   Sync PESA-Fat stage-3 measurement workbooks into the NVITK database.
+
+   Reads per-subject Excel files produced by CT-PET v5 and Dixon v5 stage 3, upserts
+   long-form rows into ``image_measurements``, and rebuilds the SQLite catalog index once
+   at the end.
+
+   Use ``--from-source local`` for workstation result roots (``layout_local``) or
+   ``--from-source sge`` to SFTP files from cluster storage (``layout_cluster``) into
+   the local mirror before publishing.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.sync_measurements.log
+   nvitk.pipes.pesa_fat.sync_measurements.PIPELINE_CHOICES
+   nvitk.pipes.pesa_fat.sync_measurements.PesaFatQcPipeline
+   nvitk.pipes.pesa_fat.sync_measurements.FromSource
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.sync_measurements.SyncResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.sync_measurements._normalize_pipelines
+   nvitk.pipes.pesa_fat.sync_measurements._resolve_ssh_credentials
+   nvitk.pipes.pesa_fat.sync_measurements._measurement_pairs
+   nvitk.pipes.pesa_fat.sync_measurements._download_measurements_from_cluster
+   nvitk.pipes.pesa_fat.sync_measurements._publish_measurements
+   nvitk.pipes.pesa_fat.sync_measurements.sync_measurements
+   nvitk.pipes.pesa_fat.sync_measurements.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: PIPELINE_CHOICES
+   :value: ('ct-pet-v5', 'dixon-v5')
+
+
+.. py:data:: PesaFatQcPipeline
+
+.. py:data:: FromSource
+
+.. py:class:: SyncResult
+
+   Running tally of a measurement-sync operation: published/skipped/downloaded counts and errors.
+
+
+   .. py:attribute:: published
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: skipped
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: downloaded
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: errors
+      :type:  list[str]
+      :value: []
+
+
+
+.. py:function:: _normalize_pipelines(pipelines: str) -> list[PesaFatQcPipeline]
+
+   Parse a comma-separated ``--pipelines`` string into validated pipeline names; raises
+   ``click.BadParameter`` for any unknown pipeline.
+
+
+.. py:function:: _resolve_ssh_credentials(*, remote_host: str | None, remote_user: str | None) -> tuple[str, str, str]
+
+   Resolve SSH ``(host, user, password)`` for cluster download: from args, then env vars, then
+   interactive prompts (resolving *host* through the cluster alias map).
+
+
+.. py:function:: _measurement_pairs(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subjects: list[str], pipelines: list[PesaFatQcPipeline]) -> list[tuple[str, PesaFatQcPipeline, pathlib.Path]]
+
+   Build ``(subject, pipeline, xlsx_path)`` triples for every subject/pipeline combination under
+   *lay*.
+
+
+.. py:function:: _download_measurements_from_cluster(*, cluster_lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, local_lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subjects: list[str], pipelines: list[PesaFatQcPipeline], host: str, user: str, password: str, dry_run: bool) -> tuple[list[tuple[str, PesaFatQcPipeline, pathlib.Path]], SyncResult]
+
+   SFTP stage-3 workbooks from cluster paths into the local results mirror.
+
+
+.. py:function:: _publish_measurements(*, batch: str, pairs: list[tuple[str, PesaFatQcPipeline, pathlib.Path]], dry_run: bool, skip_db: bool) -> SyncResult
+
+   Publish each ready measurement workbook to the database (or, with *skip_db*, just verify the
+   local file exists), tracking published/skipped counts and errors.
+
+
+.. py:function:: sync_measurements(batch: str, subjects: list[str], *, pipelines: list[PesaFatQcPipeline], from_source: FromSource = 'local', results_root: pathlib.Path | None = None, remote_host: str | None = None, remote_user: str | None = None, dry_run: bool = False, skip_db: bool = False, aggregate: bool = True) -> SyncResult
+
+   Sync stage-3 measurement workbooks for *subjects* into the NVITK DB.
+
+
+.. py:function:: main(batch: str, subjects: str | None, pipelines: str, from_source: str, results_root: pathlib.Path | None, remote_host: str | None, remote_user: str | None, dry_run: bool, skip_db: bool, no_aggregate: bool, log_level: str) -> None
+
+   Sync CT-PET and Dixon stage-3 measurements into the NVITK database.
+
+

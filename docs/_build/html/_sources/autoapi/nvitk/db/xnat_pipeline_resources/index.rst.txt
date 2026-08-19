@@ -1,0 +1,62 @@
+nvitk.db.xnat_pipeline_resources
+================================
+
+.. py:module:: nvitk.db.xnat_pipeline_resources
+
+.. autoapi-nested-parse::
+
+   Sync qvtpy / eICAB XNAT experiment resources into the dataset ``assets`` table.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_pipeline_resources.inspect_xnat_pipeline_resource
+   nvitk.db.xnat_pipeline_resources.unwrap_xnat_resource_download
+   nvitk.db.xnat_pipeline_resources.download_experiment_resource
+   nvitk.db.xnat_pipeline_resources.sync_xnat_pipeline_resources
+   nvitk.db.xnat_pipeline_resources.list_pipeline_assets_for_subject
+
+
+Module Contents
+---------------
+
+.. py:function:: inspect_xnat_pipeline_resource(experiment: Any, resource_label: str) -> dict[str, Any]
+
+   Return availability metadata for one experiment resource (no download).
+
+
+.. py:function:: unwrap_xnat_resource_download(dest_dir: pathlib.Path, resource_label: str) -> pathlib.Path
+
+   Promote ``{experiment}/resources/{label}/files/*`` up to *dest_dir*.
+
+   xnatpy ``download_dir`` extracts the REST ZIP with experiment/resource nesting.
+   Local QC / pipeline loaders expect the uploaded payload (stage folders, NIfTIs)
+   directly under the destination, matching the on-disk results layout.
+
+
+.. py:function:: download_experiment_resource(experiment: Any, resource_label: str, dest_dir: pathlib.Path, *, overwrite: bool = False) -> pathlib.Path
+
+   Download an experiment-level XNAT resource into *dest_dir*.
+
+   After download, unwraps xnatpy's ``{experiment}/resources/{label}/files`` nesting
+   so *dest_dir* matches the local pipeline results layout.
+
+
+.. py:function:: sync_xnat_pipeline_resources(repo: nvitk.db.repo.DataRepo, config: nvitk.db.xnat_config.XnatConnectionConfig, *, catalog_path: str | pathlib.Path | None = None, subjects: str | Iterable[str] | None = None, subjects_file: str | pathlib.Path | None = None, id_type: str = 'subject', resources: Iterable[str] = QVTPY_PIPELINE_RESOURCES, download_root: str | pathlib.Path | None = None, download_resources: bool = False, overwrite_downloads: bool = False, skip_existing_downloads: bool = True, build_sqlite_index: bool = False, source_batch_id: str | None = None) -> pandas.DataFrame
+
+   Index qvtpy/eICAB experiment resources on XNAT into ``assets``.
+
+
+.. py:function:: list_pipeline_assets_for_subject(repo: nvitk.db.repo.DataRepo, project_id: str, subject_uid: str) -> pandas.DataFrame
+
+   Return indexed pipeline bundle rows for *subject_uid*.
+
+   Includes ``eicab`` / ``qvtpy`` / ``4dflows`` experiment resources. Derived
+   ``4dflows`` file rows (``source=xnat_4dflows``) are collapsed to a single
+   downloadable ``pipeline_4dflows`` bundle entry when no bundle row exists.
+
+

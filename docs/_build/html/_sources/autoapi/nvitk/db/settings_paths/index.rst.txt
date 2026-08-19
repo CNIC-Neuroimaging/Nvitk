@@ -1,0 +1,52 @@
+nvitk.db.settings_paths
+=======================
+
+.. py:module:: nvitk.db.settings_paths
+
+.. autoapi-nested-parse::
+
+   Locate ``.nvitk/settings.json`` and read the ``db`` block.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.settings_paths._find_repo_root
+   nvitk.db.settings_paths.settings_json_path
+   nvitk.db.settings_paths.load_db_settings_block
+   nvitk.db.settings_paths.configured_sge_dataset_root
+   nvitk.db.settings_paths.sge_dataset_root_path
+
+
+Module Contents
+---------------
+
+.. py:function:: _find_repo_root() -> pathlib.Path | None
+
+   Walk up from this file to find the repo root (the ancestor with ``pyproject.toml`` and
+   ``src/nvitk/``); ``None`` if not found (e.g. an installed, non-editable package).
+
+
+.. py:function:: settings_json_path() -> pathlib.Path | None
+
+   Return the first existing ``.nvitk/settings.json`` on the search path.
+
+
+.. py:function:: load_db_settings_block() -> dict[str, Any]
+
+   Parse the ``db`` section from settings, or return ``{}``.
+
+
+.. py:function:: configured_sge_dataset_root() -> pathlib.Path | None
+
+   Return ``db.sge_root`` from settings (path may not exist on this host).
+
+
+.. py:function:: sge_dataset_root_path(*, must_exist: bool = True) -> pathlib.Path | None
+
+   Resolve the cluster dataset root from env or ``db.sge_root``.
+
+

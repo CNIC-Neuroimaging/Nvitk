@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.types &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="nvitk.types.image" href="image/index.html" />
+    <link rel="prev" title="nvitk.transform.swap_axes" href="../transform/swap_axes/index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.types">
+<span id="nvitk-types"></span><h1>nvitk.types<a class="headerlink" href="#module-nvitk.types" title="Link to this heading">¶</a></h1>
+<p>Typed domain objects (primarily <a class="reference internal" href="image/index.html#nvitk.types.image.Image" title="nvitk.types.image.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a>).</p>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading">¶</a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="image/index.html">nvitk.types.image</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mesh/index.html">nvitk.types.mesh</a></li>
+</ul>
+</div>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Image</span></code></a></p></td>
+<td><p>Voxel data with a metadata dict, optional axis labels, and NumPy/CuPy interoperability.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.types.Mesh" title="nvitk.types.Mesh"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Mesh</span></code></a></p></td>
+<td><p>Triangle mesh with optional world-space metadata from a source image.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="package-contents">
+<h2>Package Contents<a class="headerlink" href="#package-contents" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.types.Image">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.types.</span></span><span class="sig-name descname"><span class="pre">Image</span></span><a class="headerlink" href="#nvitk.types.Image" title="Link to this definition">¶</a></dt>
+<dd><p>Voxel data with a metadata dict, optional axis labels, and NumPy/CuPy interoperability.</p>
+<p><strong>Construction</strong></p>
+<ul class="simple">
+<li><p>Pass a NumPy/CuPy array (and optional <code class="docutils literal notranslate"><span class="pre">metadata</span></code> / <code class="docutils literal notranslate"><span class="pre">axes</span></code> / <code class="docutils literal notranslate"><span class="pre">name</span></code> / <code class="docutils literal notranslate"><span class="pre">orientation</span></code>).</p></li>
+<li><p>Pass a path string or <code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code> to load via <a class="reference internal" href="../io/imageio/index.html#nvitk.io.imageio.imread" title="nvitk.io.imageio.imread"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.io.imageio.imread()</span></code></a>.</p></li>
+</ul>
+<p><strong>Behavior</strong></p>
+<p>Indexing and ufuncs return a new <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> when the result is array-like.
+Use <a class="reference internal" href="#nvitk.types.Image.with_data" title="nvitk.types.Image.with_data"><code class="xref py py-meth docutils literal notranslate"><span class="pre">with_data()</span></code></a> or <a class="reference internal" href="#nvitk.types.Image.take" title="nvitk.types.Image.take"><code class="xref py py-meth docutils literal notranslate"><span class="pre">take()</span></code></a> to replace voxels while merging metadata safely.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Image.data">
+<span class="sig-name descname"><span class="pre">data</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span></span><a class="headerlink" href="#nvitk.types.Image.data" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Image.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.metadata" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Image.axes">
+<span class="sig-name descname"><span class="pre">axes</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.axes" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Image.name">
+<span class="sig-name descname"><span class="pre">name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.name" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Image.orientation">
+<span class="sig-name descname"><span class="pre">orientation</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.orientation" title="Link to this definition">¶</a></dt>
+<dd><p>Voxel axes orientation codes (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;RAS&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;LPS&quot;</span></code>) from the image affine.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__post_init__">
+<span class="sig-name descname"><span class="pre">__post_init__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image.__post_init__" title="Link to this definition">¶</a></dt>
+<dd><p>Normalize metadata, validate <code class="docutils literal notranslate"><span class="pre">axes</span></code> vs <code class="docutils literal notranslate"><span class="pre">ndim</span></code>, and merge path loads.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.backend">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">backend</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.types.Image.backend" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">&quot;cupy&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;numpy&quot;</span></code> depending on <code class="docutils literal notranslate"><span class="pre">self.data</span></code>.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.modality">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">modality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.modality" title="Link to this definition">¶</a></dt>
+<dd><p>DICOM Modality (tag <code class="docutils literal notranslate"><span class="pre">(0008,0060)</span></code>), e.g. <code class="docutils literal notranslate"><span class="pre">&quot;PT&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;CT&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;MR&quot;</span></code>.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.submodality">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">submodality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.submodality" title="Link to this definition">¶</a></dt>
+<dd><p>Series-level descriptor (series description / submodality), if recorded.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.rescale_type">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">rescale_type</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.types.Image.rescale_type" title="Link to this definition">¶</a></dt>
+<dd><p>Intensity units tag (default <code class="docutils literal notranslate"><span class="pre">&quot;DV&quot;</span></code>), upper-cased; e.g. <code class="docutils literal notranslate"><span class="pre">&quot;BQML&quot;</span></code> for PET.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.is_pet">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_pet</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><a class="headerlink" href="#nvitk.types.Image.is_pet" title="Link to this definition">¶</a></dt>
+<dd><p>True when <a class="reference internal" href="#nvitk.types.Image.modality" title="nvitk.types.Image.modality"><code class="xref py py-attr docutils literal notranslate"><span class="pre">modality</span></code></a> is a PET code (<code class="docutils literal notranslate"><span class="pre">PT</span></code> / <code class="docutils literal notranslate"><span class="pre">PET</span></code>).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.is_3d">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_3d</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><a class="headerlink" href="#nvitk.types.Image.is_3d" title="Link to this definition">¶</a></dt>
+<dd><p>True for a 3-D volume (no time axis).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.is_4d">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">is_4d</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><a class="headerlink" href="#nvitk.types.Image.is_4d" title="Link to this definition">¶</a></dt>
+<dd><p>True for a 4-D volume (e.g. a time series or 4D-flow stack).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.shape">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">shape</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.types.Image.shape" title="Link to this definition">¶</a></dt>
+<dd><p>Voxel-array shape as a plain tuple of ints.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.ndim">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">ndim</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.types.Image.ndim" title="Link to this definition">¶</a></dt>
+<dd><p>Number of array dimensions.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.dtype">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">dtype</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span></span><a class="headerlink" href="#nvitk.types.Image.dtype" title="Link to this definition">¶</a></dt>
+<dd><p>Voxel dtype of the underlying array.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.affine">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">affine</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.affine" title="Link to this definition">¶</a></dt>
+<dd><p>4x4 world affine from <code class="docutils literal notranslate"><span class="pre">metadata['affine']</span></code> (float), or <code class="docutils literal notranslate"><span class="pre">None</span></code> if unset.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.spacing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">spacing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.spacing" title="Link to this definition">¶</a></dt>
+<dd><p>Physical voxel size in mm per axis.</p>
+<p>Prefers an explicit <code class="docutils literal notranslate"><span class="pre">metadata['spacing']</span></code>; otherwise assembles it from
+the per-axis <code class="docutils literal notranslate"><span class="pre">x_res</span></code>/<code class="docutils literal notranslate"><span class="pre">y_res</span></code>/<code class="docutils literal notranslate"><span class="pre">z_res</span></code>/<code class="docutils literal notranslate"><span class="pre">t_res</span></code> keys. <code class="docutils literal notranslate"><span class="pre">None</span></code> when no
+spacing information is available.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.temporal_resolution">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">temporal_resolution</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Image.temporal_resolution" title="Link to this definition">¶</a></dt>
+<dd><p>Time between frames of a 4-D series (<code class="docutils literal notranslate"><span class="pre">t_res</span></code>), or <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.dicom_tags">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">dicom_tags</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.types.Image.dicom_tags" title="Link to this definition">¶</a></dt>
+<dd><p>Metadata entries that look like DICOM tags (excludes nvitk housekeeping keys).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.types.Image.__repr__" title="Link to this definition">¶</a></dt>
+<dd><p>Compact one-line summary (shape, dtype, backend, axes, modality, …).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__len__">
+<span class="sig-name descname"><span class="pre">__len__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.types.Image.__len__" title="Link to this definition">¶</a></dt>
+<dd><p>Length of the leading axis (number of slices/frames).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__iter__">
+<span class="sig-name descname"><span class="pre">__iter__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.types.Image.__iter__" title="Link to this definition">¶</a></dt>
+<dd><p>Iterate the leading axis, yielding an <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> per slice.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__array__">
+<span class="sig-name descname"><span class="pre">__array__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="headerlink" href="#nvitk.types.Image.__array__" title="Link to this definition">¶</a></dt>
+<dd><p>NumPy view for <code class="docutils literal notranslate"><span class="pre">np.asarray(image)</span></code> — always copies GPU data to host.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Image.__cuda_array_interface__">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">__cuda_array_interface__</span></span><a class="headerlink" href="#nvitk.types.Image.__cuda_array_interface__" title="Link to this definition">¶</a></dt>
+<dd><p>Expose the CUDA array interface so CuPy-backed images interop zero-copy.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image._clone">
+<span class="sig-name descname"><span class="pre">_clone</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image._clone" title="Link to this definition">¶</a></dt>
+<dd><p>Wrap <em>data</em> in a new Image, carrying metadata/name/orientation forward.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image._axes_after_indexing">
+<span class="sig-name descname"><span class="pre">_axes_after_indexing</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image._axes_after_indexing" title="Link to this definition">¶</a></dt>
+<dd><p>Recompute the <code class="docutils literal notranslate"><span class="pre">axes</span></code> label string after <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code>.</p>
+<p>Integer indices drop their axis; slices keep it. Returns <code class="docutils literal notranslate"><span class="pre">None</span></code> (i.e.
+forget axis labels) whenever <code class="docutils literal notranslate"><span class="pre">newaxis</span></code>/<code class="docutils literal notranslate"><span class="pre">None</span></code> makes the mapping
+ambiguous, so we never carry a wrong axis convention forward.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image._axes_after_take">
+<span class="sig-name descname"><span class="pre">_axes_after_take</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">new_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image._axes_after_take" title="Link to this definition">¶</a></dt>
+<dd><p>Infer <code class="docutils literal notranslate"><span class="pre">axes</span></code> string after <code class="xref py py-meth docutils literal notranslate"><span class="pre">numpy.ndarray.take()</span></code> when possible.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__getitem__">
+<span class="sig-name descname"><span class="pre">__getitem__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__getitem__" title="Link to this definition">¶</a></dt>
+<dd><p>Index the voxel array; array results stay <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a>, scalars unwrap.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__setitem__">
+<span class="sig-name descname"><span class="pre">__setitem__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image.__setitem__" title="Link to this definition">¶</a></dt>
+<dd><p>Assign into the voxel array, unwrapping an <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> right-hand side.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">deep_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.copy" title="Link to this definition">¶</a></dt>
+<dd><p>Duplicate voxel data when <em>deep_data</em> is True (default); shallow copy shares the array reference.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.with_data">
+<span class="sig-name descname"><span class="pre">with_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.with_data" title="Link to this definition">¶</a></dt>
+<dd><p>Return a new <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> with replaced voxel <code class="docutils literal notranslate"><span class="pre">data</span></code> (and merged metadata when <code class="docutils literal notranslate"><span class="pre">data</span></code> is an <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a>).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.take">
+<span class="sig-name descname"><span class="pre">take</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">indices</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.take" title="Link to this definition">¶</a></dt>
+<dd><p>Apply <code class="xref py py-meth docutils literal notranslate"><span class="pre">numpy.ndarray.take()</span></code> to <code class="docutils literal notranslate"><span class="pre">data</span></code> and wrap the result as an <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.astype">
+<span class="sig-name descname"><span class="pre">astype</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.astype" title="Link to this definition">¶</a></dt>
+<dd><p>Return a new <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> whose array is <code class="docutils literal notranslate"><span class="pre">self.data.astype(...)</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.to_numpy">
+<span class="sig-name descname"><span class="pre">to_numpy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.to_numpy" title="Link to this definition">¶</a></dt>
+<dd><p>Host-memory <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> (delegates to <a class="reference internal" href="../core/array/index.html#nvitk.core.array.to_numpy" title="nvitk.core.array.to_numpy"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.core.array.to_numpy()</span></code></a>).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.to_cupy">
+<span class="sig-name descname"><span class="pre">to_cupy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">strict</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.to_cupy" title="Link to this definition">¶</a></dt>
+<dd><p>CuPy-backed <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a> when available.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.to_backend">
+<span class="sig-name descname"><span class="pre">to_backend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">copy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">strict</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.to_backend" title="Link to this definition">¶</a></dt>
+<dd><p>Coerce voxels with <a class="reference internal" href="../core/array/index.html#nvitk.core.array.as_backend_array" title="nvitk.core.array.as_backend_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.core.array.as_backend_array()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.orient_to">
+<span class="sig-name descname"><span class="pre">orient_to</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">target</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.orient_to" title="Link to this definition">¶</a></dt>
+<dd><p>Return a new image reoriented to <em>target</em> axis codes (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;RAS&quot;</span></code>).</p>
+<p>Uses nibabel orientation transforms on the first 3 spatial axes and updates
+affine/orientation metadata accordingly.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.as_tuple">
+<span class="sig-name descname"><span class="pre">as_tuple</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.types.Image.as_tuple" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(data,</span> <span class="pre">metadata)</span></code> for interop with APIs expecting raw arrays.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.get_meta">
+<span class="sig-name descname"><span class="pre">get_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">aliases</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.get_meta" title="Link to this definition">¶</a></dt>
+<dd><p>First matching key among <em>key</em> and <em>aliases</em> in <code class="docutils literal notranslate"><span class="pre">metadata</span></code>, else <em>default</em>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.set_meta">
+<span class="sig-name descname"><span class="pre">set_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image.set_meta" title="Link to this definition">¶</a></dt>
+<dd><p>Assign <code class="docutils literal notranslate"><span class="pre">metadata[key]</span> <span class="pre">=</span> <span class="pre">value</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.has_meta">
+<span class="sig-name descname"><span class="pre">has_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">aliases</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.types.Image.has_meta" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>key</em> or any <em>aliases</em> is present in <code class="docutils literal notranslate"><span class="pre">metadata</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.select_meta">
+<span class="sig-name descname"><span class="pre">select_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">keys</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.types.Image.select_meta" title="Link to this definition">¶</a></dt>
+<dd><p>Subset of <code class="docutils literal notranslate"><span class="pre">metadata</span></code> containing only keys that exist.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image._binary">
+<span class="sig-name descname"><span class="pre">_binary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">op</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image._binary" title="Link to this definition">¶</a></dt>
+<dd><p>Apply elementwise <em>op</em> against <em>other</em> (Image or array), re-wrapping arrays.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__add__">
+<span class="sig-name descname"><span class="pre">__add__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__add__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">self</span> <span class="pre">+</span> <span class="pre">other</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__radd__">
+<span class="sig-name descname"><span class="pre">__radd__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__radd__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">other</span> <span class="pre">+</span> <span class="pre">self</span></code> (reflected).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__sub__">
+<span class="sig-name descname"><span class="pre">__sub__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__sub__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">self</span> <span class="pre">-</span> <span class="pre">other</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__rsub__">
+<span class="sig-name descname"><span class="pre">__rsub__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__rsub__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">other</span> <span class="pre">-</span> <span class="pre">self</span></code> (reflected).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__mul__">
+<span class="sig-name descname"><span class="pre">__mul__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__mul__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">self</span> <span class="pre">*</span> <span class="pre">other</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__rmul__">
+<span class="sig-name descname"><span class="pre">__rmul__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__rmul__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">other</span> <span class="pre">*</span> <span class="pre">self</span></code> (reflected).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__truediv__">
+<span class="sig-name descname"><span class="pre">__truediv__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__truediv__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">self</span> <span class="pre">/</span> <span class="pre">other</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__rtruediv__">
+<span class="sig-name descname"><span class="pre">__rtruediv__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__rtruediv__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">other</span> <span class="pre">/</span> <span class="pre">self</span></code> (reflected).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__pow__">
+<span class="sig-name descname"><span class="pre">__pow__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.types.Image.__pow__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise <code class="docutils literal notranslate"><span class="pre">self</span> <span class="pre">**</span> <span class="pre">other</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__neg__">
+<span class="sig-name descname"><span class="pre">__neg__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.__neg__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise negation.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__abs__">
+<span class="sig-name descname"><span class="pre">__abs__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">Image</span></a></span></span><a class="headerlink" href="#nvitk.types.Image.__abs__" title="Link to this definition">¶</a></dt>
+<dd><p>Elementwise absolute value.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.__array_ufunc__">
+<span class="sig-name descname"><span class="pre">__array_ufunc__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ufunc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">method</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.types.Image.__array_ufunc__" title="Link to this definition">¶</a></dt>
+<dd><p>NumPy/CuPy ufunc hook so <code class="docutils literal notranslate"><span class="pre">np.*</span></code> calls on an Image return an Image.</p>
+<p>Image inputs are unwrapped to their arrays before dispatch; array outputs
+(including each element of a multi-output ufunc) are re-wrapped.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.save">
+<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Image.save" title="Link to this definition">¶</a></dt>
+<dd><p>Write via <a class="reference internal" href="../io/imageio/index.html#nvitk.io.imageio.imsave" title="nvitk.io.imageio.imsave"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.io.imageio.imsave()</span></code></a> (format from extension or <code class="docutils literal notranslate"><span class="pre">force_type</span></code>).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Image.from_file">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">from_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.types.Image.from_file" title="Link to this definition">¶</a></dt>
+<dd><p>Shorthand for <a class="reference internal" href="../io/imageio/index.html#nvitk.io.imageio.imread" title="nvitk.io.imageio.imread"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.io.imageio.imread()</span></code></a> returning an <a class="reference internal" href="#nvitk.types.Image" title="nvitk.types.Image"><code class="xref py py-class docutils literal notranslate"><span class="pre">Image</span></code></a>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.types.Mesh">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.types.</span></span><span class="sig-name descname"><span class="pre">Mesh</span></span><a class="headerlink" href="#nvitk.types.Mesh" title="Link to this definition">¶</a></dt>
+<dd><p>Triangle mesh with optional world-space metadata from a source image.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.vertices">
+<span class="sig-name descname"><span class="pre">vertices</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span></span><a class="headerlink" href="#nvitk.types.Mesh.vertices" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.faces">
+<span class="sig-name descname"><span class="pre">faces</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span></span><a class="headerlink" href="#nvitk.types.Mesh.faces" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.types.Mesh.metadata" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.__post_init__">
+<span class="sig-name descname"><span class="pre">__post_init__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.types.Mesh.__post_init__" title="Link to this definition">¶</a></dt>
+<dd><p>Coerce vertices/faces to <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code> float64 / <code class="docutils literal notranslate"><span class="pre">(M,</span> <span class="pre">3)</span></code> int32 and validate.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.affine">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">affine</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Mesh.affine" title="Link to this definition">¶</a></dt>
+<dd><p>4x4 world affine of the source image (float), or <code class="docutils literal notranslate"><span class="pre">None</span></code> if unset.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.spacing">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">spacing</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Mesh.spacing" title="Link to this definition">¶</a></dt>
+<dd><p>Source-image voxel spacing in mm (first 3 axes), or <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.label_id">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">label_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.types.Mesh.label_id" title="Link to this definition">¶</a></dt>
+<dd><p>Label id this mesh was extracted from, if it came from a segmentation.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.types.Mesh.name" title="Link to this definition">¶</a></dt>
+<dd><p>Human-readable mesh name (defaults to <code class="docutils literal notranslate"><span class="pre">&quot;mesh&quot;</span></code>).</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.to_napari_surface">
+<span class="sig-name descname"><span class="pre">to_napari_surface</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.types.Mesh.to_napari_surface" title="Link to this definition">¶</a></dt>
+<dd><p>Dict suitable for <code class="docutils literal notranslate"><span class="pre">napari.layers.Surface</span></code>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.types.Mesh.from_arrays">
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">from_arrays</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vertices</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">faces</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.types.Mesh" title="nvitk.types.Mesh"><span class="pre">Mesh</span></a></span></span><a class="headerlink" href="#nvitk.types.Mesh.from_arrays" title="Link to this definition">¶</a></dt>
+<dd><p>Build a <a class="reference internal" href="#nvitk.types.Mesh" title="nvitk.types.Mesh"><code class="xref py py-class docutils literal notranslate"><span class="pre">Mesh</span></code></a> from raw vertex/face arrays and optional metadata.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">API Reference</a><ul>
+  <li><a href="../index.html">nvitk</a><ul>
+      <li>Previous: <a href="../transform/swap_axes/index.html" title="previous chapter">nvitk.transform.swap_axes</a></li>
+      <li>Next: <a href="image/index.html" title="next chapter">nvitk.types.image</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../_sources/autoapi/nvitk/types/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

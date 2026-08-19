@@ -1,0 +1,66 @@
+nvitk.core.exceptions
+=====================
+
+.. py:module:: nvitk.core.exceptions
+
+.. autoapi-nested-parse::
+
+   Typed exceptions for NVITK (I/O, backends, validation).
+
+
+
+Exceptions
+----------
+
+.. autoapisummary::
+
+   nvitk.core.exceptions.NvitkError
+   nvitk.core.exceptions.BackendError
+   nvitk.core.exceptions.BackendUnavailableError
+   nvitk.core.exceptions.UnsupportedFormatError
+   nvitk.core.exceptions.ValidationError
+
+
+Module Contents
+---------------
+
+.. py:exception:: NvitkError
+
+   Bases: :py:obj:`Exception`
+
+
+   Base class for all library-specific errors.
+
+
+.. py:exception:: BackendError
+
+   Bases: :py:obj:`NvitkError`
+
+
+   Raised when array backend selection or availability fails.
+
+
+.. py:exception:: BackendUnavailableError
+
+   Bases: :py:obj:`BackendError`
+
+
+   Requested backend (e.g. CuPy) cannot be used in this environment.
+
+
+.. py:exception:: UnsupportedFormatError
+
+   Bases: :py:obj:`NvitkError`
+
+
+   No registered reader/writer matches the path or ``force_type``.
+
+
+.. py:exception:: ValidationError
+
+   Bases: :py:obj:`NvitkError`
+
+
+   Inconsistent axes, shapes, metadata, or other semantic validation failure.
+
+

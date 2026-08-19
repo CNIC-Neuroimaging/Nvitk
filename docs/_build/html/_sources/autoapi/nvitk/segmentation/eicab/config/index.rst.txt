@@ -1,0 +1,151 @@
+nvitk.segmentation.eicab.config
+===============================
+
+.. py:module:: nvitk.segmentation.eicab.config
+
+.. autoapi-nested-parse::
+
+   Defaults for eICAB TOF / Circle-of-Willis segmentation (local + SGE).
+
+   Override paths via CLI flags; if :data:`CONTAINER_PATH` does not exist, local/SGE
+   runs fail with a clear error unless ``--container`` points to a valid image.
+
+   Optional site overrides: copy ``.nvitk/sge.example.json`` to ``.nvitk/sge.json``
+   (see :mod:`nvitk.cluster.sge_json`). Under ``pipelines.eicab``,
+   ``default_sge_container_root`` is the outer Singularity image used for
+   ``singularity exec`` (``PIPELINE_CONTAINER_PATH``); ``container_path`` (or
+   ``--container``) is the inner eICAB inference ``.sif`` passed to ``singularity run``.
+   ``default_vasculature_host_dir`` sets the host tree for Neuro/vasculature2 (see
+   ``--vasculature-dir``). eICAB weights live inside the eICAB container; there is no
+   separate model-weights bind for this tool.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.config.CONTAINER_PATH
+   nvitk.segmentation.eicab.config.DEFAULT_TMP_DIR
+   nvitk.segmentation.eicab.config.EICAB_THREAD_LIMIT
+   nvitk.segmentation.eicab.config.EICAB_LOCAL_METRIC_SCRATCH
+   nvitk.segmentation.eicab.config.EICAB_METRIC_SCRATCH_ROOT
+   nvitk.segmentation.eicab.config.SGE_PE_SMP
+   nvitk.segmentation.eicab.config.PIPELINE_CONTAINER_PATH
+   nvitk.segmentation.eicab.config.SGE_PROJECT
+   nvitk.segmentation.eicab.config.SGE_ACCOUNT
+   nvitk.segmentation.eicab.config.SGE_NGPU
+   nvitk.segmentation.eicab.config.SGE_H_VMEM
+   nvitk.segmentation.eicab.config.SGE_QUEUE
+   nvitk.segmentation.eicab.config.SGE_LOG_DIR
+   nvitk.segmentation.eicab.config.SGE_ERR_DIR
+   nvitk.segmentation.eicab.config.DEFAULT_SGE_SCRIPTS_DIR
+   nvitk.segmentation.eicab.config.DEFAULT_VASCULATURE_HOST_DIR
+   nvitk.segmentation.eicab.config.CLUSTER_HOST_ALIASES
+   nvitk.segmentation.eicab.config.SGE_PROJECT
+   nvitk.segmentation.eicab.config.SGE_ACCOUNT
+   nvitk.segmentation.eicab.config.SGE_NGPU
+   nvitk.segmentation.eicab.config.SGE_H_VMEM
+   nvitk.segmentation.eicab.config.SGE_QUEUE
+   nvitk.segmentation.eicab.config.DEFAULT_SGE_SCRIPTS_DIR
+   nvitk.segmentation.eicab.config.CONTAINER_PATH
+   nvitk.segmentation.eicab.config.PIPELINE_CONTAINER_PATH
+   nvitk.segmentation.eicab.config.DEFAULT_TMP_DIR
+   nvitk.segmentation.eicab.config.EICAB_THREAD_LIMIT
+   nvitk.segmentation.eicab.config.EICAB_LOCAL_METRIC_SCRATCH
+   nvitk.segmentation.eicab.config.EICAB_METRIC_SCRATCH_ROOT
+   nvitk.segmentation.eicab.config.SGE_PE_SMP
+   nvitk.segmentation.eicab.config.DEFAULT_VASCULATURE_HOST_DIR
+   nvitk.segmentation.eicab.config.CLUSTER_HOST_ALIASES
+
+
+Module Contents
+---------------
+
+.. py:data:: CONTAINER_PATH
+
+.. py:data:: DEFAULT_TMP_DIR
+
+.. py:data:: EICAB_THREAD_LIMIT
+   :type:  int | None
+   :value: None
+
+
+.. py:data:: EICAB_LOCAL_METRIC_SCRATCH
+   :value: True
+
+
+.. py:data:: EICAB_METRIC_SCRATCH_ROOT
+   :value: '/data_tmp'
+
+
+.. py:data:: SGE_PE_SMP
+   :type:  int | None
+   :value: None
+
+
+.. py:data:: PIPELINE_CONTAINER_PATH
+
+.. py:data:: SGE_PROJECT
+   :value: 'MCC'
+
+
+.. py:data:: SGE_ACCOUNT
+   :value: 'Prod'
+
+
+.. py:data:: SGE_NGPU
+   :value: 0
+
+
+.. py:data:: SGE_H_VMEM
+   :value: '25G'
+
+
+.. py:data:: SGE_QUEUE
+   :value: None
+
+
+.. py:data:: SGE_LOG_DIR
+
+.. py:data:: SGE_ERR_DIR
+
+.. py:data:: DEFAULT_SGE_SCRIPTS_DIR
+   :type:  pathlib.Path
+
+.. py:data:: DEFAULT_VASCULATURE_HOST_DIR
+
+.. py:data:: CLUSTER_HOST_ALIASES
+   :type:  dict[str, str]
+
+.. py:data:: SGE_PROJECT
+
+.. py:data:: SGE_ACCOUNT
+
+.. py:data:: SGE_NGPU
+
+.. py:data:: SGE_H_VMEM
+
+.. py:data:: SGE_QUEUE
+
+.. py:data:: DEFAULT_SGE_SCRIPTS_DIR
+
+.. py:data:: CONTAINER_PATH
+
+.. py:data:: PIPELINE_CONTAINER_PATH
+
+.. py:data:: DEFAULT_TMP_DIR
+
+.. py:data:: EICAB_THREAD_LIMIT
+
+.. py:data:: EICAB_LOCAL_METRIC_SCRATCH
+
+.. py:data:: EICAB_METRIC_SCRATCH_ROOT
+
+.. py:data:: SGE_PE_SMP
+
+.. py:data:: DEFAULT_VASCULATURE_HOST_DIR
+
+.. py:data:: CLUSTER_HOST_ALIASES
+

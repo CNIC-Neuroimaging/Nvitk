@@ -1,0 +1,93 @@
+nvitk.gui.viz.hemo_geometry
+===========================
+
+.. py:module:: nvitk.gui.viz.hemo_geometry
+
+.. autoapi-nested-parse::
+
+   Napari overlays for PITC / PWV vessel hemodynamics geometry.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.hemo_geometry.HEMO_INIT_LAYER
+   nvitk.gui.viz.hemo_geometry.HEMO_PATHS_LAYER
+   nvitk.gui.viz.hemo_geometry.HEMO_EXCLUDED_LAYER
+   nvitk.gui.viz.hemo_geometry.HEMO_STATIONS_LAYER
+   nvitk.gui.viz.hemo_geometry.HEMO_PITC_STATIONS_LAYER
+   nvitk.gui.viz.hemo_geometry.HEMO_PWV_STATIONS_LAYER
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.hemo_geometry.station_feature_choices
+   nvitk.gui.viz.hemo_geometry.color_stations_by_feature
+   nvitk.gui.viz.hemo_geometry.clear_hemo_geometry_layers
+   nvitk.gui.viz.hemo_geometry.add_hemo_geometry_layers
+
+
+Module Contents
+---------------
+
+.. py:data:: HEMO_INIT_LAYER
+   :value: 'PITC/PWV root init'
+
+
+.. py:data:: HEMO_PATHS_LAYER
+   :value: 'PITC/PWV centerlines'
+
+
+.. py:data:: HEMO_EXCLUDED_LAYER
+   :value: 'PITC/PWV excluded branches'
+
+
+.. py:data:: HEMO_STATIONS_LAYER
+   :value: 'PITC/PWV stations'
+
+
+.. py:data:: HEMO_PITC_STATIONS_LAYER
+   :value: 'PITC stations'
+
+
+.. py:data:: HEMO_PWV_STATIONS_LAYER
+   :value: 'PWV stations'
+
+
+.. py:function:: station_feature_choices(layer: Any) -> list[str]
+
+   Numeric feature columns available for station face coloring.
+
+
+.. py:function:: color_stations_by_feature(layer: Any, feature: str, *, mode: str = 'pitc', cmap_name: str | None = None, vmin: float | None = None, vmax: float | None = None) -> tuple[float, float] | None
+
+   Color a stations Points layer by a numeric feature.
+
+   Recent Napari builds only expose a solid face-color swatch in layer controls,
+   so this helper is the supported way to switch feature encodings after a run.
+
+   Colors are assigned as explicit per-point RGBA rather than Napari's
+   feature-colormap mode: PWV metrics carry NaN for stations not used in the fit,
+   and Napari's colormap mapping renders nothing when any value is NaN. NaN values
+   are drawn transparent so the remaining stations stay colored.
+
+   Returns the ``(lo, hi)`` contrast limits actually applied, or ``None`` if the
+   layer had no points.
+
+
+.. py:function:: clear_hemo_geometry_layers(viewer: Any) -> None
+
+   Remove prior PITC/PWV geometry overlays.
+
+
+.. py:function:: add_hemo_geometry_layers(viewer: Any, regions: list[nvitk.pipes.qvtpy.util.hemodynamics.vessel_hemodynamics.RegionGeometryViz], *, reference_layer: Any | None, mode: str, face_key: str | None = None, point_size: float = 2.5) -> None
+
+   Add PITC or PWV geometry overlays to Napari.
+
+

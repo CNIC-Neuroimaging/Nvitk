@@ -1,0 +1,287 @@
+nvitk.util.pyhelp_tree
+======================
+
+.. py:module:: nvitk.util.pyhelp_tree
+
+.. autoapi-nested-parse::
+
+   Interactive pyhelp tree: Rich Live display with keyboard expand/collapse.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.util.pyhelp_tree._BRANCH_STYLES
+   nvitk.util.pyhelp_tree._TOP_LEVEL_BORDER
+   nvitk.util.pyhelp_tree._SECTION_THEME
+   nvitk.util.pyhelp_tree._SUBMODULE_THEME
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.util.pyhelp_tree.VisibleRow
+   nvitk.util.pyhelp_tree._KeyReader
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.util.pyhelp_tree.flatten_visible
+   nvitk.util.pyhelp_tree._tool_label
+   nvitk.util.pyhelp_tree._prefix
+   nvitk.util.pyhelp_tree._indent
+   nvitk.util.pyhelp_tree._branch_style
+   nvitk.util.pyhelp_tree._format_branch_row
+   nvitk.util.pyhelp_tree._format_tool_row
+   nvitk.util.pyhelp_tree._build_table
+   nvitk.util.pyhelp_tree._footer_text
+   nvitk.util.pyhelp_tree._set_all_expanded
+   nvitk.util.pyhelp_tree._collapse_all
+   nvitk.util.pyhelp_tree._expand_all
+   nvitk.util.pyhelp_tree._ui_console
+   nvitk.util.pyhelp_tree._panel_border
+   nvitk.util.pyhelp_tree._render_panel
+   nvitk.util.pyhelp_tree._default_shell_mode
+   nvitk.util.pyhelp_tree.run_command_help
+   nvitk.util.pyhelp_tree._emit_selected_command
+   nvitk.util.pyhelp_tree.run_interactive_pyhelp
+   nvitk.util.pyhelp_tree._theme_for_root
+   nvitk.util.pyhelp_tree._theme_for_submodule
+   nvitk.util.pyhelp_tree._format_static_tool_line
+   nvitk.util.pyhelp_tree._render_static_submodule
+   nvitk.util.pyhelp_tree._render_static_pipeline_tools
+   nvitk.util.pyhelp_tree._render_static_root_section
+   nvitk.util.pyhelp_tree._static_footer
+   nvitk.util.pyhelp_tree.print_static_tree
+   nvitk.util.pyhelp_tree._iter_tools
+
+
+Module Contents
+---------------
+
+.. py:data:: _BRANCH_STYLES
+   :type:  dict[str, str]
+
+.. py:data:: _TOP_LEVEL_BORDER
+
+.. py:data:: _SECTION_THEME
+   :type:  dict[str, dict[str, str]]
+
+.. py:data:: _SUBMODULE_THEME
+   :type:  dict[str, dict[str, str]]
+
+.. py:class:: VisibleRow
+
+   One rendered line in the interactive view.
+
+
+   .. py:attribute:: kind
+      :type:  str
+
+
+   .. py:attribute:: node
+      :type:  nvitk.cli.catalog.CatalogNode | None
+      :value: None
+
+
+
+   .. py:attribute:: tool
+      :type:  nvitk.cli.catalog.ToolEntry | None
+      :value: None
+
+
+
+   .. py:attribute:: depth
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: label
+      :type:  str
+      :value: ''
+
+
+
+.. py:function:: flatten_visible(roots: list[nvitk.cli.catalog.CatalogNode]) -> list[VisibleRow]
+
+   Flatten the catalog tree into the ordered list of currently-visible rows (branches, and tools of expanded branches).
+
+
+.. py:function:: _tool_label(tool: nvitk.cli.catalog.ToolEntry) -> str
+
+   Display label for a tool row: its command name, or its library display label if it has no command.
+
+
+.. py:function:: _prefix(expanded: bool) -> str
+
+   Rich-markup expand/collapse glyph (``[-]``/``[+]``) for a branch row.
+
+
+.. py:function:: _indent(depth: int) -> str
+
+   Two-space indent string for tree depth *depth*.
+
+
+.. py:function:: _branch_style(node: nvitk.cli.catalog.CatalogNode) -> str
+
+   Rich style string for a branch node, from ``_BRANCH_STYLES`` (falls back to bold white).
+
+
+.. py:function:: _format_branch_row(node: nvitk.cli.catalog.CatalogNode, depth: int) -> str
+
+   Render one catalog branch as a Rich-markup tree row.
+
+
+.. py:function:: _format_tool_row(tool: nvitk.cli.catalog.ToolEntry, depth: int) -> str
+
+   Render one tool as a Rich-markup row: an installable command (with gpu/mask tags) or a library-only reference.
+
+
+.. py:function:: _build_table(roots: list[nvitk.cli.catalog.CatalogNode], cursor: int) -> rich.table.Table
+
+   Build the Rich table of visible tree rows, highlighting the row at *cursor*.
+
+
+.. py:function:: _footer_text(*, interactive: bool = True) -> str
+
+   Rich-markup footer text: keybinding hints, backend flags, and (if interactive) the shell-integration hint.
+
+
+.. py:function:: _set_all_expanded(roots: list[nvitk.cli.catalog.CatalogNode], expanded: bool) -> None
+
+   Recursively set ``expanded`` on every branch node under *roots*.
+
+
+.. py:function:: _collapse_all(roots: list[nvitk.cli.catalog.CatalogNode]) -> None
+
+   Collapse every branch, then re-expand the top-level "Image Processing" root as the default view.
+
+
+.. py:function:: _expand_all(roots: list[nvitk.cli.catalog.CatalogNode]) -> None
+
+   Expand every branch node under *roots*.
+
+
+.. py:function:: _ui_console() -> rich.console.Console
+
+   Console for the interactive UI (stderr so stdout stays free for command capture).
+
+
+.. py:class:: _KeyReader
+
+   Single-key reader with arrow-key decoding (Unix).
+
+
+   .. py:attribute:: _fd
+
+
+   .. py:attribute:: _old
+      :type:  list | None
+      :value: None
+
+
+
+   .. py:method:: __enter__() -> _KeyReader
+
+      Switch the terminal to cbreak mode (unbuffered single-key reads) if stdin is a TTY.
+
+
+
+   .. py:method:: __exit__(*args: object) -> None
+
+      Restore the terminal's original mode.
+
+
+
+   .. py:method:: read_key() -> str
+
+      Read and decode one keypress: arrow keys, ENTER, SPACE, ESC, or the raw character.
+
+
+
+.. py:function:: _panel_border(roots: list[nvitk.cli.catalog.CatalogNode]) -> str
+
+   Border color for the panel: themed per single top-level root, else a neutral blue for the full tree.
+
+
+.. py:function:: _render_panel(roots: list[nvitk.cli.catalog.CatalogNode], cursor: int, total_cmds: int, *, interactive: bool, console: rich.console.Console) -> rich.panel.Panel
+
+   Assemble the full Rich panel: header, install count, tree table, and footer hints.
+
+
+.. py:function:: _default_shell_mode() -> bool
+
+   Use bash readline injection when running under bash interactively.
+
+
+.. py:function:: run_command_help(command: str, *, console: rich.console.Console | None = None) -> int
+
+   Run ``command --help`` after interactive selection. Returns process exit code.
+
+
+.. py:function:: _emit_selected_command(command: str, *, shell_mode: bool) -> None
+
+   Write selected command to stdout for shell capture / readline.
+
+
+.. py:function:: run_interactive_pyhelp(roots: list[nvitk.cli.catalog.CatalogNode], *, total_cmds: int | None = None, shell_mode: bool = False, pick_only: bool = False) -> str | None
+
+   Run interactive TUI. Returns selected command name or None.
+
+   UI renders on /dev/tty (or stderr); selected command is written to stdout.
+
+
+.. py:function:: _theme_for_root(node_id: str) -> dict[str, str]
+
+   Color theme (border/header/rule) for a top-level catalog root, from ``_SECTION_THEME`` (with a default fallback).
+
+
+.. py:function:: _theme_for_submodule(node_id: str) -> dict[str, str]
+
+   Color theme (header/cmd/rule) for a submodule section, from ``_SUBMODULE_THEME`` (with a default fallback).
+
+
+.. py:function:: _format_static_tool_line(tool: nvitk.cli.catalog.ToolEntry, submodule_id: str) -> rich.text.Text
+
+   One compact tool line for the static catalog.
+
+
+.. py:function:: _render_static_submodule(node: nvitk.cli.catalog.CatalogNode) -> rich.console.Group
+
+   Submodule block: colored header + tool list.
+
+
+.. py:function:: _render_static_pipeline_tools(tools: list[nvitk.cli.catalog.ToolEntry]) -> rich.console.Group
+
+   Group pipeline commands by cohort for readability.
+
+
+.. py:function:: _render_static_root_section(node: nvitk.cli.catalog.CatalogNode) -> rich.panel.Panel
+
+   One top-level section (Image Processing, Pipelines, General).
+
+
+.. py:function:: _static_footer() -> rich.console.Group
+
+   Footer block (backend/device flags + interactive-picker hint) for the non-interactive static catalog print.
+
+
+.. py:function:: print_static_tree(roots: list[nvitk.cli.catalog.CatalogNode], *, expanded: bool = True, total_cmds: int | None = None, file: TextIO | None = None) -> None
+
+   Print a color-grouped static catalog (``pyhelp --no-interactive``).
+
+
+.. py:function:: _iter_tools(node: nvitk.cli.catalog.CatalogNode)
+
+   Yield all tools under a catalog node.
+
+

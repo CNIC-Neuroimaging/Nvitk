@@ -1,0 +1,232 @@
+nvitk.io.conversors.phase2volume
+================================
+
+.. py:module:: nvitk.io.conversors.phase2volume
+
+.. autoapi-nested-parse::
+
+   Phase-contrast / cine MRI-style tabular pipelines to 3D/4D volumes (CLI optional).
+
+   4DFlow derivatives follow the QVTplus ``loadNII`` / ``calc_angio`` convention:
+   time-mean angiography, velocity magnitude, complex-difference contrast, optional
+   spatial polynomial background correction on velocity (see ``_phase2volume_bg``).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.io.conversors.phase2volume.click
+   nvitk.io.conversors.phase2volume.log
+   nvitk.io.conversors.phase2volume._click_command
+   nvitk.io.conversors.phase2volume._click_option
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.io.conversors.phase2volume.PhaseInputs
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors.phase2volume._cli_decorator
+   nvitk.io.conversors.phase2volume._first_match
+   nvitk.io.conversors.phase2volume._find_direction_dirs
+   nvitk.io.conversors.phase2volume.discover_phase_inputs
+   nvitk.io.conversors.phase2volume._normalize_venc_to_mm_s
+   nvitk.io.conversors.phase2volume._scalar_venc_from_raw
+   nvitk.io.conversors.phase2volume._venc_from_json_payload
+   nvitk.io.conversors.phase2volume._venc_from_json_dir
+   nvitk.io.conversors.phase2volume._venc_from_nifti_metadata
+   nvitk.io.conversors.phase2volume._venc_from_single_dicom
+   nvitk.io.conversors.phase2volume._venc_from_dicom_directory
+   nvitk.io.conversors.phase2volume.resolve_venc_mm_s
+   nvitk.io.conversors.phase2volume._calc_angio
+   nvitk.io.conversors.phase2volume.compute_phase_derivatives
+   nvitk.io.conversors.phase2volume._write_outputs
+   nvitk.io.conversors.phase2volume.utc_now
+   nvitk.io.conversors.phase2volume.process_patient
+   nvitk.io.conversors.phase2volume.phase2volume
+   nvitk.io.conversors.phase2volume.main
+
+
+Module Contents
+---------------
+
+.. py:data:: click
+   :value: None
+
+
+.. py:data:: log
+
+.. py:function:: _cli_decorator(*args, **kwargs)
+
+   No-op stand-in for ``click.command``/``click.option`` when click isn't installed.
+
+
+.. py:data:: _click_command
+
+.. py:data:: _click_option
+
+.. py:class:: PhaseInputs
+
+   Resolved paths to a 4D-flow patient's angio and per-direction (AP/RL/FH) phase DICOM folders/files.
+
+
+   .. py:attribute:: patient_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: flow_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: ap_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: rl_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: fh_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: angio_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: ap_phase_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: rl_phase_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: fh_phase_path
+      :type:  pathlib.Path
+
+
+.. py:function:: _first_match(directory: pathlib.Path, *patterns: str) -> pathlib.Path | None
+
+   First path in *directory* matching any of the glob *patterns*, tried in order.
+
+
+.. py:function:: _find_direction_dirs(flow_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]
+
+   Identify the AP/RL/FH phase-direction subfolders under a 4DFlow directory by name matching.
+
+
+.. py:function:: discover_phase_inputs(patient_dir: str | pathlib.Path) -> PhaseInputs
+
+   Locate a patient's angio and AP/RL/FH phase DICOM inputs under their ``4DFlow`` folder.
+
+
+.. py:function:: _normalize_venc_to_mm_s(raw: float, *, source_hint: str = '') -> float
+
+   Interpret scalar as mm/s; values that look like cm/s are scaled by 10.
+
+
+.. py:function:: _scalar_venc_from_raw(raw: Any, *, source_hint: str = '') -> float | None
+
+   Parse a VENC scalar, including Philips ``(2001,101A)`` 3-float lists.
+
+   For a length-3 list (one component per AP/FH/RL phase), the non-zero entry is
+   the encoding magnitude for that series.
+
+
+.. py:function:: _venc_from_json_payload(payload: dict[str, Any]) -> float | None
+
+   Extract a VENC value (mm/s) from a JSON sidecar dict: explicit VENC/Philips tag first, then legacy cm/s fields.
+
+
+.. py:function:: _venc_from_json_dir(ap_dir: pathlib.Path) -> tuple[float | None, str | None]
+
+   Find a VENC value in any JSON sidecar under *ap_dir*; returns ``(value_mm_s, source_label)``.
+
+
+.. py:function:: _venc_from_nifti_metadata(meta: dict[str, Any] | None) -> tuple[float | None, str | None]
+
+   Find a VENC value in a NIfTI image's metadata dict; returns ``(value_mm_s, source_label)``.
+
+
+.. py:function:: _venc_from_single_dicom(path: pathlib.Path) -> float | None
+
+   Extract a VENC value (mm/s) from one DICOM file, trying Philips/standard/GE private tags in turn.
+
+
+.. py:function:: _venc_from_dicom_directory(dicom_dir: pathlib.Path, *, max_files: int = 100) -> tuple[float | None, str | None]
+
+   Scan up to *max_files* DICOMs under *dicom_dir* for a VENC value; returns ``(value_mm_s, source_label)``.
+
+
+.. py:function:: resolve_venc_mm_s(*, ap_dir: pathlib.Path, default_mm_s: float = 700.0, ap_phase_metadata: dict[str, Any] | None = None, magnitude_metadata: dict[str, Any] | None = None, dicom_search_dir: pathlib.Path | None = None, log_context: str = '') -> tuple[float, str]
+
+   Resolve VENC in mm/s: NIfTI metadata, then JSON sidecars, then DICOM, then default.
+
+   Returns ``(venc_mm_s, source_tag)``. When falling back to default, logs a warning
+   (MATLAB QVTplus often used fixed 700 mm/s when tags were absent).
+
+
+.. py:function:: _calc_angio(angio_mag, v_mag, venc: float)
+
+   QVTplus-style complex-difference magnitude: MAG * sin(pi/2 * min(|V|, VENC) / VENC).
+
+
+.. py:function:: compute_phase_derivatives(angio_data, ap_phase, rl_phase, fh_phase, *, venc: float, background_phase_correction: bool = True, bg_poly_order: int = 2, bg_static_percentile: float = 25.0, cd_4d_background_correction: bool | None = None) -> dict[str, Any]
+
+   Compute angiography, complex-difference, and velocity magnitude derivatives (QVTplus-aligned).
+
+   Velocity in mm/s: ``vx = -RL_phase * 10``, ``vy = -AP_phase * 10``, ``vz = FH_phase * 10``.
+
+   When ``background_phase_correction`` is True (default), fits spatial polynomials
+   (order ``bg_poly_order``, default 2 per MATLAB ``loadNII`` ``fit_order``) on the
+   temporal-mean field using low-speed voxels (``bg_static_percentile``), subtracts
+   from each frame, then recomputes magnitudes and CD. MATLAB's cd_thresh/noise_thresh
+   mask is not replicated; see ``_phase2volume_bg``.
+
+   Arrays follow :func:`~nvitk.core.array.as_backend_array` (NumPy or CuPy per
+   :mod:`nvitk.core.backend`).
+
+
+.. py:function:: _write_outputs(flow_dir: pathlib.Path, outputs: dict[str, np.ndarray | None], metadata: dict[str, Any]) -> list[pathlib.Path]
+
+   Write each non-``None`` output array as ``<flow_dir>/<name>.nii.gz`` with shape/axes metadata.
+
+
+.. py:function:: utc_now() -> str
+
+   Current UTC timestamp as an ISO-8601 string (for provenance metadata).
+
+
+.. py:function:: process_patient(patient_dir: str | pathlib.Path, *, venc: float = 700.0, dry_run: bool = False, subject_uid: str | None = None, pipeline_id: str = '1.0.0', background_phase_correction: bool = True, bg_poly_order: int = 2, bg_static_percentile: float = 25.0, cd_4d_background_correction: bool | None = None, dicom_search_dir: pathlib.Path | None = None, backend: str = None) -> list[pathlib.Path]
+
+   Convert one patient's 4D-flow phase DICOMs into velocity/CD/angio NIfTI volumes with VENC scaling and QC.
+
+   Discovers the AP/RL/FH direction folders (:func:`discover_phase_inputs`),
+   resolves VENC (explicit arg, else JSON sidecar, else NIfTI metadata, else
+   DICOM tags), converts phase to velocity, optionally applies background
+   phase correction, and writes the resulting volumes next to the input.
+
+
+.. py:function:: phase2volume(input_path: str | pathlib.Path, *, multifile: bool = False, venc: float = 700.0, dry_run: bool = False, pipeline_id: str = '1.0.0', background_phase_correction: bool = True, bg_poly_order: int = 2, bg_static_percentile: float = 25.0, cd_4d_background_correction: bool | None = None, dicom_search_dir: pathlib.Path | None = None, backend: str = 'gpu') -> list[pathlib.Path]
+
+   Library entry point behind the ``phase2volume`` CLI: convert one patient, or every patient under *input_path*
+   when *multifile* is set.
+
+
+.. py:function:: main(input_path: pathlib.Path, multifile: bool, venc: float, dicom_search_dir: pathlib.Path | None, background_phase_correction: bool, bg_poly_order: int, bg_static_percentile: float, dry_run: bool, pipeline_id_opt: str | None, pipeline_version_legacy: str | None, backend: str) -> None
+
+   CLI entry point: convert one (or, with ``--multifile``, every) 4D-flow patient's phase DICOMs to NIfTI volumes.
+
+

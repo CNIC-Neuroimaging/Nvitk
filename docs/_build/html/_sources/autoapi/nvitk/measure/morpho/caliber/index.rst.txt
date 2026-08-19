@@ -1,0 +1,239 @@
+nvitk.measure.morpho.caliber
+============================
+
+.. py:module:: nvitk.measure.morpho.caliber
+
+.. autoapi-nested-parse::
+
+   Taper reference, stenosis detection, enlargement detection, and flag filtering.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.caliber._siphon_mask
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.caliber.stenosis_valid_mask_from_ends
+   nvitk.measure.morpho.caliber.compute_siphon_mask
+   nvitk.measure.morpho.caliber._pava_nondecreasing
+   nvitk.measure.morpho.caliber._enforce_nonincreasing_reference
+   nvitk.measure.morpho.caliber._healthy_radius_envelope
+   nvitk.measure.morpho.caliber._linear_taper_reference
+   nvitk.measure.morpho.caliber._compute_vessel_taper
+   nvitk.measure.morpho.caliber.stenosis_segment_percent
+   nvitk.measure.morpho.caliber.stenosis_raw_percent
+   nvitk.measure.morpho.caliber.fill_reference_gaps
+   nvitk.measure.morpho.caliber.detect_stenosis_segments
+   nvitk.measure.morpho.caliber.stenosis_pointwise
+   nvitk.measure.morpho.caliber.detect_enlargement_segments
+   nvitk.measure.morpho.caliber.enlargement_pointwise
+   nvitk.measure.morpho.caliber.resolve_stenosis_enlargement_overlap
+   nvitk.measure.morpho.caliber.stenosis_total_length
+   nvitk.measure.morpho.caliber.flag_segments_from_min_length
+   nvitk.measure.morpho.caliber.hysteresis_segments_from_min_length
+   nvitk.measure.morpho.caliber.mask_from_segments
+   nvitk.measure.morpho.caliber.points_for_length
+   nvitk.measure.morpho.caliber.clip_segments_to_core
+   nvitk.measure.morpho.caliber.filter_flag_by_min_length
+   nvitk.measure.morpho.caliber.segment_detail_json
+   nvitk.measure.morpho.caliber.select_caliber_detection_radius
+   nvitk.measure.morpho.caliber.refresh_enlargement_summary_from_flags
+
+
+Module Contents
+---------------
+
+.. py:function:: stenosis_valid_mask_from_ends(s, exclude_end_mm) -> numpy.ndarray
+
+   Boolean mask excluding the first/last *exclude_end_mm* of arc length *s* (avoid end-effect false positives).
+
+
+.. py:function:: compute_siphon_mask(pts: numpy.ndarray, s: numpy.ndarray, kappa_threshold: Optional[float] = None, dilation_mm: Optional[float] = None) -> numpy.ndarray
+
+   Boolean mask of high-curvature (siphon) regions, dilated by dilation_mm.
+
+
+.. py:data:: _siphon_mask
+
+.. py:function:: _pava_nondecreasing(y: numpy.ndarray, w: Optional[numpy.ndarray] = None) -> numpy.ndarray
+
+   Pool-adjacent-violators fit for a nondecreasing 1D sequence.
+
+
+.. py:function:: _enforce_nonincreasing_reference(ref: numpy.ndarray, valid_mask: numpy.ndarray) -> numpy.ndarray
+
+   Make the valid part of ref nonincreasing along arc length.
+
+
+.. py:function:: _healthy_radius_envelope(s: numpy.ndarray, r: numpy.ndarray, valid_mask: numpy.ndarray, fit_mask: numpy.ndarray) -> numpy.ndarray
+
+   Estimate expected healthy radius from the high-percentile local envelope.
+
+
+.. py:function:: _linear_taper_reference(s: numpy.ndarray, r: numpy.ndarray, valid_mask: numpy.ndarray, fit_mask: numpy.ndarray) -> numpy.ndarray
+
+   Simple robust-enough taper used only to pre-remove obvious outliers.
+
+
+.. py:function:: _compute_vessel_taper(s: numpy.ndarray, r: numpy.ndarray, valid_mask: numpy.ndarray, exclude_mask: Optional[numpy.ndarray] = None, low_outlier_pct: Optional[float] = None, high_outlier_pct: Optional[float] = None, fit_basis: Optional[numpy.ndarray] = None) -> numpy.ndarray
+
+   Reference radius via an iterative healthy-caliber envelope.
+
+   A stenosis should be judged against the expected healthy caliber, not
+   against a regression line pulled downward by the stenosis itself.  The
+   reference is therefore the high-percentile local radius envelope, optionally
+   made non-increasing along the vessel, with low/high outlier regions removed
+   from the envelope mask over a few iterations.
+
+   fit_basis: optional mask of points allowed to contribute to the fit.
+       Defaults to valid_mask.  Pass a stricter mask (e.g. interior-only) to
+       prevent end-zone lesions from biasing the local percentile envelope.
+       The reference is still *computed* (and interpolated) at all valid_mask
+       positions regardless of fit_basis.
+
+
+.. py:function:: stenosis_segment_percent(s: numpy.ndarray, r: numpy.ndarray, r_ref_per_point: numpy.ndarray, segments: List[Tuple[int, int]], margin_mm: Optional[float] = None) -> numpy.ndarray
+
+   Reported stenosis severity, using one reference radius per lesion.
+
+   The moving taper reference is useful to *find* candidate lesions, but it is
+   a confusing denominator for reporting because two points in the same lesion
+   can be compared against different reference radii.  For accepted stenotic
+   segments we therefore use the maximum expected healthy reference in and
+   around that lesion.  Outside accepted segments the reported percentage is 0.
+
+
+.. py:function:: stenosis_raw_percent(s: numpy.ndarray, r: numpy.ndarray, r_ref_per_point: numpy.ndarray, exclude_end_mm: float = 0.0) -> numpy.ndarray
+
+   Raw pointwise radius deficit against the taper reference.
+
+
+.. py:function:: fill_reference_gaps(ref: numpy.ndarray) -> numpy.ndarray
+
+   Fill NaN reference-radius values by nearest/interpolated finite values.
+
+
+.. py:function:: detect_stenosis_segments(s, r, threshold_pct, min_segment_mm, exclude_end_mm=0.0, max_internal_gap_mm: Optional[float] = None, pts=None, taper_fit_exclude_end_mm: Optional[float] = None, **_ignored) -> nvitk.measure.morpho.models.StenosisResult
+
+   Detect stenosis segments along a vessel by comparing local radius to a fitted taper reference.
+
+   Builds a per-point reference radius (excluding a wider end-zone and, if
+   curvature points are given, siphon regions), then flags points whose radius
+   drops *threshold_pct* below that reference. When ``TAPER_TWO_PASS`` is set,
+   iteratively excludes detected lesion points from the reference fit and
+   re-detects until the lesion mask stabilizes. Segments are merged via
+   hysteresis (:func:`hysteresis_segments_from_min_length`) using a lower
+   support threshold so a strict core lesion can extend into a softer halo.
+
+
+.. py:function:: stenosis_pointwise(s, r, r_ref_per_point, threshold_pct, exclude_end_mm=0.0, min_segment_mm: Optional[float] = None, max_internal_gap_mm: Optional[float] = None, **_ignored)
+
+   Per-point stenosis percentage and flag against an already-computed reference radius.
+
+   Lighter-weight sibling of :func:`detect_stenosis_segments` for cases (e.g.
+   interactive review) where the taper reference was already fit and just needs
+   re-evaluating; optionally re-applies hysteresis segment merging.
+
+
+.. py:function:: detect_enlargement_segments(s, r, threshold_pct, min_segment_mm, exclude_end_mm=0.0, max_internal_gap_mm: Optional[float] = None, pts=None, taper_fit_exclude_end_mm: Optional[float] = None, **_ignored) -> nvitk.measure.morpho.models.EnlargementResult
+
+   Detect enlargement (aneurysm-like) segments: mirror of :func:`detect_stenosis_segments`.
+
+   Same taper-reference-fit + iterative-refit + hysteresis-merge strategy, but
+   flags points *above* the reference by *threshold_pct* instead of below it.
+   Siphon (high-curvature) regions can optionally be excluded from detection
+   (not just the reference fit) via ``SIPHON_SUPPRESSES_ENLARGEMENT_DETECTION``,
+   since curvature can locally widen the apparent radius without true enlargement.
+
+
+.. py:function:: enlargement_pointwise(s, r, r_ref_per_point, threshold_pct, exclude_end_mm=0.0, min_segment_mm: Optional[float] = None, max_internal_gap_mm: Optional[float] = None, pts=None, **_ignored)
+
+   Per-point enlargement percentage and flag against an already-computed reference radius.
+
+   Mirror of :func:`stenosis_pointwise` for the enlargement (aneurysm) direction.
+
+
+.. py:function:: resolve_stenosis_enlargement_overlap(stenosis_pct: numpy.ndarray, is_stenotic: numpy.ndarray, enlargement_pct: numpy.ndarray, is_enlarged: numpy.ndarray) -> Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray]
+
+   Clear both flags at points where stenosis and enlargement detections coincide (an ambiguous fit, not a real lesion).
+
+
+.. py:function:: stenosis_total_length(s, flag) -> float
+
+   Total arc length (mm) covered by consecutive-flagged point pairs.
+
+
+.. py:function:: flag_segments_from_min_length(s: numpy.ndarray, flag: numpy.ndarray, min_segment_mm: float, max_gap_mm: float = 0.0, min_points: Optional[int] = None) -> List[Tuple[int, int]]
+
+   Group flagged points into ``(start, end)`` index segments, merging runs separated by ≤*max_gap_mm*.
+
+   A merged segment survives if it spans ≥*min_segment_mm* of arc length OR
+   (when given) has at least *min_points* points.
+
+
+.. py:function:: hysteresis_segments_from_min_length(s: numpy.ndarray, core_flag: numpy.ndarray, support_flag: numpy.ndarray, min_segment_mm: float, max_gap_mm: float = 0.0, min_points: Optional[int] = None) -> List[Tuple[int, int]]
+
+   Hysteresis segment merging: build segments from the looser *support_flag*, keep only those
+   that contain at least one point from the stricter *core_flag*.
+
+
+.. py:function:: mask_from_segments(n_points: int, segments: List[Tuple[int, int]]) -> numpy.ndarray
+
+   Boolean point mask of length *n_points* that is ``True`` inside each ``(start, end)`` segment.
+
+
+.. py:function:: points_for_length(s: numpy.ndarray, length_mm: Optional[float]) -> Optional[int]
+
+   Point count spanning *length_mm* at this path's own sampling step, or ``None``.
+
+   Lets a policy be stated in mm while :func:`flag_segments_from_min_length` still counts points,
+   so changing ``CENTERLINE_RESAMPLE_STEP_MM`` cannot silently retune a detection rule.
+
+
+.. py:function:: clip_segments_to_core(segments: List[Tuple[int, int]], core_flag: numpy.ndarray) -> List[Tuple[int, int]]
+
+   Trim each accepted segment to the span between its first and last core point.
+
+   The support contour decides *whether* a lesion is real and merges runs across small internal
+   dips; it should not widen what gets **reported**. Reporting the halo would inflate
+   ``*_length_total_mm`` and make "stenosis length" mean something other than "length narrowed by
+   at least the core threshold". Trimming keeps the merge (an internal sub-core dip stays inside
+   one segment) while pinning both ends to the core contour.
+
+   Segments holding no core point are dropped — they cannot occur via
+   :func:`hysteresis_segments_from_min_length`, which already requires one, but the guard keeps
+   this usable on any segment list.
+
+
+.. py:function:: filter_flag_by_min_length(s: numpy.ndarray, flag: numpy.ndarray, min_segment_mm: float, max_gap_mm: float = 0.0) -> numpy.ndarray
+
+   Drop flagged runs shorter than *min_segment_mm* (single-threshold version of the hysteresis merge).
+
+
+.. py:function:: segment_detail_json(s: numpy.ndarray, percent_point: numpy.ndarray, segments_point_idx: List[Tuple[int, int]]) -> str
+
+   JSON list of per-segment detail (index range, arc-length span, peak percent) for export columns.
+
+
+.. py:function:: select_caliber_detection_radius(cross_section_radius: numpy.ndarray, mis_radius: Optional[numpy.ndarray] = None) -> numpy.ndarray
+
+   Pick the radius signal used for stenosis/enlargement detection, per ``RADIUS_SOURCE_FOR_CALIBER_DETECTION``.
+
+   Falls back to *cross_section_radius* wherever the maximum-inscribed-sphere
+   (VMTK MIS) radius is unavailable or non-finite.
+
+
+.. py:function:: refresh_enlargement_summary_from_flags(res: dict) -> None
+
+   In-place: recompute a path result's summary enlargement fields from its per-point flags/percent arrays.
+
+

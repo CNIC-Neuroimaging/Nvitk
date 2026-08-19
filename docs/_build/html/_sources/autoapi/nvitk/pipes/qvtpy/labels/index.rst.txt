@@ -1,0 +1,592 @@
+nvitk.pipes.qvtpy.labels
+========================
+
+.. py:module:: nvitk.pipes.qvtpy.labels
+
+.. autoapi-nested-parse::
+
+   Vessel label IDs: eICAB input masks vs qvtpy pipeline outputs.
+
+   **eICAB (input)** — integers in ``*_eICAB_CW.nii(.gz)`` / ``*_eICAB_WB.nii(.gz)`` (0–18).
+   Morphometrics topology for these ids: ``measure/morpho/topology/eicab_topology.json``.
+
+   **qvtpy (pipeline)** — integers in ``centerlines_mask``, ``seg_4dflow``, LOCs, and
+   measurement tables. Arterial ids come from :func:`relabel_eicab_mask_to_qvtpy`
+   (merge PCA P1/P2; drop SCA/AChA). Venous sinuses use fixed ids 31–34.
+   Reference morphometrics topology (unused by stage-7):
+   ``measure/morpho/topology/qvtpy_topology.json``.
+
+   **Outputs**
+
+   - :data:`QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID` — combined arterial + venous id→name map.
+   - Group frozensets (``QVTPY_ACA_IDS``, ``QVTPY_RG_SKIP_LABEL_IDS``, …) for stage-4 heuristics.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.labels.EICAB_BACKGROUND
+   nvitk.pipes.qvtpy.labels.EICAB_LICA
+   nvitk.pipes.qvtpy.labels.EICAB_RICA
+   nvitk.pipes.qvtpy.labels.EICAB_BASILAR
+   nvitk.pipes.qvtpy.labels.EICAB_ACOMM
+   nvitk.pipes.qvtpy.labels.EICAB_LACA
+   nvitk.pipes.qvtpy.labels.EICAB_RACA
+   nvitk.pipes.qvtpy.labels.EICAB_LMCA
+   nvitk.pipes.qvtpy.labels.EICAB_RMCA
+   nvitk.pipes.qvtpy.labels.EICAB_LPCOMM
+   nvitk.pipes.qvtpy.labels.EICAB_RPCOMM
+   nvitk.pipes.qvtpy.labels.EICAB_LPCA_P1
+   nvitk.pipes.qvtpy.labels.EICAB_RPCA_P1
+   nvitk.pipes.qvtpy.labels.EICAB_LPCA_P2
+   nvitk.pipes.qvtpy.labels.EICAB_RPCA_P2
+   nvitk.pipes.qvtpy.labels.EICAB_LSCA
+   nvitk.pipes.qvtpy.labels.EICAB_RSCA
+   nvitk.pipes.qvtpy.labels.EICAB_LACHA
+   nvitk.pipes.qvtpy.labels.EICAB_RACHA
+   nvitk.pipes.qvtpy.labels.EICAB_BASI
+   nvitk.pipes.qvtpy.labels.EICAB_LABEL_4_UNDOCUMENTED
+   nvitk.pipes.qvtpy.labels.EICAB_ID_TO_NAME
+   nvitk.pipes.qvtpy.labels.EICAB_VESSEL_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.EICAB_QVTPLUS_DOCUMENTED_COW
+   nvitk.pipes.qvtpy.labels.EICAB_NAME_TO_ID
+   nvitk.pipes.qvtpy.labels.QVTPY_BACKGROUND
+   nvitk.pipes.qvtpy.labels.QVTPY_LICA
+   nvitk.pipes.qvtpy.labels.QVTPY_RICA
+   nvitk.pipes.qvtpy.labels.QVTPY_BASILAR
+   nvitk.pipes.qvtpy.labels.QVTPY_LACA
+   nvitk.pipes.qvtpy.labels.QVTPY_RACA
+   nvitk.pipes.qvtpy.labels.QVTPY_LMCA
+   nvitk.pipes.qvtpy.labels.QVTPY_RMCA
+   nvitk.pipes.qvtpy.labels.QVTPY_LPCA
+   nvitk.pipes.qvtpy.labels.QVTPY_RPCA
+   nvitk.pipes.qvtpy.labels.QVTPY_LPCOMM
+   nvitk.pipes.qvtpy.labels.QVTPY_RPCOMM
+   nvitk.pipes.qvtpy.labels.QVTPY_ACOMM
+   nvitk.pipes.qvtpy.labels.QVTPY_LVA
+   nvitk.pipes.qvtpy.labels.QVTPY_RVA
+   nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_ID_TO_NAME
+   nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_NAME_TO_ID
+   nvitk.pipes.qvtpy.labels.QVTPY_ARTERIAL_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_ICA_BASILAR_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_ACA_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_MCA_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_PCA_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_COMM_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_PCOMM_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_VERTEBRAL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_NON_COMM_ARTERIAL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_SMALL_ARTERIAL_IDS
+   nvitk.pipes.qvtpy.labels.NAME_SSSV
+   nvitk.pipes.qvtpy.labels.NAME_STRV
+   nvitk.pipes.qvtpy.labels.NAME_LTSV
+   nvitk.pipes.qvtpy.labels.NAME_RTSV
+   nvitk.pipes.qvtpy.labels.NAME_RCOMM
+   nvitk.pipes.qvtpy.labels.NAME_LCOMM
+   nvitk.pipes.qvtpy.labels.NAME_COMM
+   nvitk.pipes.qvtpy.labels.QVTPY_SSSV
+   nvitk.pipes.qvtpy.labels.QVTPY_STRV
+   nvitk.pipes.qvtpy.labels.QVTPY_LTSV
+   nvitk.pipes.qvtpy.labels.QVTPY_RTSV
+   nvitk.pipes.qvtpy.labels.VENOUS_LABEL_SSSV
+   nvitk.pipes.qvtpy.labels.VENOUS_LABEL_STRV
+   nvitk.pipes.qvtpy.labels.VENOUS_LABEL_LTSV
+   nvitk.pipes.qvtpy.labels.VENOUS_LABEL_RTSV
+   nvitk.pipes.qvtpy.labels.VENOUS_LABEL_BY_NAME
+   nvitk.pipes.qvtpy.labels.VENOUS_NAME_BY_LABEL
+   nvitk.pipes.qvtpy.labels.MATLAB_QVT_VENOUS_VESSEL_NAMES
+   nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_EXPLORE_MORE_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_MCA_PCA_EXPLORE_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_PCOMM_EICAB_BARRIER_IDS
+   nvitk.pipes.qvtpy.labels.EICAB_RG_BARRIER_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_SKIP_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_RG_INTENSITY_FRAC_VENOUS
+   nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_UNKNOWN_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_VENOUS_REGION_BASE
+   nvitk.pipes.qvtpy.labels.QVTPY_UNKNOWN_LABEL
+   nvitk.pipes.qvtpy.labels.VENOUS_UNKNOWN_LABEL
+   nvitk.pipes.qvtpy.labels.VENOUS_REGION_BASE
+   nvitk.pipes.qvtpy.labels.UNKNOWN_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_RESERVED_LABEL_BY_ID
+   nvitk.pipes.qvtpy.labels.EICAB_LABEL_IDS_OMITTED
+   nvitk.pipes.qvtpy.labels.EICAB_TO_QVTPY_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_TO_EICAB_LABELS
+   nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID
+   nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID
+   nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_LABEL_BY_ID
+   nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_SEG_4DFLOW_NAME_TO_LABEL
+   nvitk.pipes.qvtpy.labels.QVTPY_CENTERLINE_AND_SEG_LABEL_IDS
+   nvitk.pipes.qvtpy.labels.QVTPY_BRANCH_SEGMENT_LETTER
+   nvitk.pipes.qvtpy.labels.QVTPY_BRANCHED_LABEL_IDS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.labels.relabel_eicab_mask_to_qvtpy
+   nvitk.pipes.qvtpy.labels.eicab_vessel_name
+   nvitk.pipes.qvtpy.labels.eicab_label_from_name
+   nvitk.pipes.qvtpy.labels.qvtpy_vessel_name
+   nvitk.pipes.qvtpy.labels.qvtpy_label_from_name
+   nvitk.pipes.qvtpy.labels.qvtpy_branch_names
+   nvitk.pipes.qvtpy.labels.qvtpy_branch_parent_label
+
+
+Module Contents
+---------------
+
+.. py:data:: EICAB_BACKGROUND
+   :type:  int
+   :value: 0
+
+
+.. py:data:: EICAB_LICA
+   :type:  int
+   :value: 1
+
+
+.. py:data:: EICAB_RICA
+   :type:  int
+   :value: 2
+
+
+.. py:data:: EICAB_BASILAR
+   :type:  int
+   :value: 3
+
+
+.. py:data:: EICAB_ACOMM
+   :type:  int
+   :value: 4
+
+
+.. py:data:: EICAB_LACA
+   :type:  int
+   :value: 5
+
+
+.. py:data:: EICAB_RACA
+   :type:  int
+   :value: 6
+
+
+.. py:data:: EICAB_LMCA
+   :type:  int
+   :value: 7
+
+
+.. py:data:: EICAB_RMCA
+   :type:  int
+   :value: 8
+
+
+.. py:data:: EICAB_LPCOMM
+   :type:  int
+   :value: 9
+
+
+.. py:data:: EICAB_RPCOMM
+   :type:  int
+   :value: 10
+
+
+.. py:data:: EICAB_LPCA_P1
+   :type:  int
+   :value: 11
+
+
+.. py:data:: EICAB_RPCA_P1
+   :type:  int
+   :value: 12
+
+
+.. py:data:: EICAB_LPCA_P2
+   :type:  int
+   :value: 13
+
+
+.. py:data:: EICAB_RPCA_P2
+   :type:  int
+   :value: 14
+
+
+.. py:data:: EICAB_LSCA
+   :type:  int
+   :value: 15
+
+
+.. py:data:: EICAB_RSCA
+   :type:  int
+   :value: 16
+
+
+.. py:data:: EICAB_LACHA
+   :type:  int
+   :value: 17
+
+
+.. py:data:: EICAB_RACHA
+   :type:  int
+   :value: 18
+
+
+.. py:data:: EICAB_BASI
+   :type:  int
+   :value: 3
+
+
+.. py:data:: EICAB_LABEL_4_UNDOCUMENTED
+   :type:  int
+   :value: 4
+
+
+.. py:data:: EICAB_ID_TO_NAME
+   :type:  dict[int, str]
+
+.. py:data:: EICAB_VESSEL_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: EICAB_QVTPLUS_DOCUMENTED_COW
+   :type:  frozenset[int]
+
+.. py:data:: EICAB_NAME_TO_ID
+   :type:  dict[str, int]
+
+.. py:data:: QVTPY_BACKGROUND
+   :type:  int
+   :value: 0
+
+
+.. py:data:: QVTPY_LICA
+   :type:  int
+   :value: 1
+
+
+.. py:data:: QVTPY_RICA
+   :type:  int
+   :value: 2
+
+
+.. py:data:: QVTPY_BASILAR
+   :type:  int
+   :value: 3
+
+
+.. py:data:: QVTPY_LACA
+   :type:  int
+   :value: 4
+
+
+.. py:data:: QVTPY_RACA
+   :type:  int
+   :value: 5
+
+
+.. py:data:: QVTPY_LMCA
+   :type:  int
+   :value: 6
+
+
+.. py:data:: QVTPY_RMCA
+   :type:  int
+   :value: 7
+
+
+.. py:data:: QVTPY_LPCA
+   :type:  int
+   :value: 8
+
+
+.. py:data:: QVTPY_RPCA
+   :type:  int
+   :value: 9
+
+
+.. py:data:: QVTPY_LPCOMM
+   :type:  int
+   :value: 10
+
+
+.. py:data:: QVTPY_RPCOMM
+   :type:  int
+   :value: 11
+
+
+.. py:data:: QVTPY_ACOMM
+   :type:  int
+   :value: 12
+
+
+.. py:data:: QVTPY_LVA
+   :type:  int
+   :value: 13
+
+
+.. py:data:: QVTPY_RVA
+   :type:  int
+   :value: 14
+
+
+.. py:data:: QVTPY_ARTERIAL_ID_TO_NAME
+   :type:  dict[int, str]
+
+.. py:data:: QVTPY_ARTERIAL_NAME_TO_ID
+   :type:  dict[str, int]
+
+.. py:data:: QVTPY_ARTERIAL_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_ICA_BASILAR_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_ACA_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_MCA_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_PCA_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_COMM_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_PCOMM_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_VERTEBRAL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_NON_COMM_ARTERIAL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_SMALL_ARTERIAL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: NAME_SSSV
+   :type:  str
+   :value: 'SSSV'
+
+
+.. py:data:: NAME_STRV
+   :type:  str
+   :value: 'STRV'
+
+
+.. py:data:: NAME_LTSV
+   :type:  str
+   :value: 'LTSV'
+
+
+.. py:data:: NAME_RTSV
+   :type:  str
+   :value: 'RTSV'
+
+
+.. py:data:: NAME_RCOMM
+   :type:  str
+   :value: 'RCOMM'
+
+
+.. py:data:: NAME_LCOMM
+   :type:  str
+   :value: 'LCOMM'
+
+
+.. py:data:: NAME_COMM
+   :type:  str
+   :value: 'COMM'
+
+
+.. py:data:: QVTPY_SSSV
+   :type:  int
+   :value: 31
+
+
+.. py:data:: QVTPY_STRV
+   :type:  int
+   :value: 32
+
+
+.. py:data:: QVTPY_LTSV
+   :type:  int
+   :value: 33
+
+
+.. py:data:: QVTPY_RTSV
+   :type:  int
+   :value: 34
+
+
+.. py:data:: VENOUS_LABEL_SSSV
+   :type:  int
+   :value: 31
+
+
+.. py:data:: VENOUS_LABEL_STRV
+   :type:  int
+   :value: 32
+
+
+.. py:data:: VENOUS_LABEL_LTSV
+   :type:  int
+   :value: 33
+
+
+.. py:data:: VENOUS_LABEL_RTSV
+   :type:  int
+   :value: 34
+
+
+.. py:data:: VENOUS_LABEL_BY_NAME
+   :type:  dict[str, int]
+
+.. py:data:: VENOUS_NAME_BY_LABEL
+   :type:  dict[int, str]
+
+.. py:data:: MATLAB_QVT_VENOUS_VESSEL_NAMES
+   :type:  tuple[str, Ellipsis]
+
+.. py:data:: QVTPY_VENOUS_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_EXPLORE_MORE_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_MCA_PCA_EXPLORE_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_PCA_BASILAR_EICAB_BARRIER_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_PCOMM_EICAB_BARRIER_IDS
+   :type:  frozenset[int]
+
+.. py:data:: EICAB_RG_BARRIER_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_SKIP_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: QVTPY_RG_INTENSITY_FRAC_VENOUS
+   :type:  dict[int, float]
+
+.. py:data:: QVTPY_VENOUS_UNKNOWN_LABEL
+   :type:  int
+   :value: 30
+
+
+.. py:data:: QVTPY_VENOUS_REGION_BASE
+   :type:  int
+   :value: 31
+
+
+.. py:data:: QVTPY_UNKNOWN_LABEL
+   :type:  int
+   :value: 35
+
+
+.. py:data:: VENOUS_UNKNOWN_LABEL
+   :type:  int
+   :value: 30
+
+
+.. py:data:: VENOUS_REGION_BASE
+   :type:  int
+   :value: 31
+
+
+.. py:data:: UNKNOWN_LABEL
+   :type:  int
+   :value: 35
+
+
+.. py:data:: QVTPY_RESERVED_LABEL_BY_ID
+   :type:  dict[int, str]
+
+.. py:data:: EICAB_LABEL_IDS_OMITTED
+   :type:  frozenset[int]
+
+.. py:data:: EICAB_TO_QVTPY_LABEL
+   :type:  dict[int, int]
+
+.. py:data:: QVTPY_TO_EICAB_LABELS
+   :type:  dict[int, tuple[int, Ellipsis]]
+
+.. py:data:: QVTPY_CENTERLINE_AND_SEG_LABEL_BY_ID
+   :type:  dict[int, str]
+
+.. py:data:: QVTPY_CENTERLINE_BACKBONE_LABEL_BY_ID
+   :type:  dict[int, str]
+
+.. py:data:: QVTPY_SEG_4DFLOW_LABEL_BY_ID
+   :type:  dict[int, str]
+
+.. py:data:: QVTPY_CENTERLINE_AND_SEG_NAME_TO_LABEL
+   :type:  dict[str, int]
+
+.. py:data:: QVTPY_CENTERLINE_BACKBONE_NAME_TO_LABEL
+   :type:  dict[str, int]
+
+.. py:data:: QVTPY_SEG_4DFLOW_NAME_TO_LABEL
+   :type:  dict[str, int]
+
+.. py:data:: QVTPY_CENTERLINE_AND_SEG_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:function:: relabel_eicab_mask_to_qvtpy(volume: np.ndarray) -> np.ndarray
+
+   Map warped eICAB labels to qvtpy arterial ids (merge PCA; drop SCA/AChA).
+
+
+.. py:function:: eicab_vessel_name(label_id: int) -> str
+
+   Name for an **eICAB** mask integer.
+
+
+.. py:function:: eicab_label_from_name(name: str) -> int | None
+
+   eICAB label id for a known input-mask vessel name, or None.
+
+
+.. py:function:: qvtpy_vessel_name(label_id: int) -> str
+
+   Name for a qvtpy label in ``centerlines_mask`` / ``seg_4dflow``.
+
+
+.. py:function:: qvtpy_label_from_name(name: str) -> int | None
+
+   qvtpy label id for a pipeline vessel name (arterial or venous), or None.
+
+
+.. py:data:: QVTPY_BRANCH_SEGMENT_LETTER
+   :type:  dict[int, str]
+
+.. py:data:: QVTPY_BRANCHED_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:function:: qvtpy_branch_names(label_id: int, n_branches: int) -> list[str]
+
+   Anatomical names for the branches of one arterial label.
+
+   Branched vessels (MCA/ACA/PCA) name the trunk ``{vessel}-{L}1`` (e.g.
+   ``LACA-A1``) and each side branch a generation-2 segment ``{vessel}-{L}2a``,
+   ``{vessel}-{L}2b``, … (e.g. ``LMCA-M2a``). Non-branched vessels
+   (ICA/basilar/comm/vertebral) use the bare vessel name for the trunk and a
+   ``{vessel}-b2`` … suffix for any extra branches.
+
+
+.. py:function:: qvtpy_branch_parent_label(branch_name: str) -> int | None
+
+   Parent qvtpy label id for a branch name like ``LMCA-M2a`` (or bare name).
+
+

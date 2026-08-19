@@ -1,0 +1,56 @@
+nvitk.gui.pipeline.catalog
+==========================
+
+.. py:module:: nvitk.gui.pipeline.catalog
+
+.. autoapi-nested-parse::
+
+   Pipeline CLI entries for the nvitk GUI (from ``src/nvitk/pipes``).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.catalog.PIPELINE_TOOLS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.catalog.PipelineGuiSpec
+
+
+Module Contents
+---------------
+
+.. py:class:: PipelineGuiSpec
+
+   GUI-facing metadata for one installed pipeline CLI command (id, label, command, description).
+
+
+   .. py:attribute:: id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: cli_command
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+      :value: ''
+
+
+
+.. py:data:: PIPELINE_TOOLS
+   :type:  tuple[PipelineGuiSpec, Ellipsis]
+

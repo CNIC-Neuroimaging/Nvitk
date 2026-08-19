@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.pesa_fat.run_batch &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.pesa_fat.run_hotspot" href="../run_hotspot/index.html" />
+    <link rel="prev" title="nvitk.pipes.pesa_fat.qc.slice_review" href="../qc/slice_review/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.pesa_fat.run_batch">
+<span id="nvitk-pipes-pesa-fat-run-batch"></span><h1>nvitk.pipes.pesa_fat.run_batch<a class="headerlink" href="#module-nvitk.pipes.pesa_fat.run_batch" title="Link to this heading">¶</a></h1>
+<p>PESA-Fat batch master.</p>
+<p>Single entry point that drives the <em>whole</em> PESA-Fat batch — stage 0
+(DICOM -&gt; NIfTI + renaming), then the ct-pet-v5 and dixon-v5 pipelines
+(stages 1–3), and optional stage 4 (local HTML QC report).</p>
+<p>Two execution modes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--submit</span> <span class="pre">local</span></code> — stage 0 is run in-process, then each pipeline’s
+master (<code class="xref py py-mod docutils literal notranslate"><span class="pre">ct_pet_v5.run</span></code> / <code class="xref py py-mod docutils literal notranslate"><span class="pre">dixon_v5.run</span></code>) is called with
+<code class="docutils literal notranslate"><span class="pre">--submit</span> <span class="pre">local</span></code> for the selected stages.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--submit</span> <span class="pre">sge</span></code> — for every subject we submit a stage-0 SGE job
+(<code class="docutils literal notranslate"><span class="pre">qsub</span></code> wrapping <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">exec</span> <span class="pre">python</span> <span class="pre">-m</span> <span class="pre">stage0_convert</span></code>) and
+capture its jid. Each pipeline then submits <strong>one array job per subject</strong>
+(tasks = stages 1–3, <code class="docutils literal notranslate"><span class="pre">-tc</span> <span class="pre">1</span></code> + done-markers) with <code class="docutils literal notranslate"><span class="pre">-hold_jid</span></code> on that
+stage-0 jid. CT-PET and Dixon arrays for a given subject run in parallel
+after stage 0. Optional <code class="docutils literal notranslate"><span class="pre">stage4</span></code> appends a CPU QC job that holds on all
+pipeline array jids when stage 3 is part of the script.</p></li>
+</ul>
+<p class="rubric">Examples</p>
+<p>Local dry-run of the whole batch:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">nvitk</span><span class="o">-</span><span class="n">pesa</span><span class="o">-</span><span class="n">fat</span> <span class="o">--</span><span class="n">batch</span> <span class="mi">202602</span><span class="n">_Week4</span>
+</pre></div>
+</div>
+<p>SGE: write <code class="docutils literal notranslate"><span class="pre">SCRIPTS_CLUSTER/submit_&lt;batch&gt;.sh</span></code> (default path), then try SSH
+to run it on the login node (install <code class="docutils literal notranslate"><span class="pre">nvitk[cluster]</span></code> for Paramiko):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">nvitk</span><span class="o">-</span><span class="n">pesa</span><span class="o">-</span><span class="n">fat</span> <span class="o">--</span><span class="n">batch</span> <span class="mi">202602</span><span class="n">_Week4</span> <span class="o">--</span><span class="n">submit</span> <span class="n">sge</span>
+</pre></div>
+</div>
+<p>Override script path with <code class="docutils literal notranslate"><span class="pre">--emit-script</span></code>; skip SSH with <code class="docutils literal notranslate"><span class="pre">--no-remote</span></code>.
+Default <code class="docutils literal notranslate"><span class="pre">--src-dir</span></code> is <a class="reference internal" href="../common/paths/index.html#id0" title="nvitk.pipes.pesa_fat.common.paths.DEFAULT_NVITK_SRC_DIR"><code class="xref py py-data docutils literal notranslate"><span class="pre">nvitk.pipes.pesa_fat.common.paths.DEFAULT_NVITK_SRC_DIR</span></code></a>.</p>
+<p>Skip stage 0, run only dixon v5 for a subset locally:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">nvitk</span><span class="o">-</span><span class="n">pesa</span><span class="o">-</span><span class="n">fat</span> <span class="o">--</span><span class="n">batch</span> <span class="mi">202602</span><span class="n">_Week4</span>         <span class="o">--</span><span class="n">subjects</span> <span class="n">PESA001</span><span class="p">,</span><span class="n">PESA002</span>         <span class="o">--</span><span class="n">pipelines</span> <span class="n">dixon</span><span class="o">-</span><span class="n">v5</span>         <span class="o">--</span><span class="n">stages</span> <span class="n">stage1</span><span class="p">,</span><span class="n">stage2</span><span class="p">,</span><span class="n">stage3</span>
+</pre></div>
+</div>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch.log" title="nvitk.pipes.pesa_fat.run_batch.log"><code class="xref py py-obj docutils literal notranslate"><span class="pre">log</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch.PIPELINE_CHOICES" title="nvitk.pipes.pesa_fat.run_batch.PIPELINE_CHOICES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PIPELINE_CHOICES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch.STAGE_CHOICES" title="nvitk.pipes.pesa_fat.run_batch.STAGE_CHOICES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">STAGE_CHOICES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch.INPUT_SOURCE_CHOICES" title="nvitk.pipes.pesa_fat.run_batch.INPUT_SOURCE_CHOICES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">INPUT_SOURCE_CHOICES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_DICOM" title="nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_DICOM"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_STAGE0_BIND_DICOM</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_NIFTI" title="nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_NIFTI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_STAGE0_BIND_NIFTI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_MODULE" title="nvitk.pipes.pesa_fat.run_batch._STAGE0_MODULE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_STAGE0_MODULE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._AGGREGATE_MODULE" title="nvitk.pipes.pesa_fat.run_batch._AGGREGATE_MODULE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_AGGREGATE_MODULE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._STAGE4_QC_MODULE" title="nvitk.pipes.pesa_fat.run_batch._STAGE4_QC_MODULE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_STAGE4_QC_MODULE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._stage0_python_cmd" title="nvitk.pipes.pesa_fat.run_batch._stage0_python_cmd"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_stage0_python_cmd</span></code></a>(→ str)</p></td>
+<td><p>Stage 0 inside the container reads from the mounted DICOM root and</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._stage0_cluster_paths" title="nvitk.pipes.pesa_fat.run_batch._stage0_cluster_paths"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_stage0_cluster_paths</span></code></a>(→ nvitk.cluster.sge.ClusterPaths)</p></td>
+<td><p>Host paths for stage 0 (DICOM -&gt; NIfTI conversion) SGE submission.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._pipeline_cluster_paths" title="nvitk.pipes.pesa_fat.run_batch._pipeline_cluster_paths"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_pipeline_cluster_paths</span></code></a>(→ nvitk.cluster.sge.ClusterPaths)</p></td>
+<td><p>Host paths for stages 1–3 and batch stage-3 aggregation (NIfTI + RESULTS).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._stage4_qc_python_cmd" title="nvitk.pipes.pesa_fat.run_batch._stage4_qc_python_cmd"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_stage4_qc_python_cmd</span></code></a>(→ str)</p></td>
+<td><p>In-container CLI command for the stage-4 HTML QC report SGE job.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._aggregate_python_cmd" title="nvitk.pipes.pesa_fat.run_batch._aggregate_python_cmd"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_aggregate_python_cmd</span></code></a>(→ str)</p></td>
+<td><p>In-container CLI command for the batch stage-3 Excel aggregation SGE job.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._emit_batch_aggregate_stage" title="nvitk.pipes.pesa_fat.run_batch._emit_batch_aggregate_stage"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_emit_batch_aggregate_stage</span></code></a>(→ None)</p></td>
+<td><p>Append a CPU qsub that merges per-subject stage-3 xlsx after all stage3 jobs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._emit_stage4_qc_stage" title="nvitk.pipes.pesa_fat.run_batch._emit_stage4_qc_stage"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_emit_stage4_qc_stage</span></code></a>(→ None)</p></td>
+<td><p>Append a CPU qsub that builds the HTML QC report after stage 3 (or immediately).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._require_paramiko" title="nvitk.pipes.pesa_fat.run_batch._require_paramiko"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_require_paramiko</span></code></a>(→ None)</p></td>
+<td><p>Raise a click error with an install hint if Paramiko is not available.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._prompt_ssh_credentials" title="nvitk.pipes.pesa_fat.run_batch._prompt_ssh_credentials"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_prompt_ssh_credentials</span></code></a>(→ tuple[str, str, str])</p></td>
+<td><p>Resolve (host, user, password) from args or interactive prompts, resolving <em>host</em></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._pesa_fat_extra_sge_dirs" title="nvitk.pipes.pesa_fat.run_batch._pesa_fat_extra_sge_dirs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_pesa_fat_extra_sge_dirs</span></code></a>(→ list[pathlib.Path])</p></td>
+<td><p>Log/err dirs beyond CT-PET defaults (e.g. Dixon uses its own subdir).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._write_sge_script" title="nvitk.pipes.pesa_fat.run_batch._write_sge_script"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_write_sge_script</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Write the full batch submission script (header + all SGE stages) to <em>script_path</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._ssh_run_scripts" title="nvitk.pipes.pesa_fat.run_batch._ssh_run_scripts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_ssh_run_scripts</span></code></a>(→ bool)</p></td>
+<td><p>Run one or more submission scripts on the cluster login node over SSH; True on success.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._run_xnat_then_sge" title="nvitk.pipes.pesa_fat.run_batch._run_xnat_then_sge"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_run_xnat_then_sge</span></code></a>(→ None)</p></td>
+<td><p>Download from XNAT locally, SFTP DICOMs to cluster, emit and run SGE per batch.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._submit_stage0" title="nvitk.pipes.pesa_fat.run_batch._submit_stage0"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_submit_stage0</span></code></a>(→ str)</p></td>
+<td><p>Submit a single stage-0 SGE job and return its jid (or a shell-variable</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._subject_list" title="nvitk.pipes.pesa_fat.run_batch._subject_list"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_subject_list</span></code></a>(→ list[str])</p></td>
+<td><p>Resolve the batch subject list: parsed <em>subjects_arg</em> if given, else every subject</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._run_local" title="nvitk.pipes.pesa_fat.run_batch._run_local"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_run_local</span></code></a>(→ None)</p></td>
+<td><p>Run the batch in-process: optional stage 0 conversion, then each selected pipeline's</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch._run_sge" title="nvitk.pipes.pesa_fat.run_batch._run_sge"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_run_sge</span></code></a>(→ None)</p></td>
+<td><p>Emit or submit the full batch SGE pipeline: per-subject stage 0, then each selected</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.pesa_fat.run_batch.main" title="nvitk.pipes.pesa_fat.run_batch.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>(→ None)</p></td>
+<td><p>Run the full PESA-Fat pipeline (stage 0 + ct-pet-v5 + dixon-v5) for a batch.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch.log">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">log</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch.log" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch.PIPELINE_CHOICES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">PIPELINE_CHOICES</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('ct-pet-v5',</span> <span class="pre">'dixon-v5')</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch.PIPELINE_CHOICES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch.STAGE_CHOICES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">STAGE_CHOICES</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('stage0',</span> <span class="pre">'stage1',</span> <span class="pre">'stage2',</span> <span class="pre">'stage3',</span> <span class="pre">'stage4')</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch.STAGE_CHOICES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch.INPUT_SOURCE_CHOICES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">INPUT_SOURCE_CHOICES</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('paths',</span> <span class="pre">'xnat')</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch.INPUT_SOURCE_CHOICES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_DICOM">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_STAGE0_BIND_DICOM</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/PESAFat/DICOM/'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_DICOM" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_NIFTI">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_STAGE0_BIND_NIFTI</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'/PESAFat/NIFTI/'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_BIND_NIFTI" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._STAGE0_MODULE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_STAGE0_MODULE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'nvitk.pipes.pesa_fat.common.stage0_convert'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._STAGE0_MODULE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._AGGREGATE_MODULE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_AGGREGATE_MODULE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'nvitk.pipes.pesa_fat.common.batch_stage3_aggregate'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._AGGREGATE_MODULE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._STAGE4_QC_MODULE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_STAGE4_QC_MODULE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'nvitk.pipes.pesa_fat.common.stage4_qc'</span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._STAGE4_QC_MODULE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._stage0_python_cmd">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_stage0_python_cmd</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._stage0_python_cmd" title="Link to this definition">¶</a></dt>
+<dd><p>Stage 0 inside the container reads from the mounted DICOM root and
+writes to the mounted NIfTI root; use container paths here.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._stage0_cluster_paths">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_stage0_cluster_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../cluster/sge/index.html#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">nvitk.cluster.sge.ClusterPaths</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._stage0_cluster_paths" title="Link to this definition">¶</a></dt>
+<dd><p>Host paths for stage 0 (DICOM -&gt; NIfTI conversion) SGE submission.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._pipeline_cluster_paths">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_pipeline_cluster_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../cluster/sge/index.html#nvitk.cluster.sge.ClusterPaths" title="nvitk.cluster.sge.ClusterPaths"><span class="pre">nvitk.cluster.sge.ClusterPaths</span></a></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._pipeline_cluster_paths" title="Link to this definition">¶</a></dt>
+<dd><p>Host paths for stages 1–3 and batch stage-3 aggregation (NIfTI + RESULTS).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._stage4_qc_python_cmd">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_stage4_qc_python_cmd</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects_csv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_csv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._stage4_qc_python_cmd" title="Link to this definition">¶</a></dt>
+<dd><p>In-container CLI command for the stage-4 HTML QC report SGE job.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._aggregate_python_cmd">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_aggregate_python_cmd</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects_csv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_csv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._aggregate_python_cmd" title="Link to this definition">¶</a></dt>
+<dd><p>In-container CLI command for the batch stage-3 Excel aggregation SGE job.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._emit_batch_aggregate_stage">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_emit_batch_aggregate_stage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_agg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._emit_batch_aggregate_stage" title="Link to this definition">¶</a></dt>
+<dd><p>Append a CPU qsub that merges per-subject stage-3 xlsx after all stage3 jobs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._emit_stage4_qc_stage">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_emit_stage4_qc_stage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_qc</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hold_jid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._emit_stage4_qc_stage" title="Link to this definition">¶</a></dt>
+<dd><p>Append a CPU qsub that builds the HTML QC report after stage 3 (or immediately).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._require_paramiko">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_require_paramiko</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._require_paramiko" title="Link to this definition">¶</a></dt>
+<dd><p>Raise a click error with an install hint if Paramiko is not available.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._prompt_ssh_credentials">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_prompt_ssh_credentials</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">remote_host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remote_user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._prompt_ssh_credentials" title="Link to this definition">¶</a></dt>
+<dd><p>Resolve (host, user, password) from args or interactive prompts, resolving <em>host</em>
+through <a class="reference internal" href="../common/paths/index.html#id2" title="nvitk.pipes.pesa_fat.common.paths.CLUSTER_HOST_ALIASES"><code class="xref py py-data docutils literal notranslate"><span class="pre">CLUSTER_HOST_ALIASES</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._pesa_fat_extra_sge_dirs">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_pesa_fat_extra_sge_dirs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pipelines_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._pesa_fat_extra_sge_dirs" title="Link to this definition">¶</a></dt>
+<dd><p>Log/err dirs beyond CT-PET defaults (e.g. Dixon uses its own subdir).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._write_sge_script">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_write_sge_script</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subj_list</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stages_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">script_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">regions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_ureter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._write_sge_script" title="Link to this definition">¶</a></dt>
+<dd><p>Write the full batch submission script (header + all SGE stages) to <em>script_path</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._ssh_run_scripts">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_ssh_run_scripts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">password</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">script_paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._ssh_run_scripts" title="Link to this definition">¶</a></dt>
+<dd><p>Run one or more submission scripts on the cluster login node over SSH; True on success.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._run_xnat_then_sge">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_run_xnat_then_sge</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subj_list</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stages_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xnat_config</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xnat_session</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">regions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remote_host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remote_user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_ureter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._run_xnat_then_sge" title="Link to this definition">¶</a></dt>
+<dd><p>Download from XNAT locally, SFTP DICOMs to cluster, emit and run SGE per batch.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._submit_stage0">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_submit_stage0</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'gpu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._submit_stage0" title="Link to this definition">¶</a></dt>
+<dd><p>Submit a single stage-0 SGE job and return its jid (or a shell-variable
+reference when <em>emit</em> is set, or <code class="docutils literal notranslate"><span class="pre">'DRY_RUN'</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._subject_list">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_subject_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects_arg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._subject_list" title="Link to this definition">¶</a></dt>
+<dd><p>Resolve the batch subject list: parsed <em>subjects_arg</em> if given, else every subject
+discovered under the DICOM or NIfTI batch directory (per <em>source</em>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._run_local">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_run_local</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stages_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">regions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_ureter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._run_local" title="Link to this definition">¶</a></dt>
+<dd><p>Run the batch in-process: optional stage 0 conversion, then each selected pipeline’s
+local stages, then optional stage-4 HTML QC report.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch._run_sge">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">_run_sge</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../common/paths/index.html#nvitk.pipes.pesa_fat.common.paths.BatchLayout" title="nvitk.pipes.pesa_fat.common.paths.BatchLayout"><span class="pre">nvitk.pipes.pesa_fat.common.paths.BatchLayout</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stages_sel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">regions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TextIO</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_ureter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch._run_sge" title="Link to this definition">¶</a></dt>
+<dd><p>Emit or submit the full batch SGE pipeline: per-subject stage 0, then each selected
+pipeline’s array job(s) held on stage 0, then optional aggregate/stage-4 QC jobs.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.pesa_fat.run_batch.main">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.pesa_fat.run_batch.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">batch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subjects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipelines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stages</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dicom_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nifti_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">results_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_source</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xnat_config</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xnat_session</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">overwrite</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dixon_regions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_compress</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remote_host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remote_user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_ureter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.pesa_fat.run_batch.main" title="Link to this definition">¶</a></dt>
+<dd><p>Run the full PESA-Fat pipeline (stage 0 + ct-pet-v5 + dixon-v5) for a batch.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../index.html">nvitk.pipes.pesa_fat</a><ul>
+      <li>Previous: <a href="../qc/slice_review/index.html" title="previous chapter">nvitk.pipes.pesa_fat.qc.slice_review</a></li>
+      <li>Next: <a href="../run_hotspot/index.html" title="next chapter">nvitk.pipes.pesa_fat.run_hotspot</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/pipes/pesa_fat/run_batch/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

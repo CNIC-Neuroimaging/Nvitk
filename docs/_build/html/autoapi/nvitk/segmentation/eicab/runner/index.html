@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.segmentation.eicab.runner &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.segmentation.hemisphere" href="../../hemisphere/index.html" />
+    <link rel="prev" title="nvitk.segmentation.eicab.run_job" href="../run_job/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.segmentation.eicab.runner">
+<span id="nvitk-segmentation-eicab-runner"></span><h1>nvitk.segmentation.eicab.runner<a class="headerlink" href="#module-nvitk.segmentation.eicab.runner" title="Link to this heading">¶</a></h1>
+<p>Local eICAB inference via <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> and optional output pruning.</p>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.metric_scratch_bind_args" title="nvitk.segmentation.eicab.runner.metric_scratch_bind_args"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metric_scratch_bind_args</span></code></a>(→ list[str])</p></td>
+<td><p>Singularity <code class="docutils literal notranslate"><span class="pre">--bind</span></code> args for VED metric_space + CWD on node-local scratch.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.metric_scratch_prep_shell" title="nvitk.segmentation.eicab.runner.metric_scratch_prep_shell"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metric_scratch_prep_shell</span></code></a>(→ str)</p></td>
+<td><p>Shell snippet: create node-local dirs for VED <code class="docutils literal notranslate"><span class="pre">metric_space</span></code> and CWD.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.metric_scratch_cleanup_shell" title="nvitk.segmentation.eicab.runner.metric_scratch_cleanup_shell"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metric_scratch_cleanup_shell</span></code></a>(→ str)</p></td>
+<td><p>Shell snippet: remove <strong>only</strong> this job's <code class="docutils literal notranslate"><span class="pre">nvitk_eicab_&lt;JOB_ID&gt;</span></code> dir.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.segmentation_outputs_to_keep" title="nvitk.segmentation.eicab.runner.segmentation_outputs_to_keep"><code class="xref py py-obj docutils literal notranslate"><span class="pre">segmentation_outputs_to_keep</span></code></a>(→ list[pathlib.Path])</p></td>
+<td><p>Pick CoW, whole-brain, and <code class="docutils literal notranslate"><span class="pre">*_resampled</span></code> NIfTIs; drop other intermediates.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.prune_eicab_outputs" title="nvitk.segmentation.eicab.runner.prune_eicab_outputs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">prune_eicab_outputs</span></code></a>(→ None)</p></td>
+<td><p>Drop auxiliary folders/files unless <em>keep_aux_outputs</em> is True.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.build_eicab_singularity_argv" title="nvitk.segmentation.eicab.runner.build_eicab_singularity_argv"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_eicab_singularity_argv</span></code></a>(→ list[str])</p></td>
+<td><p>Build <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> argv for eICAB on the cluster host (host paths).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.segmentation.eicab.runner.run_eicab" title="nvitk.segmentation.eicab.runner.run_eicab"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run_eicab</span></code></a>(→ subprocess.CompletedProcess[str])</p></td>
+<td><p>Run eICAB via <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> (same contract as legacy BioImaging).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.metric_scratch_bind_args">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">metric_scratch_bind_args</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.metric_scratch_bind_args" title="Link to this definition">¶</a></dt>
+<dd><p>Singularity <code class="docutils literal notranslate"><span class="pre">--bind</span></code> args for VED metric_space + CWD on node-local scratch.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.metric_scratch_prep_shell">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">metric_scratch_prep_shell</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.metric_scratch_prep_shell" title="Link to this definition">¶</a></dt>
+<dd><p>Shell snippet: create node-local dirs for VED <code class="docutils literal notranslate"><span class="pre">metric_space</span></code> and CWD.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.metric_scratch_cleanup_shell">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">metric_scratch_cleanup_shell</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.metric_scratch_cleanup_shell" title="Link to this definition">¶</a></dt>
+<dd><p>Shell snippet: remove <strong>only</strong> this job’s <code class="docutils literal notranslate"><span class="pre">nvitk_eicab_&lt;JOB_ID&gt;</span></code> dir.</p>
+<p>Guards:
+- rebuilds the path from scratch root + <code class="docutils literal notranslate"><span class="pre">JOB_ID</span></code> (no glob);
+- requires basename prefix <code class="docutils literal notranslate"><span class="pre">nvitk_eicab_</span></code>;
+- refuses to delete the scratch root itself.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.segmentation_outputs_to_keep">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">segmentation_outputs_to_keep</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">out_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.segmentation_outputs_to_keep" title="Link to this definition">¶</a></dt>
+<dd><p>Pick CoW, whole-brain, and <code class="docutils literal notranslate"><span class="pre">*_resampled</span></code> NIfTIs; drop other intermediates.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.prune_eicab_outputs">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">prune_eicab_outputs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">out_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_aux_outputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.prune_eicab_outputs" title="Link to this definition">¶</a></dt>
+<dd><p>Drop auxiliary folders/files unless <em>keep_aux_outputs</em> is True.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.build_eicab_singularity_argv">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">build_eicab_singularity_argv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_nii</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">tmp_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolution</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.625</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simple_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attention</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vasculature_host_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.build_eicab_singularity_argv" title="Link to this definition">¶</a></dt>
+<dd><p>Build <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> argv for eICAB on the cluster host (host paths).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.segmentation.eicab.runner.run_eicab">
+<span class="sig-prename descclassname"><span class="pre">nvitk.segmentation.eicab.runner.</span></span><span class="sig-name descname"><span class="pre">run_eicab</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_nii</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolution</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.625</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">simple_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attention</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">container</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tmp_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keep_aux_outputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vasculature_host_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">check</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">capture_output</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">subprocess.CompletedProcess</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.segmentation.eicab.runner.run_eicab" title="Link to this definition">¶</a></dt>
+<dd><p>Run eICAB via <code class="docutils literal notranslate"><span class="pre">singularity</span> <span class="pre">run</span></code> (same contract as legacy BioImaging).</p>
+<p><em>vasculature_host_path</em> should be the <strong>host</strong> directory bind-mounted to
+<code class="docutils literal notranslate"><span class="pre">/programs/Neuro/vasculature2</span></code> (see <code class="docutils literal notranslate"><span class="pre">run_eicab_inference.sh</span></code>). When
+omitted and the path does not exist, the vasculature bind is skipped (only
+sensible for debugging).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.segmentation</a><ul>
+  <li><a href="../index.html">nvitk.segmentation.eicab</a><ul>
+      <li>Previous: <a href="../run_job/index.html" title="previous chapter">nvitk.segmentation.eicab.run_job</a></li>
+      <li>Next: <a href="../../hemisphere/index.html" title="next chapter">nvitk.segmentation.hemisphere</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/segmentation/eicab/runner/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

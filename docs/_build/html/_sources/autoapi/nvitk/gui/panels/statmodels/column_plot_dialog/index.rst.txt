@@ -1,0 +1,134 @@
+nvitk.gui.panels.statmodels.column_plot_dialog
+==============================================
+
+.. py:module:: nvitk.gui.panels.statmodels.column_plot_dialog
+
+.. autoapi-nested-parse::
+
+   Distribution viewer for one column of the analysis dataframe.
+
+   Description
+   -----------
+   Before fitting anything you want to know what a column looks like: is it bimodal because two
+   territories are pooled, is the tail a real effect or three bad segmentations, does the binning make
+   sense. That is a different question from the model plot, so it gets its own non-modal window — you
+   can leave it open beside the main one and keep changing the plot type or the split.
+
+   Interactive throughout: hovering a point names the subject and its territory, which is what turns
+   "there is an outlier" into "sub-0142's left MCA".
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.column_plot_dialog.ColumnPlotDialog
+
+
+Module Contents
+---------------
+
+.. py:class:: ColumnPlotDialog(parent: qtpy.QtWidgets.QWidget | None, *, frame: pandas.DataFrame, column: str, kind: str = 'violin', excluded_mask: Any = None, default_directory: pathlib.Path | None = None)
+
+   Bases: :py:obj:`nvitk.gui.panels.statmodels.figure_host.FigureHostMixin`, :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Interactive distribution of one column, optionally split by another.
+
+   Non-modal on purpose: it is an exploration window, not a step in a workflow.
+
+
+   .. py:attribute:: _frame
+
+
+   .. py:attribute:: _column
+
+
+   .. py:attribute:: _excluded
+      :value: None
+
+
+
+   .. py:attribute:: _directory
+      :value: None
+
+
+
+   .. py:attribute:: _column_box
+
+
+   .. py:attribute:: _kind
+
+
+   .. py:attribute:: _facet_mode
+
+
+   .. py:attribute:: _split
+
+
+   .. py:attribute:: _sub_split
+
+
+   .. py:attribute:: _show_excluded
+
+
+   .. py:attribute:: _interactive
+
+
+   .. py:attribute:: _btn_export
+
+
+   .. py:attribute:: _status
+
+
+   .. py:method:: _plottable_columns() -> list[str]
+
+      Every column worth a distribution — numeric first, then the categoricals.
+
+
+
+   .. py:method:: _split_columns(max_levels: int = _MAX_SPLIT_LEVELS) -> list[str]
+
+      Columns usable as a grouping: discrete, and few enough levels to stay readable.
+
+      A numeric column is only offered when it is a Categorical — a continuous measurement has as
+      many "levels" as rows and grouping by it is meaningless. ``subject_uid`` is excluded the same
+      way, by the level cap.
+
+
+
+   .. py:method:: _sync_split_choices() -> None
+
+      Repopulate the grouping pickers for the current mode, keeping the selection where possible.
+
+      Panels tolerate far more levels than overlaid violins, so the list genuinely differs between
+      modes rather than being one compromise cap.
+
+
+
+   .. py:method:: _hover_columns() -> list[str]
+
+      Identifier columns worth attaching to every point's hover box.
+
+
+
+   .. py:method:: _on_mode_changed(*_args: Any) -> None
+
+      Show only the controls the chosen grouping actually uses, then redraw.
+
+
+
+   .. py:method:: _redraw(*_args: Any) -> None
+
+      Rebuild the figure from the current control state.
+
+
+
+   .. py:method:: _on_export() -> None
+
+      Write the current figure to a PNG the user chooses.
+
+
+

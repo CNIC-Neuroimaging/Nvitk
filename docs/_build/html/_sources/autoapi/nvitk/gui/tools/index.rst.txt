@@ -1,0 +1,27 @@
+nvitk.gui.tools
+===============
+
+.. py:module:: nvitk.gui.tools
+
+.. autoapi-nested-parse::
+
+   Tool registry, panels, execution, and GPU toggle.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/gui/tools/descriptions/index
+   /autoapi/nvitk/gui/tools/dock/index
+   /autoapi/nvitk/gui/tools/gpu_toggle/index
+   /autoapi/nvitk/gui/tools/panel/index
+   /autoapi/nvitk/gui/tools/presets/index
+   /autoapi/nvitk/gui/tools/registry/index
+   /autoapi/nvitk/gui/tools/runner/index
+   /autoapi/nvitk/gui/tools/totalseg_selector/index
+
+

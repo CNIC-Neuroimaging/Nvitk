@@ -1,0 +1,124 @@
+nvitk.pipes.pesa_fat.dixon_v5.stage3_measure
+============================================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5.stage3_measure
+
+.. autoapi-nested-parse::
+
+   Dixon v5 stage 3 (per-subject): volume, FF, T2*, R2* and WF measurements.
+
+   Port of :code:`BioImaging/src/pesa_fat/dixon/3_measure_vol_int.py`.
+
+   For a PESA* subject with stage-2 outputs (``HEAD``, ``THORAX``, ``LEGS``),
+   computes per label and per region:
+
+   * ``VOL`` - volume in cc (voxel count * prod(spacing) / 1000)
+   * ``FF``  - mean of the Dixon fat-fraction map inside the mask
+   * ``T2``  - mean of the T2* map inside the mask
+   * ``R2``  - mean of the reciprocal T2* map (``1/T2`` where T2 > 0)
+   * ``WF``  - for liver only: ``(liver_water_mean / pvm_water_mean) * 100``.
+               The reference is the mean Dixon water signal pooled over the
+               bilateral paravertebral muscle (``T_PVM_L`` + ``T_PVM_R``) in
+               the THORAX region. See ``cfg.WF_REFERENCE_LABELS``.
+
+   Writes a single-row Excel file per subject under
+   ``RESULTS/<batch>/res_measure_dixon/per_subject/<SUBJECT>.xlsx``; the batch
+   master aggregates these into ``<batch>_SummaryCodebook.xlsx``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.log
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.SPECS
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._REGION_LABELS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.column_order
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._imread_opt
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._load_maps
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._mean_under_mask
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._binary_mask
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._nslices_axial_xyz
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure._wf_reference
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.process_subject
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.run_subject
+   nvitk.pipes.pesa_fat.dixon_v5.stage3_measure.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: SPECS
+
+.. py:function:: column_order() -> list[str]
+
+   Full stage-3 output column order: ``pesa_id``, then per-ROI metric columns from ``cfg.MEASURE_SPECS``.
+
+
+.. py:data:: _REGION_LABELS
+   :type:  dict[str, dict[str, int]]
+
+.. py:function:: _imread_opt(parent: pathlib.Path, stem: str) -> nvitk.types.Image | None
+
+   Read the ``<stem>.nii[.gz]`` file resolved under *parent*, or ``None`` if it doesn't exist.
+
+
+.. py:function:: _load_maps(subject_nifti_dir: pathlib.Path, region: str) -> dict[str, nvitk.types.Image | None]
+
+   Load the FF/T2/WATER Dixon contrast maps for *region* under *subject_nifti_dir* (any missing
+   map is ``None``).
+
+
+.. py:function:: _mean_under_mask(values: Any, mask: Any) -> float
+
+   Mean of *values* where *mask* is non-zero, or NaN if the mask is empty.
+
+
+.. py:function:: _binary_mask(label_img: nvitk.types.Image, label_ids: tuple[int, Ellipsis]) -> nvitk.types.Image
+
+   Union of *label_ids* in *label_img* as a binary mask image.
+
+
+.. py:function:: _nslices_axial_xyz(mask: nvitk.types.Image) -> int
+
+   Number of axial (Z) slices in *mask* containing at least one foreground voxel.
+
+
+.. py:function:: _wf_reference(region_masks: dict[str, nvitk.types.Image | None], region_waters: dict[str, nvitk.types.Image | None]) -> float | None
+
+   Pooled mean of the water-map signal over ``cfg.WF_REFERENCE_LABELS``.
+
+   All voxels from every referenced (region, label) are concatenated into a
+   single pool, and the arithmetic mean of that pool is returned. This
+   matches the definition
+   ``WF_ref = mean(water[ union over PVM_L, PVM_R ])``
+   rather than averaging per-mask means, so unbalanced mask sizes stay
+   properly weighted.
+
+
+.. py:function:: process_subject(subject_nifti_dir: pathlib.Path, subject_stage2_dir: pathlib.Path) -> dict[str, Any]
+
+   Compute all stage-3 columns for one subject.
+
+
+.. py:function:: run_subject(subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, *, backend: str = 'cupy', output: pathlib.Path | None = None) -> pathlib.Path
+
+   Run stage 3 for a single subject and write a one-row Excel file.
+
+
+.. py:function:: main(batch: str, subject: str, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, backend: str, output: pathlib.Path | None, log_level: str) -> None
+
+   Dixon v5 stage 3 worker (single subject).
+
+

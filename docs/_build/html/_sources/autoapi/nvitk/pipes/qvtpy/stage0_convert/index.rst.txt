@@ -1,0 +1,88 @@
+nvitk.pipes.qvtpy.stage0_convert
+================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage0_convert
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 0 (convert): DICOM → NIfTI conversion and reorganization.
+
+   **Inputs**
+
+   - Per-subject DICOM tree under ``<dicom_root>/<subject>/`` (from stage 0 download).
+
+   **Outputs**
+
+   - ``<nifti_root>/<subject>/4DFlow/{AP,RL,FH}/`` — ``*_m.nii.gz`` / ``*_ph.nii.gz`` + JSON sidecars.
+   - ``<nifti_root>/<subject>/TOF/TOF.nii.gz``.
+   - Optional derived volumes via :func:`nvitk.io.conversors.phase2volume.phase2volume`
+     (``Angiography_3D``, ``ComplexDifference_3D/4D``, …) when ``--compute-phase-derived``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage0_convert.REQUIRED_FLOW_DIRS
+   nvitk.pipes.qvtpy.stage0_convert.REQUIRED_DERIVED_FILES
+   nvitk.pipes.qvtpy.stage0_convert.DERIVED_FILES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage0_convert.run_subject
+   nvitk.pipes.qvtpy.stage0_convert.print_nifti_qc_report
+   nvitk.pipes.qvtpy.stage0_convert.main
+
+
+Module Contents
+---------------
+
+.. py:data:: REQUIRED_FLOW_DIRS
+   :type:  tuple[str, Ellipsis]
+   :value: ('AP', 'RL', 'FH')
+
+
+.. py:data:: REQUIRED_DERIVED_FILES
+   :type:  tuple[str, Ellipsis]
+   :value: ('Angiography_3D', 'ComplexDifference_3D')
+
+
+.. py:data:: DERIVED_FILES
+   :type:  tuple[str, Ellipsis]
+   :value: ('Angiography_3D', 'Angiography_4D', 'ComplexDifference_3D', 'ComplexDifference_4D',...
+
+
+.. py:function:: run_subject(subject: str, *, dicom_root: pathlib.Path, nifti_root: pathlib.Path, compute_phase_derived: bool = True, skip_existing: bool = False, phase_background_correction: bool = True, phase_bg_poly_order: int = 2, phase_bg_static_percentile: float = 25.0, cd_4d_background_correction: bool | None = None) -> pathlib.Path
+
+   Convert + reorganize for one subject. Returns the subject NIfTI folder.
+
+
+.. py:function:: print_nifti_qc_report(nifti_root: str | pathlib.Path, subjects: Iterable[str], *, check_derived: bool = False) -> dict[str, Any]
+
+   Print a brief QC report of the stage0_convert NIfTI layout.
+
+   For every subject id under *nifti_root* (each ``{nifti_root}/{subject}``), check:
+
+   - ``4DFlow/{AP,RL,FH}/`` exists and contains both ``*_m.nii*`` and ``*_ph.nii*``
+   - ``TOF/TOF.nii*`` is present
+
+   When ``check_derived=True``, additionally list per-subject missing optional
+   derived images under ``4DFlow/`` (informational only — derived misses do not
+   flag a subject as incomplete).
+
+   Returns a summary dict with ``root``, ``complete``, ``incomplete``,
+   ``derived_missing`` and ``total`` keys.
+
+
+.. py:function:: main(dicom_root: pathlib.Path, nifti_root: pathlib.Path, subject: str | None, skip_existing: bool, compute_phase_derived: bool, phase_background_correction: bool, phase_bg_poly_order: int, phase_bg_static_percentile: float, no_cd_4d_background_correction: bool, report: bool, report_derived: bool) -> None
+
+   CLI entry point: run stage-0 DICOM-to-NIfTI conversion (and derived phase/CD processing) for
+   one subject or every subject under ``dicom_root``.
+
+

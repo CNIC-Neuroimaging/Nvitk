@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats._model_values &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats._statmodels_frames" href="../_statmodels_frames/index.html" />
+    <link rel="prev" title="nvitk.stats._hemodynamic_frames" href="../_hemodynamic_frames/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats._model_values">
+<span id="nvitk-stats-model-values"></span><h1>nvitk.stats._model_values<a class="headerlink" href="#module-nvitk.stats._model_values" title="Link to this heading">¶</a></h1>
+<p>Per-region numbers pulled off a fitted model, for any anatomical map.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p><a class="reference internal" href="../vascular_map/index.html#module-nvitk.stats.vascular_map" title="nvitk.stats.vascular_map"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats.vascular_map</span></code></a> and <a class="reference internal" href="../brain_map/index.html#module-nvitk.stats.brain_map" title="nvitk.stats.brain_map"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats.brain_map</span></code></a> draw completely different pictures —
+a schematic circle of Willis, a cortical surface — but they ask the model exactly the same question:
+<em>what number does this fit give for this anatomical level, and how sure is it?</em> Answering it means
+knowing how patsy spells a categorical contrast, how each R engine wraps its coefficient table, what
+a marginal mean is on the outcome’s own scale, and which half of an interaction a contrast view
+means. None of that is about anatomy.</p>
+<p>So it lives here once, parameterised by a <strong>resolver</strong>: a callable turning a published level label
+(<code class="docutils literal notranslate"><span class="pre">LICA</span></code>, <code class="docutils literal notranslate"><span class="pre">ctx-lh-precuneus</span></code>, <code class="docutils literal notranslate"><span class="pre">ctx-Left-Frontal-Lobe</span></code>) into the drawing keys it refers to — zero
+when the level is not on this map, one for a plain level, several when it is an aggregate that
+belongs on every member it was averaged from.</p>
+</section>
+<section id="engines">
+<h2>Engines<a class="headerlink" href="#engines" title="Link to this heading">¶</a></h2>
+<p>statsmodels exposes <code class="docutils literal notranslate"><span class="pre">params</span></code>/<code class="docutils literal notranslate"><span class="pre">pvalues</span></code> directly; every R engine wraps an object that does not,
+and each wraps it differently — an <code class="docutils literal notranslate"><span class="pre">lmrob</span></code> fit <em>is</em> the R object, a pymer4 model holds one, MMRM
+another. <code class="xref py py-data docutils literal notranslate"><span class="pre">_COEF_NORMALIZERS</span></code> is tried in turn so one code path serves every engine instead of
+the maps silently working only for OLS and MixedLM.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Resolver</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.coefficient_series" title="nvitk.stats._model_values.coefficient_series"><code class="xref py py-obj docutils literal notranslate"><span class="pre">coefficient_series</span></code></a>(→ tuple[pandas.Series, ...)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">(params,</span> <span class="pre">pvalues)</span></code> as pandas Series, whichever engine produced <em>result</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._model_values.term_parts" title="nvitk.stats._model_values.term_parts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">term_parts</span></code></a>(→ list[str])</p></td>
+<td><p>Split a patsy/R interaction term into its factors (<code class="docutils literal notranslate"><span class="pre">a[T.x]:b[T.y]</span></code> → two parts).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.level_of" title="nvitk.stats._model_values.level_of"><code class="xref py py-obj docutils literal notranslate"><span class="pre">level_of</span></code></a>(→ str)</p></td>
+<td><p>The factor level a single (non-interaction) term names.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._model_values.term_prefixes" title="nvitk.stats._model_values.term_prefixes"><code class="xref py py-obj docutils literal notranslate"><span class="pre">term_prefixes</span></code></a>(→ list[str])</p></td>
+<td><p>Candidate factor names a term may be prefixed with, longest first.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.interaction_contrasts" title="nvitk.stats._model_values.interaction_contrasts"><code class="xref py py-obj docutils literal notranslate"><span class="pre">interaction_contrasts</span></code></a>(→ list[str])</p></td>
+<td><p>Levels of the <em>other</em> factor in interactions with the anatomical term, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;sex[T.M]&quot;]</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._model_values.group_coefficient_terms" title="nvitk.stats._model_values.group_coefficient_terms"><code class="xref py py-obj docutils literal notranslate"><span class="pre">group_coefficient_terms</span></code></a>(→ list[str])</p></td>
+<td><p>Per-group terms this fit estimates for <em>group_column</em>, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;(Intercept)&quot;,</span> <span class="pre">&quot;age_c&quot;]</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.values_from_frame" title="nvitk.stats._model_values.values_from_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">values_from_frame</span></code></a>(→ tuple[dict[Hashable, float], ...)</p></td>
+<td><p>Map a per-region result table onto drawing keys.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._model_values.values_from_result" title="nvitk.stats._model_values.values_from_result"><code class="xref py py-obj docutils literal notranslate"><span class="pre">values_from_result</span></code></a>(→ tuple[dict[Hashable, float], ...)</p></td>
+<td><p>Pull per-region numbers off a fitted model.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._model_values.values_from_marginal_means" title="nvitk.stats._model_values.values_from_marginal_means"><code class="xref py py-obj docutils literal notranslate"><span class="pre">values_from_marginal_means</span></code></a>(→ tuple[dict[Hashable, ...)</p></td>
+<td><p>Model-predicted mean per region, on the outcome's own scale — <strong>including the reference level</strong>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._model_values.values_from_group_coefficients" title="nvitk.stats._model_values.values_from_group_coefficients"><code class="xref py py-obj docutils literal notranslate"><span class="pre">values_from_group_coefficients</span></code></a>(→ tuple[dict[Hashable, ...)</p></td>
+<td><p>Per-region values from an <code class="docutils literal notranslate"><span class="pre">lme4</span></code> random-effects structure.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.Resolver">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">Resolver</span></span><a class="headerlink" href="#nvitk.stats._model_values.Resolver" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.coefficient_series">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">coefficient_series</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">pandas.Series</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pandas.Series</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.coefficient_series" title="Link to this definition">¶</a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(params,</span> <span class="pre">pvalues)</span></code> as pandas Series, whichever engine produced <em>result</em>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – When no normalizer recognizes the object, naming what was tried — a silent empty result
+here becomes “the map shows observed means” three frames up, which looks like data rather
+than a failure.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.term_parts">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">term_parts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.term_parts" title="Link to this definition">¶</a></dt>
+<dd><p>Split a patsy/R interaction term into its factors (<code class="docutils literal notranslate"><span class="pre">a[T.x]:b[T.y]</span></code> → two parts).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.level_of">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">level_of</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">part</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefixes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats._model_values.level_of" title="Link to this definition">¶</a></dt>
+<dd><p>The factor level a single (non-interaction) term names.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.term_prefixes">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">term_prefixes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.term_prefixes" title="Link to this definition">¶</a></dt>
+<dd><p>Candidate factor names a term may be prefixed with, longest first.</p>
+<p>Longest first so <code class="docutils literal notranslate"><span class="pre">territory_id</span></code> is tried before <code class="docutils literal notranslate"><span class="pre">territory</span></code> and cannot mis-split a term.
+Every column of the model frame is a candidate, not just <em>group_column</em>: the plot’s grouping is
+often <code class="docutils literal notranslate"><span class="pre">group_key</span></code> while the model term is <code class="docutils literal notranslate"><span class="pre">territory</span></code>, and matching only the former left the
+R engines resolving nothing.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.interaction_contrasts">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">interaction_contrasts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><span class="pre">Resolver</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.interaction_contrasts" title="Link to this definition">¶</a></dt>
+<dd><p>Levels of the <em>other</em> factor in interactions with the anatomical term, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;sex[T.M]&quot;]</span></code>.</p>
+<p>A model with <code class="docutils literal notranslate"><span class="pre">territory</span> <span class="pre">*</span> <span class="pre">sex</span></code> estimates a different profile for each sex, and the coefficient
+table holds them as <code class="docutils literal notranslate"><span class="pre">territory[T.LICA]:sex[T.M]</span></code>. Without naming which side of the interaction
+to draw, a map would show only the main effect — the profile at the <em>other</em> factor’s reference
+level — and quietly present it as the whole story.</p>
+<p>Empty when the model has no interaction on that term, which is the signal a caller needs to hide
+the selector rather than offer one with nothing in it.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.group_coefficient_terms">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">group_coefficient_terms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.group_coefficient_terms" title="Link to this definition">¶</a></dt>
+<dd><p>Per-group terms this fit estimates for <em>group_column</em>, e.g. <code class="docutils literal notranslate"><span class="pre">[&quot;(Intercept)&quot;,</span> <span class="pre">&quot;age_c&quot;]</span></code>.</p>
+<p>Empty when the model has no random structure over that factor — which is the signal a caller
+needs to fall back to the fixed effects instead of offering a menu with nothing in it.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.values_from_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">values_from_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><span class="pre">Resolver</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">key_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pvalue_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.values_from_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Map a per-region result table onto drawing keys.</p>
+<p>Accepts whatever spelling the frame uses — the <em>resolver</em> absorbs the differences. Rows that do
+not resolve (an intercept term, a whole-head scalar, a region from a different modality) are
+dropped silently: a mixed result table is the normal case, and only the rows this map can draw
+belong on it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Both keyed by drawing key; <em>pvalues</em> is empty when <em>pvalue_column</em> is <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>(<a class="reference internal" href="../frame_ops/index.html#nvitk.stats.frame_ops.FilterRule.values" title="nvitk.stats.frame_ops.FilterRule.values">values</a>, pvalues)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.values_from_result">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">values_from_result</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><span class="pre">Resolver</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'coefficient'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">contrast</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">unit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'region'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.values_from_result" title="Link to this definition">¶</a></dt>
+<dd><p>Pull per-region numbers off a fitted model.</p>
+<p>Sources, because they answer different questions and are read differently:</p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">coefficient</span></code></dt><dd><p>The fixed effect of each level, read from the parameter table — patsy names them
+<code class="docutils literal notranslate"><span class="pre">territory[T.LICA]</span></code>, so the level is recovered from the term. These are contrasts
+<em>against the reference level</em>, which is therefore absent from the map by construction: it
+is the zero everything else is measured from, not a region with no effect.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">emmeans</span></code></dt><dd><p>The model-predicted mean per region on the outcome’s own scale, <strong>including</strong> the reference
+level. See <a class="reference internal" href="#nvitk.stats._model_values.values_from_marginal_means" title="nvitk.stats._model_values.values_from_marginal_means"><code class="xref py py-func docutils literal notranslate"><span class="pre">values_from_marginal_means()</span></code></a>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mean</span></code></dt><dd><p>The observed mean of <em>outcome</em> within each region, from <em>data</em>. Not a model estimate at all
+— no covariate adjustment, no p-values — but it is what “estimated marginal means” reduces
+to for a model whose only term is the region, and it is the honest fallback when the fit has
+no per-region parameter to read.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">group:&lt;term&gt;</span></code></dt><dd><p>A per-region value from an <code class="docutils literal notranslate"><span class="pre">lme4</span></code> random-effects structure. See
+<a class="reference internal" href="#nvitk.stats._model_values.values_from_group_coefficients" title="nvitk.stats._model_values.values_from_group_coefficients"><code class="xref py py-func docutils literal notranslate"><span class="pre">values_from_group_coefficients()</span></code></a>.</p>
+</dd>
+<dt>contrast<span class="classifier">str</span></dt><dd><p>A level of an interacting factor, as <a class="reference internal" href="#nvitk.stats._model_values.interaction_contrasts" title="nvitk.stats._model_values.interaction_contrasts"><code class="xref py py-func docutils literal notranslate"><span class="pre">interaction_contrasts()</span></code></a> names it (<code class="docutils literal notranslate"><span class="pre">sex[T.M]</span></code>).
+The region’s value becomes its <strong>simple effect at that level</strong> — main effect plus the
+interaction — which is the profile actually seen in that group. Left empty, the map shows
+the main effect, i.e. the profile at the interacting factor’s <em>reference</em> level; on a model
+with an interaction that is one group’s answer presented as if it were everyone’s.</p>
+<p>The p-value reported alongside stays the <strong>interaction</strong> term’s: it tests whether this
+region’s effect differs between the groups, which is the question a contrast view raises.
+A simple effect’s own test needs a linear combination the coefficient table does not carry.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><em>note</em> describes what was extracted, for the figure subtitle.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>(<a class="reference internal" href="../frame_ops/index.html#nvitk.stats.frame_ops.FilterRule.values" title="nvitk.stats.frame_ops.FilterRule.values">values</a>, pvalues, <a class="reference internal" href="../../measure/mask_hemodynamics/index.html#nvitk.measure.mask_hemodynamics.MaskHemodynamicsResult.note" title="nvitk.measure.mask_hemodynamics.MaskHemodynamicsResult.note">note</a>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.values_from_marginal_means">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">values_from_marginal_means</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><span class="pre">Resolver</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">unit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'region'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.values_from_marginal_means" title="Link to this definition">¶</a></dt>
+<dd><p>Model-predicted mean per region, on the outcome’s own scale — <strong>including the reference level</strong>.</p>
+<p>Treatment coding gives the reference level no coefficient: it is absorbed into the intercept,
+which is why a <code class="docutils literal notranslate"><span class="pre">~</span> <span class="pre">territory</span> <span class="pre">+</span> <span class="pre">…</span></code> fit shows every region but one. That is correct for a
+contrast table and wrong for a map, where the reader is looking at anatomy and one structure is
+simply missing.</p>
+<p>The marginal mean rebuilds it: <code class="docutils literal notranslate"><span class="pre">intercept</span> <span class="pre">+</span> <span class="pre">β_region</span></code> (with <code class="docutils literal notranslate"><span class="pre">β</span> <span class="pre">=</span> <span class="pre">0</span></code> for the reference), plus
+each numeric covariate held at its mean. Categorical covariates stay at their own reference
+level, so the result is “predicted value in an average subject”, comparable across regions and
+interpretable on the outcome’s unit rather than as a difference from whichever region sorted
+first.</p>
+<p>No p-values come back. A coefficient’s p-value tests the <em>contrast against the reference</em>, not
+whether a marginal mean differs from zero, and carrying it here would attach a test to a number
+it does not describe. Use the coefficient view when significance is the question.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._model_values.values_from_group_coefficients">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._model_values.</span></span><span class="sig-name descname"><span class="pre">values_from_group_coefficients</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.stats._model_values.Resolver" title="nvitk.stats._model_values.Resolver"><span class="pre">Resolver</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">term</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">unit</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'region'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._model_values.values_from_group_coefficients" title="Link to this definition">¶</a></dt>
+<dd><p>Per-region values from an <code class="docutils literal notranslate"><span class="pre">lme4</span></code> random-effects structure.</p>
+<p>A model like <code class="docutils literal notranslate"><span class="pre">flow_mean</span> <span class="pre">~</span> <span class="pre">age_c</span> <span class="pre">+</span> <span class="pre">(1</span> <span class="pre">+</span> <span class="pre">age_c</span> <span class="pre">|</span> <span class="pre">territory)</span></code> puts nothing about individual
+regions in its <em>fixed</em> effects — the region information is the random structure, one intercept
+and one <code class="docutils literal notranslate"><span class="pre">age_c</span></code> slope per level. <code class="docutils literal notranslate"><span class="pre">coef()</span></code> totals are used rather than <code class="docutils literal notranslate"><span class="pre">ranef()</span></code> deviations
+because a total is the quantity with a physical reading: the age slope <em>in that region</em>, not its
+departure from the average slope.</p>
+<p>Random effects are shrunk point predictions, not tested parameters, so no p-values come back.
+Greying by significance is therefore unavailable here, which is correct — a BLUP has no null
+hypothesis attached to it.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../_hemodynamic_frames/index.html" title="previous chapter">nvitk.stats._hemodynamic_frames</a></li>
+      <li>Next: <a href="../_statmodels_frames/index.html" title="next chapter">nvitk.stats._statmodels_frames</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/_model_values/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

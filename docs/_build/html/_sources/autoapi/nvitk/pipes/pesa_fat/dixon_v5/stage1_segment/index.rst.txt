@@ -1,0 +1,64 @@
+nvitk.pipes.pesa_fat.dixon_v5.stage1_segment
+============================================
+
+.. py:module:: nvitk.pipes.pesa_fat.dixon_v5.stage1_segment
+
+.. autoapi-nested-parse::
+
+   Dixon v5 stage 1 (per-subject): TotalSegmentator on MR Dixon contrasts.
+
+   Runs the region-specific task plan (see :mod:`config`) for a single PESA*
+   subject. For each ``(region, task)`` pair it reads the matching Dixon
+   contrast (``DIXON_<REGION>_<SUFFIX>.nii[.gz]``) and writes the multilabel
+   segmentation to
+   ``RESULTS/<batch>/res_segmentation_dixon/<SUBJECT>/DIXON_<REGION>/<task>.nii``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage1_segment.log
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.dixon_v5.stage1_segment._find_input
+   nvitk.pipes.pesa_fat.dixon_v5.stage1_segment._subject_region_output_dir
+   nvitk.pipes.pesa_fat.dixon_v5.stage1_segment.run_subject
+   nvitk.pipes.pesa_fat.dixon_v5.stage1_segment.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:function:: _find_input(subject_nifti_dir: pathlib.Path, region: str, suffix: str) -> pathlib.Path | None
+
+   Resolve the Dixon contrast NIfTI ``<INPUT_PREFIX>_<region>_<suffix>[.nii(.gz)]`` under
+   *subject_nifti_dir*, or ``None`` if missing.
+
+
+.. py:function:: _subject_region_output_dir(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subject: str, region: str) -> pathlib.Path
+
+   Stage-1 output directory for *subject*'s *region* Dixon segmentation.
+
+
+.. py:function:: run_subject(subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, *, device: str = 'gpu', model_dir: pathlib.Path | None = None, overwrite: bool = True, regions: tuple[str, Ellipsis] = cfg.REGION_ORDER) -> dict[str, pathlib.Path]
+
+   Run every MR task for a single subject across the requested regions.
+
+   Returns a ``{region: output_dir}`` mapping.
+
+
+.. py:function:: main(batch: str, subject: str, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, device: str, model_dir: pathlib.Path | None, regions: str, overwrite: bool, log_level: str) -> None
+
+   Dixon v5 stage 1 worker (single subject across the requested regions).
+
+

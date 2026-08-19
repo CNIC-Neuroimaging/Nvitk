@@ -1,0 +1,79 @@
+nvitk.util.lazy_timer
+=====================
+
+.. py:module:: nvitk.util.lazy_timer
+
+.. autoapi-nested-parse::
+
+   Console loading-bar and function-timing helpers.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.util.lazy_timer.log
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.util.lazy_timer.LoadingBar
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.util.lazy_timer.timed
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:class:: LoadingBar(n_iters, length=50)
+
+   Class to create a loading bar in the console.
+   :param n_iters: number of iterations
+   :param length: length of the loading bar
+
+
+   .. py:attribute:: iter
+      :value: 0
+
+
+
+   .. py:attribute:: n_iters
+
+
+   .. py:attribute:: length
+      :value: 50
+
+
+
+   .. py:method:: update()
+
+      Update the loading bar.
+
+
+
+   .. py:method:: end()
+
+      End the loading bar.
+
+
+
+.. py:function:: timed(fun)
+
+   Decorator to measure the time it takes for a function to execute.
+   :param fun: function to be measured
+   :return: wrapper function
+
+

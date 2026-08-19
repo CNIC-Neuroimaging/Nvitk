@@ -1,0 +1,49 @@
+nvitk.gui.panels.statmodels.panel
+=================================
+
+.. py:module:: nvitk.gui.panels.statmodels.panel
+
+.. autoapi-nested-parse::
+
+   Right-tab launcher for the floating Statmodels window.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.panel.StatmodelsPanel
+
+
+Module Contents
+---------------
+
+.. py:class:: StatmodelsPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Right-tab launcher for the floating Statmodels window.
+
+
+   .. py:attribute:: _window
+      :type:  nvitk.gui.panels.statmodels.window.StatmodelsWindow | None
+      :value: None
+
+
+
+   .. py:attribute:: _pipeline_kind
+
+
+   .. py:attribute:: _btn
+
+
+   .. py:method:: _open_window() -> None
+
+      Open (creating once, then reusing) the floating :class:`StatmodelsWindow`, selecting the
+      chosen pipeline kind.
+
+
+

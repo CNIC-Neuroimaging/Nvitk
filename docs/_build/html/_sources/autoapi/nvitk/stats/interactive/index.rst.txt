@@ -1,0 +1,181 @@
+nvitk.stats.interactive
+=======================
+
+.. py:module:: nvitk.stats.interactive
+
+.. autoapi-nested-parse::
+
+   Interactive Plotly renderings of the model plots, with the numbers on hover.
+
+   Description
+   -----------
+   The matplotlib versions in :mod:`~nvitk.stats.mixedlm` and friends draw the same geometry, but
+   reading a value off them means squinting at an axis. These carry the numbers in the hover box,
+   which is what the plots are actually consulted for:
+
+   =====================  ==========================================================================
+   Element                Hover shows
+   =====================  ==========================================================================
+   observation            subject id, group level, x and y, plus any extra identifier column
+   model line             the group, its slope and intercept, and the value under the cursor
+   fixed-effect line      the population slope and intercept
+   confidence band        the interval's bounds at that x
+   marginal mean (EMM)    the estimate, its standard error and the interval
+   observed cell mean     the unadjusted mean and how many observations went into it
+   =====================  ==========================================================================
+
+   Design
+   ------
+   These functions take **already-computed** geometry rather than a fitted model: a frame of points, a
+   frame of lines, a frame of marginal means. The statistics stay where they are — this module only
+   renders — which is what keeps one plotting path for every engine instead of one per backend.
+
+   :func:`model_plot` is the entry point the GUI uses; :func:`column_plot` covers the distribution
+   views (violin, box, strip, histogram, ECDF) that hang off the dataframe's column menu.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.interactive.PALETTE
+   nvitk.stats.interactive.GREYED
+   nvitk.stats.interactive.COLUMN_PLOT_KINDS
+   nvitk.stats.interactive.COLUMN_FACET_MODES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.interactive.column_panel_figure
+   nvitk.stats.interactive.palette_for
+   nvitk.stats.interactive.model_plot
+   nvitk.stats.interactive.panel_grid_figure
+   nvitk.stats.interactive.column_plot
+   nvitk.stats.interactive.forest_plot
+   nvitk.stats.interactive.matrix_plot
+   nvitk.stats.interactive.network_plot
+
+
+Module Contents
+---------------
+
+.. py:data:: PALETTE
+   :type:  tuple[str, Ellipsis]
+   :value: ('#4C72B0', '#DD8452', '#55A868', '#C44E52', '#8172B3', '#937860', '#DA8BC3', '#8C8C8C',...
+
+
+.. py:data:: GREYED
+   :value: '#B0B0B0'
+
+
+.. py:data:: COLUMN_PLOT_KINDS
+   :type:  dict[str, str]
+
+.. py:data:: COLUMN_FACET_MODES
+   :type:  dict[str, str]
+
+.. py:function:: column_panel_figure(frame: pandas.DataFrame, column: str, *, facet_by: str, kind: str = 'violin', group: str = '', hover_columns: Sequence[str] = (), excluded_mask: Any = None, show_excluded: bool = True, anatomical: bool = False, title: str = '', n_cols: int = 2) -> Any
+
+   One distribution panel per level of *facet_by*, laid out as a grid.
+
+   This is the shape a per-territory hemodynamics figure wants: overlaying a sagittal sinus around
+   −1.0 with a carotid around −0.2 on shared axes flattens both, and the per-panel autoscale is the
+   whole point. Within a panel, *group* still splits into coloured series, so you can facet by
+   territory **and** split by sex at the same time.
+
+   :param anatomical: Group the levels of *facet_by* into vascular panels (carotids / anterior / posterior /
+                      venous) instead of giving each level its own, using
+                      :func:`~nvitk.stats.region_groups.resolve_panels`.
+   :type anatomical: bool
+
+   :raises ValueError: When *facet_by* is absent, or nothing survives in any panel.
+
+
+.. py:function:: palette_for(levels: Sequence[Any]) -> dict[str, str]
+
+   Stable colour per level, cycling the palette.
+
+
+.. py:function:: model_plot(*, points: pandas.DataFrame | None = None, lines: pandas.DataFrame | None = None, bands: pandas.DataFrame | None = None, marginal_means: pandas.DataFrame | None = None, x: str, y: str, group: str = '', mode: str = 'continuous', categorical_order: Sequence[str] | None = None, hover_columns: Sequence[str] = (), excluded_mask: Any = None, show_excluded: bool = True, errorbar: bool = True, title: str = '', x_label: str = '', y_label: str = '', height: int = 620) -> Any
+
+   One interactive model panel.
+
+   :param points: The observations: *x*, *y*, and *group* when there is one. Every column named in
+                  *hover_columns* is attached to the hover box, which is how ``subject_uid`` gets there.
+   :type points: pandas.DataFrame, optional
+   :param lines: Fitted curves, long: ``group``, *x*, *y*, and optionally ``slope`` / ``intercept``, which
+                 are shown in the hover so a line's parameters can be read without the coefficient table.
+                 A group of ``""`` is drawn as the dashed population line.
+   :type lines: pandas.DataFrame, optional
+   :param bands: Confidence ribbons: ``group``, *x*, ``lower``, ``upper``.
+   :type bands: pandas.DataFrame, optional
+   :param marginal_means: Categorical estimates: ``group``, *x*, ``estimate``, and optionally ``se`` / ``lower`` /
+                          ``upper``. Drawn as markers with error bars.
+   :type marginal_means: pandas.DataFrame, optional
+   :param excluded_mask: Rows of *points* that a filter excluded. With *show_excluded* they are drawn in grey and
+                         kept out of the legend; without it they are dropped. Greying rather than dropping is what
+                         lets you see whether a filter removed a coherent cluster or scattered noise.
+   :type excluded_mask: array-like of bool, optional
+   :param errorbar: Draw the confidence intervals. The marginal-means frame carries ``lower``/``upper`` whether
+                    or not they were asked for — they fall out of the same delta-method computation — so this
+                    has to gate the *drawing*, not the data.
+   :type errorbar: bool
+
+   :rtype: plotly.graph_objects.Figure
+
+
+.. py:function:: panel_grid_figure(panels: Mapping[str, Any], *, title: str = '', n_cols: int = 2, height_per_row: int = 420) -> Any
+
+   Combine per-panel figures into one subplot grid, preserving each panel's traces.
+
+   The anatomical grouped display builds one figure per panel and hands them here, so the panel
+   logic stays in :mod:`~nvitk.stats.region_groups` and this only does layout. Legends are shown
+   for the first panel only — every panel repeats the same series, and eight copies of one legend
+   is most of the figure.
+
+
+.. py:function:: column_plot(frame: pandas.DataFrame, column: str, *, kind: str = 'violin', group: str = '', hover_columns: Sequence[str] = (), excluded_mask: Any = None, show_excluded: bool = True, title: str = '', height: int = 560) -> Any
+
+   Distribution of one column — violin, box, points, histogram, density or ECDF.
+
+   Splitting by *group* puts one violin (or box, or histogram trace) per level, which is usually
+   the point: a flow distribution pooled over every territory is bimodal for anatomical reasons
+   and tells you nothing.
+
+   Categorical columns are shown as counts whatever *kind* asks for, since a violin of labels is
+   not defined — the request is honoured in spirit rather than refused.
+
+   :raises ValueError: When *column* is absent, *kind* is unknown, or nothing numeric survives.
+
+
+.. py:function:: forest_plot(frame: pandas.DataFrame, *, label: str, estimate: str = 'coef', lower: str = 'ci_low', upper: str = 'ci_high', p_value: str = 'p_value', max_rows: int = 40, reference: float = 0.0, title: str = '', x_label: str = 'Estimate', height_per_row: int = 26) -> Any
+
+   Interactive forest — one row per estimate, with its interval and the exact numbers on hover.
+
+   Used for path coefficients, mediation paths and the MRF field alike: they differ in what the
+   estimate *means*, not in how it is read. Rows whose interval excludes *reference* are drawn in
+   the accent colour, the rest in grey, so significance is visible without reading every interval.
+
+
+.. py:function:: matrix_plot(matrix: pandas.DataFrame, *, title: str = '', colorscale: str = 'RdBu_r', zmid: float | None = 0.0, value_label: str = 'value') -> Any
+
+   Interactive heatmap of a square matrix — the MMRM correlation between levels, say.
+
+   Hover names both levels and the exact value, which is the thing a static heatmap makes you
+   estimate from a colour bar. Long level names get automatic margins rather than being clipped.
+
+
+.. py:function:: network_plot(edges: pandas.DataFrame, *, source: str = 'rhs', target: str = 'lhs', weight: str = 'coef', lower: str = 'ci_low', upper: str = 'ci_high', node_labels: Mapping[str, str] | None = None, title: str = '') -> Any
+
+   The fitted network as a layered diagram, edges weighted by their coefficient.
+
+   Nodes are laid out by depth, so upstream vessels sit left of the ones they feed. Edge width is
+   the coefficient's magnitude and colour its sign; an edge whose interval covers zero is drawn
+   faint. Hovering an edge gives the exact coefficient rather than leaving it to the line width.
+
+

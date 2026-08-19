@@ -1,0 +1,110 @@
+nvitk.pipes.bbtpy.run
+=====================
+
+.. py:module:: nvitk.pipes.bbtpy.run
+
+.. autoapi-nested-parse::
+
+   Black-blood pipeline runner (``nvitk-bbtpy``).
+
+   Stages (``--stages``, comma-separated)
+   --------------------------------------
+   ``stage0_d`` / ``download``
+       XNAT → DICOM (BrainVIEW VWI_BB, variant priority strong > default > weak).
+
+   ``stage0_c`` / ``convert`` / ``stage0``
+       DICOM → ``{nifti_root}/{subject}/BlackBlood/vwi_bb.nii.gz``.
+
+   ``stage1`` / ``reg`` / ``registration``
+       Rigid FLIRT: eICAB ``TOF_resampled`` (moving) → native ``vwi_bb`` (fixed).
+       Writes ``tof_to_vwi_bb.mat`` and warped TOF QC volume.
+
+   ``stage2`` / ``seg`` / ``segmentation``
+       Warp eICAB to ``vwi_bb``, build centerlines (QC), then per-vessel dilated eICAB ROI
+       hypointense thresholding → ``seg_bb.nii.gz``.
+
+   Default stages (no download): ``stage0_c,stage1,stage2``.
+
+   Data layout
+   -----------
+   - Native BB: ``{nifti_root}/{subject}/BlackBlood/vwi_bb.nii.gz``
+   - eICAB (qvtpy): ``{eicab_results_root}/{subject}/eicab/*_eICAB_{CW|WB}.nii.gz``
+   - Results: ``{output_root}/{subject}/bbtpy/``
+
+   Segmentation: dilated eICAB mask ROI + hypointense threshold (``util/bb_vessel_segmentation.py``).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.run.log
+   nvitk.pipes.bbtpy.run.STAGE_DOWNLOAD
+   nvitk.pipes.bbtpy.run.STAGE_CONVERT
+   nvitk.pipes.bbtpy.run.STAGE_REG
+   nvitk.pipes.bbtpy.run.STAGE_SEG
+   nvitk.pipes.bbtpy.run._STAGE_ALIASES
+   nvitk.pipes.bbtpy.run._DEFAULT_STAGES
+   nvitk.pipes.bbtpy.run._STAGE_LABELS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.run._normalize_stages
+   nvitk.pipes.bbtpy.run._parse_subjects
+   nvitk.pipes.bbtpy.run.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: STAGE_DOWNLOAD
+   :value: 'stage0_d'
+
+
+.. py:data:: STAGE_CONVERT
+   :value: 'stage0_c'
+
+
+.. py:data:: STAGE_REG
+   :value: 'stage1'
+
+
+.. py:data:: STAGE_SEG
+   :value: 'stage2'
+
+
+.. py:data:: _STAGE_ALIASES
+   :type:  dict[str, str]
+
+.. py:data:: _DEFAULT_STAGES
+   :value: 'stage0_c,stage1,stage2'
+
+
+.. py:data:: _STAGE_LABELS
+   :type:  dict[str, str]
+
+.. py:function:: _normalize_stages(stages: str) -> list[str]
+
+   Parse a comma-separated ``--stages`` string into canonical stage ids (resolving aliases),
+   defaulting to convert+reg+seg when empty; raises ``click.BadParameter`` for unknown stages.
+
+
+.. py:function:: _parse_subjects(subjects: str | None, subjects_file: pathlib.Path | None, nifti_root: pathlib.Path) -> list[str]
+
+   Resolve the subject list from *subjects_file*, else a comma-separated *subjects* string, else
+   every subdirectory of *nifti_root*.
+
+
+.. py:function:: main(subjects: str | None, subjects_file: pathlib.Path | None, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, output_root: pathlib.Path | None, eicab_results_root: pathlib.Path | None, qvtpy_results_root: pathlib.Path | None, vwi_bb_rel_path: str | None, wvi_rel_path: str | None, eicab_subdir: str | None, eicab_mask: str, stages: str, with_download: bool, skip_existing: bool, xnat_config: pathlib.Path | None, server: str | None, project: str | None, user: str | None, password: str | None, netrc_file: pathlib.Path | None, report: bool, dof: int, cost: str, eicab_dilate: int, thr_algorithm: str, min_component_frac: float, min_centerline_points: int, vwi_preprocess: str, vwi_median_size: int, vwi_gaussian_sigma: float) -> None
+
+   Black-blood (bbtpy): VWI_BB download, TOF→BB registration, centerline segmentation.
+
+

@@ -1,0 +1,76 @@
+nvitk.pipes.qvtpy.stage7_morphometrics
+======================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage7_morphometrics
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 7: TOF eICAB morphometrics (cow_morpho port).
+
+   **Inputs**
+
+   - eICAB WB (or CW fallback) multilabel mask under ``<output_root>/<subject>/eicab/``.
+
+   **Outputs**
+
+   - ``case_metrics_donut_tree.xlsx``, centerline/surface VTPs, tortuosity tables, and
+     radius histograms under ``<output_root>/<subject>/qvtpy/stage7_morphometrics/``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage7_morphometrics.log
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage7_morphometrics._default_nvitk_src_dir
+   nvitk.pipes.qvtpy.stage7_morphometrics.run_subject
+   nvitk.pipes.qvtpy.stage7_morphometrics._subject_sge_spec
+   nvitk.pipes.qvtpy.stage7_morphometrics.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage7_morphometrics.submit_subject_sge
+   nvitk.pipes.qvtpy.stage7_morphometrics.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:function:: _default_nvitk_src_dir() -> pathlib.Path
+
+   The nvitk package's ``src`` directory (parent of the ``nvitk`` module), for container mounts.
+
+
+.. py:function:: run_subject(subject: str, *, output_root: pathlib.Path, skip_existing: bool = False, eicab_mask_preference: str = 'wb', use_postprocessed_mask: bool = True, input_already_smoothed: bool = False, n_workers: int | None = None, morpho_config: nvitk.measure.morphometrics_config.MorphometricsConfig | None = None) -> pathlib.Path
+
+   Run stage-7 TOF morphometrics for one subject.
+
+
+.. py:function:: _subject_sge_spec(subject: str, *, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, eicab_mask_preference: str = 'wb', use_postprocessed_mask: bool = True, input_already_smoothed: bool = False, n_workers: int | None = None, backend: str = 'cpu') -> tuple[nvitk.cluster.sge.StageSpec, nvitk.cluster.sge.ClusterPaths]
+
+   Build the SGE stage spec and cluster paths for running stage-7 morphometrics on *subject*.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, eicab_mask_preference: str = 'wb', use_postprocessed_mask: bool = True, input_already_smoothed: bool = False, n_workers: int | None = None, backend: str = 'cpu') -> str
+
+   Return the host shell command for one stage7 array/SGE task.
+
+
+.. py:function:: submit_subject_sge(subject: str, *, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, hold_jid: str | None = None, emit: TextIO | None = None, eicab_mask_preference: str = 'wb', use_postprocessed_mask: bool = True, input_already_smoothed: bool = False, n_workers: int | None = None, backend: str = 'cpu') -> str
+
+   Emit or submit one stage-7 SGE job. Returns qsub job id.
+
+
+.. py:function:: main(backend: str, subject: str, output_root: pathlib.Path, skip_existing: bool, eicab_mask_preference: str, use_postprocessed_mask: bool, input_already_smoothed: bool, n_workers: int | None) -> None
+
+   CLI entry point: run stage-7 TOF morphometrics for a single subject.
+
+

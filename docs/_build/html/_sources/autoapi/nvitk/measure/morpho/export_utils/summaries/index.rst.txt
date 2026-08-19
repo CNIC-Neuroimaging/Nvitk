@@ -1,0 +1,127 @@
+nvitk.measure.morpho.export_utils.summaries
+===========================================
+
+.. py:module:: nvitk.measure.morpho.export_utils.summaries
+
+.. autoapi-nested-parse::
+
+   Summary rows, export dataframes, and aggregate asymmetry/hemisphere outputs.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.summaries.PATH_SUMMARY_EXPORT_DROP_COLUMNS
+   nvitk.measure.morpho.export_utils.summaries.TREE_SUMMARY_EXPORT_DROP_COLUMNS
+   nvitk.measure.morpho.export_utils.summaries.BRANCHPOINT_EXPORT_DROP_COLUMNS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.summaries.compute_vessel_summary_row
+   nvitk.measure.morpho.export_utils.summaries.path_summary_export_dataframe
+   nvitk.measure.morpho.export_utils.summaries.tree_summary_export_dataframe
+   nvitk.measure.morpho.export_utils.summaries.branchpoint_export_dataframe
+   nvitk.measure.morpho.export_utils.summaries.build_tree_region_points_dataframe
+   nvitk.measure.morpho.export_utils.summaries.tree_region_summary_from_points
+   nvitk.measure.morpho.export_utils.summaries.recursive_tree_segment_summary_rows
+   nvitk.measure.morpho.export_utils.summaries.build_vessel_points_dataframe
+   nvitk.measure.morpho.export_utils.summaries.compute_lr_asymmetry
+   nvitk.measure.morpho.export_utils.summaries.compute_hemispheric_summary
+   nvitk.measure.morpho.export_utils.summaries.compute_volumetry_summary
+
+
+Module Contents
+---------------
+
+.. py:data:: PATH_SUMMARY_EXPORT_DROP_COLUMNS
+   :value: ['case_id', 'component_id', 'path_id', 'path_role', 'tree_mode', 'donut_loop_mode',...
+
+
+.. py:data:: TREE_SUMMARY_EXPORT_DROP_COLUMNS
+   :value: ['component_id', 'full_name', 'side', 'pair', 'territory', 'flow_from', 'tree_mode',...
+
+
+.. py:data:: BRANCHPOINT_EXPORT_DROP_COLUMNS
+   :value: ['case_id', 'component_id', 'branchpoint_index', 'x_mm', 'y_mm', 'z_mm', 'degree']
+
+
+.. py:function:: compute_vessel_summary_row(case_id: str, label: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, res: dict) -> dict
+
+   Flatten one path result's metrics + vessel identity into a single export-ready summary row.
+
+
+.. py:function:: path_summary_export_dataframe(path_summary_df: pandas.DataFrame) -> pandas.DataFrame
+
+   Drop internal-only columns from the path summary table before writing to Excel.
+
+
+.. py:function:: tree_summary_export_dataframe(tree_summary_df: pandas.DataFrame) -> pandas.DataFrame
+
+   Drop internal-only columns from the tree summary table before writing to Excel.
+
+
+.. py:function:: branchpoint_export_dataframe(branchpoints_df: pandas.DataFrame) -> pandas.DataFrame
+
+   Drop internal-only columns from the branchpoint table before writing to Excel.
+
+
+.. py:function:: build_tree_region_points_dataframe(case_id: str, label: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, component_id: int, tree_region_id: str, tree_region: str, points: numpy.ndarray, source_path_id: str, source_point_indices: numpy.ndarray, radius_mm: Optional[numpy.ndarray] = None, curvature: Optional[numpy.ndarray] = None, torsion: Optional[numpy.ndarray] = None, source_path_id_2: str = '', source_point_indices_2: Optional[numpy.ndarray] = None, tree_metadata: Optional[dict] = None) -> pandas.DataFrame
+
+   Build the per-point export table for one tree-region region (points + geometry + tree metadata).
+
+
+.. py:function:: tree_region_summary_from_points(label: int, component_id: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, tree_region_id: str, tree_region: str, points: numpy.ndarray, source_path_id: str, source_path_id_2: str = '', tree_metadata: Optional[dict] = None) -> dict
+
+   Summarize one tree-region's geometry (length, chord, tortuosity) as a single export row.
+
+
+.. py:function:: recursive_tree_segment_summary_rows(case_id: str, label: int, component_id: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, segments: List[dict]) -> List[dict]
+
+   Flatten recursive tree segments into export rows (identity, anatomic naming, geometry).
+
+
+.. py:function:: build_vessel_points_dataframe(case_id: str, label: int, vessel_info: nvitk.measure.morpho.models.VesselInfo, res: dict) -> pandas.DataFrame
+
+   Per-point export table for one path: geometry, radius, curvature/torsion, and stenosis/enlargement flags.
+
+
+.. py:function:: compute_lr_asymmetry(summary_df: pandas.DataFrame) -> pandas.DataFrame
+
+   Per-vessel-pair left/right metrics, asymmetry index (``(L-R)/mean``), and L/R ratio.
+
+   Groups the path summary by ``pair``, aggregates each side's paths (length-
+   weighted mean for most metrics; sum/min/max for length/radius-min/degree
+   metrics), and reports paired L/R values plus derived asymmetry columns.
+
+
+.. py:function:: compute_hemispheric_summary(summary_df: pandas.DataFrame) -> pandas.DataFrame
+
+   Per-hemisphere (L/R) rollup: total length, length-weighted tortuosity/radius, and lesion counts.
+
+   One row per side, aggregating across every vessel/path on that side rather
+   than pairing left against right (see :func:`compute_lr_asymmetry` for that).
+
+
+.. py:function:: compute_volumetry_summary(tree_summary_df: pandas.DataFrame, input_volumetry: dict | None = None) -> pandas.DataFrame
+
+   Per-label volumetry rolled up from the per-component tree summaries.
+
+   One row per label (components summed), plus a ``TOTAL`` row. Volumes come
+   from voxel counts × voxel volume; ``mesh_volume_mm3`` / ``surface_area_mm2``
+   come from the reconstructed surface and are ``NaN`` where VTK could not
+   evaluate a closed mesh.
+
+   ``input_volumetry`` (label -> ``{n_voxels, volume_mm3, n_components}``, as
+   built by :func:`nvitk.measure.morpho.run_case.label_input_volumetry`) adds
+   ``input_*`` columns describing the mask the pipeline was handed. The
+   measured columns are always lower: they exclude components too small to
+   skeletonize, and the mask itself has been Taubin-smoothed upstream.
+
+

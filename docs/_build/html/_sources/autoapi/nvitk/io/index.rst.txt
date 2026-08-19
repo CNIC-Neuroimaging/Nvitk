@@ -1,0 +1,141 @@
+nvitk.io
+========
+
+.. py:module:: nvitk.io
+
+.. autoapi-nested-parse::
+
+   Image I/O: :func:`imread` / :func:`imsave`, axis helpers, and optional format conversors.
+
+   Typical usage: ``from nvitk.io import imread, imsave`` or import conversors by name.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/io/_common/index
+   /autoapi/nvitk/io/ants_bridge/index
+   /autoapi/nvitk/io/brainshow/index
+   /autoapi/nvitk/io/conversors/index
+   /autoapi/nvitk/io/imageio/index
+   /autoapi/nvitk/io/readers/index
+   /autoapi/nvitk/io/writers/index
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.convert_image
+   nvitk.io.imread
+   nvitk.io.imsave
+   nvitk.io.imshow
+   nvitk.io.swapaxes
+   nvitk.io.brainshow
+
+
+Package Contents
+----------------
+
+.. py:function:: convert_image(src: str | pathlib.Path, dst: str | pathlib.Path, *, src_type: str | None = None, dst_type: str | None = None, axes: str | None = None, backend: str | None = None, series_index: int = 0, **kwargs: Any) -> None
+
+   Read *src* with :func:`imread`, pick one series if multiple, then :func:`imsave` to *dst*.
+
+   Use *series_index* when the reader returns a list (e.g. multi-series DICOM). *src_type* /
+   *dst_type* override extension-based format detection; remaining *kwargs* go to read and write.
+
+
+.. py:function:: imread(path: str | pathlib.Path, *, axes: str | None = None, force_type: str | None = None, backend: str | None = None, **kwargs: Any)
+
+   Load a volume or series from disk into :class:`~nvitk.types.image.Image`.
+
+   :param path: File or directory (directories are treated as DICOM folders unless ``force_type`` overrides).
+   :param axes: If set, reorder reader output to this axis string (reader-dependent).
+   :param force_type: Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, …
+   :param backend: ``numpy`` or ``cupy`` for the returned :class:`~nvitk.types.image.Image` array.
+   :param \*\*kwargs: Passed to the format reader (e.g. DICOM ``force_ras``, NIfTI ``metadata_json``).
+
+   :returns: A single image, or a list when the reader returns multiple series (e.g. DICOM).
+   :rtype: Image or list[Image]
+
+
+.. py:function:: imsave(path: str | pathlib.Path, image: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, force_type: str | None = None, **kwargs: Any) -> None
+
+   Write array or :class:`~nvitk.types.image.Image` to *path* using the writer chosen by extension or *force_type*.
+
+   Merges ``image.metadata`` with *metadata*; optional *axes* reorders data before write.
+
+
+.. py:function:: imshow(image, *, axis: int = None, index: tuple | int | str = 'mid', show: bool = True, display: str = None, mosaic_init: int = 0, mosaic_fin: int | None = None, t_axis: int = 3, **kwargs)
+
+   Display a 2D slice, orthogonal triple, mosaic of slices, or animation via matplotlib.
+
+   *display* selects layout: ``standard`` (single slice), ``orth`` / ``orthogonal`` (three
+   linked views), ``mosaic`` (grid of slices along *axis*), or ``animation`` (time or slice
+   sweep). Pass ``cmap`` and other ``imshow`` kwargs as needed; default colormap is ``gray``;
+   omit or override ``cmap`` for RGB output.
+
+   :param image: Array or :class:`~nvitk.types.image.Image` with optional ``axes`` (used when *axis* is None).
+   :param axis: Dimension index along which to slice, mosaic, project, or stack RGB; if None, uses the
+                ``Z`` axis index when present, else 2.
+   :param index: Per-axis slice index, ``"mid"``, a triple for orthogonal mode, a **projection** along
+                 *axis* (``"max"``, ``"mean"``, ``"avg"``, ``"median"``), or ``"rgb"`` when that axis has
+                 length 3 (last dimension becomes channels for ``imshow``). Projection and RGB use a
+                 single 2D panel (orthogonal and mosaic layouts fall back to standard for those modes).
+   :param show: If True, ``plt.show()`` (or JS HTML in Jupyter for animations).
+   :param display: Layout name; aliases include ``orth``, ``mosaic``, ``animation``, ``animation+orth``, etc.
+   :param mosaic_init: Inclusive start / exclusive end slice indices for mosaic mode.
+   :param mosaic_fin: Inclusive start / exclusive end slice indices for mosaic mode.
+   :param t_axis: Time dimension for 4D animation when *display* is ``animation``.
+   :param \*\*kwargs: Forwarded to ``imshow`` (e.g. ``vmin``, ``vmax``, ``cmap``).
+
+   :returns: Artist handles from static views, or a ``FuncAnimation`` when *display* is ``animation``.
+   :rtype: list or matplotlib.animation.FuncAnimation
+
+
+.. py:function:: swapaxes(image: Any, axes_prev: str, axes_new: str, metadata: dict[str, Any] | None = None)
+
+   Reorder *image* from *axes_prev* to *axes_new* using :func:`~nvitk.io._common.reorder_axes`.
+
+   If *metadata* is omitted, returns only the reordered array. If provided, returns
+   ``(data, metadata)`` with ``axes`` and ``shape`` updated.
+
+
+.. py:function:: brainshow(values: Any, *, atlas: AtlasLike, mode: Mode = 'surface', region_order: Sequence[Any] | None = None, labels: Sequence[Any] | None = None, hemisphere: Hemisphere = 'both', cmap: str = 'coolwarm', vmin: float | None = None, vmax: float | None = None, threshold: float | None = None, title: str | None = None, axes: Any | None = None, output_file: str | pathlib.Path | None = None, show: bool = True, atlas_kwargs: Mapping[str, Any] | None = None, plot_kwargs: Mapping[str, Any] | None = None) -> Any
+
+   Render brain regions colored by *values* on *atlas* using Nilearn.
+
+   :param values: Per-region numeric values: sequence aligned with ``region_order`` / ``labels``,
+                  or mapping from region label (str) or atlas index (int) -> float.
+   :param atlas: Preset name or mapping. Volume presets: ``destrieux_2009``, ``destrieux_vol``.
+                 Surface presets: ``destrieux_surface``, ``surf_destrieux``.
+                 Custom volume: ``{"kind": "volume", "maps": path_or_Nifti1Image, "labels": ...}``.
+   :param mode: ``surface`` (mesh / projected volume) or ``volume`` (glass brain / ortho stat map).
+   :param region_order: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                        ``region_order``.
+   :param labels: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                  ``region_order``.
+   :param hemisphere: ``both``, ``left``, or ``right`` (masks volumetric painting by MNI x sign).
+   :param cmap: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmin: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmax: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param threshold: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param title: Figure title where supported.
+   :param axes: Optional matplotlib axes for volumetric ``plot_stat_map`` only.
+   :param output_file: Save figure path when supported by Nilearn.
+   :param show: Call matplotlib.pyplot.show() when True and backend allows.
+   :param atlas_kwargs: Extra kwargs for Nilearn fetch functions when using presets.
+   :param plot_kwargs: Additional kwargs forwarded to Nilearn plotting functions.
+
+   :returns: Nilearn figure handle(s); exact type depends on mode and atlas flavor.
+   :rtype: Figure or list
+
+   :raises ImportError: If Nilearn is not installed.
+   :raises ValidationError: If inputs are inconsistent with the atlas or mapping rules.
+
+

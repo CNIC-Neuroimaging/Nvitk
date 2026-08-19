@@ -1,0 +1,528 @@
+nvitk.viz
+=========
+
+.. py:module:: nvitk.viz
+
+.. autoapi-nested-parse::
+
+   Visualization helpers.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/viz/atlas_sources/index
+   /autoapi/nvitk/viz/brainshow/index
+   /autoapi/nvitk/viz/centerline_pick/index
+   /autoapi/nvitk/viz/flowshow/index
+   /autoapi/nvitk/viz/pet_hotspots/index
+   /autoapi/nvitk/viz/streamlines/index
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.viz.HotspotMode
+   nvitk.viz.VectorColorMode
+   nvitk.viz.ColorMetric
+   nvitk.viz.StreamlineParams
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.viz.ResolvedAtlas
+   nvitk.viz.FlowshowAnimationOptions
+   nvitk.viz.FlowshowVectorOptions
+   nvitk.viz.FlowTraceParams
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.viz.desikan_atlas_path
+   nvitk.viz.vascular_atlas_path
+   nvitk.viz.atlas_indices_for_region
+   nvitk.viz.brainshow
+   nvitk.viz.build_index_to_value
+   nvitk.viz.build_volume_stat_image
+   nvitk.viz.normalize_region_key
+   nvitk.viz.resolve_atlas
+   nvitk.viz.show_hotspots
+   nvitk.viz.flowshow
+   nvitk.viz.compute_pathlines
+   nvitk.viz.compute_streamlines
+   nvitk.viz.resample_polyline
+   nvitk.viz.sample_vel_trilinear
+   nvitk.viz.stream_seed_cloud
+   nvitk.viz.streamline_mean_speeds
+   nvitk.viz.vertex_scalars_for_polylines
+
+
+Package Contents
+----------------
+
+.. py:function:: desikan_atlas_path() -> pathlib.Path | None
+
+   Configured Desikan–Killiany parcellation (a NIfTI volume or a FreeSurfer ``.annot``).
+
+
+.. py:function:: vascular_atlas_path() -> pathlib.Path | None
+
+   Configured arterial-territory / watershed parcellation (a NIfTI volume).
+
+
+.. py:class:: ResolvedAtlas
+
+   Unified atlas representation after resolving presets or user specs.
+
+
+   .. py:attribute:: flavor
+      :type:  Flavor
+
+
+   .. py:attribute:: index_to_label
+      :type:  dict[int, str]
+
+
+   .. py:attribute:: atlas_img
+      :type:  nibabel.nifti1.Nifti1Image | None
+      :value: None
+
+
+
+   .. py:attribute:: map_left
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: map_right
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: surf_mesh
+      :type:  str
+      :value: 'fsaverage5'
+
+
+
+.. py:function:: atlas_indices_for_region(name: Any, index_to_label: Mapping[int, str]) -> list[int]
+
+   Atlas indices a region level refers to — **one, several, or none**.
+
+   Several, because the grouping levels a model is fitted at are not all single parcels. A frame
+   grouped by hemisphere reports ``precuneus`` for the average of both, a lobe-grouped one reports
+   ``ctx-Left-Frontal-Lobe``, and the ASL tables publish ``ctx-whole-brain``. Each is one number
+   that belongs on every parcel it was averaged from — painting it on none, which an exact-match
+   lookup does, leaves a lobe-grouped fit with an empty brain. This mirrors
+   :func:`nvitk.stats.vascular_map.nodes_for_label`, which expands a hemisphere-melted ``ICA`` onto
+   both carotids for the same reason.
+
+   Resolution order: exact parcel → whole-brain / hemisphere → Desikan lobe → nothing.
+
+   Returns ``[]`` for anything the atlas does not cover, which is how a caller tells a region that
+   was measured but cannot be drawn (a FLAIR white-matter zone, a whole-head scalar such as
+   ``etiv``) from one that simply has no value.
+
+
+.. py:function:: brainshow(values: Any, *, atlas: AtlasLike, mode: Mode = 'surface', region_order: Sequence[Any] | None = None, labels: Sequence[Any] | None = None, hemisphere: Hemisphere = 'both', cmap: str = 'coolwarm', vmin: float | None = None, vmax: float | None = None, threshold: float | None = None, title: str | None = None, axes: Any | None = None, output_file: str | pathlib.Path | None = None, show: bool = True, atlas_kwargs: Mapping[str, Any] | None = None, plot_kwargs: Mapping[str, Any] | None = None) -> Any
+
+   Render brain regions colored by *values* on *atlas* using Nilearn.
+
+   :param values: Per-region numeric values: sequence aligned with ``region_order`` / ``labels``,
+                  or mapping from region label (str) or atlas index (int) -> float.
+   :param atlas: Preset name or mapping. Volume presets: ``destrieux_2009``, ``destrieux_vol``.
+                 Surface presets: ``destrieux_surface``, ``surf_destrieux``.
+                 Custom volume: ``{"kind": "volume", "maps": path_or_Nifti1Image, "labels": ...}``.
+   :param mode: ``surface`` (mesh / projected volume) or ``volume`` (glass brain / ortho stat map).
+   :param region_order: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                        ``region_order``.
+   :param labels: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                  ``region_order``.
+   :param hemisphere: ``both``, ``left``, or ``right`` (masks volumetric painting by MNI x sign).
+   :param cmap: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmin: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmax: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param threshold: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param title: Figure title where supported.
+   :param axes: Optional matplotlib axes for volumetric ``plot_stat_map`` only.
+   :param output_file: Save figure path when supported by Nilearn.
+   :param show: Call matplotlib.pyplot.show() when True and backend allows.
+   :param atlas_kwargs: Extra kwargs for Nilearn fetch functions when using presets.
+   :param plot_kwargs: Additional kwargs forwarded to Nilearn plotting functions.
+
+   :returns: Nilearn figure handle(s); exact type depends on mode and atlas flavor.
+   :rtype: Figure or list
+
+   :raises ImportError: If Nilearn is not installed.
+   :raises ValidationError: If inputs are inconsistent with the atlas or mapping rules.
+
+
+.. py:function:: build_index_to_value(values: Any, *, region_order: Sequence[Any] | None, index_to_label: Mapping[int, str]) -> dict[int, float]
+
+   Turn *values* + *region_order* (or mapping *values*) into atlas index -> float.
+
+   Atlas indices follow the integer labels stored in the volume or surface parcel maps
+   (same convention as Nilearn Destrieux atlases).
+
+
+.. py:function:: build_volume_stat_image(atlas_img: nibabel.nifti1.Nifti1Image, index_to_value: Mapping[int, float], *, hemisphere: Hemisphere = 'both', background: float = np.nan) -> nibabel.nifti1.Nifti1Image
+
+   Paint voxel-wise stat map from integer atlas labels.
+
+
+.. py:function:: normalize_region_key(name: Any) -> tuple[str, str]
+
+   Reduce a region name to ``(side, stem)``, whichever vocabulary it was written in.
+
+   *side* is ``"l"``, ``"r"``, or ``""`` for something bilateral or midline; *stem* is the parcel
+   with every separator, side token and smoothing suffix removed, so it compares across spellings.
+
+   .. rubric:: Examples
+
+   >>> normalize_region_key("ctx-lh-precuneus")
+   ('l', 'precuneus')
+   >>> normalize_region_key("ctx_lh_precuneus") == normalize_region_key("lh.precuneus")
+   True
+   >>> normalize_region_key("left_precuneus")          # T1 spelling
+   ('l', 'precuneus')
+   >>> normalize_region_key("ctx_bh_precuneus")        # bilateral: belongs on both sides
+   ('', 'precuneus')
+   >>> normalize_region_key("Left_MCA-8")              # ASL vascular parcel + smoothing kernel
+   ('l', 'mca')
+   >>> normalize_region_key("ctx-Left-Frontal-Lobe")
+   ('l', 'frontallobe')
+
+
+.. py:function:: resolve_atlas(atlas: AtlasLike, atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   Normalize *atlas* spec into :class:`ResolvedAtlas`.
+
+   Presets (volume): ``destrieux_2009``, ``destrieux_vol`` →
+   :func:`nilearn.datasets.fetch_atlas_destrieux_2009`.
+
+   Presets (surface): ``destrieux_surface``, ``surf_destrieux`` →
+   :func:`nilearn.datasets.fetch_atlas_surf_destrieux`.
+
+   Presets (located, not fetched): ``desikan`` / ``aparc`` →
+   :func:`resolve_atlas_preset_desikan`; ``vascular`` / ``arterial`` →
+   :func:`resolve_atlas_preset_vascular`. See :mod:`nvitk.viz.atlas_sources` for where they are
+   searched for.
+
+   Custom mapping atlas::
+
+       {"kind": "volume", "maps": path_or_img, "labels": {1: "L_MCA", ...}}
+       # labels optional; list[str] uses integer indices 0..n-1 as atlas IDs.
+
+   Aliases: ``kind`` may be omitted if ``maps`` is present (infer volume).
+
+
+.. py:data:: HotspotMode
+
+.. py:function:: show_hotspots(suv: nvitk.types.Image | numpy.ndarray, mask: nvitk.types.Image | numpy.ndarray, *, label_ids: Sequence[int] | None = None, hotspot: HotspotMode = 'top_percent', top_percent: float = 0.1, top_k: int | None = None, threshold: float | None = None, max_points: int = 50000, mask_iso: float = 0.5, mask_opacity: float = 0.25, mask_smooth: bool = False, point_size: float = 6.0, cmap: str = 'turbo', notebook: bool = False, show: bool = True, title: str | None = None, auto_threshold_fallback: bool = True, allow_empty_hotspot: bool = False, scalar_bar_title: str = 'SUV', show_min_max_text: bool = True, show_orientation_axes: bool = True) -> Any
+
+   Render SUV hotspots inside a segmentation mask.
+
+   :param suv: suv in **SUV units**, 3D. Either :class:`~nvitk.types.Image` or a NumPy array.
+   :param mask: Segmentation mask, 3D, same grid as *suv*. Binary or multi-label.
+   :param label_ids: Optional subset of labels (for multi-label masks). None means "all nonzero".
+   :param hotspot: Hotspot selection mode.
+   :param top_percent: For ``hotspot='top_percent'``: keep voxels within the top *top_percent* SUVs inside ROI.
+                       Example: ``0.1`` means top 0.1% (very sparse hotspots).
+   :param top_k: For ``hotspot='top_k'``: keep the top K voxels by SUV inside ROI.
+   :param suv_threshold: For ``hotspot='threshold'``: keep voxels with SUV >= this value inside ROI.
+   :param max_points: Cap number of rendered hotspot voxels (largest SUVs retained).
+   :param mask_iso: Isosurface threshold for the ROI volume (binary ROI -> 0.5 is typical).
+   :param mask_opacity: ROI surface opacity.
+   :param mask_smooth: If True, apply light smoothing to the ROI surface mesh.
+   :param point_size: Hotspot point size (rendered as spheres).
+   :param cmap: Colormap for SUV scalars.
+   :param notebook: If True, configure PyVista plotter for notebooks.
+   :param show: If True, immediately show the interactive window.
+   :param title: Optional plot title.
+   :param auto_threshold_fallback: If True (default), when the first hotspot selection is empty but the ROI is
+                                   non-empty, retry once with ``hotspot='threshold'`` and ``threshold=0.1``.
+   :param allow_empty_hotspot: If True, when hotspots are still empty after any fallback, return a plotter
+                               showing only the ROI surface with a note (for batch HTML reports). If False
+                               (default), raise :class:`~nvitk.core.exceptions.ValidationError`.
+
+   :returns: A PyVista plotter instance.
+   :rtype: plotter
+
+
+.. py:class:: FlowshowAnimationOptions
+
+   Time animation; glyph voxel sites can be precomputed for cheap updates.
+
+
+   .. py:attribute:: precompute_glyph_indices
+      :type:  bool
+      :value: True
+
+
+      Cache subsampled voxel coordinates per label so each frame only indexes ``vel[*, t]``.
+
+
+   .. py:attribute:: auto_play
+      :type:  bool
+      :value: False
+
+
+      start ``Play`` widget if possible.
+
+      :type: Desktop
+
+      :type: start timer immediately. Notebook
+
+
+   .. py:attribute:: animation_fps
+      :type:  float
+      :value: 8.0
+
+
+
+   .. py:attribute:: loop
+      :type:  bool
+      :value: True
+
+
+      If False, animation stops at last time frame (desktop timer).
+
+
+.. py:class:: FlowshowVectorOptions
+
+   How velocity vectors (glyphs) and streamlines are drawn.
+
+
+   .. py:attribute:: color_mode
+      :type:  VectorColorMode
+      :value: 'label'
+
+
+      |v| colormap. ``fixed``: single color.
+
+      :type: ``label``
+
+      :type: color by vessel id (multi-label). ``speed``
+
+
+   .. py:attribute:: fixed_color
+      :type:  str
+      :value: '#00A6FB'
+
+
+      Used when ``color_mode == "fixed"`` (single-label view default accent).
+
+
+   .. py:attribute:: scale_by_magnitude
+      :type:  bool
+      :value: False
+
+
+      If True, arrow length scales with |v| (normalized per frame unless clim fixed).
+
+
+   .. py:attribute:: scale_factor
+      :type:  float
+      :value: 0.35
+
+
+      PyVista glyph scale multiplier when ``scale_by_magnitude`` is True.
+
+
+   .. py:attribute:: speed_cmap
+      :type:  str
+      :value: 'turbo'
+
+
+      Colormap for ``color_mode == "speed"``.
+
+
+   .. py:attribute:: speed_clim
+      :type:  tuple[float, float] | None
+      :value: None
+
+
+      Fixed |v| range for speed colors and optional scale normalization; if None, estimated once from data.
+
+
+   .. py:attribute:: glyph_opacity
+      :type:  float
+      :value: 0.88
+
+
+
+   .. py:attribute:: streamline_radius
+      :type:  float
+      :value: 0.12
+
+
+
+   .. py:attribute:: streamline_max_time
+      :type:  float
+      :value: 35.0
+
+
+
+   .. py:attribute:: streamline_n_seeds
+      :type:  int
+      :value: 64
+
+
+
+   .. py:attribute:: streamline_opacity
+      :type:  float
+      :value: 0.55
+
+
+
+   .. py:attribute:: streamline_fixed_color
+      :type:  str
+      :value: '#F7B801'
+
+
+
+.. py:data:: VectorColorMode
+
+.. py:function:: flowshow(ap_phase: nvitk.types.Image | numpy.ndarray, rl_phase: nvitk.types.Image | numpy.ndarray, fh_phase: nvitk.types.Image | numpy.ndarray, vessel_mask: nvitk.types.Image | numpy.ndarray, *, centerline_mask: nvitk.types.Image | numpy.ndarray | None = None, stride: int = 4, timepoint: int = 0, notebook: bool = True, show: bool = True, show_all_labels: bool = True, max_glyphs: int = 50000, depth_peeling: bool = False, vector: FlowshowVectorOptions | None = None, animation: FlowshowAnimationOptions | None = None, stream_seed: int | None = 42, dt_seconds: float | None = None, cross_section_volumes: dict[str, nvitk.types.Image | numpy.ndarray] | None = None, centerline_window: int = 5, cross_section_radius_vox: float = 12.0, cross_section_res: int = 0, show_gradient: bool = False, loc_records: Sequence[Mapping[str, Any]] | None = None, voxel_spacing_mm: tuple[float, float, float] | None = None) -> Any
+
+   Interactive 4DFlow viewer.
+
+   :param vector: Glyph / streamline styling (:class:`FlowshowVectorOptions`).
+   :param animation: Time animation and glyph index precomputation (:class:`FlowshowAnimationOptions`).
+   :param stream_seed: RNG seed for subsampling and streamlines.
+   :param dt_seconds: Temporal spacing (seconds) between frames for pathlines. If None and `ap_phase`
+                      is an `Image`, we try `ap_phase.temporal_resolution`.
+   :param cross_section_res: If > 0, caps oblique slice grid size; if 0 (default), grid size follows the
+                             measurement disk radius (~one sample per voxel across the disk diameter).
+
+
+.. py:data:: ColorMetric
+
+.. py:class:: FlowTraceParams
+
+   Parameters for mask-seeded streamlines or pathlines.
+
+
+   .. py:attribute:: n_seeds
+      :type:  int
+      :value: 64
+
+
+
+   .. py:attribute:: max_length
+      :type:  float
+      :value: 35.0
+
+
+
+   .. py:attribute:: stream_seed
+      :type:  int | None
+      :value: 42
+
+
+
+   .. py:attribute:: label_ids
+      :type:  tuple[int, Ellipsis] | None
+      :value: None
+
+
+
+   .. py:attribute:: trace_mode
+      :type:  TraceMode
+      :value: 'streamlines'
+
+
+
+   .. py:attribute:: integration_direction
+      :type:  IntegrationDirection
+      :value: 'forward'
+
+
+
+   .. py:attribute:: seed_mode
+      :type:  SeedMode
+      :value: 'planar'
+
+
+
+   .. py:attribute:: seed_plane_axis
+      :type:  int
+      :value: 2
+
+
+
+   .. py:attribute:: seed_plane_side
+      :type:  PlaneSide
+      :value: 'min'
+
+
+
+   .. py:attribute:: dt_seconds
+      :type:  float
+      :value: 1.0
+
+
+
+   .. py:attribute:: resample_paths
+      :type:  bool
+      :value: False
+
+
+
+   .. py:attribute:: resample_spacing_vox
+      :type:  float
+      :value: 0.5
+
+
+
+.. py:data:: StreamlineParams
+
+.. py:function:: compute_pathlines(velocity_xyzt: numpy.ndarray, mask: numpy.ndarray, params: FlowTraceParams, *, time_start: int) -> list[numpy.ndarray]
+
+   Pathlines integrated forward through the time-varying velocity field.
+
+
+.. py:function:: compute_streamlines(velocity_xyz: numpy.ndarray, mask: numpy.ndarray, params: FlowTraceParams) -> list[numpy.ndarray]
+
+   Instantaneous streamlines for one cardiac phase.
+
+
+.. py:function:: resample_polyline(poly: numpy.ndarray, *, spacing_vox: float) -> numpy.ndarray
+
+   Resample a polyline to approximately uniform arc-length spacing.
+
+
+.. py:function:: sample_vel_trilinear(frame: numpy.ndarray, pos: numpy.ndarray) -> numpy.ndarray
+
+   Trilinear sample of a (X, Y, Z, 3) velocity frame at fractional voxel position.
+
+
+.. py:function:: stream_seed_cloud(mask: numpy.ndarray, n_seeds: int, seed: int | None, *, label_ids: Sequence[int] | None = None, seed_mode: SeedMode = 'volume', seed_plane_axis: int = 2, seed_plane_side: PlaneSide = 'min') -> numpy.ndarray | None
+
+   Random subsample of mask voxel indices (N, 3) for trace seeds.
+
+
+.. py:function:: streamline_mean_speeds(polylines: Sequence[numpy.ndarray], velocity_xyz: numpy.ndarray) -> numpy.ndarray
+
+   Mean |v| (mm/s) along each polyline.
+
+
+.. py:function:: vertex_scalars_for_polylines(polylines: Sequence[numpy.ndarray], *, velocity_xyz: numpy.ndarray | None = None, color_metric: ColorMetric = 'speed', dt_seconds: float = 1.0, trace_mode: TraceMode = 'streamlines') -> list[numpy.ndarray]
+
+   Per-vertex scalar values for coloring.
+
+

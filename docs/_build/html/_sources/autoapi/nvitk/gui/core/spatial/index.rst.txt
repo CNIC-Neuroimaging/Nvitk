@@ -1,0 +1,159 @@
+nvitk.gui.core.spatial
+======================
+
+.. py:module:: nvitk.gui.core.spatial
+
+.. autoapi-nested-parse::
+
+   Spatial metadata and orientation helpers for Napari layers.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.core.spatial.nvitk_metadata_from_layer
+   nvitk.gui.core.spatial.layer_affine
+   nvitk.gui.core.spatial.layer_spacing
+   nvitk.gui.core.spatial.layer_spatial_kwargs
+   nvitk.gui.core.spatial.data_indices_to_world
+   nvitk.gui.core.spatial.spatial_vector_3d
+   nvitk.gui.core.spatial.world_vector_to_data
+   nvitk.gui.core.spatial.view_direction_into_scene
+   nvitk.gui.core.spatial.world_to_data_coords
+   nvitk.gui.core.spatial.world_to_data_indices
+   nvitk.gui.core.spatial.find_spatial_reference_layer
+   nvitk.gui.core.spatial.layer_to_image
+   nvitk.gui.core.spatial._time_axis_index
+   nvitk.gui.core.spatial.spatial_volume_image
+   nvitk.gui.core.spatial.layers_need_resample
+   nvitk.gui.core.spatial.align_mask_to_reference_layer
+   nvitk.gui.core.spatial._axis_direction_label
+   nvitk.gui.core.spatial.orientation_text
+   nvitk.gui.core.spatial.format_layer_spatial_info
+   nvitk.gui.core.spatial._layer_for_orientation_status
+   nvitk.gui.core.spatial.attach_orientation_status
+
+
+Module Contents
+---------------
+
+.. py:function:: nvitk_metadata_from_layer(layer: Any) -> dict[str, Any]
+
+   Merged nvitk metadata (nested ``nvitk_metadata`` + top-level keys).
+
+
+.. py:function:: layer_affine(layer: Any) -> numpy.ndarray | None
+
+   4x4 transform used by the Napari layer (voxel index → world).
+
+
+.. py:function:: layer_spacing(layer: Any) -> tuple[float, Ellipsis] | None
+
+   Voxel spacing in layer axis order.
+
+   Prefer file metadata / affine column norms over Napari ``scale``. When a
+   layer is displayed with an affine, Napari typically leaves ``scale`` at
+   ``(1,1,1)``, which must not override the real mm spacing.
+
+
+.. py:function:: layer_spatial_kwargs(layer: Any) -> dict[str, Any]
+
+   Keyword args for ``add_image`` / ``add_labels`` / ``add_surface``.
+
+
+.. py:function:: data_indices_to_world(points: numpy.ndarray, layer: Any) -> numpy.ndarray
+
+   Map voxel indices in layer data axis order to world coordinates.
+
+
+.. py:function:: spatial_vector_3d(vector: Any, event: Any | None = None) -> numpy.ndarray | None
+
+   Map Napari ndim-D *vector* (e.g. view_direction) to 3 displayed spatial components.
+
+
+.. py:function:: world_vector_to_data(layer: Any, vector: Any, event: Any | None = None) -> numpy.ndarray | None
+
+   Map a Napari world direction to a unit vector in layer data (voxel) space.
+
+
+.. py:function:: view_direction_into_scene(layer: Any, view_direction: Any, event: Any | None = None) -> numpy.ndarray | None
+
+   Unit view ray direction in data space, from the camera through the scene.
+
+   Napari ``dims.view_direction`` points from the scene toward the camera; the pick
+   ray uses the opposite (into the volume).
+
+
+.. py:function:: world_to_data_coords(layer: Any, position: Any) -> numpy.ndarray | None
+
+   Map a Napari world click to sub-voxel data coordinates on *layer*'s 3D grid.
+
+
+.. py:function:: world_to_data_indices(layer: Any, position: Any) -> numpy.ndarray | None
+
+   Map a Napari world click to rounded voxel indices on *layer*'s 3D grid.
+
+
+.. py:function:: find_spatial_reference_layer(viewer: Any, layer: Any) -> Any
+
+   Pick a layer with affine/scale on the same voxel grid as *layer*.
+
+
+.. py:function:: layer_to_image(layer: Any, data: numpy.ndarray | None = None) -> nvitk.types.Image
+
+   Build :class:`~nvitk.types.Image` using file metadata and layer geometry.
+
+
+.. py:function:: _time_axis_index(layer: Any) -> int
+
+   Array axis index for cardiac phase (``T`` / ``C``) on a 4D+ layer.
+
+
+.. py:function:: spatial_volume_image(layer: Any, data: numpy.ndarray | None = None) -> nvitk.types.Image
+
+   3D spatial volume from a 3D or 4D+ layer (cardiac phase index 0).
+
+
+.. py:function:: layers_need_resample(mask_layer: Any, reference_layer: Any, mask_img: nvitk.types.Image, reference_img: nvitk.types.Image) -> bool
+
+   True when mask and reference are not on the same voxel grid.
+
+
+.. py:function:: align_mask_to_reference_layer(mask_layer: Any, reference_layer: Any, mask_data=None, *, order=0) -> tuple[nvitk.types.Image, nvitk.types.Image, bool]
+
+   Return ``(reference_image, mask_on_reference_grid, was_resampled)``.
+
+   When shapes or affines differ, resamples the mask onto the reference grid
+   (same convention as :meth:`~nvitk.measure.Measurer.align` ``mask_to_raw``).
+
+
+.. py:function:: _axis_direction_label(code: str) -> str
+
+   Human-readable label for a single anatomical direction code (``R``/``L``/``A``/``P``/``S``/``I``).
+
+
+.. py:function:: orientation_text(layer: Any, viewer: Any | None = None) -> str
+
+   Describe voxel-axis world directions (standard NIfTI affine interpretation).
+
+   Shown in the viewer to clarify R/L, A/P, S/I along array axes 0, 1, 2.
+
+
+.. py:function:: format_layer_spatial_info(layer: Any) -> str
+
+   Human-readable spatial metadata for the active Napari layer.
+
+
+.. py:function:: _layer_for_orientation_status(viewer: Any) -> Any | None
+
+   Prefer a volume layer over Shapes/Points overlays for the status bar.
+
+
+.. py:function:: attach_orientation_status(viewer: Any, label_widget: Any) -> None
+
+   Keep *label_widget* (Qt QLabel) in sync with the active layer / dims.
+
+

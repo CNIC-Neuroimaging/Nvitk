@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.lab.mouse_tof_cow &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.labels" href="../../labels/index.html" />
+    <link rel="prev" title="nvitk.gui.lab" href="../index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.lab.mouse_tof_cow">
+<span id="nvitk-gui-lab-mouse-tof-cow"></span><h1>nvitk.gui.lab.mouse_tof_cow<a class="headerlink" href="#module-nvitk.gui.lab.mouse_tof_cow" title="Link to this heading">¶</a></h1>
+<p>Mouse TOF Circle-of-Willis lab workflow (GUI).</p>
+<p>Stage 1: N4 → blood flood from-scratch → label connected components.
+Stage 2: Interactively assign CCs to Left ICA / Right ICA / Basilar trees,
+then finalize with a multilabel blood-flood expand.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.TREE_SPECS" title="nvitk.gui.lab.mouse_tof_cow.TREE_SPECS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TREE_SPECS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession" title="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MouseTofCowSession</span></code></a></p></td>
+<td><p>Interactive Stage-2 assignment of CCs to CoW vessel trees.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.set_ui_hooks" title="nvitk.gui.lab.mouse_tof_cow.set_ui_hooks"><code class="xref py py-obj docutils literal notranslate"><span class="pre">set_ui_hooks</span></code></a>(→ None)</p></td>
+<td><p>Dock registers callbacks to refresh Stage-2 status / button visibility.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.run_stage1" title="nvitk.gui.lab.mouse_tof_cow.run_stage1"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run_stage1</span></code></a>(→ tuple[numpy.ndarray, numpy.ndarray])</p></td>
+<td><p>N4 → blood flood from-scratch → label CCs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.expand_cow_trees" title="nvitk.gui.lab.mouse_tof_cow.expand_cow_trees"><code class="xref py py-obj docutils literal notranslate"><span class="pre">expand_cow_trees</span></code></a>(→ numpy.ndarray)</p></td>
+<td><p>Final multilabel blood-flood expand of assigned CoW tree seeds.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.session_active" title="nvitk.gui.lab.mouse_tof_cow.session_active"><code class="xref py py-obj docutils literal notranslate"><span class="pre">session_active</span></code></a>(→ bool)</p></td>
+<td><p>True if <em>viewer</em> has an unfinished Stage-2 assignment session.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.get_session" title="nvitk.gui.lab.mouse_tof_cow.get_session"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_session</span></code></a>(→ MouseTofCowSession | None)</p></td>
+<td><p>The active Stage-2 session on <em>viewer</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if there isn't one (or it's finished).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.cancel_session" title="nvitk.gui.lab.mouse_tof_cow.cancel_session"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cancel_session</span></code></a>(→ None)</p></td>
+<td><p>Uninstall Stage-2 picking; leave the CC layer unchanged.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.start_mouse_tof_cow" title="nvitk.gui.lab.mouse_tof_cow.start_mouse_tof_cow"><code class="xref py py-obj docutils literal notranslate"><span class="pre">start_mouse_tof_cow</span></code></a>(→ None)</p></td>
+<td><p>Run Stage 1 on <em>layer</em>, add labeled-CC Labels, start Stage 2 session.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.TREE_SPECS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">TREE_SPECS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">(('Left</span> <span class="pre">ICA',</span> <span class="pre">1),</span> <span class="pre">('Right</span> <span class="pre">ICA',</span> <span class="pre">2),</span> <span class="pre">('Basilar',</span> <span class="pre">3))</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.TREE_SPECS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.set_ui_hooks">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">set_ui_hooks</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">status</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">_StatusFn</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">visibility</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">_DoneFn</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.set_ui_hooks" title="Link to this definition">¶</a></dt>
+<dd><p>Dock registers callbacks to refresh Stage-2 status / button visibility.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.run_stage1">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">run_stage1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.run_stage1" title="Link to this definition">¶</a></dt>
+<dd><p>N4 → blood flood from-scratch → label CCs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Connected-component labels (int32) and the raw (pre-N4) intensity used
+later for the final multilabel expand.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>labeled, <a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.intensity" title="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.intensity">intensity</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.expand_cow_trees">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">expand_cow_trees</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">intensity</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">markers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.expand_cow_trees" title="Link to this definition">¶</a></dt>
+<dd><p>Final multilabel blood-flood expand of assigned CoW tree seeds.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">MouseTofCowSession</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession" title="Link to this definition">¶</a></dt>
+<dd><p>Interactive Stage-2 assignment of CCs to CoW vessel trees.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.viewer">
+<span class="sig-name descname"><span class="pre">viewer</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.viewer" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.labels_layer">
+<span class="sig-name descname"><span class="pre">labels_layer</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.labels_layer" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.source_name">
+<span class="sig-name descname"><span class="pre">source_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.source_name" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.intensity">
+<span class="sig-name descname"><span class="pre">intensity</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.intensity" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_index">
+<span class="sig-name descname"><span class="pre">tree_index</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_index" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.highlight_id">
+<span class="sig-name descname"><span class="pre">highlight_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.highlight_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.assigned">
+<span class="sig-name descname"><span class="pre">assigned</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.assigned" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._callback">
+<span class="sig-name descname"><span class="pre">_callback</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._callback" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._finished">
+<span class="sig-name descname"><span class="pre">_finished</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._finished" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_name">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">tree_name</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_name" title="Link to this definition">¶</a></dt>
+<dd><p>Display name of the vessel tree currently being assigned (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;Left</span> <span class="pre">ICA&quot;</span></code>).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_label">
+<span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">tree_label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.tree_label" title="Link to this definition">¶</a></dt>
+<dd><p>Output label id of the vessel tree currently being assigned.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.status_text">
+<span class="sig-name descname"><span class="pre">status_text</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.status_text" title="Link to this definition">¶</a></dt>
+<dd><p>Human-readable summary of the current tree, pending highlight, and assignment counts.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.install">
+<span class="sig-name descname"><span class="pre">install</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.install" title="Link to this definition">¶</a></dt>
+<dd><p>Attach the mouse-pick callback to the viewer and select the CC labels layer.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.uninstall">
+<span class="sig-name descname"><span class="pre">uninstall</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.uninstall" title="Link to this definition">¶</a></dt>
+<dd><p>Detach the mouse-pick callback and clear the highlighted-label display.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._on_mouse_pick">
+<span class="sig-name descname"><span class="pre">_on_mouse_pick</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">layer_or_viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">event</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._on_mouse_pick" title="Link to this definition">¶</a></dt>
+<dd><p>Left-click handler: highlight the connected component clicked on the labels layer, unless
+it’s already assigned to a tree.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.clear_highlight">
+<span class="sig-name descname"><span class="pre">clear_highlight</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.clear_highlight" title="Link to this definition">¶</a></dt>
+<dd><p>Clear the pending CC highlight without changing assignments.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._apply_highlight">
+<span class="sig-name descname"><span class="pre">_apply_highlight</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._apply_highlight" title="Link to this definition">¶</a></dt>
+<dd><p>Set the labels layer’s selected/shown label to the currently highlighted CC.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.add_highlighted_cc">
+<span class="sig-name descname"><span class="pre">add_highlighted_cc</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.add_highlighted_cc" title="Link to this definition">¶</a></dt>
+<dd><p>Assign the currently highlighted CC to the tree being built and clear the highlight.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.finish_current_tree">
+<span class="sig-name descname"><span class="pre">finish_current_tree</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession.finish_current_tree" title="Link to this definition">¶</a></dt>
+<dd><p>Move on to the next vessel tree, or run the final expand once all trees are done.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._finalize">
+<span class="sig-name descname"><span class="pre">_finalize</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._finalize" title="Link to this definition">¶</a></dt>
+<dd><p>Build multilabel seeds from the assigned CCs, run the final blood-flood expand, add the
+resulting trees Labels layer, and end the interactive session.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._refresh_display">
+<span class="sig-name descname"><span class="pre">_refresh_display</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._refresh_display" title="Link to this definition">¶</a></dt>
+<dd><p>Tint assigned CCs by tree; keep free CCs on the original palette.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._push_status">
+<span class="sig-name descname"><span class="pre">_push_status</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession._push_status" title="Link to this definition">¶</a></dt>
+<dd><p>Publish the current status text through the registered status hook.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.session_active">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">session_active</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.session_active" title="Link to this definition">¶</a></dt>
+<dd><p>True if <em>viewer</em> has an unfinished Stage-2 assignment session.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.get_session">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">get_session</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession" title="nvitk.gui.lab.mouse_tof_cow.MouseTofCowSession"><span class="pre">MouseTofCowSession</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.get_session" title="Link to this definition">¶</a></dt>
+<dd><p>The active Stage-2 session on <em>viewer</em>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if there isn’t one (or it’s finished).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.cancel_session">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">cancel_session</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">notify_user</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.cancel_session" title="Link to this definition">¶</a></dt>
+<dd><p>Uninstall Stage-2 picking; leave the CC layer unchanged.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.lab.mouse_tof_cow.start_mouse_tof_cow">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.lab.mouse_tof_cow.</span></span><span class="sig-name descname"><span class="pre">start_mouse_tof_cow</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.lab.mouse_tof_cow.start_mouse_tof_cow" title="Link to this definition">¶</a></dt>
+<dd><p>Run Stage 1 on <em>layer</em>, add labeled-CC Labels, start Stage 2 session.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.gui</a><ul>
+  <li><a href="../index.html">nvitk.gui.lab</a><ul>
+      <li>Previous: <a href="../index.html" title="previous chapter">nvitk.gui.lab</a></li>
+      <li>Next: <a href="../../labels/index.html" title="next chapter">nvitk.gui.labels</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/gui/lab/mouse_tof_cow/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

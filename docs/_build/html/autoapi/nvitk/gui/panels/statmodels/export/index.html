@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.panels.statmodels.export &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.panels.statmodels.figure_host" href="../figure_host/index.html" />
+    <link rel="prev" title="nvitk.gui.panels.statmodels.derived" href="../derived/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.panels.statmodels.export">
+<span id="nvitk-gui-panels-statmodels-export"></span><h1>nvitk.gui.panels.statmodels.export<a class="headerlink" href="#module-nvitk.gui.panels.statmodels.export" title="Link to this heading">¶</a></h1>
+<p>Export the active analysis dataframe.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>Writes exactly what the table shows — measurements joined, derived columns computed, filter rules
+applied — so a spreadsheet handed to a collaborator matches the rows the model was fitted on.</p>
+<p>An <code class="docutils literal notranslate"><span class="pre">.xlsx</span></code> export carries a second <strong>provenance</strong> sheet recording how the frame was built: which
+measurements and groupings, which covariates and the visits they came from, every active filter with
+the rows it removed, and every derived column’s definition. Without it a spreadsheet is a number
+soup that nobody — including its author six months later — can reconstruct.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.export.EXCEL_ROW_LIMIT" title="nvitk.gui.panels.statmodels.export.EXCEL_ROW_LIMIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EXCEL_ROW_LIMIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.export.build_provenance_frame" title="nvitk.gui.panels.statmodels.export.build_provenance_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_provenance_frame</span></code></a>(, join, covariates, ...)</p></td>
+<td><p>Two-column <code class="docutils literal notranslate"><span class="pre">item</span></code>/<code class="docutils literal notranslate"><span class="pre">detail</span></code> record of how the exported frame was assembled.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.export.export_analysis_frame" title="nvitk.gui.panels.statmodels.export.export_analysis_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_analysis_frame</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Write <em>frame</em> to <em>path</em>, choosing the format from the extension.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.export.export_group_summary" title="nvitk.gui.panels.statmodels.export.export_group_summary"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_group_summary</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Write a per-group statistics table, with its provenance and optionally the rows behind it.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.export.EXCEL_ROW_LIMIT">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.export.</span></span><span class="sig-name descname"><span class="pre">EXCEL_ROW_LIMIT</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1048575</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.export.EXCEL_ROW_LIMIT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.export.build_provenance_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.export.</span></span><span class="sig-name descname"><span class="pre">build_provenance_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_rows</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">measurements</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">join</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'inner'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariates</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">visit_provenance</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">derived</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../../../stats/frame_ops/index.html#nvitk.stats.frame_ops.DerivedColumn" title="nvitk.stats.frame_ops.DerivedColumn"><span class="pre">nvitk.stats.frame_ops.DerivedColumn</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../../../stats/frame_ops/index.html#nvitk.stats.frame_ops.FilterRule" title="nvitk.stats.frame_ops.FilterRule"><span class="pre">nvitk.stats.frame_ops.FilterRule</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filter_report</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.export.build_provenance_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Two-column <code class="docutils literal notranslate"><span class="pre">item</span></code>/<code class="docutils literal notranslate"><span class="pre">detail</span></code> record of how the exported frame was assembled.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.export.export_analysis_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.export.</span></span><span class="sig-name descname"><span class="pre">export_analysis_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">provenance</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.export.export_analysis_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Write <em>frame</em> to <em>path</em>, choosing the format from the extension.</p>
+<p><code class="docutils literal notranslate"><span class="pre">.xlsx</span></code> gets a <code class="docutils literal notranslate"><span class="pre">data</span></code> sheet plus an optional <code class="docutils literal notranslate"><span class="pre">provenance</span></code> sheet; <code class="docutils literal notranslate"><span class="pre">.csv</span></code> and <code class="docutils literal notranslate"><span class="pre">.tsv</span></code> are
+written flat, with the provenance alongside as <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;.provenance.csv</span></code> so it is not lost.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – For an unsupported extension, an empty frame, or an Excel export that exceeds the sheet
+row limit.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.export.export_group_summary">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.export.</span></span><span class="sig-name descname"><span class="pre">export_group_summary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">summary</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">provenance</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.export.export_group_summary" title="Link to this definition">¶</a></dt>
+<dd><p>Write a per-group statistics table, with its provenance and optionally the rows behind it.</p>
+<p>Three sheets rather than one: <code class="docutils literal notranslate"><span class="pre">summary</span></code> is the table, <code class="docutils literal notranslate"><span class="pre">provenance</span></code> records what it describes
+(a sheet of means with no note of which column, grouping or confidence level is unreconstructable
+later), and <code class="docutils literal notranslate"><span class="pre">values</span></code> carries the underlying rows so a reader can check a number without going
+back to the tool.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – For an unsupported extension or an empty summary.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.gui</a><ul>
+  <li><a href="../../index.html">nvitk.gui.panels</a><ul>
+  <li><a href="../index.html">nvitk.gui.panels.statmodels</a><ul>
+      <li>Previous: <a href="../derived/index.html" title="previous chapter">nvitk.gui.panels.statmodels.derived</a></li>
+      <li>Next: <a href="../figure_host/index.html" title="next chapter">nvitk.gui.panels.statmodels.figure_host</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/gui/panels/statmodels/export/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

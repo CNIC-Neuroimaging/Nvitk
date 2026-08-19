@@ -1,0 +1,45 @@
+nvitk.io.readers.mha
+====================
+
+.. py:module:: nvitk.io.readers.mha
+
+.. autoapi-nested-parse::
+
+   MetaImage (``.mha`` / ``.mhd``) reader via SimpleITK.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.io.readers.mha.sitk
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.readers.mha._build_affine
+   nvitk.io.readers.mha.read_mha
+
+
+Module Contents
+---------------
+
+.. py:data:: sitk
+   :value: None
+
+
+.. py:function:: _build_affine(spacing: tuple[float, Ellipsis], origin: tuple[float, Ellipsis], direction: tuple[float, Ellipsis]) -> numpy.ndarray
+
+   Build a voxel→world affine from MHA/MHD spacing, origin, and (row-major) direction cosines.
+
+
+.. py:function:: read_mha(path: str, *, axes: str | None = None, **_: Any)
+
+   Load MetaImage volume as numpy array with ``axes``, ``affine``, spacing, and origin metadata.
+
+

@@ -1,0 +1,41 @@
+nvitk.measure.morpho.orchestration
+==================================
+
+.. py:module:: nvitk.measure.morpho.orchestration
+
+.. autoapi-nested-parse::
+
+   Orchestration: process one component and one full case.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.orchestration.process_component_tree_vmtk
+
+
+Module Contents
+---------------
+
+.. py:function:: process_component_tree_vmtk(label: int, component_id: int, mask_cc: numpy.ndarray, multilabel: numpy.ndarray, spacing, vessel_info: nvitk.measure.morpho.models.VesselInfo, mapping: dict, centerline_dir: Optional[str], centerline_radius_dir: Optional[str], region_centerline_dir: Optional[str], surface_dir: Optional[str], ctx: Optional[nvitk.measure.morpho.anatomy_axes.MorphoContext] = None) -> Tuple[List[dict], Dict[str, pandas.DataFrame], dict, pandas.DataFrame, List[dict], Dict[str, pandas.DataFrame], List[dict], pandas.DataFrame, List[dict]]
+
+   Full per-component morphometrics pipeline: skeletonize → VMTK centerlines → metrics/export.
+
+   Drives, for one connected component of one label: skeleton extraction and
+   root selection, surface reconstruction, VMTK centerline generation between
+   root and each terminal (with donut-loop handling and retry logic), stenosis/
+   enlargement detection, recursive tree-segment splitting, and every VTP/point
+   export. This is the single entry point :mod:`run_case` dispatches to workers.
+
+   :returns: ``(path_results, point_sheets, tree_summary, branch_df, region_summaries,
+             region_sheets, recursive_segments, donut_loop_df, split_results)`` — see the
+             call sites in :mod:`run_case` for how each piece feeds the exported workbook.
+             ``path_results`` are the measured root→terminal paths, which overlap on
+             shared trunks; ``split_results`` is the non-overlapping representation the
+             workbook summarises.
+   :rtype: tuple
+
+

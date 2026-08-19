@@ -1,0 +1,127 @@
+3_run_analysis
+==============
+
+.. py:module:: 3_run_analysis
+
+.. autoapi-nested-parse::
+
+   Paso 3 — Análisis: gráficas, métricas y reporte HTML
+   =====================================================
+   Lee la tabla combinada (producida por el paso 2) y genera:
+     - Figuras scatter + Bland-Altman por grupo (normal + versión con etiquetas)
+     - Heatmaps resumen de concordancia (SUV y DIXON)
+     - Excel con métricas (Metricas_Manual_vs_Auto.xlsx)
+     - Reporte HTML interactivo (Report_Manual_vs_Auto.html)
+
+   Entrada : RESULTS/Combined_Measurements.xlsx
+   Salidas : RESULTS/Fig_*.png  (normal + _labeled)
+             RESULTS/Fig_Summary_SUV.png / Fig_Summary_DIXON.png
+             RESULTS/Metricas_Manual_vs_Auto.xlsx
+             RESULTS/Report_Manual_vs_Auto.html
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   3_run_analysis.log
+   3_run_analysis.PALETTE
+   3_run_analysis.COMPARISONS
+   3_run_analysis.PAIR_COLS
+   3_run_analysis._NAN_DICT
+   3_run_analysis.df
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   3_run_analysis.darken_hex
+   3_run_analysis.compute_ccc
+   3_run_analysis.compute_metrics
+   3_run_analysis._fmt
+   3_run_analysis._best_legend_loc
+   3_run_analysis.scatter_panel
+   3_run_analysis.bland_altman_panel
+   3_run_analysis.make_heatmap
+   3_run_analysis.export_excel
+   3_run_analysis.build_html
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: PALETTE
+
+.. py:function:: darken_hex(hex_color, factor=0.8)
+
+   Darken a ``#rrggbb`` hex color by scaling its HLS lightness by *factor*.
+
+
+.. py:data:: COMPARISONS
+
+.. py:data:: PAIR_COLS
+   :value: [('man_L3_SUVmax', 'L3_SUVMAX', 'L3 SUVmax', 'SUV'), ('man_L3_SUVmean', 'L3_SUVmean', 'L3...
+
+
+.. py:function:: compute_ccc(x, y)
+
+   Lin's concordance correlation coefficient for *x* vs *y*, with a 95% Fisher-z CI.
+
+
+.. py:data:: _NAN_DICT
+
+.. py:function:: compute_metrics(manual_vals, auto_vals)
+
+   Concordance metrics (Pearson r, Spearman rho, CCC, ICC(A,1), Bland-Altman bias/LoA,
+   RMSE, MAE) between manual and automatic measurements; all-NaN dict if n < 4.
+
+
+.. py:function:: _fmt(v)
+
+   Format *v* to 3 decimals, or ``"n/d"`` if None/NaN.
+
+
+.. py:function:: _best_legend_loc(xv, yv, lim)
+
+   Legend corner (of the 4 quadrants) with the fewest scatter points, to avoid overlap.
+
+
+.. py:function:: scatter_panel(ax, x, y, label, units, metrics, note=False, xlabel=None, ylabel=None, point_labels=None)
+
+   Draw a manual-vs-automatic scatter panel on *ax* with identity/regression lines and a
+   concordance-metrics text box (handles n=0/1 edge cases separately).
+
+
+.. py:function:: bland_altman_panel(ax, x, y, label, units, metrics, note=False, point_labels=None)
+
+   Draw a Bland-Altman panel on *ax* (mean vs. difference) with bias/LoA lines annotated
+   (handles n=0/1 edge cases separately).
+
+
+.. py:function:: make_heatmap(summary_df, title, out_path)
+
+   Save a combined correlation/concordance heatmap + Bland-Altman summary table figure.
+
+
+.. py:function:: export_excel(summary, comp_table, out_path)
+
+   Write the formatted metrics + comparative-data Excel workbook (colored headers,
+   zebra rows, conditional formatting on Diff% columns).
+
+
+.. py:function:: build_html(summary, comp_table, all_fig_paths, out_sum_suv, out_sum_dix, out_path)
+
+   Assemble and write the interactive HTML report (embedded figures, metrics table,
+   heatmaps) to *out_path*.
+
+
+.. py:data:: df
+   :value: None
+
+

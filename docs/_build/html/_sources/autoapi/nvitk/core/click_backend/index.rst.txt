@@ -1,0 +1,45 @@
+nvitk.core.click_backend
+========================
+
+.. py:module:: nvitk.core.click_backend
+
+.. autoapi-nested-parse::
+
+   Shared Click ``--backend`` option for nvitk CLIs and pipeline entry points.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.core.click_backend.set_default_backend
+   nvitk.core.click_backend.apply_cli_backend
+   nvitk.core.click_backend.backend_click_option
+   nvitk.core.click_backend.sge_backend_env
+
+
+Module Contents
+---------------
+
+.. py:function:: set_default_backend(name: str, allow_fallback: bool = True) -> BackendName
+
+   Alias for :func:`set_global_backend` (default ``allow_fallback=True`` for CLI use).
+
+
+.. py:function:: apply_cli_backend(backend: str, *, allow_fallback: bool = True) -> str
+
+   Apply *backend* from CLI (``cpu`` / ``gpu`` or ``numpy`` / ``cupy``).
+
+
+.. py:function:: backend_click_option(*, default: str = 'gpu') -> Callable[[F], F]
+
+   Decorator: add ``--backend cpu|gpu`` and call :func:`set_default_backend` before the command.
+
+
+.. py:function:: sge_backend_env(src_bind: str, backend: str = 'gpu') -> dict[str, str]
+
+   ``extra_env`` for SGE workers: ``PYTHONPATH`` plus ``NVITK_BACKEND``.
+
+

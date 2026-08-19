@@ -1,0 +1,112 @@
+nvitk.gui.panels.statmodels.helpers
+===================================
+
+.. py:module:: nvitk.gui.panels.statmodels.helpers
+
+.. autoapi-nested-parse::
+
+   Repo access, formula parsing and small widget helpers shared across the Statmodels panels.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.helpers.IDENTIFIER_RE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.helpers.open_repo
+   nvitk.gui.panels.statmodels.helpers.statmodels_root
+   nvitk.gui.panels.statmodels.helpers.parse_vc_formula
+   nvitk.gui.panels.statmodels.helpers.formula_lhs
+   nvitk.gui.panels.statmodels.helpers.resolve_outcome_column
+   nvitk.gui.panels.statmodels.helpers.dropped_rows_note
+   nvitk.gui.panels.statmodels.helpers.populate_checklist
+   nvitk.gui.panels.statmodels.helpers.checked_variable_ids
+   nvitk.gui.panels.statmodels.helpers.set_checked_variable_ids
+   nvitk.gui.panels.statmodels.helpers.filter_list_widget
+
+
+Module Contents
+---------------
+
+.. py:data:: IDENTIFIER_RE
+
+.. py:function:: open_repo() -> nvitk.db.repo.DataRepo
+
+   Open the configured dataset repo, unwrapping the ``(repo, ...)`` tuple form if returned.
+
+
+.. py:function:: statmodels_root(repo: nvitk.db.repo.DataRepo) -> pathlib.Path
+
+   Ensure and return the ``nvitk-statmodels`` scratch directory under the dataset root, for cached
+   fits and saved configs.
+
+
+.. py:function:: parse_vc_formula(text: str) -> dict[str, str] | None
+
+   Parse the variance-components formula field (a Python dict literal, e.g.
+   ``{"patient": "0 + C(subject_uid)"}``) into a ``{group: formula}`` dict, or ``None`` if blank;
+   raises ``ValueError`` if it isn't a dict literal.
+
+
+.. py:function:: formula_lhs(formula: str) -> str
+
+   Left-hand side of a patsy formula, or ``""`` when there is no ``~``.
+
+
+.. py:function:: resolve_outcome_column(df: pandas.DataFrame, formula: str, measurement_columns: Sequence[str]) -> tuple[pandas.DataFrame, str | None]
+
+   Resolve the formula's left-hand side to a real frame column, renaming only when unambiguous.
+
+   Three cases, in order:
+
+   1. The LHS is a bare identifier that already exists — use it as-is.
+   2. The LHS is *not* a bare identifier (``log(pi)``, ``np.log(pi)``) — leave it to patsy and take
+      the plotting outcome from the first formula token that is a column. Prefer a derived column
+      for this: a real ``log_pi`` works as a plot axis and a filter target, a formula-level
+      transform does not.
+   3. The LHS is a bare identifier that is missing — rename the measurement column onto it, but
+      only when exactly one measurement is loaded. With several, "the measurement" is ambiguous and
+      a guess would silently model the wrong variable.
+
+   :returns: The frame (renamed only in case 3) and the column to plot on the y axis, or ``None`` when
+             nothing suitable was found.
+   :rtype: (df, outcome_column)
+
+   :raises ValueError: In case 3 with more than one measurement loaded; the message lists the candidates.
+
+
+.. py:function:: dropped_rows_note(meta: dict[str, Any]) -> str
+
+   Human-readable note about rows dropped for missing values during a fit, or ``""`` if none were.
+
+
+.. py:function:: populate_checklist(widget: qtpy.QtWidgets.QListWidget, entries: list[dict[str, Any]]) -> None
+
+   Fill *widget* with one unchecked, checkable item per variable *entries*, labeled
+   ``"<label> (<variable_id>)"``.
+
+
+.. py:function:: checked_variable_ids(widget: qtpy.QtWidgets.QListWidget) -> list[str]
+
+   Variable ids of every checked item in *widget*.
+
+
+.. py:function:: set_checked_variable_ids(widget: qtpy.QtWidgets.QListWidget, ids: list[str]) -> None
+
+   Check the items in *widget* whose variable id is in *ids*, uncheck the rest.
+
+
+.. py:function:: filter_list_widget(widget: qtpy.QtWidgets.QListWidget, needle: str) -> None
+
+   Hide items of *widget* whose text does not contain *needle* (case-insensitive).
+
+

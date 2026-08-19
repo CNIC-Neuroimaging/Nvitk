@@ -1,0 +1,47 @@
+nvitk.gui.tools.descriptions
+============================
+
+.. py:module:: nvitk.gui.tools.descriptions
+
+.. autoapi-nested-parse::
+
+   Short help text for GUI tools (shown under Operation in the Tools panel).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.descriptions.TOOL_DESCRIPTIONS
+   nvitk.gui.tools.descriptions.MULTILABEL_NOTE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.descriptions.tool_description_text
+
+
+Module Contents
+---------------
+
+.. py:data:: TOOL_DESCRIPTIONS
+   :type:  dict[str, str]
+
+.. py:data:: MULTILABEL_NOTE
+   :type:  str
+   :value: "With several labels selected, runs once per label and combines the results, keeping the input's...
+
+
+.. py:function:: tool_description_text(tool_id: str, *, fallback_label: str = '') -> str
+
+   Human-readable description for *tool_id* from ``TOOL_DESCRIPTIONS``, falling back to
+   *fallback_label* (or a generic prompt) when no description or tool id is available.
+
+   Per-label tools (``GuiToolSpec.multilabel``) get :data:`MULTILABEL_NOTE` appended.
+
+

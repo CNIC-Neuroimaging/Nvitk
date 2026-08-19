@@ -1,0 +1,62 @@
+nvitk.morphology.components
+===========================
+
+.. py:module:: nvitk.morphology.components
+
+.. autoapi-nested-parse::
+
+   Connected-component labeling and area filtering (backend-aware via ``ndi``).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.components.label_connected
+   nvitk.morphology.components.remove_small_components
+   nvitk.morphology.components.keep_largest_components
+   nvitk.morphology.components.remove_small_components_by_fraction
+   nvitk.morphology.components.keep_component_closest_to_center
+   nvitk.morphology.components.keep_components_touching_seeds
+
+
+Module Contents
+---------------
+
+.. py:function:: label_connected(mask: nvitk.types.Image | Any, *, connectivity: int = 1) -> tuple[Any, int]
+
+   Label connected components of a binary *mask*.
+
+   Returns ``(labeled_array, num_features)`` on the active backend.
+
+
+.. py:function:: remove_small_components(mask: nvitk.types.Image | Any, *, min_size: int, connectivity: int = 1) -> Any
+
+   Drop connected components with fewer than *min_size* voxels.
+
+
+.. py:function:: keep_largest_components(mask: nvitk.types.Image | Any, *, n: int = 1, connectivity: int = 1, structure: Any = None) -> Any
+
+   Keep the *n* largest connected components of a binary *mask* (by voxel count).
+
+   Components are ranked by size; ties keep lower label ids first after the
+   size sort. If fewer than *n* components exist, all are kept.
+
+
+.. py:function:: remove_small_components_by_fraction(mask: nvitk.types.Image | Any, *, min_fraction: float, connectivity: int = 1) -> Any
+
+   Area-opening: remove components smaller than *min_fraction* of foreground.
+
+
+.. py:function:: keep_component_closest_to_center(labeled: Any, *, center: tuple[float, float] | None = None) -> Any
+
+   Binary mask of the labeled component whose centroid is nearest *center*.
+
+
+.. py:function:: keep_components_touching_seeds(mask: nvitk.types.Image | Any, seed_mask: nvitk.types.Image | Any, *, connectivity: int = 1) -> Any
+
+   Keep only connected components of *mask* that overlap *seed_mask*.
+
+

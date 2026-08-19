@@ -1,0 +1,33 @@
+nvitk.io.conversors.nikon2nifti
+===============================
+
+.. py:module:: nvitk.io.conversors.nikon2nifti
+
+.. autoapi-nested-parse::
+
+   Convert Nikon ND2 to NIfTI via :func:`~nvitk.io.readers.read_nd2` and :func:`~nvitk.io.writers.write_nifti`.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors.nikon2nifti.nikon2nifti
+   nvitk.io.conversors.nikon2nifti.main
+
+
+Module Contents
+---------------
+
+.. py:function:: nikon2nifti(nikon_path: str, nifti_path: str, *, axes: str | None = None, **kwargs: Any) -> str
+
+   Convert a Nikon ND2 file to NIfTI; library entry point behind the ``nikon2nifti`` CLI.
+
+
+.. py:function:: main(input_path: pathlib.Path, output_path: pathlib.Path, axes: str | None) -> None
+
+   CLI entry point: convert one Nikon ND2 file to NIfTI.
+
+

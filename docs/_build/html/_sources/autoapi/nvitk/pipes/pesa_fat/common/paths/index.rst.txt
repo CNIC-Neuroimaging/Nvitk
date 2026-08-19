@@ -1,0 +1,244 @@
+nvitk.pipes.pesa_fat.common.paths
+=================================
+
+.. py:module:: nvitk.pipes.pesa_fat.common.paths
+
+.. autoapi-nested-parse::
+
+   Filesystem layout helpers for the PESA-Fat CT-PET / Dixon batches.
+
+   The pipelines operate on a flat on-disk tree rooted at three top-level
+   directories:
+
+   * ``DICOM_ROOT / <batch> / PESA* / ...``   (inputs)
+   * ``NIFTI_ROOT / <batch> / PESA* / ...``   (stage 0 outputs + inputs to later stages)
+   * ``RESULTS_ROOT / <batch> / res_<stage>/PESA* / ...``   (later-stage outputs)
+
+   All pipelines derive their per-subject paths from :class:`BatchLayout`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_DICOM_ROOT
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_NIFTI_ROOT
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_RESULTS_ROOT
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_MODEL_ROOT
+   nvitk.pipes.pesa_fat.common.paths.LOCAL_DEFAULT_DICOM_ROOT
+   nvitk.pipes.pesa_fat.common.paths.LOCAL_DEFAULT_NIFTI_ROOT
+   nvitk.pipes.pesa_fat.common.paths.LOCAL_DEFAULT_RESULTS_ROOT
+   nvitk.pipes.pesa_fat.common.paths.LOCAL_DEFAULT_MODEL_ROOT
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_NVITK_SRC_DIR
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_SGE_SCRIPTS_DIR
+   nvitk.pipes.pesa_fat.common.paths.CLUSTER_HOST_ALIASES
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_NVITK_SRC_DIR
+   nvitk.pipes.pesa_fat.common.paths.DEFAULT_SGE_SCRIPTS_DIR
+   nvitk.pipes.pesa_fat.common.paths.CLUSTER_HOST_ALIASES
+   nvitk.pipes.pesa_fat.common.paths.SUBJECT_GLOB
+   nvitk.pipes.pesa_fat.common.paths.NIFTI_EXTS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.paths.BatchLayout
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.common.paths.resolve_nii
+   nvitk.pipes.pesa_fat.common.paths.resolve_nii_optional
+   nvitk.pipes.pesa_fat.common.paths.parse_subjects
+   nvitk.pipes.pesa_fat.common.paths.default_submit_script_path
+   nvitk.pipes.pesa_fat.common.paths.layout
+   nvitk.pipes.pesa_fat.common.paths.layout_local
+   nvitk.pipes.pesa_fat.common.paths.layout_cluster
+   nvitk.pipes.pesa_fat.common.paths.group_subjects_by_batch
+
+
+Module Contents
+---------------
+
+.. py:data:: DEFAULT_DICOM_ROOT
+
+.. py:data:: DEFAULT_NIFTI_ROOT
+
+.. py:data:: DEFAULT_RESULTS_ROOT
+
+.. py:data:: DEFAULT_MODEL_ROOT
+
+.. py:data:: LOCAL_DEFAULT_DICOM_ROOT
+
+.. py:data:: LOCAL_DEFAULT_NIFTI_ROOT
+
+.. py:data:: LOCAL_DEFAULT_RESULTS_ROOT
+
+.. py:data:: LOCAL_DEFAULT_MODEL_ROOT
+
+.. py:data:: DEFAULT_NVITK_SRC_DIR
+
+.. py:data:: DEFAULT_SGE_SCRIPTS_DIR
+
+.. py:data:: CLUSTER_HOST_ALIASES
+   :type:  dict[str, str]
+
+.. py:data:: DEFAULT_NVITK_SRC_DIR
+
+.. py:data:: DEFAULT_SGE_SCRIPTS_DIR
+
+.. py:data:: CLUSTER_HOST_ALIASES
+
+.. py:data:: SUBJECT_GLOB
+   :value: 'PESA*'
+
+
+.. py:data:: NIFTI_EXTS
+   :type:  tuple[str, Ellipsis]
+   :value: ('.nii.gz', '.nii')
+
+
+   Accepted NIfTI extensions, preferring compressed output.
+
+.. py:function:: resolve_nii(parent: pathlib.Path, stem: str) -> pathlib.Path
+
+   Return the existing ``parent/stem.nii[.gz]``, preferring ``.nii.gz``.
+
+
+.. py:function:: resolve_nii_optional(parent: pathlib.Path, stem: str) -> pathlib.Path | None
+
+   Variant of :func:`resolve_nii` returning ``None`` instead of raising.
+
+
+.. py:function:: parse_subjects(value: str | None) -> list[str] | None
+
+   Turn ``"PESA001,PESA002"`` into a list (or ``None`` when empty).
+
+
+.. py:class:: BatchLayout
+
+   Resolved directories for a specific batch run.
+
+
+   .. py:attribute:: batch
+      :type:  str
+
+
+   .. py:attribute:: dicom_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: nifti_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: results_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: model_root
+      :type:  pathlib.Path
+
+
+   .. py:property:: dicom_dir
+      :type: pathlib.Path
+
+
+      This batch's DICOM directory.
+
+
+   .. py:property:: nifti_dir
+      :type: pathlib.Path
+
+
+      This batch's NIfTI directory.
+
+
+   .. py:property:: results_dir
+      :type: pathlib.Path
+
+
+      This batch's results directory.
+
+
+   .. py:property:: model_dir
+      :type: pathlib.Path
+
+
+      The TotalSegmentator model root (not batch-scoped).
+
+
+   .. py:method:: stage_dir(stage_name: str) -> pathlib.Path
+
+      Return ``results_dir / f"res_{stage_name}"``.
+
+
+
+   .. py:method:: subject_nifti_dir(subject: str) -> pathlib.Path
+
+      *subject*'s NIfTI directory within this batch.
+
+
+
+   .. py:method:: subject_dicom_dir(subject: str) -> pathlib.Path
+
+      *subject*'s DICOM directory within this batch.
+
+
+
+   .. py:method:: subject_nifti_dirs() -> list[pathlib.Path]
+
+      Return all ``PESA*`` subject directories under ``nifti_dir`` (sorted).
+
+
+
+   .. py:method:: subject_dicom_dirs() -> list[pathlib.Path]
+
+      Return all ``PESA*`` subject directories under ``dicom_dir`` (sorted).
+
+
+
+   .. py:method:: iter_subjects() -> Iterator[str]
+
+      Yield subject names (directory basenames) from the NIfTI layout.
+
+
+
+.. py:function:: default_submit_script_path(batch: str) -> pathlib.Path
+
+   Return ``SCRIPTS_CLUSTER/submit_<batch>.sh`` under :data:`DEFAULT_SGE_SCRIPTS_DIR`.
+
+
+.. py:function:: layout(batch: str, *, dicom_root: pathlib.Path | str | None = None, nifti_root: pathlib.Path | str | None = None, results_root: pathlib.Path | str | None = None, model_root: pathlib.Path | str | None = None) -> BatchLayout
+
+   Build a :class:`BatchLayout` for ``batch``, falling back to defaults.
+
+
+.. py:function:: layout_local(batch: str, *, dicom_root: pathlib.Path | str | None = None, nifti_root: pathlib.Path | str | None = None, results_root: pathlib.Path | str | None = None, model_root: pathlib.Path | str | None = None) -> BatchLayout
+
+   Workstation layout for XNAT download and ``--submit local``.
+
+   Uses ``pipelines.pesa_fat_paths.local_*`` from ``.nvitk/sge.json`` when CLI
+   ``--*-root`` flags are omitted (never the cluster ``cluster_*`` / ``DEFAULT_*`` paths).
+
+
+.. py:function:: layout_cluster(batch: str, *, dicom_root: pathlib.Path | str | None = None, nifti_root: pathlib.Path | str | None = None, results_root: pathlib.Path | str | None = None, model_root: pathlib.Path | str | None = None) -> BatchLayout
+
+   Cluster-side :class:`BatchLayout` for SGE binds and SFTP upload targets.
+
+   Reads ``pipelines.pesa_fat_paths`` from ``.nvitk/sge.json`` when set;
+   otherwise falls back to CLI ``--*-root`` flags or :data:`DEFAULT_*_ROOT`.
+
+
+.. py:function:: group_subjects_by_batch(download_map: dict[str, tuple[str, dict]]) -> dict[str, list[str]]
+
+   Group XNAT download results ``{subject: (batch, paths)}`` by batch name.
+
+

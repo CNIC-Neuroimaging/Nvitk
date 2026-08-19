@@ -1,0 +1,30 @@
+nvitk.pipes.pesa_fat.common
+===========================
+
+.. py:module:: nvitk.pipes.pesa_fat.common
+
+.. autoapi-nested-parse::
+
+   Shared PESA-Fat pipeline building blocks: paths, stage 0, SGE chain helpers, stage 4 QC.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/pipes/pesa_fat/common/batch_stage3_aggregate/index
+   /autoapi/nvitk/pipes/pesa_fat/common/cluster_upload/index
+   /autoapi/nvitk/pipes/pesa_fat/common/db_publish/index
+   /autoapi/nvitk/pipes/pesa_fat/common/dixon_regions/index
+   /autoapi/nvitk/pipes/pesa_fat/common/paths/index
+   /autoapi/nvitk/pipes/pesa_fat/common/sge_array/index
+   /autoapi/nvitk/pipes/pesa_fat/common/sge_db/index
+   /autoapi/nvitk/pipes/pesa_fat/common/stage0_convert/index
+   /autoapi/nvitk/pipes/pesa_fat/common/stage3_batch_summary/index
+   /autoapi/nvitk/pipes/pesa_fat/common/stage4_qc/index
+   /autoapi/nvitk/pipes/pesa_fat/common/xnat_inputs/index
+
+

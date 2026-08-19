@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>ureter_segmentation &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="1_build_manual_table" href="../1_build_manual_table/index.html" />
+    <link rel="prev" title="3_run_analysis" href="../3_run_analysis/index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-ureter_segmentation">
+<span id="ureter-segmentation"></span><h1>ureter_segmentation<a class="headerlink" href="#module-ureter_segmentation" title="Link to this heading">¶</a></h1>
+<p>Ureter exclusion mask for CT-PET (PESA-Fat ct-pet-v5 conventions) — v2.</p>
+<section id="key-changes-versus-v1">
+<h2>Key changes versus v1<a class="headerlink" href="#key-changes-versus-v1" title="Link to this heading">¶</a></h2>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">anchor_bladder_entry_per_side</span></code> — each ureter now ends at the ipsilateral
+trigone corner (superior bladder face, same lateral hemisphere as its
+kidney), rather than both sharing a single posterior mid-bladder point.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">build_cost_volume</span></code> — PET-primary cost; CT hard barriers removed.
+Three components:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>inverse of a <em>gap-filled</em> SUV envelope (dark spots healed by smoothing);</p></li>
+<li><p>an anatomical <em>corridor prior</em> (distance to the straight kidney→bladder
+line) that keeps the path in the expected para-spinal region;</p></li>
+<li><p>a soft <em>lateral hemisphere</em> constraint that prevents the path from
+crossing to the contralateral side.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">run_ureter_segmentation</span></code> updated to use both new primitives; original
+helpers kept for backward compatibility.</p></li>
+</ul>
+</section>
+<section id="array-axis-conventions-consistent-with-the-rest-of-this-module">
+<h2>Array / axis conventions (consistent with the rest of this module)<a class="headerlink" href="#array-axis-conventions-consistent-with-the-rest-of-this-module" title="Link to this heading">¶</a></h2>
+<p>The volume is stored <strong>XYZ in memory</strong> (axis 0 = Lateral/X, axis 1 = AP/Y,
+axis 2 = IS/Z).  This matches:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">_convex_hull_slicewise_z</span></code> iterating over <code class="docutils literal notranslate"><span class="pre">shape[-1]</span></code> for Z;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">anchor_kidney_pelvis_concavity</span></code> using axis 0 for <code class="docutils literal notranslate"><span class="pre">midline_x_index</span></code>;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">anchor_bladder_mid_posterior</span></code> having <code class="docutils literal notranslate"><span class="pre">axis_z</span> <span class="pre">=</span> <span class="pre">-1</span></code>.</p></li>
+</ul>
+</div></blockquote>
+<p>All new functions expose explicit <code class="docutils literal notranslate"><span class="pre">axis_x</span></code> / <code class="docutils literal notranslate"><span class="pre">axis_z</span></code> parameters so the
+caller can override for any resampled grid that differs from this default.</p>
+<p>I/O: nvitk.io (not SimpleITK).  Arrays: backend <code class="docutils literal notranslate"><span class="pre">np</span></code> / <code class="docutils literal notranslate"><span class="pre">ndi</span></code> after
+<code class="docutils literal notranslate"><span class="pre">setup(globals())</span></code>.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation.log" title="ureter_segmentation.log"><code class="xref py py-obj docutils literal notranslate"><span class="pre">log</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation._convex_hull_slicewise_z" title="ureter_segmentation._convex_hull_slicewise_z"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_convex_hull_slicewise_z</span></code></a>(→ np.ndarray)</p></td>
+<td><p>Hull each axial (IS) slice along the last axis — same as stage2.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ureter_segmentation.anchor_kidney_pelvis_concavity" title="ureter_segmentation.anchor_kidney_pelvis_concavity"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anchor_kidney_pelvis_concavity</span></code></a>(, midline_x_index, ...)</p></td>
+<td><p>Anchor in (hull − kidney) per axial slice → 3D largest CC → centroid.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation.anchor_bladder_entry_per_side" title="ureter_segmentation.anchor_bladder_entry_per_side"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anchor_bladder_entry_per_side</span></code></a>(→ tuple[float, float, float])</p></td>
+<td><p>Bladder ureter-entry anchor ipsilateral to <em>kidney_mask</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ureter_segmentation.build_cost_volume" title="ureter_segmentation.build_cost_volume"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_cost_volume</span></code></a>(→ Any)</p></td>
+<td><p>PET-primary cost volume for ureter MCP routing — v2.1.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation.minimum_cost_path_zyx" title="ureter_segmentation.minimum_cost_path_zyx"><code class="xref py py-obj docutils literal notranslate"><span class="pre">minimum_cost_path_zyx</span></code></a>(→ Any)</p></td>
+<td><p>Least-cost voxel path from <em>start_zyx</em> to <em>end_zyx</em> through a cost volume.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ureter_segmentation.spline_resample_zyx" title="ureter_segmentation.spline_resample_zyx"><code class="xref py py-obj docutils literal notranslate"><span class="pre">spline_resample_zyx</span></code></a>(→ Any)</p></td>
+<td><p>Fit a smoothing cubic B-spline to a <code class="docutils literal notranslate"><span class="pre">(z,</span> <span class="pre">y,</span> <span class="pre">x)</span></code> path and resample to <em>n_points</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation.line_mask_from_path" title="ureter_segmentation.line_mask_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">line_mask_from_path</span></code></a>(→ Any)</p></td>
+<td><p>Rasterize a float <code class="docutils literal notranslate"><span class="pre">(z,</span> <span class="pre">y,</span> <span class="pre">x)</span></code> path to a 1-voxel-wide binary line mask of <em>shape</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#ureter_segmentation.edt_tube_mm" title="ureter_segmentation.edt_tube_mm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">edt_tube_mm</span></code></a>(→ Any)</p></td>
+<td><p>Dilate a line mask into a tube of physical <em>radius_mm</em> using a spacing-aware EDT.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#ureter_segmentation.segment_ureter" title="ureter_segmentation.segment_ureter"><code class="xref py py-obj docutils literal notranslate"><span class="pre">segment_ureter</span></code></a>(→ Tuple[Any, Dict[str, Any], Dict[str, ...)</p></td>
+<td><p>Build bilateral ureter exclusion masks from kidney + bladder segmentations</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="ureter_segmentation.log">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">log</span></span><a class="headerlink" href="#ureter_segmentation.log" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation._convex_hull_slicewise_z">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">_convex_hull_slicewise_z</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vol_uint8</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">np.ndarray</span></span></span><a class="headerlink" href="#ureter_segmentation._convex_hull_slicewise_z" title="Link to this definition">¶</a></dt>
+<dd><p>Hull each axial (IS) slice along the last axis — same as stage2.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.anchor_kidney_pelvis_concavity">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">anchor_kidney_pelvis_concavity</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">kidney_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacing</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">(1.0,</span> <span class="pre">1.0,</span> <span class="pre">1.0)</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">midline_x_index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">medial_half_width_vox</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#ureter_segmentation.anchor_kidney_pelvis_concavity" title="Link to this definition">¶</a></dt>
+<dd><p>Anchor in (hull − kidney) per axial slice → 3D largest CC → centroid.
+Unchanged from v1 — starting points are already correct.</p>
+<p><code class="docutils literal notranslate"><span class="pre">midline_x_index</span></code> / <code class="docutils literal notranslate"><span class="pre">medial_half_width_vox</span></code>: restrict the cavity to
+the medial half of the kidney (lateral axis = axis 0).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.anchor_bladder_entry_per_side">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">anchor_bladder_entry_per_side</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bladder_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kidney_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis_x</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis_z</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">-1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">superior_fraction</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.35</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structure</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#ureter_segmentation.anchor_bladder_entry_per_side" title="Link to this definition">¶</a></dt>
+<dd><p>Bladder ureter-entry anchor ipsilateral to <em>kidney_mask</em>.</p>
+<section id="anatomy">
+<h3>Anatomy<a class="headerlink" href="#anatomy" title="Link to this heading">¶</a></h3>
+<p>Each ureter enters the bladder at the <em>ureteral orifice</em>, located at the
+lateral corners of the trigone — superior face of the bladder, on the same
+lateral side as its kidney.  Both orifices are separated by ~5 cm in an
+adult.  Using a shared mid-bladder point for both ureters causes the MCP
+to route both paths into the midline well before the actual entry point.</p>
+</section>
+<section id="strategy">
+<h3>Strategy<a class="headerlink" href="#strategy" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Identify the lateral centroid of the kidney to determine which half of
+the volume it occupies.</p></li>
+<li><p>Restrict bladder voxels to the same lateral hemisphere (ipsilateral).</p></li>
+<li><p>Keep only the top <code class="docutils literal notranslate"><span class="pre">superior_fraction</span></code> of those voxels in the IS
+direction — the trigone is at the superior–posterior face.</p></li>
+<li><p>Return the centroid of the largest connected component.</p></li>
+</ol>
+<dl class="field-list simple">
+<dt class="field-odd">param axis_x<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Array axis for the Lateral (L-R) direction.
+Default 0 — matches <code class="docutils literal notranslate"><span class="pre">anchor_kidney_pelvis_concavity</span></code> convention
+where <code class="docutils literal notranslate"><span class="pre">midline_x_index</span></code> is applied along axis 0.</p>
+</dd>
+<dt class="field-even">type axis_x<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+<dt class="field-odd">param axis_z<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Array axis for the IS direction.
+Default -1 (last axis) — matches <code class="docutils literal notranslate"><span class="pre">_convex_hull_slicewise_z</span></code> and
+<code class="docutils literal notranslate"><span class="pre">anchor_bladder_mid_posterior</span></code> conventions.</p>
+</dd>
+<dt class="field-even">type axis_z<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+<dt class="field-odd">param superior_fraction<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Fraction of IS extent to keep from the top; 0.35 → top 35 %.</p>
+</dd>
+<dt class="field-even">type superior_fraction<span class="colon">:</span></dt>
+<dd class="field-even"><p>float</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.build_cost_volume">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">build_cost_volume</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">suv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacing_xyz_mm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">body</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">w_pet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_clip_l</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.01</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_clip_h</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">15.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_fill_sigma_vox</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">4.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_fill_blend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.001</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#ureter_segmentation.build_cost_volume" title="Link to this definition">¶</a></dt>
+<dd><p>PET-primary cost volume for ureter MCP routing — v2.1.</p>
+<section id="what-changed-from-v2">
+<h3>What changed from v2<a class="headerlink" href="#what-changed-from-v2" title="Link to this heading">¶</a></h3>
+<p>The corridor prior (distance to the straight kidney→bladder segment) has
+been <strong>removed</strong>.  It was structurally wrong: because it is zero on the
+straight line and grows everywhere else, the MCP minimised it by routing
+straight, producing a linear cylindrical mask regardless of the PET signal.
+A path prior that rewards the straight line <em>is</em> the straight line.</p>
+</section>
+<section id="components">
+<h3>Components<a class="headerlink" href="#components" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>pet_term</dt><dd><p>Inverse of a gap-filled SUV envelope — the primary and dominant cost.
+High uptake = low cost = preferred.  Dark spots are healed by blending
+the raw map with a smoothed version (element-wise maximum), so short
+low-uptake gaps along the ureter do not reroute the path.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">param w_lateral<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Maximum penalty added by the lateral guardrail (plateau value).
+In the same units as pet_term.  Default 1.5 ≈ cost of a near-zero
+SUV voxel — enough to block, not enough to reshape the path.</p>
+</dd>
+<dt class="field-even">type w_lateral<span class="colon">:</span></dt>
+<dd class="field-even"><p>float</p>
+</dd>
+<dt class="field-odd">param lateral_free_mm<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Half-width of the zero-penalty lateral band around the kidney x.</p>
+</dd>
+<dt class="field-even">type lateral_free_mm<span class="colon">:</span></dt>
+<dd class="field-even"><p>float</p>
+</dd>
+<dt class="field-odd">param lateral_slope_mm<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Width of the linear ramp from free band to plateau.  The full
+guardrail spans <code class="docutils literal notranslate"><span class="pre">lateral_free_mm</span> <span class="pre">+</span> <span class="pre">lateral_slope_mm</span></code> in mm.</p>
+</dd>
+<dt class="field-even">type lateral_slope_mm<span class="colon">:</span></dt>
+<dd class="field-even"><p>float</p>
+</dd>
+<dt class="field-odd">param axis_x<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Array axis for the Lateral (L-R) direction (default 0).</p>
+</dd>
+<dt class="field-even">type axis_x<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.minimum_cost_path_zyx">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">minimum_cost_path_zyx</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cost</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_zyx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end_zyx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#ureter_segmentation.minimum_cost_path_zyx" title="Link to this definition">¶</a></dt>
+<dd><p>Least-cost voxel path from <em>start_zyx</em> to <em>end_zyx</em> through a cost volume.</p>
+<p>Uses skimage’s <code class="docutils literal notranslate"><span class="pre">route_through_array</span></code> (26-connected, geometric step weights).
+Returns the path as an <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">3)</span></code> int array of <code class="docutils literal notranslate"><span class="pre">(z,</span> <span class="pre">y,</span> <span class="pre">x)</span></code> indices.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.spline_resample_zyx">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">spline_resample_zyx</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path_zyx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">s_smooth</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bounds_lo</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bounds_hi</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#ureter_segmentation.spline_resample_zyx" title="Link to this definition">¶</a></dt>
+<dd><p>Fit a smoothing cubic B-spline to a <code class="docutils literal notranslate"><span class="pre">(z,</span> <span class="pre">y,</span> <span class="pre">x)</span></code> path and resample to <em>n_points</em>.</p>
+<p>Points are clipped to <code class="docutils literal notranslate"><span class="pre">[bounds_lo,</span> <span class="pre">bounds_hi]</span></code> so the smoothed curve cannot
+leave the volume. Short paths (&lt;4 points) are padded before the fit.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.line_mask_from_path">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">line_mask_from_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path_zyx_float</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#ureter_segmentation.line_mask_from_path" title="Link to this definition">¶</a></dt>
+<dd><p>Rasterize a float <code class="docutils literal notranslate"><span class="pre">(z,</span> <span class="pre">y,</span> <span class="pre">x)</span></code> path to a 1-voxel-wide binary line mask of <em>shape</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.edt_tube_mm">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">edt_tube_mm</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">line_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spacing_xyz_mm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radius_mm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#ureter_segmentation.edt_tube_mm" title="Link to this definition">¶</a></dt>
+<dd><p>Dilate a line mask into a tube of physical <em>radius_mm</em> using a spacing-aware EDT.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ureter_segmentation.segment_ureter">
+<span class="sig-prename descclassname"><span class="pre">ureter_segmentation.</span></span><span class="sig-name descname"><span class="pre">segment_ureter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pet_suv</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">kidney_r</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">kidney_l</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">bladder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">body</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../nvitk/types/index.html#nvitk.types.Image" title="nvitk.types.Image"><span class="pre">nvitk.types.Image</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">radius_mm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">6.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">w_pet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">5.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_fill_sigma_vox</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">suv_fill_blend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.05</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spline_s</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis_x</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis_z</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">-1</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#ureter_segmentation.segment_ureter" title="Link to this definition">¶</a></dt>
+<dd><p>Build bilateral ureter exclusion masks from kidney + bladder segmentations
+and the registered SUV map.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><ul class="simple">
+<li><p><strong>mask_ureter</strong> (<em>Image</em>) – Binary mask (uint8) in the PET SUV grid.</p></li>
+<li><p><strong>paths</strong> (<em>dict {“R”: array, “L”: array}</em>) – Raw MCP voxel paths.</p></li>
+<li><p><strong>paths_sp</strong> (<em>dict {“R”: array, “L”: array}</em>) – B-spline-smoothed paths.</p></li>
+<li><p><em>Design notes</em></p></li>
+<li><p><em>————</em></p></li>
+<li><p><em>* Starting points (kidney pelvis concavity) are unchanged from v1.</em></p></li>
+<li><p><strong>* Ending points are now **ipsilateral**</strong> (<em>each ureter routes to the</em>) – superior corner of the bladder on the same lateral side as its kidney.
+This avoids the artificial convergence at a single mid-bladder point
+that caused both paths to merge and deviate from the true anatomy.</p></li>
+<li><p><em>* The cost volume uses only SUV (gap-filled) plus soft anatomical priors.</em> – CT barriers are omitted: at whole-body resolution the ureter is not
+visible on CT, and hard bone/air penalties deflected the MCP onto
+incorrect routes running along fascial planes far from the true path.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="../nvitk/index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">API Reference</a><ul>
+      <li>Previous: <a href="../3_run_analysis/index.html" title="previous chapter">3_run_analysis</a></li>
+      <li>Next: <a href="../1_build_manual_table/index.html" title="next chapter">1_build_manual_table</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../_sources/autoapi/ureter_segmentation/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

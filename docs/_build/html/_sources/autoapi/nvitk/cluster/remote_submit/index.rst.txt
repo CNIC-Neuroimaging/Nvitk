@@ -1,0 +1,37 @@
+nvitk.cluster.remote_submit
+===========================
+
+.. py:module:: nvitk.cluster.remote_submit
+
+.. autoapi-nested-parse::
+
+   Optional SSH helper to run an emitted SGE bash script on a login node.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.remote_submit.run_sge_script_ssh
+   nvitk.cluster.remote_submit.run_sge_script_ssh_capture
+
+
+Module Contents
+---------------
+
+.. py:function:: run_sge_script_ssh(host: str, user: str, password: str, script_path: pathlib.Path | str, *, local_script_path: pathlib.Path | None = None, port: int = 22, timeout: float | None = None) -> bool
+
+   Execute ``bash <script>`` on *host* via Paramiko. Returns True on exit 0.
+
+
+.. py:function:: run_sge_script_ssh_capture(host: str, user: str, password: str, script_path: pathlib.Path | str, *, local_script_path: pathlib.Path | None = None, port: int = 22, connect_timeout: float | None = None) -> tuple[int, str, str]
+
+   Execute ``bash <script>`` on the cluster; return ``(exit_code, stdout, stderr)``.
+
+   *connect_timeout* applies only to the SSH handshake. The remote ``bash`` run
+   blocks until the script exits; there is no read timeout while the script runs
+   (large cohort submissions may take many minutes).
+
+

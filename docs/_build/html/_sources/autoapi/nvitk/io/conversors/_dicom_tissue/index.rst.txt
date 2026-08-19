@@ -1,0 +1,35 @@
+nvitk.io.conversors._dicom_tissue
+=================================
+
+.. py:module:: nvitk.io.conversors._dicom_tissue
+
+.. autoapi-nested-parse::
+
+   Tissue-segmentation DICOM private tags → numpy volumes.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors._dicom_tissue.is_tissue_segmentation
+   nvitk.io.conversors._dicom_tissue.extract_tissue_segmentation_data
+
+
+Module Contents
+---------------
+
+.. py:function:: is_tissue_segmentation(ds: Any) -> bool
+
+   Return True when a DICOM dataset stores a TISSUE private segmentation mask.
+
+
+.. py:function:: extract_tissue_segmentation_data(ds: Any)
+
+   Extract segmentation data from TISSUE DICOM private tags.
+
+   :returns: (segmentation_array, affine_matrix, shape_info) or (None, None, None)
+
+

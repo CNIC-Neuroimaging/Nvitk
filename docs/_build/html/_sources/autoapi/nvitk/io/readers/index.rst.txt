@@ -1,0 +1,92 @@
+nvitk.io.readers
+================
+
+.. py:module:: nvitk.io.readers
+
+.. autoapi-nested-parse::
+
+   Low-level readers by format (also invoked via :mod:`nvitk.io.imageio`).
+
+   Prefer :func:`nvitk.io.imread` unless you need a specific reader directly.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/io/readers/dicom/index
+   /autoapi/nvitk/io/readers/mha/index
+   /autoapi/nvitk/io/readers/nd2/index
+   /autoapi/nvitk/io/readers/nifti/index
+   /autoapi/nvitk/io/readers/pil/index
+   /autoapi/nvitk/io/readers/tiff/index
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.readers.read_dicom
+   nvitk.io.readers.read_mha
+   nvitk.io.readers.read_nd2
+   nvitk.io.readers.nifti_metadata_json_path
+   nvitk.io.readers.read_nifti
+   nvitk.io.readers.read_pil
+   nvitk.io.readers.read_tiff
+
+
+Package Contents
+----------------
+
+.. py:function:: read_dicom(path: str, *, axes: str | None = None, series_number: str | None = None, series_uid: str | None = None, series_index: int | None = None, return_all_series: bool = False, include_private_tags: bool = False, force_ras: bool = False, revert_scaling: bool = False, rescale_type: str = 'DV', tmp_dir=None, **_: Any)
+
+   Read a DICOM file, directory, or archive using the shared conversion stack (see *load_dicom_series*).
+
+   Parameters mirror the loader: series selection, optional private tags, RAS orientation, and
+   rescaling. Returns one ``(data, metadata)`` pair or a list when ``return_all_series=True``.
+
+
+.. py:function:: read_mha(path: str, *, axes: str | None = None, **_: Any)
+
+   Load MetaImage volume as numpy array with ``axes``, ``affine``, spacing, and origin metadata.
+
+
+.. py:function:: read_nd2(path: str, *, axes: str | None = None, **_: Any)
+
+   Load ND2 to array with inferred axis labels (e.g. ``TCZYX``) and shape metadata.
+
+
+.. py:function:: nifti_metadata_json_path(nifti_file: str | pathlib.Path) -> pathlib.Path
+
+   Sibling path ``<stem>.json`` for a ``.nii`` / ``.nii.gz`` file (the JSON need not exist).
+
+
+.. py:function:: read_nifti(path: str, *, axes: str | None = None, metadata_json: str | pathlib.Path | None = None, **_: Any)
+
+   Load a NIfTI file or the first ``.nii`` / ``.nii.gz`` in a directory via nibabel.
+
+   Populates ``axes``, ``shape``, ``affine``, ``orientation`` (when derivable), voxel sizes,
+   and merges a sibling JSON sidecar if present (or *metadata_json* when given). NIfTI header
+   extension payloads that decode as JSON are merged without overwriting core spatial keys.
+   Optional *axes* reorders the array and updates metadata.
+
+   :returns: Voxel array and metadata dict for :class:`~nvitk.types.image.Image` construction.
+   :rtype: tuple[numpy.ndarray, dict]
+
+
+.. py:function:: read_pil(path: str, *, axes: str | None = None, **_: Any)
+
+   Load image file as array and metadata (``mode``, ``axes``, ``shape``).
+
+
+.. py:function:: read_tiff(path: str, *, axes: str | None = None, **_: Any)
+
+   Load a TIFF stack; returns ``(data, metadata)`` with ``axes``, ``shape``, and optional resolutions.
+
+   *axes* may reorder via :func:`~nvitk.io._common.reorder_axes` when provided.
+
+

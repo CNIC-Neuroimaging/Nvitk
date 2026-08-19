@@ -1,0 +1,99 @@
+nvitk.cluster.sge_json
+======================
+
+.. py:module:: nvitk.cluster.sge_json
+
+.. autoapi-nested-parse::
+
+   Load optional repo-local ``.nvitk/sge.json`` and merge overlays onto Python defaults.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.sge_json._find_repo_root
+   nvitk.cluster.sge_json.sge_json_path
+   nvitk.cluster.sge_json.load_sge_document
+   nvitk.cluster.sge_json.paths_section
+   nvitk.cluster.sge_json.resolve_nvitk_src_dir
+   nvitk.cluster.sge_json.gui_sge_job_root
+   nvitk.cluster.sge_json.resolve_nvitk_container
+   nvitk.cluster.sge_json.defaults_section
+   nvitk.cluster.sge_json.pipeline_section
+   nvitk.cluster.sge_json.merged_pipeline_flat
+   nvitk.cluster.sge_json._p
+   nvitk.cluster.sge_json.resolve_log_err_dirs
+   nvitk.cluster.sge_json.merge_cluster_host_aliases
+
+
+Module Contents
+---------------
+
+.. py:function:: _find_repo_root() -> pathlib.Path | None
+
+   Ascend from this file until ``pyproject.toml`` + ``src/nvitk`` exist.
+
+
+.. py:function:: sge_json_path() -> pathlib.Path | None
+
+   Locate ``.nvitk/sge.json`` (repo, cwd, ``NVITK_HOME``, or ``NVITK_SGE_JSON``).
+
+
+.. py:function:: load_sge_document() -> dict[str, Any]
+
+   Return parsed ``sge.json`` or empty dict if missing / invalid.
+
+
+.. py:function:: paths_section() -> dict[str, Any]
+
+   The ``paths`` block of ``sge.json`` (empty dict if absent).
+
+
+.. py:function:: resolve_nvitk_src_dir(*, fallback: pathlib.Path | None = None) -> pathlib.Path
+
+   Cluster/host nvitk source tree from ``paths.nvitk_src_dir`` in ``sge.json``.
+
+
+.. py:function:: gui_sge_job_root() -> str
+
+   Default remote staging root for GUI SGE jobs (``paths.gui_sge_job_root``).
+
+
+.. py:function:: resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: pathlib.Path | None = None) -> pathlib.Path
+
+   Cluster nvitk Singularity image from pipeline override, ``sge.json``, or container registry.
+
+
+.. py:function:: defaults_section() -> dict[str, Any]
+
+   The ``defaults`` block of ``sge.json`` (empty dict if absent).
+
+
+.. py:function:: pipeline_section(pipeline_id: str) -> dict[str, Any]
+
+   The ``pipelines[pipeline_id]`` block of ``sge.json`` (empty dict if absent).
+
+
+.. py:function:: merged_pipeline_flat(pipeline_id: str) -> dict[str, Any]
+
+   ``defaults`` shallow-updated by ``pipelines[pipeline_id]``.
+
+
+.. py:function:: _p(path_like: Any) -> pathlib.Path
+
+   Coerce a string/Path-like value to a user-expanded :class:`Path`.
+
+
+.. py:function:: resolve_log_err_dirs(*, paths: Mapping[str, Any], pipe: Mapping[str, Any], fallback_log: pathlib.Path, fallback_err: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]
+
+   Resolve SGE log/err dirs: explicit paths, or ``sge_*_root`` + optional ``*_subdir``.
+
+
+.. py:function:: merge_cluster_host_aliases(base: dict[str, str], paths: Mapping[str, Any], pipe: Mapping[str, Any]) -> dict[str, str]
+
+   Merge ``cluster_host_aliases`` maps from *paths* then *pipe* on top of *base* (later sources win).
+
+

@@ -1,0 +1,361 @@
+nvitk.core
+==========
+
+.. py:module:: nvitk.core
+
+.. autoapi-nested-parse::
+
+   Public core API: NumPy/CuPy backend switching, array helpers, and proxy setup.
+
+   Typical GPU-aware code::
+
+       from nvitk.core import setup, get_current_backend
+       setup(globals())
+
+       def f(x):
+           return np.asarray(x)  # np follows active backend after setup
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/core/array/index
+   /autoapi/nvitk/core/backend/index
+   /autoapi/nvitk/core/click_backend/index
+   /autoapi/nvitk/core/config/index
+   /autoapi/nvitk/core/exceptions/index
+   /autoapi/nvitk/core/logger/index
+   /autoapi/nvitk/core/patterns/index
+   /autoapi/nvitk/core/proxy/index
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.core.BackendModules
+   nvitk.core.using
+   nvitk.core.BackendProxy
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.core.as_backend_array
+   nvitk.core.ensure_same_backend
+   nvitk.core.is_cupy_array
+   nvitk.core.is_numpy_array
+   nvitk.core.to_cupy
+   nvitk.core.to_numpy
+   nvitk.core.available_backends
+   nvitk.core.get_array_module
+   nvitk.core.get_backend_modules
+   nvitk.core.get_current_backend
+   nvitk.core.get_global_backend
+   nvitk.core.get_ops
+   nvitk.core.is_cupy_installed
+   nvitk.core.is_gpu_available
+   nvitk.core.register_module_for_backend_updates
+   nvitk.core.set_default_backend
+   nvitk.core.set_global_backend
+   nvitk.core.setup
+   nvitk.core.synchronize
+   nvitk.core.using_backend
+   nvitk.core.get_backend_proxy
+   nvitk.core.setup_backend_proxy
+
+
+Package Contents
+----------------
+
+.. py:function:: as_backend_array(arr: Any, backend: str | None = None, copy: bool = False, strict: bool = False) -> Any
+
+   Convert *arr* to NumPy or CuPy using :func:`~nvitk.core.backend.get_current_backend` when *backend* is None.
+
+   :param arr: Any array-like or CuPy/NumPy array.
+   :param backend: ``numpy``/``cpu``/``np`` or ``cupy``/``gpu``/``cp``; default follows current context.
+   :param copy: Force a copy on conversion.
+   :param strict: For CuPy: raise :class:`~nvitk.core.exceptions.BackendUnavailableError` if CuPy missing.
+
+   :raises ValueError: Unknown *backend* string.
+
+
+.. py:function:: ensure_same_backend(*arrays: Any, backend: str | None = None) -> tuple[Any, Ellipsis]
+
+   Apply :func:`as_backend_array` to each input with the same *backend* (or current).
+
+
+.. py:function:: is_cupy_array(arr: Any) -> bool
+
+   True if *arr* is a ``cupy.ndarray``.
+
+
+.. py:function:: is_numpy_array(arr: Any) -> bool
+
+   True if *arr* is a ``numpy.ndarray``.
+
+
+.. py:function:: to_cupy(arr: Any, copy: bool = False, strict: bool = False)
+
+   Move *arr* to CuPy, or return NumPy array if *strict* is False and CuPy is unavailable.
+
+   :param strict: If True, raise :class:`~nvitk.core.exceptions.BackendUnavailableError` when CuPy cannot load.
+
+
+.. py:function:: to_numpy(arr: Any, copy: bool = False) -> numpy.ndarray
+
+   Materialize *arr* on CPU as ``numpy.ndarray`` (``get()`` for CuPy).
+
+
+.. py:class:: BackendModules
+
+   Triple of ``(xp, scipy, ndi)`` for the resolved backend name.
+
+
+   .. py:attribute:: xp
+      :type:  Any
+
+
+   .. py:attribute:: scipy
+      :type:  Any
+
+
+   .. py:attribute:: ndi
+      :type:  Any
+
+
+.. py:function:: available_backends() -> tuple[BackendName, Ellipsis]
+
+   Tuple of backend names usable on this machine (always includes ``numpy``).
+
+
+.. py:function:: get_array_module(array: Any) -> Any
+
+   Return ``cupy`` or ``numpy`` depending on *array*'s type.
+
+
+.. py:function:: get_backend_modules(name: str | None = None, allow_fallback: bool = True) -> BackendModules
+
+   Return :class:`BackendModules` for *name* or :func:`get_current_backend`.
+
+   :param name: Optional explicit backend; default is current context.
+   :param allow_fallback: Passed to :func:`_resolve_backend` when *name* is given.
+
+
+.. py:function:: get_current_backend() -> BackendName
+
+   Active backend for this context (thread/async aware via :class:`contextvars.ContextVar`).
+
+
+.. py:function:: get_global_backend() -> BackendName
+
+   Process-wide default backend (updated by :func:`set_global_backend`).
+
+
+.. py:function:: get_ops(name: str | None = None, allow_fallback: bool = True) -> tuple[Any, Any, Any]
+
+   Return ``(xp, scipy, ndi)`` tuple for *name* or current backend.
+
+
+.. py:function:: is_cupy_installed() -> bool
+
+   True if the ``cupy`` package imported (does not guarantee a usable GPU).
+
+
+.. py:function:: is_gpu_available() -> bool
+
+   True if CuPy is installed and a CUDA device is visible.
+
+
+.. py:function:: register_module_for_backend_updates(module_name: str, module_globals: dict[str, Any] | None = None) -> None
+
+   Register *module_name* so backend switches refresh its ``np``/``scipy``/``ndi`` globals.
+
+   Typically used together with :func:`setup_backend_proxy` via :func:`setup`.
+
+
+.. py:function:: set_default_backend(name: str, allow_fallback: bool = True) -> BackendName
+
+   Alias for :func:`set_global_backend` (default ``allow_fallback=True`` for CLI use).
+
+
+.. py:function:: set_global_backend(name: str, allow_fallback: bool = False) -> BackendName
+
+   Set the default backend for new code and refresh registered module proxies.
+
+   :param name: ``numpy`` or ``cupy`` (aliases accepted).
+   :param allow_fallback: If True and CuPy is unavailable, use NumPy instead of raising.
+
+   :returns: The resolved backend actually in effect.
+   :rtype: BackendName
+
+
+.. py:function:: setup(module_globals: dict[str, Any], module_name: str | None = None)
+
+   One-call setup: :func:`~nvitk.core.proxy.setup_backend_proxy` + :func:`register_module_for_backend_updates`.
+
+   :param module_globals: Pass ``globals()`` from the calling module.
+   :param module_name: Defaults to ``module_globals['__name__']``.
+
+   :returns: The proxy bound to *module_globals*.
+   :rtype: BackendProxy
+
+
+.. py:function:: synchronize() -> None
+
+   If current backend is CuPy, synchronize the default CUDA stream (no-op otherwise).
+
+
+.. py:class:: using(backend_name: str, allow_fallback: bool = True)
+
+   Context manager for scoped backend switching (updates :class:`contextvars.ContextVar`).
+
+   .. rubric:: Examples
+
+   .. code-block:: python
+
+       with using("cupy"):
+           x = np.array([1])  # CuPy array module
+
+
+   .. py:attribute:: backend_name
+
+
+   .. py:attribute:: allow_fallback
+      :value: True
+
+
+
+   .. py:attribute:: _token
+      :type:  object | None
+      :value: None
+
+
+
+   .. py:method:: __enter__() -> using
+
+      Switch the context-local backend and refresh proxied module globals.
+
+
+
+   .. py:method:: __exit__(exc_type, exc_val, exc_tb) -> None
+
+      Restore the previous backend on block exit.
+
+
+
+   .. py:method:: __repr__() -> str
+
+      Developer-friendly representation echoing the requested backend.
+
+
+
+.. py:function:: using_backend(name: str, allow_fallback: bool = True) -> Iterator[BackendName]
+
+   Context manager: temporarily set :func:`get_current_backend` to *name* (generator style).
+
+   Prefer :class:`using` for the attribute-style API; this is the lower-level API.
+
+
+.. py:class:: BackendProxy(module_name: str)
+
+   Lazily bind ``np``, ``scipy``, ``ndi`` in a module's ``globals()`` to the active backend.
+
+   On :meth:`refresh_globals`, inserts either NumPy/SciPy or CuPy/cupyx equivalents.
+   Unknown attribute access forwards to the active array module (``proxy.np``).
+
+
+   .. py:attribute:: module_name
+
+
+   .. py:attribute:: _cached_backend
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:attribute:: _cached_modules
+      :type:  tuple[Any, Any, Any] | None
+      :value: None
+
+
+
+   .. py:attribute:: _module_globals
+      :type:  dict[str, Any] | None
+      :value: None
+
+
+
+   .. py:method:: _resolve_modules() -> tuple[Any, Any, Any]
+
+      Return the ``(array, scipy, ndimage)`` triple for the active backend, cached per backend.
+
+
+
+   .. py:method:: bind_globals(module_globals: dict[str, Any]) -> None
+
+      Store *module_globals* and populate ``np``/``scipy``/``ndi`` keys.
+
+
+
+   .. py:method:: invalidate() -> None
+
+      Drop cached backend tuple so the next access re-reads :func:`~nvitk.core.backend.get_current_backend`.
+
+
+
+   .. py:method:: refresh_globals() -> None
+
+      Write current ``(np, scipy, ndi)`` triple into bound module globals.
+
+
+
+   .. py:property:: np
+      :type: Any
+
+
+      Active array module — NumPy on the CPU backend, CuPy on the GPU backend.
+
+
+   .. py:property:: scipy
+      :type: Any
+
+
+      Active SciPy module — ``scipy`` or ``cupyx.scipy``.
+
+
+   .. py:property:: ndi
+      :type: Any
+
+
+      Active n-d image module — ``scipy.ndimage`` or ``cupyx.scipy.ndimage``.
+
+
+   .. py:method:: __getattr__(name: str) -> Any
+
+      Forward any unknown attribute to the active array module (so ``proxy.zeros`` works).
+
+
+
+.. py:function:: get_backend_proxy(module_name: str | None = None) -> BackendProxy
+
+   Return (or create) the :class:`BackendProxy` keyed by *module_name*.
+
+   If *module_name* is omitted, uses the caller's ``__name__`` via the stack.
+
+
+.. py:function:: setup_backend_proxy(module_globals: dict[str, Any], module_name: str | None = None) -> BackendProxy
+
+   Bind *module_globals* to a proxy for this package (typically ``setup_backend_proxy(globals())``).
+
+   :returns: The proxy instance; call :meth:`BackendProxy.refresh_globals` after backend changes (normally automatic).
+   :rtype: BackendProxy
+
+

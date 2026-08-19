@@ -1,0 +1,206 @@
+nvitk.gui.panels.statmodels.report
+==================================
+
+.. py:module:: nvitk.gui.panels.statmodels.report
+
+.. autoapi-nested-parse::
+
+   Model info panel — stat chips over tabbed tables.
+
+   Description
+   -----------
+   Replaces the monospace summary dump with something you can read at a glance and act on: a strip of
+   stat chips (n, groups, convergence, AIC/BIC/LLF) over tabs holding real tables. The coefficient table
+   sorts numerically, right-aligns its numbers, shades p-values by significance, and copies as TSV.
+
+   The classic fixed-width report is still there, verbatim, in the **Raw** tab — nothing that used to be
+   visible has been taken away.
+
+   Mediation results reuse the same shell: the tabs become Paths / By level / Raw, and a warning banner
+   carries the engine's caveat (pooled OLS, skipped levels, non-converged draws).
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.report.ResultTableModel
+   nvitk.gui.panels.statmodels.report.ResultTableView
+   nvitk.gui.panels.statmodels.report.ModelReportPanel
+
+
+Module Contents
+---------------
+
+.. py:class:: ResultTableModel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtCore.QAbstractTableModel`
+
+
+   Read-only model over a results frame, with numeric sorting and p-value shading.
+
+   Numbers are shown with ``%.4g`` and right-aligned; the raw float is exposed under
+   :data:`SORT_ROLE` so a proxy sorts ``1e-135`` below ``0.04`` instead of alphabetically.
+
+
+   .. py:attribute:: SORT_ROLE
+
+
+   .. py:attribute:: _df
+
+
+   .. py:attribute:: _headers
+      :type:  list[str]
+      :value: []
+
+
+
+   .. py:method:: set_frame(df: pandas.DataFrame | None, *, headers: Mapping[str, str] | None = None) -> None
+
+      Show *df*, optionally renaming columns for display via *headers*.
+
+
+
+   .. py:method:: frame() -> pandas.DataFrame
+
+      The frame currently displayed.
+
+
+
+   .. py:method:: rowCount(parent: qtpy.QtCore.QModelIndex = QModelIndex()) -> int
+
+      Number of rows.
+
+
+
+   .. py:method:: columnCount(parent: qtpy.QtCore.QModelIndex = QModelIndex()) -> int
+
+      Number of columns.
+
+
+
+   .. py:method:: data(index: qtpy.QtCore.QModelIndex, role: int = Qt.DisplayRole) -> Any
+
+      Formatted text, alignment, significance shading and the numeric sort key.
+
+
+
+   .. py:method:: headerData(section: int, orientation: int, role: int = Qt.DisplayRole) -> Any
+
+      Column names (possibly renamed for display) and 1-based row numbers.
+
+
+
+.. py:class:: ResultTableView(parent: qtpy.QtWidgets.QWidget | None = None, *, copy_button: bool = True)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   A sortable results table with a Copy-as-TSV button and ``Ctrl+C`` on the selection.
+
+
+   .. py:attribute:: _model
+
+
+   .. py:attribute:: _proxy
+
+
+   .. py:attribute:: _table
+
+
+   .. py:method:: set_frame(df: pandas.DataFrame | None, *, headers: Mapping[str, str] | None = None) -> None
+
+      Display *df*.
+
+
+
+   .. py:method:: copy_all() -> None
+
+      Put the whole table on the clipboard as TSV.
+
+
+
+   .. py:method:: copy_selection() -> None
+
+      Put the selected cells on the clipboard as TSV, falling back to the whole table.
+
+
+
+.. py:class:: ModelReportPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QGroupBox`
+
+
+   Model info: a chip strip over Summary / Coefficients / Random effects / Raw tabs.
+
+   Both :meth:`set_mixedlm` and :meth:`set_mediation` rebuild the same shell, so switching between
+   analysis types does not leave a stale tab behind.
+
+
+   .. py:attribute:: _chip_row
+
+
+   .. py:attribute:: _banner
+
+
+   .. py:attribute:: _tabs
+
+
+   .. py:attribute:: _placeholder
+
+
+   .. py:method:: clear() -> None
+
+      Drop every chip and tab, showing the placeholder.
+
+
+
+   .. py:method:: _set_chips(chips: Sequence[tuple[str, str, str | None]]) -> None
+
+      Replace the chip strip with ``(title, value, accent)`` triples.
+
+
+
+   .. py:method:: _set_banner(message: str) -> None
+
+      Show *message* as a warning banner, or hide the banner when blank.
+
+
+
+   .. py:method:: _add_text_tab(title: str, text: str) -> None
+
+      Append a read-only monospace tab.
+
+
+
+   .. py:method:: _add_table_tab(title: str, frame: pandas.DataFrame, *, headers: Mapping[str, str] | None = None) -> None
+
+      Append a sortable table tab.
+
+
+
+   .. py:method:: set_mixedlm(info: dict[str, Any], *, raw_text: str, note: str = '') -> None
+
+      Render a :func:`~nvitk.stats.mixedlm.mixedlm_info_dict` bundle.
+
+      :param raw_text: The classic report, shown verbatim in the Raw tab.
+      :type raw_text: str
+      :param note: Extra context for the banner, e.g. the dropped-incomplete-rows note.
+      :type note: str
+
+
+
+   .. py:method:: set_mediation(bundle: Mapping[str, Any], *, raw_text: str) -> None
+
+      Render a :func:`~nvitk.stats.mediation.run_mediation` bundle.
+
+
+
+   .. py:method:: set_message(message: str) -> None
+
+      Show a single informational message in place of a result.
+
+
+

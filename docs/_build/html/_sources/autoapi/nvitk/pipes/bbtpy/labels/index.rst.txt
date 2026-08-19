@@ -1,0 +1,248 @@
+nvitk.pipes.bbtpy.labels
+========================
+
+.. py:module:: nvitk.pipes.bbtpy.labels
+
+.. autoapi-nested-parse::
+
+   eICAB Circle-of-Willis integers → black-blood arterial label table (local copy; no qvtpy import).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.labels.EICAB_BACKGROUND
+   nvitk.pipes.bbtpy.labels.EICAB_LICA
+   nvitk.pipes.bbtpy.labels.EICAB_RICA
+   nvitk.pipes.bbtpy.labels.EICAB_BASILAR
+   nvitk.pipes.bbtpy.labels.EICAB_ACOMM
+   nvitk.pipes.bbtpy.labels.EICAB_LACA
+   nvitk.pipes.bbtpy.labels.EICAB_RACA
+   nvitk.pipes.bbtpy.labels.EICAB_LMCA
+   nvitk.pipes.bbtpy.labels.EICAB_RMCA
+   nvitk.pipes.bbtpy.labels.EICAB_LPCOMM
+   nvitk.pipes.bbtpy.labels.EICAB_RPCOMM
+   nvitk.pipes.bbtpy.labels.EICAB_LPCA_P1
+   nvitk.pipes.bbtpy.labels.EICAB_RPCA_P1
+   nvitk.pipes.bbtpy.labels.EICAB_LPCA_P2
+   nvitk.pipes.bbtpy.labels.EICAB_RPCA_P2
+   nvitk.pipes.bbtpy.labels.EICAB_LSCA
+   nvitk.pipes.bbtpy.labels.EICAB_RSCA
+   nvitk.pipes.bbtpy.labels.EICAB_LACHA
+   nvitk.pipes.bbtpy.labels.EICAB_RACHA
+   nvitk.pipes.bbtpy.labels.BB_BACKGROUND
+   nvitk.pipes.bbtpy.labels.BB_LICA
+   nvitk.pipes.bbtpy.labels.BB_RICA
+   nvitk.pipes.bbtpy.labels.BB_BASILAR
+   nvitk.pipes.bbtpy.labels.BB_LACA
+   nvitk.pipes.bbtpy.labels.BB_RACA
+   nvitk.pipes.bbtpy.labels.BB_LMCA
+   nvitk.pipes.bbtpy.labels.BB_RMCA
+   nvitk.pipes.bbtpy.labels.BB_LPCA
+   nvitk.pipes.bbtpy.labels.BB_RPCA
+   nvitk.pipes.bbtpy.labels.BB_LPCOMM
+   nvitk.pipes.bbtpy.labels.BB_RPCOMM
+   nvitk.pipes.bbtpy.labels.BB_ACOMM
+   nvitk.pipes.bbtpy.labels.BB_ARTERIAL_ID_TO_NAME
+   nvitk.pipes.bbtpy.labels.BB_ARTERIAL_LABEL_IDS
+   nvitk.pipes.bbtpy.labels.BB_ICA_IDS
+   nvitk.pipes.bbtpy.labels.EICAB_TO_BB_LABEL
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.labels.relabel_eicab_to_bb
+   nvitk.pipes.bbtpy.labels.bb_vessel_name
+
+
+Module Contents
+---------------
+
+.. py:data:: EICAB_BACKGROUND
+   :type:  int
+   :value: 0
+
+
+.. py:data:: EICAB_LICA
+   :type:  int
+   :value: 1
+
+
+.. py:data:: EICAB_RICA
+   :type:  int
+   :value: 2
+
+
+.. py:data:: EICAB_BASILAR
+   :type:  int
+   :value: 3
+
+
+.. py:data:: EICAB_ACOMM
+   :type:  int
+   :value: 4
+
+
+.. py:data:: EICAB_LACA
+   :type:  int
+   :value: 5
+
+
+.. py:data:: EICAB_RACA
+   :type:  int
+   :value: 6
+
+
+.. py:data:: EICAB_LMCA
+   :type:  int
+   :value: 7
+
+
+.. py:data:: EICAB_RMCA
+   :type:  int
+   :value: 8
+
+
+.. py:data:: EICAB_LPCOMM
+   :type:  int
+   :value: 9
+
+
+.. py:data:: EICAB_RPCOMM
+   :type:  int
+   :value: 10
+
+
+.. py:data:: EICAB_LPCA_P1
+   :type:  int
+   :value: 11
+
+
+.. py:data:: EICAB_RPCA_P1
+   :type:  int
+   :value: 12
+
+
+.. py:data:: EICAB_LPCA_P2
+   :type:  int
+   :value: 13
+
+
+.. py:data:: EICAB_RPCA_P2
+   :type:  int
+   :value: 14
+
+
+.. py:data:: EICAB_LSCA
+   :type:  int
+   :value: 15
+
+
+.. py:data:: EICAB_RSCA
+   :type:  int
+   :value: 16
+
+
+.. py:data:: EICAB_LACHA
+   :type:  int
+   :value: 17
+
+
+.. py:data:: EICAB_RACHA
+   :type:  int
+   :value: 18
+
+
+.. py:data:: BB_BACKGROUND
+   :type:  int
+   :value: 0
+
+
+.. py:data:: BB_LICA
+   :type:  int
+   :value: 1
+
+
+.. py:data:: BB_RICA
+   :type:  int
+   :value: 2
+
+
+.. py:data:: BB_BASILAR
+   :type:  int
+   :value: 3
+
+
+.. py:data:: BB_LACA
+   :type:  int
+   :value: 4
+
+
+.. py:data:: BB_RACA
+   :type:  int
+   :value: 5
+
+
+.. py:data:: BB_LMCA
+   :type:  int
+   :value: 6
+
+
+.. py:data:: BB_RMCA
+   :type:  int
+   :value: 7
+
+
+.. py:data:: BB_LPCA
+   :type:  int
+   :value: 8
+
+
+.. py:data:: BB_RPCA
+   :type:  int
+   :value: 9
+
+
+.. py:data:: BB_LPCOMM
+   :type:  int
+   :value: 10
+
+
+.. py:data:: BB_RPCOMM
+   :type:  int
+   :value: 11
+
+
+.. py:data:: BB_ACOMM
+   :type:  int
+   :value: 12
+
+
+.. py:data:: BB_ARTERIAL_ID_TO_NAME
+   :type:  dict[int, str]
+
+.. py:data:: BB_ARTERIAL_LABEL_IDS
+   :type:  frozenset[int]
+
+.. py:data:: BB_ICA_IDS
+   :type:  frozenset[int]
+
+.. py:data:: EICAB_TO_BB_LABEL
+   :type:  dict[int, int]
+
+.. py:function:: relabel_eicab_to_bb(volume: numpy.ndarray) -> numpy.ndarray
+
+   Map eICAB labels to black-blood arterial ids (merge PCA; drop SCA/AChA).
+
+
+.. py:function:: bb_vessel_name(label_id: int) -> str
+
+   Return the arterial name for a black-blood label id, or ``LABEL_<id>``.
+
+

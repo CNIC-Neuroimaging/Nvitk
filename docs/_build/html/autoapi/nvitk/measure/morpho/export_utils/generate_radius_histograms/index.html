@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.measure.morpho.export_utils.generate_radius_histograms &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.measure.morpho.export_utils.summaries" href="../summaries/index.html" />
+    <link rel="prev" title="nvitk.measure.morpho.export_utils.generate_pvsm" href="../generate_pvsm/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.measure.morpho.export_utils.generate_radius_histograms">
+<span id="nvitk-measure-morpho-export-utils-generate-radius-histograms"></span><h1>nvitk.measure.morpho.export_utils.generate_radius_histograms<a class="headerlink" href="#module-nvitk.measure.morpho.export_utils.generate_radius_histograms" title="Link to this heading">¶</a></h1>
+<p>Generate one vessel-radius histogram per centerline sheet in a metrics workbook.</p>
+<p>All sheets are processed together so the x-axis range, bin edges, and y-axis
+limit are shared — making histograms directly comparable across vessels.</p>
+<p>Edit the CONFIG block below for direct single-case runs; the batch runner
+patches EXCEL_PATH and OUTPUT_DIR at runtime.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.EXCEL_PATH" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.EXCEL_PATH"><code class="xref py py-obj docutils literal notranslate"><span class="pre">EXCEL_PATH</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.OUTPUT_DIR" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.OUTPUT_DIR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">OUTPUT_DIR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.RADIUS_COLUMN" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.RADIUS_COLUMN"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RADIUS_COLUMN</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.BIN_METHOD" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.BIN_METHOD"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BIN_METHOD</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.MIN_BINS" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.MIN_BINS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MIN_BINS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.MAX_BINS" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.MAX_BINS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MAX_BINS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.FIG_DPI" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.FIG_DPI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FIG_DPI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.SUMMARY_SHEET_RE" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.SUMMARY_SHEET_RE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SUMMARY_SHEET_RE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.safe_filename" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.safe_filename"><code class="xref py py-obj docutils literal notranslate"><span class="pre">safe_filename</span></code></a>(→ str)</p></td>
+<td><p>Sanitize <em>name</em> into a filesystem-safe filename fragment (falls back to <code class="docutils literal notranslate"><span class="pre">&quot;centerline&quot;</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.vessel_sheet_sort_key" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.vessel_sheet_sort_key"><code class="xref py py-obj docutils literal notranslate"><span class="pre">vessel_sheet_sort_key</span></code></a>(→ Tuple[int, str])</p></td>
+<td><p>Sort key ordering workbook sheets by their leading label id, then name.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.is_candidate_centerline_sheet" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.is_candidate_centerline_sheet"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_candidate_centerline_sheet</span></code></a>(→ bool)</p></td>
+<td><p>True for a per-centerline data sheet (not a numbered summary sheet) that has the radius column.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.read_radius_sheets" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.read_radius_sheets"><code class="xref py py-obj docutils literal notranslate"><span class="pre">read_radius_sheets</span></code></a>(→ Dict[str, numpy.ndarray])</p></td>
+<td><p>Read the positive, finite radius values from every per-centerline sheet of the morphometrics workbook.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.choose_bin_edges" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.choose_bin_edges"><code class="xref py py-obj docutils literal notranslate"><span class="pre">choose_bin_edges</span></code></a>(→ numpy.ndarray)</p></td>
+<td><p>Pick shared histogram bin edges across all vessels, so every sheet's plot uses the same x-axis.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.histogram_plan" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.histogram_plan"><code class="xref py py-obj docutils literal notranslate"><span class="pre">histogram_plan</span></code></a>(→ Tuple[int, pandas.DataFrame])</p></td>
+<td><p>Compute each sheet's histogram counts/summary stats and the shared peak count (for a common y-axis).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.plot_histograms" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.plot_histograms"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_histograms</span></code></a>(→ None)</p></td>
+<td><p>Render and save one radius-histogram PNG per sheet, using shared x/y limits across all plots.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.run" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.run"><code class="xref py py-obj docutils literal notranslate"><span class="pre">run</span></code></a>(→ None)</p></td>
+<td><p>Full pipeline: read radii from the morphometrics workbook, plot per-vessel histograms, and write a CSV summary.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.main" title="nvitk.measure.morpho.export_utils.generate_radius_histograms.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>(→ None)</p></td>
+<td><p>Direct-run entry point: run the histogram pipeline per the module-level <code class="docutils literal notranslate"><span class="pre">EXCEL_PATH</span></code>/<code class="docutils literal notranslate"><span class="pre">OUTPUT_DIR</span></code> config.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.EXCEL_PATH">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">EXCEL_PATH</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.EXCEL_PATH" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.OUTPUT_DIR">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">OUTPUT_DIR</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.OUTPUT_DIR" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.RADIUS_COLUMN">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">RADIUS_COLUMN</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'radius_mm'</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.RADIUS_COLUMN" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.BIN_METHOD">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">BIN_METHOD</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'fd'</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.BIN_METHOD" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.MIN_BINS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">MIN_BINS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">12</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.MIN_BINS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.MAX_BINS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">MAX_BINS</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">80</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.MAX_BINS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.FIG_DPI">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">FIG_DPI</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">180</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.FIG_DPI" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.SUMMARY_SHEET_RE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">SUMMARY_SHEET_RE</span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.SUMMARY_SHEET_RE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.safe_filename">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">safe_filename</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.safe_filename" title="Link to this definition">¶</a></dt>
+<dd><p>Sanitize <em>name</em> into a filesystem-safe filename fragment (falls back to <code class="docutils literal notranslate"><span class="pre">&quot;centerline&quot;</span></code>).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.vessel_sheet_sort_key">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">vessel_sheet_sort_key</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sheet_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.vessel_sheet_sort_key" title="Link to this definition">¶</a></dt>
+<dd><p>Sort key ordering workbook sheets by their leading label id, then name.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.is_candidate_centerline_sheet">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">is_candidate_centerline_sheet</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sheet_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radius_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.is_candidate_centerline_sheet" title="Link to this definition">¶</a></dt>
+<dd><p>True for a per-centerline data sheet (not a numbered summary sheet) that has the radius column.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.read_radius_sheets">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">read_radius_sheets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">excel_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radius_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.read_radius_sheets" title="Link to this definition">¶</a></dt>
+<dd><p>Read the positive, finite radius values from every per-centerline sheet of the morphometrics workbook.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.choose_bin_edges">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">choose_bin_edges</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">all_radii</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bin_method</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_bins</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_bins</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.choose_bin_edges" title="Link to this definition">¶</a></dt>
+<dd><p>Pick shared histogram bin edges across all vessels, so every sheet’s plot uses the same x-axis.</p>
+<p><em>bin_method</em> is either an explicit bin count or a NumPy binning strategy
+name (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;auto&quot;</span></code>); the resulting bin count is clamped to
+<code class="docutils literal notranslate"><span class="pre">[min_bins,</span> <span class="pre">max_bins]</span></code>. A small padding is added around the data range.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.histogram_plan">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">histogram_plan</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radii_by_sheet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bin_edges</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pandas.DataFrame</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.histogram_plan" title="Link to this definition">¶</a></dt>
+<dd><p>Compute each sheet’s histogram counts/summary stats and the shared peak count (for a common y-axis).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.plot_histograms">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">plot_histograms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radii_by_sheet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bin_edges</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y_max</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.plot_histograms" title="Link to this definition">¶</a></dt>
+<dd><p>Render and save one radius-histogram PNG per sheet, using shared x/y limits across all plots.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.run">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">excel_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.run" title="Link to this definition">¶</a></dt>
+<dd><p>Full pipeline: read radii from the morphometrics workbook, plot per-vessel histograms, and write a CSV summary.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.measure.morpho.export_utils.generate_radius_histograms.main">
+<span class="sig-prename descclassname"><span class="pre">nvitk.measure.morpho.export_utils.generate_radius_histograms.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.measure.morpho.export_utils.generate_radius_histograms.main" title="Link to this definition">¶</a></dt>
+<dd><p>Direct-run entry point: run the histogram pipeline per the module-level <code class="docutils literal notranslate"><span class="pre">EXCEL_PATH</span></code>/<code class="docutils literal notranslate"><span class="pre">OUTPUT_DIR</span></code> config.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.measure</a><ul>
+  <li><a href="../../index.html">nvitk.measure.morpho</a><ul>
+  <li><a href="../index.html">nvitk.measure.morpho.export_utils</a><ul>
+      <li>Previous: <a href="../generate_pvsm/index.html" title="previous chapter">nvitk.measure.morpho.export_utils.generate_pvsm</a></li>
+      <li>Next: <a href="../summaries/index.html" title="next chapter">nvitk.measure.morpho.export_utils.summaries</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/measure/morpho/export_utils/generate_radius_histograms/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

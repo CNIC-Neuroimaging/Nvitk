@@ -1,0 +1,199 @@
+nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess
+=================================================
+
+.. py:module:: nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess
+
+.. autoapi-nested-parse::
+
+   CT-PET v5 stage 2 (per-subject): post-process TotalSegmentator outputs.
+
+   Port of :code:`BioImaging/src/pesa_fat/ct_pet/__post_process.py` /
+   :code:`2_post_processing.py`.
+
+   Produces the following per-subject label files under
+   ``RESULTS/<batch>/res_post_processing_ct/<SUBJECT>/CT/``::
+
+       MO.nii.gz       L4=1, L3=2                                          (bone narrow)
+       FAT.nii.gz      GRASA_V=1, GRASA_SC=2                               (cleaned fat)
+       BODY.nii.gz     BODY=1                                              (trunk+ext)
+       ORGANS.nii.gz   HIGADO=1, BAZO=2, PANCREAS=3
+       MUSCLES.nii.gz  CUADRICEPS_L=1, CUADRICEPS_R=2, PARAVERTEBRAL_L=3,
+                       PARAVERTEBRAL_R=4, DELTOIDES_L=5, DELTOIDES_R=6,
+                       TRAPECIOS=7                                         (v5 hemisphere-split)
+
+   v5 changes
+   ----------
+   * Muscles are kept hemisphere-split; there is no L+R merging. Deltoid
+     (bilateral TS label 9) is split into L/R via
+     :func:`nvitk.segmentation.hemisphere.split_lr_by_cc`. Trapezius (14)
+     remains a single bilateral mask.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.URETER_EXCLUSION_BY_MASK
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._LABEL_MAPS_BY_MASK_FILE
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.log
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._BN_ERODE
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._BODY_DILATATION
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._ORGANS_TO_REMOVE
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._ORGANS_TO_DILATE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._spacing
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._process_bladder
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._vertebra_narrow
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._vertebrae_l3_l4_labels
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._muscles_keep_biggest_cc_per_label
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.limit_vertebrae_axial
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.build_mo_mask
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.build_body_mask
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._remove_extremities
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._remove_organs
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._ureter_exclusion_label_ids
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._apply_ureter_exclusion
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.build_fat_mask
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.build_organs_mask
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.build_muscles_mask
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._imread
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess._process
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.run_subject
+   nvitk.pipes.pesa_fat.ct_pet_v5.stage2_postprocess.main
+
+
+Module Contents
+---------------
+
+.. py:data:: URETER_EXCLUSION_BY_MASK
+   :type:  dict[str, tuple[str, Ellipsis]]
+
+.. py:data:: _LABEL_MAPS_BY_MASK_FILE
+   :type:  dict[str, dict[str, int]]
+
+.. py:data:: log
+
+.. py:data:: _BN_ERODE
+   :value: 5
+
+
+.. py:data:: _BODY_DILATATION
+   :value: 5
+
+
+.. py:data:: _ORGANS_TO_REMOVE
+   :value: ('kidney_right', 'kidney_left', 'small_bowel', 'colon', 'urinary_bladder', 'liver')
+
+
+.. py:data:: _ORGANS_TO_DILATE
+
+.. py:function:: _spacing(img: nvitk.types.Image) -> tuple[float, float, float]
+
+   *img*'s (x, y, z) voxel spacing from its ``spacing`` metadata, or from ``x_res``/``y_res``/
+   ``z_res`` as a fallback (defaulting to 1.0).
+
+
+.. py:function:: _process_bladder(bladder: nvitk.types.Image, pet: nvitk.types.Image) -> nvitk.types.Image
+
+   Expand the urinary bladder seeds along high-uptake PET signal.
+
+
+.. py:function:: _vertebra_narrow(vertebra: nvitk.types.Image, radius: int = _BN_ERODE) -> nvitk.types.Image
+
+   Return the bone narrow (eroded biggest CC) of a vertebra mask.
+
+
+.. py:function:: _vertebrae_l3_l4_labels(total: nvitk.types.Image) -> Any
+
+   Labeled L3/L4 mask on the ``total`` grid (values = :data:`MO_LABELS`).
+
+
+.. py:function:: _muscles_keep_biggest_cc_per_label(base_img: nvitk.types.Image, out_labels: nvitk.types.Image) -> nvitk.types.Image
+
+   Per muscle label ID, keep only the largest 3D connected component.
+
+
+.. py:function:: limit_vertebrae_axial(img: np.ndarray, vertebrae: np.ndarray, min_vertebrae: int, max_vertebrae: int, ref_space: nvitk.types.Image) -> np.ndarray
+
+   Keep only axial slices between the L3 and L4 extent (biggest CC each).
+
+
+.. py:function:: build_mo_mask(total: nvitk.types.Image) -> nvitk.types.Image
+
+   L3/L4 bone narrow.
+
+
+.. py:function:: build_body_mask(body: nvitk.types.Image) -> nvitk.types.Image
+
+   Merge body_trunc + body_extremities into a single BODY=1 mask.
+
+
+.. py:function:: _remove_extremities(fat: Any, body: nvitk.types.Image) -> Any
+
+   Zero out voxels inside body_extremities (id=2).
+
+
+.. py:function:: _remove_organs(fat_arr: Any, total: nvitk.types.Image, pet: nvitk.types.Image) -> Any
+
+   Remove organ interiors (incl. dilated kidneys, PET-guided bladder) from fat.
+
+
+.. py:function:: _ureter_exclusion_label_ids(mask_file: str) -> list[int]
+
+   Resolve configured label names for *mask_file* to integer IDs.
+
+
+.. py:function:: _apply_ureter_exclusion(label_img: np.ndarray, ureter_mask: np.ndarray, *, mask_file: str) -> None
+
+   Zero configured label(s) in *label_img* where *ureter_mask* is positive.
+
+
+.. py:function:: build_fat_mask(tissue_types: nvitk.types.Image, total: nvitk.types.Image, body: nvitk.types.Image, pet: nvitk.types.Image, exclude_ureter: bool = True, output_dir: pathlib.Path | None = None) -> nvitk.types.Image
+
+   Visceral/subcutaneous fat clean-up (extremities, organs, PET-guided bladder).
+
+
+.. py:function:: build_organs_mask(total: nvitk.types.Image) -> nvitk.types.Image
+
+   ORGANS.nii.gz: HIGADO=1, BAZO=2, PANCREAS=3.
+
+
+.. py:function:: build_muscles_mask(total: nvitk.types.Image, muscles: nvitk.types.Image) -> nvitk.types.Image
+
+   Hemisphere-preserving MUSCLES.nii.gz.
+
+   * ``quadriceps_femoris_left/right`` (TS IDs 1,2) -> CUADRICEPS_L/R
+   * ``autochthon_left/right`` (TS IDs 86,87 in 'total')   -> PARAVERTEBRAL_L/R
+   * ``deltoid`` (TS ID 9)                           -> split L/R via CC
+   * ``trapezius`` (TS ID 14)                        -> bilateral TRAPECIOS
+
+
+.. py:function:: _imread(path_parent: pathlib.Path, stem: str, axes: str = 'XYZ') -> nvitk.types.Image
+
+   Read the ``<stem>.nii[.gz]`` file resolved under *path_parent* as an Image with axis order *axes*.
+
+
+.. py:function:: _process(segmentation_dir: pathlib.Path, nifti_dir: pathlib.Path, output_dir: pathlib.Path, exclude_ureter: bool = True) -> None
+
+   Build and write the MO/FAT/FAT_BATCH/BODY/ORGANS/MUSCLES post-processed masks for one subject
+   from its TotalSegmentator outputs and PET volume.
+
+
+.. py:function:: run_subject(subject: str, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, *, backend: str = 'cupy', exclude_ureter: bool = True) -> pathlib.Path
+
+   Build the five stage-2 outputs for a single subject.
+
+
+.. py:function:: main(batch: str, subject: str, dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, backend: str, log_level: str, exclude_ureter: bool = True) -> None
+
+   CT-PET v5 stage 2 worker (single subject).
+
+

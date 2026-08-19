@@ -1,0 +1,102 @@
+nvitk.pipes.qvtpy.util.eicab.eicab_masks
+========================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.eicab.eicab_masks
+
+.. autoapi-nested-parse::
+
+   Resolve eICAB Circle-of-Willis (CW) or whole-brain (WB) multilabel masks.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.EicabMaskKind
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.CENTERLINES_MASK_PP_NIFTI
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.EicabMaskResolution
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.eicab_pp_path
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.find_tof_resampled_volume
+   nvitk.pipes.qvtpy.util.eicab.eicab_masks.resolve_eicab_mask
+
+
+Module Contents
+---------------
+
+.. py:data:: EicabMaskKind
+
+.. py:data:: CENTERLINES_MASK_PP_NIFTI
+   :value: 'centerlines_mask_pp.nii.gz'
+
+
+.. py:class:: EicabMaskResolution
+
+   Result of :func:`resolve_eicab_mask`.
+
+
+   .. py:attribute:: path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: requested
+      :type:  EicabMaskKind
+
+
+   .. py:attribute:: used
+      :type:  EicabMaskKind
+
+
+   .. py:attribute:: fallback
+      :type:  bool
+
+
+   .. py:attribute:: fallback_reason
+      :type:  str | None
+
+
+   .. py:attribute:: postprocessed
+      :type:  bool
+      :value: False
+
+
+
+   .. py:attribute:: original_path
+      :type:  pathlib.Path | None
+      :value: None
+
+
+
+.. py:function:: eicab_pp_path(original: pathlib.Path) -> pathlib.Path
+
+   Post-processed mask path: ``foo_eICAB_CW.nii.gz`` → ``foo_eICAB_CW_pp.nii.gz``.
+
+
+.. py:function:: find_tof_resampled_volume(eicab_output_dir: pathlib.Path) -> pathlib.Path | None
+
+   Return path to eICAB ``TOF_resampled`` NIfTI under *eicab_output_dir*, or None.
+
+
+.. py:function:: resolve_eicab_mask(eicab_dir: pathlib.Path, preference: EicabMaskKind = 'cw', *, prefer_postprocessed: bool = True) -> EicabMaskResolution
+
+   Return the eICAB label NIfTI path for *preference*, with warn-and-fallback.
+
+   When *prefer_postprocessed* is True and a ``*_pp`` sibling of the base mask exists,
+   that post-processed file is returned (``postprocessed=True``).
+
+

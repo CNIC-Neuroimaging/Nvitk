@@ -1,0 +1,423 @@
+nvitk.morphology.centerline_siphon
+==================================
+
+.. py:module:: nvitk.morphology.centerline_siphon
+
+.. autoapi-nested-parse::
+
+   Topological siphon correction for ICA-like vessel centerlines.
+
+   Problem
+   -------
+   The cavernous siphon of the Internal Carotid Artery (ICA) often closes into a
+   donut on TOF MRA: two adjacent passes of the vessel merge into a single mask
+   because of partial-volume effects, turning the topological hook
+   (:math:`\beta_1 = 0`) into a torus (:math:`\beta_1 \ge 1`). A standard
+   skeleton-diameter centerline then **shortcuts across the false bridge** instead
+   of following the true curl.
+
+   Strategy (purely topological — no orientation prior)
+   ----------------------------------------------------
+   For each vessel label requested via ``correction_ids`` we:
+
+   1. Skeletonize the binary mask.
+   2. Build a 26-connected ``networkx`` graph of the skeleton voxels.
+   3. Find every cycle (``minimum_cycle_basis``).
+   4. Split each cycle into **two arcs** at *anchors*:
+
+      - degree-3+ junctions on the cycle (real branch points where stem / tip
+        attach to the loop), or
+      - one junction + the max-Z cycle voxel, or
+      - the min-Z and max-Z cycle voxels (pure floating loop, no junctions).
+
+   5. Drop the **shorter arc** from the skeleton — the bridge is by anatomical
+      definition a short chord across the donut hole; the curl is the long way
+      around. The original mask is **not** modified.
+   6. Trace the centerline as the unique shortest path between the **min-Z leaf**
+      (skull-base entry) and the **max-Z leaf** (ICA bifurcation tip) of the
+      pruned skeleton.
+
+   Outputs
+   -------
+   :func:`correct_siphon_centerlines` produces, in the input TOF image space:
+
+   - ``corrected_centerlines.nii.gz`` — per-label centerline mask (siphon-
+     corrected for ``correction_ids``, default ``compute_centerlines`` for the
+     rest).
+   - ``removed_bridges.nii.gz`` — per-label bridge-voxel mask (same label IDs as
+     ``correction_ids``).
+   - ``vessel_mask_corrected.nii.gz`` — full multilabel mask with ICAs replaced by
+     post-clean Otsu lumen masks (same label IDs).
+   - ``seg_ica_repaired.nii.gz`` — ICA-only multilabel volume (post-clean labels).
+   - ``cleared_bridge_region.nii.gz`` — voxels removed by post-CL mask cleaning.
+   - ``siphon_correction.json`` — per-label metadata (cycles, arc lengths,
+     endpoints, warnings).
+   - ``qc_siphon_correction.png`` — 3D matplotlib QC figure (when
+     ``save_qc=True``).
+   - ``qc_ica_overview.png`` — axial Otsu → erode → repaired+CL montage (when
+     ``save_qc=True``).
+
+   At the end of each run a notebook-style summary table (voxels, β₁, cycles,
+   centerline length, repair action) is printed to stdout.
+
+   Backend
+   -------
+   The module is registered for backend-proxy switching (``np`` / ``scipy`` /
+   ``ndi`` track ``nvitk.core.backend`` between NumPy and CuPy). CPU-only
+   libraries (``scikit-image`` skeleton, ``networkx``, ``marching_cubes``,
+   ``matplotlib``) are fed via :func:`to_numpy`; their results are routed back to
+   the active backend via :func:`as_backend_array`.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.morphology.centerline_siphon.GenusReport
+   nvitk.morphology.centerline_siphon.SiphonCorrectionResult
+   nvitk.morphology.centerline_siphon.RepairLog
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.centerline_siphon.compute_mask_genus
+   nvitk.morphology.centerline_siphon.ica_otsu_mask
+   nvitk.morphology.centerline_siphon.repair_ica_donut_3d
+   nvitk.morphology.centerline_siphon.prune_skeleton_shortest_arc
+   nvitk.morphology.centerline_siphon.compute_corrected_centerline
+   nvitk.morphology.centerline_siphon.clean_mask_geodesic_cl
+   nvitk.morphology.centerline_siphon.recover_lumen_thickness
+   nvitk.morphology.centerline_siphon.recover_lumen_thickness_symmetric
+   nvitk.morphology.centerline_siphon.refine_mask_lumen_gaps
+   nvitk.morphology.centerline_siphon.clean_ica_mask_after_centerline
+   nvitk.morphology.centerline_siphon.correct_siphon_centerlines
+
+
+Module Contents
+---------------
+
+.. py:class:: GenusReport
+
+   Topology summary for a 3D binary mask.
+
+   For a tube-like vessel we assume :math:`\beta_2 \approx 0` (no internal
+   cavities), so :math:`\beta_1 = \beta_0 - \chi`. ``suspect`` flips True
+   iff :math:`\beta_1 > 0` (a topological handle / donut).
+
+
+   .. py:attribute:: label_name
+      :type:  str
+
+
+   .. py:attribute:: n_voxels
+      :type:  int
+
+
+   .. py:attribute:: n_components
+      :type:  int
+
+
+   .. py:attribute:: euler_chi
+      :type:  float
+
+
+   .. py:attribute:: beta0
+      :type:  int
+
+
+   .. py:attribute:: beta1
+      :type:  int
+
+
+   .. py:attribute:: skeleton_cycles
+      :type:  int
+
+
+   .. py:attribute:: skeleton_voxels
+      :type:  int
+
+
+   .. py:attribute:: beta1_raw
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: max_cycle_len
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: noise_filtered
+      :type:  bool
+      :value: False
+
+
+
+   .. py:property:: suspect
+      :type: bool
+
+
+      True when the mask has ≥1 topological loop (``beta1 > 0``) — a likely siphon donut.
+
+
+   .. py:method:: to_dict() -> dict
+
+      JSON-serializable dict of the genus report (adds the derived ``suspect`` flag).
+
+
+
+.. py:class:: SiphonCorrectionResult
+
+   Per-label outcome of :func:`correct_siphon_centerlines`.
+
+
+   .. py:attribute:: label
+      :type:  int
+
+
+   .. py:attribute:: label_name
+      :type:  str
+
+
+   .. py:attribute:: n_skel
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_skel_pruned
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_bridge
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_pts
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: base
+      :type:  tuple[int, int, int] | None
+      :value: None
+
+
+
+   .. py:attribute:: tip
+      :type:  tuple[int, int, int] | None
+      :value: None
+
+
+
+   .. py:attribute:: cycles
+      :type:  list[dict]
+      :value: []
+
+
+
+   .. py:attribute:: bridge_voxels
+      :type:  list[tuple[int, int, int]]
+      :value: []
+
+
+
+   .. py:attribute:: warning
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:method:: to_dict() -> dict
+
+      JSON-serializable summary of the per-label siphon-correction outcome.
+
+
+
+.. py:function:: compute_mask_genus(mask: Any, *, label_name: str = 'vessel', connectivity: int = 1, min_cycle_len: int = MIN_SIPHON_CYCLE_LEN, filter_small_handles: bool = True) -> GenusReport
+
+   Return :class:`GenusReport` for *mask* (3D bool / int, NumPy or CuPy).
+
+   When ``filter_small_handles`` is True, β₁ is zeroed if the largest skeleton
+   cycle is shorter than ``min_cycle_len`` (noise handle vs cavernous siphon).
+
+   The mask is moved to NumPy internally (``skimage`` / ``networkx`` are CPU
+   only). The returned report is JSON-serialisable via ``report.to_dict()``.
+
+
+.. py:class:: RepairLog
+
+   Per-ICA donut-repair summary.
+
+
+   .. py:attribute:: label_name
+      :type:  str
+
+
+   .. py:attribute:: action
+      :type:  str
+      :value: 'none'
+
+
+
+   .. py:attribute:: n_voxels_before
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: n_voxels_after
+      :type:  int
+      :value: 0
+
+
+
+   .. py:attribute:: before
+      :type:  GenusReport | None
+      :value: None
+
+
+
+   .. py:attribute:: after
+      :type:  GenusReport | None
+      :value: None
+
+
+
+   .. py:attribute:: iters
+      :type:  list[dict]
+      :value: []
+
+
+
+   .. py:attribute:: notes
+      :type:  list[str]
+      :value: []
+
+
+
+   .. py:method:: to_dict() -> dict
+
+      JSON-serializable summary of the siphon cleanup (before/after genus, actions).
+
+
+
+.. py:function:: ica_otsu_mask(wvi: Any, cl_mask: Any, lid: int, *, pad: int = CROP_PAD, min_cc_frac: float = MIN_COMPONENT_FRAC, barrier_r: int = CL_BARRIER_RADIUS, erode_iters: int = EROSION_ITERS) -> tuple[Any, Any, dict]
+
+   Per-ICA local Otsu on TOF inside the seed-CL bbox (+ erosion).
+
+   Returns eroded mask (for genus check / repair), pre-erode mask, and an info dict.
+
+
+.. py:function:: repair_ica_donut_3d(mask_bool: Any, seed_bool: Any, *, label_name: str, ckpt_dir: pathlib.Path | None = None, anchor: tuple[int, int, int] | None = None, max_iters: int | None = None, action_prefix: str = '') -> tuple[Any, RepairLog]
+
+   Optional 3D donut cut on an eroded ICA mask.
+
+   When ``anchor`` is set, the cut is centred on that voxel (e.g. bridge region)
+   instead of the max-Y cycle band. ``max_iters`` defaults to ``MAX_REPAIR_ITERS``.
+
+   When ``ckpt_dir`` is ``None`` no checkpoint files are written.
+
+
+.. py:function:: prune_skeleton_shortest_arc(mask: Any, *, label_name: str = 'vessel') -> tuple[Any, list[tuple[int, int, int]], dict]
+
+   Skeleton with each cycle's *shortest* arc removed (the false bridge).
+
+   Operates on a NumPy or CuPy mask; the returned skeleton is moved back to
+   the active backend via :func:`as_backend_array`.
+
+   :returns: * **sk_pruned** (*array (current backend, bool)*) -- Skeleton with bridge voxels deleted (mask itself is **not** modified).
+             * **bridge_voxels** (*list[(i, j, k)]*) -- Deleted voxel coordinates (union across cycles).
+             * **info** (*dict*) -- Per-cycle arc lengths, anchors, Y/Z ranges.
+
+
+.. py:function:: compute_corrected_centerline(mask: Any, *, label_name: str = 'vessel') -> tuple[Any, Any, dict]
+
+   Corrected centerline as ``min-Z leaf → max-Z leaf`` shortest path.
+
+   1. :func:`prune_skeleton_shortest_arc` removes false bridges.
+   2. ``base = min-Z degree-1 leaf``, ``tip = max-Z degree-1 leaf`` in the
+      pruned skeleton (fallback: extremal-Z over all nodes if no leaf).
+   3. ``networkx.shortest_path(G, base, tip)`` is unique on a tree, so the
+      centerline always terminates at the vessel's anatomical extremes
+      (skull-base entry and ICA bifurcation tip).
+
+   :returns: * **path** (*array (current backend, float32, shape (N, 3))*) -- Ordered voxel coords (i, j, k), base → tip.
+             * **sk_pruned** (*array (current backend, bool)*) -- Skeleton with bridge voxels removed.
+             * **info** (*dict*) -- Pruning + endpoint metadata.
+
+
+.. py:function:: clean_mask_geodesic_cl(roi: Any, centerline_path: Any, bridge_voxels: Sequence[tuple[int, int, int]], *, label_name: str = 'vessel', bridge_dilate_r: int = BRIDGE_DILATE_R) -> tuple[Any, dict]
+
+   Remove mask voxels on the bridge side of a geodesic CL vs bridge partition.
+
+
+.. py:function:: recover_lumen_thickness(mask: Any, ceiling_mask: Any, *, label_name: str = 'vessel', max_extra_iters: int | None = None, cl_seeds: np.ndarray | None = None, n_micro_steps: int | None = None) -> tuple[Any, dict]
+
+   Dilate *mask* toward *ceiling* with fractional shells; stop before β₁ > 0.
+
+
+.. py:function:: recover_lumen_thickness_symmetric(items: Sequence[dict[str, Any]]) -> tuple[dict[int, Any], dict[str, Any]]
+
+   Apply the same number of thickness micro-steps to all ICA masks in *items*.
+
+   Each entry: ``lid``, ``mask``, ``ceiling``, ``label_name``, optional ``cl_seeds``.
+   Uses the minimum safe step count across ICAs so hemispheres stay matched.
+
+
+.. py:function:: refine_mask_lumen_gaps(mask: Any, ceiling: Any, centerline_path: Any, *, label_name: str = 'vessel', close_iters: int = LUMEN_GAP_CLOSE_ITERS) -> Any
+
+   Reconnect lumen along the corrected CL and fill small internal gaps.
+
+
+.. py:function:: clean_ica_mask_after_centerline(repaired_mask: Any, prep_info: dict, centerline_path: Any, bridge_voxels: Sequence[tuple[int, int, int]], seed_bool: Any, *, label_name: str, clean_mask: bool = True, recover_lumen_thickness_flag: bool = True) -> tuple[Any, dict]
+
+   Post-centerline ICA mask cleaning: bridge cut, geodesic, thickness recovery.
+
+
+.. py:function:: correct_siphon_centerlines(tof: Any, vessel_mask: Any, *, correction_ids: Sequence[int] = (1, 2), out_dir: str | pathlib.Path | None = None, save_qc: bool = False, min_points: int = 3, clean_mask: bool = True, recover_lumen_thickness: bool = True) -> dict[str, Any]
+
+   End-to-end siphon centerline correction (matches ``eicab_reseg.ipynb``).
+
+   For each label in *correction_ids*, the notebook's pipeline:
+
+   1. Seed centerlines from input multilabel *vessel_mask*.
+   2. Per-ICA local Otsu on TOF inside the seed-CL bbox (+2-iter erosion).
+   3. Optional 3D donut cut when β₁ > 0 after erosion.
+   4. Topological bridge prune + ``min-Z → max-Z`` centerline on the
+      **repaired Otsu mask** (not the raw vessel label).
+
+   Labels outside *correction_ids* keep the default
+   :func:`~nvitk.morphology.centerline.compute_centerlines` on *vessel_mask*.
+   When *out_dir* is set, a merged ``vessel_mask_corrected.nii.gz`` replaces
+   each corrected ICA with its final Otsu lumen mask (eroded, or donut-cut
+   when needed); non-ICA labels are copied unchanged from *vessel_mask*.
+
+   :param tof: TOF MRA (``Image``, path, or array); drives Otsu. Spatial metadata (affine, zooms, axes)
+               is copied to all NIfTI outputs.
+   :param vessel_mask: Multilabel vessel mask on the same grid as *tof*.
+   :param correction_ids: Label IDs to siphon-correct (default ``(1, 2)`` = RICA/LICA).
+   :param out_dir: If set, writes centerlines, bridges, corrected vessel/ICA masks,
+                   ``siphon_correction.json``, and optionally QC figures.
+   :param save_qc: Save 3D QC and ICA overview figures; always prints the summary table.
+   :param min_points: Minimum centerline length (voxels) for inclusion.
+   :param clean_mask: Run post-centerline mask cleaning (bridge-anchored cut, geodesic, thickness).
+   :param recover_lumen_thickness: Dilate cleaned mask toward Otsu ceiling with a β₁ watchdog (default on).
+
+   :returns: ``centerlines``, ``bridges``, ``details``, rasterised masks, and
+             ``output_paths``.
+   :rtype: dict
+
+

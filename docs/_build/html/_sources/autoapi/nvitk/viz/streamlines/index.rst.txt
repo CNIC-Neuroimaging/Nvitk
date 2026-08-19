@@ -1,0 +1,185 @@
+nvitk.viz.streamlines
+=====================
+
+.. py:module:: nvitk.viz.streamlines
+
+.. autoapi-nested-parse::
+
+   Headless flow tracing: instantaneous streamlines and time-varying pathlines.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.viz.streamlines.IntegrationDirection
+   nvitk.viz.streamlines.SeedMode
+   nvitk.viz.streamlines.TraceMode
+   nvitk.viz.streamlines.ColorMetric
+   nvitk.viz.streamlines.PlaneSide
+   nvitk.viz.streamlines.StreamlineParams
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.viz.streamlines.FlowTraceParams
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.viz.streamlines.clip_polylines_to_roi
+   nvitk.viz.streamlines.stream_seed_cloud
+   nvitk.viz.streamlines.resample_polyline
+   nvitk.viz.streamlines.resample_polylines
+   nvitk.viz.streamlines.sample_vel_trilinear
+   nvitk.viz.streamlines.compute_streamlines
+   nvitk.viz.streamlines.compute_pathlines
+   nvitk.viz.streamlines.vertex_scalars_for_polylines
+   nvitk.viz.streamlines.streamline_mean_speeds
+
+
+Module Contents
+---------------
+
+.. py:data:: IntegrationDirection
+
+.. py:data:: SeedMode
+
+.. py:data:: TraceMode
+
+.. py:data:: ColorMetric
+
+.. py:data:: PlaneSide
+
+.. py:class:: FlowTraceParams
+
+   Parameters for mask-seeded streamlines or pathlines.
+
+
+   .. py:attribute:: n_seeds
+      :type:  int
+      :value: 64
+
+
+
+   .. py:attribute:: max_length
+      :type:  float
+      :value: 35.0
+
+
+
+   .. py:attribute:: stream_seed
+      :type:  int | None
+      :value: 42
+
+
+
+   .. py:attribute:: label_ids
+      :type:  tuple[int, Ellipsis] | None
+      :value: None
+
+
+
+   .. py:attribute:: trace_mode
+      :type:  TraceMode
+      :value: 'streamlines'
+
+
+
+   .. py:attribute:: integration_direction
+      :type:  IntegrationDirection
+      :value: 'forward'
+
+
+
+   .. py:attribute:: seed_mode
+      :type:  SeedMode
+      :value: 'planar'
+
+
+
+   .. py:attribute:: seed_plane_axis
+      :type:  int
+      :value: 2
+
+
+
+   .. py:attribute:: seed_plane_side
+      :type:  PlaneSide
+      :value: 'min'
+
+
+
+   .. py:attribute:: dt_seconds
+      :type:  float
+      :value: 1.0
+
+
+
+   .. py:attribute:: resample_paths
+      :type:  bool
+      :value: False
+
+
+
+   .. py:attribute:: resample_spacing_vox
+      :type:  float
+      :value: 0.5
+
+
+
+.. py:function:: clip_polylines_to_roi(polylines: Sequence[numpy.ndarray], mask: numpy.ndarray, *, label_ids: Sequence[int] | None = None) -> list[numpy.ndarray]
+
+   Clip each polyline in *polylines* to its longest contiguous run inside the mask ROI (dropping empties).
+
+
+.. py:function:: stream_seed_cloud(mask: numpy.ndarray, n_seeds: int, seed: int | None, *, label_ids: Sequence[int] | None = None, seed_mode: SeedMode = 'volume', seed_plane_axis: int = 2, seed_plane_side: PlaneSide = 'min') -> numpy.ndarray | None
+
+   Random subsample of mask voxel indices (N, 3) for trace seeds.
+
+
+.. py:function:: resample_polyline(poly: numpy.ndarray, *, spacing_vox: float) -> numpy.ndarray
+
+   Resample a polyline to approximately uniform arc-length spacing.
+
+
+.. py:function:: resample_polylines(polylines: Sequence[numpy.ndarray], *, spacing_vox: float) -> list[numpy.ndarray]
+
+   Apply :func:`resample_polyline` to every polyline with ≥2 points, dropping ``None``/too-short ones.
+
+
+.. py:function:: sample_vel_trilinear(frame: numpy.ndarray, pos: numpy.ndarray) -> numpy.ndarray
+
+   Trilinear sample of a (X, Y, Z, 3) velocity frame at fractional voxel position.
+
+
+.. py:function:: compute_streamlines(velocity_xyz: numpy.ndarray, mask: numpy.ndarray, params: FlowTraceParams) -> list[numpy.ndarray]
+
+   Instantaneous streamlines for one cardiac phase.
+
+
+.. py:function:: compute_pathlines(velocity_xyzt: numpy.ndarray, mask: numpy.ndarray, params: FlowTraceParams, *, time_start: int) -> list[numpy.ndarray]
+
+   Pathlines integrated forward through the time-varying velocity field.
+
+
+.. py:function:: vertex_scalars_for_polylines(polylines: Sequence[numpy.ndarray], *, velocity_xyz: numpy.ndarray | None = None, color_metric: ColorMetric = 'speed', dt_seconds: float = 1.0, trace_mode: TraceMode = 'streamlines') -> list[numpy.ndarray]
+
+   Per-vertex scalar values for coloring.
+
+
+.. py:function:: streamline_mean_speeds(polylines: Sequence[numpy.ndarray], velocity_xyz: numpy.ndarray) -> numpy.ndarray
+
+   Mean |v| (mm/s) along each polyline.
+
+
+.. py:data:: StreamlineParams
+

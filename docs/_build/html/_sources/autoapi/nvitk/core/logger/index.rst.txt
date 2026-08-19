@@ -1,0 +1,473 @@
+nvitk.core.logger
+=================
+
+.. py:module:: nvitk.core.logger
+
+.. autoapi-nested-parse::
+
+   Console and file logging for NVITK.
+
+   Uses ANSI escape codes (see :mod:`nvitk.util.colors`) for level colors on ``stderr``,
+   plain formatting on file handlers, and Rich :class:`~rich.progress.Progress` in terminals
+   only (disabled in Jupyter). The :class:`Logger` is a process-wide singleton.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.core.logger.T
+   nvitk.core.logger.get_ipython
+   nvitk.core.logger._ANSI_ESCAPE_RE
+   nvitk.core.logger._COHORT_STAGES
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.core.logger._AnsiLevelFormatter
+   nvitk.core.logger.Logger
+   nvitk.core.logger.PipelineRunTracker
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.core.logger.in_notebook
+   nvitk.core.logger._strip_ansi
+
+
+Module Contents
+---------------
+
+.. py:data:: T
+
+.. py:data:: get_ipython
+   :value: None
+
+
+.. py:function:: in_notebook() -> bool
+
+   Return True when running inside a Jupyter / IPython ZMQ kernel (no Rich progress).
+
+
+.. py:data:: _ANSI_ESCAPE_RE
+
+.. py:function:: _strip_ansi(text: str) -> str
+
+   Remove ANSI CSI color sequences from *text* (for the in-memory log buffer).
+
+
+.. py:class:: _AnsiLevelFormatter(fmt=None, datefmt=None, style='%', validate=True, *, defaults=None)
+
+   Bases: :py:obj:`logging.Formatter`
+
+
+   Format log lines as ``time | LEVEL | message`` with ANSI color on the level column only.
+
+
+   .. py:attribute:: _LEVEL_PREFIX
+
+
+   .. py:method:: format(record: logging.LogRecord) -> str
+
+      Render a record as ``HH:MM:SS | LEVEL | message`` with ANSI on the level column.
+
+
+
+.. py:class:: Logger(level: str = 'INFO', name: str = 'nvitk', start_progress: bool = False)
+
+   Singleton logger: stderr with ANSI level colors, optional file handlers, Rich progress in terminals.
+
+   **Levels:** ``NONE`` (disable console), ``INFO``, ``DEBUG``. Debug can optionally append
+   caller locals via :meth:`enable_debug_locals`.
+
+   **Console:** :class:`logging.StreamHandler` on ``stderr`` with :class:`_AnsiLevelFormatter`
+   (not Rich markup), so output is reliable in Jupyter and on HPC.
+
+   **Progress:** :class:`~rich.progress.Progress` on a shared :class:`~rich.console.Console`
+   when not in a notebook; otherwise disabled.
+
+   **Typical import**
+
+   .. code-block:: python
+
+       from nvitk.core.logger import Logger
+       logger = Logger(level="INFO")
+       logger.info("message")
+
+   .. rubric:: Examples
+
+   File logging and script setup use :meth:`add_file_handler` and :meth:`setup_script_logging`.
+
+
+   .. py:attribute:: _levels
+
+
+   .. py:attribute:: _name
+      :value: 'nvitk'
+
+
+
+   .. py:attribute:: _logger
+
+
+   .. py:attribute:: _file_handlers
+      :value: []
+
+
+
+   .. py:attribute:: _log_buffer
+      :type:  list[str]
+      :value: []
+
+
+
+   .. py:attribute:: _replaced_stream_handler
+      :type:  logging.StreamHandler | None
+      :value: None
+
+
+
+   .. py:attribute:: _rich_handler
+      :type:  rich.logging.RichHandler | None
+      :value: None
+
+
+
+   .. py:attribute:: _show_debug_locals
+      :value: False
+
+
+
+   .. py:method:: set_level(level: str = 'INFO') -> None
+
+      Replace console handlers with Null (``NONE``) or ANSI :class:`logging.StreamHandler`.
+
+      File handlers registered via :meth:`add_file_handler` are left unchanged.
+
+      :param level: ``'NONE'``, ``'INFO'``, or ``'DEBUG'``.
+
+
+
+   .. py:method:: get_level() -> str
+
+      Map the underlying logger level to ``'NONE'``, ``'INFO'``, or ``'DEBUG'``.
+
+      :returns: Current level label; unknown numeric levels fall back to ``'INFO'``.
+      :rtype: str
+
+
+
+   .. py:method:: add_file_handler(file_path: Union[str, pathlib.Path], level: str = 'INFO', format_string: Optional[str] = None, mode: str = 'a') -> logging.FileHandler
+
+      Append a :class:`logging.FileHandler` with plain (non-ANSI) formatting.
+
+      Parent directories are created automatically. The handler is tracked for
+      :meth:`remove_file_handlers`. Emits one :meth:`info` line to the console when added.
+
+      :param file_path: Destination ``.log`` or ``.err`` path.
+      :param level: Minimum record level for this handler (standard logging names).
+      :param format_string: If omitted, ``"%(asctime)s - %(name)s - %(levelname)s - %(message)s"``.
+      :param mode: File open mode, default append ``'a'``.
+
+      :returns: The attached handler instance.
+      :rtype: logging.FileHandler
+
+      .. rubric:: Examples
+
+      >>> logger = Logger()
+      >>> logger.add_file_handler("logs/app.log")
+      >>> logger.add_file_handler("logs/errors.log", level="ERROR")
+
+
+
+   .. py:method:: setup_script_logging(script_name: str, log_dir: Union[str, pathlib.Path] = 'logs', log_level: str = 'INFO', err_level: str = 'ERROR') -> tuple[logging.FileHandler, logging.FileHandler]
+
+      Create ``{script_name}.log`` (all messages ≥ *log_level*) and ``{script_name}.err`` (≥ *err_level*).
+
+      :param script_name: Base filename without extension.
+      :param log_dir: Directory for both files.
+      :param log_level: Threshold for the general log file.
+      :param err_level: Threshold for the error-only file.
+
+      :returns: ``(log_handler, err_handler)``.
+      :rtype: tuple[logging.FileHandler, logging.FileHandler]
+
+      .. rubric:: Examples
+
+      >>> logger = Logger()
+      >>> logger.setup_script_logging("pipeline")
+
+
+
+   .. py:method:: remove_file_handlers() -> None
+
+      Close and remove every handler added via :meth:`add_file_handler` (not console handlers).
+
+
+
+   .. py:method:: enable_debug_locals(enable: bool = True) -> None
+
+      When *enable* is True, attach a filter so DEBUG records append ``| LOCALS=...`` from the caller frame.
+
+      :param enable: Toggle the :class:`_DebugLocalsFilter` on the root logger.
+
+
+
+   .. py:class:: _DebugLocalsFilter(name='')
+
+      Bases: :py:obj:`logging.Filter`
+
+
+      Internal: extend DEBUG ``record.msg`` with ``f_locals`` of the direct caller.
+
+
+      .. py:method:: filter(record: logging.LogRecord) -> bool
+
+         Attach caller local variables to DEBUG records (opt-in verbose tracing).
+
+
+
+
+   .. py:method:: _swap_to_rich_handler() -> None
+
+      Replace the stderr StreamHandler with a RichHandler sharing the progress console.
+
+
+
+   .. py:method:: _swap_to_stream_handler() -> None
+
+      Restore the original stderr StreamHandler after progress ends.
+
+
+
+   .. py:method:: ensure_progress() -> None
+
+      Start Rich :class:`~rich.progress.Progress` if not already running (terminal only).
+
+
+
+   .. py:method:: stop_progress() -> None
+
+      Stop and clear the Rich progress display (no-op in notebooks).
+
+
+
+   .. py:method:: step(msg: str, *args, **kwargs) -> None
+
+      Emit an indented INFO line for a sub-step within a pipeline stage.
+
+
+
+   .. py:method:: progress(description: str, total: float) -> Optional[rich.progress.TaskID]
+
+      Add a Rich progress task (no-op in notebooks: logs a single INFO and returns None).
+
+      :param description: Task label shown in the progress bar.
+      :param total: Total units for completion (float for partial steps).
+
+      :returns: Task id for :meth:`update_progress`, or None if progress is disabled.
+      :rtype: TaskID or None
+
+
+
+   .. py:method:: update_progress(task_id: rich.progress.TaskID, advance: float = 1.0) -> None
+
+      Advance a Rich task created by :meth:`progress` (ignored if progress is disabled).
+
+
+
+   .. py:method:: debug(msg, *args, **kwargs)
+
+      Emit a DEBUG record (``%``-style formatting supported like :meth:`logging.Logger.debug`).
+
+
+
+   .. py:method:: info(msg, *args, **kwargs)
+
+      Emit an INFO record.
+
+
+
+   .. py:method:: warning(msg, *args, **kwargs)
+
+      Emit a WARNING record.
+
+
+
+   .. py:method:: error(msg, *args, **kwargs)
+
+      Emit an ERROR record.
+
+
+
+   .. py:method:: critical(msg, *args, **kwargs)
+
+      Emit a CRITICAL record.
+
+
+
+   .. py:method:: exception(msg, *args, **kwargs)
+
+      Emit an ERROR record with exception info (call inside ``except``).
+
+
+
+   .. py:method:: ok(msg, *args, **kwargs)
+
+      Emit at INFO level with green ANSI on the message body (level column stays INFO color).
+
+
+
+   .. py:method:: _append_log_line(level_name: str, msg: str) -> None
+
+      Strip ANSI and append one line to :attr:`_log_buffer` for testing or inspection.
+
+
+
+   .. py:method:: get_logger() -> logging.Logger
+
+      Return the underlying :class:`logging.Logger` (same *name* as passed to ``__init__``).
+
+
+
+   .. py:method:: reset(restart_progress: bool = True) -> None
+
+      Stop progress, clear buffers, remove file handlers, and restart Rich progress in terminals.
+
+      Intended for tests or subprocess isolation.
+
+
+
+   .. py:method:: __repr__() -> str
+
+      ``Logger(name=..., level=..., file_handlers=...)``.
+
+
+
+   .. py:method:: __str__() -> str
+
+      Same as :meth:`__repr__`.
+
+
+
+.. py:data:: _COHORT_STAGES
+
+.. py:class:: PipelineRunTracker
+
+   Step logging for multi-subject pipeline runs (no Rich progress bar).
+
+   Counts one step per cohort stage (e.g. XNAT download) plus one per
+   (subject, per-subject stage). Use :meth:`run_stage` to log begin/complete/fail.
+
+   .. rubric:: Examples
+
+   >>> log = Logger()
+   >>> with PipelineRunTracker(log, "black_blood", subjects, stages) as run:
+   ...     run.run_stage("(cohort)", "stage0_d", lambda: download_all())
+   ...     for subj in subjects:
+   ...         run.run_stage(subj, "stage1", lambda: reg(subj))
+
+
+   .. py:attribute:: logger
+      :type:  Logger
+
+
+   .. py:attribute:: pipeline
+      :type:  str
+
+
+   .. py:attribute:: subjects
+      :type:  list[str]
+
+
+   .. py:attribute:: stages
+      :type:  list[str]
+
+
+   .. py:attribute:: stage_labels
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: _per_subject_stages
+      :type:  list[str]
+
+
+   .. py:attribute:: _cohort_stages
+      :type:  list[str]
+
+
+   .. py:attribute:: _total
+      :type:  int
+
+
+   .. py:attribute:: _done
+      :type:  int
+      :value: 0
+
+
+
+   .. py:method:: __post_init__() -> None
+
+      Split stages into cohort-wide vs per-subject and precompute the total step count.
+
+
+
+   .. py:method:: _label(stage: str) -> str
+
+      Human-friendly label for *stage* (falls back to the raw stage id).
+
+
+
+   .. py:method:: __enter__() -> PipelineRunTracker
+
+      Log the run header (subjects, stage list) and start tracking.
+
+
+
+   .. py:method:: __exit__(exc_type, exc_val, exc_tb) -> bool
+
+      Log a success summary, or an abort line if the block raised.
+
+
+
+   .. py:method:: _tick(caption: str, *, ok: bool = True) -> None
+
+      Advance the completed-step counter and emit a ``[done/total]`` progress line.
+
+
+
+   .. py:method:: begin(subject: str, stage: str) -> None
+
+      Log start of a pipeline step.
+
+
+
+   .. py:method:: complete(subject: str, stage: str, detail: str = '') -> None
+
+      Mark a step complete and log ``[n/total]``.
+
+
+
+   .. py:method:: fail(subject: str, stage: str, exc: BaseException | str) -> None
+
+      Mark a step failed, log ``[n/total]``, and emit ERROR.
+
+
+
+   .. py:method:: run_stage(subject: str, stage: str, fn: Callable[[], T], *, detail: str | Callable[[T], str] | None = None, reraise: bool = False) -> T | None
+
+      Run *fn* with begin/complete logging; on exception call :meth:`fail`.
+
+      Returns the result of *fn*, or None if an exception was caught and
+      *reraise* is False.
+
+
+

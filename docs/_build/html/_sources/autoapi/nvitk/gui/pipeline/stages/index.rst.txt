@@ -1,0 +1,182 @@
+nvitk.gui.pipeline.stages
+=========================
+
+.. py:module:: nvitk.gui.pipeline.stages
+
+.. autoapi-nested-parse::
+
+   Pipeline stage metadata for the Napari GUI pipeline runner.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.stages.DOWNLOAD_STAGE_IDS
+   nvitk.gui.pipeline.stages.CONVERT_STAGE_IDS
+   nvitk.gui.pipeline.stages.PIPELINE_STAGE_DEFS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.stages.StageInputSpec
+   nvitk.gui.pipeline.stages.PipelineStageSpec
+   nvitk.gui.pipeline.stages.PipelineStageDef
+   nvitk.gui.pipeline.stages.StageInputBinding
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.stages.pipeline_def_for_script
+   nvitk.gui.pipeline.stages.visible_stage_inputs
+   nvitk.gui.pipeline.stages.resolve_stage_input_bindings
+   nvitk.gui.pipeline.stages.binding_requires_layer
+   nvitk.gui.pipeline.stages.input_label_for_key
+
+
+Module Contents
+---------------
+
+.. py:class:: StageInputSpec
+
+   One layer or on-disk input required by a pipeline stage.
+
+
+   .. py:attribute:: slot
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: optional
+      :type:  bool
+      :value: False
+
+
+
+   .. py:attribute:: from_stage
+      :type:  str | None
+      :value: None
+
+
+
+.. py:class:: PipelineStageSpec
+
+   One selectable stage in a GUI pipeline (id, display label, description, default on/off, and
+   required inputs).
+
+
+   .. py:attribute:: id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: default_enabled
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: inputs
+      :type:  tuple[StageInputSpec, Ellipsis]
+      :value: ()
+
+
+
+.. py:class:: PipelineStageDef
+
+   A whole GUI pipeline: its CLI command, display title, and ordered stage specs.
+
+
+   .. py:attribute:: cli_command
+      :type:  str
+
+
+   .. py:attribute:: title
+      :type:  str
+
+
+   .. py:attribute:: stages
+      :type:  tuple[PipelineStageSpec, Ellipsis]
+
+
+   .. py:attribute:: hidden_params
+      :type:  frozenset[str]
+
+
+.. py:class:: StageInputBinding
+
+   A user's chosen source (Napari layer or on-disk) for one stage input slot.
+
+
+   .. py:attribute:: stage_id
+      :type:  str
+
+
+   .. py:attribute:: input_name
+      :type:  str
+
+
+   .. py:attribute:: source
+      :type:  str
+
+
+   .. py:attribute:: layer_name
+      :type:  str | None
+      :value: None
+
+
+
+.. py:data:: DOWNLOAD_STAGE_IDS
+   :type:  frozenset[str]
+
+.. py:data:: CONVERT_STAGE_IDS
+   :type:  frozenset[str]
+
+.. py:data:: PIPELINE_STAGE_DEFS
+   :type:  dict[str, PipelineStageDef]
+
+.. py:function:: pipeline_def_for_script(script_name: str) -> PipelineStageDef | None
+
+   Look up the registered :class:`PipelineStageDef` for a CLI *script_name*, or ``None``.
+
+
+.. py:function:: visible_stage_inputs(stages: tuple[PipelineStageSpec, Ellipsis], enabled: dict[str, bool], stage_index: int) -> tuple[str, Ellipsis]
+
+   Return UI keys for inputs that still need a Napari layer selection.
+
+
+.. py:function:: resolve_stage_input_bindings(stages: tuple[PipelineStageSpec, Ellipsis], enabled: dict[str, bool], *, active_layer_name: str | None, layer_selections: dict[tuple[str, str], str | None]) -> list[StageInputBinding]
+
+   Resolve how each checked stage obtains its layer inputs.
+
+
+.. py:function:: binding_requires_layer(stages: tuple[PipelineStageSpec, Ellipsis], binding: StageInputBinding) -> bool
+
+   True when a layer dropdown must be filled before running.
+
+
+.. py:function:: input_label_for_key(stages: tuple[PipelineStageSpec, Ellipsis], key: str) -> str
+
+   Human-readable label for a stage input UI key.
+
+

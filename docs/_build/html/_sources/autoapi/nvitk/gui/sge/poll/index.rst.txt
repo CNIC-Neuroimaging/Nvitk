@@ -1,0 +1,107 @@
+nvitk.gui.sge.poll
+==================
+
+.. py:module:: nvitk.gui.sge.poll
+
+.. autoapi-nested-parse::
+
+   Poll cluster jobs via ``output/.done`` marker (SFTP).
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.sge.poll.SgeJobMonitor
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.sge.poll.read_done_marker
+   nvitk.gui.sge.poll.register_sge_monitor
+   nvitk.gui.sge.poll.shutdown_sge_monitor
+   nvitk.gui.sge.poll.store_pending_job
+   nvitk.gui.sge.poll.update_pending_job_status
+   nvitk.gui.sge.poll.resolve_session_import
+
+
+Module Contents
+---------------
+
+.. py:function:: read_done_marker(*, host: str, user: str, password: str, remote_job_root: str, port=22) -> nvitk.gui.sge.models.SgeDoneMarker | None
+
+   Return parsed ``output/.done`` when present, else ``None``.
+
+
+.. py:class:: SgeJobMonitor(parent: qtpy.QtCore.QObject | None = None, interval_ms: int = 5000)
+
+   Bases: :py:obj:`qtpy.QtCore.QObject`
+
+
+   Background timer that polls ``output/.done`` for tracked GUI jobs.
+
+
+   .. py:attribute:: job_finished
+
+
+   .. py:attribute:: job_failed
+
+
+   .. py:attribute:: _jobs
+      :type:  dict[str, nvitk.gui.sge.models.SgePendingJob]
+
+
+   .. py:attribute:: _timer
+
+
+   .. py:method:: track(job: nvitk.gui.sge.models.SgePendingJob) -> None
+
+      Start tracking *job* for completion, starting the poll timer if it's idle.
+
+
+
+   .. py:method:: pending_jobs() -> list[nvitk.gui.sge.models.SgePendingJob]
+
+      Currently tracked, not-yet-finished jobs.
+
+
+
+   .. py:method:: _poll() -> None
+
+      Check each tracked job's remote ``.done`` marker; emit ``job_finished``/``job_failed`` and
+      stop tracking any job that has completed, stopping the timer once none remain.
+
+
+
+.. py:function:: register_sge_monitor(app_state: dict[str, Any], *, on_finished=None, on_failed=None, parent: qtpy.QtCore.QObject | None = None) -> SgeJobMonitor
+
+   Create or return the shared :class:`SgeJobMonitor` stored in *app_state*.
+
+
+.. py:function:: shutdown_sge_monitor(app_state: dict[str, Any]) -> None
+
+   Stop polling and block auto-import after the Napari window closes.
+
+
+.. py:function:: store_pending_job(app_state: dict[str, Any], job: nvitk.gui.sge.models.SgePendingJob) -> None
+
+   Persist a serialized snapshot of *job* into ``app_state["sge_pending_jobs"]`` (replacing any
+   prior entry with the same job id) and remember the connection used, for session recovery.
+
+
+.. py:function:: update_pending_job_status(app_state: dict[str, Any], job_id: str, *, status: str, done_payload=None, local_download_dir=None) -> None
+
+   Update the stored status (and optionally done payload / local download dir) for the pending job
+   matching *job_id* in ``app_state["sge_pending_jobs"]``.
+
+
+.. py:function:: resolve_session_import(app_state: dict[str, Any], *, job_id=None) -> tuple[nvitk.gui.sge.models.SgeConnection, str, str | None]
+
+   Return ``(connection, remote_job_root, job_id)`` from the current GUI session.
+
+

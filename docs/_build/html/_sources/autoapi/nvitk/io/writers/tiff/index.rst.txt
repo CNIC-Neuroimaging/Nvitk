@@ -1,0 +1,27 @@
+nvitk.io.writers.tiff
+=====================
+
+.. py:module:: nvitk.io.writers.tiff
+
+.. autoapi-nested-parse::
+
+   Write arrays to TIFF via ``tifffile`` (optional metadata passthrough).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.writers.tiff.write_tiff
+
+
+Module Contents
+---------------
+
+.. py:function:: write_tiff(path: str, data: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None
+
+   Save *data* to *path* as TIFF; reorders axes when *metadata* contains ``axes`` and *axes* differs.
+
+

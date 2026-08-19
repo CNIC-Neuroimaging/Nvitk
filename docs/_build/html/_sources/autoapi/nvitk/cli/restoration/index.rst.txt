@@ -1,0 +1,71 @@
+nvitk.cli.restoration
+=====================
+
+.. py:module:: nvitk.cli.restoration
+
+.. autoapi-nested-parse::
+
+   ``nvitk-restore`` CLI — restoration tools (bilateral, N4, MRI super-resolution).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli.restoration.main
+   nvitk.cli.restoration._bilateral_runner
+   nvitk.cli.restoration.cmd_bilateral
+   nvitk.cli.restoration._n4_runner
+   nvitk.cli.restoration.cmd_n4
+   nvitk.cli.restoration._parse_expansion
+   nvitk.cli.restoration._mri_sr_runner
+   nvitk.cli.restoration.cmd_mri_sr
+
+
+Module Contents
+---------------
+
+.. py:function:: main() -> None
+
+   Image restoration tools.
+
+
+.. py:function:: _bilateral_runner(image, *, sigma_spatial: float | None, sigma_color: float | None, mode: str)
+
+   Run bilateral denoising on *image*, estimating any unset ``sigma_spatial``/``sigma_color`` from
+   the data, and dispatching to the 2D/3D/auto variant per ``mode``.
+
+
+.. py:function:: cmd_bilateral(input_path: pathlib.Path, output_path: pathlib.Path, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, mode: str, sigma_spatial: float | None, sigma_color: float | None) -> None
+
+   Bilateral denoising (CPU skimage or GPU CUDA kernels).
+
+
+.. py:function:: _n4_runner(image, mask=None, *, shrink_factor: int, spline_param: float | None, rescale_intensities: bool, verbose: bool)
+
+   Apply ANTs N4 bias-field correction to *image* with the parsed CLI parameters.
+
+
+.. py:function:: cmd_n4(input_path: pathlib.Path, output_path: pathlib.Path, mask_path: pathlib.Path | None, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, shrink_factor: int, spline_param: float | None, rescale_intensities: bool, verbose: bool) -> None
+
+   N4 bias-field correction (ANTsPy).
+
+
+.. py:function:: _parse_expansion(text: str) -> tuple[int, Ellipsis]
+
+   Parse ``--expansion-factor`` as either one integer (broadcast to all 3 axes) or three
+   comma/semicolon-separated integers; raises ``click.ClickException`` for any other shape.
+
+
+.. py:function:: _mri_sr_runner(image, *, expansion_factor: tuple[int, Ellipsis], feature: str, verbose: bool)
+
+   Run ANTsPyNet MRI super-resolution on *image* with the parsed CLI parameters.
+
+
+.. py:function:: cmd_mri_sr(input_path: pathlib.Path, output_path: pathlib.Path, backend: str, submit: str, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, dry_run: bool, expansion_factor: str, feature: str, verbose: bool) -> None
+
+   MRI super-resolution (ANTsPyNet).
+
+

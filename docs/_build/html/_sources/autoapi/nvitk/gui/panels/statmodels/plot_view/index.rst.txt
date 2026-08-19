@@ -1,0 +1,366 @@
+nvitk.gui.panels.statmodels.plot_view
+=====================================
+
+.. py:module:: nvitk.gui.panels.statmodels.plot_view
+
+.. autoapi-nested-parse::
+
+   Plot pane — Matplotlib canvas, group include/exclude checklist, and axis-limit sliders.
+
+   Description
+   -----------
+   Three controls sit around the figure:
+
+   *Groups*      one checkbox per level of the grouping column. Unchecking a level removes both its
+                 model curve and its raw points, and lets the axes rescale to what remains. The fit is
+                 untouched — the black fixed-effect line stays the all-group estimate — so this is a
+                 display filter, not a re-analysis. Use a ``territory`` filter on the analysis frame
+                 when the levels should actually leave the model.
+   *Axis limits* sliders that rescale the current figure without recomputing anything.
+   *Show legend* toggles the legend in place.
+   *Export PNG*  writes the figure exactly as displayed, to a location the user picks.
+
+   The figure itself is always drawn white (see :func:`~.theme.whiten_figure`) so it stays readable
+   against the dark chrome and exports cleanly.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.plot_view.PlotPanel
+
+
+Module Contents
+---------------
+
+.. py:class:: PlotPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QGroupBox`
+
+
+   The plot pane: canvas + group checklist + axis controls.
+
+   Signals
+   -------
+   optionsChanged
+       A control that requires the plot to be *redrawn* changed (the group selection). Axis sliders
+       and the legend toggle act on the existing figure and do not emit.
+   exportRequested
+       The user pressed *Export PNG…*. The window owns the dialog, because it knows the dataset
+       root and the model name the file should be suggested under.
+
+
+   .. py:attribute:: optionsChanged
+
+
+   .. py:attribute:: exportRequested
+
+
+   .. py:attribute:: _canvas
+      :value: None
+
+
+
+   .. py:attribute:: _fig
+      :value: None
+
+
+
+   .. py:attribute:: _axes
+      :value: None
+
+
+
+   .. py:attribute:: _plotly
+      :value: None
+
+
+
+   .. py:attribute:: _interactive
+      :value: False
+
+
+
+   .. py:attribute:: _linked_axes
+      :type:  list[Any]
+      :value: []
+
+
+
+   .. py:attribute:: _axis_base
+      :type:  dict[str, tuple[float, float]]
+
+
+   .. py:attribute:: _axis_span
+      :type:  dict[str, tuple[float, float]]
+
+
+   .. py:attribute:: _panel_base
+      :type:  list[dict[str, tuple[float, float]]]
+      :value: []
+
+
+
+   .. py:attribute:: _group_column
+      :value: ''
+
+
+
+   .. py:attribute:: _group_boxes
+      :type:  dict[str, qtpy.QtWidgets.QCheckBox]
+
+
+   .. py:attribute:: _suspend_group_signal
+      :value: False
+
+
+
+   .. py:attribute:: _top_row
+
+
+   .. py:attribute:: _options_slot
+
+
+   .. py:attribute:: _kind_row
+
+
+   .. py:attribute:: _kind
+
+
+   .. py:attribute:: _btn_export
+
+
+   .. py:attribute:: _map_row
+
+
+   .. py:attribute:: _map_slot
+
+
+   .. py:attribute:: _status
+
+
+   .. py:method:: _build_canvas_host() -> qtpy.QtWidgets.QWidget
+
+      Container the figure is swapped into.
+
+      Two backends live here. Interactive figures (Plotly) go to a web view and own their own
+      zoom, pan and hover; static ones (Matplotlib) go to a canvas and use the axis sliders below.
+      Which one a plot uses is decided by the plot, not by this pane, so an engine that has not
+      been migrated keeps working unchanged.
+
+
+
+   .. py:method:: _is_interactive(figure: Any) -> bool
+
+      Whether *figure* is a Plotly figure rather than a Matplotlib one.
+
+
+
+   .. py:method:: _build_groups_box() -> qtpy.QtWidgets.QWidget
+
+      Scrollable checklist of the grouping column's levels.
+
+
+
+   .. py:method:: _build_axis_controls() -> qtpy.QtWidgets.QWidget
+
+      Legend toggle plus sliders that rescale the current figure without recomputing.
+
+
+
+   .. py:method:: kind_combo() -> qtpy.QtWidgets.QComboBox
+
+      The optional figure picker, for analyses that produce several plots.
+
+
+
+   .. py:method:: set_kind_row_visible(visible: bool) -> None
+
+      Show or hide the figure picker row.
+
+
+
+   .. py:method:: set_options_widget(widget: qtpy.QtWidgets.QWidget) -> None
+
+      Place the window's plot-option controls on the pane's top row.
+
+
+
+   .. py:method:: set_map_options_widget(widget: qtpy.QtWidgets.QWidget) -> None
+
+      Place the display-specific controls on the pane's second row.
+
+
+
+   .. py:method:: set_map_options_visible(visible: bool) -> None
+
+      Show or hide the second options row.
+
+
+
+   .. py:method:: set_groups_visible(visible: bool) -> None
+
+      Show or hide the group checklist (it only applies to grouped model plots).
+
+
+
+   .. py:method:: set_levels(column: str, levels: Sequence[str]) -> None
+
+      Rebuild the group checklist for *column*, preserving which levels were unchecked.
+
+      Levels that disappear (a reload changed the frame) lose their state; new ones start checked.
+
+
+
+   .. py:method:: checked_levels() -> list[str]
+
+      Levels currently checked, in the order they were added.
+
+
+
+   .. py:method:: set_checked_levels(levels: Sequence[str] | None) -> None
+
+      Check exactly *levels* (``None`` checks everything).
+
+
+
+   .. py:method:: _set_all_groups(state: bool) -> None
+
+      Check or uncheck every level, then request a redraw once.
+
+
+
+   .. py:method:: _on_group_toggled(*_args: Any) -> None
+
+      Request a redraw unless we are mid-rebuild.
+
+
+
+   .. py:method:: clear() -> None
+
+      Remove the current plot widget and release its figure.
+
+
+
+   .. py:method:: show_figure(fig: Any) -> None
+
+      Embed *fig* as the current plot and reset the axis sliders to its limits.
+
+
+
+   .. py:method:: has_figure() -> bool
+
+      Whether a figure is currently displayed and can be exported.
+
+
+
+   .. py:method:: save_figure(path: Any, *, dpi: int = 200) -> pathlib.Path
+
+      Write the displayed figure to *path* as it currently looks.
+
+      Everything the user changed after the plot was drawn is part of the file: hidden groups,
+      dragged axis limits, the legend toggle. The figure was whitened on embed, so the export has
+      a white background rather than the explorer's dark chrome.
+
+      :raises RuntimeError: When no figure is displayed.
+
+
+
+   .. py:method:: _show_interactive(figure: Any) -> None
+
+      Hand a Plotly figure to the web view, and stand the axis sliders down.
+
+
+
+   .. py:method:: _fit_layout(fig: Any) -> None
+      :staticmethod:
+
+
+      Re-fit the figure's layout so nothing spills outside the canvas.
+
+      Skipped when the figure already carries a layout engine of its own (``constrained``, which
+      some plots set because they re-flow on every draw) — calling ``tight_layout`` on top of one
+      of those fights it and matplotlib warns.
+
+      Also skipped for 3-D axes. ``tight_layout`` has no notion of a projected axes' true extent,
+      so on the brain map it warns once per panel and then lays the figure out worse than the
+      plotter already had — the surface panels are sized by the plotter itself.
+
+
+
+   .. py:method:: show_error(message: str) -> None
+
+      Replace the plot with an error message.
+
+
+
+   .. py:method:: set_status(message: str) -> None
+
+      Show a note above the canvas (e.g. an EMM grid that could not be evaluated).
+
+
+
+   .. py:method:: show_legend() -> bool
+
+      Whether the legend toggle is on.
+
+
+
+   .. py:method:: set_show_legend(value: bool) -> None
+
+      Set the legend toggle without triggering a redraw of the data.
+
+
+
+   .. py:method:: apply_legend_visibility() -> None
+
+      Show or hide the current axes legends according to the toggle.
+
+
+
+   .. py:method:: _disable_axis_sliders() -> None
+
+      Grey out the axis-limit controls (no single-axes figure to rescale).
+
+
+
+   .. py:method:: _sync_axis_sliders() -> None
+
+      Capture the freshly drawn axes limits as the slider baseline and move the handles to match.
+
+      Each slider spans the plotted range padded by :data:`AXIS_SLIDER_MARGIN` on both sides, so
+      the handles start inset and the user can zoom out as well as in.
+
+      With several linked panels the baseline is their **union**, and moving a slider puts every
+      panel on that one common scale — which is how you compare magnitudes between panels that
+      each autoscaled to their own range. *Reset* restores the individual ranges.
+
+
+
+   .. py:method:: _axis_slider_to_value(axis: str, position: int) -> float
+
+      Map a slider position to a data coordinate on *axis*.
+
+
+
+   .. py:method:: _axis_value_to_slider(axis: str, value: float) -> int
+
+      Map a data coordinate on *axis* back to a slider position.
+
+
+
+   .. py:method:: _on_axis_slider_changed(*_args: Any) -> None
+
+      Rescale every linked axes to the slider positions and redraw the canvas.
+
+
+
+   .. py:method:: reset_axes() -> None
+
+      Restore the autoscaled limits captured when the plot was drawn, panel by panel.
+
+
+

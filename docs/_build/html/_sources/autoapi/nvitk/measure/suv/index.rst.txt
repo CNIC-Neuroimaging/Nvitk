@@ -1,0 +1,71 @@
+nvitk.measure.suv
+=================
+
+.. py:module:: nvitk.measure.suv
+
+.. autoapi-nested-parse::
+
+   Standardized Uptake Value (SUV) utilities for PET.
+
+   Port of [BioImaging _pet.py](/home/imarcoss/BioImaging/src/imaging/measure/_pet.py)
+   with the following fixes:
+
+   - Drops the stray ``from curses import raw`` import.
+   - Makes the Philips SUV scale factor path consistent between :func:`suv_image`
+     and :func:`suv_stats` (the legacy ``compute_pet_metrics`` hard-coded
+     ``philips_factor = None``).
+   - Uses :class:`~nvitk.types.Image` as the public input type.
+
+   Backend policy
+   --------------
+   Arithmetic on voxel data (``activity * factor``, per-slice rescaling,
+   statistics) stays on the active backend. ``to_numpy`` is only invoked when
+   emitting Python floats at the final stat step.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.suv.suv_image
+   nvitk.measure.suv.suv_stats
+
+
+Module Contents
+---------------
+
+.. py:function:: suv_image(pet: nvitk.types.Image | Any, metadata: Dict[str, Any] | None = None, *, kind: str = 'bw', philips: bool = False, revert_scaling: bool = False) -> nvitk.types.Image | Any
+
+   Convert a raw PET image to an SUV image.
+
+   :param pet: PET image. If an :class:`Image`, *metadata* defaults to ``pet.metadata``.
+   :param metadata: DICOM-style metadata. Required if *pet* is a bare array.
+   :param kind: ``bw``, ``lbm``, ``bsa``, or ``ibw`` (also accepts legacy ``SUVbw``...).
+   :param philips: If True (default) and the Philips ``(7053,1000)`` SUV factor is present,
+                   use that as a direct multiplier. Set to False to always compute from
+                   half-life/weight.
+   :param revert_scaling: If True, undo scanner-applied ``RescaleSlope/Intercept`` per slice before
+                          applying the SUV factor.
+
+   :returns: SUV image. Matches the input type (``Image`` in -> ``Image`` out).
+   :rtype: Image | ndarray
+
+
+.. py:function:: suv_stats(pet: nvitk.types.Image | Any, mask: nvitk.types.Image | Any, metadata: Dict[str, Any] | None = None, *, kinds: Iterable[str] = ('bw', ), stats: Iterable[str] = ('mean', 'median', 'max', 'min', 'std', 'p95', 'p5', 'p99'), philips: bool = False, revert_scaling: bool = False) -> Dict[str, float]
+
+   Compute SUV statistics restricted to ``mask > 0``.
+
+   :param pet: PET image (raw scanner counts unless *revert_scaling* is used).
+   :param mask: Mask image/array with same shape as *pet*.
+   :param metadata: DICOM-style metadata. Defaults to ``pet.metadata`` when available.
+   :param kinds: Iterable of SUV kinds (``bw``/``lbm``/``bsa``/``ibw``).
+   :param stats: Per-kind stats to compute (same names as :func:`nvitk.measure.masked_stats`).
+   :param philips: Enable the Philips ``(7053,1000)`` short-circuit for SUVbw.
+   :param revert_scaling: If True, undo per-slice rescaling before applying the SUV factor.
+
+   :returns: ``{'SUVbw_mean': ..., 'SUVbw_max': ..., 'SUVlbm_mean': ...}``.
+   :rtype: dict[str, float]
+
+

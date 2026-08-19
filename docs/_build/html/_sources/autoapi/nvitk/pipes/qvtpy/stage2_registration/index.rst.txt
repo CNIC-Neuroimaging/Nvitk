@@ -1,0 +1,53 @@
+nvitk.pipes.qvtpy.stage2_registration
+=====================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage2_registration
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 2: rigid eICAB TOF (resampled) → 4D-flow reference (FSL FLIRT).
+
+   **Inputs**
+
+   - eICAB ``TOF_resampled`` (stage 1) and fixed 4D-flow ``Angiography_3D`` or ``ComplexDifference_3D``.
+
+   **Outputs**
+
+   - ``<output>/<subject>/qvtpy/stage2_registration/`` — FLIRT matrix, warped TOF, ``registration_meta.json``.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage2_registration.run_subject
+   nvitk.pipes.qvtpy.stage2_registration.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage2_registration.submit_subject_sge
+   nvitk.pipes.qvtpy.stage2_registration.main
+
+
+Module Contents
+---------------
+
+.. py:function:: run_subject(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool = False, reference: ReferenceKind = 'angio', dof: int = 6, cost: str = 'normmi', eicab_subdir: str | None = None) -> pathlib.Path
+
+   Run FLIRT locally. Writes ``registration_meta.json`` and FLIRT outputs.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, reference: ReferenceKind = 'angio', dof: int = 6, cost: str = 'normmi', eicab_subdir: str | None = None, backend: str = 'gpu') -> str
+
+   Return the host shell command for one stage2 array/SGE task.
+
+
+.. py:function:: submit_subject_sge(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, reference: ReferenceKind = 'angio', dof: int = 6, cost: str = 'normmi', eicab_subdir: str | None = None, hold_jid: str | None = None, backend: str = 'gpu', emit: TextIO | None = None) -> str
+
+   Emit or submit one stage2 SGE block (FLIRT inside Singularity).
+
+
+.. py:function:: main(subject: str, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool, reference: ReferenceKind, dof: int, cost: str, eicab_subdir: str | None) -> None
+
+   CLI entry point (``qvtpy-stage2-registration``): run FLIRT rigid registration for one subject.
+
+

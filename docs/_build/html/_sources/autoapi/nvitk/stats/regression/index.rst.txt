@@ -1,0 +1,262 @@
+nvitk.stats.regression
+======================
+
+.. py:module:: nvitk.stats.regression
+
+.. autoapi-nested-parse::
+
+   Single-level regression models — OLS, GLM, and non-linear least squares.
+
+   Description
+   -----------
+   Companions to :mod:`nvitk.stats.mixedlm` for data that does not need (or cannot support) a random
+   structure. Three engines, deliberately sharing as much of the surrounding machinery as possible:
+
+   ``ols``
+       Ordinary least squares over a patsy formula. The plain linear model.
+   ``glm``
+       Generalized linear model: a non-linear *link* between the predictors and the response
+       (logistic for binary outcomes, Poisson/negative-binomial for counts, Gamma or inverse-Gaussian
+       with a log link for skewed positive measures like flow or plaque volume). Still linear in its
+       parameters, so the formula, the coefficient table and the marginal-means plot all carry over.
+   ``nonlinear``
+       True non-linear least squares: an explicit parametric curve (exponential decay, sigmoid, power
+       law, …) fitted by iteration. This one does *not* share the formula workflow — it fits one
+       response against one predictor — so it has its own result shape and plot.
+
+   Curvature *in the predictor* (splines, polynomials) is not an engine: those are patsy terms
+   (:data:`SPLINE_TERMS`) that work inside ``ols``, ``glm`` and MixedLM alike, because such a model is
+   still linear in its parameters.
+
+   Result conventions
+   ------------------
+   ``fit_ols`` and ``fit_glm`` return ``(result, model_df, metadata)`` exactly like
+   :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm`, so callers can treat all three interchangeably.
+   :func:`model_info_dict` renders any of them — including a MixedLM — into the structure
+   :func:`~nvitk.stats.mixedlm.render_mixedlm_info` and the GUI report panel already understand.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.regression.ANALYSIS_OLS
+   nvitk.stats.regression.ANALYSIS_GLM
+   nvitk.stats.regression.ANALYSIS_NONLINEAR
+   nvitk.stats.regression.GLM_FAMILIES
+   nvitk.stats.regression.SPLINE_TERMS
+   nvitk.stats.regression.NONLINEAR_MODELS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats.regression.GlmFamily
+   nvitk.stats.regression.SplineTerm
+   nvitk.stats.regression.NonlinearModel
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.regression.spline_term
+   nvitk.stats.regression.prepare_model_frame
+   nvitk.stats.regression.fit_ols
+   nvitk.stats.regression.fit_glm
+   nvitk.stats.regression.fit_nonlinear
+   nvitk.stats.regression.nonlinear_confidence_band
+   nvitk.stats.regression.model_info_dict
+   nvitk.stats.regression.plot_nonlinear_fit
+
+
+Module Contents
+---------------
+
+.. py:data:: ANALYSIS_OLS
+   :value: 'ols'
+
+
+.. py:data:: ANALYSIS_GLM
+   :value: 'glm'
+
+
+.. py:data:: ANALYSIS_NONLINEAR
+   :value: 'nonlinear'
+
+
+.. py:class:: GlmFamily
+
+   One GLM family, its available links, and when to reach for it.
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: links
+      :type:  tuple[str, Ellipsis]
+
+
+   .. py:attribute:: default_link
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+.. py:data:: GLM_FAMILIES
+   :type:  dict[str, GlmFamily]
+
+.. py:class:: SplineTerm
+
+   A patsy term that lets a linear model bend.
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: template
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+.. py:data:: SPLINE_TERMS
+   :type:  tuple[SplineTerm, Ellipsis]
+
+.. py:function:: spline_term(kind: str, column: str, *, df: int = 4) -> str
+
+   Render a :data:`SPLINE_TERMS` template, e.g. ``("bs", "age_c", df=4) -> "bs(age_c, df=4)"``.
+
+
+.. py:function:: prepare_model_frame(data: pandas.DataFrame, formula: str, *, required_columns: Sequence[str] | None = None, dropna_columns: Sequence[str] | None = None) -> tuple[pandas.DataFrame, dict[str, Any]]
+
+   Sanitize column names, coerce object-numerics and drop incomplete rows.
+
+   The same preparation :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` performs, factored out so
+   every engine reports row counts the same way and the GUI's "dropped N incomplete rows" note
+   means the same thing whichever model was fitted.
+
+
+.. py:function:: fit_ols(*, data: pandas.DataFrame, formula: str, required_columns: Sequence[str] | None = None, dropna_columns: Sequence[str] | None = None, robust: str | None = None, fit_kwargs: dict[str, Any] | None = None) -> tuple[Any, pandas.DataFrame, dict[str, Any]]
+
+   Fit an ordinary least squares model.
+
+   :param robust: Heteroscedasticity-consistent covariance type (``"HC0"`` … ``"HC3"``). Worth setting when
+                  the residual spread grows with the fitted value; it changes the standard errors, not the
+                  coefficients.
+   :type robust: str, optional
+
+   :returns: Shaped like :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` so callers are interchangeable.
+   :rtype: (result, model_df, metadata)
+
+
+.. py:function:: fit_glm(*, data: pandas.DataFrame, formula: str, family: str = 'gaussian', link: str | None = None, required_columns: Sequence[str] | None = None, dropna_columns: Sequence[str] | None = None, fit_kwargs: dict[str, Any] | None = None) -> tuple[Any, pandas.DataFrame, dict[str, Any]]
+
+   Fit a generalized linear model.
+
+   The link is where the non-linearity lives: predictors combine linearly on the link scale, and
+   the fitted values are mapped back through its inverse. Coefficients are therefore effects *on
+   the link scale* — log-odds for a logit link, log-ratios for a log link.
+
+
+.. py:class:: NonlinearModel
+
+   A parametric curve fitted by iterative least squares.
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: expression
+      :type:  str
+
+
+   .. py:attribute:: params
+      :type:  tuple[str, Ellipsis]
+
+
+   .. py:attribute:: func
+      :type:  Callable[Ellipsis, numpy.ndarray]
+
+
+   .. py:attribute:: initial
+      :type:  Callable[[numpy.ndarray, numpy.ndarray], list[float]]
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+.. py:data:: NONLINEAR_MODELS
+   :type:  dict[str, NonlinearModel]
+
+.. py:function:: fit_nonlinear(*, data: pandas.DataFrame, x: str, y: str, model: str = 'exp_decay', p0: Sequence[float] | None = None, maxfev: int = 20000) -> tuple[dict[str, Any], pandas.DataFrame, dict[str, Any]]
+
+   Fit an explicit parametric curve of *y* against *x* by non-linear least squares.
+
+   Unlike the formula-driven engines this fits one predictor against one response, with no
+   covariate adjustment and no grouping — the parameters are the model.
+
+   :returns: *result* is a dict with ``params`` (a coefficient frame), ``predict`` (a callable),
+             ``cov``, ``r_squared``, ``rmse``, ``n_obs`` and the model spec — not a statsmodels object,
+             so it is handled separately by the reporting and plotting helpers.
+   :rtype: (result, model_df, metadata)
+
+
+.. py:function:: nonlinear_confidence_band(result: Mapping[str, Any], grid: numpy.ndarray, *, ci_level: float = 0.95) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+
+   Fitted curve and its confidence band over *grid*, by the delta method.
+
+   The gradient of the curve with respect to each parameter is taken numerically, then
+   ``se(x) = √(gᵀ Σ g)`` propagates the parameter covariance to the prediction.
+
+   :rtype: (fitted, lower, upper)
+
+
+.. py:function:: model_info_dict(result: Any, *, outcome_name: str = 'Outcome', group_name: str = 'Group', meta: Mapping[str, Any] | None = None) -> dict[str, Any]
+
+   Structured report for **any** engine — MixedLM, OLS, GLM or non-linear.
+
+   Dispatches on the result type so the GUI report panel and
+   :func:`~nvitk.stats.mixedlm.render_mixedlm_info` need to know nothing about which model was run.
+
+
+.. py:function:: plot_nonlinear_fit(result: Mapping[str, Any], data: pandas.DataFrame, *, errorbar: bool = False, ci_level: float = 0.95, include_points: bool = True, group: str | None = None, group_order: Sequence[str] | None = None, palette: str = 'tab10', display: str = 'overview', title: str | None = None, x_label: str | None = None, y_label: str | None = None) -> Any
+
+   Scatter of the observations with the fitted curve, optionally with a confidence band.
+
+   The curve is a single fit over all rows: *group* only colours the scatter, it does not fit one
+   curve per group. Fitting per group would mean one non-linear fit per level, which the parameter
+   table has no room to report honestly.
+
+   :param display: ``"grouped"`` splits *group*'s levels into a grid of anatomical panels (see
+                   :mod:`nvitk.stats.region_groups`), each autoscaled to its own range. The fitted curve is the
+                   same single fit in every panel — which is exactly what makes the panels comparable: each one
+                   shows how its own regions sit against the common curve.
+   :type display: {"overview", "grouped"}
+
+

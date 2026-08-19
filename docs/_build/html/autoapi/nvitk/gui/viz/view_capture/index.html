@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.viz.view_capture &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="nvitk.io" href="../../../io/index.html" />
+    <link rel="prev" title="nvitk.gui.viz.vessel_cross_sections" href="../vessel_cross_sections/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.viz.view_capture">
+<span id="nvitk-gui-viz-view-capture"></span><h1>nvitk.gui.viz.view_capture<a class="headerlink" href="#module-nvitk.gui.viz.view_capture" title="Link to this heading">¶</a></h1>
+<p>Export Napari viewer screenshots (3D canvas, 4D GIF).</p>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">GifAnimationSpec</span></code></a></p></td>
+<td><p>Time axis and frame count for viewer GIF export.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="nvitk.gui.viz.view_capture._ViewerViewState"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_ViewerViewState</span></code></a></p></td>
+<td><p>Snapshot of a Napari viewer's dims/camera state, for save-and-restore around screenshot/GIF export.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._dims_slot_for_array_axis" title="nvitk.gui.viz.view_capture._dims_slot_for_array_axis"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_dims_slot_for_array_axis</span></code></a>(→ int)</p></td>
+<td><p>Map array-axis index to Napari dims slot (for GIF export only).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._array_axis_for_dims_slot" title="nvitk.gui.viz.view_capture._array_axis_for_dims_slot"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_array_axis_for_dims_slot</span></code></a>(→ int)</p></td>
+<td><p>Inverse of <a class="reference internal" href="#nvitk.gui.viz.view_capture._dims_slot_for_array_axis" title="nvitk.gui.viz.view_capture._dims_slot_for_array_axis"><code class="xref py py-func docutils literal notranslate"><span class="pre">_dims_slot_for_array_axis()</span></code></a>: map a Napari dims slot back to an array axis.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._process_events" title="nvitk.gui.viz.view_capture._process_events"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_process_events</span></code></a>(→ None)</p></td>
+<td><p>Flush pending Qt events so the viewer redraws before a screenshot is captured.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._capture_viewer_state" title="nvitk.gui.viz.view_capture._capture_viewer_state"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_capture_viewer_state</span></code></a>(→ _ViewerViewState)</p></td>
+<td><p>Snapshot <em>viewer</em>'s current dims/camera state into a <a class="reference internal" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="nvitk.gui.viz.view_capture._ViewerViewState"><code class="xref py py-class docutils literal notranslate"><span class="pre">_ViewerViewState</span></code></a>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._restore_viewer_state" title="nvitk.gui.viz.view_capture._restore_viewer_state"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_restore_viewer_state</span></code></a>(→ None)</p></td>
+<td><p>Restore <em>viewer</em>'s dims/camera to a previously captured <em>state</em>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture.time_axis_index" title="nvitk.gui.viz.view_capture.time_axis_index"><code class="xref py py-obj docutils literal notranslate"><span class="pre">time_axis_index</span></code></a>(→ int | None)</p></td>
+<td><p>Return the array axis used for the time/cardiac slider, or None.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._gif_spec" title="nvitk.gui.viz.view_capture._gif_spec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_gif_spec</span></code></a>(→ GifAnimationSpec)</p></td>
+<td><p>Build a <a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><code class="xref py py-class docutils literal notranslate"><span class="pre">GifAnimationSpec</span></code></a> from an array-space time axis, resolving its Napari dims slot.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._frame_count_for_array_time_axis" title="nvitk.gui.viz.view_capture._frame_count_for_array_time_axis"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_frame_count_for_array_time_axis</span></code></a>(→ int)</p></td>
+<td><p>Number of frames along <em>array_time_axis</em>, preferring <em>phase_layer</em>'s own time axis length when</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture.resolve_gif_animation" title="nvitk.gui.viz.view_capture.resolve_gif_animation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_gif_animation</span></code></a>(→ GifAnimationSpec)</p></td>
+<td><p>Find how to step the Napari dims slider for GIF export.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._paused_flow_dims_sync" title="nvitk.gui.viz.view_capture._paused_flow_dims_sync"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_paused_flow_dims_sync</span></code></a>(→ Iterator[None])</p></td>
+<td><p>Disconnect live flow dims hook while GIF frames are written (avoids re-entrancy).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._set_dim_slot_index" title="nvitk.gui.viz.view_capture._set_dim_slot_index"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_set_dim_slot_index</span></code></a>(→ None)</p></td>
+<td><p>Set time on the Napari dims slot that maps to the cardiac axis (4D image GIFs).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._set_gif_frame" title="nvitk.gui.viz.view_capture._set_gif_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_set_gif_frame</span></code></a>(→ None)</p></td>
+<td><p>Advance to cardiac phase <em>frame</em> for one GIF screenshot.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture._ensure_3d_view" title="nvitk.gui.viz.view_capture._ensure_3d_view"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_ensure_3d_view</span></code></a>(→ None)</p></td>
+<td><p>Switch <em>viewer</em> to 3D display mode if it isn't already, then flush pending Qt events.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture.export_view_png" title="nvitk.gui.viz.view_capture.export_view_png"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_view_png</span></code></a>(→ numpy.ndarray)</p></td>
+<td><p>Capture the current Napari 3D canvas to a PNG.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.viz.view_capture.export_view_gif" title="nvitk.gui.viz.view_capture.export_view_gif"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_view_gif</span></code></a>(→ int)</p></td>
+<td><p>Export one 3D screenshot per time point as an animated GIF.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._dims_slot_for_array_axis">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_dims_slot_for_array_axis</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">array_axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._dims_slot_for_array_axis" title="Link to this definition">¶</a></dt>
+<dd><p>Map array-axis index to Napari dims slot (for GIF export only).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._array_axis_for_dims_slot">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_array_axis_for_dims_slot</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dims_slot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._array_axis_for_dims_slot" title="Link to this definition">¶</a></dt>
+<dd><p>Inverse of <a class="reference internal" href="#nvitk.gui.viz.view_capture._dims_slot_for_array_axis" title="nvitk.gui.viz.view_capture._dims_slot_for_array_axis"><code class="xref py py-func docutils literal notranslate"><span class="pre">_dims_slot_for_array_axis()</span></code></a>: map a Napari dims slot back to an array axis.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.GifAnimationSpec">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">GifAnimationSpec</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="Link to this definition">¶</a></dt>
+<dd><p>Time axis and frame count for viewer GIF export.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.GifAnimationSpec.time_axis">
+<span class="sig-name descname"><span class="pre">time_axis</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.GifAnimationSpec.time_axis" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.GifAnimationSpec.dims_slot">
+<span class="sig-name descname"><span class="pre">dims_slot</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.GifAnimationSpec.dims_slot" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.GifAnimationSpec.n_frames">
+<span class="sig-name descname"><span class="pre">n_frames</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.GifAnimationSpec.n_frames" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.GifAnimationSpec.phase_layer">
+<span class="sig-name descname"><span class="pre">phase_layer</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.GifAnimationSpec.phase_layer" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_ViewerViewState</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="Link to this definition">¶</a></dt>
+<dd><p>Snapshot of a Napari viewer’s dims/camera state, for save-and-restore around screenshot/GIF export.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.ndisplay">
+<span class="sig-name descname"><span class="pre">ndisplay</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.ndisplay" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.order">
+<span class="sig-name descname"><span class="pre">order</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.order" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.point">
+<span class="sig-name descname"><span class="pre">point</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.point" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.current_step">
+<span class="sig-name descname"><span class="pre">current_step</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.current_step" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.axis_labels">
+<span class="sig-name descname"><span class="pre">axis_labels</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.axis_labels" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.camera_center">
+<span class="sig-name descname"><span class="pre">camera_center</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.camera_center" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.camera_zoom">
+<span class="sig-name descname"><span class="pre">camera_zoom</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.camera_zoom" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ViewerViewState.camera_angles">
+<span class="sig-name descname"><span class="pre">camera_angles</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ViewerViewState.camera_angles" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._process_events">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_process_events</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._process_events" title="Link to this definition">¶</a></dt>
+<dd><p>Flush pending Qt events so the viewer redraws before a screenshot is captured.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._capture_viewer_state">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_capture_viewer_state</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="nvitk.gui.viz.view_capture._ViewerViewState"><span class="pre">_ViewerViewState</span></a></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._capture_viewer_state" title="Link to this definition">¶</a></dt>
+<dd><p>Snapshot <em>viewer</em>’s current dims/camera state into a <a class="reference internal" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="nvitk.gui.viz.view_capture._ViewerViewState"><code class="xref py py-class docutils literal notranslate"><span class="pre">_ViewerViewState</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._restore_viewer_state">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_restore_viewer_state</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.viz.view_capture._ViewerViewState" title="nvitk.gui.viz.view_capture._ViewerViewState"><span class="pre">_ViewerViewState</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._restore_viewer_state" title="Link to this definition">¶</a></dt>
+<dd><p>Restore <em>viewer</em>’s dims/camera to a previously captured <em>state</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.time_axis_index">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">time_axis_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.time_axis_index" title="Link to this definition">¶</a></dt>
+<dd><p>Return the array axis used for the time/cardiac slider, or None.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._gif_spec">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_gif_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">array_time_axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_frames</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">phase_layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><span class="pre">GifAnimationSpec</span></a></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._gif_spec" title="Link to this definition">¶</a></dt>
+<dd><p>Build a <a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><code class="xref py py-class docutils literal notranslate"><span class="pre">GifAnimationSpec</span></code></a> from an array-space time axis, resolving its Napari dims slot.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._frame_count_for_array_time_axis">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_frame_count_for_array_time_axis</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">array_time_axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">phase_layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._frame_count_for_array_time_axis" title="Link to this definition">¶</a></dt>
+<dd><p>Number of frames along <em>array_time_axis</em>, preferring <em>phase_layer</em>’s own time axis length when
+given, else the viewer dims range for that axis.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.resolve_gif_animation">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">resolve_gif_animation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><span class="pre">GifAnimationSpec</span></a></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.resolve_gif_animation" title="Link to this definition">¶</a></dt>
+<dd><p>Find how to step the Napari dims slider for GIF export.</p>
+<p>Supports 4D image layers and synced 4D flow-vector overlays (3D vectors layer).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._paused_flow_dims_sync">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_paused_flow_dims_sync</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Iterator</span><span class="p"><span class="pre">[</span></span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._paused_flow_dims_sync" title="Link to this definition">¶</a></dt>
+<dd><p>Disconnect live flow dims hook while GIF frames are written (avoids re-entrancy).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._set_dim_slot_index">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_set_dim_slot_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dims_slot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._set_dim_slot_index" title="Link to this definition">¶</a></dt>
+<dd><p>Set time on the Napari dims slot that maps to the cardiac axis (4D image GIFs).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._set_gif_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_set_gif_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.viz.view_capture.GifAnimationSpec" title="nvitk.gui.viz.view_capture.GifAnimationSpec"><span class="pre">GifAnimationSpec</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._set_gif_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Advance to cardiac phase <em>frame</em> for one GIF screenshot.</p>
+<p>Flow overlays: step Napari’s cardiac dims slot (volume/MIP) and set vector glyphs
+from the precomputed cache by index (do not use the live dims callback here).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture._ensure_3d_view">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">_ensure_3d_view</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture._ensure_3d_view" title="Link to this definition">¶</a></dt>
+<dd><p>Switch <em>viewer</em> to 3D display mode if it isn’t already, then flush pending Qt events.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.export_view_png">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">export_view_png</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">canvas_only</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flash</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.export_view_png" title="Link to this definition">¶</a></dt>
+<dd><p>Capture the current Napari 3D canvas to a PNG.</p>
+<p>Temporarily enables <code class="docutils literal notranslate"><span class="pre">ndisplay=3</span></code> if needed, then restores the prior view.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.viz.view_capture.export_view_gif">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.viz.view_capture.</span></span><span class="sig-name descname"><span class="pre">export_view_gif</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">viewer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">fps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_axis</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">canvas_only</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#nvitk.gui.viz.view_capture.export_view_gif" title="Link to this definition">¶</a></dt>
+<dd><p>Export one 3D screenshot per time point as an animated GIF.</p>
+<p>Returns the number of frames written.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../index.html">nvitk</a><ul>
+  <li><a href="../../index.html">nvitk.gui</a><ul>
+  <li><a href="../index.html">nvitk.gui.viz</a><ul>
+      <li>Previous: <a href="../vessel_cross_sections/index.html" title="previous chapter">nvitk.gui.viz.vessel_cross_sections</a></li>
+      <li>Next: <a href="../../../io/index.html" title="next chapter">nvitk.io</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/nvitk/gui/viz/view_capture/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

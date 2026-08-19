@@ -1,0 +1,165 @@
+nvitk.measure.cross_section
+===========================
+
+.. py:module:: nvitk.measure.cross_section
+
+.. autoapi-nested-parse::
+
+   Oblique cross-section sampling and in-plane vessel segmentation.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.cross_section.ThrAlgorithm
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.measure.cross_section.CrossSectionResult
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.cross_section.tilt_corrected_spacing_mm
+   nvitk.measure.cross_section.segment_in_plane_cd_only
+   nvitk.measure.cross_section.cross_section_at_point
+   nvitk.measure.cross_section.segment_in_plane
+   nvitk.measure.cross_section.segment_in_plane_label_constrained
+   nvitk.measure.cross_section.resolve_plane_res
+   nvitk.measure.cross_section.cross_section_at_loc
+   nvitk.measure.cross_section.segment_at_point
+   nvitk.measure.cross_section.segment_along_polyline
+   nvitk.measure.cross_section.masked_plane_velocity_series
+   nvitk.measure.cross_section.flow_series_ml_s
+
+
+Module Contents
+---------------
+
+.. py:data:: ThrAlgorithm
+
+.. py:class:: CrossSectionResult
+
+   In-plane segmentation and metrics at one centerline station.
+
+
+   .. py:attribute:: mask_2d
+      :type:  np.ndarray
+
+
+   .. py:attribute:: area_mm2
+      :type:  float
+
+
+   .. py:attribute:: circularity
+      :type:  float
+
+
+   .. py:attribute:: center_xyz
+      :type:  np.ndarray
+
+
+   .. py:attribute:: tangent
+      :type:  np.ndarray
+
+
+   .. py:attribute:: u
+      :type:  np.ndarray
+
+
+   .. py:attribute:: v
+      :type:  np.ndarray
+
+
+   .. py:attribute:: pixel_spacing_mm
+      :type:  tuple[float, float]
+
+
+   .. py:attribute:: plane_res
+      :type:  int
+
+
+   .. py:attribute:: radius_vox
+      :type:  float
+      :value: 10.0
+
+
+
+   .. py:attribute:: intensity_2d
+      :type:  np.ndarray | None
+      :value: None
+
+
+
+.. py:function:: tilt_corrected_spacing_mm(voxel_spacing: tuple[float, float, float], tangent: np.ndarray) -> tuple[float, float]
+
+   In-plane pixel spacing with tilt correction (MATLAB pixelSpace intent).
+
+
+.. py:function:: segment_in_plane_cd_only(cd_sl: np.ndarray, *, min_component_fraction: float = 0.05, thr_algorithm: ThrAlgorithm = 'lsthr') -> tuple[np.ndarray, float]
+
+   Threshold a single complex-difference (or intensity) oblique slice in-plane.
+
+
+.. py:function:: cross_section_at_point(center_xyz: np.ndarray, tangent: np.ndarray, *, cd: np.ndarray, voxel_spacing: tuple[float, float, float], radius_vox: float = _DEFAULT_RADIUS_VOX, interp_vals: int = _DEFAULT_INTERP_VALS, cross_section_res: int = 0, plane_interp_order: int = 1, cs_supersampling: bool = False, measure_resegment: bool = True, thr_algorithm: ThrAlgorithm = 'lsthr', volume_seg: np.ndarray | None = None, volume_label_id: int = 0) -> CrossSectionResult
+
+   Oblique cross-section at a centerline point using a single 3D intensity volume.
+
+   Intensity and mask are always sampled on the same in-plane grid. When
+   *cs_supersampling* is on, that grid is finer: the intensity crop is linearly
+   interpolated onto it, and (without resegmentation) the volume mask is
+   nearest-neighbor sampled onto the same fine grid so overlays coincide.
+
+
+.. py:function:: segment_in_plane(mag_sl: np.ndarray, cd_sl: np.ndarray, vel_sl: np.ndarray, *, min_component_fraction: float = 0.05, thr_algorithm: ThrAlgorithm = 'lsthr') -> tuple[np.ndarray, float]
+
+   Fuse slices, threshold, keep CC closest to plane center. Returns ``(mask, circularity)``.
+
+
+.. py:function:: segment_in_plane_label_constrained(mag_sl: np.ndarray, cd_sl: np.ndarray, vel_sl: np.ndarray, label_mask_sl: np.ndarray, *, min_component_fraction: float = 0.05, thr_algorithm: ThrAlgorithm = 'lsthr') -> tuple[np.ndarray, float, bool]
+
+   In-plane QVT fusion mask intersected with a multilabel plane slice.
+
+   Returns ``(mask, circularity, used_label_fallback)``.
+
+
+.. py:function:: resolve_plane_res(radius_vox: float, *, cross_section_res: int = 0, interp_vals: int = _DEFAULT_INTERP_VALS, supersampling: bool = False) -> int
+
+   Oblique plane grid size; explicit *cross_section_res* overrides supersampling.
+
+
+.. py:function:: cross_section_at_loc(center_xyz: np.ndarray, tangent: np.ndarray, *, mag: np.ndarray, cd: np.ndarray, vel_mag: np.ndarray, voxel_spacing: tuple[float, float, float], radius_vox: float = _DEFAULT_RADIUS_VOX, interp_vals: int = _DEFAULT_INTERP_VALS, cross_section_res: int = 0, plane_interp_order: int = 1, cs_supersampling: bool = False, measure_resegment: bool = True, thr_algorithm: ThrAlgorithm = 'lsthr', volume_seg: np.ndarray | None = None, volume_label_id: int = 0, label_constrain: bool = False) -> CrossSectionResult
+
+   Oblique cross-section at a LOC; resegment in-plane or sample stage-4 mask.
+
+
+.. py:function:: segment_at_point(center_xyz: np.ndarray, tangent: np.ndarray, *, mag: np.ndarray, cd: np.ndarray, vel_mag: np.ndarray, voxel_spacing: tuple[float, float, float], radius_vox: float = _DEFAULT_RADIUS_VOX, interp_vals: int = _DEFAULT_INTERP_VALS, cross_section_res: int = 0, plane_interp_order: int = 1, thr_algorithm: ThrAlgorithm = 'lsthr') -> CrossSectionResult
+
+   Sample oblique plane and segment vessel cross-section at *center_xyz*.
+
+
+.. py:function:: segment_along_polyline(points_xyz: np.ndarray, *, mag: np.ndarray, cd: np.ndarray, vel_mag: np.ndarray, voxel_spacing: tuple[float, float, float], stride: int = 1, radius_vox: float = _DEFAULT_RADIUS_VOX, **kwargs: Any) -> list[CrossSectionResult]
+
+   Segment at stations along an ordered centerline polyline.
+
+
+.. py:function:: masked_plane_velocity_series(vx: np.ndarray, vy: np.ndarray, vz: np.ndarray, result: CrossSectionResult, *, plane_interp_order: int = 1) -> np.ndarray
+
+   Through-plane velocity time series: masked mean on the oblique plane per frame.
+
+
+.. py:function:: flow_series_ml_s(velocity_ts: np.ndarray, area_mm2: float) -> np.ndarray
+
+   Q(t) = v_plane(t) * area / 1000 (ml/s).
+
+

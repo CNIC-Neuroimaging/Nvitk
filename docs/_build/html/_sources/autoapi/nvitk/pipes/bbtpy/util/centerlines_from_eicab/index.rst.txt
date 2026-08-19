@@ -1,0 +1,98 @@
+nvitk.pipes.bbtpy.util.centerlines_from_eicab
+=============================================
+
+.. py:module:: nvitk.pipes.bbtpy.util.centerlines_from_eicab
+
+.. autoapi-nested-parse::
+
+   eICAB CW/WB mask → BB relabel, warp to vwi_bb space, centerlines, rasterized mask.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.log
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.CENTERLINES_MASK_NIFTI
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.CENTERLINE_META_JSON
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.EICAB_BB_IN_VWI_BB_NIFTI
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.EICAB_BB_IN_TOF_NIFTI
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.CenterlineArtifacts
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.rasterize_centerlines_mask
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab._grids_match
+   nvitk.pipes.bbtpy.util.centerlines_from_eicab.build_centerlines_from_eicab
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: CENTERLINES_MASK_NIFTI
+   :value: 'centerlines_mask.nii.gz'
+
+
+.. py:data:: CENTERLINE_META_JSON
+   :value: 'centerline_meta.json'
+
+
+.. py:data:: EICAB_BB_IN_VWI_BB_NIFTI
+   :value: 'eicab_bb_in_vwi_bb.nii.gz'
+
+
+.. py:data:: EICAB_BB_IN_TOF_NIFTI
+   :value: 'eicab_bb_in_tof.nii.gz'
+
+
+.. py:class:: CenterlineArtifacts
+
+   Paths and in-memory centerlines produced by :func:`build_centerlines_from_eicab`.
+
+
+   .. py:attribute:: centerlines
+      :type:  dict[int, numpy.ndarray]
+
+
+   .. py:attribute:: centerlines_mask_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: centerline_meta_path
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: eicab_bb_path
+      :type:  pathlib.Path
+
+
+.. py:function:: rasterize_centerlines_mask(shape: tuple[int, int, int], centerlines: dict[int, numpy.ndarray]) -> numpy.ndarray
+
+   Voxel mask with arterial label id on centerline points.
+
+
+.. py:function:: _grids_match(a_shape: tuple[int, Ellipsis], b_shape: tuple[int, Ellipsis]) -> bool
+
+   True when the first three dimensions of two volumes match.
+
+
+.. py:function:: build_centerlines_from_eicab(eicab_mask_path: pathlib.Path, vwi_bb_ref_path: pathlib.Path, out_dir: pathlib.Path, *, transform_mat: pathlib.Path | None = None, min_points: int = 5, skip_existing: bool = False, eicab_mask_info: nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskResolution | None = None) -> CenterlineArtifacts
+
+   Relabel eICAB labels, warp into vwi_bb grid if needed, compute centerlines in BB space.
+
+

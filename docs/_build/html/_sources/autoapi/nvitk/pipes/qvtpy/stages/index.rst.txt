@@ -1,0 +1,116 @@
+nvitk.pipes.qvtpy.stages
+========================
+
+.. py:module:: nvitk.pipes.qvtpy.stages
+
+.. autoapi-nested-parse::
+
+   QVTpy pipeline stage identifiers, aliases, and parsing.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stages.STAGE_DOWNLOAD
+   nvitk.pipes.qvtpy.stages.STAGE_CONVERT
+   nvitk.pipes.qvtpy.stages.STAGE_EICAB
+   nvitk.pipes.qvtpy.stages.STAGE_REG
+   nvitk.pipes.qvtpy.stages.STAGE_CENTERLINE
+   nvitk.pipes.qvtpy.stages.STAGE_SEG
+   nvitk.pipes.qvtpy.stages.STAGE_SEG_T
+   nvitk.pipes.qvtpy.stages.STAGE_LOC
+   nvitk.pipes.qvtpy.stages.STAGE_MEASURE
+   nvitk.pipes.qvtpy.stages.STAGE_MORPHOMETRICS
+   nvitk.pipes.qvtpy.stages.STAGE_XNAT_UPLOAD
+   nvitk.pipes.qvtpy.stages.STAGE_AUTOQC
+   nvitk.pipes.qvtpy.stages.STAGE_ALIASES
+   nvitk.pipes.qvtpy.stages.STAGES_ORDERED
+   nvitk.pipes.qvtpy.stages.ALL_STAGES
+   nvitk.pipes.qvtpy.stages.DEFAULT_STAGES
+   nvitk.pipes.qvtpy.stages.STAGE_LABELS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stages.parse_stages
+
+
+Module Contents
+---------------
+
+.. py:data:: STAGE_DOWNLOAD
+   :value: 'stage0_d'
+
+
+.. py:data:: STAGE_CONVERT
+   :value: 'stage0_c'
+
+
+.. py:data:: STAGE_EICAB
+   :value: 'stage1'
+
+
+.. py:data:: STAGE_REG
+   :value: 'stage2'
+
+
+.. py:data:: STAGE_CENTERLINE
+   :value: 'stage3'
+
+
+.. py:data:: STAGE_SEG
+   :value: 'stage4'
+
+
+.. py:data:: STAGE_SEG_T
+   :value: 'stage4t'
+
+
+.. py:data:: STAGE_LOC
+   :value: 'stage5'
+
+
+.. py:data:: STAGE_MEASURE
+   :value: 'stage6'
+
+
+.. py:data:: STAGE_MORPHOMETRICS
+   :value: 'stage7'
+
+
+.. py:data:: STAGE_XNAT_UPLOAD
+   :value: 'stage8_xnat_upload'
+
+
+.. py:data:: STAGE_AUTOQC
+   :value: 'stage9_autoqc'
+
+
+.. py:data:: STAGE_ALIASES
+   :type:  dict[str, str]
+
+.. py:data:: STAGES_ORDERED
+   :type:  tuple[str, Ellipsis]
+
+.. py:data:: ALL_STAGES
+   :type:  tuple[str, Ellipsis]
+
+.. py:data:: DEFAULT_STAGES
+   :type:  str
+   :value: 'stage0_c,stage1,stage2,stage3,stage4,stage5,stage6'
+
+
+.. py:data:: STAGE_LABELS
+   :type:  dict[str, str]
+
+.. py:function:: parse_stages(spec: str) -> list[str]
+
+   Parse ``--stages`` comma list into canonical stage ids in pipeline order.
+
+

@@ -1,0 +1,37 @@
+nvitk.restoration._cuda_kernels
+===============================
+
+.. py:module:: nvitk.restoration._cuda_kernels
+
+.. autoapi-nested-parse::
+
+   CUDA raw kernels for GPU-accelerated bilateral filtering.
+
+   These kernels are ported from the legacy BioImaging/src/imaging/filters/kernels.py
+   (see the ``nvitk.restoration.bilateral`` dispatcher for their public surface).
+
+   They are compiled lazily on first use so that importing this module does **not**
+   require a CUDA-capable CuPy install. Importers that need a kernel should go
+   through :func:`get_kernel`; importing ``cupy`` outside that path is avoided so
+   CPU-only installs remain functional.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.restoration._cuda_kernels.get_kernel
+
+
+Module Contents
+---------------
+
+.. py:function:: get_kernel(name: str)
+
+   Compile and cache a CuPy raw kernel by *name*.
+
+   Raises :class:`RuntimeError` if CuPy is not available.
+
+

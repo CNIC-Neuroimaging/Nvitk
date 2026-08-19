@@ -1,0 +1,70 @@
+nvitk.filters.jerman
+====================
+
+.. py:module:: nvitk.filters.jerman
+
+.. autoapi-nested-parse::
+
+   Jerman multiscale vesselness filter (IEEE TMI 2016).
+
+   Implements the enhancement function of Jerman et al. using Hessian
+   eigenvalues at multiple Gaussian scales. Unlike Frangi / Hybrid Hessian,
+   the response is regularized via ``tau`` for more uniform vessel intensity
+   across scales and contrast (useful for TOF-MRA preprocessing).
+
+   Reference
+   ---------
+   T. Jerman, F. Pernuš, B. Likar, Ž. Špiclin,
+   "Enhancement of Vascular Structures in 3D and 2D Angiographic Images",
+   IEEE Trans. Med. Imaging, 35(9):2107–2118, 2016.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.filters.jerman.JERMAN_SIGMAS_DEFAULT
+   nvitk.filters.jerman.JERMAN_TAU_DEFAULT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.filters.jerman.parse_sigmas
+   nvitk.filters.jerman.jerman_filter
+
+
+Module Contents
+---------------
+
+.. py:function:: parse_sigmas(text: str | None, *, default: collections.abc.Sequence[float] = HESSIAN_SIGMAS_DEFAULT) -> tuple[float, Ellipsis]
+
+   Parse comma/semicolon-separated sigma scales; empty → *default*.
+
+
+.. py:data:: JERMAN_SIGMAS_DEFAULT
+   :type:  tuple[float, Ellipsis]
+   :value: (1.0, 3.0, 5.0, 7.0, 9.0)
+
+
+.. py:data:: JERMAN_TAU_DEFAULT
+   :type:  float
+   :value: 0.5
+
+
+.. py:function:: jerman_filter(image: nvitk.types.Image | numpy.ndarray, *, sigmas: collections.abc.Iterable[float] | collections.abc.Sequence[float] | None = None, tau: float = JERMAN_TAU_DEFAULT, black_ridges: bool = True, mode: str = 'reflect', cval: float = 0.0) -> nvitk.types.Image | numpy.ndarray
+
+   Jerman vesselness / ridge filter for 2-D or 3-D images.
+
+   :param image: 2-D or 3-D intensity volume (:class:`~nvitk.types.Image` or ndarray).
+   :param sigmas: Gaussian scales. Default ``(1, 3, 5, 7, 9)``.
+   :param tau: Regularization in ``[0.5, 1]``. Lower → stronger / more intense response.
+   :param black_ridges: Detect dark ridges when True; bright ridges when False (e.g. TOF vessels).
+   :param mode: Boundary mode for Gaussian derivatives.
+   :param cval: Boundary mode for Gaussian derivatives.
+
+

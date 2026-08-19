@@ -1,0 +1,44 @@
+nvitk.db.asl_atlases
+====================
+
+.. py:module:: nvitk.db.asl_atlases
+
+.. autoapi-nested-parse::
+
+   ASL atlas presets: region_id lists normalized like ``importers._region_id`` / ``normalize_variable_id``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.db.asl_atlases.ASL_ATLAS_REGIONS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.asl_atlases._norm_regions
+   nvitk.db.asl_atlases.regions_for_atlas
+
+
+Module Contents
+---------------
+
+.. py:function:: _norm_regions(raw: tuple[str, Ellipsis]) -> tuple[str, Ellipsis]
+
+   Normalize each region name in *raw* via :func:`~nvitk.db.storage.normalize_variable_id`.
+
+
+.. py:data:: ASL_ATLAS_REGIONS
+   :type:  dict[str, tuple[str, Ellipsis]]
+
+.. py:function:: regions_for_atlas(name: str) -> list[str]
+
+   Return normalized ``region_id`` values for a named ASL atlas preset.
+
+

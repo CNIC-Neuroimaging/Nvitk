@@ -1,0 +1,118 @@
+nvitk.stats.violin_hemodynamics
+===============================
+
+.. py:module:: nvitk.stats.violin_hemodynamics
+
+.. autoapi-nested-parse::
+
+   Cohort violin + strip hemodynamics plots from qvtpy ``image_measurements``.
+
+   Shared by the CLI script ``scripts/pesa_brain/plotter/violin_hemodynamics.py``
+   and the QC GUI cohort-violin dock.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.violin_hemodynamics.VESSEL_SPECS
+   nvitk.stats.violin_hemodynamics.PITC_PWV_SPECS
+   nvitk.stats.violin_hemodynamics.TERRITORY_COLORS
+   nvitk.stats.violin_hemodynamics.METRICS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.violin_hemodynamics.resolve_pipeline_id
+   nvitk.stats.violin_hemodynamics.load_long_measurements
+   nvitk.stats.violin_hemodynamics.derive_tcbf_rows
+   nvitk.stats.violin_hemodynamics.prepare_plot_frame
+   nvitk.stats.violin_hemodynamics.flag_outliers_iqr
+   nvitk.stats.violin_hemodynamics.flag_low_values
+   nvitk.stats.violin_hemodynamics.low_vals_export_df
+   nvitk.stats.violin_hemodynamics.draw_violin_figure
+   nvitk.stats.violin_hemodynamics.plot_violin_figure
+   nvitk.stats.violin_hemodynamics.metric_by_key
+
+
+Module Contents
+---------------
+
+.. py:data:: VESSEL_SPECS
+   :type:  list[tuple[str, str, str]]
+   :value: [('TCBF', 'TCBF', 'TCBF & ICAs'), ('LICA', 'LICA', 'TCBF & ICAs'), ('RICA', 'RICA', 'TCBF &...
+
+
+.. py:data:: PITC_PWV_SPECS
+   :type:  list[tuple[str, str, str]]
+   :value: [('L_ICA', 'L_ICA', 'TCBF & ICAs'), ('R_ICA', 'R_ICA', 'TCBF & ICAs'), ('Basilar', 'Basilar',...
+
+
+.. py:data:: TERRITORY_COLORS
+   :type:  dict[str, str]
+
+.. py:data:: METRICS
+   :type:  list[dict[str, Any]]
+
+.. py:function:: resolve_pipeline_id(pipeline_version: str) -> str
+
+   Resolve a pipeline-version token (or a known qvtpy alias) to the canonical qvtpy pipeline id.
+
+
+.. py:function:: load_long_measurements(*, pipeline_id: str, variable_ids: list[str], subjects: str | None = None) -> pandas.DataFrame
+
+   Load long-format image_measurements for the given variables.
+
+
+.. py:function:: derive_tcbf_rows(flow_df: pandas.DataFrame) -> pandas.DataFrame
+
+   TCBF = LICA + RICA + BASILAR flow_mean per subject.
+
+
+.. py:function:: prepare_plot_frame(long_df: pandas.DataFrame, *, variable_id: str, specs: list[tuple[str, str, str]], derive_tcbf: bool) -> pandas.DataFrame
+
+   Filter/reshape long measurements into the violin-plot frame: ``subject_uid``/``vessel``/``group``/``value``.
+
+   Optionally derives a synthetic TCBF row per subject, maps region ids to
+   display vessel names and violin groups per *specs*, and drops zero
+   placeholder values (a project convention for "not measured").
+
+
+.. py:function:: flag_outliers_iqr(df: pandas.DataFrame, *, k: float = 1.5) -> pandas.Series
+
+   Return boolean mask of IQR outliers, computed per vessel.
+
+
+.. py:function:: flag_low_values(df: pandas.DataFrame, *, thresh: float) -> pandas.Series
+
+   Return boolean mask of values strictly below ``thresh``.
+
+
+.. py:function:: low_vals_export_df(df: pandas.DataFrame, *, thresh: float) -> pandas.DataFrame
+
+   Build subject/vessel/value table for values below ``thresh``.
+
+
+.. py:function:: draw_violin_figure(plot_df: pandas.DataFrame, *, title: str, ylabel: str, panel: str, outlier_rem: bool = False, outlier_high: bool = False, flag_low_vals: bool = False, low_val_thresh: float = 50.0, highlight_subject: str | None = None, fig: matplotlib.figure.Figure | None = None, figsize: tuple[float, float] | None = None) -> matplotlib.figure.Figure | None
+
+   Draw a territory-grouped violin plot onto *fig* (or a new figure).
+
+   When ``outlier_rem`` is True and ``highlight_subject`` is set, that subject's
+   points are retained even if they are IQR outliers, and highlighted on the plot.
+
+
+.. py:function:: plot_violin_figure(plot_df: pandas.DataFrame, *, title: str, ylabel: str, panel: str, output_path: pathlib.Path, outlier_rem: bool = False, outlier_high: bool = False, flag_low_vals: bool = False, low_val_thresh: float = 50.0, highlight_subject: str | None = None) -> pathlib.Path | None
+
+   Draw and save a violin figure to *output_path*.
+
+
+.. py:function:: metric_by_key(key: str) -> dict[str, Any] | None
+
+   Look up a metric's spec dict in ``METRICS`` by its key; ``None`` if not found.
+
+

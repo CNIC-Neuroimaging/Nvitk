@@ -1,0 +1,87 @@
+nvitk.gui.panels.statmodels.figure_host
+=======================================
+
+.. py:module:: nvitk.gui.panels.statmodels.figure_host
+
+.. autoapi-nested-parse::
+
+   A pane that shows either a Matplotlib figure or a Plotly one, and swaps cleanly between them.
+
+   Description
+   -----------
+   Every exploration dialog in this panel needs the same three things: hand a Plotly figure to a web
+   view, hand a Matplotlib figure to a canvas, and tear down whichever was there before without leaking
+   the previous figure. The logic is short but easy to get subtly wrong — a canvas removed from a layout
+   without ``deleteLater`` keeps its parent alive, and a figure dropped without ``plt.close`` leaks a
+   Matplotlib manager on every redraw — so it lives in one place rather than being re-typed per dialog.
+
+   Mixed in rather than wrapped in a widget: the host layout differs between dialogs (a controls row
+   above, a status label between, a splitter beside), and a widget that owned the layout would have to
+   grow a parameter for each of those.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.figure_host.FigureHostMixin
+
+
+Module Contents
+---------------
+
+.. py:class:: FigureHostMixin
+
+   Matplotlib / Plotly figure hosting for a dialog.
+
+   Call :meth:`_build_figure_host` once while laying the dialog out, then :meth:`_show_static` or
+   :meth:`_show_interactive` per redraw. The two are mutually exclusive: showing one hides the
+   other, so a dialog can offer an "Interactive" toggle without tracking which backend is live.
+
+
+   .. py:attribute:: _view
+      :type:  nvitk.gui.panels.statmodels.plotly_view.PlotlyView
+
+
+   .. py:attribute:: _static_host
+      :type:  qtpy.QtWidgets.QWidget
+
+
+   .. py:attribute:: _static_layout
+      :type:  qtpy.QtWidgets.QVBoxLayout
+
+
+   .. py:attribute:: _static_canvas
+      :type:  Any
+
+
+   .. py:attribute:: _static_figure
+      :type:  Any
+
+
+   .. py:method:: _build_figure_host(layout: qtpy.QtWidgets.QVBoxLayout, *, stretch: int = 1) -> None
+
+      Add the web view and the canvas host to *layout*, with the canvas hidden initially.
+
+
+
+   .. py:method:: _show_interactive(figure: Any) -> None
+
+      Hand a Plotly figure to the web view and hide the static canvas.
+
+
+
+   .. py:method:: _show_static(figure: Any) -> None
+
+      Embed a Matplotlib figure and hide the web view.
+
+
+
+   .. py:method:: _clear_static() -> None
+
+      Drop the current Matplotlib canvas and release its figure.
+
+
+

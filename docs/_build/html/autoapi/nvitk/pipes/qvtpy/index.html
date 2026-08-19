@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.qvtpy &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.qvtpy.autoqc_sources" href="autoqc_sources/index.html" />
+    <link rel="prev" title="nvitk.pipes.pesa_fat.sync_measurements" href="../pesa_fat/sync_measurements/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.qvtpy">
+<span id="nvitk-pipes-qvtpy"></span><h1>nvitk.pipes.qvtpy<a class="headerlink" href="#module-nvitk.pipes.qvtpy" title="Link to this heading">¶</a></h1>
+<p>Python-native QVT+ cerebrovascular pipeline (qvtpy).</p>
+<p>Orchestrates DICOM acquisition, NIfTI conversion, eICAB CoW segmentation, 4D-flow
+registration, centerline extraction, local complex-difference segmentation, LOC
+placement, and phase-based hemodynamics. Entry points:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="run/index.html#module-nvitk.pipes.qvtpy.run" title="nvitk.pipes.qvtpy.run"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.pipes.qvtpy.run</span></code></a> — master CLI <code class="docutils literal notranslate"><span class="pre">nvitk-qvtpy</span></code> (local or SGE).</p></li>
+<li><p><a class="reference internal" href="run_flowshow/index.html#module-nvitk.pipes.qvtpy.run_flowshow" title="nvitk.pipes.qvtpy.run_flowshow"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.pipes.qvtpy.run_flowshow</span></code></a> — interactive 4D-flow viewer <code class="docutils literal notranslate"><span class="pre">nvitk-qvtpy-flowshow</span></code>.</p></li>
+<li><p><a class="reference internal" href="config/index.html#module-nvitk.pipes.qvtpy.config" title="nvitk.pipes.qvtpy.config"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.pipes.qvtpy.config</span></code></a> — host paths, stage directory names, cluster defaults.</p></li>
+<li><p><a class="reference internal" href="labels/index.html#module-nvitk.pipes.qvtpy.labels" title="nvitk.pipes.qvtpy.labels"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.pipes.qvtpy.labels</span></code></a> — eICAB vs qvtpy multilabel id tables.</p></li>
+</ul>
+<p>Per-subject results live under <code class="docutils literal notranslate"><span class="pre">&lt;output_root&gt;/&lt;subject&gt;/qvtpy/&lt;stage_dir&gt;/</span></code> (see
+<a class="reference internal" href="config/index.html#nvitk.pipes.qvtpy.config.QVT_SUBDIR" title="nvitk.pipes.qvtpy.config.QVT_SUBDIR"><code class="xref py py-data docutils literal notranslate"><span class="pre">QVT_SUBDIR</span></code></a> and <code class="docutils literal notranslate"><span class="pre">STAGE*_DIR</span></code> constants).</p>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading">¶</a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="autoqc_sources/index.html">nvitk.pipes.qvtpy.autoqc_sources</a></li>
+<li class="toctree-l1"><a class="reference internal" href="common/index.html">nvitk.pipes.qvtpy.common</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config/index.html">nvitk.pipes.qvtpy.config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="labels/index.html">nvitk.pipes.qvtpy.labels</a></li>
+<li class="toctree-l1"><a class="reference internal" href="run/index.html">nvitk.pipes.qvtpy.run</a></li>
+<li class="toctree-l1"><a class="reference internal" href="run_flowshow/index.html">nvitk.pipes.qvtpy.run_flowshow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage0_convert/index.html">nvitk.pipes.qvtpy.stage0_convert</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage0_download/index.html">nvitk.pipes.qvtpy.stage0_download</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage1_eicab/index.html">nvitk.pipes.qvtpy.stage1_eicab</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage2_registration/index.html">nvitk.pipes.qvtpy.stage2_registration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage3_centerline/index.html">nvitk.pipes.qvtpy.stage3_centerline</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage4_4dflow_segmentation/index.html">nvitk.pipes.qvtpy.stage4_4dflow_segmentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage4t_4dflow_t_segmentation/index.html">nvitk.pipes.qvtpy.stage4t_4dflow_t_segmentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage5_loc_generation/index.html">nvitk.pipes.qvtpy.stage5_loc_generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage6_measure/index.html">nvitk.pipes.qvtpy.stage6_measure</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage7_morphometrics/index.html">nvitk.pipes.qvtpy.stage7_morphometrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stage9_autoqc/index.html">nvitk.pipes.qvtpy.stage9_autoqc</a></li>
+<li class="toctree-l1"><a class="reference internal" href="stages/index.html">nvitk.pipes.qvtpy.stages</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sync_measurements/index.html">nvitk.pipes.qvtpy.sync_measurements</a></li>
+<li class="toctree-l1"><a class="reference internal" href="util/index.html">nvitk.pipes.qvtpy.util</a></li>
+<li class="toctree-l1"><a class="reference internal" href="xnat_upload/index.html">nvitk.pipes.qvtpy.xnat_upload</a></li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.pipes</a><ul>
+      <li>Previous: <a href="../pesa_fat/sync_measurements/index.html" title="previous chapter">nvitk.pipes.pesa_fat.sync_measurements</a></li>
+      <li>Next: <a href="autoqc_sources/index.html" title="next chapter">nvitk.pipes.qvtpy.autoqc_sources</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/pipes/qvtpy/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

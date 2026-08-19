@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.panels.statmodels.mediation_panel &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.panels.statmodels.panel" href="../panel/index.html" />
+    <link rel="prev" title="nvitk.gui.panels.statmodels.measurements" href="../measurements/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.panels.statmodels.mediation_panel">
+<span id="nvitk-gui-panels-statmodels-mediation-panel"></span><h1>nvitk.gui.panels.statmodels.mediation_panel<a class="headerlink" href="#module-nvitk.gui.panels.statmodels.mediation_panel" title="Link to this heading">¶</a></h1>
+<p>Mediation formulation panel and its background worker.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>Mediation asks a different question from a MixedLM — “how much of X’s effect on Y goes through M?” —
+so it gets its own form rather than a free-text formula: pick X, M and Y, tick the covariates, choose
+the engine, and run.</p>
+<p>Three engines are offered (see <a class="reference internal" href="../../../../stats/mediation/index.html#module-nvitk.stats.mediation" title="nvitk.stats.mediation"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.stats.mediation</span></code></a>). The MixedLM cluster bootstrap is the
+one that respects the subject × territory nesting, and it is also the slow one: <code class="docutils literal notranslate"><span class="pre">2</span> <span class="pre">×</span> <span class="pre">n_boot</span></code> model
+fits. It therefore runs on <a class="reference internal" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker" title="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker"><code class="xref py py-class docutils literal notranslate"><span class="pre">MediationWorker</span></code></a> with a progress bar, a live ETA and a working
+Cancel — a cancelled run still summarizes the draws that completed.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.mediation_panel.ENGINE_HINTS" title="nvitk.gui.panels.statmodels.mediation_panel.ENGINE_HINTS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ENGINE_HINTS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker" title="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MediationWorker</span></code></a></p></td>
+<td><p>Background thread running <a class="reference internal" href="../../../../stats/mediation/index.html#nvitk.stats.mediation.run_mediation" title="nvitk.stats.mediation.run_mediation"><code class="xref py py-func docutils literal notranslate"><span class="pre">run_mediation()</span></code></a>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel" title="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MediationFormPanel</span></code></a></p></td>
+<td><p>X / M / Y selectors, covariate checklist, engine choice and run controls.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.ENGINE_HINTS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.mediation_panel.</span></span><span class="sig-name descname"><span class="pre">ENGINE_HINTS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.ENGINE_HINTS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.mediation_panel.</span></span><span class="sig-name descname"><span class="pre">MediationWorker</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../../stats/mediation/index.html#nvitk.stats.mediation.MediationSpec" title="nvitk.stats.mediation.MediationSpec"><span class="pre">nvitk.stats.mediation.MediationSpec</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">qtpy.QtCore.QThread</span></code></p>
+<p>Background thread running <a class="reference internal" href="../../../../stats/mediation/index.html#nvitk.stats.mediation.run_mediation" title="nvitk.stats.mediation.run_mediation"><code class="xref py py-func docutils literal notranslate"><span class="pre">run_mediation()</span></code></a>.</p>
+<p>Emits <code class="docutils literal notranslate"><span class="pre">progress(done,</span> <span class="pre">total)</span></code> as draws complete and <code class="docutils literal notranslate"><span class="pre">finished_ok(bundle)</span></code> or
+<code class="docutils literal notranslate"><span class="pre">failed(message)</span></code> at the end. <a class="reference internal" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.cancel" title="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.cancel"><code class="xref py py-meth docutils literal notranslate"><span class="pre">cancel()</span></code></a> sets an event the engines poll every draw, so the
+run stops within one model fit rather than at the next natural boundary.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.finished_ok">
+<span class="sig-name descname"><span class="pre">finished_ok</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.finished_ok" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.failed">
+<span class="sig-name descname"><span class="pre">failed</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.failed" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.progress">
+<span class="sig-name descname"><span class="pre">progress</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.progress" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._df">
+<span class="sig-name descname"><span class="pre">_df</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._df" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._spec">
+<span class="sig-name descname"><span class="pre">_spec</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._spec" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._cancel">
+<span class="sig-name descname"><span class="pre">_cancel</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker._cancel" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.cancel">
+<span class="sig-name descname"><span class="pre">cancel</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.cancel" title="Link to this definition">¶</a></dt>
+<dd><p>Ask the run to stop at the next draw boundary.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationWorker.run" title="Link to this definition">¶</a></dt>
+<dd><p>Run the configured engine and emit the result bundle.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.mediation_panel.</span></span><span class="sig-name descname"><span class="pre">MediationFormPanel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">qtpy.QtWidgets.QWidget</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">qtpy.QtWidgets.QGroupBox</span></code></p>
+<p>X / M / Y selectors, covariate checklist, engine choice and run controls.</p>
+<section id="signals">
+<h3>Signals<a class="headerlink" href="#signals" title="Link to this heading">¶</a></h3>
+<dl class="simple">
+<dt>runRequested(MediationSpec)</dt><dd><p>The user pressed Run and the spec validated.</p>
+</dd>
+<dt>cancelRequested</dt><dd><p>The user pressed Cancel during a run.</p>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.runRequested">
+<span class="sig-name descname"><span class="pre">runRequested</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.runRequested" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.cancelRequested">
+<span class="sig-name descname"><span class="pre">cancelRequested</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.cancelRequested" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._columns">
+<span class="sig-name descname"><span class="pre">_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">[]</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._numeric_columns">
+<span class="sig-name descname"><span class="pre">_numeric_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">[]</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._numeric_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._started_at">
+<span class="sig-name descname"><span class="pre">_started_at</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._started_at" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._engine">
+<span class="sig-name descname"><span class="pre">_engine</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._engine" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._x">
+<span class="sig-name descname"><span class="pre">_x</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._x" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._m">
+<span class="sig-name descname"><span class="pre">_m</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._m" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._y">
+<span class="sig-name descname"><span class="pre">_y</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._y" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._group_col">
+<span class="sig-name descname"><span class="pre">_group_col</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._group_col" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._group_col_label">
+<span class="sig-name descname"><span class="pre">_group_col_label</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._group_col_label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._subject_col">
+<span class="sig-name descname"><span class="pre">_subject_col</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._subject_col" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._subject_col_label">
+<span class="sig-name descname"><span class="pre">_subject_col_label</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._subject_col_label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._n_boot">
+<span class="sig-name descname"><span class="pre">_n_boot</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._n_boot" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._n_boot_label">
+<span class="sig-name descname"><span class="pre">_n_boot_label</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._n_boot_label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._seed">
+<span class="sig-name descname"><span class="pre">_seed</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._seed" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._ci">
+<span class="sig-name descname"><span class="pre">_ci</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._ci" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._covariates">
+<span class="sig-name descname"><span class="pre">_covariates</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._covariates" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._hint">
+<span class="sig-name descname"><span class="pre">_hint</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._hint" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._error">
+<span class="sig-name descname"><span class="pre">_error</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._error" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._btn_run">
+<span class="sig-name descname"><span class="pre">_btn_run</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._btn_run" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._btn_cancel">
+<span class="sig-name descname"><span class="pre">_btn_cancel</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._btn_cancel" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._progress">
+<span class="sig-name descname"><span class="pre">_progress</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._progress" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_columns">
+<span class="sig-name descname"><span class="pre">set_columns</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_columns" title="Link to this definition">¶</a></dt>
+<dd><p>Repopulate every selector from <em>df</em>, preserving choices that are still valid.</p>
+<p>X / M / Y offer numeric columns only — the engines read coefficients back by name, which a
+categorical expansion (<code class="docutils literal notranslate"><span class="pre">C(x)[T.b]</span></code>) makes impossible. Transform a categorical into a
+derived numeric column first if it really is the exposure.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._checked_covariates">
+<span class="sig-name descname"><span class="pre">_checked_covariates</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._checked_covariates" title="Link to this definition">¶</a></dt>
+<dd><p>Covariate names currently ticked, excluding whatever plays X/M/Y.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._on_engine_changed">
+<span class="sig-name descname"><span class="pre">_on_engine_changed</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._on_engine_changed" title="Link to this definition">¶</a></dt>
+<dd><p>Enable only the fields the selected engine uses, and update the hint.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.spec">
+<span class="sig-name descname"><span class="pre">spec</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../../../../stats/mediation/index.html#nvitk.stats.mediation.MediationSpec" title="nvitk.stats.mediation.MediationSpec"><span class="pre">nvitk.stats.mediation.MediationSpec</span></a></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.spec" title="Link to this definition">¶</a></dt>
+<dd><p>The mediation currently described by the form.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.apply_spec">
+<span class="sig-name descname"><span class="pre">apply_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../../../../stats/mediation/index.html#nvitk.stats.mediation.MediationSpec" title="nvitk.stats.mediation.MediationSpec"><span class="pre">nvitk.stats.mediation.MediationSpec</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.apply_spec" title="Link to this definition">¶</a></dt>
+<dd><p>Load <em>spec</em> into the form, ignoring columns that are not currently available.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._on_run">
+<span class="sig-name descname"><span class="pre">_on_run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel._on_run" title="Link to this definition">¶</a></dt>
+<dd><p>Validate and emit the run request.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_error">
+<span class="sig-name descname"><span class="pre">set_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_error" title="Link to this definition">¶</a></dt>
+<dd><p>Show a validation/failure message under the form.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_running">
+<span class="sig-name descname"><span class="pre">set_running</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">running</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_running" title="Link to this definition">¶</a></dt>
+<dd><p>Swap the panel between idle and running states.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_progress">
+<span class="sig-name descname"><span class="pre">set_progress</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">done</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">total</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.mediation_panel.MediationFormPanel.set_progress" title="Link to this definition">¶</a></dt>
+<dd><p>Advance the bar and, after enough draws to be meaningful, show an ETA.</p>
+</dd></dl>
+
+</section>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.gui</a><ul>
+  <li><a href="../../index.html">nvitk.gui.panels</a><ul>
+  <li><a href="../index.html">nvitk.gui.panels.statmodels</a><ul>
+      <li>Previous: <a href="../measurements/index.html" title="previous chapter">nvitk.gui.panels.statmodels.measurements</a></li>
+      <li>Next: <a href="../panel/index.html" title="next chapter">nvitk.gui.panels.statmodels.panel</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/gui/panels/statmodels/mediation_panel/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

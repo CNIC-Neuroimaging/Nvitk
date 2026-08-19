@@ -1,0 +1,363 @@
+nvitk.gui.panels.qc
+===================
+
+.. py:module:: nvitk.gui.panels.qc
+
+.. autoapi-nested-parse::
+
+   QC subwindow: pipeline/subject selector and Load into Napari.
+
+   Supports two QC setups:
+   - **XNAT** — catalog subjects + download pipeline resources (existing path).
+   - **Local** — NIfTI root + results root on disk (no XNAT password).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.qc.log
+   nvitk.gui.panels.qc.PIPELINE_QVTPY
+   nvitk.gui.panels.qc.PIPELINE_EICAB
+   nvitk.gui.panels.qc.SOURCE_XNAT
+   nvitk.gui.panels.qc.SOURCE_LOCAL
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.qc._QcLoadWorker
+   nvitk.gui.panels.qc.QcPanel
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.qc._default_local_roots
+   nvitk.gui.panels.qc._list_subject_dirs
+   nvitk.gui.panels.qc._subject_has_pipeline_results
+   nvitk.gui.panels.qc.pd_concat_unique
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: PIPELINE_QVTPY
+   :value: 'qvtpy'
+
+
+.. py:data:: PIPELINE_EICAB
+   :value: 'eicab'
+
+
+.. py:data:: SOURCE_XNAT
+   :value: 0
+
+
+.. py:data:: SOURCE_LOCAL
+   :value: 1
+
+
+.. py:class:: _QcLoadWorker(*, pipeline: str, subject_uid: str, project_id: str, config_path: pathlib.Path, password: str, local_path: str, app_state: dict[str, Any], download_root: pathlib.Path)
+
+   Bases: :py:obj:`qtpy.QtCore.QThread`
+
+
+   Background thread that downloads (or reuses cached) pipeline resources and phase NIfTIs for a
+   QC subject, so the GUI stays responsive during network I/O.
+
+
+   .. py:attribute:: finished_ok
+
+
+   .. py:attribute:: failed
+
+
+   .. py:attribute:: progress
+
+
+   .. py:attribute:: _pipeline
+
+
+   .. py:attribute:: _subject_uid
+
+
+   .. py:attribute:: _project_id
+
+
+   .. py:attribute:: _config_path
+
+
+   .. py:attribute:: _password
+
+
+   .. py:attribute:: _local_path
+
+
+   .. py:attribute:: _app_state
+
+
+   .. py:attribute:: _download_root
+
+
+   .. py:method:: run() -> None
+
+      Resolve the primary pipeline resource (cached locally or downloaded from XNAT), then best-
+      effort fetch companion ``4dflows`` and AP/RL/FH phase NIfTI resources; emits ``finished_ok``
+      with the collected roots or ``failed`` on error.
+
+
+
+.. py:function:: _default_local_roots() -> tuple[pathlib.Path, pathlib.Path]
+
+   NIfTI + results defaults from qvtpy local config.
+
+
+.. py:function:: _list_subject_dirs(root: pathlib.Path, prefix: str = 'PESA') -> list[str]
+
+   Names of subdirectories under *root* whose name starts with *prefix* (case-insensitive).
+
+
+.. py:function:: _subject_has_pipeline_results(results_root: pathlib.Path, subject: str, pipeline: str) -> bool
+
+   True if *subject* has *pipeline* (qvtpy or eicab) output under *results_root*, recognizing
+   bundled, unpacked-stage, and flat-export layouts.
+
+
+.. py:class:: QcPanel(viewer: Any, app_state: dict[str, Any], *, on_inputs_opened: Callable[[list[str]], None] | None = None, parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Right-tab QC browser for qvtpy / eicab subjects (XNAT or local roots).
+
+
+   .. py:attribute:: _viewer
+
+
+   .. py:attribute:: _app_state
+
+
+   .. py:attribute:: _on_inputs_opened
+      :value: None
+
+
+
+   .. py:attribute:: _worker
+      :type:  _QcLoadWorker | None
+      :value: None
+
+
+
+   .. py:attribute:: _review_panel
+      :value: None
+
+
+
+   .. py:attribute:: _status
+
+
+   .. py:attribute:: _source
+
+
+   .. py:attribute:: _pipeline
+
+
+   .. py:attribute:: _stack
+
+
+   .. py:attribute:: _subject_search
+
+
+   .. py:attribute:: _subjects
+
+
+   .. py:attribute:: _all_subjects
+      :type:  list[dict[str, Any]]
+      :value: []
+
+
+
+   .. py:attribute:: _qc_statuses
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: _btn_refresh
+
+
+   .. py:attribute:: _btn_load
+
+
+   .. py:method:: _build_xnat_page() -> qtpy.QtWidgets.QWidget
+
+      Build the XNAT-source page: project picker and config-file path with browse button.
+
+
+
+   .. py:method:: _build_local_page() -> qtpy.QtWidgets.QWidget
+
+      Build the local-source page: NIfTI root and results root path fields with browse buttons.
+
+
+
+   .. py:method:: _path_row(edit: qtpy.QtWidgets.QLineEdit) -> qtpy.QtWidgets.QWidget
+
+      Wrap *edit* with a "…" browse button that fills it from a directory picker.
+
+
+
+   .. py:method:: _browse_into(edit: qtpy.QtWidgets.QLineEdit) -> None
+
+      Open a directory picker and set *edit*'s text to the chosen path, then reload subjects.
+
+
+
+   .. py:method:: _browse_xnat_config() -> None
+
+      Open a file picker for the XNAT config file and set the config-path field.
+
+
+
+   .. py:method:: _is_xnat() -> bool
+
+      True if the currently selected QC source is XNAT (vs. local disk).
+
+
+
+   .. py:method:: _on_source_changed() -> None
+
+      Switch the stacked page and Load button label for the newly selected source, then reload
+      the subject list.
+
+
+
+   .. py:method:: _current_pipeline() -> str
+
+      The currently selected pipeline id (``"qvtpy"`` or ``"eicab"``).
+
+
+
+   .. py:method:: _current_project() -> str
+
+      The currently selected XNAT project id.
+
+
+
+   .. py:method:: _required_slot() -> str
+
+      The catalog ``asset_slot`` corresponding to the currently selected pipeline's resource.
+
+
+
+   .. py:method:: _refresh_qc_statuses() -> None
+
+      Query the DB for per-subject QC revision status.
+
+
+
+   .. py:method:: _reload_subjects() -> None
+
+      Refresh QC statuses and reload the subject list from the currently selected source.
+
+
+
+   .. py:method:: _reload_xnat_subjects() -> None
+
+      Populate the subject list from the catalog's ``assets`` table, filtered to the required
+      pipeline resource slot and (if available) the currently selected XNAT project.
+
+
+
+   .. py:method:: _reload_local_subjects() -> None
+
+      Populate the subject list by scanning the configured NIfTI/results root directories,
+      ordering subjects that already have the selected pipeline's results first.
+
+
+
+   .. py:attribute:: _QC_TAG
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: _QC_COLOR
+      :type:  dict[str, str]
+
+
+   .. py:method:: _filter_subjects() -> None
+
+      Rebuild the subject list widget from ``_all_subjects``, applying the search filter and
+      QC-status tags/colors.
+
+
+
+   .. py:method:: _on_subject_selected(current: qtpy.QtWidgets.QListWidgetItem | None, _previous: qtpy.QtWidgets.QListWidgetItem | None) -> None
+
+      Enable the Load button once a subject is selected.
+
+
+
+   .. py:method:: _on_load() -> None
+
+      Dispatch the Load button to the XNAT or local subject loader based on the current source.
+
+
+
+   .. py:method:: _on_load_xnat(row: dict[str, Any], item: qtpy.QtWidgets.QListWidgetItem) -> None
+
+      Prompt for the XNAT password and start a :class:`_QcLoadWorker` to download/cache the
+      selected subject's pipeline resources in the background.
+
+
+
+   .. py:method:: _on_load_local(row: dict[str, Any], item: qtpy.QtWidgets.QListWidgetItem) -> None
+
+      Resolve the selected subject's local results/NIfTI directories and load them directly
+      (synchronously, no background worker needed).
+
+
+
+   .. py:method:: _on_progress(message: str) -> None
+
+      Show a background-worker progress *message* in the status label and log panel.
+
+
+
+   .. py:method:: _on_load_ok(payload: object) -> None
+
+      Open the resolved pipeline layers into Napari and (for qvtpy) attach the QC review and
+      cohort violin docks.
+
+
+
+   .. py:method:: _on_subject_revised() -> None
+
+      Refresh QC status tags after a subject is marked as revised.
+
+
+
+   .. py:method:: _on_load_failed(message: str) -> None
+
+      Show the background worker's failure *message* in the status label and as a notification.
+
+
+
+   .. py:method:: _on_worker_finished() -> None
+
+      Re-enable the Load button and drop the finished worker reference.
+
+
+
+.. py:function:: pd_concat_unique(a: Any, b: Any) -> Any
+
+   Concatenate two DataFrames and drop exact-duplicate rows, short-circuiting when either is
+   empty/``None``.
+
+

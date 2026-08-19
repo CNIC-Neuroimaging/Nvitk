@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats._hemodynamic_frames &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats._model_values" href="../_model_values/index.html" />
+    <link rel="prev" title="nvitk.stats" href="../index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats._hemodynamic_frames">
+<span id="nvitk-stats-hemodynamic-frames"></span><h1>nvitk.stats._hemodynamic_frames<a class="headerlink" href="#module-nvitk.stats._hemodynamic_frames" title="Link to this heading">¶</a></h1>
+<p>Build long analysis tables from <code class="docutils literal notranslate"><span class="pre">melt_imaging_territories</span></code> + clinical wide frames.</p>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.FRAME_SUFFIX" title="nvitk.stats._hemodynamic_frames.FRAME_SUFFIX"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FRAME_SUFFIX</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_measurements" title="nvitk.stats._hemodynamic_frames.aggregate_territory_measurements"><code class="xref py py-obj docutils literal notranslate"><span class="pre">aggregate_territory_measurements</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>For each <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>, mean (or other <code class="docutils literal notranslate"><span class="pre">agg</span></code>) <code class="docutils literal notranslate"><span class="pre">value</span></code> within</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.frame_column_name" title="nvitk.stats._hemodynamic_frames.frame_column_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">frame_column_name</span></code></a>(→ str)</p></td>
+<td><p>Column name for one cardiac frame of a time-resolved variable.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_frames" title="nvitk.stats._hemodynamic_frames.aggregate_territory_frames"><code class="xref py py-obj docutils literal notranslate"><span class="pre">aggregate_territory_frames</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>A time-resolved measurement as <strong>one column per cardiac frame</strong>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.frame_columns" title="nvitk.stats._hemodynamic_frames.frame_columns"><code class="xref py py-obj docutils literal notranslate"><span class="pre">frame_columns</span></code></a>(→ list[str])</p></td>
+<td><p>The per-frame columns of <em>variable_id</em> in <em>frame</em>, in cardiac order.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.merge_subject_covariates" title="nvitk.stats._hemodynamic_frames.merge_subject_covariates"><code class="xref py py-obj docutils literal notranslate"><span class="pre">merge_subject_covariates</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Attach subject-level covariates (one row per <code class="docutils literal notranslate"><span class="pre">subject_key</span></code> in <code class="docutils literal notranslate"><span class="pre">clinical_wide</span></code>).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.index_wide_image_columns_by_region_variable" title="nvitk.stats._hemodynamic_frames.index_wide_image_columns_by_region_variable"><code class="xref py py-obj docutils literal notranslate"><span class="pre">index_wide_image_columns_by_region_variable</span></code></a>(...)</p></td>
+<td><p>Map <code class="docutils literal notranslate"><span class="pre">(region_id,</span> <span class="pre">variable_id)</span></code> pairs to wide column names parseable by</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.build_analysis_df_from_territory_definitions" title="nvitk.stats._hemodynamic_frames.build_analysis_df_from_territory_definitions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_analysis_df_from_territory_definitions</span></code></a>(...)</p></td>
+<td><p>One row per <code class="docutils literal notranslate"><span class="pre">(subject_key,</span> <span class="pre">territory)</span></code> using an <strong>explicit</strong> per-territory</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames" title="nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_analysis_df_from_repo_frames</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>One row per <code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">territory)</span></code> with aggregated imaging measures and</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.aggregate_territory_measurements">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">aggregate_territory_measurements</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">territory_df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">variable_ids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">agg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'mean'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_measurements" title="Link to this definition">¶</a></dt>
+<dd><p>For each <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>, mean (or other <code class="docutils literal notranslate"><span class="pre">agg</span></code>) <code class="docutils literal notranslate"><span class="pre">value</span></code> within
+<code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">territory)</span></code>.</p>
+<p>Expects columns: <code class="docutils literal notranslate"><span class="pre">subject_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">territory</span></code>, <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>, <code class="docutils literal notranslate"><span class="pre">value</span></code>.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.FRAME_SUFFIX">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">FRAME_SUFFIX</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'_f{index}'</span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.FRAME_SUFFIX" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.frame_column_name">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">frame_column_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variable_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.frame_column_name" title="Link to this definition">¶</a></dt>
+<dd><p>Column name for one cardiac frame of a time-resolved variable.</p>
+<p>Frame 0 gets the bare variable name, every later frame a <code class="docutils literal notranslate"><span class="pre">_fN</span></code> suffix. That asymmetry is not
+a choice made here — it is what the database’s own wide pivot produces, and diverging from it
+would leave two spellings of the same column in circulation.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">frame_column_name</span><span class="p">(</span><span class="s2">&quot;flow_tseries&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">frame_column_name</span><span class="p">(</span><span class="s2">&quot;flow_tseries&quot;</span><span class="p">,</span> <span class="mi">7</span><span class="p">)</span>
+<span class="go">(&#39;flow_tseries&#39;, &#39;flow_tseries_f7&#39;)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.aggregate_territory_frames">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">aggregate_territory_frames</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">territory_df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">variable_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">agg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'mean'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_frames" title="Link to this definition">¶</a></dt>
+<dd><p>A time-resolved measurement as <strong>one column per cardiac frame</strong>.</p>
+<section id="why-not-just-aggregate">
+<h3>Why not just aggregate<a class="headerlink" href="#why-not-just-aggregate" title="Link to this heading">¶</a></h3>
+<p><a class="reference internal" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_measurements" title="nvitk.stats._hemodynamic_frames.aggregate_territory_measurements"><code class="xref py py-func docutils literal notranslate"><span class="pre">aggregate_territory_measurements()</span></code></a> groups on <code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">territory)</span></code> alone, so a
+variable with a <code class="docutils literal notranslate"><span class="pre">frame_index</span></code> — <code class="docutils literal notranslate"><span class="pre">flow_tseries</span></code> is the only one today — would have its whole
+cardiac cycle averaged into a single number. That number already exists and is called
+<code class="docutils literal notranslate"><span class="pre">flow_mean</span></code>; collapsing the waveform to recompute it discards the only thing the timeseries
+adds.</p>
+<p>So the frame index joins the grouping key and the result is pivoted: one row per
+<code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">territory)</span></code> still, but <code class="docutils literal notranslate"><span class="pre">flow_tseries</span></code>, <code class="docutils literal notranslate"><span class="pre">flow_tseries_f1</span></code> … one per frame.
+The frame stays rectangular and numeric, so every model, filter and export keeps working, and a
+caller that wants the waveform reads the columns back with <a class="reference internal" href="#nvitk.stats._hemodynamic_frames.frame_columns" title="nvitk.stats._hemodynamic_frames.frame_columns"><code class="xref py py-func docutils literal notranslate"><span class="pre">frame_columns()</span></code></a>.</p>
+<p>Expects columns: <code class="docutils literal notranslate"><span class="pre">subject_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">territory</span></code>, <code class="docutils literal notranslate"><span class="pre">variable_id</span></code>, <code class="docutils literal notranslate"><span class="pre">value</span></code>, <code class="docutils literal notranslate"><span class="pre">frame_index</span></code>.</p>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.frame_columns">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">frame_columns</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">variable_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.frame_columns" title="Link to this definition">¶</a></dt>
+<dd><p>The per-frame columns of <em>variable_id</em> in <em>frame</em>, in cardiac order.</p>
+<p>Sorted by frame index rather than by name, so frame 10 follows frame 9 instead of frame 1 — a
+lexical sort would reorder the waveform and animate a cardiac cycle out of sequence.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.merge_subject_covariates">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">merge_subject_covariates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">long_df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clinical_wide</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariate_cols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dedupe</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'first'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.merge_subject_covariates" title="Link to this definition">¶</a></dt>
+<dd><p>Attach subject-level covariates (one row per <code class="docutils literal notranslate"><span class="pre">subject_key</span></code> in <code class="docutils literal notranslate"><span class="pre">clinical_wide</span></code>).</p>
+<p><code class="docutils literal notranslate"><span class="pre">long_df</span></code> must include <code class="docutils literal notranslate"><span class="pre">subject_key</span></code> and typically <code class="docutils literal notranslate"><span class="pre">territory</span></code> plus outcome
+columns from <a class="reference internal" href="#nvitk.stats._hemodynamic_frames.aggregate_territory_measurements" title="nvitk.stats._hemodynamic_frames.aggregate_territory_measurements"><code class="xref py py-func docutils literal notranslate"><span class="pre">aggregate_territory_measurements()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.index_wide_image_columns_by_region_variable">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">index_wide_image_columns_by_region_variable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">id_cols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_frame_index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.index_wide_image_columns_by_region_variable" title="Link to this definition">¶</a></dt>
+<dd><p>Map <code class="docutils literal notranslate"><span class="pre">(region_id,</span> <span class="pre">variable_id)</span></code> pairs to wide column names parseable by
+<a class="reference internal" href="../index.html#nvitk.stats.parse_wide_image_column" title="nvitk.stats.parse_wide_image_column"><code class="xref py py-func docutils literal notranslate"><span class="pre">parse_wide_image_column()</span></code></a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">id_cols</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">(&quot;subject_uid&quot;,)</span></code> when present in <code class="docutils literal notranslate"><span class="pre">df</span></code>; otherwise
+no id columns are assumed.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.build_analysis_df_from_territory_definitions">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">build_analysis_df_from_territory_definitions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image_df_wide</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clinical_wide</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">territory_definitions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">collections.abc.Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">flow_vars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">asl_vars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariate_cols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dedupe_clinical</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'first'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'mean'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_frame_index</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.build_analysis_df_from_territory_definitions" title="Link to this definition">¶</a></dt>
+<dd><p>One row per <code class="docutils literal notranslate"><span class="pre">(subject_key,</span> <span class="pre">territory)</span></code> using an <strong>explicit</strong> per-territory
+region list for 4D flow and ASL.</p>
+<p>Unlike <code class="xref py py-func docutils literal notranslate"><span class="pre">melt_imaging_territories()</span></code> + <a class="reference internal" href="#nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames" title="nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames"><code class="xref py py-func docutils literal notranslate"><span class="pre">build_analysis_df_from_repo_frames()</span></code></a>,
+the same ASL <code class="docutils literal notranslate"><span class="pre">region_id</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">ctx-whole-brain</span></code>) may contribute to <strong>more
+than one</strong> analysis territory (e.g. <code class="docutils literal notranslate"><span class="pre">ICA-WB</span></code> and <code class="docutils literal notranslate"><span class="pre">Venous-WB</span></code>) with
+different flow region groupings, because territories are not derived from a
+single inverted <code class="docutils literal notranslate"><span class="pre">region</span> <span class="pre">→</span> <span class="pre">territory</span></code> map.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>territory_definitions</strong> – <code class="docutils literal notranslate"><span class="pre">{territory_name:</span> <span class="pre">{&quot;flow&quot;:</span> <span class="pre">(region_ids...),</span> <span class="pre">&quot;asl&quot;:</span> <span class="pre">(region_ids...)}}</span></code>.
+Either <code class="docutils literal notranslate"><span class="pre">flow</span></code> or <code class="docutils literal notranslate"><span class="pre">asl</span></code> may be omitted or empty; missing variables for
+that territory are filled with NaN. Region IDs must match <code class="docutils literal notranslate"><span class="pre">region_id</span></code> in
+wide column names after <a class="reference internal" href="../index.html#nvitk.stats.parse_wide_image_column" title="nvitk.stats.parse_wide_image_column"><code class="xref py py-func docutils literal notranslate"><span class="pre">parse_wide_image_column()</span></code></a>.</p></li>
+<li><p><strong>flow_vars</strong> – <code class="docutils literal notranslate"><span class="pre">variable_id</span></code> tokens to pull from wide columns (e.g. <code class="docutils literal notranslate"><span class="pre">flow_mean</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mean_cbf</span></code>).</p></li>
+<li><p><strong>asl_vars</strong> – <code class="docutils literal notranslate"><span class="pre">variable_id</span></code> tokens to pull from wide columns (e.g. <code class="docutils literal notranslate"><span class="pre">flow_mean</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mean_cbf</span></code>).</p></li>
+<li><p><strong>include_frame_index</strong> – When True, include <code class="docutils literal notranslate"><span class="pre">flow_tseries</span></code> (and similar) columns with <code class="docutils literal notranslate"><span class="pre">_fN</span></code>
+suffixes in the column index; default False matches <code class="xref py py-func docutils literal notranslate"><span class="pre">melt_imaging_territories()</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats._hemodynamic_frames.</span></span><span class="sig-name descname"><span class="pre">build_analysis_df_from_repo_frames</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">territory_df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clinical_wide</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">imaging_variable_ids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariate_cols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">collections.abc.Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dedupe_clinical</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'first'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'mean'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats._hemodynamic_frames.build_analysis_df_from_repo_frames" title="Link to this definition">¶</a></dt>
+<dd><p>One row per <code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">territory)</span></code> with aggregated imaging measures and
+merged covariates — same grain as <code class="docutils literal notranslate"><span class="pre">cacs.ipynb</span></code> after melt (long format).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>territory_df</strong> – Output of <a class="reference internal" href="../index.html#nvitk.stats.melt_imaging_territories" title="nvitk.stats.melt_imaging_territories"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.stats.melt_imaging_territories()</span></code></a>.</p></li>
+<li><p><strong>clinical_wide</strong> – Wide clinical / joined table (e.g. <code class="docutils literal notranslate"><span class="pre">repo.join([clinical,</span> <span class="pre">plaque,</span> <span class="pre">cognitive])</span></code>).</p></li>
+<li><p><strong>imaging_variable_ids</strong> – <code class="docutils literal notranslate"><span class="pre">variable_id</span></code> values to aggregate (e.g. <code class="docutils literal notranslate"><span class="pre">(&quot;mean_cbf&quot;,</span> <span class="pre">&quot;pi&quot;)</span></code>).</p></li>
+<li><p><strong>covariate_cols</strong> – Columns to copy from <code class="docutils literal notranslate"><span class="pre">clinical_wide</span></code> (must exist; typically <code class="docutils literal notranslate"><span class="pre">tacsctot_group</span></code>,
+<code class="docutils literal notranslate"><span class="pre">age_at_mri</span></code>, <code class="docutils literal notranslate"><span class="pre">sex</span></code>, …).</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../index.html" title="previous chapter">nvitk.stats</a></li>
+      <li>Next: <a href="../_model_values/index.html" title="next chapter">nvitk.stats._model_values</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/_hemodynamic_frames/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

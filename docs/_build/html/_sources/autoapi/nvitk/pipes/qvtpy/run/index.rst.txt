@@ -1,0 +1,128 @@
+nvitk.pipes.qvtpy.run
+=====================
+
+.. py:module:: nvitk.pipes.qvtpy.run
+
+.. autoapi-nested-parse::
+
+   qvtpy pipeline master.
+
+   This mirrors the PESA-Fat runner shape: local execution vs. SGE submission via
+   a bash script + SSH to the cluster login node.
+
+   Stages (select with ``--stages``; default ``stage0_c,stage1``)
+   --------------------------------------------------------------
+   - ``stage0_d`` — XNAT → DICOM (local only).
+   - ``stage0_c`` — DICOM → NIfTI + reorg + optional ``phase2volume`` derivatives.
+   - ``stage1`` — eICAB on ``TOF/TOF.nii.gz``.
+   - ``stage2`` — eICAB ``TOF_resampled`` → 4D flow rigid FLIRT (NiPype FSL; fixed = Angiography_3D or CD).
+   - ``stage3`` — eICAB in 4Dflow space + arterial/venous centerlines (``--eicab-mask``, geometry venous branches).
+   - ``stage4`` — Local CD crop per vessel + threshold + optional region growing → ``seg_4dflow``.
+   - ``stage4t`` — Same as stage 4 on each ``ComplexDifference_4D`` frame → ``seg_4dflow_4d`` (opt-in).
+   - ``stage5`` — QVTplus-style LOC CSV (arterial + venous).
+   - ``stage6`` — Per-LOC masked-plane flow / PI / RI from phase volumes.
+   - ``stage7`` — TOF eICAB morphometrics (centerline caliber / tortuosity / stenosis).
+   - ``stage8_xnat_upload`` — upload ``eicab/`` and ``qvtpy/`` results to XNAT session resources (local or cluster via SSH fetch).
+   - ``stage9_autoqc`` — score the published measurements against literature bands and physiological
+     consistency, and write the QC metrics back to the dataset. Cohort-level and database-only: it
+     reads what stage 6 published rather than the pipeline outputs, so it is safe to re-run at any
+     time and needs no subject tree on disk.
+
+   SGE: per subject, one ``qsub -t`` array job (task = pending stage) with
+   ``-tc 1`` and done-markers between tasks (see
+   :func:`nvitk.cluster.sge.emit_array_job_block`).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.run.DEFAULT_STAGES
+   nvitk.pipes.qvtpy.run.STAGE_CENTERLINE
+   nvitk.pipes.qvtpy.run.STAGE_CONVERT
+   nvitk.pipes.qvtpy.run.STAGE_DOWNLOAD
+   nvitk.pipes.qvtpy.run.STAGE_EICAB
+   nvitk.pipes.qvtpy.run.STAGE_LOC
+   nvitk.pipes.qvtpy.run.STAGE_MEASURE
+   nvitk.pipes.qvtpy.run.STAGE_MORPHOMETRICS
+   nvitk.pipes.qvtpy.run.STAGE_REG
+   nvitk.pipes.qvtpy.run.STAGE_SEG
+   nvitk.pipes.qvtpy.run.STAGE_SEG_T
+   nvitk.pipes.qvtpy.run.STAGE_AUTOQC
+   nvitk.pipes.qvtpy.run.STAGE_XNAT_UPLOAD
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.run.main
+
+
+Module Contents
+---------------
+
+.. py:data:: DEFAULT_STAGES
+   :type:  str
+   :value: 'stage0_c,stage1,stage2,stage3,stage4,stage5,stage6'
+
+
+.. py:data:: STAGE_CENTERLINE
+   :value: 'stage3'
+
+
+.. py:data:: STAGE_CONVERT
+   :value: 'stage0_c'
+
+
+.. py:data:: STAGE_DOWNLOAD
+   :value: 'stage0_d'
+
+
+.. py:data:: STAGE_EICAB
+   :value: 'stage1'
+
+
+.. py:data:: STAGE_LOC
+   :value: 'stage5'
+
+
+.. py:data:: STAGE_MEASURE
+   :value: 'stage6'
+
+
+.. py:data:: STAGE_MORPHOMETRICS
+   :value: 'stage7'
+
+
+.. py:data:: STAGE_REG
+   :value: 'stage2'
+
+
+.. py:data:: STAGE_SEG
+   :value: 'stage4'
+
+
+.. py:data:: STAGE_SEG_T
+   :value: 'stage4t'
+
+
+.. py:data:: STAGE_AUTOQC
+   :value: 'stage9_autoqc'
+
+
+.. py:data:: STAGE_XNAT_UPLOAD
+   :value: 'stage8_xnat_upload'
+
+
+.. py:function:: main(dicom_root: pathlib.Path | None, nifti_root: pathlib.Path | None, stages_spec: str, subjects: str | None, subjects_file: pathlib.Path | None, subjects_2_exclude: str | None, submit: str, container: pathlib.Path, src_dir: pathlib.Path | None, skip_existing: bool, skip_processed: bool, skip_existing_downloads: bool, output_root: pathlib.Path | None, emit_script: pathlib.Path | None, no_remote: bool, remote_host: str | None, remote_user: str | None, from_source: str, save_dicoms: bool, compute_phase_derived: bool, phase_background_correction: bool, phase_bg_poly_order: int, phase_bg_static_percentile: float, sequences: str, xnat_config_path: pathlib.Path | None, database_root: pathlib.Path | None, report: bool, report_derived: bool, eicab_container: pathlib.Path | None, vasculature_dir: pathlib.Path | None, eicab_device: str, eicab_resolution: float, eicab_thread_limit: int | None, eicab_sge_pe_smp: int | None, eicab_local_metric_scratch: bool | None, post_process_eicab: bool, only_pp: bool, stage2_reference: str, stage2_dof: int, stage2_cost: str, eicab_mask: str, eicab_prefer_pp: bool, cd_up_thresh: float | None, cd_shift_hm: bool | None, venous_min_component_frac: float, eicab_min_island_fraction: float, eicab_bridge_open_radius: int, venous_min_branch_points: int, pcomm_min_points: int, arterial_branch_min_points: int, venous_brain_mask: bool, totalseg_model_dir: pathlib.Path | None, crop_padding_bbox: int, thr_algorithm_4dflow: str, region_growing: bool, rg_intensity_frac: float, rg_intensity_frac_explore: float, rg_intensity_frac_aca: float, cl_barrier_radius: int, rg_barrier_radius: int, aca_sequential_grow: bool, aca_overlap_min_voxels: int, acomm_junction_radius: int, distal_flow_expand: bool, distal_hyst_low_factor: float, distal_hyst_high_factor: float, distal_thicken_iter: int, distal_max_image_frac: float, distal_lr_halfspace_slack: int, pp_distal: bool, loc_arterial_strategy: str, cross_section_radius_vox: float, loc_endpoint_inset_frac: float, distal_locs: bool, measure_resegment: bool, measure_thr_algorithm: str, cross_section_res: int, cross_section_plane_interp: int, cs_supersampling: bool, save_plots: bool, backend: str, pitc_stride: int, pitc_quality_thresh: float, pitc_quality_metric: str, pitc_measure_resegment: bool, pitc_label_constrain: bool, sge_subject_chunk_size: int, sge_serial_subjects: bool, sge_chunk_poll_interval: float, sge_chunk_wait_timeout: float | None, sge_job_margin: int, xnat_upload_require_stages: str, xnat_upload_eicab: bool, xnat_upload_qvtpy: bool, xnat_upload_skip_existing: bool, xnat_upload_dry_run: bool) -> None
+
+   CLI entry point (``nvitk-qvtpy``) driving the full QVTpy pipeline for one or more subjects:
+   resolves local/cluster paths, then downloads/converts, runs eICAB, registration, centerline,
+   4D-flow segmentation, LOC generation, measurement, and morphometrics stages, dispatching each
+   either locally or as SGE array jobs per *submit*/*stages_spec*.
+
+

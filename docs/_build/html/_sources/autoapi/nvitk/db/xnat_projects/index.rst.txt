@@ -1,0 +1,179 @@
+nvitk.db.xnat_projects
+======================
+
+.. py:module:: nvitk.db.xnat_projects
+
+.. autoapi-nested-parse::
+
+   XNAT project registry and project-specific scan classifiers.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_projects.VISIT_PLAQUE
+   nvitk.db.xnat_projects.VISIT_PESA_BRAIN
+   nvitk.db.xnat_projects.VISIT_IA_PET_V5
+   nvitk.db.xnat_projects.VISIT_LABEL_BY_PROJECT
+   nvitk.db.xnat_projects.PESA_BRAIN_SEQUENCES
+   nvitk.db.xnat_projects.IA_PET_V5_SEQUENCES
+   nvitk.db.xnat_projects.XNAT_PROJECTS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_projects.XnatProjectSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_projects.visit_label_for_project
+   nvitk.db.xnat_projects.list_xnat_project_ids
+   nvitk.db.xnat_projects.resolve_xnat_project_cohort_token
+   nvitk.db.xnat_projects.get_xnat_project
+   nvitk.db.xnat_projects.default_sequences_for_project
+   nvitk.db.xnat_projects.sequences_csv
+   nvitk.db.xnat_projects.build_default_xnat_sequences_csv
+   nvitk.db.xnat_projects.classify_scan_ia_pet_v5
+   nvitk.db.xnat_projects.classify_experiment_ia_pet_v5
+   nvitk.db.xnat_projects.session_modality_from_classifications
+   nvitk.db.xnat_projects.get_scan_classifier
+   nvitk.db.xnat_projects.classify_scan_for_project
+
+
+Module Contents
+---------------
+
+.. py:data:: VISIT_PLAQUE
+   :value: '3'
+
+
+.. py:data:: VISIT_PESA_BRAIN
+   :value: '4'
+
+
+.. py:data:: VISIT_IA_PET_V5
+   :value: '5'
+
+
+.. py:data:: VISIT_LABEL_BY_PROJECT
+   :type:  dict[str, str]
+
+.. py:function:: visit_label_for_project(project_id: str) -> str
+
+   Default visit label for imaging sessions tied to an XNAT (or local) project.
+
+
+.. py:class:: XnatProjectSpec
+
+   Metadata for a mapped XNAT project.
+
+
+   .. py:attribute:: project_id
+      :type:  str
+
+
+   .. py:attribute:: display_name
+      :type:  str
+
+
+   .. py:attribute:: cohort_id
+      :type:  str
+
+
+   .. py:attribute:: classifier
+      :type:  ClassifierName
+
+
+   .. py:attribute:: default_sequences
+      :type:  tuple[str, Ellipsis]
+
+
+.. py:data:: PESA_BRAIN_SEQUENCES
+   :type:  tuple[str, Ellipsis]
+   :value: ('TOF', '4DFLOW_AP', '4DFLOW_RL', '4DFLOW_FH', 'VWI_BB', '3D_T1', '3D_T2_HR', '3D_FLAIR',...
+
+
+.. py:data:: IA_PET_V5_SEQUENCES
+   :type:  tuple[str, Ellipsis]
+   :value: ('DIXON_HEAD', 'DIXON_THORAX', 'DIXON_LEGS', 'CT', 'PET')
+
+
+.. py:data:: XNAT_PROJECTS
+   :type:  dict[str, XnatProjectSpec]
+
+.. py:function:: list_xnat_project_ids() -> list[str]
+
+   Sorted ids of every registered :data:`XNAT_PROJECTS` entry.
+
+
+.. py:function:: resolve_xnat_project_cohort_token(subjects: str | None) -> str | None
+
+   Return XNAT ``project_id`` when *subjects* is a single cohort/project alias.
+
+   Recognizes ``PESA-Brain`` / ``PESA_Brain``, ``IA-PET-V5`` / ``IA_PET_V5``, and
+   registered :data:`XNAT_PROJECTS` keys.
+
+
+.. py:function:: get_xnat_project(project_id: str) -> XnatProjectSpec
+
+   Return the registered :class:`XnatProjectSpec` for *project_id*; raises ``KeyError`` (listing
+   known ids) if unregistered.
+
+
+.. py:function:: default_sequences_for_project(project_id: str) -> tuple[str, Ellipsis]
+
+   Default sequence keys to sync for *project_id* (from its registered :class:`XnatProjectSpec`).
+
+
+.. py:function:: sequences_csv(sequences: Iterable[str]) -> str
+
+   Comma-separated sequence keys for :func:`~nvitk.db.xnat.sync_xnat_project` filters.
+
+
+.. py:function:: build_default_xnat_sequences_csv() -> str
+
+   Union of PESA_Brain and IA_PET_V5 default sequence keys (deduplicated, stable order).
+
+
+.. py:function:: classify_scan_ia_pet_v5(series_description: str | None, quality: str | None = None, *, scan_id: str | None = None, experiment_label: str | None = None) -> dict[str, Any] | None
+
+   Classify a single PESA-Fat IA_PET_V5 scan (Dixon MR + CT/PET).
+
+   Dixon scans return a candidate marker (``dixon=True``); region assignment
+   requires :func:`classify_experiment_ia_pet_v5` at experiment scope.
+
+
+.. py:function:: classify_experiment_ia_pet_v5(scans: list[Any], *, experiment_label: str | None = None) -> list[tuple[Any, str, str, str, dict[str, Any]]]
+
+   Classify all scans in one IA_PET_V5 experiment.
+
+   Returns ``(scan, scan_id, series_description, quality, classification)`` tuples
+   with one entry per sequence label (first scan wins for duplicates).
+
+
+.. py:function:: session_modality_from_classifications(classifications: list[dict[str, Any]]) -> str
+
+   Infer session-level modality label from classified scans in one experiment.
+
+
+.. py:function:: get_scan_classifier(project_id: str) -> Callable[Ellipsis, dict[str, Any] | None]
+
+   Return the scan-classification function registered for *project_id*'s ``classifier`` (currently
+   :func:`classify_scan_ia_pet_v5` or a PESA-Brain wrapper around :func:`~nvitk.db.xnat.classify_scan`).
+
+
+.. py:function:: classify_scan_for_project(project_id: str, series_description: str | None, quality: str | None = None, *, scan_id: str | None = None, experiment_label: str | None = None) -> dict[str, Any] | None
+
+   Dispatch scan classification for a registered XNAT project.
+
+

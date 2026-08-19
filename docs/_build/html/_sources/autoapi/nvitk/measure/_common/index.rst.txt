@@ -1,0 +1,50 @@
+nvitk.measure._common
+=====================
+
+.. py:module:: nvitk.measure._common
+
+.. autoapi-nested-parse::
+
+   Internal helpers shared by the measure primitives.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure._common.resolve_array
+   nvitk.measure._common.resolve_spacing
+   nvitk.measure._common.bool_mask
+   nvitk.measure._common.ensure_same_shape
+
+
+Module Contents
+---------------
+
+.. py:function:: resolve_array(img: nvitk.types.Image | Any) -> Any
+
+   Return the voxel array for *img*, or *img* itself when already an array.
+
+
+.. py:function:: resolve_spacing(img: nvitk.types.Image | Any, spacing: tuple[float, Ellipsis] | None) -> tuple[float, Ellipsis]
+
+   Return a spacing tuple for *img*.
+
+   Resolution order:
+   1. explicit *spacing* argument;
+   2. ``img.spacing`` when *img* is an :class:`Image`;
+   3. :class:`ValueError`.
+
+
+.. py:function:: bool_mask(mask: nvitk.types.Image | Any) -> Any
+
+   Boolean-cast *mask* preserving backend (NumPy/CuPy).
+
+
+.. py:function:: ensure_same_shape(a: nvitk.types.Image | Any, b: nvitk.types.Image | Any) -> None
+
+   Raise ``ValueError`` unless *a* and *b* (Image or array) have the same shape.
+
+

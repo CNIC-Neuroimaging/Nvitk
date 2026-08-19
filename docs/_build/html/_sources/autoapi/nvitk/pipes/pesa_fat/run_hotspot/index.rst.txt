@@ -1,0 +1,50 @@
+nvitk.pipes.pesa_fat.run_hotspot
+================================
+
+.. py:module:: nvitk.pipes.pesa_fat.run_hotspot
+
+.. autoapi-nested-parse::
+
+   PESA-Fat hotspot viewer CLI.
+
+   This script loads the appropriate image + postprocessed mask for a given
+   stage-3 *measure* name and launches the 3D hotspot viewer.
+
+   Measure naming
+   --------------
+   Hotspot visualization operates on **voxelwise images** (SUV volume / Dixon maps),
+   so for CT-PET the hotspot map does not depend on SUVMAX vs SUVmean vs percentiles.
+
+   This CLI therefore uses the naming scheme:
+
+   - CT-PET: `<ROI>_SUV` (e.g. `HIGADO_SUV`, `GRASA_V_SUV`, `L4_SUV`)
+   - DIXON: `<ROI>_<METRIC>` where `METRIC in {FF,T2,R2}` (e.g. `KIDNEY_R_FF`, `LIVER_T2`)
+
+   For backwards compatibility, CT-PET stage-3 style names like `HIGADO_SUVMAX`
+   are accepted and treated as `HIGADO_SUV`.
+
+   .. rubric:: Notes
+
+   - CT-PET requires raw PET (`PT.nii[.gz]`) and computes SUV via
+     :func:`nvitk.measure.suv.suv_image` (assumes metadata is present).
+   - Dixon uses the raw voxelwise Dixon maps as the "PET" intensity image.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.run_hotspot.main
+
+
+Module Contents
+---------------
+
+.. py:function:: main(subject: str, measure: str, batch: str | None, nifti_root: pathlib.Path | None, results_root: pathlib.Path | None, list_measures: bool, hotspot: nvitk.viz.HotspotMode, top_percent: float, top_k: int | None, suv_threshold: float | None, max_points: int, mask_iso: float, mask_opacity: float, mask_smooth: bool, point_size: float, cmap: str, notebook: bool, no_show: bool, extra_masks: str | None, extra_mask_opacity: float) -> None
+
+   CLI entry point (``nvitk-pesa-fat-hotspot``): load the SUV/Dixon voxelwise image and ROI
+   mask for one subject/measure and launch the 3D hotspot viewer.
+
+

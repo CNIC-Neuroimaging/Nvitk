@@ -1,0 +1,87 @@
+nvitk.measure.voxel
+===================
+
+.. py:module:: nvitk.measure.voxel
+
+.. autoapi-nested-parse::
+
+   Voxel-based overlap metrics (``dice``, ``jaccard``, ``precision``, ...).
+
+   All primitives accept :class:`~nvitk.types.Image` or raw arrays. Unlike the
+   BioImaging legacy implementation, the dispatching ``voxel_metrics`` function has
+   a single unambiguous signature (it no longer silently interprets a ``dict``
+   as a callable registry).
+
+   Counts are computed on the active backend; a single host hop is used to
+   produce the final Python ``int`` for each confusion cell.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.voxel.confusion_counts
+   nvitk.measure.voxel.dice
+   nvitk.measure.voxel.jaccard
+   nvitk.measure.voxel.precision
+   nvitk.measure.voxel.recall
+   nvitk.measure.voxel.fpr
+   nvitk.measure.voxel.fnr
+   nvitk.measure.voxel.volume_similarity
+   nvitk.measure.voxel.voxel_metrics
+
+
+Module Contents
+---------------
+
+.. py:function:: confusion_counts(label_true: Any, label_pred: Any) -> dict[str, int]
+
+   Return ``{'TP','TN','FP','FN'}`` counts from two binary masks.
+
+
+.. py:function:: dice(label_true: Any, label_pred: Any) -> float
+
+   Dice overlap ``2·TP / (2·TP + FP + FN)`` in ``[0, 1]`` (``0.0`` when both masks are empty).
+
+
+.. py:function:: jaccard(label_true: Any, label_pred: Any) -> float
+
+   Jaccard / IoU ``TP / (TP + FP + FN)`` in ``[0, 1]``.
+
+
+.. py:function:: precision(label_true: Any, label_pred: Any) -> float
+
+   Fraction of predicted-positive voxels that are correct ``TP / (TP + FP)``.
+
+
+.. py:function:: recall(label_true: Any, label_pred: Any) -> float
+
+   Fraction of true-positive voxels that were recovered ``TP / (TP + FN)`` (sensitivity).
+
+
+.. py:function:: fpr(label_true: Any, label_pred: Any) -> float
+
+   False-positive rate ``FP / (FP + TN)``.
+
+
+.. py:function:: fnr(label_true: Any, label_pred: Any) -> float
+
+   False-negative rate ``FN / (FN + TP)``.
+
+
+.. py:function:: volume_similarity(label_true: Any, label_pred: Any) -> float
+
+   Relative volume difference ``|n_pred − n_true| / n_true`` (0 = identical volumes).
+
+
+.. py:function:: voxel_metrics(label_true: Any, label_pred: Any, *, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+   Compute a named subset of voxel-based metrics.
+
+   :param metrics: Iterable of names from
+                   ``{'TP','TN','FP','FN','dice','jaccard','precision','recall','fpr','fnr','vs'}``.
+                   Default: all of them.
+
+

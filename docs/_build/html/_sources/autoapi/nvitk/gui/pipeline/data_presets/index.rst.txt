@@ -1,0 +1,299 @@
+nvitk.gui.pipeline.data_presets
+===============================
+
+.. py:module:: nvitk.gui.pipeline.data_presets
+
+.. autoapi-nested-parse::
+
+   Pipeline filesystem presets for the Napari data browser (local mode).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.data_presets.NIFTI_SUFFIXES
+   nvitk.gui.pipeline.data_presets.QVTPY_PIPELINE_BUNDLE_DIRS
+   nvitk.gui.pipeline.data_presets.PESA_FAT_SUBJECT_GLOBS
+   nvitk.gui.pipeline.data_presets._COHORT_WEEK_RE
+   nvitk.gui.pipeline.data_presets.PRESET_REGISTRY
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.data_presets.PipelinePresetSpec
+   nvitk.gui.pipeline.data_presets.PipelineRoots
+   nvitk.gui.pipeline.data_presets.LocalAsset
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.data_presets.list_pipeline_preset_ids
+   nvitk.gui.pipeline.data_presets.get_pipeline_preset
+   nvitk.gui.pipeline.data_presets._path_from_config
+   nvitk.gui.pipeline.data_presets._is_cohort_dir_name
+   nvitk.gui.pipeline.data_presets.list_local_cohorts
+   nvitk.gui.pipeline.data_presets._cohort_has_pesa_subjects
+   nvitk.gui.pipeline.data_presets.resolve_pesa_fat_batch
+   nvitk.gui.pipeline.data_presets.load_preset_roots
+   nvitk.gui.pipeline.data_presets._is_subject_dir_name
+   nvitk.gui.pipeline.data_presets._matches_subject_globs
+   nvitk.gui.pipeline.data_presets._list_subject_dirs
+   nvitk.gui.pipeline.data_presets._batch_bases
+   nvitk.gui.pipeline.data_presets._subjects_from_results_tree
+   nvitk.gui.pipeline.data_presets.list_local_subjects
+   nvitk.gui.pipeline.data_presets._is_nifti_file
+   nvitk.gui.pipeline.data_presets._discover_dicom_assets
+   nvitk.gui.pipeline.data_presets._discover_nifti_assets
+   nvitk.gui.pipeline.data_presets._discover_results_assets
+   nvitk.gui.pipeline.data_presets.list_local_assets
+
+
+Module Contents
+---------------
+
+.. py:data:: NIFTI_SUFFIXES
+   :value: ('.nii.gz', '.nii')
+
+
+.. py:data:: QVTPY_PIPELINE_BUNDLE_DIRS
+   :type:  tuple[str, Ellipsis]
+   :value: ('eicab', 'qvtpy')
+
+
+.. py:data:: PESA_FAT_SUBJECT_GLOBS
+   :type:  tuple[str, Ellipsis]
+   :value: ('PESA*',)
+
+
+.. py:data:: _COHORT_WEEK_RE
+
+.. py:class:: PipelinePresetSpec
+
+   Registered pipeline with default data roots from its config module.
+
+
+   .. py:attribute:: preset_id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: config_module
+      :type:  str
+
+
+   .. py:attribute:: layout
+      :type:  str
+
+
+   .. py:attribute:: subject_globs
+      :type:  tuple[str, Ellipsis]
+
+
+   .. py:attribute:: show_batch
+      :type:  bool
+
+
+   .. py:attribute:: default_batch
+      :type:  str
+
+
+   .. py:attribute:: pesa_fat_layout
+      :type:  bool
+      :value: False
+
+
+
+.. py:class:: PipelineRoots
+
+   Resolved roots for browsing a pipeline on disk.
+
+
+   .. py:attribute:: preset_id
+      :type:  str
+
+
+   .. py:attribute:: dicom_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: nifti_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: results_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: layout
+      :type:  str
+
+
+   .. py:attribute:: batch
+      :type:  str | None
+
+
+   .. py:attribute:: subject_globs
+      :type:  tuple[str, Ellipsis]
+
+
+   .. py:attribute:: pesa_fat_layout
+      :type:  bool
+      :value: False
+
+
+
+   .. py:method:: subject_dicom_dir(subject: str) -> pathlib.Path
+
+      *subject*'s DICOM directory under this preset's DICOM root.
+
+
+
+   .. py:method:: subject_nifti_dir(subject: str) -> pathlib.Path
+
+      *subject*'s NIfTI directory under this preset's NIfTI root.
+
+
+
+   .. py:method:: subject_results_base(subject: str) -> pathlib.Path
+
+      Base results directory for *subject* (the batch subfolder for batch layouts).
+
+
+
+   .. py:method:: _subject_base(root: pathlib.Path, subject: str) -> pathlib.Path
+
+      *subject*'s directory under *root*, nested under the current batch for batch layouts.
+
+
+
+.. py:class:: LocalAsset
+
+   One openable file or DICOM directory for a subject.
+
+
+   .. py:attribute:: kind
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: path
+      :type:  pathlib.Path
+
+
+.. py:data:: PRESET_REGISTRY
+   :type:  tuple[PipelinePresetSpec, Ellipsis]
+
+.. py:function:: list_pipeline_preset_ids() -> list[str]
+
+   Ids of every registered pipeline data-browser preset, in registry order.
+
+
+.. py:function:: get_pipeline_preset(preset_id: str) -> PipelinePresetSpec
+
+   Look up the registered :class:`PipelinePresetSpec` for *preset_id*; raises ``KeyError``
+   (listing known ids) if unregistered.
+
+
+.. py:function:: _path_from_config(mod: Any, name: str) -> pathlib.Path | None
+
+   Read a path-valued attribute *name* off a pipeline config module *mod*, or ``None`` if unset.
+
+
+.. py:function:: _is_cohort_dir_name(name: str) -> bool
+
+   Cohort folder under NIFTI/DICOM/RESULTS roots (not a PESA subject).
+
+
+.. py:function:: list_local_cohorts(*, nifti_root: pathlib.Path | str, dicom_root=None, results_root=None) -> list[str]
+
+   Discover cohort folders (e.g. ``202602_Week1``) at the roots of a PESA-Fat tree.
+
+
+.. py:function:: _cohort_has_pesa_subjects(nifti_root: pathlib.Path, cohort: str) -> bool
+
+   True if *cohort*'s NIfTI folder contains any PESA-Fat subject directories.
+
+
+.. py:function:: resolve_pesa_fat_batch(*, nifti_root: pathlib.Path, dicom_root: pathlib.Path, results_root: pathlib.Path, batch: str | None) -> str | None
+
+   Pick a cohort folder when batch is missing or points at a non-existent path.
+
+
+.. py:function:: load_preset_roots(preset_id: str, *, dicom_root=None, nifti_root=None, results_root=None, batch=None) -> PipelineRoots
+
+   Load default roots from a pipeline config, with optional overrides.
+
+
+.. py:function:: _is_subject_dir_name(name: str) -> bool
+
+   Exclude pipeline stage folders and hidden entries.
+
+
+.. py:function:: _matches_subject_globs(name: str, globs: tuple[str, Ellipsis]) -> bool
+
+   True if *name* looks like a real subject directory (not junk) and matches any of *globs*.
+
+
+.. py:function:: _list_subject_dirs(root: pathlib.Path, globs: tuple[str, Ellipsis]) -> set[str]
+
+   PESA* (etc.) folder names directly under *root*.
+
+
+.. py:function:: _batch_bases(roots: PipelineRoots) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]
+
+   ``(nifti, dicom, results)`` base directories, nested under the current batch for batch layouts.
+
+
+.. py:function:: _subjects_from_results_tree(r_base: pathlib.Path, globs: tuple[str, Ellipsis]) -> set[str]
+
+   Collect PESA* under ``<cohort>/res_*`` (skip ``per_subject`` leaves).
+
+
+.. py:function:: list_local_subjects(roots: PipelineRoots, *, include_dicom=True, include_nifti=True, include_results=True) -> list[str]
+
+   Discover subject folder names from enabled roots (independent of asset filters).
+
+
+.. py:function:: _is_nifti_file(path: pathlib.Path) -> bool
+
+   True if *path* has a ``.nii`` or ``.nii.gz`` extension.
+
+
+.. py:function:: _discover_dicom_assets(subject_dir: pathlib.Path) -> list[LocalAsset]
+
+   List DICOM assets under *subject_dir*: one per subdirectory (assumed one series each), or the
+   directory itself if it directly contains files.
+
+
+.. py:function:: _discover_nifti_assets(subject_dir: pathlib.Path, *, max_files: int = 200) -> list[LocalAsset]
+
+   List every NIfTI file found anywhere under *subject_dir* (capped at *max_files*), labeled by
+   their path relative to *subject_dir*.
+
+
+.. py:function:: _discover_results_assets(roots: PipelineRoots, subject: str) -> list[LocalAsset]
+
+   List *subject*'s pipeline output files under *roots* (batch-layout ``res_*`` stage
+   subdirectories, including a ``per_subject`` fallback, or the flat results tree otherwise).
+
+
+.. py:function:: list_local_assets(roots: PipelineRoots, subject: str, *, include_dicom=True, include_nifti=True, include_results=True) -> list[LocalAsset]
+
+   List openable DICOM series, NIfTI files, and result masks for *subject*.
+
+

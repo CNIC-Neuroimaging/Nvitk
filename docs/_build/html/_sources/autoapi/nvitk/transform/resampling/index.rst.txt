@@ -1,0 +1,54 @@
+nvitk.transform.resampling
+==========================
+
+.. py:module:: nvitk.transform.resampling
+
+.. autoapi-nested-parse::
+
+   Affine voxel-to-voxel resampling between two :class:`~nvitk.types.Image` grids.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.transform.resampling.resample_to
+   nvitk.transform.resampling.resample_pet_to_mask
+   nvitk.transform.resampling.resample_mask_to_pet
+
+
+Module Contents
+---------------
+
+.. py:function:: resample_to(source: nvitk.types.Image, target: nvitk.types.Image, *, order: int = 0, mode: str = 'constant', cval: float = 0.0, prefilter: bool | None = None) -> nvitk.types.Image
+
+   Resample *source* onto *target*'s voxel grid via affine composition.
+
+   The mapping is ``T = inv(target.affine) @ source.affine``; scipy's
+   ``affine_transform`` expects the output→input map so we invert it.
+
+   :param source: Image whose voxels are resampled.
+   :param target: Image whose grid (shape + affine) defines the output.
+   :param order: Spline interpolation order. **Use 0 for label/mask data** (nearest
+                 neighbor) and 1 for intensity data.
+   :param mode: Boundary handling passed to ``ndi.affine_transform``.
+   :param cval: Boundary handling passed to ``ndi.affine_transform``.
+   :param prefilter: Defaults to ``False`` when ``order == 0`` and ``True`` otherwise.
+
+   :returns: A new image whose data lives on ``target``'s grid and carries
+             ``target``'s affine/spacing/orientation but ``source``'s other metadata.
+   :rtype: Image
+
+
+.. py:function:: resample_pet_to_mask(pet: nvitk.types.Image, mask: nvitk.types.Image, *, order: int = 1) -> nvitk.types.Image
+
+   Trilinear resample of a PET image onto a mask's grid.
+
+
+.. py:function:: resample_mask_to_pet(mask: nvitk.types.Image, pet: nvitk.types.Image, *, order: int = 0) -> nvitk.types.Image
+
+   Nearest-neighbor resample of a mask onto a PET image's grid.
+
+

@@ -1,0 +1,113 @@
+nvitk.measure.morpho.surface
+============================
+
+.. py:module:: nvitk.measure.morpho.surface
+
+.. autoapi-nested-parse::
+
+   Surface extraction, VTK polydata construction, and VTP writing.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.surface.mask_to_surface
+   nvitk.measure.morpho.surface.refine_surface_for_vmtk
+   nvitk.measure.morpho.surface.snap_to_surface
+   nvitk.measure.morpho.surface.save_vtp
+   nvitk.measure.morpho.surface.build_polyline_polydata
+   nvitk.measure.morpho.surface.add_string_point_array
+   nvitk.measure.morpho.surface.build_radius_tube_polydata
+   nvitk.measure.morpho.surface.default_tree_point_metadata
+   nvitk.measure.morpho.surface.add_tree_metadata_point_arrays
+   nvitk.measure.morpho.surface.extract_point_data_array
+   nvitk.measure.morpho.surface.resample_point_data_by_arclength
+   nvitk.measure.morpho.surface._polygon_area_3d
+   nvitk.measure.morpho.surface.compute_cross_section_radius
+   nvitk.measure.morpho.surface.build_donut_loop_debug_polydata
+
+
+Module Contents
+---------------
+
+.. py:function:: mask_to_surface(mask: numpy.ndarray, spacing, pre_refined_surface_path: Optional[str] = None)
+
+   Binary mask → cleaned, smoothed, largest-region triangle surface (VTK marching cubes pipeline).
+
+   Pipeline: marching cubes → clean/triangulate → windowed-sinc smoothing →
+   fill holes → keep largest connected region → optional VMTK refinement
+   (:func:`refine_surface_for_vmtk`). If *pre_refined_surface_path* is given,
+   the pre-refinement surface is also saved there for QC.
+
+
+.. py:function:: refine_surface_for_vmtk(surface)
+
+   Subdivide + smooth a surface so VMTK centerline extraction has denser, more regular triangles.
+
+
+.. py:function:: snap_to_surface(pt_mm: numpy.ndarray, surface)
+
+   Nearest surface-mesh point (world mm) to *pt_mm*, via a VTK point locator.
+
+
+.. py:function:: save_vtp(poly, path: str) -> None
+
+   Write a VTK polydata object to a ``.vtp`` file.
+
+
+.. py:function:: build_polyline_polydata(points: numpy.ndarray, arrays: List[Tuple[numpy.ndarray, str]])
+
+   Build a single-polyline VTK polydata from *points*, attaching each ``(array, name)`` as point data.
+
+
+.. py:function:: add_string_point_array(poly, values: List[str], name: str) -> None
+
+   Attach a per-point string array *name* to a VTK polydata's point data.
+
+
+.. py:function:: build_radius_tube_polydata(points: numpy.ndarray, radius: numpy.ndarray, arrays: List[Tuple[numpy.ndarray, str]])
+
+   Build a VTK tube mesh around a centerline, varying tube radius by the per-point *radius* array.
+
+
+.. py:function:: default_tree_point_metadata(n: int, label: str = 'trunk', path: str = '') -> dict
+
+   Constant-valued per-point tree metadata (label/path/depth) for *n* centerline points.
+
+
+.. py:function:: add_tree_metadata_point_arrays(poly, metadata: dict) -> None
+
+   Attach tree label/path/depth arrays from *metadata* (see :func:`default_tree_point_metadata`) to a polydata.
+
+
+.. py:function:: extract_point_data_array(poly, name: str, n_points: int) -> numpy.ndarray
+
+   Read a named point-data array from a VTK polydata as a 1-D float array (NaNs if absent).
+
+   Vector arrays (e.g. normals) are reduced to their magnitude.
+
+
+.. py:function:: resample_point_data_by_arclength(old_pts: numpy.ndarray, new_pts: numpy.ndarray, values: numpy.ndarray) -> numpy.ndarray
+
+   Interpolate a per-point scalar array from *old_pts* onto *new_pts*, matched by arc length.
+
+
+.. py:function:: _polygon_area_3d(pts3d: numpy.ndarray, normal: numpy.ndarray) -> float
+
+   Area of a planar 3-D polygon: project onto its plane (given by *normal*) and shoelace it.
+
+
+.. py:function:: compute_cross_section_radius(surface, pts: numpy.ndarray) -> Tuple[numpy.ndarray, numpy.ndarray]
+
+   Effective vessel radius at each centerline point: cut *surface* by the local normal plane,
+   take the largest closed cross-section loop's area, and convert area → equivalent-circle radius.
+
+
+.. py:function:: build_donut_loop_debug_polydata(loop_rows: List[dict], tree: nvitk.measure.morpho.models.SkeletonTree, spacing)
+
+   Build a multi-polyline VTK debug mesh of donut-loop arms, tagged with loop/arm index and endpoint role.
+
+

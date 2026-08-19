@@ -1,0 +1,397 @@
+nvitk.stats.r_mmrm
+==================
+
+.. py:module:: nvitk.stats.r_mmrm
+
+.. autoapi-nested-parse::
+
+   Mixed models for repeated measures (MMRM), through R's ``mmrm`` package.
+
+   Description
+   -----------
+   An MMRM is not a random-effects model. Where a MixedLM says *"each subject has its own intercept,
+   and everything else is independent noise"*, an MMRM says *"the repeated measurements within a
+   subject are correlated, and here is the shape of that correlation"* — fitting a structured
+   covariance matrix directly instead of decomposing it into random effects plus residual.
+
+   For a subject × territory frame that matters. A random intercept imposes **compound symmetry**:
+   every pair of territories is assumed equally correlated. In reality MCA and ACA (both anterior) are
+   more alike than MCA and Basilar. An unstructured MMRM estimates all of those correlations rather
+   than assuming them away — at the cost of ``k(k+1)/2`` covariance parameters for ``k`` territories,
+   which needs a reasonable number of subjects to support.
+
+   .. code-block:: text
+
+       MixedLM  : pi ~ age_c + sex,  groups=territory, vc={subject}
+       lme4     : pi ~ age_c + sex + (1 | subject_uid)
+       MMRM     : pi ~ age_c + sex + us(territory | subject_uid)
+
+   The bracketed term is a *covariance structure*, not a random effect: ``us`` unstructured, ``cs``
+   compound symmetry (the MixedLM equivalent), ``ar1`` first-order autoregressive, ``toep`` Toeplitz,
+   ``ad`` ante-dependence, each with a heterogeneous-variance variant.
+
+   Requirements
+   ------------
+   Python: **nothing beyond rpy2**, which is already needed for the lme4 engine. ``pymer4`` does not
+   wrap ``mmrm``, so this talks to R directly.
+
+   R: ``mmrm`` (which pulls in ``TMB``), plus ``emmeans`` for least-squares means.
+
+   Design note
+   -----------
+   Extraction happens *in R*, returning tidy data frames that rpy2 converts to pandas. Traversing S4/list
+   internals from Python would be far more brittle, and R's own accessors are the documented interface.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.r_mmrm.ANALYSIS_MMRM
+   nvitk.stats.r_mmrm.REQUIRED_R_PACKAGES
+   nvitk.stats.r_mmrm.OPTIONAL_R_PACKAGES
+   nvitk.stats.r_mmrm.INSTALL_HINT
+   nvitk.stats.r_mmrm.COVARIANCE_STRUCTURES
+   nvitk.stats.r_mmrm.ORDERED_STRUCTURES
+   nvitk.stats.r_mmrm.DF_METHODS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats.r_mmrm.CovarianceStructure
+   nvitk.stats.r_mmrm.DfMethod
+   nvitk.stats.r_mmrm.MmrmBackendStatus
+   nvitk.stats.r_mmrm.CovarianceTerm
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.r_mmrm.mmrm_backend_status
+   nvitk.stats.r_mmrm.emmeans_available
+   nvitk.stats.r_mmrm.parse_mmrm_covariance
+   nvitk.stats.r_mmrm.mmrm_formula
+   nvitk.stats.r_mmrm.validate_mmrm_data
+   nvitk.stats.r_mmrm.fit_mmrm
+   nvitk.stats.r_mmrm.mmrm_coef_frame
+   nvitk.stats.r_mmrm.mmrm_covariance_matrix
+   nvitk.stats.r_mmrm.mmrm_correlation_matrix
+   nvitk.stats.r_mmrm.mmrm_random_effects_frame
+   nvitk.stats.r_mmrm.mmrm_info_dict
+   nvitk.stats.r_mmrm.mmrm_emmeans
+   nvitk.stats.r_mmrm.plot_mmrm_emmeans
+   nvitk.stats.r_mmrm.plot_mmrm_correlation
+
+
+Module Contents
+---------------
+
+.. py:data:: ANALYSIS_MMRM
+   :value: 'mmrm'
+
+
+.. py:data:: REQUIRED_R_PACKAGES
+   :type:  tuple[str, Ellipsis]
+   :value: ('mmrm',)
+
+
+.. py:data:: OPTIONAL_R_PACKAGES
+   :type:  tuple[str, Ellipsis]
+   :value: ('emmeans',)
+
+
+.. py:data:: INSTALL_HINT
+   :value: Multiline-String
+
+   .. raw:: html
+
+      <details><summary>Show Value</summary>
+
+   .. code-block:: python
+
+      """No extra Python packages are needed — this uses rpy2 directly.
+      conda install -c conda-forge r-mmrm r-emmeans
+        or:  R -e "install.packages(c('mmrm','emmeans'), repos='https://cloud.r-project.org')""""
+
+   .. raw:: html
+
+      </details>
+
+
+
+.. py:class:: CovarianceStructure
+
+   One ``mmrm`` covariance structure, and when it is the right choice.
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: n_parameters
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+.. py:data:: COVARIANCE_STRUCTURES
+   :type:  dict[str, CovarianceStructure]
+
+.. py:data:: ORDERED_STRUCTURES
+   :type:  frozenset[str]
+
+.. py:class:: DfMethod
+
+   A denominator degrees-of-freedom method.
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: description
+      :type:  str
+
+
+.. py:data:: DF_METHODS
+   :type:  dict[str, DfMethod]
+
+.. py:class:: MmrmBackendStatus
+
+   What is present, what is missing, and what to do about it.
+
+
+   .. py:attribute:: available
+      :type:  bool
+
+
+   .. py:attribute:: rpy2_version
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: r_version
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: r_packages
+      :type:  Mapping[str, str]
+
+
+   .. py:attribute:: missing
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:attribute:: reason
+      :type:  str
+      :value: ''
+
+
+
+   .. py:method:: install_hint() -> str
+
+      Copy-pasteable commands for whatever is missing.
+
+
+
+   .. py:method:: summary() -> str
+
+      One-line description for a status bar or tooltip.
+
+
+
+.. py:function:: mmrm_backend_status(*, check_r_packages: bool = True) -> MmrmBackendStatus
+
+   Probe rpy2 → R → ``mmrm``. Never raises, and never imports R as an import side effect.
+
+   Deliberately independent of the lme4 probe: MMRM needs neither pymer4 nor the easystats suite,
+   so it can be available when the lme4 engine is not, and reporting them together would send you
+   chasing packages you do not need.
+
+
+.. py:function:: emmeans_available() -> bool
+
+   Whether ``emmeans`` is installed — least-squares means need it.
+
+
+.. py:class:: CovarianceTerm
+
+   A covariance term parsed out of a formula.
+
+
+   .. py:attribute:: structure
+      :type:  str
+
+
+   .. py:attribute:: visit
+      :type:  str
+
+
+   .. py:attribute:: subject
+      :type:  str
+
+
+   .. py:attribute:: group
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: text
+      :type:  str
+      :value: ''
+
+
+
+   .. py:method:: columns() -> list[str]
+
+      Frame columns this term references.
+
+
+
+.. py:function:: parse_mmrm_covariance(formula: str) -> tuple[str, CovarianceTerm | None]
+
+   Split an ``mmrm`` formula into its fixed part and its covariance term.
+
+   Lets the term be written inline — ``… + us(territory | mri_id)`` — the way it is in R, instead
+   of being assembled from separate controls. Returns the fixed formula with the term removed, plus
+   the parsed term (``None`` when the formula has none).
+
+   >>> parse_mmrm_covariance("pi ~ age_c + us(territory | mri_id)")[1].subject
+   'mri_id'
+
+
+.. py:function:: mmrm_formula(fixed: str, *, visit: str, subject: str, structure: str = 'us', group: str = '') -> str
+
+   Append an ``mmrm`` covariance term to a fixed-effects formula.
+
+   >>> mmrm_formula("pi ~ age_c + sex", visit="territory", subject="subject_uid")
+   'pi ~ age_c + sex + us(territory | subject_uid)'
+
+   :param group: Optional grouping column for a *separate* covariance matrix per group, written
+                 ``us(visit | group / subject)`` — e.g. one covariance per treatment arm.
+   :type group: str
+
+
+.. py:function:: validate_mmrm_data(data: pandas.DataFrame, *, visit: str, subject: str, structure: str = 'us') -> list[str]
+
+   Problems that would make an ``mmrm`` fit fail or mislead, as human-readable messages.
+
+   ``mmrm`` requires at most one observation per ``(subject, visit)`` cell — the covariance matrix
+   is indexed by visit, so a duplicate has no place to go and R raises a message that does not
+   point at the data. Checking here means the error names the offending subjects.
+
+
+.. py:function:: fit_mmrm(*, data: pandas.DataFrame, formula: str, visit: str = '', subject: str = '', structure: str = 'us', group: str = '', method: str = 'Satterthwaite', reml: bool = True, strict: bool = True) -> tuple[Any, pandas.DataFrame, dict[str, Any]]
+
+   Fit a mixed model for repeated measures.
+
+   :param formula: Either the full R formula with the covariance term written inline —
+                   ``"pi ~ age_c + us(territory | mri_id)"`` — or the fixed part alone, in which case the term
+                   is assembled from *visit*, *subject*, *structure* and *group*. An inline term always wins:
+                   if you wrote one, that is the model, and the separate arguments are ignored.
+   :type formula: str
+   :param method: Denominator degrees of freedom; see :data:`DF_METHODS`.
+   :type method: str
+   :param reml: Restricted maximum likelihood. Leave on unless comparing fixed-effects specifications by
+                likelihood.
+   :type reml: bool
+   :param strict: Refuse to fit when :func:`validate_mmrm_data` finds a hard problem. Set ``False`` to
+                  downgrade those to warnings.
+   :type strict: bool
+
+   :returns: *fit* is the R ``mmrm`` object; *metadata* matches the other engines.
+   :rtype: (fit, model_df, metadata)
+
+
+.. py:function:: mmrm_coef_frame(fit: Any) -> pandas.DataFrame
+
+   Fixed-effects table, normalized to this package's column names.
+
+
+.. py:function:: mmrm_covariance_matrix(fit: Any) -> pandas.DataFrame
+
+   The estimated covariance matrix of the repeated measures, indexed by level.
+
+
+.. py:function:: mmrm_correlation_matrix(fit: Any) -> pandas.DataFrame
+
+   The covariance matrix rescaled to correlations.
+
+   This is the thing an unstructured MMRM is *for*: it says how alike two territories actually are,
+   which a random intercept assumes rather than estimates.
+
+
+.. py:function:: mmrm_random_effects_frame(fit: Any) -> pandas.DataFrame
+
+   The covariance structure rendered as component/kind/var/sd rows.
+
+   Lets an MMRM reuse the shared report panel's "Random effects" tab: the diagonal becomes one
+   variance per level, and the off-diagonal correlations follow.
+
+
+.. py:function:: mmrm_info_dict(fit: Any, *, outcome_name: str = 'Outcome', meta: Mapping[str, Any] | None = None) -> dict[str, Any]
+
+   Report structure matching the other engines, so the shared panel renders it unchanged.
+
+
+.. py:function:: mmrm_emmeans(fit: Any, specs: str) -> pandas.DataFrame
+
+   Least-squares means from ``emmeans``, as a tidy frame.
+
+   :param specs: An emmeans specification formula, e.g. ``"~ territory"`` or
+                 ``"~ tacsctot_group | territory"``.
+   :type specs: str
+
+   :returns: The grid columns plus ``emmean``, ``SE``, ``df``, ``lower.CL``, ``upper.CL``.
+   :rtype: pandas.DataFrame
+
+
+.. py:function:: plot_mmrm_emmeans(emmeans_frame: pandas.DataFrame, *, x: str, hue: str | None = None, errorbar: bool = True, palette: str = 'tab10', display: str = 'overview', title: str = 'MMRM least-squares means', y_label: str = 'Estimated marginal mean') -> Any
+
+   Least-squares means with their confidence intervals, drawn like the other categorical plots.
+
+   Whiskers rather than a ribbon: the x axis is a set of levels, and there is nothing between them
+   to interpolate.
+
+   :param display: ``"grouped"`` splits the anatomical levels into a grid of panels (see
+                   :mod:`nvitk.stats.region_groups`). The split follows whichever column holds them — *hue* when
+                   there is one, otherwise *x*, in which case each panel's axis carries only its own levels.
+                   The means themselves are unchanged: they were estimated over the whole model either way.
+   :type display: {"overview", "grouped"}
+
+
+.. py:function:: plot_mmrm_correlation(fit: Any, *, levels: Sequence[str] | None = None, title: str = 'Estimated correlation between levels') -> Any
+
+   Heatmap of the estimated correlation matrix.
+
+   Worth looking at whenever the structure is unstructured: it shows directly whether the compound
+   symmetry a random-intercept model would have assumed is anywhere near the truth.
+
+   :param levels: Show only these levels, in this order. The correlations are still *estimated* over every
+                  level — this only restricts the display.
+   :type levels: sequence of str, optional
+
+

@@ -1,0 +1,127 @@
+nvitk.gui.viz.cross_section_panel
+=================================
+
+.. py:module:: nvitk.gui.viz.cross_section_panel
+
+.. autoapi-nested-parse::
+
+   Matplotlib dock for oblique cross-section inspection.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.cross_section_panel.DOCK_OBJECT_NAME
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.cross_section_panel.CrossSectionPanel
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.cross_section_panel.attach_cross_section_dock
+
+
+Module Contents
+---------------
+
+.. py:data:: DOCK_OBJECT_NAME
+   :value: 'nvitk_vessel_cross_section_dock'
+
+
+.. py:class:: CrossSectionPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Dock widget showing intensity + mask overlay and optional flow waveforms.
+
+
+   .. py:attribute:: _title
+
+
+   .. py:attribute:: _pick_toggle
+
+
+   .. py:attribute:: _slice_canvas
+      :value: None
+
+
+
+   .. py:attribute:: _slice_fig
+      :value: None
+
+
+
+   .. py:attribute:: _slice_ax
+      :value: None
+
+
+
+   .. py:attribute:: _wave_canvas
+      :value: None
+
+
+
+   .. py:attribute:: _wave_fig
+      :value: None
+
+
+
+   .. py:attribute:: _wave_ax
+      :value: None
+
+
+
+   .. py:method:: is_picking_enabled() -> bool
+
+      True when left-click should trigger a cross-section pick.
+
+
+
+   .. py:method:: set_picking_enabled(enabled: bool) -> None
+
+      Check/uncheck the pick-toggle checkbox.
+
+
+
+   .. py:method:: clear(message: str = '') -> None
+
+      Clear both the slice and waveform canvases, optionally updating the title to *message*.
+
+
+
+   .. py:method:: show_slice(intensity: numpy.ndarray, mask: numpy.ndarray | None, *, title: str, waveforms: list[dict[str, Any]] | None = None) -> None
+
+      Render *intensity* as grayscale, overlay *mask* in translucent red if given, and draw any
+      *waveforms* underneath.
+
+
+
+   .. py:method:: _draw_waveforms(waveforms: list[dict[str, Any]] | None) -> None
+
+      Plot each flow waveform in *waveforms* on the waveform axes, color-coding by offset from
+      the selected cross-section (blue = selected, red = upstream, green = downstream).
+
+      Each curve's cardiac time-averaged flow magnitude (``mean_flow_ml_min``) is appended to its
+      legend entry, and the selected station's value is called out in a box beside the curves —
+      mL/min is the reporting unit, while the curves stay in the ml/s the pipeline computes.
+
+
+
+.. py:function:: attach_cross_section_dock(viewer: Any, panel: CrossSectionPanel) -> Any
+
+   Attach *panel* on Napari's left edge.
+
+

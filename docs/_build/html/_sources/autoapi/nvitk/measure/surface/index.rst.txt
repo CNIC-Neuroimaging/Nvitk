@@ -1,0 +1,69 @@
+nvitk.measure.surface
+=====================
+
+.. py:module:: nvitk.measure.surface
+
+.. autoapi-nested-parse::
+
+   Surface-distance metrics (Hausdorff, MSD, MDSD, STDSD).
+
+   Fixes the legacy BioImaging bug where spacing was used for the erosion kernel
+   but not for the KD-tree distance computation, so distances were in voxels
+   instead of mm. Here, contour point coordinates are multiplied by *spacing* so
+   that all returned values are in physical units.
+
+   Backend policy
+   --------------
+   Contour extraction uses the proxy ``ndi`` (so binary erosion runs on GPU when
+   the active backend is CuPy). The KD-tree step hands off to SciPy's
+   ``cKDTree``, which is NumPy-only, so we materialize the contour coordinates
+   at that boundary.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.surface.hausdorff
+   nvitk.measure.surface.hausdorff95
+   nvitk.measure.surface.msd
+   nvitk.measure.surface.mdsd
+   nvitk.measure.surface.stdsd
+   nvitk.measure.surface.surface_metrics
+
+
+Module Contents
+---------------
+
+.. py:function:: hausdorff(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Hausdorff distance (mm): the worst-case surface-to-surface distance between two masks.
+
+
+.. py:function:: hausdorff95(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   95th-percentile Hausdorff distance (mm): robust to a few outlier surface voxels.
+
+
+.. py:function:: msd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Mean surface distance (mm) between the two mask boundaries.
+
+
+.. py:function:: mdsd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Median surface distance (mm) between the two mask boundaries.
+
+
+.. py:function:: stdsd(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None) -> float
+
+   Standard deviation of surface distances (mm) — boundary agreement spread.
+
+
+.. py:function:: surface_metrics(label_true: Any, label_pred: Any, *, spacing: tuple[float, Ellipsis] | None = None, metrics: Iterable[str] | None = None) -> dict[str, float]
+
+   Compute multiple surface metrics in one pass (all sharing the same distance array).
+
+

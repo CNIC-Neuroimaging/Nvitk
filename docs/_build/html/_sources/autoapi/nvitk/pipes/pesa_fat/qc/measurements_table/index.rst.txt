@@ -1,0 +1,64 @@
+nvitk.pipes.pesa_fat.qc.measurements_table
+==========================================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.measurements_table
+
+.. autoapi-nested-parse::
+
+   Load stage-3 per-subject spreadsheets and render HTML tables with range highlighting.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.measurements_table.PesaFatQcPipeline
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.measurements_table.load_per_subject_tables
+   nvitk.pipes.pesa_fat.qc.measurements_table.dataframe_to_html_table
+   nvitk.pipes.pesa_fat.qc.measurements_table.stage3_measurements_xlsx_path
+   nvitk.pipes.pesa_fat.qc.measurements_table.copy_measurements_xlsx_for_qc
+   nvitk.pipes.pesa_fat.qc.measurements_table.measurements_download_button_html
+
+
+Module Contents
+---------------
+
+.. py:data:: PesaFatQcPipeline
+
+.. py:function:: load_per_subject_tables(per_subject_dir: pathlib.Path, subjects: list[str]) -> pandas.DataFrame
+
+   Concatenate ``<subject>.xlsx`` files (one row each) into a single DataFrame.
+
+
+.. py:function:: dataframe_to_html_table(df: pandas.DataFrame, ranges: dict[str, tuple[float, float]]) -> str
+
+   Render a DataFrame as an HTML table with out-of-range cells highlighted.
+
+   v2: expects *df* to contain a single subject row and reshapes it to
+   ROI-per-row, metric-per-column for readability.
+
+
+.. py:function:: stage3_measurements_xlsx_path(lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subject: str, pipeline: PesaFatQcPipeline) -> pathlib.Path
+
+   Path to the stage-3 per-subject measurements workbook.
+
+
+.. py:function:: copy_measurements_xlsx_for_qc(*, lay: nvitk.pipes.pesa_fat.common.paths.BatchLayout, subject: str, pipeline: PesaFatQcPipeline, assets_dir: pathlib.Path, rel_assets: str) -> str | None
+
+   Copy stage-3 Excel beside QC HTML assets; return relative download href.
+
+
+.. py:function:: measurements_download_button_html(href: str | None, *, label: str = 'Download Table') -> str
+
+   Link button to download the measurements Excel (relative to the QC report).
+
+

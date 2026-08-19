@@ -1,0 +1,62 @@
+nvitk.cli._sge
+==============
+
+.. py:module:: nvitk.cli._sge
+
+.. autoapi-nested-parse::
+
+   SGE submission helpers for module-level image-tool CLIs.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cli._sge.cluster_paths
+   nvitk.cli._sge.default_resources
+   nvitk.cli._sge.build_worker_command
+   nvitk.cli._sge.submit_tool_job
+   nvitk.cli._sge.emit_submit_script
+   nvitk.cli._sge.default_emit_path
+
+
+Module Contents
+---------------
+
+.. py:function:: cluster_paths(*, data_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path | None = None, models: pathlib.Path | None = None, nvitk_src: pathlib.Path | None = None) -> nvitk.cluster.sge.ClusterPaths
+
+   Build a :class:`~nvitk.cluster.sge.ClusterPaths` for a CLI job, filling container/models/source
+   paths from :mod:`nvitk.cli.config` defaults where not overridden.
+
+
+.. py:function:: default_resources(*, gpu: bool = False) -> nvitk.cluster.sge.SgeResources
+
+   Default :class:`~nvitk.cluster.sge.SgeResources` for a CLI job, requesting a GPU slot when
+   *gpu* is True (else CPU-only).
+
+
+.. py:function:: build_worker_command(module_path: str, subcommand: str, *, container_input: str, container_output: str, extra_args: list[str]) -> str
+
+   Build python command run inside Singularity (container paths).
+
+
+.. py:function:: submit_tool_job(*, job_name: str, python_cmd: str, data_root: pathlib.Path, output_root: pathlib.Path, gpu: bool = False, emit: object | None = None) -> str | None
+
+   Submit (or, if *emit* is given, append to that script file handle instead of submitting) one
+   SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*.
+
+
+.. py:function:: emit_submit_script(*, script_path: pathlib.Path, stages: list[tuple[str, str]], data_root: pathlib.Path, output_root: pathlib.Path, gpu: bool = False) -> pathlib.Path
+
+   Write a qsub shell script at *script_path* containing one job stage per ``(job_name,
+   python_cmd)`` in *stages*, sharing the header and cluster paths.
+
+
+.. py:function:: default_emit_path(tool: str, subcommand: str) -> pathlib.Path
+
+   Timestamped default path for an emitted submit script for *tool*/*subcommand* under
+   ``cfg.SGE_SCRIPTS_DIR``.
+
+

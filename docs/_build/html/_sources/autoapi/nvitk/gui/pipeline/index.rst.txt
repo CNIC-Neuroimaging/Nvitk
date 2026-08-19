@@ -1,0 +1,24 @@
+nvitk.gui.pipeline
+==================
+
+.. py:module:: nvitk.gui.pipeline
+
+.. autoapi-nested-parse::
+
+   Pipeline catalog, stage metadata, and CLI form UI.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/gui/pipeline/catalog/index
+   /autoapi/nvitk/gui/pipeline/data_presets/index
+   /autoapi/nvitk/gui/pipeline/form/index
+   /autoapi/nvitk/gui/pipeline/qvtpy_stages/index
+   /autoapi/nvitk/gui/pipeline/stages/index
+
+

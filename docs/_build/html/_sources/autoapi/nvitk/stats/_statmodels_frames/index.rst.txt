@@ -1,0 +1,458 @@
+nvitk.stats._statmodels_frames
+==============================
+
+.. py:module:: nvitk.stats._statmodels_frames
+
+.. autoapi-nested-parse::
+
+   Long-form image measurements → Statmodels analysis frames.
+
+   Uses ``DataRepo.image(..., wide=False)`` so region/variable columns stay
+   explicit (avoids single-variable wide pivots that drop ``_{variable}`` suffixes).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats._statmodels_frames.KIND_MODALITY
+   nvitk.stats._statmodels_frames.QVTPY_VESSEL_FEATURES
+   nvitk.stats._statmodels_frames.QVTPY_TREE_FEATURES
+   nvitk.stats._statmodels_frames.ASL_FEATURES
+   nvitk.stats._statmodels_frames.T1_FEATURES
+   nvitk.stats._statmodels_frames.FLAIR_FEATURES
+   nvitk.stats._statmodels_frames.TOF_FEATURES
+   nvitk.stats._statmodels_frames.FEATURE_ALIASES
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.stats._statmodels_frames.MeasurementSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats._statmodels_frames.resolve_feature_id
+   nvitk.stats._statmodels_frames.features_for_kind
+   nvitk.stats._statmodels_frames.feature_family
+   nvitk.stats._statmodels_frames.grouping_choices_for
+   nvitk.stats._statmodels_frames.region_to_hemisphere_pair_key
+   nvitk.stats._statmodels_frames.t1_region_to_hemisphere_pair_key
+   nvitk.stats._statmodels_frames.asl_region_id_to_hemisphere
+   nvitk.stats._statmodels_frames.assign_group_key
+   nvitk.stats._statmodels_frames.atlas_for_request
+   nvitk.stats._statmodels_frames.clinical_measurement_variable_ids
+   nvitk.stats._statmodels_frames.subject_attribute_entries
+   nvitk.stats._statmodels_frames.subject_attribute_columns
+   nvitk.stats._statmodels_frames.subject_image_annotation_entries
+   nvitk.stats._statmodels_frames.subject_image_annotation_columns
+   nvitk.stats._statmodels_frames.composites_for
+   nvitk.stats._statmodels_frames.build_feature_territory_frame
+   nvitk.stats._statmodels_frames.collapse_visits_to_subject
+   nvitk.stats._statmodels_frames.resolve_covariate_frame
+   nvitk.stats._statmodels_frames.finalize_analysis_frame
+   nvitk.stats._statmodels_frames.build_multi_feature_analysis_frame
+   nvitk.stats._statmodels_frames.build_long_analysis_frame
+
+
+Module Contents
+---------------
+
+.. py:data:: KIND_MODALITY
+   :type:  dict[str, str]
+
+.. py:data:: QVTPY_VESSEL_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('flow_mean', 'pi', 'ri', 'psf', 'flow_tseries')
+
+
+.. py:data:: QVTPY_TREE_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('pwv', 'pwv_fielding_xcor', 'pitc_slope', 'pitc_intercept')
+
+
+.. py:data:: ASL_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('mean_cbf', 'cov_cbf', 'att_mean', 'att_cov')
+
+
+.. py:data:: T1_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('t1_gray_volume', 't1_thickness_avg', 't1_thickness_std', 't1_surface_area', 't1_num_vertices',...
+
+
+.. py:data:: FLAIR_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('wmh_dist', 'wmh_freq', 'wmh_les', 'wmh_reg')
+
+
+.. py:data:: TOF_FEATURES
+   :type:  tuple[str, Ellipsis]
+   :value: ('length_mm', 'radius_mean_mm', 'radius_max_mm', 'tortuosity_dm', 'curvature_mean_1_per_mm',...
+
+
+.. py:data:: FEATURE_ALIASES
+   :type:  dict[str, str]
+
+.. py:function:: resolve_feature_id(feature: str) -> str
+
+   Resolve a friendly feature alias (e.g. ``"flow"``) to its canonical ``variable_id`` (e.g. ``"flow_mean"``).
+
+
+.. py:function:: features_for_kind(kind: str) -> list[str]
+
+   List the available feature ``variable_id``s for a pipeline kind (qvtpy/asl/t1/flair/tof).
+
+
+.. py:function:: feature_family(kind: str, variable_id: str) -> str
+
+   Return ``vessel`` / ``tree`` / ``region`` for grouping UI defaults.
+
+
+.. py:function:: grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]
+
+   Ordered ``(label, key)`` grouping options for the current modality/feature.
+
+
+.. py:function:: region_to_hemisphere_pair_key(region_id: str) -> str
+
+   Collapse L/R counterparts to one key (ICA, MCA, …); midline stays itself.
+
+   The result is canonicalized through :data:`_HEMISPHERE_CANONICAL`, so spellings that differ only
+   in separator or case land on the same key. That is what lets a 4D-flow measurement grouped by
+   hemisphere join an ASL one on ``(subject_uid, territory)``.
+
+
+.. py:function:: t1_region_to_hemisphere_pair_key(region_id: str) -> str
+
+   Drop the hemisphere prefix from a FreeSurfer region so L/R counterparts share a key.
+
+   ``left_precuneus`` and ``right_precuneus`` both become ``precuneus``; midline structures
+   (``brain_stem``, ``csf``) and the whole-head scalars (``etiv``) are returned unchanged.
+
+   Kept separate from :func:`region_to_hemisphere_pair_key` because that one is built for vessels:
+   it canonicalizes through the vessel table and upper-cases short names, which would turn
+   ``left_bankssts`` into ``BANKSSTS`` and leave the hemisphere grouping spelled unlike every other
+   T1 grouping. Parcel names have no canonical short form, so stripping the side is all there is
+   to do.
+
+   .. rubric:: Examples
+
+   >>> t1_region_to_hemisphere_pair_key("left_precuneus")
+   'precuneus'
+   >>> t1_region_to_hemisphere_pair_key("brain_stem")
+   'brain_stem'
+
+
+.. py:function:: asl_region_id_to_hemisphere(region_id: str) -> str
+
+   Collapse an ASL atlas region to the same vessel key the 4D-flow hemisphere grouping produces.
+
+   ASL vascular parcels are published per side and per smoothing kernel (``left_mca_8``,
+   ``right_pca_8``, ``watershed_8``). Stripping the kernel suffix and the side prefix yields
+   ``MCA`` / ``ACA`` / ``PCA`` / ``ICA`` / ``Basilar`` — exactly the keys
+   :func:`region_to_hemisphere_pair_key` gives for ``LMCA`` / ``RMCA`` / …, so the two modalities
+   can be joined vessel by vessel rather than only at the coarse territory level.
+
+   Watershed parcels have no 4D-flow counterpart and keep their own ``Watershed`` key; Desikan
+   parcels fall back to a side-stripped parcel name.
+
+
+.. py:function:: assign_group_key(region_id: str, *, grouping: str, kind: str = 'qvtpy', variable_id: str = 'flow_mean') -> str
+
+   Map a published ``region_id`` to the analysis ``group_key``.
+
+
+.. py:function:: atlas_for_request(kind: str, variable_id: str, atlas: str | None) -> str | None
+
+   Atlas argument for ``DataRepo.image`` (ASL vascular/desikan; T1 cortical/subcortical).
+
+
+.. py:function:: clinical_measurement_variable_ids(repo: Any) -> set[str]
+
+   ``variable_id``s that currently have at least one row in ``clinical_measurements``.
+
+   Used to prefer the measurements table over the sparse ``subjects`` entity columns when both
+   expose the same name (e.g. ``sex`` after ``import_sex.py``). Catalog registration alone is not
+   enough: a Statmodels window opened before the import keeps a stale catalog and would otherwise
+   keep routing ``sex`` through ``subjects``.
+
+
+.. py:function:: subject_attribute_entries(repo: Any) -> list[dict[str, Any]]
+
+   Subject-level covariates (``sex``, …) available on the ``subjects`` table, in the same
+   ``{"variable_id", "label", "domain"}`` shape as :meth:`Catalog.variable_entries`.
+
+   Bookkeeping / identifier / timestamp columns are excluded, as are names already available as
+   clinical measurements (catalog entry **or** rows in ``clinical_measurements``) — the measurement
+   table always wins over the entity column.
+
+
+.. py:function:: subject_attribute_columns(repo: Any) -> list[str]
+
+   ``variable_id``s of the subject-level covariates returned by :func:`subject_attribute_entries`.
+
+
+.. py:function:: subject_image_annotation_entries(repo: Any) -> list[dict[str, Any]]
+
+   Image variables holding **one value per subject** rather than one per vessel.
+
+   These are the manual QC annotations — ``cow_config`` / ``venous_config``, see
+   :mod:`nvitk.db.qvtpy_anatomy` — which describe the subject's anatomy as a whole and so carry no
+   ``region_id``. They cannot be measurements in an analysis frame (there is no region to join on),
+   but they are exactly what a model wants as a subject-level factor, so they are offered
+   alongside the clinical covariates.
+
+   Recognized by ``scope == "subject"`` on the catalog entry, plus the known annotation ids —
+   a dataset whose catalog was written by an older run may carry the rows without the flag.
+
+
+.. py:function:: subject_image_annotation_columns(repo: Any) -> list[str]
+
+   ``variable_id``s of the subject-level image annotations offered as covariates.
+
+
+.. py:function:: composites_for(kind: str, variable_id: str) -> list[tuple[str, str]]
+
+   ``(name, label)`` composite territories available for a pipeline kind / feature.
+
+
+.. py:function:: build_feature_territory_frame(repo: Any, *, pipeline_kind: str, pipeline: str, feature: str, grouping: str, atlas: str | None = None, agg: str = 'mean', column: str | None = None, composites: Sequence[str] = (), regions: Sequence[str] = ()) -> pandas.DataFrame
+
+   One image measurement, aggregated to one row per ``(subject_uid, territory)``.
+
+   This is the covariate-free half of :func:`build_long_analysis_frame`: it loads the long-form
+   rows for a single ``variable_id``, assigns the ``territory`` group key implied by *grouping*, and
+   aggregates within each ``(subject_uid, territory)`` cell. Keeping it separate is what lets
+   several measurements from *different* pipelines be joined on a shared key before any covariate
+   merge happens — attaching covariates per measurement would compound their inner merge.
+
+   :param pipeline_kind: Selects the imaging modality via :data:`KIND_MODALITY`.
+   :type pipeline_kind: {"qvtpy", "asl", "t1", "flair", "tof"}
+   :param pipeline: Pipeline id, or one of ``latest``/``default``/``current``/``last`` for the catalog default.
+   :type pipeline: str
+   :param feature: Feature name or alias; resolved through :func:`resolve_feature_id`.
+   :type feature: str
+   :param grouping: How ``region_id`` collapses into ``territory`` (see :func:`assign_group_key`).
+   :type grouping: GroupingMode
+   :param agg: Aggregation applied within each ``(subject_uid, territory)`` cell.
+   :type agg: str
+   :param column: Output column name. Defaults to the resolved ``variable_id``.
+   :type column: str, optional
+   :param composites: Names from :data:`COMPOSITE_DEFINITIONS` to append as extra territory labels, e.g.
+                      ``("TCBF",)``. They are computed from the raw ``region_id`` rows, so they are unaffected by
+                      *grouping*, and appear as additional levels of ``territory``.
+   :type composites: sequence of str
+   :param regions: Keep only these published ``region_id``s. Empty means all. Matching is case-insensitive and
+                   ignores ``-``/``_`` differences, because the same structure is spelled several ways across
+                   importers.
+
+                   The filter runs *after* composites are built, so naming ``TCBF`` here keeps the composite
+                   while dropping the vessels it was summed from — which is the point of asking for it. It is
+                   what makes a whole-head scalar usable: ``t1_volume_mm3`` publishes 61 regions, of which
+                   ``etiv`` is one, and a model wanting head size wants that row and no other.
+   :type regions: sequence of str
+
+   :returns: Columns ``subject_uid``, ``territory``, and the measurement column.
+             ``frame.attrs["region_ids"]`` lists the source region ids, which lets callers work out
+             whether a different grouping would produce keys compatible with another measurement.
+   :rtype: pandas.DataFrame
+
+
+.. py:function:: collapse_visits_to_subject(frame: pandas.DataFrame, *, policy: str = 'latest', subject_key: str = 'subject_uid', visit_key: str = 'visit_id') -> tuple[pandas.DataFrame, dict[str, list[str]]]
+
+   Collapse a per-visit measurement frame to one row per subject, combining across visits.
+
+   ``clinical_measurements`` pivots on ``(subject_uid, visit_id)``, so a cohort whose variables were
+   collected at different visits gets one row per visit with the *other* visits' variables blank.
+   Anything downstream that assumes one row per subject then keeps a single visit and silently
+   discards the rest — which is how requesting carotid plaque (visit 3) alongside the rest of the
+   clinical panel (visit 4) can null out the panel.
+
+   Each column is filled from the first non-missing value in visit order, so variables measured at
+   different visits combine instead of competing.
+
+   :param policy: Which visit wins for a variable recorded at more than one. ``latest`` takes the most recent.
+   :type policy: {"latest", "earliest"}
+
+   :returns: *provenance* maps each column to the visits that contributed a value, so a caller can tell
+             the user which variables came from where.
+   :rtype: (collapsed, provenance)
+
+
+.. py:function:: resolve_covariate_frame(repo: Any, *, clinical_vars: list[str] | None = None, cognitive_vars: list[str] | None = None, visit_policy: str = 'latest') -> tuple[pandas.DataFrame, list[str]]
+
+   Subject-level covariate frame assembled from the clinical / subjects / image / cognitive tables.
+
+   Each source is collapsed to one row per subject (see :func:`collapse_visits_to_subject`) *before*
+   the sources are merged, so variables recorded at different visits combine rather than
+   multiplying rows or shadowing one another.
+
+   :returns: *covariates* is one row per ``subject_uid`` (outer-merged across sources, duplicated columns
+             dropped from the right frame); *present* lists the requested names that actually resolved.
+             ``covariates.attrs["visit_provenance"]`` maps each column to the visits it came from.
+             A source that raises is skipped silently — a missing cognitive table must not block a model
+             that only needs clinical covariates.
+   :rtype: (covariates, present)
+
+
+.. py:function:: finalize_analysis_frame(wide: pandas.DataFrame, repo: Any, *, primary_variable_id: str | None = None) -> pandas.DataFrame
+
+   Add the conveniences every Statmodels frame is expected to carry.
+
+   In order: ``group_key`` (a copy of ``territory``, used as the default MixedLM grouping), the
+   friendly outcome aliases the default formulas reference (``flow`` for ``flow_mean``, and the
+   inverse of :data:`FEATURE_ALIASES`), ``patient_id``, the ``hematocrit`` → ``Hematocrit`` rename,
+   numeric coercion of catalog-numeric covariates, and the mean-centered ``age_c``.
+
+   :param primary_variable_id: Measurement to alias. With several measurements loaded, only the first one gets aliases —
+                               the aliases exist for the legacy single-feature default formulas.
+   :type primary_variable_id: str, optional
+
+
+.. py:class:: MeasurementSpec
+
+   One image measurement to load into an analysis frame.
+
+   A spec is self-contained: it names its own pipeline kind, pipeline, feature, atlas and grouping,
+   so measurements from different modalities can be combined as long as their *grouping* produces
+   commensurate ``territory`` keys (e.g. qvtpy ``hemisphere`` → ``MCA``/``ACA``/``PCA`` against ASL
+   ``territory`` → the same vascular-territory labels).
+
+   :param alias: Output column name. Defaults to ``resolve_feature_id(feature)``. Must be a valid Python
+                 identifier: :func:`~nvitk.stats.mixedlm.fit_or_load_mixedlm` sanitizes column names, so a
+                 non-identifier alias would silently diverge between the analysis frame and the model frame.
+   :type alias: str, optional
+
+
+   .. py:attribute:: pipeline_kind
+      :type:  str
+      :value: 'qvtpy'
+
+
+
+   .. py:attribute:: pipeline
+      :type:  str
+      :value: 'latest'
+
+
+
+   .. py:attribute:: feature
+      :type:  str
+      :value: 'flow_mean'
+
+
+
+   .. py:attribute:: grouping
+      :type:  str
+      :value: 'vessel'
+
+
+
+   .. py:attribute:: atlas
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:attribute:: alias
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:attribute:: agg
+      :type:  str
+      :value: 'mean'
+
+
+
+   .. py:attribute:: composites
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:attribute:: regions
+      :type:  tuple[str, Ellipsis]
+      :value: ()
+
+
+
+   .. py:method:: column() -> str
+
+      Name this measurement takes in the analysis frame.
+
+
+
+   .. py:method:: label() -> str
+
+      One-line description for list widgets, e.g. ``"qvtpy · latest · pi · hemisphere → pi"``.
+
+
+
+   .. py:method:: to_dict() -> dict[str, Any]
+
+      Serialize to a JSON-safe dict.
+
+
+
+   .. py:method:: from_dict(data: Mapping[str, Any]) -> MeasurementSpec
+      :classmethod:
+
+
+      Rebuild from :meth:`to_dict` output, tolerating missing keys.
+
+
+
+.. py:function:: build_multi_feature_analysis_frame(repo: Any, *, measurements: Sequence[MeasurementSpec | Mapping[str, Any]], clinical_vars: list[str] | None = None, cognitive_vars: list[str] | None = None, join: str = 'inner', grain: str = 'territory', attach_qc: bool = True) -> tuple[pandas.DataFrame, dict[str, Any]]
+
+   Analysis frame combining one or more image measurements plus subject covariates.
+
+   Each measurement is loaded independently by :func:`build_feature_territory_frame` and the
+   results are joined on ``(subject_uid, territory)``. With ``join="inner"`` (the default) only
+   subject/territory cells present in *every* measurement survive, which is the right grain for a
+   model like ``att_mean ~ pi + …``: every row then has all its predictors observed.
+
+   Covariates are merged **once**, after the measurement join. The covariate merge is an inner
+   merge on ``subject_uid``, so attaching it per measurement would apply it repeatedly.
+
+   :param join: How successive measurement frames are combined.
+   :type join: {"inner", "outer", "left"}
+   :param grain: What a row is. ``"territory"`` keeps the long shape and joins on the shared
+                 ``(subject, territory)`` cell — right when the measurements share a parcellation, and the
+                 only way to fit a model with a territory term. ``"subject"`` gives one row per subject and
+                 spreads each measurement's territories into ``value@territory`` columns, which is the only
+                 way to relate measurements whose parcellations name different kinds of region: an ASL
+                 whole-brain CBF against a 4D-flow vessel, or a FreeSurfer parcel against either.
+   :type grain: {"territory", "subject"}
+   :param attach_qc: Merge the published per-vessel autoQC metrics (``qc_flow_plausible``, ``qc_score``, …) onto
+                     the frame. They are what the QC filter presets read, so turning this off greys those out —
+                     but it also keeps five columns nobody asked for out of a frame built for something else,
+                     and skips their lookup on a dataset where the stage never ran.
+   :type attach_qc: bool
+
+   :returns: *meta* carries ``measurements`` (per-spec row/subject/territory counts), ``key_overlap``
+             (fraction of measurement 0's keys retained after each join), ``n_rows``, ``covariates``, and
+             ``warnings`` — a list of human-readable problems worth surfacing in a UI, most importantly a
+             disjoint ``territory`` vocabulary between two pipelines.
+   :rtype: (frame, meta)
+
+   :raises ValueError: If *measurements* is empty or two specs would write the same output column.
+
+
+.. py:function:: build_long_analysis_frame(repo: Any, *, pipeline_kind: str, pipeline: str, feature: str, grouping: str, atlas: str | None = None, clinical_vars: list[str] | None = None, cognitive_vars: list[str] | None = None) -> pandas.DataFrame
+
+   Load long-form image rows, assign group keys, aggregate, attach covariates.
+
+   Single-measurement convenience wrapper over :func:`build_multi_feature_analysis_frame`.
+
+

@@ -1,0 +1,71 @@
+nvitk.segmentation.region_growing
+=================================
+
+.. py:module:: nvitk.segmentation.region_growing
+
+.. autoapi-nested-parse::
+
+   6-connected intensity-gated region growing on 3D volumes.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.region_growing.IntensityPolarity
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.region_growing.region_grow_binary_mask
+   nvitk.segmentation.region_growing.region_grow_into_label_volume
+   nvitk.segmentation.region_growing.dilate_bool_barrier
+   nvitk.segmentation.region_growing.forbidden_other_labels
+   nvitk.segmentation.region_growing.forbidden_from_label_mask
+   nvitk.segmentation.region_growing.merge_forbidden
+
+
+Module Contents
+---------------
+
+.. py:data:: IntensityPolarity
+
+.. py:function:: region_grow_binary_mask(vessel_mask: np.ndarray, intensity: np.ndarray, *, intensity_frac: float, abs_floor: float | None = None, forbidden: np.ndarray | None = None, polarity: IntensityPolarity = 'hyperintense', seed_intensity_mask: np.ndarray | None = None) -> int
+
+   Grow a boolean mask in-place using 6-connectivity and mean-seed intensity gate.
+
+   When *seed_intensity_mask* is set, the intensity mean (gate reference) is
+   computed only on ``vessel_mask & seed_intensity_mask`` so bright auxiliary
+   seeds (e.g. AComm) do not inflate the threshold.
+
+
+.. py:function:: region_grow_into_label_volume(labels: np.ndarray, intensity: np.ndarray, label_id: int, *, intensity_frac: float, abs_floor: float | None = None, forbidden: np.ndarray | None = None, polarity: IntensityPolarity = 'hyperintense') -> int
+
+   6-connected region growing into empty voxels (``labels == 0``) for *label_id*.
+
+
+.. py:function:: dilate_bool_barrier(mask: np.ndarray, *, radius_vox: int = 0) -> np.ndarray
+
+   Morphologically dilate a boolean forbidden mask.
+
+
+.. py:function:: forbidden_other_labels(label_volume: np.ndarray, exclude_label_ids: Sequence[int], *, radius_vox: int = 0) -> np.ndarray
+
+   Forbidden mask: voxels labeled as any id except 0 and *exclude_label_ids*.
+
+
+.. py:function:: forbidden_from_label_mask(mask: np.ndarray, *, radius_vox: int = 0, exclude_label_ids: Sequence[int] = ()) -> np.ndarray
+
+   Forbidden mask from *mask* (binary or multilabel), optionally excluding label ids.
+
+
+.. py:function:: merge_forbidden(*masks: np.ndarray | None) -> np.ndarray | None
+
+   OR-combine optional forbidden masks; ``None`` if all inputs are ``None``.
+
+

@@ -1,0 +1,101 @@
+nvitk.pipes.pesa_fat.qc.review_policy
+=====================================
+
+.. py:module:: nvitk.pipes.pesa_fat.qc.review_policy
+
+.. autoapi-nested-parse::
+
+   Shared PESA-Fat QC review structure lists and status aggregation.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECTS
+   nvitk.pipes.pesa_fat.qc.review_policy.REVIEW_ASPECT_LABELS
+   nvitk.pipes.pesa_fat.qc.review_policy.DEFAULT_REVIEW_ASPECT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.pesa_fat.qc.review_policy.filter_review_structures
+   nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_structure
+   nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_aspect
+   nvitk.pipes.pesa_fat.qc.review_policy.is_reviewable_entry
+   nvitk.pipes.pesa_fat.qc.review_policy.expected_review_structures
+   nvitk.pipes.pesa_fat.qc.review_policy.expected_review_entries
+   nvitk.pipes.pesa_fat.qc.review_policy.reviews_dict_to_entries
+   nvitk.pipes.pesa_fat.qc.review_policy.overall_status
+   nvitk.pipes.pesa_fat.qc.review_policy.portal_display_status
+
+
+Module Contents
+---------------
+
+.. py:data:: REVIEW_ASPECTS
+   :type:  tuple[str, Ellipsis]
+   :value: ('SEGMENTATION', 'MEASUREMENT')
+
+
+.. py:data:: REVIEW_ASPECT_LABELS
+   :type:  dict[str, str]
+
+.. py:data:: DEFAULT_REVIEW_ASPECT
+   :value: 'MEASUREMENT'
+
+
+.. py:function:: filter_review_structures(structures: list[str] | tuple[str, Ellipsis]) -> list[str]
+
+   Remove unwanted review labels (shared policy for CT-PET and Dixon).
+
+
+.. py:function:: is_reviewable_structure(name: str, *, reviewable_structures: Iterable[str] | None = None) -> bool
+
+   True when *name* participates in QC review (excludes ``*_LR`` composites).
+
+
+.. py:function:: is_reviewable_aspect(aspect: str) -> bool
+
+   True if *aspect* is one of the recognized review aspects (``SEGMENTATION``/``MEASUREMENT``).
+
+
+.. py:function:: is_reviewable_entry(structure: str, aspect: str, *, pipeline: str) -> bool
+
+   True when *(structure, aspect)* is a valid QC review target.
+
+
+.. py:function:: expected_review_structures(pipeline: str) -> list[str]
+
+   All structures that must be reviewed for dashboard overall OK.
+
+
+.. py:function:: expected_review_entries(pipeline: str) -> list[tuple[str, str]]
+
+   All (structure, aspect) pairs required for a complete review.
+
+
+.. py:function:: reviews_dict_to_entries(reviews_by_structure: dict) -> dict[tuple[str, str], str]
+
+   Normalize nested or flat review state into ``(structure, aspect) -> status``.
+
+
+.. py:function:: overall_status(reviews_by_structure: dict[str, str], *, expected_structures: list[str] | None = None, pipeline: str | None = None) -> str
+
+   Legacy aggregate: PENDING / OK / FAIL.
+
+
+.. py:function:: portal_display_status(reviews_by_structure: dict, *, expected_structures: list[str] | None = None, pipeline: str | None = None) -> tuple[str, str]
+
+   Return ``(label, tone)`` for dashboard cells.
+
+   - ``PENDING`` / ``pending`` — any expected (structure, aspect) still pending.
+   - ``REVISED`` / ``ok`` — all reviewed, not all FAIL (green).
+   - ``REVISED`` / ``fail`` — all reviewed and all FAIL (red).
+
+

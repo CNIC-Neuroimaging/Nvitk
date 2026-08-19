@@ -1,0 +1,35 @@
+nvitk.measure.intensity
+=======================
+
+.. py:module:: nvitk.measure.intensity
+
+.. autoapi-nested-parse::
+
+   Masked intensity statistics (``mean``, ``median``, ``max``, ``p95``, etc.).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.intensity.masked_stats
+
+
+Module Contents
+---------------
+
+.. py:function:: masked_stats(image: nvitk.types.Image | Any, mask: nvitk.types.Image | Any, *, stats: Iterable[str] = ('mean', 'median', 'max', 'p95', 'std', 'sum')) -> dict[str, float]
+
+   Compute a set of intensity statistics for *image* restricted to ``mask > 0``.
+
+   :param image: Intensity image.
+   :param mask: Label or binary mask image/array with same shape as *image*.
+   :param stats: Iterable of stat names to compute. Supported:
+                 ``mean``, ``median``, ``max``, ``min``, ``p95``, ``p5``, ``std``, ``sum``, ``count``.
+
+   :returns: Plain Python floats (CuPy arrays are materialized to host at the tail of the pipeline).
+   :rtype: dict[str, float]
+
+

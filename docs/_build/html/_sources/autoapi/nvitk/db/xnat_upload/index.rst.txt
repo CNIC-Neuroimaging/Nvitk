@@ -1,0 +1,58 @@
+nvitk.db.xnat_upload
+====================
+
+.. py:module:: nvitk.db.xnat_upload
+
+.. autoapi-nested-parse::
+
+   XNAT experiment-level resource upload helpers (pipeline-agnostic).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_upload.DEFAULT_QVTPY_SCAN_SEQUENCES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.db.xnat_upload.resolve_subject_experiment
+   nvitk.db.xnat_upload.iter_upload_files
+   nvitk.db.xnat_upload.xnat_resource_has_files
+   nvitk.db.xnat_upload.upload_directory_to_xnat_resource
+
+
+Module Contents
+---------------
+
+.. py:data:: DEFAULT_QVTPY_SCAN_SEQUENCES
+   :type:  frozenset[str]
+
+.. py:function:: resolve_subject_experiment(project: Any, subject_label: str, *, prefer_sequences: Iterable[str] | None = None) -> tuple[Any, str]
+
+   Return ``(experiment, experiment_label)`` for the best qvtpy MR session.
+
+
+.. py:function:: iter_upload_files(local_dir: pathlib.Path) -> list[pathlib.Path]
+
+   List files under *local_dir* excluding obvious junk.
+
+
+.. py:function:: xnat_resource_has_files(experiment: Any, resource_label: str) -> bool
+
+   Return True when *resource_label* exists on *experiment* and has files.
+
+
+.. py:function:: upload_directory_to_xnat_resource(experiment: Any, resource_label: str, local_dir: pathlib.Path | str, *, overwrite: bool = False, dry_run: bool = False) -> int
+
+   Upload *local_dir* to an experiment resource via xnatpy ``upload_dir``.
+
+   Returns the number of files that would be / were uploaded.
+
+

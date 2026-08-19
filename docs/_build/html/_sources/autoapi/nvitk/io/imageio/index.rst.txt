@@ -1,0 +1,144 @@
+nvitk.io.imageio
+================
+
+.. py:module:: nvitk.io.imageio
+
+.. autoapi-nested-parse::
+
+   High-level image load/save and helpers (:func:`imread`, :func:`imsave`, :func:`imshow`, axis tools).
+
+   Readers and writers are selected by extension or ``force_type``; see :mod:`nvitk.io._common`.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.io.imageio._READERS
+   nvitk.io.imageio._WRITERS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.imageio.imread
+   nvitk.io.imageio.imsave
+   nvitk.io.imageio.swapaxes
+   nvitk.io.imageio._parse_index_token
+   nvitk.io.imageio._is_projection_token
+   nvitk.io.imageio._project_along_axis
+   nvitk.io.imageio._rgb_along_axis
+   nvitk.io.imageio._kwargs_imshow_rgb
+   nvitk.io.imageio._standard_2d_view
+   nvitk.io.imageio.imshow
+   nvitk.io.imageio.convert_image
+
+
+Module Contents
+---------------
+
+.. py:data:: _READERS
+
+.. py:data:: _WRITERS
+
+.. py:function:: imread(path: str | pathlib.Path, *, axes: str | None = None, force_type: str | None = None, backend: str | None = None, **kwargs: Any)
+
+   Load a volume or series from disk into :class:`~nvitk.types.image.Image`.
+
+   :param path: File or directory (directories are treated as DICOM folders unless ``force_type`` overrides).
+   :param axes: If set, reorder reader output to this axis string (reader-dependent).
+   :param force_type: Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, …
+   :param backend: ``numpy`` or ``cupy`` for the returned :class:`~nvitk.types.image.Image` array.
+   :param \*\*kwargs: Passed to the format reader (e.g. DICOM ``force_ras``, NIfTI ``metadata_json``).
+
+   :returns: A single image, or a list when the reader returns multiple series (e.g. DICOM).
+   :rtype: Image or list[Image]
+
+
+.. py:function:: imsave(path: str | pathlib.Path, image: Any, *, axes: str | None = None, metadata: dict[str, Any] | None = None, force_type: str | None = None, **kwargs: Any) -> None
+
+   Write array or :class:`~nvitk.types.image.Image` to *path* using the writer chosen by extension or *force_type*.
+
+   Merges ``image.metadata`` with *metadata*; optional *axes* reorders data before write.
+
+
+.. py:function:: swapaxes(image: Any, axes_prev: str, axes_new: str, metadata: dict[str, Any] | None = None)
+
+   Reorder *image* from *axes_prev* to *axes_new* using :func:`~nvitk.io._common.reorder_axes`.
+
+   If *metadata* is omitted, returns only the reordered array. If provided, returns
+   ``(data, metadata)`` with ``axes`` and ``shape`` updated.
+
+
+.. py:function:: _parse_index_token(index: Any, axis: int) -> str | None
+
+   Extract a lower-cased string token (e.g. ``"max"``, ``"rgb"``) from *index* for the given *axis*, if present.
+
+
+.. py:function:: _is_projection_token(tok: str | None) -> bool
+
+   True when *tok* names a supported intensity projection (max/mean/avg/median).
+
+
+.. py:function:: _project_along_axis(vol: numpy.ndarray, axis: int, how: str) -> numpy.ndarray
+
+   Collapse *vol* along *axis* with the named projection (max/mean/avg/median).
+
+
+.. py:function:: _rgb_along_axis(vol: numpy.ndarray, axis: int) -> numpy.ndarray
+
+   Move a length-3 *axis* to the end so it can be shown as RGB by matplotlib.
+
+
+.. py:function:: _kwargs_imshow_rgb(kwargs: dict[str, Any]) -> dict[str, Any]
+
+   Drop ``cmap`` from imshow kwargs (invalid/ignored for RGB data).
+
+
+.. py:function:: _standard_2d_view(vol: numpy.ndarray, axis: int, index: Any, resolve_index) -> tuple[numpy.ndarray, bool]
+
+   Reduce *vol* to a 2D array for a single ``imshow`` call.
+
+   :returns: * **view** (*ndarray*)
+             * *rgb_layout* -- If True, omit ``cmap`` (RGB / multi-channel image).
+
+
+.. py:function:: imshow(image, *, axis: int = None, index: tuple | int | str = 'mid', show: bool = True, display: str = None, mosaic_init: int = 0, mosaic_fin: int | None = None, t_axis: int = 3, **kwargs)
+
+   Display a 2D slice, orthogonal triple, mosaic of slices, or animation via matplotlib.
+
+   *display* selects layout: ``standard`` (single slice), ``orth`` / ``orthogonal`` (three
+   linked views), ``mosaic`` (grid of slices along *axis*), or ``animation`` (time or slice
+   sweep). Pass ``cmap`` and other ``imshow`` kwargs as needed; default colormap is ``gray``;
+   omit or override ``cmap`` for RGB output.
+
+   :param image: Array or :class:`~nvitk.types.image.Image` with optional ``axes`` (used when *axis* is None).
+   :param axis: Dimension index along which to slice, mosaic, project, or stack RGB; if None, uses the
+                ``Z`` axis index when present, else 2.
+   :param index: Per-axis slice index, ``"mid"``, a triple for orthogonal mode, a **projection** along
+                 *axis* (``"max"``, ``"mean"``, ``"avg"``, ``"median"``), or ``"rgb"`` when that axis has
+                 length 3 (last dimension becomes channels for ``imshow``). Projection and RGB use a
+                 single 2D panel (orthogonal and mosaic layouts fall back to standard for those modes).
+   :param show: If True, ``plt.show()`` (or JS HTML in Jupyter for animations).
+   :param display: Layout name; aliases include ``orth``, ``mosaic``, ``animation``, ``animation+orth``, etc.
+   :param mosaic_init: Inclusive start / exclusive end slice indices for mosaic mode.
+   :param mosaic_fin: Inclusive start / exclusive end slice indices for mosaic mode.
+   :param t_axis: Time dimension for 4D animation when *display* is ``animation``.
+   :param \*\*kwargs: Forwarded to ``imshow`` (e.g. ``vmin``, ``vmax``, ``cmap``).
+
+   :returns: Artist handles from static views, or a ``FuncAnimation`` when *display* is ``animation``.
+   :rtype: list or matplotlib.animation.FuncAnimation
+
+
+.. py:function:: convert_image(src: str | pathlib.Path, dst: str | pathlib.Path, *, src_type: str | None = None, dst_type: str | None = None, axes: str | None = None, backend: str | None = None, series_index: int = 0, **kwargs: Any) -> None
+
+   Read *src* with :func:`imread`, pick one series if multiple, then :func:`imsave` to *dst*.
+
+   Use *series_index* when the reader returns a list (e.g. multi-series DICOM). *src_type* /
+   *dst_type* override extension-based format detection; remaining *kwargs* go to read and write.
+
+

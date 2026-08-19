@@ -1,0 +1,78 @@
+nvitk.transform.reorient
+========================
+
+.. py:module:: nvitk.transform.reorient
+
+.. autoapi-nested-parse::
+
+   Reorient volumes by axis permute / flips / target codes (optionally vs a reference).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.transform.reorient.MOUSE_ANATOMY_PERMUTE
+   nvitk.transform.reorient.MOUSE_TARGET_ORIENTATION
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.transform.reorient.canonical_affine_for_axcodes
+   nvitk.transform.reorient.reorient_volume
+   nvitk.transform.reorient.mouse_reorient_volume
+   nvitk.transform.reorient.mouse_reorient_nifti
+
+
+Module Contents
+---------------
+
+.. py:data:: MOUSE_ANATOMY_PERMUTE
+   :type:  tuple[int, int, int]
+   :value: (0, 2, 1)
+
+
+.. py:data:: MOUSE_TARGET_ORIENTATION
+   :type:  str
+   :value: 'LAS'
+
+
+.. py:function:: canonical_affine_for_axcodes(spacing: Sequence[float], axcodes: str, *, shape: Sequence[int] | None = None, origin: Sequence[float] | None = None) -> numpy.ndarray
+
+   Build a 4×4 voxel→RAS-world affine for data already stored as *axcodes*.
+
+
+.. py:function:: reorient_volume(image: nvitk.types.Image | Any, *, mode: str = 'manual', reference: nvitk.types.Image | Any | None = None, target_orientation: str | None = None, permute_order: str | Sequence[int] | None = None, flip_axes: Sequence[bool] | None = None, reset_affine: bool = False) -> nvitk.types.Image
+
+   Reorient a 3D volume via optional axis permute/flips and target axis codes.
+
+   :param image: Input :class:`~nvitk.types.Image` (or array coerced via metadata-less Image).
+   :param mode: ``manual`` — permute / flip / target codes from arguments.
+                ``reference`` — match *reference* orientation codes (after optional permute/flips).
+                ``mouse`` — preclinical preset: permute ``(0,2,1)`` then canonical ``LAS``
+                (AP moves from Z→Y; SI ends on Z), matching the ANTsPy mouse gallery layout.
+   :param reference: Reference image whose orientation codes are the target when ``mode='reference'``.
+   :param target_orientation: Three-letter codes (e.g. ``LAS``, ``RAS``). Used in manual mode, and as
+                              fallback when reference has no readable affine.
+   :param permute_order: Spatial axis permutation (e.g. ``"0,2,1"`` or ``(0, 2, 1)``).
+   :param flip_axes: Length-3 booleans for flipping array axes 0/1/2 after permute.
+   :param reset_affine: If True, after permute/flips assign a fresh canonical affine for
+                        *target_orientation* (use when the header axes do not match anatomy).
+                        Forced True for ``mode='mouse'``.
+
+
+.. py:function:: mouse_reorient_volume(image: nvitk.types.Image | Any) -> nvitk.types.Image
+
+   Apply the lab mouse / ANTsPy-gallery axis convention (see :data:`MOUSE_TARGET_ORIENTATION`).
+
+
+.. py:function:: mouse_reorient_nifti(nifti_image: Any) -> Any
+
+   Apply :func:`mouse_reorient_volume` to a nibabel spatial image and return a NIfTI.
+
+

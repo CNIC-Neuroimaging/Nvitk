@@ -1,0 +1,90 @@
+nvitk.pipes.qvtpy.stage1_eicab
+==============================
+
+.. py:module:: nvitk.pipes.qvtpy.stage1_eicab
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 1: eICAB Circle-of-Willis / TOF segmentation on stage-0 NIfTI layout.
+
+   **Inputs**
+
+   - ``<nifti_root>/<subject>/TOF/TOF.nii.gz`` from :mod:`nvitk.pipes.qvtpy.stage0_convert`.
+
+   **Outputs**
+
+   - eICAB NIfTIs under ``<output_root>/<subject>/<eicab-subdir>/`` (default
+     :data:`~nvitk.pipes.qvtpy.config.STAGE1_EICAB_DIR`), including ``TOF_resampled`` for stage 2.
+
+   **Execution**
+
+   - ``--submit local`` — :func:`nvitk.segmentation.eicab.runner.run_eicab` via Singularity.
+   - ``--submit sge`` — host ``singularity run`` eICAB (+ optional nvitk post-steps) per subject.
+   - ``--post-process-eicab`` (default on) — Otsu ICA resegment + ICA RG; writes ``*_pp`` mask and ``centerlines_mask_pp.nii.gz`` (originals unchanged).
+   - ``--only-pp`` — skip eICAB inference; run ICA post-process on existing outputs only.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage1_eicab.find_tof_resampled_volume
+   nvitk.pipes.qvtpy.stage1_eicab.find_tof_volume
+   nvitk.pipes.qvtpy.stage1_eicab.run_postprocess_only
+   nvitk.pipes.qvtpy.stage1_eicab.run_subject
+   nvitk.pipes.qvtpy.stage1_eicab.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage1_eicab.submit_subject_sge
+   nvitk.pipes.qvtpy.stage1_eicab.main
+
+
+Module Contents
+---------------
+
+.. py:function:: find_tof_resampled_volume(eicab_output_dir: pathlib.Path) -> pathlib.Path | None
+
+   Return path to eICAB ``TOF_resampled`` NIfTI under *eicab_output_dir*, or None.
+
+
+.. py:function:: find_tof_volume(subject_nifti_dir: pathlib.Path) -> pathlib.Path | None
+
+   Return path to TOF NIfTI after stage0 reorganization, or None.
+
+
+.. py:function:: run_postprocess_only(subject: str, *, output_root: pathlib.Path, eicab_subdir: str | None = None) -> pathlib.Path
+
+   ICA Otsu resegment + region growing on existing eICAB outputs.
+
+
+.. py:function:: run_subject(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, eicab_subdir: str | None = None, skip_existing: bool = False, resolution: float = 0.5, simple_segmentation: bool = False, attention: bool = False, device: str = 'cpu', eicab_container: pathlib.Path | None = None, tmp_dir: pathlib.Path | None = None, vasculature_dir: pathlib.Path | None = None, keep_aux_outputs: bool = False, post_process_eicab: bool = True, only_pp: bool = False) -> pathlib.Path
+
+   Run eICAB locally for one subject. Returns the eICAB output directory.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, eicab_subdir: str | None = None, skip_existing: bool = False, resolution: float = 0.5, simple_segmentation: bool = False, attention: bool = False, device: str = 'cpu', eicab_container: pathlib.Path | None = None, pipeline_container: pathlib.Path | None = None, src_dir: pathlib.Path | None = None, tmp_dir: pathlib.Path | None = None, thread_limit: int | None = None, sge_pe_smp: int | None = None, local_metric_scratch: bool | None = None, vasculature_dir: pathlib.Path | None = None, log_dir: pathlib.Path | None = None, err_dir: pathlib.Path | None = None, keep_aux_outputs: bool = False, post_process_eicab: bool = True, only_pp: bool = False, resources: nvitk.cluster.sge.SgeResources | None = None, backend: str = 'gpu', job_name: str | None = None) -> str
+
+   Return the host shell command for one stage1 array/SGE task.
+
+   Normal eICAB path: host ``singularity run`` chain via
+   :func:`~nvitk.segmentation.eicab.cluster.build_eicab_host_shell_cmd`.
+   ``only_pp``: pipeline-container singularity command (same as
+   :func:`_submit_postprocess_only_sge`).
+
+
+.. py:function:: submit_subject_sge(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, eicab_subdir: str | None = None, skip_existing: bool = False, resolution: float = 0.5, simple_segmentation: bool = False, attention: bool = False, device: str = 'cpu', eicab_container: pathlib.Path | None = None, pipeline_container: pathlib.Path | None = None, src_dir: pathlib.Path | None = None, tmp_dir: pathlib.Path | None = None, thread_limit: int | None = None, sge_pe_smp: int | None = None, local_metric_scratch: bool | None = None, vasculature_dir: pathlib.Path | None = None, log_dir: pathlib.Path | None = None, err_dir: pathlib.Path | None = None, keep_aux_outputs: bool = False, post_process_eicab: bool = True, only_pp: bool = False, resources: nvitk.cluster.sge.SgeResources | None = None, hold_jid: str | None = None, backend: str = 'gpu', dry_run: bool = False, emit: TextIO | None = None, job_name: str | None = None) -> str
+
+   Submit one stage1 eICAB SGE job. Returns the qsub job id (or '' when *emit* is set).
+
+   The local TOF file does not need to exist yet: when a stage0_c job is
+   chained via ``hold_jid``, the TOF is produced on the cluster before this
+   job starts. We discover the actual file when present, otherwise fall back
+   to the canonical stage0_c output path ``{nifti_root}/{subject}/TOF/TOF.nii.gz``.
+
+
+.. py:function:: main(nifti_root: pathlib.Path, output_root: pathlib.Path, eicab_subdir: str | None, subject: str | None, submit: str, skip_existing: bool, resolution: float, simple_segmentation: bool, attention: bool, device: str, eicab_container: pathlib.Path | None, pipeline_container: pathlib.Path | None, src_dir: pathlib.Path | None, tmp_dir: pathlib.Path | None, eicab_thread_limit: int | None, sge_pe_smp: int | None, vasculature_dir: pathlib.Path | None, log_dir: pathlib.Path | None, err_dir: pathlib.Path | None, keep_aux_outputs: bool, post_process_eicab: bool, only_pp: bool, emit_script: pathlib.Path | None, no_remote: bool, remote_host: str | None, remote_user: str | None, dry_run: bool) -> None
+
+   CLI entry point: run eICAB (and optional post-processing) for one or every subject under
+   ``nifti_root``, either locally or by submitting SGE jobs.
+
+

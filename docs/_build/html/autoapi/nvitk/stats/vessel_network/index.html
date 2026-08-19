@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.stats.vessel_network &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.stats.violin_hemodynamics" href="../violin_hemodynamics/index.html" />
+    <link rel="prev" title="nvitk.stats.vascular_map" href="../vascular_map/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.stats.vessel_network">
+<span id="nvitk-stats-vessel-network"></span><h1>nvitk.stats.vessel_network<a class="headerlink" href="#module-nvitk.stats.vessel_network" title="Link to this heading">¶</a></h1>
+<p>The cerebral vascular network — topology, conservation, adjacency and composition.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>Every statistical model in this toolkit so far has treated territories as <em>exchangeable levels</em>: a
+list of unrelated categories that happen to appear in the same frame. Anatomically they are nothing
+of the sort. The vertebrals merge into the basilar, which splits into the posterior cerebrals; each
+carotid splits into an anterior and a middle cerebral; the sagittal and straight sinuses drain into
+the transverse sinuses. Flow through those junctions is <em>conserved</em>, and that constraint is
+information no exchangeable-levels model can use.</p>
+<p>This module holds the topology once, so the four ways of exploiting it share one definition:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Use</p></th>
+<th class="head"><p>Entry point</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>conservation residuals</p></td>
+<td><p><a class="reference internal" href="#nvitk.stats.vessel_network.CONSERVATION_RULES" title="nvitk.stats.vessel_network.CONSERVATION_RULES"><code class="xref py py-data docutils literal notranslate"><span class="pre">CONSERVATION_RULES</span></code></a>, <a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">conservation_frame()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>path analysis / SEM</p></td>
+<td><p><a class="reference internal" href="#nvitk.stats.vessel_network.network_edges" title="nvitk.stats.vessel_network.network_edges"><code class="xref py py-func docutils literal notranslate"><span class="pre">network_edges()</span></code></a>, <a class="reference internal" href="#nvitk.stats.vessel_network.sem_model_syntax" title="nvitk.stats.vessel_network.sem_model_syntax"><code class="xref py py-func docutils literal notranslate"><span class="pre">sem_model_syntax()</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p>MRF smooth over the graph</p></td>
+<td><p><a class="reference internal" href="#nvitk.stats.vessel_network.neighbour_list" title="nvitk.stats.vessel_network.neighbour_list"><code class="xref py py-func docutils literal notranslate"><span class="pre">neighbour_list()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>compositional (flow shares)</p></td>
+<td><p><a class="reference internal" href="#nvitk.stats.vessel_network.flow_fractions" title="nvitk.stats.vessel_network.flow_fractions"><code class="xref py py-func docutils literal notranslate"><span class="pre">flow_fractions()</span></code></a>, <a class="reference internal" href="#nvitk.stats.vessel_network.clr_transform" title="nvitk.stats.vessel_network.clr_transform"><code class="xref py py-func docutils literal notranslate"><span class="pre">clr_transform()</span></code></a></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="communicating-arteries">
+<h2>Communicating arteries<a class="headerlink" href="#communicating-arteries" title="Link to this heading">¶</a></h2>
+<p>The circle of Willis is not a tree. The posterior communicating arteries join each carotid to the
+ipsilateral posterior cerebral, and the anterior communicating joins the two anterior cerebrals —
+collaterals whose flow <strong>direction is subject-specific</strong>. That is why they are held separately from
+the tree edges in <a class="reference internal" href="#nvitk.stats.vessel_network.COLLATERAL_EDGES" title="nvitk.stats.vessel_network.COLLATERAL_EDGES"><code class="xref py py-data docutils literal notranslate"><span class="pre">COLLATERAL_EDGES</span></code></a> and enter the conservation equations as <em>signed</em> terms:
+a positive PComm flow moves blood from the carotid to the posterior circulation, a negative one the
+other way. Modelling them as tree edges would force a direction the anatomy does not have.</p>
+</section>
+<section id="sign-convention">
+<h2>Sign convention<a class="headerlink" href="#sign-convention" title="Link to this heading">¶</a></h2>
+<p>Tree flows are magnitudes and always positive. Collateral flows are signed, positive in the
+direction named by the edge (<code class="docutils literal notranslate"><span class="pre">lica</span> <span class="pre">→</span> <span class="pre">lpca</span></code> for the left PComm). Whether a published measurement
+already follows that convention is a property of the pipeline, not of this module: pass
+<code class="docutils literal notranslate"><span class="pre">signed_collaterals=False</span></code> to <a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">conservation_frame()</span></code></a> when the values are magnitudes and the
+direction is unknown, and the affected balances are reported as ranges rather than as residuals.</p>
+</section>
+<section id="units">
+<h2>Units<a class="headerlink" href="#units" title="Link to this heading">¶</a></h2>
+<p>Flow terms must share one unit (qvtpy publishes mL/min). Conservation is a statement about volume
+per unit time; mixing a velocity or an index into a balance is meaningless, and
+<a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">conservation_frame()</span></code></a> refuses measurements it does not recognize as flows unless told
+otherwise.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.VESSEL_NODES" title="nvitk.stats.vessel_network.VESSEL_NODES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VESSEL_NODES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.TREE_EDGES" title="nvitk.stats.vessel_network.TREE_EDGES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TREE_EDGES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.COLLATERAL_EDGES" title="nvitk.stats.vessel_network.COLLATERAL_EDGES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COLLATERAL_EDGES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.COLLATERAL_CONDUIT" title="nvitk.stats.vessel_network.COLLATERAL_CONDUIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COLLATERAL_CONDUIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.CONSERVATION_RULES" title="nvitk.stats.vessel_network.CONSERVATION_RULES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CONSERVATION_RULES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.COMPOSITION_SETS" title="nvitk.stats.vessel_network.COMPOSITION_SETS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COMPOSITION_SETS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.COLLATERAL_SPECS" title="nvitk.stats.vessel_network.COLLATERAL_SPECS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COLLATERAL_SPECS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.VesselEdge" title="nvitk.stats.vessel_network.VesselEdge"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VesselEdge</span></code></a></p></td>
+<td><p>One directed connection, <code class="docutils literal notranslate"><span class="pre">source</span></code> feeding <code class="docutils literal notranslate"><span class="pre">target</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.ConservationRule" title="nvitk.stats.vessel_network.ConservationRule"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConservationRule</span></code></a></p></td>
+<td><p>One mass-balance equation, written as a signed sum that should come to zero.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.CollateralSpec" title="nvitk.stats.vessel_network.CollateralSpec"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CollateralSpec</span></code></a></p></td>
+<td><p>How a communicating artery is treated in a model.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.canonical_node" title="nvitk.stats.vessel_network.canonical_node"><code class="xref py py-obj docutils literal notranslate"><span class="pre">canonical_node</span></code></a>(→ str | None)</p></td>
+<td><p>Canonical vessel node for a published region label, or <code class="docutils literal notranslate"><span class="pre">None</span></code> when it is not one.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.network_edges" title="nvitk.stats.vessel_network.network_edges"><code class="xref py py-obj docutils literal notranslate"><span class="pre">network_edges</span></code></a>(→ tuple[VesselEdge, Ellipsis])</p></td>
+<td><p>The network's edges, optionally restricted to one compartment.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.neighbour_list" title="nvitk.stats.vessel_network.neighbour_list"><code class="xref py py-obj docutils literal notranslate"><span class="pre">neighbour_list</span></code></a>(→ dict[str, list[str]])</p></td>
+<td><p>Symmetric adjacency, as <code class="docutils literal notranslate"><span class="pre">mgcv</span></code>'s Markov-random-field smooth expects it.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.wide_flow_frame" title="nvitk.stats.vessel_network.wide_flow_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">wide_flow_frame</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Pivot a long analysis frame to one row per subject and one column per canonical vessel node.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">conservation_frame</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Evaluate the mass-balance residuals, one column per rule, one row per subject.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.conservation_summary" title="nvitk.stats.vessel_network.conservation_summary"><code class="xref py py-obj docutils literal notranslate"><span class="pre">conservation_summary</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Tidy per-rule summary of a <a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">conservation_frame()</span></code></a> result: how far each balance is from zero.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.flow_fractions" title="nvitk.stats.vessel_network.flow_fractions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">flow_fractions</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Each vessel's share of a set's total flow — one row per subject, one column per vessel.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.clr_transform" title="nvitk.stats.vessel_network.clr_transform"><code class="xref py py-obj docutils literal notranslate"><span class="pre">clr_transform</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Centred log-ratio of a set of shares, so they can go into an ordinary linear model.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.sem_model_syntax" title="nvitk.stats.vessel_network.sem_model_syntax"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sem_model_syntax</span></code></a>(, outcome_covariates, conduit_names)</p></td>
+<td><p>Path-model syntax for the vascular network, in the <code class="docutils literal notranslate"><span class="pre">lavaan</span></code>/<code class="docutils literal notranslate"><span class="pre">semopy</span></code> dialect.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.stats.vessel_network.collateral_features" title="nvitk.stats.vessel_network.collateral_features"><code class="xref py py-obj docutils literal notranslate"><span class="pre">collateral_features</span></code></a>(, signed)</p></td>
+<td><p>Turn the communicating arteries into the variables a model can actually use.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VESSEL_NODES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">VESSEL_NODES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VESSEL_NODES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.canonical_node">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">canonical_node</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.canonical_node" title="Link to this definition">¶</a></dt>
+<dd><p>Canonical vessel node for a published region label, or <code class="docutils literal notranslate"><span class="pre">None</span></code> when it is not one.</p>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">canonical_node</span><span class="p">(</span><span class="s2">&quot;Left_ICA&quot;</span><span class="p">),</span> <span class="n">canonical_node</span><span class="p">(</span><span class="s2">&quot;LICA&quot;</span><span class="p">),</span> <span class="n">canonical_node</span><span class="p">(</span><span class="s2">&quot;lica&quot;</span><span class="p">)</span>
+<span class="go">(&#39;lica&#39;, &#39;lica&#39;, &#39;lica&#39;)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">canonical_node</span><span class="p">(</span><span class="s2">&quot;ctx-lh-superiorfrontal&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">VesselEdge</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge" title="Link to this definition">¶</a></dt>
+<dd><p>One directed connection, <code class="docutils literal notranslate"><span class="pre">source</span></code> feeding <code class="docutils literal notranslate"><span class="pre">target</span></code>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge.source">
+<span class="sig-name descname"><span class="pre">source</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge.source" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge.target">
+<span class="sig-name descname"><span class="pre">target</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge.target" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge.kind">
+<span class="sig-name descname"><span class="pre">kind</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'tree'</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge.kind" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge.compartment">
+<span class="sig-name descname"><span class="pre">compartment</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'arterial'</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge.compartment" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.VesselEdge.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.VesselEdge.label" title="Link to this definition">¶</a></dt>
+<dd><p>Human-readable arrow, for a legend or a path diagram.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.TREE_EDGES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">TREE_EDGES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.stats.vessel_network.VesselEdge" title="nvitk.stats.vessel_network.VesselEdge"><span class="pre">VesselEdge</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.TREE_EDGES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.COLLATERAL_EDGES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">COLLATERAL_EDGES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.stats.vessel_network.VesselEdge" title="nvitk.stats.vessel_network.VesselEdge"><span class="pre">VesselEdge</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.COLLATERAL_EDGES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.COLLATERAL_CONDUIT">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">COLLATERAL_CONDUIT</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.COLLATERAL_CONDUIT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.network_edges">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">network_edges</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_collaterals</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compartment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.stats.vessel_network.VesselEdge" title="nvitk.stats.vessel_network.VesselEdge"><span class="pre">VesselEdge</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.network_edges" title="Link to this definition">¶</a></dt>
+<dd><p>The network’s edges, optionally restricted to one compartment.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>include_collaterals</strong> (<em>bool</em>) – Include the communicating arteries. Excluding them leaves a strict DAG, which is what a
+path model needs when the collateral flows were not measured.</p></li>
+<li><p><strong>compartment</strong> (<em>{&quot;&quot;</em><em>, </em><em>&quot;arterial&quot;</em><em>, </em><em>&quot;venous&quot;}</em>) – Empty keeps both.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.neighbour_list">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">neighbour_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">nodes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_collaterals</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compartment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.neighbour_list" title="Link to this definition">¶</a></dt>
+<dd><p>Symmetric adjacency, as <code class="docutils literal notranslate"><span class="pre">mgcv</span></code>’s Markov-random-field smooth expects it.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bs=&quot;mrf&quot;</span></code> needs an <em>undirected</em> neighbourhood: each node listing the nodes it touches, with
+the relation symmetric. Directions are dropped here on purpose — an MRF shares information
+between anatomically adjacent vessels, it does not model flow direction. Use
+<a class="reference internal" href="#nvitk.stats.vessel_network.sem_model_syntax" title="nvitk.stats.vessel_network.sem_model_syntax"><code class="xref py py-func docutils literal notranslate"><span class="pre">sem_model_syntax()</span></code></a> when the direction is the point.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>nodes</strong> (<em>sequence</em><em> of </em><em>str</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Restrict to these canonical nodes (typically the ones actually present in the frame).
+Edges to absent nodes are dropped, which can leave a node isolated — reported, because an
+MRF over a disconnected graph estimates those levels independently.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">{node:</span> <span class="pre">[neighbour,</span> <span class="pre">...]}</span></code>, every node present as a key even when it has no neighbours.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">ConservationRule</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule" title="Link to this definition">¶</a></dt>
+<dd><p>One mass-balance equation, written as a signed sum that should come to zero.</p>
+<p><code class="docutils literal notranslate"><span class="pre">terms</span></code> maps a canonical node to its coefficient, so
+<code class="docutils literal notranslate"><span class="pre">{&quot;lva&quot;:</span> <span class="pre">1,</span> <span class="pre">&quot;rva&quot;:</span> <span class="pre">1,</span> <span class="pre">&quot;basi&quot;:</span> <span class="pre">-1}</span></code> is <em>left vertebral + right vertebral − basilar = 0</em>.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.key">
+<span class="sig-name descname"><span class="pre">key</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.key" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.terms">
+<span class="sig-name descname"><span class="pre">terms</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.terms" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.caveat">
+<span class="sig-name descname"><span class="pre">caveat</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.caveat" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.signed_terms">
+<span class="sig-name descname"><span class="pre">signed_terms</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.signed_terms" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.compartment">
+<span class="sig-name descname"><span class="pre">compartment</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'arterial'</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.compartment" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.required_nodes">
+<span class="sig-name descname"><span class="pre">required_nodes</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.required_nodes" title="Link to this definition">¶</a></dt>
+<dd><p>Canonical nodes the rule needs before it can be evaluated.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.ConservationRule.expression">
+<span class="sig-name descname"><span class="pre">expression</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.ConservationRule.expression" title="Link to this definition">¶</a></dt>
+<dd><p>The equation as text, e.g. <code class="docutils literal notranslate"><span class="pre">lva</span> <span class="pre">+</span> <span class="pre">rva</span> <span class="pre">−</span> <span class="pre">basi</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CONSERVATION_RULES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">CONSERVATION_RULES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#nvitk.stats.vessel_network.ConservationRule" title="nvitk.stats.vessel_network.ConservationRule"><span class="pre">ConservationRule</span></a><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CONSERVATION_RULES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.wide_flow_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">wide_flow_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.wide_flow_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Pivot a long analysis frame to one row per subject and one column per canonical vessel node.</p>
+<p>Conservation, composition and path models all need a subject’s vessels side by side; the
+analysis frame stores them stacked. Regions that are not vessels are dropped, and duplicate
+(subject, node) cells are averaged with a warning — that happens when a melted grouping put two
+vessels under one key, where a balance no longer means anything.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Indexed by <em>subject_column</em>, columns named by canonical node.
+<code class="docutils literal notranslate"><span class="pre">frame.attrs[&quot;dropped_regions&quot;]</span></code> lists labels that resolved to no node.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.conservation_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">conservation_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#nvitk.stats.vessel_network.ConservationRule" title="nvitk.stats.vessel_network.ConservationRule"><span class="pre">ConservationRule</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signed_collaterals</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">relative</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.conservation_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Evaluate the mass-balance residuals, one column per rule, one row per subject.</p>
+<p>A residual is <em>inflow − outflow</em>: near zero means the measurements are internally consistent,
+and a systematic departure is either an unmeasured branch (see each rule’s <code class="docutils literal notranslate"><span class="pre">caveat</span></code>) or a
+measurement bias. Either way it is a quantity worth modelling in its own right — a subject whose
+carotid balance is 40 mL/min out has something wrong with a segmentation or with an artery.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>rules</strong> (<em>sequence</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Rule keys or <a class="reference internal" href="#nvitk.stats.vessel_network.ConservationRule" title="nvitk.stats.vessel_network.ConservationRule"><code class="xref py py-class docutils literal notranslate"><span class="pre">ConservationRule</span></code></a> objects. Defaults to every rule whose nodes are all
+present in the frame; rules missing a node are skipped and reported.</p></li>
+<li><p><strong>signed_collaterals</strong> (<em>bool</em>) – Whether the communicating-artery measurements carry a direction. When <code class="docutils literal notranslate"><span class="pre">False</span></code>, rules that
+need a signed collateral are still evaluated but with the collateral term dropped, and their
+<code class="docutils literal notranslate"><span class="pre">caveat</span></code> records that the residual is therefore uncertain by that flow.</p></li>
+<li><p><strong>relative</strong> (<em>bool</em>) – Also emit <code class="docutils literal notranslate"><span class="pre">&lt;rule&gt;_rel</span></code>, the residual as a fraction of the rule’s total inflow. Absolute
+residuals scale with the subject’s cardiac output; relative ones are comparable between
+subjects and are usually what you want as an outcome.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Indexed by subject. One column per rule (<code class="docutils literal notranslate"><span class="pre">&lt;key&gt;_residual</span></code>), optionally <code class="docutils literal notranslate"><span class="pre">&lt;key&gt;_rel</span></code>, plus
+the vessel columns used. <code class="docutils literal notranslate"><span class="pre">frame.attrs[&quot;rules&quot;]</span></code> describes what was evaluated and skipped.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.conservation_summary">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">conservation_summary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">residuals</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.conservation_summary" title="Link to this definition">¶</a></dt>
+<dd><p>Tidy per-rule summary of a <a class="reference internal" href="#nvitk.stats.vessel_network.conservation_frame" title="nvitk.stats.vessel_network.conservation_frame"><code class="xref py py-func docutils literal notranslate"><span class="pre">conservation_frame()</span></code></a> result: how far each balance is from zero.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bias</span></code> is the median residual — a systematic offset, usually an unmeasured branch.
+<code class="docutils literal notranslate"><span class="pre">scatter</span></code> is the median absolute deviation, which is the part that varies subject to subject
+and therefore the part that reflects measurement noise rather than anatomy.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.COMPOSITION_SETS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">COMPOSITION_SETS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.COMPOSITION_SETS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.flow_fractions">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">flow_fractions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'terminal'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'frac'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.flow_fractions" title="Link to this definition">¶</a></dt>
+<dd><p>Each vessel’s share of a set’s total flow — one row per subject, one column per vessel.</p>
+<p>Absolute flows carry the subject’s whole cardiac output, so a model of <code class="docutils literal notranslate"><span class="pre">lmca</span> <span class="pre">~</span> <span class="pre">age</span></code> is partly
+a model of how much blood the person has. Fractions remove that: they ask <em>how the available
+flow is distributed</em>, which is the question most territory comparisons are really about, and
+they are far less sensitive to global scaling errors.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>nodes</strong> (sequence of str or key of <a class="reference internal" href="#nvitk.stats.vessel_network.COMPOSITION_SETS" title="nvitk.stats.vessel_network.COMPOSITION_SETS"><code class="xref py py-data docutils literal notranslate"><span class="pre">COMPOSITION_SETS</span></code></a>) – Which vessels form the composition. They must partition one supply for the fractions to
+mean anything — mixing arterial inflow with venous outflow does not.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">&lt;prefix&gt;_&lt;node&gt;</span></code> columns summing to 1 within each row, plus <code class="docutils literal notranslate"><span class="pre">&lt;prefix&gt;_total</span></code> holding the
+denominator so the absolute scale is not lost. Subjects missing any component are NaN
+throughout, since a partial denominator would silently inflate every share.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.clr_transform">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">clr_transform</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fractions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'clr'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.clr_transform" title="Link to this definition">¶</a></dt>
+<dd><p>Centred log-ratio of a set of shares, so they can go into an ordinary linear model.</p>
+<p>Shares live on a simplex: they are bounded, they sum to one, and so they are <em>not</em> independent —
+if the MCA’s share rises, something else’s must fall. Regressing them directly gives correlated
+residuals and predictions outside [0, 1]. The CLR maps them to a real space where a linear model
+is meaningful; a positive CLR coefficient means that vessel’s share grew <em>relative to the
+geometric mean of all of them</em>, which is the only kind of statement a composition supports.</p>
+<p>Zeros have no logarithm, so any subject with a zero share is returned as NaN rather than being
+silently offset — an imputed zero would change every other component’s value in the row.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.sem_model_syntax">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">sem_model_syntax</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_collaterals</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compartment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'arterial'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariates</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outcome_covariates</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">conduit_names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.sem_model_syntax" title="Link to this definition">¶</a></dt>
+<dd><p>Path-model syntax for the vascular network, in the <code class="docutils literal notranslate"><span class="pre">lavaan</span></code>/<code class="docutils literal notranslate"><span class="pre">semopy</span></code> dialect.</p>
+<p>Each edge becomes a regression of the downstream vessel on its upstream feeder, so the model is
+the anatomy written as equations:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">basi</span> <span class="o">~</span> <span class="n">lva</span> <span class="o">+</span> <span class="n">rva</span>
+<span class="n">lpca</span> <span class="o">~</span> <span class="n">basi</span> <span class="o">+</span> <span class="n">lpcomm</span>
+<span class="n">lmca</span> <span class="o">~</span> <span class="n">lica</span>
+</pre></div>
+</div>
+<p><em>covariates</em> are added to every structural equation — the usual <code class="docutils literal notranslate"><span class="pre">age_c</span> <span class="pre">+</span> <span class="pre">sex</span></code> — which turns the
+fit into “how does age move flow along each edge, holding the upstream vessel fixed”. That is
+the question a stacked territory model cannot answer, because it has no notion of upstream.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>nodes</strong> (<em>sequence</em><em> of </em><em>str</em><em>, </em><a class="reference internal" href="../../gui/pipeline/stages/index.html#nvitk.gui.pipeline.stages.StageInputSpec.optional" title="nvitk.gui.pipeline.stages.StageInputSpec.optional"><em>optional</em></a>) – Restrict to vessels present in the data. Edges touching an absent vessel are dropped.</p></li>
+<li><p><strong>include_collaterals</strong> (<em>bool</em>) – Add the communicating arteries as extra predictors of their downstream vessel. They enter as
+ordinary regressors: the model does not claim a direction for them, it estimates how the
+collateral’s flow relates to the territory it can supply.</p></li>
+<li><p><strong>conduit_names</strong> (<em>bool</em>) – Name a collateral by the vessel that was measured (<code class="docutils literal notranslate"><span class="pre">lpcomm</span></code>) rather than by its endpoints.
+This is what matches the frame’s columns.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Model syntax, one equation per line, with comments naming each block.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CollateralSpec">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">CollateralSpec</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CollateralSpec" title="Link to this definition">¶</a></dt>
+<dd><p>How a communicating artery is treated in a model.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CollateralSpec.node">
+<span class="sig-name descname"><span class="pre">node</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CollateralSpec.node" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CollateralSpec.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CollateralSpec.label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CollateralSpec.patency_threshold">
+<span class="sig-name descname"><span class="pre">patency_threshold</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1.0</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CollateralSpec.patency_threshold" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.CollateralSpec.description">
+<span class="sig-name descname"><span class="pre">description</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.stats.vessel_network.CollateralSpec.description" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.COLLATERAL_SPECS">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">COLLATERAL_SPECS</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#nvitk.stats.vessel_network.CollateralSpec" title="nvitk.stats.vessel_network.CollateralSpec"><span class="pre">CollateralSpec</span></a><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.COLLATERAL_SPECS" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.stats.vessel_network.collateral_features">
+<span class="sig-prename descclassname"><span class="pre">nvitk.stats.vessel_network.</span></span><span class="sig-name descname"><span class="pre">collateral_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'territory'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subject_column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'subject_uid'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">('lpcomm',</span> <span class="pre">'rpcomm',</span> <span class="pre">'acomm')</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.stats.vessel_network.collateral_features" title="Link to this definition">¶</a></dt>
+<dd><p>Turn the communicating arteries into the variables a model can actually use.</p>
+<p>A PComm is not a vessel like the others. In perhaps half of subjects it carries no meaningful
+flow at all, so its measurement is a mixture of “absent” and “present but small” — and a plain
+linear term treats those as the same thing. This builds the three features that separate them:</p>
+<p><code class="docutils literal notranslate"><span class="pre">&lt;node&gt;</span></code>            the flow itself (signed when the pipeline provides a direction);
+<code class="docutils literal notranslate"><span class="pre">&lt;node&gt;_patent</span></code>     whether it carries flow above the threshold — the pathway’s <em>existence</em>;
+<code class="docutils literal notranslate"><span class="pre">&lt;node&gt;_abs</span></code>        the magnitude, for questions about how hard a collateral is working</p>
+<blockquote>
+<div><p>regardless of which way it runs.</p>
+</div></blockquote>
+<p>Plus, across the pair, <code class="docutils literal notranslate"><span class="pre">pcomm_config</span></code> — a four-level factor (none / left / right / both) which
+is the circle-of-Willis variant most papers actually stratify on, and <code class="docutils literal notranslate"><span class="pre">pcomm_asymmetry</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Indexed by subject.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>pandas.DataFrame</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.stats</a><ul>
+      <li>Previous: <a href="../vascular_map/index.html" title="previous chapter">nvitk.stats.vascular_map</a></li>
+      <li>Next: <a href="../violin_hemodynamics/index.html" title="next chapter">nvitk.stats.violin_hemodynamics</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/stats/vessel_network/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

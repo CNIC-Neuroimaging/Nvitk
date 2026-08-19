@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.cli.transform &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="nvitk.cluster" href="../../cluster/index.html" />
+    <link rel="prev" title="nvitk.cli.segmentation" href="../segmentation/index.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.cli.transform">
+<span id="nvitk-cli-transform"></span><h1>nvitk.cli.transform<a class="headerlink" href="#module-nvitk.cli.transform" title="Link to this heading">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">nvitk-transform</span></code> CLI — geometric transforms.</p>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cli.transform.main" title="nvitk.cli.transform.main"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main</span></code></a>(→ None)</p></td>
+<td><p>Geometric transform tools.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cli.transform.cmd_resample" title="nvitk.cli.transform.cmd_resample"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_resample</span></code></a>(input_path, output_path, reference, ...)</p></td>
+<td><p>Resample a volume onto the grid of a reference image.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cli.transform.cmd_isotropy" title="nvitk.cli.transform.cmd_isotropy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_isotropy</span></code></a>(input_path, output_path, backend, submit, ...)</p></td>
+<td><p>Resample a volume to isotropic voxel spacing.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cli.transform.cmd_rotate" title="nvitk.cli.transform.cmd_rotate"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_rotate</span></code></a>(input_path, output_path, backend, submit, ...)</p></td>
+<td><p>Rotate a 2D/3D volume around a spatial axis.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.cli.transform.cmd_swap_axes" title="nvitk.cli.transform.cmd_swap_axes"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_swap_axes</span></code></a>(input_path, output_path, backend, ...)</p></td>
+<td><p>Swap two axes, or apply a full axis permutation with --order.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.cli.transform.cmd_oblique" title="nvitk.cli.transform.cmd_oblique"><code class="xref py py-obj docutils literal notranslate"><span class="pre">cmd_oblique</span></code></a>(input_path, output_path, backend, submit, ...)</p></td>
+<td><p>Sample an oblique 2D slice through a volume defined by a point and normal vector.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.main">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.cli.transform.main" title="Link to this definition">¶</a></dt>
+<dd><p>Geometric transform tools.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.cmd_resample">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">cmd_resample</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">direct_submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">order</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.cli.transform.cmd_resample" title="Link to this definition">¶</a></dt>
+<dd><p>Resample a volume onto the grid of a reference image.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.cmd_isotropy">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">cmd_isotropy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">direct_submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.cli.transform.cmd_isotropy" title="Link to this definition">¶</a></dt>
+<dd><p>Resample a volume to isotropic voxel spacing.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.cmd_rotate">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">cmd_rotate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">direct_submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">angle</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">order</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reshape</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.cli.transform.cmd_rotate" title="Link to this definition">¶</a></dt>
+<dd><p>Rotate a 2D/3D volume around a spatial axis.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.cmd_swap_axes">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">cmd_swap_axes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">direct_submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axis1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">perm_order</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.cli.transform.cmd_swap_axes" title="Link to this definition">¶</a></dt>
+<dd><p>Swap two axes, or apply a full axis permutation with –order.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.cli.transform.cmd_oblique">
+<span class="sig-prename descclassname"><span class="pre">nvitk.cli.transform.</span></span><span class="sig-name descname"><span class="pre">cmd_oblique</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">emit_script</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">direct_submit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_remote</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">point</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">normal</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvitk.cli.transform.cmd_oblique" title="Link to this definition">¶</a></dt>
+<dd><p>Sample an oblique 2D slice through a volume defined by a point and normal vector.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">API Reference</a><ul>
+  <li><a href="../../index.html">nvitk</a><ul>
+  <li><a href="../index.html">nvitk.cli</a><ul>
+      <li>Previous: <a href="../segmentation/index.html" title="previous chapter">nvitk.cli.segmentation</a></li>
+      <li>Next: <a href="../../cluster/index.html" title="next chapter">nvitk.cluster</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/nvitk/cli/transform/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,114 @@
+nvitk.pipes.qvtpy.util.io.paths
+===============================
+
+.. py:module:: nvitk.pipes.qvtpy.util.io.paths
+
+.. autoapi-nested-parse::
+
+   Filesystem layout helpers for qvtpy (local workstation vs cluster).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.paths.DEFAULT_DICOM_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.DEFAULT_NIFTI_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.DEFAULT_RESULTS_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.DEFAULT_TOTALSEG_MODEL_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.LOCAL_DEFAULT_DICOM_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.LOCAL_DEFAULT_NIFTI_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.LOCAL_DEFAULT_RESULTS_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT
+   nvitk.pipes.qvtpy.util.io.paths.CLUSTER_HOST_ALIASES
+   nvitk.pipes.qvtpy.util.io.paths.CLUSTER_HOST_ALIASES
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.paths.QvtpyPaths
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.io.paths.resolve_totalseg_model_dir
+   nvitk.pipes.qvtpy.util.io.paths.layout_local
+   nvitk.pipes.qvtpy.util.io.paths.layout_cluster
+
+
+Module Contents
+---------------
+
+.. py:data:: DEFAULT_DICOM_ROOT
+
+.. py:data:: DEFAULT_NIFTI_ROOT
+
+.. py:data:: DEFAULT_RESULTS_ROOT
+
+.. py:data:: DEFAULT_TOTALSEG_MODEL_ROOT
+
+.. py:data:: LOCAL_DEFAULT_DICOM_ROOT
+
+.. py:data:: LOCAL_DEFAULT_NIFTI_ROOT
+
+.. py:data:: LOCAL_DEFAULT_RESULTS_ROOT
+
+.. py:data:: LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT
+
+.. py:data:: CLUSTER_HOST_ALIASES
+   :type:  dict[str, str]
+
+.. py:data:: CLUSTER_HOST_ALIASES
+
+.. py:class:: QvtpyPaths
+
+   Resolved DICOM / NIfTI / results roots for one execution context.
+
+
+   .. py:attribute:: dicom_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: nifti_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: results_root
+      :type:  pathlib.Path
+
+
+   .. py:method:: subject_dicom_dir(subject: str) -> pathlib.Path
+
+      *subject*'s DICOM directory under this context's DICOM root.
+
+
+
+   .. py:method:: subject_nifti_dir(subject: str) -> pathlib.Path
+
+      *subject*'s NIfTI directory under this context's NIfTI root.
+
+
+
+.. py:function:: resolve_totalseg_model_dir(*, model_dir: pathlib.Path | None = None, prefer_cluster: bool | None = None) -> pathlib.Path
+
+   Return TotalSegmentator weights root (qvtpy cluster/local layout).
+
+
+.. py:function:: layout_local(*, dicom_root: pathlib.Path | str | None = None, nifti_root: pathlib.Path | str | None = None, results_root: pathlib.Path | str | None = None) -> QvtpyPaths
+
+   Workstation layout for XNAT download and ``--submit local``.
+
+
+.. py:function:: layout_cluster(*, dicom_root: pathlib.Path | str | None = None, nifti_root: pathlib.Path | str | None = None, results_root: pathlib.Path | str | None = None) -> QvtpyPaths
+
+   Cluster-side layout for SGE Singularity binds.
+
+

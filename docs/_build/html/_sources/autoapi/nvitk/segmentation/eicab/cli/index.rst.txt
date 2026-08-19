@@ -1,0 +1,52 @@
+nvitk.segmentation.eicab.cli
+============================
+
+.. py:module:: nvitk.segmentation.eicab.cli
+
+.. autoapi-nested-parse::
+
+   ``nvitk-eicab`` — Circle-of-Willis / TOF eICAB segmentation (local or SGE).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.cli.log
+   nvitk.segmentation.eicab.cli._SAFE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.cli._default_nvitk_src_dir
+   nvitk.segmentation.eicab.cli._default_emit_script
+   nvitk.segmentation.eicab.cli.main
+
+
+Module Contents
+---------------
+
+.. py:data:: log
+
+.. py:data:: _SAFE
+
+.. py:function:: _default_nvitk_src_dir() -> pathlib.Path
+
+   Host directory mounted at ``/nvitk/src/`` (contains a ``nvitk/`` package tree).
+
+
+.. py:function:: _default_emit_script(input_path: pathlib.Path) -> pathlib.Path
+
+   Build a default, timestamped SGE submit-script path derived from the input filename.
+
+
+.. py:function:: main(input_path: pathlib.Path, output_path: pathlib.Path, resolution: float, simple_segmentation: bool, attention: bool, device: str, eicab_container: pathlib.Path | None, tmp_dir: pathlib.Path | None, keep_aux_outputs: bool, submit: str, pipeline_container: pathlib.Path | None, src_dir: pathlib.Path | None, input_root: pathlib.Path | None, output_root: pathlib.Path | None, vasculature_dir: pathlib.Path | None, log_dir: pathlib.Path | None, err_dir: pathlib.Path | None, project: str | None, account: str | None, ngpu: int | None, h_vmem: str | None, queue: str | None, job_name: str | None, emit_script: pathlib.Path | None, direct_submit: bool, no_remote: bool, remote_host: str | None, remote_user: str | None, display_progress: bool, dry_run: bool, log_level: str) -> None
+
+   Run eICAB locally (singularity run) or submit to SGE (wrapped pipeline container).
+
+

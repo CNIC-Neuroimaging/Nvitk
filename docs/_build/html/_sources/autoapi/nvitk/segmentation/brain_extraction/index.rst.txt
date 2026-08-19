@@ -1,0 +1,44 @@
+nvitk.segmentation.brain_extraction
+===================================
+
+.. py:module:: nvitk.segmentation.brain_extraction
+
+.. autoapi-nested-parse::
+
+   Multi-modal human brain extraction via ANTsPyNet.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.brain_extraction.BRAIN_EXTRACTION_MODALITIES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.brain_extraction.brain_extraction
+
+
+Module Contents
+---------------
+
+.. py:data:: BRAIN_EXTRACTION_MODALITIES
+   :type:  tuple[str, Ellipsis]
+   :value: ('t1', 't1nobrainer', 't1combined', 't1threetissue', 't1hemi', 't1lobes', 'flair', 't2',...
+
+
+.. py:function:: brain_extraction(image: nvitk.types.Image | numpy.ndarray | Sequence[nvitk.types.Image | numpy.ndarray], *, modality: str = 't1', verbose: bool = False) -> numpy.ndarray
+
+   ANTsPyNet multi-modal brain extraction.
+
+   :param image: One intensity volume, or a sequence of volumes for multi-modal
+                 modalities such as ``t1t2infant``.
+   :param modality: ANTsPyNet modality string (``t1``, ``t2``, ``flair``, ``mra``, …).
+
+

@@ -1,0 +1,64 @@
+nvitk.util.list_cli_commands
+============================
+
+.. py:module:: nvitk.util.list_cli_commands
+
+.. autoapi-nested-parse::
+
+   List all CLI commands (pyhelp): hierarchical catalog with interactive expand/collapse.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.util.list_cli_commands._project_root
+   nvitk.util.list_cli_commands._src_dir
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.util.list_cli_commands._get_log
+   nvitk.util.list_cli_commands.categorize_command
+   nvitk.util.list_cli_commands.get_command_color
+   nvitk.util.list_cli_commands.list_cli_commands_flat
+   nvitk.util.list_cli_commands.main
+
+
+Module Contents
+---------------
+
+.. py:data:: _project_root
+
+.. py:data:: _src_dir
+
+.. py:function:: _get_log()
+
+   Lazily import and return the process-wide :class:`Logger` singleton.
+
+
+.. py:function:: categorize_command(cmd: str, module: str) -> str
+
+   Classify a CLI command name into a display category (Image Conversion, Segmentation, ...).
+
+
+.. py:function:: get_command_color(category: str) -> str
+
+   ANSI color code for a display category (falls back to white for unknown categories).
+
+
+.. py:function:: list_cli_commands_flat() -> None
+
+   Print every registered CLI command, grouped by category, in a flat (non-tree) console listing.
+
+
+.. py:function:: main(no_interactive: bool, flat: bool, shell: bool, pick: bool) -> None
+
+   List nvitk CLI commands organized by module.
+
+

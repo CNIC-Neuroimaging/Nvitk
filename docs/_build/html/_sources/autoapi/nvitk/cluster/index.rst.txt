@@ -1,0 +1,239 @@
+nvitk.cluster
+=============
+
+.. py:module:: nvitk.cluster
+
+.. autoapi-nested-parse::
+
+   Cluster / SGE submission utilities shared across nvitk.
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/cluster/remote_submit/index
+   /autoapi/nvitk/cluster/remote_transfer/index
+   /autoapi/nvitk/cluster/sge/index
+   /autoapi/nvitk/cluster/sge_chunk/index
+   /autoapi/nvitk/cluster/sge_json/index
+   /autoapi/nvitk/cluster/sge_remote/index
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.cluster.ClusterPaths
+   nvitk.cluster.SgeResources
+   nvitk.cluster.SingularityBinds
+   nvitk.cluster.StageSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.run_sge_script_ssh
+   nvitk.cluster.build_qsub_command
+   nvitk.cluster.build_singularity_command
+   nvitk.cluster.submit_chain
+   nvitk.cluster.submit_stage
+   nvitk.cluster.write_script_header
+
+
+Package Contents
+----------------
+
+.. py:function:: run_sge_script_ssh(host: str, user: str, password: str, script_path: pathlib.Path | str, *, local_script_path: pathlib.Path | None = None, port: int = 22, timeout: float | None = None) -> bool
+
+   Execute ``bash <script>`` on *host* via Paramiko. Returns True on exit 0.
+
+
+.. py:class:: ClusterPaths
+
+   Host-side paths that must exist before submission.
+
+
+   .. py:attribute:: src
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: container
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: models
+      :type:  pathlib.Path | None
+
+
+   .. py:attribute:: data_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: output_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: log_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: err_dir
+      :type:  pathlib.Path
+
+
+   .. py:method:: ensure_dirs() -> None
+
+      Create the SGE stdout/stderr log directories for this run if they don't exist.
+
+
+
+.. py:class:: SgeResources
+
+   SGE submission resources.
+
+
+   .. py:attribute:: project
+      :type:  str
+      :value: 'GPU'
+
+
+
+   .. py:attribute:: account
+      :type:  str
+      :value: 'Prod'
+
+
+
+   .. py:attribute:: ngpu
+      :type:  int
+      :value: 1
+
+
+
+   .. py:attribute:: h_vmem
+      :type:  str
+      :value: '50G'
+
+
+
+   .. py:attribute:: queue
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:attribute:: pe_smp
+      :type:  int | None
+      :value: None
+
+
+
+.. py:class:: SingularityBinds
+
+   Container bind-points used by cluster pipelines.
+
+
+   .. py:attribute:: src
+      :type:  str
+      :value: '/nvitk/src/'
+
+
+
+   .. py:attribute:: data
+      :type:  str
+      :value: '/nvitk/data/'
+
+
+
+   .. py:attribute:: output
+      :type:  str
+      :value: '/nvitk/output/'
+
+
+
+   .. py:attribute:: models
+      :type:  str
+      :value: '/models/'
+
+
+
+.. py:class:: StageSpec
+
+   A single SGE-submitted pipeline stage.
+
+   ``python_cmd`` is the literal command run *inside* the Singularity
+   container. Host paths referenced inside the command must fall within the
+   bind mounts defined by :class:`ClusterPaths` and :class:`SingularityBinds`.
+
+
+   .. py:attribute:: job_name
+      :type:  str
+
+
+   .. py:attribute:: python_cmd
+      :type:  str
+
+
+   .. py:attribute:: resources
+      :type:  SgeResources
+
+
+   .. py:attribute:: binds
+      :type:  SingularityBinds
+
+
+   .. py:attribute:: extra_env
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: use_nv
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: extra_host_binds
+      :type:  tuple[tuple[pathlib.Path, str], Ellipsis]
+      :value: ()
+
+
+
+.. py:function:: build_qsub_command(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None = None, array_tasks: int | None = None, task_concurrency: int | None = None) -> list[str]
+
+   Build the ``qsub`` argv for *spec*.
+
+   When *array_tasks* is set, emit ``-t 1-N`` (and optional ``-tc``) with
+   per-task log/err paths using SGE's ``$TASK_ID``.
+
+
+.. py:function:: build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str
+
+   Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds.
+
+   Injects a small BLAS/OMP thread-cap preamble (``NSLOTS`` / ``NVITK_CPU_LIMIT``,
+   capped at 64) before ``extra_env`` exports so OpenBLAS/MKL never spawn
+   unbounded threads on fat SGE nodes (avoids known segfaults).
+
+
+.. py:function:: submit_chain(stages: Iterable[StageSpec], paths: ClusterPaths, *, base_hold: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> list[str]
+
+   Submit a linear chain of *stages* for a single subject.
+
+
+.. py:function:: submit_stage(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   Submit *spec* to SGE by piping the Singularity command into ``qsub``.
+
+
+.. py:function:: write_script_header(emit: TextIO, *, log_dir: pathlib.Path, err_dir: pathlib.Path, title: str, extra_dirs: Sequence[pathlib.Path] | None = None) -> None
+
+   Write the common preamble for an emitted submission script.
+
+

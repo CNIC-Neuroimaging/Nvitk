@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.pipes.qvtpy.util.centerline.centerline_io &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../../search.html" />
+    <link rel="next" title="nvitk.pipes.qvtpy.util.centerline.flow_volume_masks" href="../flow_volume_masks/index.html" />
+    <link rel="prev" title="nvitk.pipes.qvtpy.util.centerline" href="../index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.pipes.qvtpy.util.centerline.centerline_io">
+<span id="nvitk-pipes-qvtpy-util-centerline-centerline-io"></span><h1>nvitk.pipes.qvtpy.util.centerline.centerline_io<a class="headerlink" href="#module-nvitk.pipes.qvtpy.util.centerline.centerline_io" title="Link to this heading">¶</a></h1>
+<p>Load and write ordered vessel centerlines from stage-3 / stage-4 outputs.</p>
+<p><strong>Inputs</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">centerlines_mask.nii.gz</span></code> + <code class="docutils literal notranslate"><span class="pre">centerline_meta.json</span></code> (stage 3).</p></li>
+<li><p>Optional <code class="docutils literal notranslate"><span class="pre">centerlines_mask_4dflow.nii.gz</span></code> from stage-4 <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code> skeletonization.</p></li>
+</ul>
+<p><strong>Outputs</strong></p>
+<ul class="simple">
+<li><p>Polylines keyed by qvtpy arterial label id or venous name (SSSV, …).</p></li>
+<li><p>Rasterized multilabel masks via <a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask"><code class="xref py py-func docutils literal notranslate"><span class="pre">rasterize_centerlines_mask()</span></code></a>.</p></li>
+</ul>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_NIFTI" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_NIFTI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINES_MASK_NIFTI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_META_JSON" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_META_JSON"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINE_META_JSON</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_SEG_NIFTI" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_SEG_NIFTI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINES_MASK_SEG_NIFTI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_META_JSON" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_META_JSON"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINE_SEG_META_JSON</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_BRANCHES_JSON" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_BRANCHES_JSON"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINE_SEG_BRANCHES_JSON</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_BRANCH_VTP_DIR" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_BRANCH_VTP_DIR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CENTERLINE_BRANCH_VTP_DIR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.main_path_of" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.main_path_of"><code class="xref py py-obj docutils literal notranslate"><span class="pre">main_path_of</span></code></a>(→ Any | None)</p></td>
+<td><p>Trunk (main) polyline of a per-label branch list, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if empty.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.arterial_main_paths" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.arterial_main_paths"><code class="xref py py-obj docutils literal notranslate"><span class="pre">arterial_main_paths</span></code></a>(→ dict[int, Any])</p></td>
+<td><p>Legacy view: parent label id -&gt; trunk polyline (drops side branches).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.flatten_branches" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.flatten_branches"><code class="xref py py-obj docutils literal notranslate"><span class="pre">flatten_branches</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Name-keyed view: branch name -&gt; polyline (across all parent labels).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.parent_label_of" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.parent_label_of"><code class="xref py py-obj docutils literal notranslate"><span class="pre">parent_label_of</span></code></a>(→ int | None)</p></td>
+<td><p>Parent qvtpy label id for a branch name like <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.export_branch_vtps" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.export_branch_vtps"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_branch_vtps</span></code></a>(→ list[pathlib.Path])</p></td>
+<td><p>Write one <code class="docutils literal notranslate"><span class="pre">.vtp</span></code> polyline per named branch (for tortuosity metrics).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_mask_path" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_mask_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">centerlines_mask_path</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Path to the centerline multilabel NIfTI in <em>stage_dir</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerline_meta_path" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerline_meta_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">centerline_meta_path</span></code></a>(→ pathlib.Path)</p></td>
+<td><p>Path to the JSON sidecar listing arterial / venous label ids.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerline_meta" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerline_meta"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_centerline_meta</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Parse centerline JSON metadata from <em>stage_dir</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask"><code class="xref py py-obj docutils literal notranslate"><span class="pre">rasterize_centerlines_mask</span></code></a>(→ np.ndarray)</p></td>
+<td><p>Voxel mask with qvtpy label id on each centerline point.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.smooth_centerline_polyline" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.smooth_centerline_polyline"><code class="xref py py-obj docutils literal notranslate"><span class="pre">smooth_centerline_polyline</span></code></a>(→ Any)</p></td>
+<td><p>Light smoothing of an ordered centerline polyline (voxel coords).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">centerlines_from_segmentation</span></code></a>(→ dict[int, ...)</p></td>
+<td><p>Named arterial branch polylines from <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.export_centerlines_from_segmentation" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.export_centerlines_from_segmentation"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_centerlines_from_segmentation</span></code></a>(...)</p></td>
+<td><p>Build centerlines from <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code> and write mask + meta under <em>out_dir</em>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_arterial_branches</span></code></a>(→ dict[int, list[tuple[str, Any]]])</p></td>
+<td><p>Named arterial branches keyed by parent qvtpy label id.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_centerlines" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_centerlines"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_arterial_centerlines</span></code></a>(→ dict[int, Any])</p></td>
+<td><p>Arterial trunk (main-path) polylines keyed by qvtpy label id.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_venous_centerlines" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_venous_centerlines"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_venous_centerlines</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Venous centerlines keyed by vessel name (SSSV, STRV, …).</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_centerlines</span></code></a>(→ tuple[dict[int, Any], dict[str, ...)</p></td>
+<td><p>Return <code class="docutils literal notranslate"><span class="pre">(arterial,</span> <span class="pre">venous,</span> <span class="pre">meta)</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines_branches" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines_branches"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_centerlines_branches</span></code></a>(→ tuple[dict[int, ...)</p></td>
+<td><p>Return <code class="docutils literal notranslate"><span class="pre">(arterial_branches,</span> <span class="pre">venous,</span> <span class="pre">meta)</span></code> (named multi-branch arterial).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_NIFTI">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINES_MASK_NIFTI</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'centerlines_mask.nii.gz'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_NIFTI" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_META_JSON">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINE_META_JSON</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'centerline_meta.json'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_META_JSON" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_SEG_NIFTI">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINES_MASK_SEG_NIFTI</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'centerlines_mask_4dflow.nii.gz'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINES_MASK_SEG_NIFTI" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_META_JSON">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINE_SEG_META_JSON</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'centerlines_seg_meta.json'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_META_JSON" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_BRANCHES_JSON">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINE_SEG_BRANCHES_JSON</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'centerlines_seg_branches.json'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_SEG_BRANCHES_JSON" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.main_path_of">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">main_path_of</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">branches</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.main_path_of" title="Link to this definition">¶</a></dt>
+<dd><p>Trunk (main) polyline of a per-label branch list, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if empty.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.arterial_main_paths">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">arterial_main_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arterial</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.arterial_main_paths" title="Link to this definition">¶</a></dt>
+<dd><p>Legacy view: parent label id -&gt; trunk polyline (drops side branches).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.flatten_branches">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">flatten_branches</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arterial</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.flatten_branches" title="Link to this definition">¶</a></dt>
+<dd><p>Name-keyed view: branch name -&gt; polyline (across all parent labels).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.parent_label_of">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">parent_label_of</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">branch_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.parent_label_of" title="Link to this definition">¶</a></dt>
+<dd><p>Parent qvtpy label id for a branch name like <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code>.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_BRANCH_VTP_DIR">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">CENTERLINE_BRANCH_VTP_DIR</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'branch_vtps'</span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.CENTERLINE_BRANCH_VTP_DIR" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.export_branch_vtps">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">export_branch_vtps</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arterial</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.export_branch_vtps" title="Link to this definition">¶</a></dt>
+<dd><p>Write one <code class="docutils literal notranslate"><span class="pre">.vtp</span></code> polyline per named branch (for tortuosity metrics).</p>
+<p>Files are named <code class="docutils literal notranslate"><span class="pre">{parent_label}_{branch_name}.vtp</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">6_LMCA-M2a.vtp</span></code>)
+so <a class="reference internal" href="../../../../../measure/morpho/export_utils/compute_tortuosity_metrics/index.html#nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_vtp_folder" title="nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_vtp_folder"><code class="xref py py-func docutils literal notranslate"><span class="pre">nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_vtp_folder()</span></code></a>
+keys each metrics row by the branch name. Points are the (voxel-space)
+centerline coordinates. Best-effort: returns an empty list when VTK is
+unavailable.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_mask_path">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">centerlines_mask_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_mask_path" title="Link to this definition">¶</a></dt>
+<dd><p>Path to the centerline multilabel NIfTI in <em>stage_dir</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerline_meta_path">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">centerline_meta_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pathlib.Path</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerline_meta_path" title="Link to this definition">¶</a></dt>
+<dd><p>Path to the JSON sidecar listing arterial / venous label ids.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerline_meta">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_centerline_meta</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerline_meta" title="Link to this definition">¶</a></dt>
+<dd><p>Parse centerline JSON metadata from <em>stage_dir</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">rasterize_centerlines_mask</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arterial</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">venous</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">venous_label_by_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">np.ndarray</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.rasterize_centerlines_mask" title="Link to this definition">¶</a></dt>
+<dd><p>Voxel mask with qvtpy label id on each centerline point.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.smooth_centerline_polyline">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">smooth_centerline_polyline</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">window</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_SMOOTH_WINDOW</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spline</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_SMOOTH_SPLINE</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.smooth_centerline_polyline" title="Link to this definition">¶</a></dt>
+<dd><p>Light smoothing of an ordered centerline polyline (voxel coords).</p>
+<p>Uses a centered moving average; optionally resamples with a mild spline
+(<code class="docutils literal notranslate"><span class="pre">s&gt;0</span></code>) so small distal branches remain continuous without sharp kinks.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">centerlines_from_segmentation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_branch_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_ARTERIAL_BRANCH_MIN_POINTS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pcomm_min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_PCOMM_MIN_POINTS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefer_polylines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">labels</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">smooth</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">smooth_window</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_SMOOTH_WINDOW</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.centerlines_from_segmentation" title="Link to this definition">¶</a></dt>
+<dd><p>Named arterial branch polylines from <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>.</p>
+<p>Returns <code class="docutils literal notranslate"><span class="pre">{parent_label:</span> <span class="pre">[(branch_name,</span> <span class="pre">(N,3)</span> <span class="pre">points),</span> <span class="pre">...]}</span></code> with the trunk
+first. Branched territories (MCA/ACA/PCA) are decomposed into a trunk plus
+bifurcation side branches (named e.g. <code class="docutils literal notranslate"><span class="pre">LMCA-M1</span></code> / <code class="docutils literal notranslate"><span class="pre">LMCA-M2a</span></code> via
+<a class="reference internal" href="../../../labels/index.html#nvitk.pipes.qvtpy.labels.qvtpy_branch_names" title="nvitk.pipes.qvtpy.labels.qvtpy_branch_names"><code class="xref py py-func docutils literal notranslate"><span class="pre">qvtpy_branch_names()</span></code></a>); ICA/basilar/comm/vertebral
+stay single-path (one branch = the bare vessel name).</p>
+<p><em>pcomm_min_points</em> drops very short LPCOMM/RPCOMM skeletons (false positives).
+<em>min_branch_points</em> drops short MCA/ACA/PCA bifurcation side branches.
+<em>prefer_polylines</em> (typically stage-3 arterial CLs) bias branched vessels so
+proximal trunks are not dropped by a distal-only graph diameter. When absent,
+MCA/ACA/PCA use a parent-contact seed from the segmentation. Optional light
+smoothing is applied per branch by default.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.export_centerlines_from_segmentation">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">export_centerlines_from_segmentation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_branch_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_ARTERIAL_BRANCH_MIN_POINTS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pcomm_min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_PCOMM_MIN_POINTS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">venous_polylines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">venous_label_by_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefer_polylines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">smooth</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">smooth_window</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">_DEFAULT_SMOOTH_WINDOW</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">pathlib.Path</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.export_centerlines_from_segmentation" title="Link to this definition">¶</a></dt>
+<dd><p>Build centerlines from <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code> and write mask + meta under <em>out_dir</em>.</p>
+<p><em>prefer_polylines</em> (typically stage-3 arterial CLs) bias branched vessels so
+proximal trunks are not dropped by a distal-only graph diameter. When absent,
+MCA/ACA/PCA use a parent-contact seed from the segmentation.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_arterial_branches</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches" title="Link to this definition">¶</a></dt>
+<dd><p>Named arterial branches keyed by parent qvtpy label id.</p>
+<p>Prefers the <code class="docutils literal notranslate"><span class="pre">centerlines_seg_branches.json</span></code> sidecar (multi-branch, named).
+Falls back to reconstructing one trunk polyline per label from the multilabel
+centerline mask (wrapped as <code class="docutils literal notranslate"><span class="pre">[(vessel_name,</span> <span class="pre">pts)]</span></code>) when the sidecar is
+absent (e.g. stage-3, or older stage-4 outputs).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_centerlines">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_arterial_centerlines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_centerlines" title="Link to this definition">¶</a></dt>
+<dd><p>Arterial trunk (main-path) polylines keyed by qvtpy label id.</p>
+<p>Legacy single-polyline view: returns only the trunk of each vessel. Use
+<a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_arterial_branches"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_arterial_branches()</span></code></a> for the full named bifurcation set.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_venous_centerlines">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_venous_centerlines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_venous_centerlines" title="Link to this definition">¶</a></dt>
+<dd><p>Venous centerlines keyed by vessel name (SSSV, STRV, …).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_centerlines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage3_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stage4_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">truncate_length_ratio</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.6</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines" title="Link to this definition">¶</a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(arterial,</span> <span class="pre">venous,</span> <span class="pre">meta)</span></code>.</p>
+<p>Arterial polylines prefer stage-4 segmentation centerlines when available; venous
+still come from stage-3 (not present in <code class="docutils literal notranslate"><span class="pre">seg_4dflow</span></code>). Stage-3 is used when a
+stage-4 label is missing, or when the stage-4 polyline is much shorter than
+stage-3 (truncated diameter path), controlled by <em>truncate_length_ratio</em>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines_branches">
+<span class="sig-prename descclassname"><span class="pre">nvitk.pipes.qvtpy.util.centerline.centerline_io.</span></span><span class="sig-name descname"><span class="pre">load_centerlines_branches</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stage3_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_points</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">3</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stage4_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pathlib.Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">truncate_length_ratio</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.6</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines_branches" title="Link to this definition">¶</a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(arterial_branches,</span> <span class="pre">venous,</span> <span class="pre">meta)</span></code> (named multi-branch arterial).</p>
+<p>Like <a class="reference internal" href="#nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines" title="nvitk.pipes.qvtpy.util.centerline.centerline_io.load_centerlines"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_centerlines()</span></code></a> but keeps every named branch per vessel. Stage-4
+branches are preferred when present; a vessel whose stage-4 trunk is missing or
+much shorter than stage-3 (see <em>truncate_length_ratio</em>) falls back to the
+stage-3 single polyline (wrapped as the vessel’s trunk).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../../index.html">nvitk.pipes</a><ul>
+  <li><a href="../../../index.html">nvitk.pipes.qvtpy</a><ul>
+  <li><a href="../../index.html">nvitk.pipes.qvtpy.util</a><ul>
+  <li><a href="../index.html">nvitk.pipes.qvtpy.util.centerline</a><ul>
+      <li>Previous: <a href="../index.html" title="previous chapter">nvitk.pipes.qvtpy.util.centerline</a></li>
+      <li>Next: <a href="../flow_volume_masks/index.html" title="next chapter">nvitk.pipes.qvtpy.util.centerline.flow_volume_masks</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../../_sources/autoapi/nvitk/pipes/qvtpy/util/centerline/centerline_io/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

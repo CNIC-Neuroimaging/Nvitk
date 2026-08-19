@@ -1,0 +1,33 @@
+nvitk.gui.viz
+=============
+
+.. py:module:: nvitk.gui.viz
+
+.. autoapi-nested-parse::
+
+   Napari visualization helpers (vectors, centerline, loc points).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/gui/viz/centerline/index
+   /autoapi/nvitk/gui/viz/cohort_violin_panel/index
+   /autoapi/nvitk/gui/viz/cross_section_panel/index
+   /autoapi/nvitk/gui/viz/flow_streamlines/index
+   /autoapi/nvitk/gui/viz/hemo_geometry/index
+   /autoapi/nvitk/gui/viz/hemo_plot_panel/index
+   /autoapi/nvitk/gui/viz/layers/index
+   /autoapi/nvitk/gui/viz/left_dock/index
+   /autoapi/nvitk/gui/viz/loc_points/index
+   /autoapi/nvitk/gui/viz/morpho_viz/index
+   /autoapi/nvitk/gui/viz/qc_loader/index
+   /autoapi/nvitk/gui/viz/qc_review_panel/index
+   /autoapi/nvitk/gui/viz/vessel_cross_sections/index
+   /autoapi/nvitk/gui/viz/view_capture/index
+
+

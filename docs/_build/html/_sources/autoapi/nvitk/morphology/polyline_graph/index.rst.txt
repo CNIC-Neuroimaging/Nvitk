@@ -1,0 +1,131 @@
+nvitk.morphology.polyline_graph
+===============================
+
+.. py:module:: nvitk.morphology.polyline_graph
+
+.. autoapi-nested-parse::
+
+   Skeleton-graph polyline and junction extraction (qvtpy-style branch chains).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.morphology.polyline_graph.ExtractionMode
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.morphology.polyline_graph.skeleton_graph
+   nvitk.morphology.polyline_graph.junction_clusters
+   nvitk.morphology.polyline_graph.collapse_junction_clusters
+   nvitk.morphology.polyline_graph.significant_bifurcation_nodes
+   nvitk.morphology.polyline_graph.prune_skeleton_coords_tiny_loops
+   nvitk.morphology.polyline_graph.prune_skeleton_coords_short_spurs
+   nvitk.morphology.polyline_graph.degree3_junction_nodes
+   nvitk.morphology.polyline_graph.three_arm_junction_nodes
+   nvitk.morphology.polyline_graph.branch_polylines_from_skeleton
+   nvitk.morphology.polyline_graph.junction_nodes_from_skeleton
+   nvitk.morphology.polyline_graph.extract_polylines_from_centerline
+   nvitk.morphology.polyline_graph.detect_junctions_from_centerline
+
+
+Module Contents
+---------------
+
+.. py:data:: ExtractionMode
+
+.. py:function:: skeleton_graph(coords_xyz: np.ndarray) -> tuple[list[tuple[int, int, int]], dict[tuple[int, int, int], list[tuple[int, int, int]]], dict[tuple[int, int, int], int]]
+
+   Build a 26-connected graph on skeleton voxel coordinates.
+
+
+.. py:function:: junction_clusters(nodes: list[tuple[int, int, int]], deg: dict[tuple[int, int, int], int], *, min_degree: int = 3) -> list[list[tuple[int, int, int]]]
+
+   26-connected clusters of skeleton junctions (deg >= *min_degree*).
+
+
+.. py:function:: collapse_junction_clusters(nodes: list[tuple[int, int, int]], deg: dict[tuple[int, int, int], int], *, min_degree: int = 3) -> list[tuple[int, int, int]]
+
+   One representative voxel per 26-connected cluster of skeleton junctions (deg >= *min_degree*).
+
+
+.. py:function:: significant_bifurcation_nodes(coords_xyz: np.ndarray, *, min_arm_points: int = 5, min_degree: int = 3) -> list[tuple[int, int, int]]
+
+   Multi-way junction reps with ≥3 long arms (Y *or* torcular degree ≥4).
+
+   Arms are counted from the whole junction *cluster*, not from a single
+   representative's 26-neighbors. Fat torcular blobs often have local degree
+   >3 with few long arms visible from one voxel; cluster exits fix that.
+
+
+.. py:function:: prune_skeleton_coords_tiny_loops(coords_xyz: np.ndarray, *, max_cycle_len: int = 12, max_handle_points: int | None = None) -> np.ndarray
+
+   Break small skeleton cycles by removing short off-main-path handles.
+
+   Oversegmented blobs often skeletonize into tiny loops. Only **short**
+   off-main clusters on each small cycle are deleted so long anatomical
+   branches (e.g. SSSV off an L↔R transverse diameter) are not stripped when
+   26-connectivity creates local cycles at a junction.
+
+
+.. py:function:: prune_skeleton_coords_short_spurs(coords_xyz: np.ndarray, *, min_spur_points: int = 3) -> np.ndarray
+
+   Iteratively remove degree-1 chains shorter than *min_spur_points*.
+
+
+.. py:function:: degree3_junction_nodes(coords_xyz: np.ndarray) -> list[tuple[int, int, int]]
+
+   Classic Y/T junction voxels: skeleton degree *exactly* 3.
+
+   Degree >3 is intentionally ignored here (matches the original junction
+   detector). Prefer :func:`three_arm_junction_nodes` when 26-connectivity
+   inflates local degree but the cluster still has exactly three arms.
+
+
+.. py:function:: three_arm_junction_nodes(coords_xyz: np.ndarray, *, min_arm_points: int = 2, min_degree: int = 3) -> list[tuple[int, int, int]]
+
+   Junction-cluster reps with *exactly* three arms (classic Y/T).
+
+   Unlike :func:`significant_bifurcation_nodes` (needs ≥3 *long* arms, allows
+   4+), this is the no-bifurcation fallback for SSSV↔one-transverse joins even
+   when local skeleton degree is >3 under 26-connectivity.
+
+
+.. py:function:: branch_polylines_from_skeleton(coords_xyz: np.ndarray, *, min_points: int = 5, prefer_bifurcations: bool = False, prune_tiny_loops: bool = False, max_tiny_loop_len: int = 12, prune_short_spurs: bool = False, min_bifurcation_arm_points: int | None = None) -> list[np.ndarray]
+
+   One polyline per chain between skeleton endpoints and junctions.
+
+   When *prefer_bifurcations* is True:
+   1. Significant multi-way junctions (≥3 long arms, including torcular deg≥4)
+   2. Else classic 3-arm Y/T (exact deg-3 *or* 3-arm clusters if deg>3)
+   3. Else a single longest-path chain (no split points)
+
+
+.. py:function:: junction_nodes_from_skeleton(coords_xyz: np.ndarray, *, min_degree: int = 3) -> np.ndarray
+
+   Return (J, 3) junction voxel coordinates (skeleton degree >= *min_degree*).
+
+
+.. py:function:: extract_polylines_from_centerline(centerline: np.ndarray, *, mode: ExtractionMode = 'junction_split', min_points: int = 5, label_id: int | None = None, reskeletonize: bool = False, per_connected_component: bool = True) -> list[np.ndarray]
+
+   Extract ordered polylines from a 3D centerline mask (not a thick vessel mask).
+
+   :param centerline: 3D array: binary centerline (>0) or integer label volume.
+   :param mode: ``junction_split`` (qvtpy-style branch chains) or ``longest_path`` (single diameter path).
+   :param label_id: When set, only voxels equal to this label are used.
+   :param reskeletonize: If True, skeletonize before graph extraction (use for thick masks only).
+   :param per_connected_component: When True, run extraction separately on each 6-connected foreground component.
+
+
+.. py:function:: detect_junctions_from_centerline(centerline: np.ndarray, *, min_degree: int = 3, label_id: int | None = None, reskeletonize: bool = False) -> np.ndarray
+
+   Junction voxels (degree >= *min_degree*) on the centerline skeleton graph.
+
+

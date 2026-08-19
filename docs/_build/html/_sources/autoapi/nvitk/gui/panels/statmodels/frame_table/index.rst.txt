@@ -1,0 +1,414 @@
+nvitk.gui.panels.statmodels.frame_table
+=======================================
+
+.. py:module:: nvitk.gui.panels.statmodels.frame_table
+
+.. autoapi-nested-parse::
+
+   Analysis-dataframe table with column-anchored filtering.
+
+   Description
+   -----------
+   The analysis frame is where filtering belongs: you look at a ``territory`` column, see ``RPComm``
+   and ``LPComm``, and want them gone. This module makes that a two-click operation — right-click the
+   column header, uncheck the levels — instead of typing a column name, an operator and a value into a
+   detached form.
+
+   Widgets
+   -------
+   ``PandasFrameModel``   read-only Qt model over a DataFrame, with a numeric sort role so ``-1.2e-05``
+                          sorts as a number rather than as text.
+   ``AnalysisFrameView``  the table plus its header context menu (filter, sort, transform, plot-x).
+   ``ColumnFilterDialog`` per-column filter editor: level checklist, numeric range/comparison, IQR.
+   ``FilterChipBar``      the active rules, each removable, with the running row count.
+
+   The rules themselves live in :mod:`nvitk.stats.frame_ops` so notebooks can apply the same filter set.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.panels.statmodels.frame_table.PandasFrameModel
+   nvitk.gui.panels.statmodels.frame_table.ColumnFilterDialog
+   nvitk.gui.panels.statmodels.frame_table.FilterChipBar
+   nvitk.gui.panels.statmodels.frame_table.AnalysisFrameView
+
+
+Module Contents
+---------------
+
+.. py:class:: PandasFrameModel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtCore.QAbstractTableModel`
+
+
+   Read-only Qt model over a pandas frame.
+
+   Numeric cells are formatted with ``%.6g`` for display but expose their raw float under
+   :data:`SORT_ROLE`, so a :class:`~qtpy.QtCore.QSortFilterProxyModel` configured with that role
+   orders them numerically. Sorting on the display strings would put ``-1.2e-05`` next to ``-1.2``.
+
+
+   .. py:attribute:: SORT_ROLE
+
+
+   .. py:attribute:: _df
+
+
+   .. py:attribute:: _filtered
+      :type:  set[str]
+
+
+   .. py:method:: set_frame(df: pandas.DataFrame | None, *, filtered_columns: set[str] = frozenset()) -> None
+
+      Show *df* (capped at :data:`TABLE_ROW_CAP` rows) and badge *filtered_columns* in the header.
+
+
+
+   .. py:method:: frame() -> pandas.DataFrame
+
+      The (capped) frame currently displayed.
+
+
+
+   .. py:method:: rowCount(parent: qtpy.QtCore.QModelIndex = QModelIndex()) -> int
+
+      Number of displayed rows (0 while a parent index is given, as Qt requires for tables).
+
+
+
+   .. py:method:: columnCount(parent: qtpy.QtCore.QModelIndex = QModelIndex()) -> int
+
+      Number of columns.
+
+
+
+   .. py:method:: data(index: qtpy.QtCore.QModelIndex, role: int = Qt.DisplayRole) -> Any
+
+      Display text, right-alignment for numerics, and the raw value under :data:`SORT_ROLE`.
+
+
+
+   .. py:method:: headerData(section: int, orientation: int, role: int = Qt.DisplayRole) -> Any
+
+      Column names (marked with a funnel when filtered) and 1-based row numbers.
+
+
+
+.. py:class:: ColumnFilterDialog(parent: qtpy.QtWidgets.QWidget | None, *, column: str, series: pandas.Series, scope_columns: Sequence[str], existing: Sequence[nvitk.stats.frame_ops.FilterRule] = ())
+
+   Bases: :py:obj:`qtpy.QtWidgets.QDialog`
+
+
+   Build the filter rules for one column.
+
+   Three tabs, each producing at most one rule: **Levels** (checkable list, keep or exclude — the
+   vessel-exclusion case), **Numeric** (range and/or an operator comparison), and **IQR** (Tukey
+   fences, optionally computed within each level of a scope column).
+
+   The dialog is seeded from the rules already active on the column, so reopening it edits rather
+   than stacking duplicates.
+
+
+   .. py:attribute:: _column
+
+
+   .. py:attribute:: _series
+
+
+   .. py:attribute:: _numeric
+
+
+   .. py:attribute:: _is_numeric
+
+
+   .. py:attribute:: _tabs
+
+
+   .. py:method:: _summary_text() -> str
+
+      One-line description of the column's content, to orient the choice of filter.
+
+
+
+   .. py:method:: _build_levels_tab() -> None
+
+      Checkable list of the column's distinct values, with a keep/exclude switch.
+
+
+
+   .. py:method:: _build_numeric_tab(scope_columns: Sequence[str]) -> None
+
+      Range bounds, an operator comparison, and the IQR outlier filter.
+
+
+
+   .. py:method:: _on_level_search(text: str) -> None
+
+      Hide level items that do not contain *text*.
+
+
+
+   .. py:method:: _set_all_levels(action: str) -> None
+
+      Bulk check/uncheck/invert the *visible* level items.
+
+
+
+   .. py:method:: _apply_existing(existing: Sequence[nvitk.stats.frame_ops.FilterRule]) -> None
+
+      Pre-fill the tabs from the rules currently active on this column.
+
+
+
+   .. py:method:: rules() -> list[nvitk.stats.frame_ops.FilterRule]
+
+      The rules the user configured, in application order (levels → range → compare → IQR).
+
+
+
+.. py:class:: FilterChipBar(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Horizontal strip of the active filter rules, each removable, plus the running row count.
+
+   Rules that could not be applied (their column left the frame after a reload) are shown greyed
+   with the reason, rather than dropped — a filter you cannot see is a filter you cannot fix.
+
+
+   .. py:attribute:: rulesChanged
+
+
+   .. py:attribute:: _rules
+      :type:  list[nvitk.stats.frame_ops.FilterRule]
+      :value: []
+
+
+
+   .. py:attribute:: _scroll
+
+
+   .. py:attribute:: _host
+
+
+   .. py:attribute:: _host_layout
+
+
+   .. py:attribute:: _count
+
+
+   .. py:attribute:: _btn_clear
+
+
+   .. py:method:: rules() -> list[nvitk.stats.frame_ops.FilterRule]
+
+      Currently held rules.
+
+
+
+   .. py:method:: set_rules(rules: Sequence[nvitk.stats.frame_ops.FilterRule], report: Sequence[dict[str, Any]] = ()) -> None
+
+      Replace the rules and redraw the chips, annotating each with its effect from *report*.
+
+
+
+   .. py:method:: set_counts(n_filtered: int, n_total: int) -> None
+
+      Show ``m of n rows`` next to the chips.
+
+
+
+   .. py:method:: _make_chip(index: int, rule: nvitk.stats.frame_ops.FilterRule, entry: dict[str, Any] | None) -> qtpy.QtWidgets.QWidget
+
+      One chip: the rule label, its row effect, and a remove button.
+
+
+
+   .. py:method:: _on_remove(index: int) -> None
+
+      Drop the rule at *index* and notify.
+
+
+
+   .. py:method:: _on_clear() -> None
+
+      Drop every rule and notify.
+
+
+
+   .. py:method:: _sync_clear_enabled() -> None
+
+      Enable the clear-all button only when there is something to clear.
+
+
+
+.. py:class:: AnalysisFrameView(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   The analysis-dataframe table and its column header menu.
+
+   Signals
+   -------
+   filtersRequested(column)         open the filter dialog for a column
+   clearFiltersRequested(column)    drop every rule anchored to a column
+   transformRequested(column, key)  add a derived column applying a canned transform
+   binsRequested(column)            open the derived-columns editor to bin a column into groups
+   plotXRequested(column)           use a column as the plot's x axis
+   publishRequested(column)         write a derived column back into the dataset
+   columnPlotRequested(column, kind) open the distribution viewer for a column
+   qcFilterRequested(column, key)   apply a ready-made quality-control filter
+   summaryRequested(column, by)    export per-group descriptive statistics for a column
+   dropRequested(column)            remove a column from the analysis frame
+   restoreRequested()               put every dropped column back
+   typeChangeRequested(column, kind) recast a column (numeric / factor / …)
+   referenceRequested(column, level) make a level the model's reference
+   subjectPlotRequested(subject_uid) open the per-subject viewer for one subject
+
+
+   .. py:attribute:: filtersRequested
+
+
+   .. py:attribute:: clearFiltersRequested
+
+
+   .. py:attribute:: transformRequested
+
+
+   .. py:attribute:: binsRequested
+
+
+   .. py:attribute:: plotXRequested
+
+
+   .. py:attribute:: publishRequested
+
+
+   .. py:attribute:: columnPlotRequested
+
+
+   .. py:attribute:: qcFilterRequested
+
+
+   .. py:attribute:: summaryRequested
+
+
+   .. py:attribute:: dropRequested
+
+
+   .. py:attribute:: restoreRequested
+
+
+   .. py:attribute:: typeChangeRequested
+
+
+   .. py:attribute:: referenceRequested
+
+
+   .. py:attribute:: subjectPlotRequested
+
+
+   .. py:attribute:: _dropped
+      :type:  set[str]
+
+
+   .. py:attribute:: _column_types
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: _references
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: _model
+
+
+   .. py:attribute:: _proxy
+
+
+   .. py:attribute:: _table
+
+
+   .. py:attribute:: _filtered
+      :type:  set[str]
+
+
+   .. py:attribute:: _derived
+      :type:  set[str]
+
+
+   .. py:method:: set_frame(df: pandas.DataFrame | None, *, filtered_columns: set[str] = frozenset(), derived_columns: set[str] = frozenset()) -> None
+
+      Display *df*, badging *filtered_columns*, and size the columns to their content once.
+
+
+
+   .. py:method:: columns() -> list[str]
+
+      Column names of the displayed frame.
+
+
+
+   .. py:method:: _column_at(section: int) -> str
+
+      Name of the column at header *section*, or ``""`` when out of range.
+
+
+
+   .. py:method:: _grouping_columns(*, exclude: str = '', max_levels: int = 60) -> list[str]
+
+      Columns worth grouping a summary by: discrete, and not one row per level.
+
+      A continuous measurement has as many levels as rows, and ``subject_uid`` nearly so — a
+      summary keyed on either is the raw data with extra columns.
+
+
+
+   .. py:method:: _on_cell_menu(point) -> None
+
+      Per-row menu, offered only where a row identifies something worth viewing on its own.
+
+      Today that is ``subject_uid``: one row of the analysis frame is one subject × region, and
+      the interesting question about a subject is what *all* their regions look like together —
+      which is a picture of anatomy, not a cell value. Right-clicking anywhere else falls through
+      to the header menu's territory and does nothing here, rather than offering an action that
+      would not mean anything for that column.
+
+
+
+   .. py:method:: _on_header_menu(point) -> None
+
+      Build and run the per-column header menu.
+
+
+
+   .. py:method:: _column_levels(column: str, *, cap: int = MAX_CATEGORICAL_LEVELS) -> list[str]
+
+      Distinct levels of *column*, or ``[]`` when it is not usable as a factor.
+
+
+
+   .. py:method:: set_references(references: Mapping[str, str]) -> None
+
+      Record the active reference levels, so the menu can tick the current one.
+
+
+
+   .. py:method:: set_column_types(types: Mapping[str, str]) -> None
+
+      Record the active per-column type overrides, so the menu can tick the current one.
+
+
+
+   .. py:method:: set_dropped(columns: Iterable[str]) -> None
+
+      Record which columns are currently dropped, for the restore entry.
+
+
+

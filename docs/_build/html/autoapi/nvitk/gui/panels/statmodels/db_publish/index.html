@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>nvitk.gui.panels.statmodels.db_publish &#8212; Nvitk 0.1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../../../../../../_static/graphviz.css?v=4ae1632d" />
+    <script src="../../../../../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../../search.html" />
+    <link rel="next" title="nvitk.gui.panels.statmodels.derived" href="../derived/index.html" />
+    <link rel="prev" title="nvitk.gui.panels.statmodels.constants" href="../constants/index.html" />
+   
+  <link rel="stylesheet" href="../../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-nvitk.gui.panels.statmodels.db_publish">
+<span id="nvitk-gui-panels-statmodels-db-publish"></span><h1>nvitk.gui.panels.statmodels.db_publish<a class="headerlink" href="#module-nvitk.gui.panels.statmodels.db_publish" title="Link to this heading">¶</a></h1>
+<p>Publish a derived analysis column back into the dataset as a first-class variable.</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Link to this heading">¶</a></h2>
+<p>A derived column — <code class="docutils literal notranslate"><span class="pre">log_pi</span></code>, <code class="docutils literal notranslate"><span class="pre">cp_group</span></code>, <code class="docutils literal notranslate"><span class="pre">asl_vs_flow_diff</span></code> — lives only inside one Statmodels
+session. Recomputing it in the next session, or in a notebook, means retyping the definition and
+hoping it matches. Writing it back to the dataset makes it a variable like any other: it appears in
+the covariate lists, it can be loaded as a measurement, and it carries provenance saying which
+column and which expression produced it.</p>
+</section>
+<section id="which-table">
+<h2>Which table<a class="headerlink" href="#which-table" title="Link to this heading">¶</a></h2>
+<p>A derived value belongs wherever its <strong>source</strong> lives, because that is what determines the key it is
+measured on:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Source</p></th>
+<th class="head"><p>Table</p></th>
+<th class="head"><p>Key</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>image measurement</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">image_measurements</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">subject_uid</span></code> × <code class="docutils literal notranslate"><span class="pre">region_id</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>clinical variable</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">clinical_measurements</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">subject_uid</span></code> (× <code class="docutils literal notranslate"><span class="pre">visit_id</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p>cognitive variable</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">cognitive_measurements</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">subject_uid</span></code> (× <code class="docutils literal notranslate"><span class="pre">visit_id</span></code>)</p></td>
+</tr>
+</tbody>
+</table>
+<p>The row building and the upsert are <a class="reference internal" href="../../../../db/derived_measurements/index.html#module-nvitk.db.derived_measurements" title="nvitk.db.derived_measurements"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.db.derived_measurements</span></code></a>’ job; this module only
+works out <em>which</em> of its entry points applies and assembles the aggregate frame it expects.</p>
+</section>
+<section id="region-identity">
+<h2>Region identity<a class="headerlink" href="#region-identity" title="Link to this heading">¶</a></h2>
+<p>The analysis frame is keyed on the <strong>melted</strong> territory, not on the published <code class="docutils literal notranslate"><span class="pre">region_id</span></code>: a frame
+built with <code class="docutils literal notranslate"><span class="pre">grouping=&quot;territory&quot;</span></code> has one row for “Anterior Circulation”, aggregated over four
+vessels. There is no single region id to attribute that value to, so the group key is written as the
+<code class="docutils literal notranslate"><span class="pre">region_id</span></code> and the grouping that produced it is recorded in <code class="docutils literal notranslate"><span class="pre">region_label</span></code> and in the
+provenance. A value derived from a vessel-wise frame round-trips exactly; one derived from a melted
+frame round-trips to the same melted key, which is the honest answer rather than inventing a
+component vessel.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.IMAGE_TABLE" title="nvitk.gui.panels.statmodels.db_publish.IMAGE_TABLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">IMAGE_TABLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.CLINICAL_TABLE" title="nvitk.gui.panels.statmodels.db_publish.CLINICAL_TABLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CLINICAL_TABLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.COGNITIVE_TABLE" title="nvitk.gui.panels.statmodels.db_publish.COGNITIVE_TABLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">COGNITIVE_TABLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PUBLISH_TABLES" title="nvitk.gui.panels.statmodels.db_publish.PUBLISH_TABLES"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PUBLISH_TABLES</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.VARIABLE_ID_RE" title="nvitk.gui.panels.statmodels.db_publish.VARIABLE_ID_RE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VARIABLE_ID_RE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="classes">
+<h2>Classes<a class="headerlink" href="#classes" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget" title="nvitk.gui.panels.statmodels.db_publish.PublishTarget"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PublishTarget</span></code></a></p></td>
+<td><p>Where a derived column goes and what identifies each of its rows.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest" title="nvitk.gui.panels.statmodels.db_publish.PublishRequest"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PublishRequest</span></code></a></p></td>
+<td><p>Everything the write needs, as edited in the dialog.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">¶</a></h2>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.resolve_publish_target" title="nvitk.gui.panels.statmodels.db_publish.resolve_publish_target"><code class="xref py py-obj docutils literal notranslate"><span class="pre">resolve_publish_target</span></code></a>(, cognitive_columns, frame_columns)</p></td>
+<td><p>Work out which table a derived column belongs to, by following it back to its source.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.build_publish_frame" title="nvitk.gui.panels.statmodels.db_publish.build_publish_frame"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_publish_frame</span></code></a>(→ pandas.DataFrame)</p></td>
+<td><p>Reduce the analysis frame to the rows that will be written.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.publish_derived_column" title="nvitk.gui.panels.statmodels.db_publish.publish_derived_column"><code class="xref py py-obj docutils literal notranslate"><span class="pre">publish_derived_column</span></code></a>(→ dict[str, Any])</p></td>
+<td><p>Write a derived analysis column into the dataset.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">¶</a></h2>
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.IMAGE_TABLE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">IMAGE_TABLE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'image_measurements'</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.IMAGE_TABLE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.CLINICAL_TABLE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">CLINICAL_TABLE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'clinical_measurements'</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.CLINICAL_TABLE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.COGNITIVE_TABLE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">COGNITIVE_TABLE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'cognitive_measurements'</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.COGNITIVE_TABLE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PUBLISH_TABLES">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">PUBLISH_TABLES</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PUBLISH_TABLES" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.VARIABLE_ID_RE">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">VARIABLE_ID_RE</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.VARIABLE_ID_RE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">PublishTarget</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget" title="Link to this definition">¶</a></dt>
+<dd><p>Where a derived column goes and what identifies each of its rows.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.table">
+<span class="sig-name descname"><span class="pre">table</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.table" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.domain">
+<span class="sig-name descname"><span class="pre">domain</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.domain" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.key_columns">
+<span class="sig-name descname"><span class="pre">key_columns</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.key_columns" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.reason">
+<span class="sig-name descname"><span class="pre">reason</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.reason" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.modality">
+<span class="sig-name descname"><span class="pre">modality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.modality" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.pipeline_id">
+<span class="sig-name descname"><span class="pre">pipeline_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.pipeline_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.grouping">
+<span class="sig-name descname"><span class="pre">grouping</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.grouping" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishTarget.is_image">
+<span class="sig-name descname"><span class="pre">is_image</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.is_image" title="Link to this definition">¶</a></dt>
+<dd><p>Whether rows carry a region, and therefore go to <code class="docutils literal notranslate"><span class="pre">image_measurements</span></code>.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.resolve_publish_target">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">resolve_publish_target</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">column</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">derived</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../../../stats/frame_ops/index.html#nvitk.stats.frame_ops.DerivedColumn" title="nvitk.stats.frame_ops.DerivedColumn"><span class="pre">nvitk.stats.frame_ops.DerivedColumn</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">measurement_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clinical_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cognitive_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget" title="nvitk.gui.panels.statmodels.db_publish.PublishTarget"><span class="pre">PublishTarget</span></a></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.resolve_publish_target" title="Link to this definition">¶</a></dt>
+<dd><p>Work out which table a derived column belongs to, by following it back to its source.</p>
+<p>Resolution walks the derived chain: a column derived from a column derived from <code class="docutils literal notranslate"><span class="pre">pi</span></code> is still
+an image measurement. An expression that mixes domains cannot be attributed, so it falls back to
+the image table when the frame is region-keyed and to clinical otherwise — and says so in
+<a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishTarget.reason" title="nvitk.gui.panels.statmodels.db_publish.PublishTarget.reason"><code class="xref py py-attr docutils literal notranslate"><span class="pre">PublishTarget.reason</span></code></a>, because that is exactly the case where the caller should look.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>measurement_columns</strong> (<a class="reference internal" href="../../../../stats/frame_ops/index.html#nvitk.stats.frame_ops.DerivedColumn.mapping" title="nvitk.stats.frame_ops.DerivedColumn.mapping"><em>mapping</em></a>) – <code class="docutils literal notranslate"><span class="pre">{column:</span> <span class="pre">MeasurementSpec}</span></code> for the image measurements currently loaded.</p></li>
+<li><p><strong>clinical_columns</strong> – Covariate columns resolved from those domains.</p></li>
+<li><p><strong>cognitive_columns</strong> – Covariate columns resolved from those domains.</p></li>
+<li><p><strong>frame_columns</strong> – Columns of the analysis frame, used to detect whether it is region-keyed at all.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">PublishRequest</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest" title="Link to this definition">¶</a></dt>
+<dd><p>Everything the write needs, as edited in the dialog.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.column">
+<span class="sig-name descname"><span class="pre">column</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.column" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.variable_id">
+<span class="sig-name descname"><span class="pre">variable_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.variable_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.label">
+<span class="sig-name descname"><span class="pre">label</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.label" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.table">
+<span class="sig-name descname"><span class="pre">table</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.table" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.domain">
+<span class="sig-name descname"><span class="pre">domain</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.domain" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.unit">
+<span class="sig-name descname"><span class="pre">unit</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.unit" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.aliases">
+<span class="sig-name descname"><span class="pre">aliases</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Ellipsis</span><span class="p"><span class="pre">]</span></span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">()</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.aliases" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.modality">
+<span class="sig-name descname"><span class="pre">modality</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.modality" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.pipeline_id">
+<span class="sig-name descname"><span class="pre">pipeline_id</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'latest'</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.pipeline_id" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.grouping">
+<span class="sig-name descname"><span class="pre">grouping</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.grouping" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.region_column">
+<span class="sig-name descname"><span class="pre">region_column</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'territory'</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.region_column" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.definition">
+<span class="sig-name descname"><span class="pre">definition</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.definition" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.register">
+<span class="sig-name descname"><span class="pre">register</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.register" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.extra_provenance">
+<span class="sig-name descname"><span class="pre">extra_provenance</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.extra_provenance" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.PublishRequest.validate">
+<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest.validate" title="Link to this definition">¶</a></dt>
+<dd><p>Empty when the request can be written, otherwise the reason it cannot.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.build_publish_frame">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">build_publish_frame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest" title="nvitk.gui.panels.statmodels.db_publish.PublishRequest"><span class="pre">PublishRequest</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">pandas.DataFrame</span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.build_publish_frame" title="Link to this definition">¶</a></dt>
+<dd><p>Reduce the analysis frame to the rows that will be written.</p>
+<p>Image rows keep one value per <code class="docutils literal notranslate"><span class="pre">(subject_uid,</span> <span class="pre">region)</span></code>; clinical and cognitive rows collapse to
+one value per subject, since a subject-level variable repeated across territories is the same
+number written N times. Rows whose value is missing are dropped — writing NaN would shadow a real
+value on the next read.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – When the frame lacks <code class="docutils literal notranslate"><span class="pre">subject_uid</span></code>, the value column, or (for image rows) the region
+column, or when nothing survives.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="nvitk.gui.panels.statmodels.db_publish.publish_derived_column">
+<span class="sig-prename descclassname"><span class="pre">nvitk.gui.panels.statmodels.db_publish.</span></span><span class="sig-name descname"><span class="pre">publish_derived_column</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">pandas.DataFrame</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#nvitk.gui.panels.statmodels.db_publish.PublishRequest" title="nvitk.gui.panels.statmodels.db_publish.PublishRequest"><span class="pre">PublishRequest</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvitk.gui.panels.statmodels.db_publish.publish_derived_column" title="Link to this definition">¶</a></dt>
+<dd><p>Write a derived analysis column into the dataset.</p>
+<p>Delegates the actual row construction and upsert to
+<a class="reference internal" href="../../../../db/derived_measurements/index.html#module-nvitk.db.derived_measurements" title="nvitk.db.derived_measurements"><code class="xref py py-mod docutils literal notranslate"><span class="pre">nvitk.db.derived_measurements</span></code></a>, so the rows land with the same schema, provenance and
+catalog registration as any importer-produced variable.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>dry_run</strong> (<em>bool</em>) – Build and validate everything, but do not touch the dataset. Returns the same summary with
+<code class="docutils literal notranslate"><span class="pre">written=False</span></code>, which is what the dialog previews.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">{&quot;rows&quot;:</span> <span class="pre">DataFrame,</span> <span class="pre">&quot;n_rows&quot;:</span> <span class="pre">int,</span> <span class="pre">&quot;n_subjects&quot;:</span> <span class="pre">int,</span> <span class="pre">&quot;table&quot;:</span> <span class="pre">str,</span> <span class="pre">&quot;written&quot;:</span> <span class="pre">bool}</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../../index.html">Nvitk</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../../../../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../../../../index.html">nvitk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../config/index.html">config</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../sitecustomize/index.html">sitecustomize</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../3_run_analysis/index.html">3_run_analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../ureter_segmentation/index.html">ureter_segmentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../1_build_manual_table/index.html">1_build_manual_table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../../../2_build_combined_table/index.html">2_build_combined_table</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../../index.html">API Reference</a><ul>
+  <li><a href="../../../../index.html">nvitk</a><ul>
+  <li><a href="../../../index.html">nvitk.gui</a><ul>
+  <li><a href="../../index.html">nvitk.gui.panels</a><ul>
+  <li><a href="../index.html">nvitk.gui.panels.statmodels</a><ul>
+      <li>Previous: <a href="../constants/index.html" title="previous chapter">nvitk.gui.panels.statmodels.constants</a></li>
+      <li>Next: <a href="../derived/index.html" title="next chapter">nvitk.gui.panels.statmodels.derived</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Ignacio Marcos Serrano.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.0.4</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="../../../../../../_sources/autoapi/nvitk/gui/panels/statmodels/db_publish/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

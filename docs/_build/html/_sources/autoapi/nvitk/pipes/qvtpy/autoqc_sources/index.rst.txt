@@ -1,0 +1,267 @@
+nvitk.pipes.qvtpy.autoqc_sources
+================================
+
+.. py:module:: nvitk.pipes.qvtpy.autoqc_sources
+
+.. autoapi-nested-parse::
+
+   Recover 4D-flow measurements the dataset is missing, from the pipeline's results tree.
+
+   Description
+   -----------
+   :mod:`~nvitk.pipes.qvtpy.stage9_autoqc` scores what stage 6 **published**. When the import has not
+   run, or has run only partially, the numbers exist on disk but not in the dataset — and the QC then
+   either refuses to run or scores every vessel as patent because the areas are missing.
+
+   This module closes that gap. It reads ``loc_measurements.csv`` straight out of each subject's stage-6
+   directory and returns the same long ``(subject_uid, region_id, value)`` frames the dataset would have
+   produced, so the scoring path does not care where the numbers came from.
+
+   Where the results live
+   ----------------------
+   ``--submit local``  the results root on this machine.
+   ``--submit sge``    the cluster's results root, fetched over SFTP into a temporary directory that is
+                       removed afterwards. Only the stage-6 CSVs are pulled, not whole subject trees —
+                       a QC pass has no business moving gigabytes of NIfTI.
+   ``--submit xnat``   each session's ``qvtpy`` resource, downloaded into a temporary directory. XNAT
+                       serves a resource as one archive, so unlike the SFTP path this cannot fetch a
+                       single file — the whole resource comes down and is discarded afterwards.
+
+   Units
+   -----
+   Stage 6 writes ``loc_mean_flow_ml_s`` per **second**. The literature bands are per minute. The
+   conversion is left to :func:`~nvitk.pipes.qvtpy.stage9_autoqc.infer_flow_scale`, which decides from
+   the magnitude rather than from the column name — so a results tree written by an older stage that
+   used different units still scores correctly.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.autoqc_sources.LOC_MEASUREMENTS
+   nvitk.pipes.qvtpy.autoqc_sources.PITC_PROFILE
+   nvitk.pipes.qvtpy.autoqc_sources.STAGE6_FETCH_FILES
+   nvitk.pipes.qvtpy.autoqc_sources.VARIABLE_TO_LOC_COLUMN
+   nvitk.pipes.qvtpy.autoqc_sources.REGION_COLUMNS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.autoqc_sources.ResultsSource
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.autoqc_sources.stage6_dir
+   nvitk.pipes.qvtpy.autoqc_sources.discover_subjects
+   nvitk.pipes.qvtpy.autoqc_sources.read_loc_measurements
+   nvitk.pipes.qvtpy.autoqc_sources.load_pitc_profiles
+   nvitk.pipes.qvtpy.autoqc_sources.long_measurements
+   nvitk.pipes.qvtpy.autoqc_sources.fetch_stage6_csvs
+   nvitk.pipes.qvtpy.autoqc_sources.fetch_stage6_xnat
+   nvitk.pipes.qvtpy.autoqc_sources.open_results
+   nvitk.pipes.qvtpy.autoqc_sources.recover_missing
+
+
+Module Contents
+---------------
+
+.. py:data:: LOC_MEASUREMENTS
+   :value: 'loc_measurements.csv'
+
+
+.. py:data:: PITC_PROFILE
+   :value: 'pitc_profile.csv'
+
+
+.. py:data:: STAGE6_FETCH_FILES
+   :type:  tuple[str, Ellipsis]
+
+.. py:data:: VARIABLE_TO_LOC_COLUMN
+   :type:  dict[str, str]
+
+.. py:data:: REGION_COLUMNS
+   :type:  tuple[str, Ellipsis]
+   :value: ('vessel_name', 'vessel_id')
+
+
+.. py:class:: ResultsSource
+
+   Where to look for stage-6 outputs, and how to reach them.
+
+
+   .. py:attribute:: submit
+      :type:  str
+      :value: 'local'
+
+
+
+   .. py:attribute:: results_root
+      :type:  pathlib.Path | None
+      :value: None
+
+
+
+   .. py:attribute:: host
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: user
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: password
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: port
+      :type:  int
+      :value: 22
+
+
+
+   .. py:attribute:: xnat_config
+      :type:  Any
+      :value: None
+
+
+
+   .. py:attribute:: xnat_project
+      :type:  str
+      :value: ''
+
+
+
+   .. py:attribute:: _staged
+      :type:  pathlib.Path | None
+      :value: None
+
+
+
+   .. py:method:: mode() -> str
+
+      Normalized submit mode.
+
+
+
+   .. py:method:: is_remote() -> bool
+
+      Whether the results have to be fetched before they can be read.
+
+
+
+   .. py:method:: is_xnat() -> bool
+
+      Whether the results come from XNAT session resources.
+
+
+
+   .. py:method:: root() -> pathlib.Path
+
+      The results root to read from, defaulting to the configured one for this submit mode.
+
+
+
+   .. py:method:: cleanup() -> None
+
+      Remove anything a remote fetch staged locally.
+
+
+
+.. py:function:: stage6_dir(results_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   ``<results_root>/<subject>/qvtpy/stage6_measure``.
+
+
+.. py:function:: discover_subjects(results_root: pathlib.Path) -> list[str]
+
+   Subjects under *results_root* that actually have a stage-6 measurements CSV.
+
+
+.. py:function:: read_loc_measurements(results_root: pathlib.Path, subjects: Sequence[str] | None = None) -> pandas.DataFrame
+
+   Concatenate every subject's ``loc_measurements.csv`` into one frame.
+
+   :returns: The stage-6 columns plus ``subject_uid``. Empty when nothing was found — reported by the
+             caller rather than raised here, since a partially-populated tree is normal mid-run.
+   :rtype: pandas.DataFrame
+
+
+.. py:function:: load_pitc_profiles(results_root: pathlib.Path, subjects: Sequence[str] | None = None) -> pandas.DataFrame
+
+   Concatenate every subject's ``pitc_profile.csv`` into one frame with ``subject_uid``.
+
+   Returns an empty frame when nothing is found — along-segment CV is optional and must not
+   take the rest of autoQC down with it.
+
+
+.. py:function:: long_measurements(loc: pandas.DataFrame, variable_id: str) -> pandas.DataFrame
+
+   One variable as long ``(subject_uid, region_id, value)`` rows, matching the dataset's shape.
+
+   Several LOC rows can share a vessel — stage 6 writes one per localized cross-section — so they
+   are averaged per vessel, which is the same time-averaged quantity the dataset publishes.
+
+
+.. py:function:: fetch_stage6_csvs(source: ResultsSource, subjects: Sequence[str] | None = None) -> pathlib.Path
+
+   Pull each subject's stage-6 CSV from the cluster into a temporary tree, and return its root.
+
+   Only the stage-6 CSVs in :data:`STAGE6_FETCH_FILES` are transferred, mirrored into the same
+   ``<subject>/qvtpy/stage6_measure/`` layout so the local reader is unchanged. A QC pass has no
+   reason to move the NIfTIs, and on a full cohort that is the difference between seconds and
+   hours.
+
+   The caller must call :meth:`ResultsSource.cleanup` — or use :func:`open_results` — to remove it.
+
+
+.. py:function:: fetch_stage6_xnat(source: ResultsSource, subjects: Sequence[str] | None = None) -> pathlib.Path
+
+   Download each session's ``qvtpy`` resource from XNAT and keep only the stage-6 measurements.
+
+   XNAT serves a resource as a single archive, so — unlike the SFTP path — there is no way to ask
+   for one file. The whole ``qvtpy`` resource comes down per session into a scratch directory, the
+   stage-6 CSV is copied into the mirrored layout, and the rest is deleted immediately. That keeps
+   peak disk to one subject rather than a cohort.
+
+   Returns the staging root, which the caller must clean up.
+
+
+.. py:function:: open_results(source: ResultsSource, subjects: Sequence[str] | None = None) -> tuple[pandas.DataFrame, pathlib.Path]
+
+   Read the stage-6 measurements for *source*, fetching them first when they are remote.
+
+   :returns: The concatenated LOC frame and the root it was read from. For a remote source the root is
+             the temporary staging directory; call :meth:`ResultsSource.cleanup` when done with it.
+   :rtype: (loc, root)
+
+
+.. py:function:: recover_missing(needed: Iterable[str], source: ResultsSource, *, subjects: Sequence[str] | None = None) -> tuple[dict[str, pandas.DataFrame], dict[str, Any]]
+
+   Load whichever of *needed* the results tree can supply.
+
+   :param needed: Dataset variable ids that are missing — typically ``flow_mean`` and/or
+                  ``cross_section_area``.
+   :type needed: iterable of str
+
+   :returns: ``frames`` maps each recovered variable to its long frame; a variable the tree cannot
+             supply is simply absent. ``report`` carries ``root``, ``n_subjects``, ``recovered`` and
+             ``unavailable`` for the log.
+   :rtype: (frames, report)
+
+

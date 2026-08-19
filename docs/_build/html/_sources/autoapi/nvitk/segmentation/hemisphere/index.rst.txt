@@ -1,0 +1,68 @@
+nvitk.segmentation.hemisphere
+=============================
+
+.. py:module:: nvitk.segmentation.hemisphere
+
+.. autoapi-nested-parse::
+
+   Split bilateral label masks into left/right hemispheres.
+
+   Two strategies are provided:
+
+   - :func:`split_lr_by_cc` — connected-components driven: keeps the *n* largest
+     CCs in *mask* and assigns Left/Right from their world-space x centroids. This
+     is what ct-pet-v5 and dixon-v5 use for the `deltoid` TotalSegmentator label
+     which ships bilaterally without native L/R classes.
+   - :func:`split_lr_by_midline` — geometric fallback: split on a sagittal plane
+     (specified by voxel x or auto-detected from the affine origin).
+
+   Both functions work for images in any voxel orientation: the sign of the
+   affine's first column determines which voxel-space side maps to anatomical
+   "left" in world coordinates.
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.hemisphere.split_lr_by_cc
+   nvitk.segmentation.hemisphere.split_lr_by_midline
+
+
+Module Contents
+---------------
+
+.. py:function:: split_lr_by_cc(mask: nvitk.types.Image, *, n: int = 2, structure: Any = None) -> tuple[nvitk.types.Image, nvitk.types.Image]
+
+   Split a bilateral binary *mask* into ``(left, right)`` images using connected components.
+
+   The top-*n* CCs (by size) are kept and labeled L/R via their centroids'
+   world-space x coordinate (computed with ``mask.affine``). The convention
+   used is the radiology/anatomical one: **Left** means the subject's left
+   side, which in a right-handed RAS/LAS coordinate system has the *lower* x
+   world coordinate; in LPS/LPI it has the *higher* x coordinate. This is
+   derived from the sign of ``affine[0, 0]`` so it works with either
+   convention.
+
+   :param mask: 3D binary :class:`~nvitk.types.Image`. Its :attr:`Image.affine` is required.
+   :param n: How many components to keep (default 2, i.e. left + right).
+   :param structure: Connectivity structure passed to ``ndi.label``.
+
+   :returns: Two images: ``(left, right)``. If fewer than 2 CCs are found, the
+             missing one is returned as an empty mask.
+   :rtype: (Image, Image)
+
+
+.. py:function:: split_lr_by_midline(mask: nvitk.types.Image, *, plane_x: int | None = None) -> tuple[nvitk.types.Image, nvitk.types.Image]
+
+   Split a bilateral mask by a sagittal (YZ) plane at voxel x = *plane_x*.
+
+   When *plane_x* is None, the plane is chosen so that its world-x matches the
+   volume's world-x midpoint (i.e. the geometric midline along the image).
+
+   Returns ``(left, right)`` following the same lower-world-x -> LEFT
+   convention as :func:`split_lr_by_cc`.
+
+

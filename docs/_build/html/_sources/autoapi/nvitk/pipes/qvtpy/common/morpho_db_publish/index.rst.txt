@@ -1,0 +1,85 @@
+nvitk.pipes.qvtpy.common.morpho_db_publish
+==========================================
+
+.. py:module:: nvitk.pipes.qvtpy.common.morpho_db_publish
+
+.. autoapi-nested-parse::
+
+   Publish qvtpy stage-7 TOF morphometrics into the NVITK ``image_measurements`` table.
+
+   Long-form rows are upserted under pipeline ``tof_morpho_v1``. Per-vessel scalar
+   summaries are aggregated from the ``00_Path_Summary`` sheet of
+   ``case_metrics_donut_tree.xlsx``.
+
+   When ``stenosis_percent_max`` / length totals are absent (older Excel exports),
+   values are recovered from ``*_segments_detail_json``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.common.morpho_db_publish.TOF_MORPHO_PIPELINE_ID
+   nvitk.pipes.qvtpy.common.morpho_db_publish.TOF_MORPHO_PIPELINE_NAME
+   nvitk.pipes.qvtpy.common.morpho_db_publish.TOF_MORPHO_MODALITY
+   nvitk.pipes.qvtpy.common.morpho_db_publish.TOF_MORPHO_PIPELINE_ALIASES
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.common.morpho_db_publish.tof_morpho_pipeline_catalog_spec
+   nvitk.pipes.qvtpy.common.morpho_db_publish.build_image_measurement_rows_from_stage7
+   nvitk.pipes.qvtpy.common.morpho_db_publish.publish_stage7
+   nvitk.pipes.qvtpy.common.morpho_db_publish.maybe_publish_stage7_on_sge
+   nvitk.pipes.qvtpy.common.morpho_db_publish.try_publish_stage7
+
+
+Module Contents
+---------------
+
+.. py:data:: TOF_MORPHO_PIPELINE_ID
+   :value: 'tof_morpho_v1'
+
+
+.. py:data:: TOF_MORPHO_PIPELINE_NAME
+   :value: 'TOF Morphometrics'
+
+
+.. py:data:: TOF_MORPHO_MODALITY
+   :value: 'tof'
+
+
+.. py:data:: TOF_MORPHO_PIPELINE_ALIASES
+   :value: ('tof_morpho', 'morpho', 'tof_morpho_v1')
+
+
+.. py:function:: tof_morpho_pipeline_catalog_spec() -> dict[str, Any]
+
+   Dataset catalog entry for the TOF morphometrics pipeline.
+
+
+.. py:function:: build_image_measurement_rows_from_stage7(*, subject_uid: str, stage7_dir: pathlib.Path) -> pandas.DataFrame
+
+   Long-form ``image_measurements`` rows from stage-7 morphometrics Excel.
+
+
+.. py:function:: publish_stage7(*, subject_uid: str, stage7_dir: pathlib.Path, repo: nvitk.db.repo.DataRepo | None = None, prefer_sge: bool | None = None, build_sqlite_index: bool = True, source_batch_id: str | None = None) -> pandas.DataFrame
+
+   Upsert stage-7 TOF morphometrics into ``image_measurements``.
+
+
+.. py:function:: maybe_publish_stage7_on_sge(*, subject_uid: str, stage7_dir: pathlib.Path) -> None
+
+   Upsert stage-7 measurements into the cluster DB when running under SGE.
+
+
+.. py:function:: try_publish_stage7(**kwargs: Any) -> tuple[pandas.DataFrame | None, str | None]
+
+   Best-effort :func:`publish_stage7`; returns ``(rows, error_message)``.
+
+

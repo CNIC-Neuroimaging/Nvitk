@@ -1,0 +1,115 @@
+nvitk.gui.pipeline.qvtpy_stages
+===============================
+
+.. py:module:: nvitk.gui.pipeline.qvtpy_stages
+
+.. autoapi-nested-parse::
+
+   Build subprocess argv for individual QVTpy pipeline stage modules.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.qvtpy_stages._QVT_COMMON_REQUIRED
+   nvitk.gui.pipeline.qvtpy_stages.STAGE_SPECS
+   nvitk.gui.pipeline.qvtpy_stages.STAGE_BY_ID
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.qvtpy_stages.QvtpyStageSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.pipeline.qvtpy_stages._req
+   nvitk.gui.pipeline.qvtpy_stages.build_qvtpy_stage_argv
+   nvitk.gui.pipeline.qvtpy_stages.default_dicom_root
+
+
+Module Contents
+---------------
+
+.. py:class:: QvtpyStageSpec
+
+   One QVTpy pipeline stage: its tool id/label/module and which CLI arguments it requires.
+
+
+   .. py:attribute:: tool_id
+      :type:  str
+
+
+   .. py:attribute:: label
+      :type:  str
+
+
+   .. py:attribute:: module
+      :type:  str
+
+
+   .. py:attribute:: needs_subject
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: needs_nifti_root
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: needs_output_root
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: needs_dicom_root
+      :type:  bool
+      :value: False
+
+
+
+   .. py:attribute:: is_download
+      :type:  bool
+      :value: False
+
+
+
+.. py:data:: _QVT_COMMON_REQUIRED
+   :value: ('subject', 'nifti_root', 'output_root')
+
+
+.. py:data:: STAGE_SPECS
+   :type:  tuple[QvtpyStageSpec, Ellipsis]
+
+.. py:data:: STAGE_BY_ID
+   :type:  dict[str, QvtpyStageSpec]
+
+.. py:function:: _req(params: dict[str, Any], key: str) -> str
+
+   Return the stripped string value of required parameter *key* in *params*; raises ``ValueError``
+   if missing or blank.
+
+
+.. py:function:: build_qvtpy_stage_argv(tool_id: str, params: dict[str, Any]) -> list[str]
+
+   Return argv for ``python -m <stage_module>``.
+
+
+.. py:function:: default_dicom_root() -> str
+
+   Default DICOM root directory from the QVTpy pipeline config, or ``""`` if unavailable.
+
+

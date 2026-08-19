@@ -1,0 +1,105 @@
+nvitk.gui.tools.presets
+=======================
+
+.. py:module:: nvitk.gui.tools.presets
+
+.. autoapi-nested-parse::
+
+   Pipeline-default parameter presets for interactive GUI tools.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.presets._PRESETS
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.presets.ToolPreset
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.tools.presets.presets_for_tool
+   nvitk.gui.tools.presets.preset_choices_for_tool
+   nvitk.gui.tools.presets.preset_key_from_title
+   nvitk.gui.tools.presets.get_preset
+   nvitk.gui.tools.presets.apply_preset_to_panel
+   nvitk.gui.tools.presets.label_centroid_voxel
+   nvitk.gui.tools.presets.cursor_voxel_indices
+
+
+Module Contents
+---------------
+
+.. py:class:: ToolPreset
+
+   A named set of default parameter values for a GUI tool (key, display title, params, hint text).
+
+
+   .. py:attribute:: key
+      :type:  str
+
+
+   .. py:attribute:: title
+      :type:  str
+
+
+   .. py:attribute:: params
+      :type:  dict[str, Any]
+
+
+   .. py:attribute:: hint
+      :type:  str
+      :value: ''
+
+
+
+.. py:data:: _PRESETS
+   :type:  dict[str, dict[str, ToolPreset]]
+
+.. py:function:: presets_for_tool(tool_id: str) -> tuple[ToolPreset, Ellipsis]
+
+   All registered presets for *tool_id*, empty if the tool has none.
+
+
+.. py:function:: preset_choices_for_tool(tool_id: str) -> tuple[str, Ellipsis]
+
+   Display titles of *tool_id*'s presets, for populating a combo box.
+
+
+.. py:function:: preset_key_from_title(tool_id: str, title: str) -> str
+
+   Resolve a preset's display *title* back to its key for *tool_id*; ``"custom"`` if unmatched.
+
+
+.. py:function:: get_preset(tool_id: str, key: str) -> ToolPreset | None
+
+   Look up the preset registered under *key* for *tool_id*, or ``None``.
+
+
+.. py:function:: apply_preset_to_panel(panel: Any, tool_id: str, preset_key: str) -> None
+
+   Copy preset values onto magicgui tool_panel widgets when they exist.
+
+
+.. py:function:: label_centroid_voxel(mask: numpy.ndarray, label_id: int) -> tuple[int, int, int]
+
+   Voxel index of the largest connected component for *label_id*.
+
+
+.. py:function:: cursor_voxel_indices(viewer: Any, layer: Any) -> tuple[int, int, int]
+
+   Map Napari cursor position to voxel indices for *layer*.
+
+

@@ -1,0 +1,37 @@
+nvitk.io.conversors.stl2nifti
+=============================
+
+.. py:module:: nvitk.io.conversors.stl2nifti
+
+.. autoapi-nested-parse::
+
+   Rasterize STL surfaces to labeled NIfTI volumes (VTK-based; CLI optional).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.conversors.stl2nifti.run_stl2nifti
+   nvitk.io.conversors.stl2nifti.stl2nifti
+
+
+Module Contents
+---------------
+
+.. py:function:: run_stl2nifti(input_path: str | pathlib.Path, reference_path: str | pathlib.Path, output_path: str | pathlib.Path, *, multifile: bool = False, multilabel: bool = False, overwrite: bool = False, log_level: str = 'INFO', reference_rule: str | None = None, reference_rule_mode: str = 'contains') -> list[str]
+
+   Rasterize STL mesh(es) into label NIfTI volume(s) matched to a reference NIfTI's geometry.
+
+   Supports both a single input/reference pair and (with *multifile*) batch mode
+   over per-patient subdirectories; *multilabel* rasterizes multiple STLs in one
+   input folder into a single multi-label output instead of one file per mesh.
+
+
+.. py:function:: stl2nifti(input_path: str | pathlib.Path, reference_path: str | pathlib.Path, output_path: str | pathlib.Path, *, multifile: bool = False, multilabel: bool = False, overwrite: bool = False, log_level: str = 'INFO', reference_rule: str | None = None, reference_rule_mode: str = 'contains') -> str | list[str]
+
+   Thin wrapper over :func:`run_stl2nifti` returning a single path instead of a list when there's exactly one output.
+
+

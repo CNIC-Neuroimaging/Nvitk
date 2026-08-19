@@ -1,0 +1,71 @@
+nvitk.pipes.qvtpy.stage4_4dflow_segmentation
+============================================
+
+.. py:module:: nvitk.pipes.qvtpy.stage4_4dflow_segmentation
+
+.. autoapi-nested-parse::
+
+   qvtpy stage 4: per-vessel local CD threshold + region growing → ``seg_4dflow``.
+
+   **Inputs**
+
+   - ``ComplexDifference_3D``, stage-3 ``centerlines_mask``, optional ``eicab_in_4dflow``.
+
+   **Outputs**
+
+   - ``seg_4dflow.nii.gz``, ``segmentation_meta.json``, stage-4 centerline exports.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.EICAB_IN_4DFLOW_NIFTI
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.EICAB_IN_4DFLOW_EICAB_IDS_NIFTI
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.run_subject
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.build_subject_sge_command
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.submit_subject_sge
+   nvitk.pipes.qvtpy.stage4_4dflow_segmentation.main
+
+
+Module Contents
+---------------
+
+.. py:data:: EICAB_IN_4DFLOW_NIFTI
+   :value: 'eicab_in_4dflow.nii.gz'
+
+
+.. py:data:: EICAB_IN_4DFLOW_EICAB_IDS_NIFTI
+   :value: 'eicab_in_4dflow_eicab_ids.nii.gz'
+
+
+.. py:function:: run_subject(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool = False, crop_padding_bbox: int = 3, thr_algorithm: nvitk.pipes.qvtpy.util.segmentation.vessel_cd_segmentation.ThrAlgorithm = 'lsthr', region_growing: bool = True, rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC, rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE, rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA, cl_barrier_radius: int = 2, rg_barrier_radius: int = 3, aca_sequential_grow: bool = True, aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT, acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT, rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT, rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT, venous_region_growing: bool = True, segment_acomm: bool = False, distal_flow_expand: bool = False, distal_hyst_low_factor: float = 3.5, distal_hyst_high_factor: float = 0.5, distal_thicken_iter: int = 0, distal_max_image_frac: float = 0.006, distal_lr_halfspace_slack: int = 2, pp_distal: bool = False) -> pathlib.Path
+
+   Build multilabel 4D-flow segmentation locally; return stage-4 output directory.
+
+
+.. py:function:: build_subject_sge_command(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, crop_padding_bbox: int = 3, thr_algorithm: str = 'lsthr', region_growing: bool = True, rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC, rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE, rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA, cl_barrier_radius: int = 2, rg_barrier_radius: int = 3, aca_sequential_grow: bool = True, aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT, acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT, rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT, rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT, venous_region_growing: bool = True, segment_acomm: bool = False, distal_flow_expand: bool = False, distal_hyst_low_factor: float = 3.5, distal_hyst_high_factor: float = 0.5, distal_thicken_iter: int = 0, distal_max_image_frac: float = 0.006, distal_lr_halfspace_slack: int = 2, pp_distal: bool = False, backend: str = 'gpu') -> str
+
+   Return the host shell command for one stage4 array/SGE task.
+
+
+.. py:function:: submit_subject_sge(subject: str, *, nifti_root: pathlib.Path, output_root: pathlib.Path, container: pathlib.Path, src_dir: pathlib.Path | None = None, skip_existing: bool = False, hold_jid: str | None = None, emit: TextIO | None = None, crop_padding_bbox: int = 3, thr_algorithm: str = 'lsthr', region_growing: bool = True, rg_intensity_frac: float = _DEFAULT_RG_INTENSITY_FRAC, rg_intensity_frac_explore: float = _RG_INTENSITY_FRAC_EXPLORE, rg_intensity_frac_aca: float = _RG_INTENSITY_FRAC_ACA, cl_barrier_radius: int = 2, rg_barrier_radius: int = 3, aca_sequential_grow: bool = True, aca_overlap_min_voxels: int = _ACA_OVERLAP_MIN_VOXELS_DEFAULT, acomm_junction_radius: int = _ACOMM_JUNCTION_RADIUS_DEFAULT, rg_max_grow_frac: float = _RG_MAX_GROW_FRAC_DEFAULT, rg_max_image_frac: float = _RG_MAX_IMAGE_FRAC_DEFAULT, venous_region_growing: bool = True, segment_acomm: bool = False, distal_flow_expand: bool = False, distal_hyst_low_factor: float = 3.5, distal_hyst_high_factor: float = 0.5, distal_thicken_iter: int = 0, distal_max_image_frac: float = 0.006, distal_lr_halfspace_slack: int = 2, pp_distal: bool = False, backend: str = 'gpu') -> str
+
+   Emit or submit one stage-4 SGE job. Returns qsub job id.
+
+
+.. py:function:: main(subject: str, nifti_root: pathlib.Path, output_root: pathlib.Path, skip_existing: bool, crop_padding_bbox: int, thr_algorithm: str, region_growing: bool, rg_intensity_frac: float, rg_intensity_frac_explore: float, rg_intensity_frac_aca: float, cl_barrier_radius: int, rg_barrier_radius: int, aca_sequential_grow: bool, aca_overlap_min_voxels: int, acomm_junction_radius: int, rg_max_grow_frac: float, rg_max_image_frac: float, venous_region_growing: bool, segment_acomm: bool, distal_flow_expand: bool, distal_hyst_low_factor: float, distal_hyst_high_factor: float, distal_thicken_iter: int, distal_max_image_frac: float, distal_lr_halfspace_slack: int, pp_distal: bool) -> None
+
+   CLI entry point (``qvtpy-stage4-seg``): run stage 4 4D-flow vessel segmentation
+   for one subject.
+
+

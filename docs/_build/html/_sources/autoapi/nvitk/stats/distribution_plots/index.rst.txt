@@ -1,0 +1,63 @@
+nvitk.stats.distribution_plots
+==============================
+
+.. py:module:: nvitk.stats.distribution_plots
+
+.. autoapi-nested-parse::
+
+   Static (Matplotlib) distribution plots, mirroring the interactive ones.
+
+   Description
+   -----------
+   :mod:`~nvitk.stats.interactive` renders distributions with Plotly, which is what you want when the
+   question is "which subject is that outlier". This module draws the same eight views with Matplotlib,
+   which is what you want when the answer goes into a paper: vector output, a familiar style, and no
+   browser engine between the figure and the page.
+
+   The two share an API — same *kind* keys, same grouping, same excluded-mask handling — so the GUI
+   toggles between them without knowing which is which.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.stats.distribution_plots.GREYED
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.stats.distribution_plots.column_plot_static
+   nvitk.stats.distribution_plots.column_panels_static
+
+
+Module Contents
+---------------
+
+.. py:data:: GREYED
+   :value: '#B0B0B0'
+
+
+.. py:function:: column_plot_static(frame: pandas.DataFrame, column: str, *, kind: str = 'violin', group: str = '', excluded_mask: Any = None, show_excluded: bool = True, title: str = '', ax: Any = None, figsize: tuple[float, float] = (10.0, 6.0)) -> Any
+
+   Distribution of one column, drawn with Matplotlib.
+
+   Same *kind* vocabulary as :func:`~nvitk.stats.interactive.column_plot`: ``violin``,
+   ``violin_points``, ``box``, ``box_points``, ``strip``, ``histogram``, ``density``, ``ecdf``. A
+   categorical column falls back to counts, since a violin of labels is not defined.
+
+   :raises ValueError: When *column* is absent or holds nothing plottable.
+
+
+.. py:function:: column_panels_static(frame: pandas.DataFrame, column: str, *, facet_by: str, kind: str = 'violin', group: str = '', excluded_mask: Any = None, show_excluded: bool = True, anatomical: bool = False, title: str = '', n_cols: int = 2) -> Any
+
+   One static distribution panel per level of *facet_by*, each autoscaled to its own range.
+
+   Mirrors :func:`~nvitk.stats.interactive.column_panel_figure`, including the anatomical grouping.
+
+

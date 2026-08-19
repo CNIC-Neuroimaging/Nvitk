@@ -1,0 +1,295 @@
+nvitk.measure.morpho.export_utils.compute_tortuosity_metrics
+============================================================
+
+.. py:module:: nvitk.measure.morpho.export_utils.compute_tortuosity_metrics
+
+.. autoapi-nested-parse::
+
+   Compute literature-style tortuosity metrics from generated centerlines.
+
+   Accepts either a folder of .vtp centerline files or an existing metrics
+   workbook whose per-centerline sheets contain x/y/z coordinate columns.
+
+   Metrics:
+   - tortuosity_index = actual vessel length / endpoint Euclidean distance
+   - inflection_count_metric = bend_count * tortuosity_index
+   - sum_of_angles_metric = sum of bend-chain angles / vessel length
+
+   Edit the CONFIG block below for direct single-case runs; the batch runner
+   calls run() directly with the appropriate paths.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.INPUT_PATH
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.OUTPUT_CSV
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.OUTPUT_XLSX
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.SAVE_POINTWISE_SHEETS
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.SAVE_DEBUG_VTPS
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.DEBUG_VTP_DIR
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.BEND_TOLERANCE_FRACTION
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.BEND_MIN_TOLERANCE_MM
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.RESAMPLE_STEP_MM
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.MIN_SEGMENT_LENGTH_MM
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.INFLECTION_SMOOTH_SIGMA_MM
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.MIN_INFLECTION_LOBE_MM
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.SUMMARY_SHEET_RE
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.safe_sheet_name
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.safe_filename
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.vessel_sort_key
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.remove_duplicate_points
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.cumulative_s
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.arc_length
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.median_segment_length
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.chord_length
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.resample_polyline_by_arclength
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.local_turn_angles
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.perpendicular_distance_to_chord
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.perpendicular_distance_to_line_segment
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.gaussian_smooth_1d
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.signed_curvature_3d
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.find_inflection_indices
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.point_deflection_angle_deg
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.bend_angles_for_indices
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.rdp_bend_events
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.write_debug_vtp
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.compute_metrics
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_vtp_points
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_vtp_folder
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.is_centerline_sheet
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines_from_workbook
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.load_centerlines
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.default_output_paths
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.default_debug_vtp_dir
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.run
+   nvitk.measure.morpho.export_utils.compute_tortuosity_metrics.main
+
+
+Module Contents
+---------------
+
+.. py:data:: INPUT_PATH
+   :value: None
+
+
+.. py:data:: OUTPUT_CSV
+   :value: None
+
+
+.. py:data:: OUTPUT_XLSX
+   :value: None
+
+
+.. py:data:: SAVE_POINTWISE_SHEETS
+   :value: False
+
+
+.. py:data:: SAVE_DEBUG_VTPS
+   :value: True
+
+
+.. py:data:: DEBUG_VTP_DIR
+   :value: None
+
+
+.. py:data:: BEND_TOLERANCE_FRACTION
+   :value: 0.07
+
+
+.. py:data:: BEND_MIN_TOLERANCE_MM
+   :value: 0.5
+
+
+.. py:data:: RESAMPLE_STEP_MM
+   :value: 0.2
+
+
+.. py:data:: MIN_SEGMENT_LENGTH_MM
+   :value: 1e-06
+
+
+.. py:data:: INFLECTION_SMOOTH_SIGMA_MM
+   :value: 2.0
+
+
+.. py:data:: MIN_INFLECTION_LOBE_MM
+   :value: 2.0
+
+
+.. py:data:: SUMMARY_SHEET_RE
+
+.. py:function:: safe_sheet_name(name: str) -> str
+
+   Sanitize *name* for use as an Excel sheet name (illegal chars stripped, 31-char limit).
+
+
+.. py:function:: safe_filename(name: str) -> str
+
+   Sanitize *name* into a filesystem-safe filename fragment.
+
+
+.. py:function:: vessel_sort_key(path_or_name) -> Tuple[int, str]
+
+   Sort key ordering centerline files/sheets by their leading label id, then name.
+
+
+.. py:function:: remove_duplicate_points(points: numpy.ndarray, min_segment_length_mm: float) -> numpy.ndarray
+
+   Drop consecutive points closer together than *min_segment_length_mm* (keeps the first of each run).
+
+
+.. py:function:: cumulative_s(points: numpy.ndarray) -> numpy.ndarray
+
+   Cumulative arc length at each point along the polyline, starting at 0.
+
+
+.. py:function:: arc_length(points: numpy.ndarray) -> float
+
+   Total polyline length (sum of consecutive-point distances); 0.0 for <2 points.
+
+
+.. py:function:: median_segment_length(points: numpy.ndarray, fallback: float = 0.1) -> float
+
+   Median distance between consecutive points (a robust proxy for the local sampling resolution).
+
+
+.. py:function:: chord_length(points: numpy.ndarray) -> float
+
+   Straight-line distance from the first to the last point; 0.0 for <2 points.
+
+
+.. py:function:: resample_polyline_by_arclength(points: numpy.ndarray, step_mm: Optional[float]) -> numpy.ndarray
+
+   Resample a polyline to (near-)equal arc-length steps of *step_mm* via linear interpolation.
+
+
+.. py:function:: local_turn_angles(points: numpy.ndarray) -> numpy.ndarray
+
+   Turn angle (degrees) at each interior point between its incoming and outgoing segment vectors.
+
+
+.. py:function:: perpendicular_distance_to_chord(points: numpy.ndarray) -> numpy.ndarray
+
+   Perpendicular distance of every point from the straight chord joining the path's first and last point.
+
+
+.. py:function:: perpendicular_distance_to_line_segment(points: numpy.ndarray, start: numpy.ndarray, end: numpy.ndarray) -> numpy.ndarray
+
+   Perpendicular distance of every point from the finite segment ``[start, end]`` (clamped, not an infinite line).
+
+
+.. py:function:: gaussian_smooth_1d(arr: numpy.ndarray, sigma: float) -> numpy.ndarray
+
+   Gaussian smoothing of a 1-D signal that may contain NaNs (filled by interpolation before convolving, then re-masked).
+
+
+.. py:function:: signed_curvature_3d(points: numpy.ndarray, smooth_sigma_points: float = 20.0) -> numpy.ndarray
+
+   Signed curvature along a 3-D polyline, with a consistent sign convention picked via a global binormal reference.
+
+   Curvature magnitude comes from consecutive tangent turning (binormal
+   cross-products); since a 3-D curve's binormal direction is only defined up
+   to sign at each point, an SVD over all binormals picks one dominant plane
+   normal as the reference so the sign is stable along the whole path (a
+   genuine 3-D torsion reversal will still show as an actual sign flip).
+   Output is smoothed with :func:`gaussian_smooth_1d`.
+
+
+.. py:function:: find_inflection_indices(points: numpy.ndarray, signed_curv: numpy.ndarray, min_lobe_length_mm: float = 2.0) -> List[int]
+
+   Point indices where signed curvature changes sign (real S-bends), merging inflections closer than *min_lobe_length_mm*.
+
+
+.. py:function:: point_deflection_angle_deg(start: numpy.ndarray, apex: numpy.ndarray, end: numpy.ndarray) -> float
+
+   Deflection angle (degrees) of the path bending through *apex*: 180° minus the interior angle at *apex*.
+
+
+.. py:function:: bend_angles_for_indices(points: numpy.ndarray, bend_indices: List[int]) -> Dict[int, float]
+
+   Deflection angle at each bend index, measured against its neighboring bend/endpoint keypoints.
+
+
+.. py:function:: rdp_bend_events(points: numpy.ndarray) -> List[dict]
+
+   Detect bend "lobes" via recursive Ramer-Douglas-Peucker simplification against a local tolerance.
+
+   Each recursive split point whose deviation from its local chord exceeds a
+   tolerance (scaled by that chord's length) is recorded as a candidate bend
+   event; overlapping candidates closer than 10% of the total path length are
+   then pruned, keeping the most prominent one in each cluster.
+
+
+.. py:function:: write_debug_vtp(path: pathlib.Path, centerline_name: str, points: numpy.ndarray, s: numpy.ndarray, angles: numpy.ndarray, perpendicular_distances: numpy.ndarray, bend_events: List[dict], max_bending_idx: Optional[int], inflection_indices: Optional[List[int]] = None) -> None
+
+   Write a VTK debug point cloud marking endpoints, bend events, the max-bending point, and inflections
+   (each tagged with its role, arc length, angle, and bend-lobe stats) for visual QC of tortuosity detection.
+
+
+.. py:function:: compute_metrics(name: str, points: numpy.ndarray) -> Tuple[dict, pandas.DataFrame]
+
+   Compute the full standalone tortuosity-metric report for one centerline.
+
+   Cleans/resamples the polyline, then derives tortuosity index, signed
+   curvature + inflection points, RDP bend events, per-bend deflection angles,
+   and chord-distance-based bending. Returns ``(summary_dict, pointwise_df)``
+   — a one-row summary plus a per-point table (for the debug VTP / detail sheet).
+
+
+.. py:function:: load_vtp_points(path: pathlib.Path) -> numpy.ndarray
+
+   Load the longest polyline's points from a centerline VTP file.
+
+
+.. py:function:: load_centerlines_from_vtp_folder(input_path: pathlib.Path) -> Dict[str, numpy.ndarray]
+
+   Load every ``.vtp`` centerline in a folder, keyed by vessel name (strips a ``_radius`` suffix).
+
+
+.. py:function:: is_centerline_sheet(sheet_name: str, columns: Iterable[str]) -> bool
+
+   True for a per-centerline data sheet (not a numbered summary sheet) that has x/y/z_mm columns.
+
+
+.. py:function:: load_centerlines_from_workbook(input_path: pathlib.Path) -> Dict[str, numpy.ndarray]
+
+   Load every per-centerline sheet's x/y/z points from a morphometrics workbook, keyed by sheet name.
+
+
+.. py:function:: load_centerlines(input_path: pathlib.Path) -> Dict[str, numpy.ndarray]
+
+   Load centerlines from a VTP folder, a single VTP file, or a morphometrics workbook (dispatch by path type).
+
+
+.. py:function:: default_output_paths(input_path: pathlib.Path, output_csv: Optional[str], output_xlsx: Optional[str]) -> Tuple[pathlib.Path, pathlib.Path]
+
+   Resolve the CSV/XLSX report paths, defaulting next to *input_path* when not explicitly given.
+
+
+.. py:function:: default_debug_vtp_dir(input_path: pathlib.Path) -> pathlib.Path
+
+   Resolve the debug-VTP output directory, defaulting next to *input_path* when ``DEBUG_VTP_DIR`` is unset.
+
+
+.. py:function:: run(input_path: str, output_csv: Optional[str] = None, output_xlsx: Optional[str] = None, save_pointwise_sheets: bool = False) -> pandas.DataFrame
+
+   Full standalone pipeline: load centerlines, compute tortuosity metrics for each, and write CSV/XLSX reports
+   (optionally saving a debug VTP per centerline and per-point detail sheets in the workbook).
+
+
+.. py:function:: main() -> None
+
+   Direct-run entry point: run the tortuosity pipeline per the module-level ``INPUT_PATH``/config block.
+
+

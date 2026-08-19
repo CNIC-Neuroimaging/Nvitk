@@ -1,0 +1,114 @@
+nvitk.cli.config
+================
+
+.. py:module:: nvitk.cli.config
+
+.. autoapi-nested-parse::
+
+   Defaults for module-level image-tool CLIs; overlays from ``.nvitk/sge.json``.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.cli.config.PIPELINE_ID
+   nvitk.cli.config.DEFAULT_CONTAINER
+   nvitk.cli.config.DEFAULT_MODELS
+   nvitk.cli.config.SGE_PROJECT
+   nvitk.cli.config.SGE_ACCOUNT
+   nvitk.cli.config.SGE_QUEUE
+   nvitk.cli.config.SGE_NGPU
+   nvitk.cli.config.SGE_H_VMEM
+   nvitk.cli.config.SGE_JOB_PREFIX
+   nvitk.cli.config.SGE_SCRIPTS_DIR
+   nvitk.cli.config.SGE_LOG_DIR
+   nvitk.cli.config.SGE_ERR_DIR
+   nvitk.cli.config.NVITK_SRC_DIR
+   nvitk.cli.config._paths
+   nvitk.cli.config._pipe
+   nvitk.cli.config.NVITK_SRC_DIR
+   nvitk.cli.config.DEFAULT_CONTAINER
+   nvitk.cli.config.DEFAULT_MODELS
+   nvitk.cli.config.SGE_PROJECT
+   nvitk.cli.config.SGE_ACCOUNT
+   nvitk.cli.config.SGE_QUEUE
+   nvitk.cli.config.SGE_NGPU
+   nvitk.cli.config.SGE_H_VMEM
+   nvitk.cli.config.SGE_JOB_PREFIX
+   nvitk.cli.config.SGE_SCRIPTS_DIR
+   nvitk.cli.config.SGE_SCRIPTS_DIR
+
+
+Module Contents
+---------------
+
+.. py:data:: PIPELINE_ID
+   :value: 'image_tools'
+
+
+.. py:data:: DEFAULT_CONTAINER
+
+.. py:data:: DEFAULT_MODELS
+
+.. py:data:: SGE_PROJECT
+   :value: 'GPU'
+
+
+.. py:data:: SGE_ACCOUNT
+   :value: 'Prod'
+
+
+.. py:data:: SGE_QUEUE
+   :type:  str | None
+   :value: None
+
+
+.. py:data:: SGE_NGPU
+   :value: 0
+
+
+.. py:data:: SGE_H_VMEM
+   :value: '32G'
+
+
+.. py:data:: SGE_JOB_PREFIX
+   :value: 'nvitk-tool'
+
+
+.. py:data:: SGE_SCRIPTS_DIR
+
+.. py:data:: SGE_LOG_DIR
+
+.. py:data:: SGE_ERR_DIR
+
+.. py:data:: NVITK_SRC_DIR
+
+.. py:data:: _paths
+
+.. py:data:: _pipe
+
+.. py:data:: NVITK_SRC_DIR
+
+.. py:data:: DEFAULT_CONTAINER
+
+.. py:data:: DEFAULT_MODELS
+
+.. py:data:: SGE_PROJECT
+
+.. py:data:: SGE_ACCOUNT
+
+.. py:data:: SGE_QUEUE
+
+.. py:data:: SGE_NGPU
+
+.. py:data:: SGE_H_VMEM
+
+.. py:data:: SGE_JOB_PREFIX
+
+.. py:data:: SGE_SCRIPTS_DIR
+
+.. py:data:: SGE_SCRIPTS_DIR
+

@@ -1,0 +1,180 @@
+nvitk.pipes.bbtpy.util.paths
+============================
+
+.. py:module:: nvitk.pipes.bbtpy.util.paths
+
+.. autoapi-nested-parse::
+
+   Path resolution for black-blood inputs and stage outputs (no qvtpy / pesa_fat imports).
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.paths._LEGACY_WARPED
+   nvitk.pipes.bbtpy.util.paths._LEGACY_MATRIX
+   nvitk.pipes.bbtpy.util.paths._LEGACY_BB_TO_TOF_WARPED
+   nvitk.pipes.bbtpy.util.paths._LEGACY_BB_TO_TOF_MAT
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.bbtpy.util.paths._stem_without_suffix
+   nvitk.pipes.bbtpy.util.paths.find_tof_resampled_volume
+   nvitk.pipes.bbtpy.util.paths.eicab_mask_resolution
+   nvitk.pipes.bbtpy.util.paths.eicab_mask_path
+   nvitk.pipes.bbtpy.util.paths.eicab_cw_mask_path
+   nvitk.pipes.bbtpy.util.paths.require_path
+   nvitk.pipes.bbtpy.util.paths.resolve_eicab_results_root
+   nvitk.pipes.bbtpy.util.paths.require_vwi_bb_rel_path
+   nvitk.pipes.bbtpy.util.paths.vwi_bb_path
+   nvitk.pipes.bbtpy.util.paths.wvi_path
+   nvitk.pipes.bbtpy.util.paths.require_wvi_rel_path
+   nvitk.pipes.bbtpy.util.paths.qvtpy_tof_path
+   nvitk.pipes.bbtpy.util.paths.eicab_subject_dir
+   nvitk.pipes.bbtpy.util.paths.tof_resampled_path
+   nvitk.pipes.bbtpy.util.paths.bbtpy_root
+   nvitk.pipes.bbtpy.util.paths.stage1_dir
+   nvitk.pipes.bbtpy.util.paths.stage2_dir
+   nvitk.pipes.bbtpy.util.paths.registration_meta_path
+   nvitk.pipes.bbtpy.util.paths.tof_warped_to_vwi_bb_path
+   nvitk.pipes.bbtpy.util.paths.registration_matrix_path
+   nvitk.pipes.bbtpy.util.paths.vwi_bb_warped_path
+   nvitk.pipes.bbtpy.util.paths.wvi_warped_path
+
+
+Module Contents
+---------------
+
+.. py:data:: _LEGACY_WARPED
+   :value: 'WVI_warped_to_tof.nii.gz'
+
+
+.. py:data:: _LEGACY_MATRIX
+   :value: 'wvi_to_tof.mat'
+
+
+.. py:data:: _LEGACY_BB_TO_TOF_WARPED
+   :value: 'vwi_bb_warped_to_tof.nii.gz'
+
+
+.. py:data:: _LEGACY_BB_TO_TOF_MAT
+   :value: 'vwi_bb_to_tof.mat'
+
+
+.. py:function:: _stem_without_suffix(p: pathlib.Path) -> str
+
+   NIfTI filename stem (strip ``.nii`` / ``.nii.gz``).
+
+
+.. py:function:: find_tof_resampled_volume(eicab_dir: pathlib.Path) -> pathlib.Path | None
+
+   Return eICAB ``TOF_resampled`` NIfTI under *eicab_dir*, or None.
+
+
+.. py:function:: eicab_mask_resolution(eicab_results_root: pathlib.Path, subject: str, *, eicab_mask: nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskKind = 'cw', eicab_subdir: str | None = None) -> nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskResolution
+
+   Resolve CW or WB eICAB multilabel under the subject eICAB output dir.
+
+
+.. py:function:: eicab_mask_path(eicab_results_root: pathlib.Path, subject: str, *, eicab_mask: nvitk.pipes.bbtpy.util.eicab_masks.EicabMaskKind = 'cw', eicab_subdir: str | None = None) -> pathlib.Path
+
+   Path to requested eICAB CW/WB mask (with fallback logging).
+
+
+.. py:function:: eicab_cw_mask_path(eicab_results_root: pathlib.Path, subject: str, *, eicab_subdir: str | None = None) -> pathlib.Path
+
+   Deprecated: use :func:`eicab_mask_path` with ``eicab_mask='cw'``.
+
+
+.. py:function:: require_path(value: pathlib.Path | None, name: str) -> pathlib.Path
+
+   Expand *value* and ensure the path exists; raise if unset or missing.
+
+
+.. py:function:: resolve_eicab_results_root(eicab_results_root: pathlib.Path | None) -> pathlib.Path
+
+   Default eICAB results root from config when *eicab_results_root* is None.
+
+
+.. py:function:: require_vwi_bb_rel_path(vwi_bb_rel: str | None) -> str
+
+   Non-empty relative path to vwi_bb under each subject NIfTI tree.
+
+
+.. py:function:: vwi_bb_path(nifti_root: pathlib.Path, subject: str, *, vwi_bb_rel: str | None = None) -> pathlib.Path
+
+   Native black-blood NIfTI for *subject* (fixed image for stage1 FLIRT).
+
+
+.. py:function:: wvi_path(nifti_root: pathlib.Path, subject: str, *, wvi_rel: str | None = None) -> pathlib.Path
+
+   Deprecated alias for :func:`vwi_bb_path`.
+
+
+.. py:function:: require_wvi_rel_path(wvi_rel: str | None) -> str
+
+   Deprecated alias for :func:`require_vwi_bb_rel_path`.
+
+
+.. py:function:: qvtpy_tof_path(qvtpy_nifti_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   qvtpy stage0 TOF magnitude (validation / QC).
+
+
+.. py:function:: eicab_subject_dir(eicab_results_root: pathlib.Path, subject: str, *, eicab_subdir: str | None = None) -> pathlib.Path
+
+   Per-subject eICAB output directory under *eicab_results_root*.
+
+
+.. py:function:: tof_resampled_path(eicab_results_root: pathlib.Path, subject: str, *, eicab_subdir: str | None = None) -> pathlib.Path
+
+   eICAB ``TOF_resampled`` NIfTI (moving image for stage1 FLIRT).
+
+
+.. py:function:: bbtpy_root(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   ``{output_root}/{subject}/bbtpy`` (pipeline outputs root).
+
+
+.. py:function:: stage1_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Stage1 registration directory for *subject*.
+
+
+.. py:function:: stage2_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Stage2 BB-space segmentation directory for *subject*.
+
+
+.. py:function:: registration_meta_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   JSON sidecar written after stage1 FLIRT.
+
+
+.. py:function:: tof_warped_to_vwi_bb_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   TOF_resampled warped into vwi_bb grid (QC / optional).
+
+
+.. py:function:: registration_matrix_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   FLIRT matrix mapping TOF_resampled (moving) → vwi_bb (fixed).
+
+
+.. py:function:: vwi_bb_warped_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Deprecated: old pipeline warped vwi_bb to TOF; use :func:`vwi_bb_path` for segmentation.
+
+
+.. py:function:: wvi_warped_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Deprecated alias for :func:`vwi_bb_warped_path`.
+
+

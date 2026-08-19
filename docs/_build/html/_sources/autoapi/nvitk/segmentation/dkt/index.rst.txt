@@ -1,0 +1,52 @@
+nvitk.segmentation.dkt
+======================
+
+.. py:module:: nvitk.segmentation.dkt
+
+.. autoapi-nested-parse::
+
+   Desikan-Killiany-Tourville cortical parcellation via ANTsPyNet.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.segmentation.dkt.APARC_PARCEL_OFFSETS
+   nvitk.segmentation.dkt.DKT_MISSING_PARCELS
+   nvitk.segmentation.dkt.APARC_LABELS
+   nvitk.segmentation.dkt.DKT_LABELS
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.dkt.desikan_killiany_tourville_labeling
+
+
+Module Contents
+---------------
+
+.. py:data:: APARC_PARCEL_OFFSETS
+   :type:  dict[int, str]
+
+.. py:data:: DKT_MISSING_PARCELS
+   :type:  frozenset[str]
+
+.. py:data:: APARC_LABELS
+   :type:  dict[int, str]
+
+.. py:data:: DKT_LABELS
+   :type:  dict[int, str]
+
+.. py:function:: desikan_killiany_tourville_labeling(image: nvitk.types.Image | numpy.ndarray, *, do_preprocessing: bool = True, do_lobar_parcellation: bool = False, do_denoising: bool = True, version: int = 0, verbose: bool = False) -> numpy.ndarray
+
+   ANTsPyNet Desikan-Killiany-Tourville (DKT) labeling on T1w MRI.
+
+   Returns the segmentation label map (probability maps are discarded).
+
+

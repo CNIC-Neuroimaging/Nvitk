@@ -1,0 +1,141 @@
+nvitk.io.brainshow
+==================
+
+.. py:module:: nvitk.io.brainshow
+
+.. autoapi-nested-parse::
+
+   Backward-compatible re-exports for brain visualization helpers.
+
+   Prefer importing from :mod:`nvitk.viz.brainshow`.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.io.brainshow.ResolvedAtlas
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.io.brainshow.brainshow
+   nvitk.io.brainshow.build_index_to_value
+   nvitk.io.brainshow.build_volume_stat_image
+   nvitk.io.brainshow.resolve_atlas
+
+
+Module Contents
+---------------
+
+.. py:class:: ResolvedAtlas
+
+   Unified atlas representation after resolving presets or user specs.
+
+
+   .. py:attribute:: flavor
+      :type:  Flavor
+
+
+   .. py:attribute:: index_to_label
+      :type:  dict[int, str]
+
+
+   .. py:attribute:: atlas_img
+      :type:  nibabel.nifti1.Nifti1Image | None
+      :value: None
+
+
+
+   .. py:attribute:: map_left
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: map_right
+      :type:  numpy.ndarray | None
+      :value: None
+
+
+
+   .. py:attribute:: surf_mesh
+      :type:  str
+      :value: 'fsaverage5'
+
+
+
+.. py:function:: brainshow(values: Any, *, atlas: AtlasLike, mode: Mode = 'surface', region_order: Sequence[Any] | None = None, labels: Sequence[Any] | None = None, hemisphere: Hemisphere = 'both', cmap: str = 'coolwarm', vmin: float | None = None, vmax: float | None = None, threshold: float | None = None, title: str | None = None, axes: Any | None = None, output_file: str | pathlib.Path | None = None, show: bool = True, atlas_kwargs: Mapping[str, Any] | None = None, plot_kwargs: Mapping[str, Any] | None = None) -> Any
+
+   Render brain regions colored by *values* on *atlas* using Nilearn.
+
+   :param values: Per-region numeric values: sequence aligned with ``region_order`` / ``labels``,
+                  or mapping from region label (str) or atlas index (int) -> float.
+   :param atlas: Preset name or mapping. Volume presets: ``destrieux_2009``, ``destrieux_vol``.
+                 Surface presets: ``destrieux_surface``, ``surf_destrieux``.
+                 Custom volume: ``{"kind": "volume", "maps": path_or_Nifti1Image, "labels": ...}``.
+   :param mode: ``surface`` (mesh / projected volume) or ``volume`` (glass brain / ortho stat map).
+   :param region_order: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                        ``region_order``.
+   :param labels: Explicit territory ordering for sequence *values*. ``labels`` is an alias of
+                  ``region_order``.
+   :param hemisphere: ``both``, ``left``, or ``right`` (masks volumetric painting by MNI x sign).
+   :param cmap: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmin: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param vmax: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param threshold: Passed to Nilearn plotting (threshold clipped against vmin/vmax when both set).
+   :param title: Figure title where supported.
+   :param axes: Optional matplotlib axes for volumetric ``plot_stat_map`` only.
+   :param output_file: Save figure path when supported by Nilearn.
+   :param show: Call matplotlib.pyplot.show() when True and backend allows.
+   :param atlas_kwargs: Extra kwargs for Nilearn fetch functions when using presets.
+   :param plot_kwargs: Additional kwargs forwarded to Nilearn plotting functions.
+
+   :returns: Nilearn figure handle(s); exact type depends on mode and atlas flavor.
+   :rtype: Figure or list
+
+   :raises ImportError: If Nilearn is not installed.
+   :raises ValidationError: If inputs are inconsistent with the atlas or mapping rules.
+
+
+.. py:function:: build_index_to_value(values: Any, *, region_order: Sequence[Any] | None, index_to_label: Mapping[int, str]) -> dict[int, float]
+
+   Turn *values* + *region_order* (or mapping *values*) into atlas index -> float.
+
+   Atlas indices follow the integer labels stored in the volume or surface parcel maps
+   (same convention as Nilearn Destrieux atlases).
+
+
+.. py:function:: build_volume_stat_image(atlas_img: nibabel.nifti1.Nifti1Image, index_to_value: Mapping[int, float], *, hemisphere: Hemisphere = 'both', background: float = np.nan) -> nibabel.nifti1.Nifti1Image
+
+   Paint voxel-wise stat map from integer atlas labels.
+
+
+.. py:function:: resolve_atlas(atlas: AtlasLike, atlas_kwargs: dict[str, Any] | None) -> ResolvedAtlas
+
+   Normalize *atlas* spec into :class:`ResolvedAtlas`.
+
+   Presets (volume): ``destrieux_2009``, ``destrieux_vol`` →
+   :func:`nilearn.datasets.fetch_atlas_destrieux_2009`.
+
+   Presets (surface): ``destrieux_surface``, ``surf_destrieux`` →
+   :func:`nilearn.datasets.fetch_atlas_surf_destrieux`.
+
+   Presets (located, not fetched): ``desikan`` / ``aparc`` →
+   :func:`resolve_atlas_preset_desikan`; ``vascular`` / ``arterial`` →
+   :func:`resolve_atlas_preset_vascular`. See :mod:`nvitk.viz.atlas_sources` for where they are
+   searched for.
+
+   Custom mapping atlas::
+
+       {"kind": "volume", "maps": path_or_img, "labels": {1: "L_MCA", ...}}
+       # labels optional; list[str] uses integer indices 0..n-1 as atlas IDs.
+
+   Aliases: ``kind`` may be omitted if ``maps`` is present (infer volume).
+
+

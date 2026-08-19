@@ -1,0 +1,358 @@
+nvitk.cluster.sge
+=================
+
+.. py:module:: nvitk.cluster.sge
+
+.. autoapi-nested-parse::
+
+   SGE + Singularity helpers shared across nvitk pipelines and segmentation CLIs.
+
+   Generalises the ``echo <singularity exec ...> | qsub ...`` pattern so each stage
+   (conversion, segmentation, post-processing, measurement) can be submitted as a
+   self-contained Singularity job on an SGE cluster.
+
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.cluster.sge.SingularityBinds
+   nvitk.cluster.sge.SgeResources
+   nvitk.cluster.sge.ClusterPaths
+   nvitk.cluster.sge.StageSpec
+   nvitk.cluster.sge.ArrayTaskSpec
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.cluster.sge.sge_virtual_gpu_resource_name
+   nvitk.cluster.sge.sge_project_uses_virtual_gpu_resource
+   nvitk.cluster.sge.sge_project_uses_xsgpu_resource
+   nvitk.cluster.sge.sge_project_omits_ngpu_request
+   nvitk.cluster.sge.qsub_l_resource_args
+   nvitk.cluster.sge.python_module_argv
+   nvitk.cluster.sge.python_script_argv
+   nvitk.cluster.sge.gui_sge_worker_script_path
+   nvitk.cluster.sge.gui_sge_worker_argv
+   nvitk.cluster.sge.build_singularity_command
+   nvitk.cluster.sge.build_qsub_command
+   nvitk.cluster.sge.build_array_worker_script
+   nvitk.cluster.sge.emit_array_job_block
+   nvitk.cluster.sge.submit_array_job
+   nvitk.cluster.sge.format_sge_submission_summary
+   nvitk.cluster.sge.emit_sge_submission_summary_to_terminal
+   nvitk.cluster.sge.format_sge_driver_script_variables
+   nvitk.cluster.sge.write_script_header
+   nvitk.cluster.sge.submit_stage
+   nvitk.cluster.sge.submit_host_stage
+   nvitk.cluster.sge.submit_chain
+
+
+Module Contents
+---------------
+
+.. py:function:: sge_virtual_gpu_resource_name(project: str | None) -> str | None
+
+   Virtual-GPU ``qsub -l`` resource for *project*, or ``None`` for classic ``ngpu``.
+
+   Projects whose ``-P`` name starts with ``L``, ``S``, or ``XS`` (e.g. ``LGPU``,
+   ``SGPU``, ``XSGPU``) use ``-l lgpu=0``, ``-l sgpu=0``, or ``-l xsgpu=0`` instead of
+   ``-l ngpu=…``. The original ``GPU`` / ``MCC_GPU`` projects keep ``-l ngpu``.
+
+
+.. py:function:: sge_project_uses_virtual_gpu_resource(project: str | None) -> bool
+
+   True when ``qsub`` must use ``-l lgpu|sgpu|xsgpu=0`` instead of ``-l ngpu``.
+
+
+.. py:function:: sge_project_uses_xsgpu_resource(project: str | None) -> bool
+
+   True when *project* is an XS* virtual-GPU queue (``-l xsgpu=0``).
+
+
+.. py:function:: sge_project_omits_ngpu_request(project: str | None) -> bool
+
+   Alias for :func:`sge_project_uses_virtual_gpu_resource`.
+
+
+.. py:function:: qsub_l_resource_args(resources: SgeResources) -> list[str]
+
+   ``qsub`` ``-l`` option pairs derived from *resources*.
+
+
+.. py:class:: SingularityBinds
+
+   Container bind-points used by cluster pipelines.
+
+
+   .. py:attribute:: src
+      :type:  str
+      :value: '/nvitk/src/'
+
+
+
+   .. py:attribute:: data
+      :type:  str
+      :value: '/nvitk/data/'
+
+
+
+   .. py:attribute:: output
+      :type:  str
+      :value: '/nvitk/output/'
+
+
+
+   .. py:attribute:: models
+      :type:  str
+      :value: '/models/'
+
+
+
+.. py:class:: SgeResources
+
+   SGE submission resources.
+
+
+   .. py:attribute:: project
+      :type:  str
+      :value: 'GPU'
+
+
+
+   .. py:attribute:: account
+      :type:  str
+      :value: 'Prod'
+
+
+
+   .. py:attribute:: ngpu
+      :type:  int
+      :value: 1
+
+
+
+   .. py:attribute:: h_vmem
+      :type:  str
+      :value: '50G'
+
+
+
+   .. py:attribute:: queue
+      :type:  str | None
+      :value: None
+
+
+
+   .. py:attribute:: pe_smp
+      :type:  int | None
+      :value: None
+
+
+
+.. py:class:: ClusterPaths
+
+   Host-side paths that must exist before submission.
+
+
+   .. py:attribute:: src
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: container
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: models
+      :type:  pathlib.Path | None
+
+
+   .. py:attribute:: data_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: output_root
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: log_dir
+      :type:  pathlib.Path
+
+
+   .. py:attribute:: err_dir
+      :type:  pathlib.Path
+
+
+   .. py:method:: ensure_dirs() -> None
+
+      Create the SGE stdout/stderr log directories for this run if they don't exist.
+
+
+
+.. py:class:: StageSpec
+
+   A single SGE-submitted pipeline stage.
+
+   ``python_cmd`` is the literal command run *inside* the Singularity
+   container. Host paths referenced inside the command must fall within the
+   bind mounts defined by :class:`ClusterPaths` and :class:`SingularityBinds`.
+
+
+   .. py:attribute:: job_name
+      :type:  str
+
+
+   .. py:attribute:: python_cmd
+      :type:  str
+
+
+   .. py:attribute:: resources
+      :type:  SgeResources
+
+
+   .. py:attribute:: binds
+      :type:  SingularityBinds
+
+
+   .. py:attribute:: extra_env
+      :type:  dict[str, str]
+
+
+   .. py:attribute:: use_nv
+      :type:  bool
+      :value: True
+
+
+
+   .. py:attribute:: extra_host_binds
+      :type:  tuple[tuple[pathlib.Path, str], Ellipsis]
+      :value: ()
+
+
+
+.. py:function:: python_module_argv(module: str, *, python: str = 'python') -> list[str]
+
+   Argv prefix for in-container workers: ``python -m <module>``.
+
+   Use with relative-import package modules (e.g. ``nvitk.pipes.qvtpy.stage0_convert``).
+   Requires ``PYTHONPATH`` to include the tree that contains the ``nvitk`` package
+   (typically ``/nvitk/src/`` via :class:`SingularityBinds`).
+
+
+.. py:function:: python_script_argv(script_path_in_container: str, *, python: str = 'python') -> list[str]
+
+   Argv prefix to run a ``.py`` file by absolute path inside the container.
+
+   Prefer this over :func:`python_module_argv` when the cluster image does not ship
+   optional subpackages (e.g. ``nvitk.gui.sge``) but the repo is bind-mounted at
+   ``SingularityBinds.src``. ``PYTHONPATH`` must still include that src root.
+
+
+.. py:function:: gui_sge_worker_script_path(binds: SingularityBinds | None = None) -> str
+
+   Absolute in-container path to :mod:`nvitk.gui.sge.worker` (bind-mounted source).
+
+
+.. py:function:: gui_sge_worker_argv(binds: SingularityBinds | None = None, *, python: str = 'python') -> list[str]
+
+   Argv prefix for the Napari GUI SGE headless worker.
+
+
+.. py:function:: build_singularity_command(spec: StageSpec, paths: ClusterPaths) -> str
+
+   Wrap ``spec.python_cmd`` in ``singularity exec`` with the standard binds.
+
+   Injects a small BLAS/OMP thread-cap preamble (``NSLOTS`` / ``NVITK_CPU_LIMIT``,
+   capped at 64) before ``extra_env`` exports so OpenBLAS/MKL never spawn
+   unbounded threads on fat SGE nodes (avoids known segfaults).
+
+
+.. py:function:: build_qsub_command(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None = None, array_tasks: int | None = None, task_concurrency: int | None = None) -> list[str]
+
+   Build the ``qsub`` argv for *spec*.
+
+   When *array_tasks* is set, emit ``-t 1-N`` (and optional ``-tc``) with
+   per-task log/err paths using SGE's ``$TASK_ID``.
+
+
+.. py:class:: ArrayTaskSpec
+
+   One task inside an SGE array job (``SGE_TASK_ID`` maps 1-based to order).
+
+
+   .. py:attribute:: stage_id
+      :type:  str
+
+
+   .. py:attribute:: shell_cmd
+      :type:  str
+
+
+.. py:function:: build_array_worker_script(tasks: Sequence[ArrayTaskSpec], *, marker_dir: pathlib.Path | str, marker_wait_timeout_sec: int = 1800) -> str
+
+   Bash worker body for ``qsub -t``: dispatch by ``SGE_TASK_ID`` with done-markers.
+
+   Task ``k`` waits for ``${JOB_ID}.(k-1).done`` before running (except task 1).
+   With ``-tc 1`` the predecessor has already left the queue when task ``k``
+   starts, so the wait is only for NFS/marker visibility — not the predecessor
+   runtime. An ``EXIT`` trap always writes a marker when possible; ``SIGKILL``
+   (OOM killer) cannot run the trap, so the wait has a hard timeout to avoid
+   sleeping forever with empty logs.
+
+
+.. py:function:: emit_array_job_block(emit: TextIO, *, job_name: str, resources: SgeResources, paths: ClusterPaths, tasks: Sequence[ArrayTaskSpec], marker_dir: pathlib.Path | str, task_concurrency: int = 1, use_nv: bool = True, hold_jid: str | Sequence[str] | None = None) -> str
+
+   Emit one ``qsub -t 1-N -tc …`` block; return shell ``$jid_…`` reference.
+
+   *hold_jid* is applied to the whole array (classic ``-hold_jid``), e.g. so a
+   per-subject stage0 job completes before the stage1–3 array starts.
+
+
+.. py:function:: submit_array_job(*, job_name: str, resources: SgeResources, paths: ClusterPaths, tasks: Sequence[ArrayTaskSpec], marker_dir: pathlib.Path | str, task_concurrency: int = 1, use_nv: bool = True, hold_jid: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   Submit or emit one SGE array job; return jid (or ``$jid_…`` / ``DRY_RUN``).
+
+
+.. py:function:: format_sge_submission_summary(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None, qsub_argv: Sequence[str], singularity_cmd: str, max_singularity_chars: int = 4000) -> str
+
+   Human-readable lines for logging (qsub argv, resources, bind mounts).
+
+
+.. py:function:: emit_sge_submission_summary_to_terminal(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None, qsub_argv: Sequence[str], singularity_cmd: str) -> None
+
+   Print :func:`format_sge_submission_summary` to stderr unless silenced.
+
+
+.. py:function:: format_sge_driver_script_variables(script_text: str, script_path: pathlib.Path | None = None) -> str
+
+   Extract ``log_dir`` / ``err_dir`` / first ``qsub_*=(…)`` flags for terminal echo.
+
+
+.. py:function:: write_script_header(emit: TextIO, *, log_dir: pathlib.Path, err_dir: pathlib.Path, title: str, extra_dirs: Sequence[pathlib.Path] | None = None) -> None
+
+   Write the common preamble for an emitted submission script.
+
+
+.. py:function:: submit_stage(spec: StageSpec, paths: ClusterPaths, *, hold_jid: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   Submit *spec* to SGE by piping the Singularity command into ``qsub``.
+
+
+.. py:function:: submit_host_stage(spec: StageSpec, paths: ClusterPaths, host_shell_cmd: str, *, hold_jid: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   Submit *host_shell_cmd* to SGE directly (no outer ``singularity exec`` wrapper).
+
+   Use when the job must invoke ``singularity run`` on the cluster host itself
+   (e.g. eICAB inference), avoiding nested Singularity inside a pipeline container.
+
+
+.. py:function:: submit_chain(stages: Iterable[StageSpec], paths: ClusterPaths, *, base_hold: str | Sequence[str] | None = None, dry_run: bool = False, emit: TextIO | None = None) -> list[str]
+
+   Submit a linear chain of *stages* for a single subject.
+
+

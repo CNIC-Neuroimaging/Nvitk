@@ -1,0 +1,65 @@
+nvitk.pipes.qvtpy.util.eicab.morpho_paths
+=========================================
+
+.. py:module:: nvitk.pipes.qvtpy.util.eicab.morpho_paths
+
+.. autoapi-nested-parse::
+
+   Path helpers for qvtpy stage-7 TOF morphometrics.
+
+   Resolves inputs and outputs from :mod:`nvitk.pipes.qvtpy.config` layout:
+
+   - eICAB masks: ``<output_root>/<subject>/eicab/``
+   - stage-7 products: ``<output_root>/<subject>/qvtpy/stage7_morphometrics/``
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.EicabMaskPreference
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.STAGE7_SKIP_MARKER
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.eicab_dir
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.stage7_dir
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.stage7_excel_path
+   nvitk.pipes.qvtpy.util.eicab.morpho_paths.resolve_stage7_seg_mask
+
+
+Module Contents
+---------------
+
+.. py:data:: EicabMaskPreference
+
+.. py:data:: STAGE7_SKIP_MARKER
+   :value: 'case_metrics_donut_tree.xlsx'
+
+
+.. py:function:: eicab_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Directory containing eICAB NIfTI outputs for *subject*.
+
+
+.. py:function:: stage7_dir(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Stage-7 morphometrics output directory for *subject*.
+
+
+.. py:function:: stage7_excel_path(output_root: pathlib.Path, subject: str) -> pathlib.Path
+
+   Path to the stage-7 skip-marker / primary metrics workbook.
+
+
+.. py:function:: resolve_stage7_seg_mask(output_root: pathlib.Path, subject: str, *, preference: EicabMaskPreference = 'wb', prefer_postprocessed: bool = True) -> nvitk.pipes.qvtpy.util.eicab.eicab_masks.EicabMaskResolution
+
+   Return the eICAB multilabel mask used as stage-7 morphometrics input.
+
+

@@ -1,0 +1,175 @@
+nvitk.gui.viz.hemo_plot_panel
+=============================
+
+.. py:module:: nvitk.gui.viz.hemo_plot_panel
+
+.. autoapi-nested-parse::
+
+   Docked interactive PITC / PWV diagnostic plots.
+
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.hemo_plot_panel.DOCK_OBJECT_NAME
+
+
+Classes
+-------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.hemo_plot_panel.HemodynamicsPlotPanel
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.gui.viz.hemo_plot_panel.attach_hemodynamics_plot_dock
+   nvitk.gui.viz.hemo_plot_panel.show_hemodynamics_plot
+
+
+Module Contents
+---------------
+
+.. py:data:: DOCK_OBJECT_NAME
+   :value: 'nvitk_hemodynamics_plot_dock'
+
+
+.. py:class:: HemodynamicsPlotPanel(parent: qtpy.QtWidgets.QWidget | None = None)
+
+   Bases: :py:obj:`qtpy.QtWidgets.QWidget`
+
+
+   Interactive Matplotlib panel for PITC / PWV / Bjornfoot figures.
+
+
+   .. py:attribute:: _title
+
+
+   .. py:attribute:: _canvas
+      :value: None
+
+
+
+   .. py:attribute:: _toolbar
+      :value: None
+
+
+
+   .. py:attribute:: _fig
+      :value: None
+
+
+
+   .. py:attribute:: _region_plot_data
+      :type:  dict[str, dict[str, Any]]
+
+
+   .. py:attribute:: _saved_plot_paths
+      :type:  dict[str, Any]
+
+
+   .. py:attribute:: _station_layer
+      :type:  Any | None
+      :value: None
+
+
+
+   .. py:attribute:: _auto_limits
+      :type:  tuple[float, float] | None
+      :value: None
+
+
+
+   .. py:attribute:: _plot_selector
+
+
+   .. py:attribute:: _color_label
+
+
+   .. py:attribute:: _color_selector
+
+
+   .. py:attribute:: _cmap_selector
+
+
+   .. py:attribute:: _auto_range
+
+
+   .. py:attribute:: _vmin
+
+
+   .. py:attribute:: _vmax
+
+
+   .. py:attribute:: _show_legend
+
+
+   .. py:method:: _set_range_widgets_enabled(enabled: bool) -> None
+
+      Enable/disable the manual vmin/vmax spin boxes.
+
+
+
+   .. py:method:: _on_auto_range_toggled(checked: bool) -> None
+
+      When auto-range is enabled, disable the manual spin boxes and snap them to the last
+      computed auto limits; re-applies station coloring either way.
+
+
+
+   .. py:method:: bind_station_layer(layer: Any | None, *, mode: str = 'hemo', default_feature: str | None = None, default_cmap: str | None = None) -> None
+
+      Attach the stations Points layer and populate coloring controls.
+
+
+
+   .. py:method:: _apply_station_colors(_index: int | None = None) -> None
+
+      Recolor the bound stations layer by the selected feature/colormap/range, updating the
+      auto-range limits and spin-box values from the result.
+
+
+
+   .. py:method:: show_plot(region_plot_data: dict[str, dict[str, Any]], *, mode: str = 'hemo', initial_plot: str = 'pitc', saved_plot_paths: dict[str, Any] | None = None) -> None
+
+      Render a live measurement figure with zoom/pan controls.
+
+
+
+   .. py:method:: _show_saved_png(kind: str, label: str) -> bool
+
+      Display a stage-6 PNG when interactive arrays are unavailable.
+
+
+
+   .. py:method:: _has_interactive_arrays(kind: str) -> bool
+
+      True if any loaded region has the array data needed to draw *kind* (``"pitc"`` needs
+      ``distance_mm``; PWV/Bjornfoot need ``pwv_distance_mm``) interactively rather than from a
+      saved static figure.
+
+
+
+   .. py:method:: _render_current_plot(_index: int | None = None) -> None
+
+      Render the selected PITC, PWV, or Bjornfoot QC figure.
+
+
+
+.. py:function:: attach_hemodynamics_plot_dock(viewer: Any, panel: HemodynamicsPlotPanel, *, mode: str = 'hemo') -> Any
+
+   Attach or replace the hemodynamics plot dock on the left.
+
+
+.. py:function:: show_hemodynamics_plot(viewer: Any, region_plot_data: dict[str, dict[str, Any]], *, mode: str = 'hemo', station_layer: Any | None = None, default_face_key: str | None = None, initial_plot: str = 'pitc', saved_plot_paths: dict[str, Any] | None = None) -> Any
+
+   Generate and show the merged PITC/PWV diagnostics dock.
+
+

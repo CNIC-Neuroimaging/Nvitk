@@ -1,0 +1,39 @@
+nvitk.segmentation.total_segmentator.sge_stage
+==============================================
+
+.. py:module:: nvitk.segmentation.total_segmentator.sge_stage
+
+.. autoapi-nested-parse::
+
+   Submit TotalSegmentator on SGE using PESA-Fat :class:`StageSpec` (emit script or qsub).
+
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.total_segmentator.sge_stage.build_inference_python_cmd
+   nvitk.segmentation.total_segmentator.sge_stage.to_pesa_cluster_paths
+   nvitk.segmentation.total_segmentator.sge_stage.submit_totalsegmentator_stage
+
+
+Module Contents
+---------------
+
+.. py:function:: build_inference_python_cmd(job: nvitk.segmentation.total_segmentator.cluster.SegmentationJob, paths: nvitk.segmentation.total_segmentator.cluster.ClusterPaths, binds: nvitk.cluster.sge.SingularityBinds) -> str
+
+   ``bash`` wrapper command executed inside the outer Singularity image.
+
+
+.. py:function:: to_pesa_cluster_paths(paths: nvitk.segmentation.total_segmentator.cluster.ClusterPaths) -> nvitk.cluster.sge.ClusterPaths
+
+   Adapt TotalSegmentator :class:`ClusterPaths` to the PESA pipeline's path bundle.
+
+
+.. py:function:: submit_totalsegmentator_stage(job: nvitk.segmentation.total_segmentator.cluster.SegmentationJob, paths: nvitk.segmentation.total_segmentator.cluster.ClusterPaths, *, resources: nvitk.cluster.sge.SgeResources, hold_jid: str | None = None, dry_run: bool = False, emit: TextIO | None = None) -> str
+
+   One TotalSegmentator qsub stage (or emit a bash block).
+
+

@@ -1,0 +1,58 @@
+nvitk.segmentation.eicab
+========================
+
+.. py:module:: nvitk.segmentation.eicab
+
+.. autoapi-nested-parse::
+
+   eICAB Circle-of-Willis / TOF segmentation (local + SGE).
+
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/nvitk/segmentation/eicab/cli/index
+   /autoapi/nvitk/segmentation/eicab/cluster/index
+   /autoapi/nvitk/segmentation/eicab/config/index
+   /autoapi/nvitk/segmentation/eicab/cpu_limit_runner/index
+   /autoapi/nvitk/segmentation/eicab/run_job/index
+   /autoapi/nvitk/segmentation/eicab/runner/index
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   nvitk.segmentation.eicab.prune_eicab_outputs
+   nvitk.segmentation.eicab.run_eicab
+   nvitk.segmentation.eicab.segmentation_outputs_to_keep
+
+
+Package Contents
+----------------
+
+.. py:function:: prune_eicab_outputs(out_dir: pathlib.Path, *, keep_aux_outputs: bool, keep_paths: Iterable[pathlib.Path] | None = None) -> None
+
+   Drop auxiliary folders/files unless *keep_aux_outputs* is True.
+
+
+.. py:function:: run_eicab(input_nii: str | pathlib.Path, output_dir: str | pathlib.Path, *, resolution: float = 0.625, simple_segmentation: bool = False, attention: bool = False, device: str = 'cpu', container: str | pathlib.Path, tmp_dir: str | pathlib.Path, keep_aux_outputs: bool = False, vasculature_host_path: str | pathlib.Path | None = None, check: bool = True, capture_output: bool = True) -> subprocess.CompletedProcess[str]
+
+   Run eICAB via ``singularity run`` (same contract as legacy BioImaging).
+
+   *vasculature_host_path* should be the **host** directory bind-mounted to
+   ``/programs/Neuro/vasculature2`` (see ``run_eicab_inference.sh``). When
+   omitted and the path does not exist, the vasculature bind is skipped (only
+   sensible for debugging).
+
+
+.. py:function:: segmentation_outputs_to_keep(out_dir: pathlib.Path) -> list[pathlib.Path]
+
+   Pick CoW, whole-brain, and ``*_resampled`` NIfTIs; drop other intermediates.
+
+
