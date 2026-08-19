@@ -14,7 +14,13 @@ from typing import Any
 
 from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import get_global_backend, using, setup
-from nvitk.gui.core.backend import gpu_enabled, layer_data_for_tool, napari_array, run_with_backend
+from nvitk.gui.core.backend import (
+    gpu_enabled,
+    layer_data_for_tool,
+    napari_array,
+    napari_label_array,
+    run_with_backend,
+)
 from nvitk.gui.core.log_panel import gui_log, run_subprocess_logged
 from nvitk.gui.core.spatial import (
     align_mask_to_reference_layer,
@@ -191,13 +197,24 @@ def _label_ids_array(label_ids: list[int]) -> np.ndarray:
     return to_numpy(label_ids)
 
 
-def _skeletonize_input_and_labels(
+def _multilabel_input_and_labels(
     layer: Any,
     *,
     target_mode: str,
     label_ids: list[int] | None,
+    what: str = "this tool",
 ) -> tuple[Any, list[int]]:
-    """Multilabel mask + label ids for skeletonize (preserve per-vessel ids in output)."""
+    """
+    The selected labels as a **multilabel** array plus their ids, for label-preserving tools.
+
+    Deliberately bypasses :func:`prepare_layer_data`, which reduces a selection to its binary union
+    and so destroys exactly the information a per-label tool needs.
+
+    Reads through :func:`~nvitk.gui.labels.visibility.label_source_data` rather than ``layer.data``:
+    the live label-visibility filter zeroes unselected labels *in the layer's own array* for Image
+    masks, so a tool reading ``layer.data`` would silently operate on whatever the user last chose
+    to look at.
+    """
     from nvitk.gui.labels.visibility import label_source_data
 
     src = as_backend_array(label_source_data(layer))
@@ -208,13 +225,113 @@ def _skeletonize_input_and_labels(
     mode = target_mode.strip().lower()
     if mode == "label":
         if not label_ids:
-            raise ValueError("Select at least one label for skeletonize.")
+            raise ValueError(f"Select at least one label for {what}.")
         labels = [int(x) for x in label_ids]
         src_np = to_numpy(src)
         work = np.where(np.isin(src_np, _label_ids_array(labels)), src_np, 0)
         return as_backend_array(work), labels
 
     return src, all_labels
+
+
+def _skeletonize_input_and_labels(
+    layer: Any,
+    *,
+    target_mode: str,
+    label_ids: list[int] | None,
+) -> tuple[Any, list[int]]:
+    """Multilabel mask + label ids for skeletonize (preserve per-vessel ids in output)."""
+    return _multilabel_input_and_labels(
+        layer, target_mode=target_mode, label_ids=label_ids, what="skeletonize"
+    )
+
+
+def multilabel_selection(
+    layer: Any, *, spec: Any, target_mode: str, label_ids: list[int] | None
+) -> list[int]:
+    """
+    Label ids a per-label run should iterate, or ``[]`` when the ordinary binary path applies.
+
+    Per-label routing is only *different* from the ordinary path when there is more than one label
+    in play — with a single label the two agree exactly, and taking the plain path there keeps the
+    long-standing behaviour of every binary tool byte-identical.
+
+    Shared with :mod:`nvitk.gui.sge.submit`, which stages the same decision for the cluster.
+    """
+    if spec is None or not getattr(spec, "multilabel", False):
+        return []
+    mode = str(target_mode).strip().lower()
+    if mode == "label":
+        ids = [int(x) for x in (label_ids or [])]
+    elif mode == "all_labels":
+        from nvitk.gui.labels.visibility import label_source_data
+
+        ids = [int(x) for x in (label_ids or [])] or _unique_labels(
+            as_backend_array(label_source_data(layer))
+        )
+    else:
+        return []
+    return ids if len(ids) > 1 else []
+
+
+def _run_multilabel(
+    tool_id: str,
+    layer: Any,
+    viewer: Any,
+    *,
+    label_ids: list[int],
+    params: dict[str, Any],
+) -> np.ndarray:
+    """
+    Run *tool_id* once per label and recombine, keeping the original ids.
+
+    The per-label run is a plain single-label invocation of the same dispatcher, so the operation a
+    label sees here is *exactly* the one it would see if it were the only label selected — there is
+    no second implementation of any tool to keep in step with the first.
+
+    Ordering: earlier ids in *label_ids* win where two results overlap, matching
+    :func:`~nvitk.segmentation.labels.apply_per_label`'s ``overlap="first"``. Inputs are disjoint by
+    construction; outputs need not be — a dilation of two adjacent labels overlaps by design.
+    """
+    from nvitk.gui.labels.visibility import label_source_data
+
+    source = to_numpy(as_backend_array(label_source_data(layer)))
+    out = np.zeros(source.shape, dtype=_multilabel_dtype(source, label_ids))
+    claimed = np.zeros(source.shape, dtype=bool)
+
+    for label in label_ids:
+        result = run_gui_tool(
+            tool_id, layer, viewer, target_mode="label", label_ids=[int(label)], params=params
+        )
+        if result is None:
+            continue
+        kept = to_numpy(result) != 0
+        if kept.shape != source.shape:
+            raise ValueError(
+                f"{tool_id} returned shape {tuple(kept.shape)} for label {label}, but the layer is "
+                f"{tuple(source.shape)}. Per-label runs need a shape-preserving tool."
+            )
+        kept &= ~claimed
+        out[kept] = int(label)
+        claimed |= kept
+
+    gui_log(
+        f"{tool_id}: ran per label over {len(label_ids)} label(s) "
+        f"({', '.join(str(i) for i in label_ids)}); output keeps the input's ids."
+    )
+    return out
+
+
+def _multilabel_dtype(source: np.ndarray, label_ids: list[int]) -> Any:
+    """Integer dtype for a recombined per-label output — the input's own, else the smallest that fits."""
+    import numpy as numpy_host  # module ``np`` may be a CuPy proxy via ``setup(globals())``
+
+    if numpy_host.issubdtype(source.dtype, numpy_host.integer):
+        return source.dtype
+    top = max((abs(int(v)) for v in label_ids), default=0)
+    if top <= 255:
+        return numpy_host.uint8
+    return numpy_host.uint16 if top <= 65535 else numpy_host.int32
 
 
 def prepare_layer_data(
@@ -257,6 +374,11 @@ def prepare_layer_data(
 def coerce_tool_output(out: Any) -> np.ndarray:
     """Napari-safe NumPy output (never implicit CuPy → NumPy conversion)."""
     return napari_array(out)
+
+
+def coerce_label_output(out: Any) -> np.ndarray:
+    """Napari-safe output for a **label map** — keeps the integer dtype the ids live in."""
+    return napari_label_array(out)
 
 
 def _morph_common(img: Image, op: str, params: dict[str, Any]) -> np.ndarray:
@@ -553,9 +675,21 @@ def run_gui_tool(
         if not gpu_enabled():
             work = as_backend_array(to_numpy(work))
         with using(bk):
-            return coerce_tool_output(
+            # ``skeletonize_labeled`` already paints the ids back, so this is a label map and must
+            # keep its integer dtype rather than being cast to float like an intensity result.
+            return coerce_label_output(
                 skeletonize_labeled(work, labels=labels, min_points=1)
             )
+
+    # ---- Per-label routing --------------------------------------------------------------------
+    # A multi-label selection on a per-label tool runs the tool once on each label and recombines,
+    # so the output carries the same parcellation the input did. Placed here so it is decided before
+    # ``prepare_layer_data`` collapses the selection into its binary union.
+    per_label = multilabel_selection(
+        layer, spec=spec, target_mode=target_mode, label_ids=label_ids
+    )
+    if per_label:
+        return _run_multilabel(tool_id, layer, viewer, label_ids=per_label, params=params)
 
     if tool_id in _MEASURE_NOTIFY:
         per_label_ids = label_ids

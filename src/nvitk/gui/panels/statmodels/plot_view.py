@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSplitter,
     QVBoxLayout,
@@ -42,6 +43,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
+from nvitk.gui.core.flow_layout import FlowRow
 
 from .constants import AXIS_SLIDER_MARGIN, AXIS_SLIDER_STEPS
 from .theme import COLOR_ERROR, muted_label_style, whiten_figure
@@ -91,12 +93,13 @@ class PlotPanel(QGroupBox):
 
         # Options supplied by the window (plot mode / x / points) sit on one compact row with the
         # figure picker, so plot controls live next to the plot instead of in the formulation box.
-        self._top_row = QWidget()
-        top_lay = QHBoxLayout(self._top_row)
-        top_lay.setContentsMargins(0, 0, 0, 0)
-        top_lay.setSpacing(6)
-        self._options_slot = QHBoxLayout()
-        top_lay.addLayout(self._options_slot, stretch=1)
+        # A *flow* layout, not a horizontal one. This row carries a dozen-plus controls, and a
+        # QHBoxLayout's minimum width is their sum — which Qt propagates up as the window's minimum,
+        # so the window could not be resized below ~2600 px and ran off any normal display. Wrapping
+        # makes the minimum the widest single control instead.
+        self._top_row = FlowRow()
+        top_lay = self._top_row.flow()
+        self._options_slot = top_lay
 
         self._kind_row = QWidget()
         kind_lay = QHBoxLayout(self._kind_row)
@@ -116,6 +119,15 @@ class PlotPanel(QGroupBox):
         self._btn_export.clicked.connect(lambda *_: self.exportRequested.emit())
         top_lay.addWidget(self._btn_export)
         lay.addWidget(self._top_row)
+
+        # A second row for the controls that belong to one display rather than to every plot — the
+        # anatomical maps' atlas / surface / view pickers. Kept separate rather than appended to the
+        # row above so those controls stay together and in a predictable place instead of reflowing
+        # into whatever gap the first row happens to leave.
+        self._map_row = FlowRow()
+        self._map_slot = self._map_row.flow()
+        self._map_row.setVisible(False)
+        lay.addWidget(self._map_row)
 
         self._status = QLabel("")
         self._status.setWordWrap(True)
@@ -250,6 +262,18 @@ class PlotPanel(QGroupBox):
         """Place the window's plot-option controls on the pane's top row."""
         self._options_slot.addWidget(widget)
 
+    def set_map_options_widget(self, widget: QWidget) -> None:
+        """Place the display-specific controls on the pane's second row."""
+        self._map_slot.addWidget(widget)
+
+    def set_map_options_visible(self, visible: bool) -> None:
+        """Show or hide the second options row."""
+        self._map_row.setVisible(bool(visible))
+        # Controls inside the row are shown and hidden with the display, which changes how many
+        # lines it wraps onto — re-measure so the row's height follows.
+        self._map_row.refresh()
+        self._top_row.refresh()
+
     def set_groups_visible(self, visible: bool) -> None:
         """Show or hide the group checklist (it only applies to grouped model plots)."""
         self._groups_box.setVisible(bool(visible))
@@ -359,6 +383,10 @@ class PlotPanel(QGroupBox):
             return
         whiten_figure(fig)
         canvas = FigureCanvasQTAgg(fig)
+        # Without this the canvas insists on the figure's own inch size and the pane grows past the
+        # window rather than the figure shrinking into it.
+        canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        canvas.setMinimumSize(120, 120)
         self._host_layout.addWidget(canvas)
         self._canvas = canvas
         self._fig = fig
@@ -438,12 +466,18 @@ class PlotPanel(QGroupBox):
         Skipped when the figure already carries a layout engine of its own (``constrained``, which
         some plots set because they re-flow on every draw) — calling ``tight_layout`` on top of one
         of those fights it and matplotlib warns.
+
+        Also skipped for 3-D axes. ``tight_layout`` has no notion of a projected axes' true extent,
+        so on the brain map it warns once per panel and then lays the figure out worse than the
+        plotter already had — the surface panels are sized by the plotter itself.
         """
         try:
             if fig.get_layout_engine() is not None:
                 return
         except AttributeError:  # matplotlib < 3.6 has no layout-engine API
             pass
+        if any(hasattr(ax, "get_proj") for ax in fig.axes):
+            return
         try:
             fig.tight_layout()
         except Exception as exc:

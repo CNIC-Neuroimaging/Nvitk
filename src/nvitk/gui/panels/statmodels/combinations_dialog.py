@@ -43,6 +43,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.geometry import fit_dialog
 from nvitk.core.logger import Logger
 from nvitk.stats.region_algebra import (
     COMBINE_MODES,
@@ -78,7 +79,7 @@ class RegionCombinationsDialog(QDialog):
         """Build the editor, seeded from *combinations*."""
         super().__init__(parent)
         self.setWindowTitle("Region combinations")
-        self.setMinimumSize(880, 620)
+        fit_dialog(self, 880, 620)
         self._frame = frame
         self._combinations = [c for c in combinations]
         self._region_column = region_column if region_column in frame.columns else "territory"

@@ -223,11 +223,148 @@ _PARCEL_PANEL: dict[str, str] = {
     parcel: panel for panel, parcels in DESIKAN_LOBES.items() for parcel in parcels
 }
 
+#: Aggregate levels the ASL / T1 pipelines publish **alongside** the parcels they pool:
+#: ``ctx-Left-Frontal-Lobe``, ``ctx-left-hemisphere``, ``ctx-whole-brain``. They are the pipeline's
+#: own summaries, not extra anatomy, so they map to the panel they summarize rather than falling
+#: through to ``Other``.
+_AGGREGATE_PANEL: dict[str, str] = {
+    "frontal_lobe": "Frontal",
+    "parietal_lobe": "Parietal",
+    "temporal_lobe": "Temporal",
+    "occipital_lobe": "Occipital",
+    "cingulate_lobe": "Cingulate",
+    "insula_lobe": "Insula",
+    "anterior_cingulate": "Cingulate",
+    "posterior_cingulate": "Cingulate",
+    "whole_brain": "Whole Brain",
+    "hemisphere": "Whole Brain",
+    "brain": "Whole Brain",
+}
+
+# ---------------------------------------------------------------------------
+# Granularity
+# ---------------------------------------------------------------------------
+#: How coarse a published region id is. The ASL and T1 tables publish several of these *in the same
+#: column*, which is the whole reason this exists: ``ctx-lh-precuneus``, ``ctx-Left-Frontal-Lobe``
+#: and ``ctx-whole-brain`` are all valid ``region_id`` values, and a model that treats them as
+#: sibling levels of one factor is fitting a parcel against a sum that already contains it.
+GRANULARITY_PARCEL = "parcel"
+GRANULARITY_LOBE = "lobe"
+GRANULARITY_HEMISPHERE = "hemisphere"
+GRANULARITY_WHOLE = "whole"
+
+#: Coarse → fine, so a caller can ask for "no coarser than X".
+GRANULARITY_ORDER: tuple[str, ...] = (
+    GRANULARITY_WHOLE, GRANULARITY_HEMISPHERE, GRANULARITY_LOBE, GRANULARITY_PARCEL,
+)
+
+_WHOLE_TOKENS: frozenset[str] = frozenset({"whole_brain", "brain", "wholebrain"})
+_HEMISPHERE_TOKENS: frozenset[str] = frozenset({"hemisphere", "hemi"})
+
+
+def region_granularity(level: object) -> str:
+    """
+    How coarse *level* is — ``parcel`` / ``lobe`` / ``hemisphere`` / ``whole``.
+
+    Only the aggregates are detected by name; everything else is a parcel, which is the right
+    default because an unrecognised id is far more likely to be a parcellation this function has
+    never heard of than a summary of one.
+
+    Examples
+    --------
+    >>> region_granularity("ctx-lh-precuneus")
+    'parcel'
+    >>> region_granularity("ctx-Left-Frontal-Lobe")
+    'lobe'
+    >>> region_granularity("ctx_left_hemisphere"), region_granularity("ctx-whole-brain")
+    ('hemisphere', 'whole')
+    """
+    token = _normalize(level)
+    if not token:
+        return GRANULARITY_PARCEL
+    stem = _SIDE_SUFFIX_RE.sub("", _SIDE_PREFIX_RE.sub("", token))
+    # ``ctx_whole_brain`` keeps a bare ``ctx_`` that the side regex leaves behind.
+    stem = re.sub(r"^ctx_", "", stem)
+    if stem in _WHOLE_TOKENS:
+        return GRANULARITY_WHOLE
+    if stem in _HEMISPHERE_TOKENS:
+        return GRANULARITY_HEMISPHERE
+    if stem.endswith("_lobe") or stem in _AGGREGATE_PANEL:
+        # ``anterior_cingulate`` pools two parcels the way a lobe does, so it is a lobe-level
+        # summary even though its published name does not say "lobe".
+        return GRANULARITY_LOBE
+    return GRANULARITY_PARCEL
+
+
+#: Side token → the word used in a lateralized lobe label.
+_SIDE_WORD: dict[str, str] = {
+    "lh": "Left", "left": "Left", "l": "Left",
+    "rh": "Right", "right": "Right", "r": "Right",
+}
+
+
+def region_side(level: object) -> str:
+    """
+    ``"Left"`` / ``"Right"`` / ``""`` for a published region id.
+
+    Reads the side token wherever it sits — ``ctx-lh-precuneus``, ``left_precuneus``,
+    ``ctx-Left-Frontal-Lobe`` and ``precuneus_lh`` all answer the same. ``""`` for anything
+    bilateral (``ctx_bh_insula``) or midline, which is the honest answer: those genuinely have no
+    side, and inventing one would put a bilateral mean on half a brain.
+    """
+    token = _normalize(level)
+    if not token:
+        return ""
+    match = _SIDE_PREFIX_RE.match(token)
+    if match:
+        return _SIDE_WORD.get(match.group(0).replace("ctx_", "").strip("_"), "")
+    match = _SIDE_SUFFIX_RE.search(token)
+    if match:
+        return _SIDE_WORD.get(match.group(0).strip("_"), "")
+    return ""
+
+
+def region_lobe_key(level: object) -> str:
+    """
+    Lobe a region belongs to, **keeping its side** — ``Left Frontal``, ``Right Parietal``.
+
+    Different from :func:`region_display_panel`, which deliberately drops the side: that one groups
+    levels into *panels* for small multiples, where the left and right curves of one lobe belong on
+    the same axes. As a grouping key the side has to survive, because a lobe analysis that averages
+    the two hemispheres together cannot answer a lateralized question at all — and hemispheric
+    asymmetry is most of what a lobe-level perfusion or volumetry analysis is looking for.
+
+    Falls back to the bare panel name when the region carries no side, so bilateral and midline
+    structures keep one level rather than being duplicated onto both.
+
+    Examples
+    --------
+    >>> region_lobe_key("ctx-lh-superiorfrontal"), region_lobe_key("ctx-Right-Parietal-Lobe")
+    ('Left Frontal', 'Right Parietal')
+    >>> region_lobe_key("ctx_bh_insula")
+    'Insula'
+    """
+    panel = region_display_panel(level)
+    if not panel:
+        return PANEL_OTHER
+    side = region_side(level)
+    return f"{side} {panel}" if side else panel
+
+
+def split_by_granularity(levels: "Iterable[object]") -> dict[str, list[str]]:
+    """Group *levels* by :func:`region_granularity`, preserving order within each class."""
+    out: dict[str, list[str]] = {g: [] for g in GRANULARITY_ORDER}
+    for level in levels:
+        out.setdefault(region_granularity(level), []).append(str(level))
+    return {k: v for k, v in out.items() if v}
+
 # ASL parcels carry the smoothing kernel as a trailing "_0"/"_8"; T1/Desikan parcels carry a
 # hemisphere prefix. Neither is anatomy, so both are stripped before any lookup.
 _KERNEL_SUFFIX_RE = re.compile(r"_(?:0|8)$")
-_SIDE_PREFIX_RE = re.compile(r"^(?:ctx_)?(?:lh|rh|left|right|l|r)_")
-_SIDE_SUFFIX_RE = re.compile(r"_(?:lh|rh|left|right)$")
+# ``bh`` is ASL's bilateral parcel prefix (``ctx_bh_insula``) — a side token like any other,
+# and without it a bilateral parcel resolves to no lobe at all.
+_SIDE_PREFIX_RE = re.compile(r"^(?:ctx_)?(?:lh|rh|bh|left|right|l|r)_")
+_SIDE_SUFFIX_RE = re.compile(r"_(?:lh|rh|bh|left|right)$")
 _NUMERIC_CHUNK_RE = re.compile(r"(\d+)")
 
 
@@ -251,7 +388,8 @@ def region_display_panel(level: str) -> str | None:
     2. watershed parcels, which have no feeding vessel of their own;
     3. the 4D-flow vessel table, side prefixes included (``left_ica`` → carotids);
     4. hemisphere-melted keys, which carry no side (``MCA`` → anterior circulation);
-    5. Desikan / aseg parcels by lobe, after stripping the hemisphere prefix.
+    5. published aggregates (``ctx-Left-Frontal-Lobe``, ``ctx-whole-brain``);
+    6. Desikan / aseg parcels by lobe, after stripping the hemisphere prefix.
 
     Examples
     --------
@@ -302,7 +440,17 @@ def region_display_panel(level: str) -> str | None:
         if panel:
             return panel
 
-    # ---- 5. Cortical / subcortical parcels by lobe -------------------------------
+    # ---- 5. Published aggregates (``ctx-Left-Frontal-Lobe``, ``ctx-whole-brain``) -
+    # Before the parcel table, because an aggregate's name contains no parcel to match on and
+    # would otherwise fall through to ``Other`` — putting a pipeline's own lobe summary in the
+    # panel that is not the lobe it summarizes.
+    bare = re.sub(r"^ctx_", "", sideless)
+    for candidate in (bare, sideless):
+        panel = _AGGREGATE_PANEL.get(candidate)
+        if panel:
+            return panel
+
+    # ---- 6. Cortical / subcortical parcels by lobe -------------------------------
     for candidate in (sideless, sideless.replace("_", "")):
         panel = _PARCEL_PANEL.get(candidate)
         if panel:
@@ -436,6 +584,11 @@ def panel_summary(panels: Mapping[str, list[str]]) -> str:
 
 __all__ = [
     "DESIKAN_LOBES",
+    "GRANULARITY_HEMISPHERE",
+    "GRANULARITY_LOBE",
+    "GRANULARITY_ORDER",
+    "GRANULARITY_PARCEL",
+    "GRANULARITY_WHOLE",
     "LOBE_PANELS",
     "PANEL_ORDER",
     "PANEL_OTHER",
@@ -445,5 +598,9 @@ __all__ = [
     "panel_grid",
     "panel_summary",
     "region_display_panel",
+    "region_granularity",
+    "region_lobe_key",
+    "region_side",
     "resolve_panels",
+    "split_by_granularity",
 ]

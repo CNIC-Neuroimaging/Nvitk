@@ -36,7 +36,17 @@ KIND_MODALITY: dict[str, str] = {
 }
 
 # Vessel-wise LOC hemodynamics (per branch / LOC).
-QVTPY_VESSEL_FEATURES: tuple[str, ...] = ("flow_mean", "pi", "ri")
+QVTPY_VESSEL_FEATURES: tuple[str, ...] = ("flow_mean", "pi", "ri", "psf", "flow_tseries")
+
+#: Variables stored one row per cardiac frame rather than one row per vessel. They load as a *set*
+#: of columns — ``flow_tseries``, ``flow_tseries_f1``, … — because the waveform is the measurement;
+#: averaging it back to a scalar just recomputes ``flow_mean``.
+TIMESERIES_FEATURES: frozenset[str] = frozenset({"flow_tseries"})
+
+
+def is_timeseries_feature(variable_id: str) -> bool:
+    """Whether *variable_id* is stored per cardiac frame (see :data:`TIMESERIES_FEATURES`)."""
+    return resolve_feature_id(variable_id) in TIMESERIES_FEATURES
 # Tree-level hemodynamics (per arterial root: L_ICA / R_ICA / Basilar).
 QVTPY_TREE_FEATURES: tuple[str, ...] = (
     "pwv",
@@ -177,8 +187,12 @@ def grouping_choices_for(kind: str, variable_id: str) -> list[tuple[str, str]]:
             ("Vascular territory (shared with ASL)", "territory"),
         ]
     if kind == "asl":
+        # ``lobe`` is offered for the Desikan atlas and is a real reduction in multiplicity
+        # (68 parcels → 8 lobes). The pipeline publishes its own lobe rows, so this grouping uses
+        # those rather than re-averaging parcels — see ``_select_region_granularity``.
         return [
             ("Atlas region", "region"),
+            ("By lobe (Desikan; uses the published lobe rows)", "lobe"),
             ("By hemisphere (MCA / ACA / PCA / ICA / Basilar)", "hemisphere"),
             ("Vascular territory (shared with 4D flow)", "territory"),
         ]
@@ -375,9 +389,11 @@ def assign_group_key(
             return t1_region_to_hemisphere_pair_key(rid)
         return region_to_hemisphere_pair_key(rid)
     if grouping == "lobe":
-        from nvitk.stats.region_groups import region_display_panel
+        # Side-qualified: a lobe grouping that averages the two hemispheres together cannot answer
+        # a lateralized question, and asymmetry is most of what a lobe-level analysis looks for.
+        from nvitk.stats.region_groups import region_lobe_key
 
-        return region_display_panel(rid) or "Other"
+        return region_lobe_key(rid)
     if grouping == "territory":
         from nvitk.stats._vessel_territory_map import (
             REGION_TO_TERRITORY_FLOW,
@@ -692,6 +708,75 @@ def _composite_rows(long: pd.DataFrame, name: str, *, value_column: str = "value
 # ──────────────────────────────────────────────────────────────────────────────
 # Analysis-frame building blocks
 # ──────────────────────────────────────────────────────────────────────────────
+#: Which published granularity each grouping wants — see :func:`_select_region_granularity`.
+_GROUPING_GRANULARITY: dict[str, str] = {
+    "region": "parcel",
+    "vessel": "parcel",
+    "tree": "parcel",
+    "lobe": "lobe",
+    "hemisphere": "hemisphere",
+    # A vascular territory is the mean of the parcels inside it. Averaging the parcels *and* the
+    # whole-brain summary that contains them weights the summary as though it were one more parcel.
+    "territory": "parcel",
+}
+
+
+def _select_region_granularity(
+    long: pd.DataFrame,
+    *,
+    grouping: str,
+    variable_id: str,
+    explicit_regions: bool,
+) -> pd.DataFrame:
+    """
+    Keep one granularity of published region, so an aggregate never sits beside its own members.
+
+    The ASL and T1 tables publish several granularities in the same ``region_id`` column:
+    ``ctx-lh-precuneus`` (a parcel), ``ctx-Left-Parietal-Lobe`` (the lobe that contains it),
+    ``ctx-left-hemisphere`` and ``ctx-whole-brain``. Loading all of them as levels of one factor
+    means a model compares a parcel against a sum it is part of, and the brain map paints a lobe on
+    top of the parcels it pools — both wrong, and neither announces itself.
+
+    So the grouping decides the granularity:
+
+    ``region`` / ``vessel``
+        parcels only — the finest level, and what "atlas region" means.
+    ``lobe`` / ``hemisphere``
+        the **published** aggregate when the pipeline provides one, because that is the pipeline's
+        own volume-weighted summary; parcels re-averaged unweighted are a different (worse) number.
+        Falls back to deriving from parcels when no aggregate row exists.
+    ``territory``
+        parcels, because a territory is the mean of the parcels inside it — pooling the parcels
+        *and* the whole-brain summary that contains them weights that summary as one more parcel.
+
+    An explicit ``regions=`` filter always wins — naming an id is an unambiguous request for it.
+    """
+    from nvitk.stats.region_groups import region_granularity
+
+    wanted = _GROUPING_GRANULARITY.get(str(grouping).strip().lower())
+    if wanted is None or explicit_regions or long.empty:
+        return long
+
+    granularity = long["region_id"].astype(str).map(region_granularity)
+    counts = granularity.value_counts().to_dict()
+    if len(counts) <= 1:
+        return long
+
+    keep_class = wanted if counts.get(wanted) else "parcel"
+    kept = long.loc[granularity == keep_class].copy()
+    if kept.empty:
+        return long
+
+    dropped = {k: v for k, v in counts.items() if k != keep_class}
+    log.info(
+        "%s: %d published region id(s) are %s-level; keeping those for grouping=%r and dropping "
+        "%s. A parcel and a sum containing it cannot be levels of the same factor.",
+        variable_id, len(kept["region_id"].unique()), keep_class, grouping,
+        ", ".join(f"{n} {k}" for k, n in sorted(dropped.items())),
+    )
+    return kept
+
+
 def build_feature_territory_frame(
     repo: Any,
     *,
@@ -846,6 +931,11 @@ def build_feature_territory_frame(
             variable_id, len(matched), len(source_region_ids), ", ".join(matched[:8]),
         )
 
+    # ---- Granularity: never mix a parcel with a sum that already contains it --------------------
+    long = _select_region_granularity(
+        long, grouping=grouping, variable_id=variable_id, explicit_regions=bool(regions)
+    )
+
     long["territory"] = [
         assign_group_key(
             rid, grouping=grouping, kind=kind, variable_id=variable_id
@@ -859,6 +949,29 @@ def build_feature_territory_frame(
         is_composite = long["region_id"].isin(composite_names)
         long.loc[is_composite, "territory"] = long.loc[is_composite, "region_id"]
     long["modality_group"] = kind
+
+    # A time-resolved variable becomes one column per cardiac frame; collapsing it into a single
+    # number would reproduce ``flow_mean`` and throw away the waveform that made it worth loading.
+    if is_timeseries_feature(variable_id) and "frame_index" in long.columns:
+        from nvitk.stats._hemodynamic_frames import aggregate_territory_frames, frame_columns
+
+        wide = aggregate_territory_frames(long, variable_id, agg=agg)
+        out_col = str(column or variable_id)
+        if out_col != variable_id:
+            wide = wide.rename(
+                columns={
+                    name: name.replace(variable_id, out_col, 1)
+                    for name in frame_columns(wide, variable_id)
+                }
+            )
+        n_frames = len(frame_columns(wide, out_col))
+        log.info(
+            "%s: %d cardiac frame(s) loaded as %s … %s.",
+            variable_id, n_frames, out_col, f"{out_col}_f{n_frames - 1}" if n_frames > 1 else out_col,
+        )
+        wide.attrs["region_ids"] = source_region_ids
+        wide.attrs["frame_columns"] = frame_columns(wide, out_col)
+        return wide
 
     wide = aggregate_territory_measurements(long, [variable_id], agg=agg)
     out_col = str(column or variable_id)

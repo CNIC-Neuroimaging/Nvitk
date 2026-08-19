@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
+from nvitk.gui.core.geometry import fit_dialog
 from nvitk.stats.distribution_plots import column_panels_static, column_plot_static
 from nvitk.stats.interactive import (
     COLUMN_FACET_MODES,
@@ -43,7 +44,7 @@ from nvitk.stats.interactive import (
     column_plot,
 )
 
-from .plotly_view import PlotlyView
+from .figure_host import FigureHostMixin
 from .theme import muted_label_style
 
 log = Logger()
@@ -58,7 +59,7 @@ _MAX_SPLIT_LEVELS: int = 24
 _MAX_PANEL_LEVELS: int = 60
 
 
-class ColumnPlotDialog(QDialog):
+class ColumnPlotDialog(FigureHostMixin, QDialog):
     """
     Interactive distribution of one column, optionally split by another.
 
@@ -78,7 +79,7 @@ class ColumnPlotDialog(QDialog):
         """Build the controls and draw the first figure."""
         super().__init__(parent)
         self.setWindowTitle(f"Distribution — {column}")
-        self.setMinimumSize(900, 640)
+        fit_dialog(self, 900, 640)
         # Non-modal, and it owns its own lifetime so closing it does not disturb the main window.
         self.setWindowFlag(Qt.Window, True)
         self.setModal(False)
@@ -173,16 +174,8 @@ class ColumnPlotDialog(QDialog):
         self._status.setStyleSheet(muted_label_style())
         lay.addWidget(self._status)
 
-        self._view = PlotlyView()
-        lay.addWidget(self._view, stretch=1)
         # The static backend gets its own canvas host, swapped in and out beside the web view.
-        self._static_host = QWidget()
-        self._static_layout = QVBoxLayout(self._static_host)
-        self._static_layout.setContentsMargins(0, 0, 0, 0)
-        self._static_canvas = None
-        self._static_figure = None
-        lay.addWidget(self._static_host, stretch=1)
-        self._static_host.setVisible(False)
+        self._build_figure_host(lay)
         self._sync_split_choices()
         preferred_mode = self._facet_mode.findData("split")
         if preferred_mode >= 0 and self._split.count() > 1:
@@ -191,45 +184,6 @@ class ColumnPlotDialog(QDialog):
             self._facet_mode.blockSignals(False)
         self._on_mode_changed()
 
-
-    # ---- backends -------------------------------------------------------------
-    def _show_interactive(self, figure: Any) -> None:
-        """Hand a Plotly figure to the web view and hide the static canvas."""
-        self._clear_static()
-        self._static_host.setVisible(False)
-        self._view.setVisible(True)
-        self._view.show_figure(figure)
-
-    def _show_static(self, figure: Any) -> None:
-        """Embed a Matplotlib figure and hide the web view."""
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-
-        from .theme import whiten_figure
-
-        self._clear_static()
-        whiten_figure(figure)
-        canvas = FigureCanvasQTAgg(figure)
-        self._static_layout.addWidget(canvas)
-        self._static_canvas, self._static_figure = canvas, figure
-        canvas.draw_idle()
-        self._view.setVisible(False)
-        self._static_host.setVisible(True)
-
-    def _clear_static(self) -> None:
-        """Drop the current Matplotlib canvas and release its figure."""
-        while self._static_layout.count():
-            item = self._static_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        if self._static_figure is not None:
-            try:
-                import matplotlib.pyplot as plt
-
-                plt.close(self._static_figure)
-            except Exception as exc:
-                log.debug("Could not close the previous figure: %s", exc)
-        self._static_canvas = self._static_figure = None
 
     # ---- columns --------------------------------------------------------------
     def _plottable_columns(self) -> list[str]:

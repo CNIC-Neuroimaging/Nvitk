@@ -50,7 +50,11 @@ from nvitk.stats import (
     grouping_choices_for,
     resolve_feature_id,
 )
-from nvitk.stats._statmodels_frames import COMPOSITE_DEFINITIONS, composites_for
+from nvitk.stats._statmodels_frames import (
+    COMPOSITE_DEFINITIONS,
+    composites_for,
+    is_timeseries_feature,
+)
 from nvitk.stats.frame_ops import IDENTIFIER_RE
 
 from .constants import (
@@ -278,7 +282,14 @@ class MeasurementForm(QWidget):
         kind = self._current_kind()
         vid = resolve_feature_id(self._current_feature())
         if kind == PIPELINE_KIND_QVTPY:
-            if vid in {"pwv", "pwv_fielding_xcor", "pitc_slope", "pitc_intercept"}:
+            if is_timeseries_feature(vid):
+                self._hint.setText(
+                    "Time-resolved flow: loads one column per cardiac frame — flow_tseries, "
+                    "flow_tseries_f1 … — rather than a single number, since averaging the "
+                    "waveform back just reproduces flow_mean.\n"
+                    "Right-click a subject_uid cell to play the cycle on the vascular map."
+                )
+            elif vid in {"pwv", "pwv_fielding_xcor", "pitc_slope", "pitc_intercept"}:
                 self._hint.setText(
                     "Tree metrics: one value per arterial root (L_ICA / R_ICA / Basilar). "
                     "Hemisphere grouping averages L/R ICA and keeps Basilar."

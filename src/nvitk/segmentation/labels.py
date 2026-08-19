@@ -8,14 +8,17 @@ or a raw array, and return a new :class:`Image` when the input was an
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from nvitk.core import as_backend_array
 from nvitk.core.array import to_numpy
 from nvitk.core.backend import get_current_backend, setup
+from nvitk.core.logger import Logger
 from nvitk.types import Image
 
 setup(globals())
+
+log = Logger()
 
 
 def _as_array(img: Image | Any) -> Any:
@@ -212,6 +215,124 @@ def percentile_cc(
     return _wrap_like(mask, out)
 
 
+# ---------------------------------------------------------------------------
+# Per-label application
+# ---------------------------------------------------------------------------
+def _label_dtype(source: Any, labels: Sequence[int]) -> Any:
+    """
+    Smallest integer dtype that can hold every id in *labels*.
+
+    An integer input keeps its own dtype — a mask stored as ``int32`` should not silently narrow
+    to ``uint8`` just because its ids happen to be small, since callers key layers and lookup
+    tables off it. Same rule as :func:`~nvitk.morphology.centerline.skeletonize_labeled`.
+    """
+    dtype = getattr(source, "dtype", None)
+    if dtype is not None and np.issubdtype(dtype, np.integer):
+        return dtype
+    top = max((abs(int(v)) for v in labels), default=0)
+    if top <= 255:
+        return np.uint8
+    return np.uint16 if top <= 65535 else np.int32
+
+
+def apply_per_label(
+    label_img: Image | Any,
+    op: Any,
+    *,
+    label_ids: Sequence[int] | None = None,
+    dtype: Any = None,
+    overlap: str = "first",
+) -> Image | Any:
+    """
+    Run a **binary** operation independently on each label and recombine, preserving the ids.
+
+    Why
+    ---
+    A binary operation applied to the union of several labels answers a different question from
+    the same operation applied to each of them. Connected components over ``{1, 3}`` fused into
+    one mask reports one component where two labels touch, and drops the smaller label entirely
+    when they do not; a dilation grows each label into its neighbour and erases the boundary
+    between them. Running per label and painting the ids back keeps the parcellation the caller
+    started with, which is almost always what a multi-label selection means.
+
+    Parameters
+    ----------
+    label_img : Image or array
+        Integer label volume. Zero is background.
+    op : callable
+        ``op(binary) -> binary``, where *binary* is this function's own per-label mask, wrapped as
+        an :class:`~nvitk.types.Image` when *label_img* was one so the operation keeps its spacing
+        and affine. Anything non-zero in the result is taken as foreground.
+    label_ids : sequence of int, optional
+        Labels to operate on, in the order they are applied. ``None`` uses every non-zero label.
+        **Labels not named here are copied through untouched** — an operation on a selection must
+        not delete the parts of the volume it was not asked about.
+    dtype : optional
+        Output dtype. Defaults to the input's own integer dtype, else the smallest that holds
+        every id.
+    overlap : {"first", "last"}
+        Which label wins where two results cover the same voxel — the inputs are disjoint but the
+        outputs need not be (a dilation of two adjacent labels overlaps by construction).
+        ``"first"`` keeps the earlier label in *label_ids* order, ``"last"`` the later one.
+        Made explicit because the alternative is an ordering-dependent result that looks like a
+        bug the first time two labels touch.
+
+    Returns
+    -------
+    Image or array
+        Same kind as *label_img*, never a view of it.
+
+    Examples
+    --------
+    >>> from nvitk.morphology.components import keep_largest_components
+    >>> cleaned = apply_per_label(          # doctest: +SKIP
+    ...     labels, lambda m: keep_largest_components(m, n=1), label_ids=[1, 3]
+    ... )
+    """
+    overlap = str(overlap).strip().lower()
+    if overlap not in {"first", "last"}:
+        raise ValueError(f"overlap must be 'first' or 'last', not {overlap!r}.")
+
+    arr = _as_array(label_img)
+    if label_ids is None:
+        ids = [int(v) for v in np.unique(arr) if int(v) != 0]
+    else:
+        ids = [int(v) for v in label_ids if int(v) != 0]
+    if not ids:
+        raise ValueError("apply_per_label needs at least one non-zero label to operate on.")
+
+    out_dtype = dtype if dtype is not None else _label_dtype(arr, ids)
+    selected = np.isin(arr, as_backend_array(ids))
+
+    # Unselected labels pass through: the caller asked about a subset, not for the rest to vanish.
+    out = np.where(selected, 0, arr).astype(out_dtype, copy=True)
+    # Tracks what the operation has already claimed, so ``overlap`` is decided here rather than by
+    # whichever label happened to be written last.
+    claimed = np.zeros(arr.shape, dtype=bool)
+
+    for label in ids:
+        region = arr == label
+        if not bool(region.any()):
+            log.debug("apply_per_label: label %d has no voxels — skipped.", label)
+            continue
+        result = op(_wrap_like(label_img, region))
+        kept = _as_array(result) != 0
+        if kept.shape != arr.shape:
+            raise ValueError(
+                f"The operation returned shape {tuple(kept.shape)} for label {label}, but the "
+                f"label volume is {tuple(arr.shape)}. Per-label application needs a shape-"
+                f"preserving operation — resampling and cropping have to run on the whole volume."
+            )
+        if overlap == "first":
+            kept = kept & ~claimed
+        # Boolean assignment rather than ``np.where``: it writes in place at the output dtype and
+        # works identically on NumPy and CuPy, with no host round-trip for the fill value.
+        out[kept] = label
+        claimed |= kept
+
+    return _wrap_like(label_img, out)
+
+
 def adjust_masks(
     mask1: Image | Any,
     mask2: Image | Any,
@@ -263,6 +384,7 @@ __all__ = [
     "combine_labels",
     "remove_labels",
     "append_labels",
+    "apply_per_label",
     "biggest_cc",
     "percentile_cc",
     "adjust_masks",

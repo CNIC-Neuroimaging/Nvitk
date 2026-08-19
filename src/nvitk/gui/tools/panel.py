@@ -1039,7 +1039,12 @@ def build_tool_panel(
             and tuple(result.shape) == tuple(layer.data.shape)
         )
         result_arr = np.asarray(result)
-        as_labels = tool_id == "seg_blood_flood" and (
+        # A parcellation belongs in a Labels layer, not an Image one: an Image layer renders label
+        # ids as intensities and gives no per-label colour, visibility or picking. The runtime test
+        # stays — a per-label tool run on a single label legitimately returns a binary mask, which
+        # is an Image result like any other.
+        label_output = tool_id == "seg_blood_flood" or bool(spec and spec.multilabel)
+        as_labels = label_output and (
             np.issubdtype(result_arr.dtype, np.integer)
             and int(result_arr.max(initial=0)) > 1
         )

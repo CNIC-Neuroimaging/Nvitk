@@ -1077,6 +1077,72 @@ def bifurcation_conservation_error(
         return float((parent - float(branches.sum())) / parent)
 
 
+#: Default proximal window (mm) for :func:`proximal_station_mask`. Roughly the length of an
+#: M1 / A1 / P1 trunk, so the along-segment CV of a branched territory is read where the vessel
+#: is a single clean tube rather than where it is about to divide.
+PROXIMAL_SEGMENT_MM: float = 15.0
+
+
+def proximal_station_mask(
+    distance_mm: Any, *, window_mm: float = PROXIMAL_SEGMENT_MM, min_stations: int = 3
+) -> np.ndarray:
+    """
+    Stations lying within *window_mm* of a vessel's own proximal end.
+
+    Rationale
+    ---------
+    Along-segment flow consistency assumes a single non-branching tube. Even after the
+    bifurcation arms are dropped, the *distal* end of a trunk is the worst-behaved part of it:
+    the lumen flares into the bifurcation, partial volume grows, and the cross-section planes
+    start to cut the daughter vessels obliquely. Those stations inflate the CV without saying
+    anything about the segmentation of the vessel itself, so a QC statistic about the trunk is
+    better read over its proximal portion.
+
+    Parameters
+    ----------
+    distance_mm : array-like
+        Arc length of each station, in mm, along the centerline. Order is irrelevant — the
+        window is taken **relative to the minimum**, because pipeline arc lengths are usually
+        cumulative over a whole vessel tree and their absolute value carries the upstream root's
+        length rather than anything about this vessel.
+    window_mm : float
+        Width of the proximal window in mm. Non-finite or non-positive disables the window.
+    min_stations : int
+        Never narrow below this many stations. Three is the floor
+        :func:`segment_flow_consistency_cv` needs to return a number at all, and a window that
+        silently produces ``NaN`` reads downstream as "not measured" rather than "window too
+        tight" — a false negative in a QC check, which is the expensive direction.
+
+    Returns
+    -------
+    numpy.ndarray of bool
+        One flag per station. **All-True** when the window is disabled, when every station
+        already falls inside it, or when applying it would leave fewer than *min_stations* —
+        so the caller can detect the fallback by comparing the count against the window itself.
+
+    Examples
+    --------
+    >>> proximal_station_mask([100.0, 105.0, 110.0, 130.0], window_mm=15.0)
+    array([ True,  True,  True, False])
+    """
+    with using("cpu"):
+        values = to_numpy(as_backend_array(distance_mm)).astype(float).reshape(-1)
+        keep_all = np.ones(values.shape, dtype=bool)
+        window = float(window_mm)
+        if not math.isfinite(window) or window <= 0.0:
+            return keep_all
+
+        finite = np.isfinite(values)
+        if not finite.any():
+            return keep_all
+
+        origin = float(values[finite].min())
+        mask = finite & (values <= origin + window)
+        if int(mask.sum()) < int(min_stations):
+            return keep_all
+        return mask
+
+
 def segment_flow_consistency_cv(flow_per_cycle_stations: Any) -> float:
     """
     Coefficient of variation of time-averaged flow along one non-branching segment.
@@ -1339,7 +1405,9 @@ __all__ = [
     "FLOW_PLAUSIBILITY_EXEMPT",
     "FLOW_PLAUSIBILITY_ML_MIN",
     "HYPOPLASIA_DIAM_MM",
+    "PROXIMAL_SEGMENT_MM",
     "SEGMENT_CV_TOL",
+    "proximal_station_mask",
     "anterior_posterior_share_pct",
     "anterior_posterior_split_flag",
     "bifurcation_conservation_error",

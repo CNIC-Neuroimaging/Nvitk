@@ -46,27 +46,30 @@ def skeletonize_labeled(
     arr = as_backend_array(mask)
     if arr.ndim not in (2, 3):
         raise ValidationError("skeletonize_labeled expects a 2D or 3D mask.")
+    # Everything below works on host arrays (``arr_np`` and the skimage skeleton), so it uses the
+    # ``_np`` alias throughout: under the CuPy backend the module-level ``np`` is the CuPy proxy,
+    # and handing it a NumPy array raises rather than falling back.
     arr_np = to_numpy(arr)
-    labs = labels or sorted(int(v) for v in np.unique(arr_np) if int(v) != 0)
+    labs = labels or sorted(int(v) for v in _np.unique(arr_np) if int(v) != 0)
     if not labs:
         raise ValidationError("skeletonize_labeled: mask has no non-zero labels.")
 
-    if np.issubdtype(arr_np.dtype, np.integer):
+    if _np.issubdtype(arr_np.dtype, _np.integer):
         out_dtype = arr_np.dtype
     else:
         max_lab = max(labs)
-        out_dtype = np.uint8 if max_lab <= 255 else (np.uint16 if max_lab <= 65535 else np.int32)
+        out_dtype = _np.uint8 if max_lab <= 255 else (_np.uint16 if max_lab <= 65535 else _np.int32)
 
-    out = np.zeros(arr_np.shape, dtype=out_dtype)
+    out = _np.zeros(arr_np.shape, dtype=out_dtype)
     for lbl in labs:
         roi = arr_np == int(lbl)
-        if not np.any(roi):
+        if not _np.any(roi):
             continue
         sk = to_numpy(skeletonize_binary(roi)) > 0
         if int(sk.sum()) < int(min_points):
             continue
         out[sk] = int(lbl)
-    if not bool(np.any(out)):
+    if not bool(_np.any(out)):
         raise ValidationError("skeletonize_labeled: no skeleton voxels produced.")
     return as_backend_array(out)
 
@@ -234,12 +237,17 @@ def _prefer_coverage_cost(
     """Mean squared distance from each prefer point to the nearest path voxel."""
     if not path or prefer_points.size == 0:
         return float("inf")
-    path_arr = to_numpy(path).astype(np.float64)
-    prefs = to_numpy(prefer_points).astype(np.float64).reshape(-1, 3)
+    # ``to_numpy`` gives host arrays, so the reductions below go through the ``_np`` alias rather
+    # than the module-level ``np`` (a CuPy proxy under the GPU backend). CuPy's handling of a NumPy
+    # argument is not uniform — ``sum``/``min`` fall back to NumPy, ``any``/``argwhere`` raise, and
+    # ``unique``/``zeros_like`` silently return a *device* array — so which functions happen to be
+    # safe is not something to encode by omission. Host data, host namespace.
+    path_arr = to_numpy(path).astype(_np.float64)
+    prefs = to_numpy(prefer_points).astype(_np.float64).reshape(-1, 3)
     total = 0.0
     for p in prefs:
-        d2 = np.sum((path_arr - p.reshape(1, 3)) ** 2, axis=1)
-        total += float(np.min(d2))
+        d2 = _np.sum((path_arr - p.reshape(1, 3)) ** 2, axis=1)
+        total += float(_np.min(d2))
     return total / float(prefs.shape[0])
 
 

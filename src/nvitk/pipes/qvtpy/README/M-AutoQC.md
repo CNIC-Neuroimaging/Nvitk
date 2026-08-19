@@ -211,7 +211,8 @@ different units (0.03 here ⇔ 3 % there).
 |---|---|
 | **Source** | station flows (`flow_mean_ml_s`) from stage 6's `pitc_profile.csv` |
 | **Grouping** | one CV **per individual vessel**, not per tree |
-| **Stations used** | that vessel's **main path only** — bifurcation arms excluded |
+| **Stations used** | that vessel's **main path only** — bifurcation arms excluded — and, for ACA / MCA / PCA, only its **proximal segment** |
+| **Proximal window** | `segment_cv_proximal_mm = 15.0` mm, `--segment-cv-proximal-mm`; applies to `SEGMENT_CV_PROXIMAL_NODES` only. `0` uses the whole trunk |
 | **Vessels** | every vessel the profile carries: L/R ICA, L/R VA, basilar, and the L/R ACA / MCA / PCA trunks. `SEGMENT_CV_EXCLUDED_NODES` (empty by default) holds anything to skip |
 | **Minimum** | 3 finite stations; otherwise NaN |
 | **Tolerance** | `SEGMENT_CV_TOL = 0.25` ⚠️ |
@@ -221,7 +222,7 @@ drifted, partial volume ate the lumen, or a side branch was missed. The QVT vali
 along-segment percent variation with SD ≈ 3 %, so 0.25 is a soft review gate (≈ 8× that scatter), not
 a physiological limit.
 
-### Per vessel, and main path only — why
+### Per vessel, main path only, and proximal only — why
 
 **Per vessel, not per tree.** Every station in `pitc_profile.csv` is tagged with the root tree it
 feeds (`L_ICA`, `R_ICA`, `Basilar`), but a tree spans several vessels *and the bifurcation between
@@ -241,8 +242,38 @@ past each bifurcation, so the CV would measure the branching, not the segmentati
 `is_main_path_station` accepts either the canonical trunk name or the bare vessel name — so a
 profile written before branch naming still resolves — and never accepts an `-M2a` / `-b2` suffix.
 
+**Proximal segment only, for ACA / MCA / PCA.** Dropping the arms is necessary but not sufficient.
+The trunk that survives runs all the way *into* the bifurcation, and its last stations sit where the
+lumen flares, partial volume grows, and the sampling planes begin cutting the daughter vessels
+obliquely. Those stations move the flow without saying anything about how well the vessel was
+segmented — which is the only thing this check is meant to report. So for the branched territories
+the CV is read over the first `segment_cv_proximal_mm` of the trunk:
+
+| Vessel kind | Window |
+|---|---|
+| ACA / MCA / PCA (`SEGMENT_CV_PROXIMAL_NODES`) | first 15 mm of the trunk — roughly A1 / M1 / P1 |
+| ICA / VA / basilar | whole trunk |
+
+The unbranched vessels are deliberately excluded: an ICA or the basilar is one clean tube over its
+whole sampled length, so narrowing the window there would discard good stations and make the CV
+*noisier*, not cleaner.
+
+The window is measured **relative to each vessel's own proximal station**, not from an absolute arc
+length — `distance_mm` in `pitc_profile.csv` is cumulative over the whole tree, so an `LMCA-M1`
+station's absolute value carries the left ICA's length in front of it. `proximal_station_mask`
+(in `nvitk.measure.hemodynamics`) does the selection and falls back to the whole trunk whenever
+narrowing would leave fewer than 3 stations — a window too tight to compute a CV would otherwise
+publish NaN, which reads downstream as "not measured" rather than "misconfigured", and a QC check
+that fails silent is the expensive failure direction.
+
 `region_id` is published as the plain vessel name (`LMCA`, not `LMCA-M1`), so it joins the flow rows
 directly.
+
+> **What changed (proximal window).** The CV previously used every main-path station of a trunk, in
+> whatever order the profile happened to list them — `station_index` and `distance_mm` were both
+> present and both ignored. For ACA / MCA / PCA the distal stations near the bifurcation dominated
+> the spread, so the metric reported branching geometry as though it were segmentation quality.
+> Expect MCA/ACA/PCA CVs to fall; ICA, VA and basilar values are unchanged.
 
 > **What changed.** This check previously resolved only `LICA`, `RICA` and `BASILAR` — the three
 > tree roots. The ACA/MCA/PCA trunks were silently dropped because `LMCA-M1` does not resolve to a
@@ -415,6 +446,7 @@ python -m nvitk.pipes.qvtpy.stage9_autoqc --dataset /path/to/dataset --dry-run
 | `--flow-scale` | inferred | Force the mL/min conversion factor |
 | `--conservation-tol` | 0.15 | Retunes the arterial gate; distal/venous scale with it |
 | `--segment-cv-tol` | 0.25 | Along-segment CV gate |
+| `--segment-cv-proximal-mm` | 15.0 | Proximal window the ACA/MCA/PCA CV is read over; `0` uses the whole trunk |
 | `--score-flag-below` | 0.5 | Combined-score flag threshold |
 | `--submit` | `local` | Where to recover missing measurements from: `local` / `sge` (SFTP) / `xnat` |
 | `--results-root` | configured | Results tree for recovery **and** for `pitc_profile.csv` segment CV |

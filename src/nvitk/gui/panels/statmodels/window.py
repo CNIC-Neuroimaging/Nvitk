@@ -81,6 +81,7 @@ from nvitk.stats.qc_filters import (
 from nvitk.stats.summaries import OVERALL_LABEL, summarize_by_group, summary_provenance
 from nvitk.stats.region_algebra import RegionCombination, apply_region_combinations
 from nvitk.stats.sem import (
+    SEM_ESTIMATORS,
     SemSpec,
     fit_sem,
     path_effects,
@@ -154,6 +155,10 @@ from nvitk.stats.mediation import (
     render_mediation_info,
 )
 
+from nvitk.gui.core.flow_layout import FlowRow
+from nvitk.gui.core.geometry import cap_minimum_size, fit_to_screen
+from nvitk.stats.brain_map import BRAIN_ATLASES, BRAIN_SURFACES, BRAIN_VIEWS
+
 from .constants import (
     MAX_CATEGORICAL_LEVELS,
     ANALYSIS_FORMULA_KINDS,
@@ -182,6 +187,7 @@ from .constants import (
     PIPELINE_KIND_QVTPY,
 )
 from .column_plot_dialog import ColumnPlotDialog
+from .subject_plot_dialog import SubjectPlotDialog
 from .combinations_dialog import RegionCombinationsDialog
 from .db_publish import resolve_publish_target
 from .derived import CovarianceTermDialog, DerivedColumnsDialog, SplineTermDialog
@@ -236,6 +242,8 @@ _MMRM_PLOTS: tuple[tuple[str, str], ...] = (
 _SEM_PLOTS: tuple[tuple[str, str], ...] = (
     ("Path coefficients", "paths"),
     ("Network diagram", "network"),
+    ("Factor loadings", "loadings"),
+    ("Modification indices", "modindices"),
 )
 
 #: Sub-views of the vascular map: what colour encodes. Kept separate from the estimate/p-value
@@ -265,6 +273,23 @@ _VASCULAR_PLOTS: tuple[tuple[str, str], ...] = (
     ("p-value (all vessels)", "pvalue_all"),
     ("Observed mean per vessel", "means"),
 )
+
+#: Sub-views of the brain map. Deliberately the same keys as :data:`_VASCULAR_PLOTS` so the two
+#: displays are interchangeable from the window's point of view — switching Display from one to the
+#: other keeps the view you were looking at instead of resetting the picker.
+_BRAIN_PLOTS: tuple[tuple[str, str], ...] = (
+    ("Marginal mean per parcel", "emmeans"),
+    ("Model estimate (grey = n.s.)", "estimate"),
+    ("Model estimate (all parcels)", "estimate_all"),
+    ("p-value (significant only)", "pvalue"),
+    ("p-value (all parcels)", "pvalue_all"),
+    ("Observed mean per parcel", "means"),
+)
+
+#: Display keys that draw a *map of anatomy* rather than a family of curves. They share every
+#: control the plot pane gates on — the figure picker, the group checklist, the colormap — so the
+#: gating asks "is this a map" once instead of naming each one at every branch.
+_MAP_DISPLAYS: frozenset[str] = frozenset({"vascular", "brain"})
 
 _MRF_PLOTS: tuple[tuple[str, str], ...] = (
     ("Smoothed field", "field"),
@@ -297,7 +322,9 @@ class StatmodelsWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("nvitk Statmodels")
         self.setWindowFlags(self.windowFlags() | Qt.Window)
-        self.resize(1700, 1000)
+        # Preferred size, clamped to whatever screen this actually opens on — 1700×1000 runs
+        # off a laptop display, taking the plot pane's right edge with it.
+        fit_to_screen(self, 1700, 1000)
         apply_dark_theme(self)
 
         self._repo = open_repo()
@@ -355,6 +382,7 @@ class StatmodelsWindow(QMainWindow):
         self._output_split = QSplitter(Qt.Horizontal)
         self._plot = PlotPanel()
         self._plot.set_options_widget(self._build_plot_options())
+        self._plot.set_map_options_widget(self._build_map_options())
         self._mediation_plot = self._plot.kind_combo()
         self._report = ModelReportPanel()
         self._output_split.addWidget(self._plot)
@@ -623,6 +651,41 @@ class StatmodelsWindow(QMainWindow):
             "puts every path on the same SD-per-SD scale."
         )
         self._sem_standardize_label = QLabel("Scaling")
+
+        self._sem_estimator = QComboBox()
+        for key, description in SEM_ESTIMATORS.items():
+            self._sem_estimator.addItem(f"{key} — {description.split('—')[-1].strip()}", key)
+        self._sem_estimator.setToolTip(
+            "How the model is estimated.\n\n"
+            + "\n".join(f"{k}: {v}" for k, v in SEM_ESTIMATORS.items())
+            + "\n\nMLR is the safe choice when the residuals are skewed — the estimates are the "
+            "same as ML, only the standard errors change. semopy accepts ML, GLS and WLS; it has "
+            "no MLR and falls back to ML."
+        )
+        self._sem_estimator_label = QLabel("Estimator")
+
+        self._sem_missing = QComboBox()
+        self._sem_missing.addItem("listwise — drop incomplete rows", "listwise")
+        self._sem_missing.addItem("FIML — use every observed value", "fiml")
+        self._sem_missing.setToolTip(
+            "What to do with missing values.\n\n"
+            "Listwise deletion keeps only subjects measured on *every* modelled variable, so the "
+            "sparsest term decides the sample size — a model with one 40%-covered vessel is fitted "
+            "on 40% of the cohort.\n"
+            "FIML uses each subject's observed values instead and is the better default whenever "
+            "the missingness is unrelated to what is missing."
+        )
+        self._sem_missing_label = QLabel("Missing data")
+
+        self._sem_group = QComboBox()
+        self._sem_group.setToolTip(
+            "Fit the same model separately in each level of this column, so the paths themselves "
+            "are free to differ between groups.\n\n"
+            "Different from adding the column as a covariate, which only shifts the means and "
+            "assumes every path is shared. lavaan only — semopy has no multi-group support."
+        )
+        self._sem_group_label = QLabel("Multi-group")
+
         self._mrf_family = QComboBox()
         for key, description in GAM_FAMILIES.items():
             self._mrf_family.addItem(description, key)
@@ -633,6 +696,9 @@ class StatmodelsWindow(QMainWindow):
         self._mrf_method_label = QLabel("Smoothing")
 
         form.addRow(self._sem_backend_label, self._sem_backend)
+        form.addRow(self._sem_estimator_label, self._sem_estimator)
+        form.addRow(self._sem_missing_label, self._sem_missing)
+        form.addRow(self._sem_group_label, self._sem_group)
         form.addRow(self._sem_standardize_label, self._sem_standardize)
         form.addRow(self._mrf_family_label, self._mrf_family)
         form.addRow(self._mrf_method_label, self._mrf_method)
@@ -690,10 +756,11 @@ class StatmodelsWindow(QMainWindow):
 
     def _build_plot_options(self) -> QWidget:
         """Plot display / QC gate / mode / x / points, laid out for the plot pane's own top row."""
-        widget = QWidget()
-        lay = QHBoxLayout(widget)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        # Flow, not horizontal: this row grew to a dozen-plus controls, and a QHBoxLayout's minimum
+        # width is their sum — which Qt enforces as the *window's* minimum, locking it wider than
+        # the screen. Wrapping keeps the minimum at the widest single control.
+        widget = FlowRow()
+        lay = widget.flow()
 
         # Show the rows the analysis dataframe's filters removed, in grey, so a filter's effect is
         # visible on the plot. A plain toggle rather than a metric picker: the filters already live
@@ -716,13 +783,16 @@ class StatmodelsWindow(QMainWindow):
             "Matplotlib is the default — it is what the axis-limit sliders act on and what exports "
             "as a publication figure."
         )
-        self._interactive_plot.stateChanged.connect(lambda *_: self._on_plot())
+        self._interactive_plot.stateChanged.connect(
+            lambda *_: (self._sync_analysis_type(), self._on_plot())
+        )
         lay.addWidget(self._interactive_plot)
 
         self._plot_display = QComboBox()
         self._plot_display.addItem("Overview", "overview")
         self._plot_display.addItem("Grouped", "grouped")
         self._plot_display.addItem("Vascular map", "vascular")
+        self._plot_display.addItem("Brain map", "brain")
         self._display_tooltip = (
             "Overview draws every group on one pair of axes.\n"
             "Grouped splits them into a grid of anatomical panels — carotids / anterior / "
@@ -731,6 +801,10 @@ class StatmodelsWindow(QMainWindow):
             "Vascular map draws each vessel's estimate on a schematic of the circle of Willis and "
             "the dural sinuses, so a pattern across the anatomy — both carotids together, the "
             "posterior circulation alone — is visible instead of being spread down a forest plot.\n"
+            "Brain map does the same for the parenchymal measurements — ASL perfusion, T1 "
+            "volumetry — on the cortical surface, since those are parcellated by Desikan rather "
+            "than by vessel. Grey means measured but not significant; an unpainted parcel means "
+            "the model has no estimate for it, which is not the same thing.\n"
             "This is a view of the same fit: the population estimate is identical in every panel."
         )
         self._plot_display.setToolTip(self._display_tooltip)
@@ -779,6 +853,118 @@ class StatmodelsWindow(QMainWindow):
         )
         self._vasc_contrast.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._vasc_contrast_label = QLabel("contrast")
+
+        # ---- Brain-map-only controls ---------------------------------------------
+        self._brain_atlas = QComboBox()
+        # "auto" first and default: the right atlas is the one the measurement was made under, and
+        # the measurement form already knows it. Making the user restate it invites a mismatch that
+        # draws a blank brain and looks like a modelling failure.
+        self._brain_atlas.addItem("auto (from the measurement)", "")
+        for label, key in BRAIN_ATLASES:
+            self._brain_atlas.addItem(label, key)
+        self._brain_atlas.setToolTip(
+            "Parcellation the values are painted on.\n\n"
+            "Desikan is what the ASL cortical tables and the T1 volumetry are reported against. "
+            "The vascular atlas is the arterial-territory / watershed parcellation ASL uses by "
+            "default — coarser, and the one that makes a perfusion result comparable to a 4D-flow "
+            "one.\n"
+            "Pick the atlas the measurement was actually made under: a value has no meaning on a "
+            "parcellation it was not averaged over."
+        )
+        self._brain_atlas.currentIndexChanged.connect(
+            lambda *_: (self._sync_map_contrasts(self._map_display()), self._on_plot())
+        )
+        self._brain_atlas_label = QLabel("atlas")
+
+        self._brain_hemi = QComboBox()
+        for label, key in (("both hemispheres", "both"), ("left", "left"), ("right", "right")):
+            self._brain_hemi.addItem(label, key)
+        self._brain_hemi.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._brain_hemi_label = QLabel("hemi")
+
+        self._brain_views = QComboBox()
+        for label, key in BRAIN_VIEWS:
+            self._brain_views.addItem(label, key)
+        self._brain_views.setToolTip(
+            "Which surface views to draw.\n\n"
+            "Lateral alone hides the medial wall, which is where the cingulate, the precuneus and "
+            "the medial orbitofrontal cortex live — a third of the Desikan parcels."
+        )
+        self._brain_views.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._brain_views_label = QLabel("views")
+
+        self._brain_surface = QComboBox()
+        for label, key in BRAIN_SURFACES:
+            self._brain_surface.addItem(label, key)
+        self._brain_surface.setToolTip(
+            "Which fsaverage surface the parcels are painted on.\n\n"
+            "Inflated exposes the parcels buried in sulci — about two thirds of the cortex — which "
+            "a folded pial surface simply does not show.\n"
+            "Pial is the real geometry and reads as a brain.\n"
+            "Flat puts the whole cortex in one panel per hemisphere: no view to choose, no hidden "
+            "parcels, and by far the fastest to draw."
+        )
+        # Also re-syncs visibility: a flat map has no view angle, so the views picker goes away.
+        self._brain_surface.currentIndexChanged.connect(
+            lambda *_: (self._sync_analysis_type(), self._on_plot())
+        )
+        self._brain_surface_label = QLabel("surface")
+
+        self._brain_shading = QCheckBox("Shading")
+        self._brain_shading.setChecked(True)
+        self._brain_shading.setToolTip(
+            "Shade the unpainted surface with its own curvature, so gyri and sulci are visible "
+            "under the parcels.\nOff gives a flat silhouette — cleaner for a figure, and it makes "
+            "the parcel boundaries the only structure on the page."
+        )
+        self._brain_shading.stateChanged.connect(
+            lambda *_: (self._sync_analysis_type(), self._on_plot())
+        )
+
+        self._brain_threshold = QDoubleSpinBox()
+        self._brain_threshold.setRange(0.0, 1e9)
+        self._brain_threshold.setDecimals(3)
+        self._brain_threshold.setSingleStep(0.1)
+        self._brain_threshold.setSpecialValueText("off")
+        self._brain_threshold.setValue(0.0)
+        self._brain_threshold.setMaximumWidth(90)
+        self._brain_threshold.setToolTip(
+            "Leave parcels whose |value| is below this unpainted, the way a stat map is "
+            "thresholded.\n\n"
+            "Different from the significance mask: this is about effect *size*, not evidence. A "
+            "parcel hidden here is counted in the caption so it is never read as one the model has "
+            "no estimate for.\n0 turns it off."
+        )
+        self._brain_threshold.valueChanged.connect(lambda *_: self._on_plot())
+        self._brain_threshold_label = QLabel("|min|")
+
+        self._brain_blend = QCheckBox("Blend")
+        self._brain_blend.setChecked(True)
+        self._brain_blend.setToolTip(
+            "Shade the *painted* parcels with the surface curvature too, not just the bare "
+            "surface.\n\n"
+            "The sulcal pattern shows through the colours, which keeps the folding legible where a "
+            "parcel covers a whole gyrus. It darkens the colours unevenly, so a value read off the "
+            "colourbar is no longer exact — a reading aid, not a setting to publish at.\n"
+            "Needs Shading on: there is nothing to blend without a curvature map."
+        )
+        self._brain_blend.stateChanged.connect(lambda *_: self._on_plot())
+
+        self._brain_opacity = QDoubleSpinBox()
+        self._brain_opacity.setRange(0.05, 1.0)
+        self._brain_opacity.setSingleStep(0.05)
+        self._brain_opacity.setDecimals(2)
+        self._brain_opacity.setValue(1.0)
+        self._brain_opacity.setMaximumWidth(80)
+        self._brain_opacity.setToolTip(
+            "Opacity of the painted parcels.\n\n"
+            "Below 1 the surface shows through — the other way to keep the folding visible under a "
+            "dense parcellation. Like Blend it shifts the rendered colour away from the colourbar, "
+            "so treat it as a reading aid."
+        )
+        self._brain_opacity.valueChanged.connect(lambda *_: self._on_plot())
+        self._brain_opacity_label = QLabel("opacity")
+
         self._include_points = QCheckBox("Points")
         self._include_points.setChecked(True)
         self._include_points.setToolTip(
@@ -803,13 +989,38 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._plot_x)
         lay.addWidget(self._plot_group_label)
         lay.addWidget(self._plot_group)
+        lay.addWidget(self._include_points)
+        lay.addWidget(self._show_ci)
+        return widget
+
+    def _build_map_options(self) -> QWidget:
+        """
+        Second options row: the controls that belong to the anatomical maps.
+
+        Split off the general row because there are now a dozen of them, and mixing the two meant
+        the map controls reflowed into whatever gap the general ones left — different position every
+        time the analysis type changed. Its own row keeps them together and hides them as a group.
+        """
+        widget = FlowRow()
+        lay = widget.flow()
         lay.addWidget(self._vasc_cmap_label)
         lay.addWidget(self._vasc_cmap)
         lay.addWidget(self._vasc_contrast_label)
         lay.addWidget(self._vasc_contrast)
-        lay.addWidget(self._include_points)
-        lay.addWidget(self._show_ci)
-        lay.addStretch(1)
+        lay.addWidget(self._brain_atlas_label)
+        lay.addWidget(self._brain_atlas)
+        lay.addWidget(self._brain_hemi_label)
+        lay.addWidget(self._brain_hemi)
+        lay.addWidget(self._brain_views_label)
+        lay.addWidget(self._brain_views)
+        lay.addWidget(self._brain_surface_label)
+        lay.addWidget(self._brain_surface)
+        lay.addWidget(self._brain_threshold_label)
+        lay.addWidget(self._brain_threshold)
+        lay.addWidget(self._brain_opacity_label)
+        lay.addWidget(self._brain_opacity)
+        lay.addWidget(self._brain_shading)
+        lay.addWidget(self._brain_blend)
         return widget
 
     def _build_covariate_box(self, title: str, domain: str) -> QWidget:
@@ -917,6 +1128,7 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view.binsRequested.connect(self._on_bin_column)
         self._frame_view.publishRequested.connect(self._on_publish_column)
         self._frame_view.columnPlotRequested.connect(self._on_column_plot)
+        self._frame_view.subjectPlotRequested.connect(self._on_subject_plot)
         self._frame_view.qcFilterRequested.connect(self._on_qc_filter)
         self._frame_view.summaryRequested.connect(self._on_export_summary)
         self._frame_view.dropRequested.connect(self._on_drop_column)
@@ -1912,6 +2124,32 @@ class StatmodelsWindow(QMainWindow):
         )
         dialog.show()
 
+    def _on_subject_plot(self, subject: str) -> None:
+        """
+        Open the anatomical viewer for one subject.
+
+        Drawn from the **working** frame, unlike the column viewer: this window is about what a
+        subject's anatomy looks like, and painting a vessel the filters have already rejected would
+        show a value the analysis is not using.
+        """
+        frame = self._working_df if self._working_df is not None else self._analysis_df
+        if frame is None or frame.empty:
+            notify("Reload the data before opening a subject.", error=True)
+            return
+        if "subject_uid" not in frame.columns:
+            notify("The analysis dataframe has no subject_uid column.", error=True)
+            return
+
+        dialog = SubjectPlotDialog(
+            self,
+            frame=frame,
+            subject=str(subject),
+            region_column=self._region_column_name(),
+            atlas=self._brain_atlas_key(),
+            default_directory=statmodels_root(self._repo),
+        )
+        dialog.show()
+
     def _frame_with_exclusions(self, base: pd.DataFrame) -> tuple[pd.DataFrame, Any]:
         """
         The derived frame plus a boolean mask of the rows the active filters removed.
@@ -2218,8 +2456,13 @@ class StatmodelsWindow(QMainWindow):
             widget.setVisible(is_mmrm)
         is_sem = kind == ANALYSIS_SEM
         for widget in (self._sem_backend, self._sem_backend_label,
+                       self._sem_estimator, self._sem_estimator_label,
+                       self._sem_missing, self._sem_missing_label,
+                       self._sem_group, self._sem_group_label,
                        self._sem_standardize, self._sem_standardize_label):
             widget.setVisible(is_sem)
+        if is_sem:
+            self._sync_sem_groups()
         is_mrf = kind == ANALYSIS_MRF
         for widget in (self._mrf_family, self._mrf_family_label,
                        self._mrf_method, self._mrf_method_label):
@@ -2262,30 +2505,50 @@ class StatmodelsWindow(QMainWindow):
 
         # The figure picker serves mediation and MMRM, which each produce several plots; the group
         # checklist only applies to the grouped model plots.
+        display = self._map_display()
         self._plot.set_kind_row_visible(
             kind in {ANALYSIS_MEDIATION, ANALYSIS_MMRM, ANALYSIS_LMROB,
                      ANALYSIS_SEM, ANALYSIS_MRF}
-            or str(self._plot_display.currentData() or "") == "vascular"
+            or bool(display)
         )
-        # The checklist drives the vascular map too, so it stays visible there whatever
+        # The checklist drives the anatomical maps too, so it stays visible there whatever
         # engine produced the fit.
-        self._plot.set_groups_visible(
-            kind in ANALYSIS_FORMULA_KINDS
-            or str(self._plot_display.currentData() or "") == "vascular"
-        )
+        self._plot.set_groups_visible(kind in ANALYSIS_FORMULA_KINDS or bool(display))
         # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
-        vascular = str(self._plot_display.currentData() or "") == "vascular"
+        # The colormap applies to both maps; the contrast picker to both; atlas / hemisphere / views
+        # only to the cortical one, which is the only display with a choice of geometry.
+        # The whole second row belongs to the maps, so it appears and disappears with them.
+        self._plot.set_map_options_visible(bool(display))
         for widget in (self._vasc_cmap, self._vasc_cmap_label):
-            widget.setVisible(vascular)
-        self._sync_vascular_contrasts(vascular)
+            widget.setVisible(bool(display))
+        for widget in (self._brain_atlas, self._brain_atlas_label,
+                       self._brain_hemi, self._brain_hemi_label,
+                       self._brain_views, self._brain_views_label,
+                       self._brain_surface, self._brain_surface_label,
+                       self._brain_threshold, self._brain_threshold_label,
+                       self._brain_opacity, self._brain_opacity_label,
+                       self._brain_shading, self._brain_blend):
+            widget.setVisible(display == "brain")
+        self._brain_blend.setEnabled(self._brain_shading.isChecked())
+        # No view angle to pick when a flat map shows the whole cortex at once, nor in 3-D where
+        # the view is whatever you rotate the brain to.
+        fixed_view = display == "brain" and (
+            str(self._brain_surface.currentData() or "") == "flat"
+            or self._interactive_plot.isChecked()
+        )
+        for widget in (self._brain_views, self._brain_views_label):
+            widget.setVisible(display == "brain" and not fixed_view)
+        self._sync_map_contrasts(display)
         self._sync_display_enabled()
-        # The vascular display is checked first because it *replaces* the engine's own figure set:
-        # left after the engine branches, an MMRM or lmrob fit kept offering only its own plots and
-        # the map's estimate/p-value views were unreachable.
-        if str(self._plot_display.currentData() or "") == "vascular":
+        # A map display is checked first because it *replaces* the engine's own figure set: left
+        # after the engine branches, an MMRM or lmrob fit kept offering only its own plots and the
+        # map's estimate/p-value views were unreachable.
+        if display == "vascular":
             self._set_plot_kinds(self._vascular_plot_kinds())
+        elif display == "brain":
+            self._set_plot_kinds(self._brain_plot_kinds())
         elif is_mmrm:
             self._set_plot_kinds(_MMRM_PLOTS)
         elif is_lmrob:
@@ -2389,6 +2652,9 @@ class StatmodelsWindow(QMainWindow):
             + f"  |  dataset={self._repo.root}"
         )
         self._sync_plot_levels(model_df, groups)
+        # The contrast list is a property of *this* fit — without a refresh here a new model keeps
+        # the previous one's interaction terms, or shows none because the previous one had none.
+        self._sync_map_contrasts(self._map_display())
         self._on_plot()
         notify(f"{label} fit complete.")
 
@@ -2403,24 +2669,32 @@ class StatmodelsWindow(QMainWindow):
             wide = self._working_df
             if wide is None or wide.empty:
                 raise ValueError("Load the data before fitting a path model.")
-            # Judge the frame, not the reshape button: a subject-grain load is already wide, and
-            # gating on the button refused a frame that was perfectly fittable.
-            if "territory" in wide.columns or "group_key" in wide.columns and wide[
-                "group_key"
-            ].nunique() > 1:
-                raise ValueError(
-                    "A path model needs one column per vessel, and this frame is long (one row "
-                    "per subject × region). Press 'Reshape → wide' on the analysis dataframe, or "
-                    "load the measurements on the subject grain."
-                )
             # Published labels come in several spellings for one artery; map them onto the
             # columns the reshape produced so a hand-typed model still fits.
             syntax, renames = resolve_network_syntax(formula, wide.columns)
             spec = SemSpec(
                 syntax=syntax,
                 backend=str(self._sem_backend.currentData() or ""),
+                estimator=str(self._sem_estimator.currentData() or "ML"),
+                listwise=str(self._sem_missing.currentData() or "listwise") == "listwise",
+                group=str(self._sem_group.currentData() or ""),
                 standardize=self._sem_standardize.isChecked(),
             )
+            # A *long* frame is only a problem for a model whose terms are vessels — those need one
+            # column each, and a long frame has one row each. A CFA over subject-level indicators is
+            # perfectly fittable on whatever grain the frame happens to be, so the refusal is
+            # conditioned on the syntax rather than applied to every SEM.
+            long_frame = "territory" in wide.columns or (
+                "group_key" in wide.columns and wide["group_key"].nunique() > 1
+            )
+            missing = [v for v in spec.observed() if v not in wide.columns]
+            if long_frame and missing:
+                raise ValueError(
+                    f"A path model needs one column per vessel, and this frame is long (one row "
+                    f"per subject × region) — {', '.join(missing[:6])} "
+                    f"{'is' if len(missing) == 1 else 'are'} not a column. Press 'Reshape → wide' "
+                    f"on the analysis dataframe, or load the measurements on the subject grain."
+                )
             result, model_df, meta = fit_sem(data=wide, spec=spec)
             if renames:
                 meta["resolved_names"] = ", ".join(f"{k}→{v}" for k, v in sorted(renames.items()))
@@ -2568,10 +2842,14 @@ class StatmodelsWindow(QMainWindow):
             return
         if self._last_result is None or self._last_model_df is None:
             return
-        # Before the per-engine branches: the vascular map reads the fitted parameter table, which
-        # every engine produces, so an engine's own plotter must not shadow it.
-        if str(self._plot_display.currentData() or "") == "vascular":
+        # Before the per-engine branches: the anatomical maps read the fitted parameter table, which
+        # every engine produces, so an engine's own plotter must not shadow them.
+        display = self._map_display()
+        if display == "vascular":
             self._plot_vascular()
+            return
+        if display == "brain":
+            self._plot_brain()
             return
         if kind == ANALYSIS_NONLINEAR:
             self._plot_nonlinear()
@@ -3046,58 +3324,170 @@ class StatmodelsWindow(QMainWindow):
             f"subject with {measurement} spread across the vessel columns."
         )
 
+    def _sync_sem_groups(self) -> None:
+        """
+        Offer the frame's low-cardinality factors as a multi-group split.
+
+        Continuous columns and identifiers are excluded: a multi-group fit estimates the *whole
+        model* once per level, so grouping on ``subject_uid`` asks for one SEM per subject, each on
+        a single row.
+        """
+        previous = str(self._sem_group.currentData() or "")
+        self._sem_group.blockSignals(True)
+        self._sem_group.clear()
+        self._sem_group.addItem("(none — one model for everyone)", "")
+
+        df = self._working_df
+        if df is not None and not df.empty:
+            for name in df.columns:
+                series = df[name]
+                if pd.api.types.is_numeric_dtype(series) and not isinstance(
+                    series.dtype, pd.CategoricalDtype
+                ):
+                    continue
+                levels = int(series.nunique(dropna=True))
+                # Two is the minimum for a comparison; the cap keeps a per-subject split out of a
+                # menu it would otherwise dominate.
+                if 2 <= levels <= 6:
+                    self._sem_group.addItem(f"{name} ({levels} groups)", str(name))
+
+        index = self._sem_group.findData(previous)
+        self._sem_group.setCurrentIndex(index if index >= 0 else 0)
+        self._sem_group.blockSignals(False)
+
     def _plot_sem(self) -> None:
-        """Path coefficients as a forest, or the fitted network as a diagram."""
+        """Path coefficients, the fitted diagram, the measurement model, or the misfit diagnostics."""
         try:
             import matplotlib.pyplot as plt
 
+            from nvitk.stats.sem import (
+                plot_sem_modification_indices,
+                plot_sem_network,
+                sem_modification_indices,
+            )
+
+            meta = self._last_fit_meta or {}
             kind = str(self._mediation_plot.currentData() or "paths")
+            # ``latent`` is what lets a semopy fit report its loadings at all — that backend writes a
+            # measurement line as an ordinary regression and only the spec knows which names are
+            # factors.
             paths = sem_paths_frame(
-                self._last_result, backend=(self._last_fit_meta or {}).get("backend", "")
+                self._last_result,
+                backend=meta.get("backend", ""),
+                latent=meta.get("latent", ()),
             )
             regressions = paths.loc[paths["op"] == "~"] if "op" in paths.columns else paths
+            loadings = paths.loc[paths["op"] == "=~"] if "op" in paths.columns else paths.iloc[0:0]
+
             with plt.style.context("default"):
-                if kind == "network":
-                    fig = network_plot(
-                        regressions, node_labels=VESSEL_NODES, title="Fitted vascular network"
+                if kind == "modindices":
+                    indices = sem_modification_indices(
+                        self._last_result, backend=meta.get("backend", "")
+                    )
+                    fig = plot_sem_modification_indices(indices)
+                    note = (
+                        "Parameters the model fixes at zero, ranked by the χ² drop freeing each "
+                        "would give. Read them as hypotheses about *where* the model misfits — a "
+                        "model rebuilt by chasing this list is fitted to its own residuals and its "
+                        "p-values no longer mean anything."
+                    )
+                elif kind == "loadings":
+                    fig = forest_plot(
+                        loadings, label="parameter", title="Factor loadings",
+                        x_label="Loading",
                     )
                     note = (
-                        "Edge width is the coefficient's magnitude, colour its sign, dotted means "
-                        "the interval covers zero. Hover an edge for the exact value."
+                        f"How strongly each indicator loads on its factor "
+                        f"({len(meta.get('latent', ())) or 'no'} latent variable(s)). A factor "
+                        f"whose loadings are all small is one its indicators do not actually "
+                        f"share, whatever the global fit indices say."
                     )
+                elif kind == "network":
+                    # The matplotlib plotter is used when the model has latents: it draws them as
+                    # ellipses and orients each loading factor → indicator, which the vessel-only
+                    # interactive diagram has no notion of.
+                    if len(loadings):
+                        fig = plot_sem_network(paths, title="Fitted structural model")
+                        note = (
+                            "Rounded blue nodes are latent variables, boxes are measured ones. "
+                            "Edge width is the coefficient's magnitude, colour its sign, dashed "
+                            "means the interval covers zero."
+                        )
+                    else:
+                        fig = network_plot(
+                            regressions, node_labels=VESSEL_NODES,
+                            title="Fitted vascular network",
+                        )
+                        note = (
+                            "Edge width is the coefficient's magnitude, colour its sign, dotted "
+                            "means the interval covers zero. Hover an edge for the exact value."
+                        )
                 else:
+                    # A pure CFA has no structural paths; leading with an empty forest would read as
+                    # a failed fit rather than as a model that estimates loadings only.
+                    table = regressions if len(regressions) else loadings
                     fig = forest_plot(
-                        regressions, label="parameter", title="Path coefficients",
-                        x_label="Path coefficient",
+                        table, label="parameter",
+                        title="Path coefficients" if len(regressions) else "Factor loadings",
+                        x_label="Path coefficient" if len(regressions) else "Loading",
                     )
                     note = (
                         "Standardized paths, strongest first. Blue = interval excludes zero."
-                        if (self._last_fit_meta or {}).get("standardized")
+                        if meta.get("standardized")
                         else "Unstandardized paths — magnitudes are not comparable between edges."
                     )
+                    if not len(regressions):
+                        note = "This model estimates a measurement model only. " + note
             self._plot.show_figure(fig)
             self._plot.set_status(note)
         except Exception as exc:
             log.debug("SEM plot failed: %s", exc, exc_info=True)
             self._plot.show_error(f"Plot unavailable: {exc}")
 
-    def _sync_vascular_contrasts(self, vascular: bool) -> None:
-        """Populate the contrast picker from the fit's interaction terms, or hide it."""
-        from nvitk.stats.vascular_map import interaction_contrasts
+    def _map_display(self) -> str:
+        """
+        Which anatomical map is selected — ``"vascular"``, ``"brain"``, or ``""`` for neither.
 
+        Every place that used to compare the Display combo against the literal ``"vascular"`` asks
+        this instead, so adding a third map is one entry in :data:`_MAP_DISPLAYS` rather than a
+        hunt through the gating.
+        """
+        key = str(self._plot_display.currentData() or "")
+        return key if key in _MAP_DISPLAYS else ""
+
+    def _sync_map_contrasts(self, display: str) -> None:
+        """
+        Populate the contrast picker from the fit's interaction terms, or hide it.
+
+        Discovery is anatomy-specific: an interaction term only counts if one of its factors names
+        a level *this map can draw*. So the vascular map asks the vessel table and the brain map
+        asks the atlas — using the vessel resolver for a cortical model finds no interaction at all
+        and silently hides the picker, which is what made the brain map's contrast views
+        unreachable.
+        """
         contrasts: list[str] = []
-        if vascular and self._last_result is not None:
+        if display and self._last_result is not None:
             groups = self._plot_group.currentText().strip() or self._region_column_name()
             try:
-                contrasts = interaction_contrasts(
-                    self._last_result, group_column=groups, data=self._last_model_df
-                )
+                if display == "brain":
+                    from nvitk.stats.brain_map import brain_interaction_contrasts
+
+                    contrasts = brain_interaction_contrasts(
+                        self._last_result, group_column=groups, data=self._last_model_df,
+                        atlas=self._brain_atlas_key(),
+                    )
+                else:
+                    from nvitk.stats.vascular_map import interaction_contrasts
+
+                    contrasts = interaction_contrasts(
+                        self._last_result, group_column=groups, data=self._last_model_df
+                    )
             except Exception as exc:
                 log.debug("Contrast discovery failed: %s", exc, exc_info=True)
 
         # Hidden rather than disabled when the model has no interaction: an empty picker invites
         # the reader to look for a setting that does not apply to this fit.
-        show = vascular and bool(contrasts)
+        show = bool(display) and bool(contrasts)
         for widget in (self._vasc_contrast, self._vasc_contrast_label):
             widget.setVisible(show)
         if not show:
@@ -3140,6 +3530,189 @@ class StatmodelsWindow(QMainWindow):
         # random slope over it, and they answer different questions.
         return (*offered, *_VASCULAR_PLOTS)
 
+    def _brain_plot_kinds(self) -> tuple[tuple[str, str], ...]:
+        """
+        Views the brain map can offer for the current fit.
+
+        Same rule as :meth:`_vascular_plot_kinds`: a model whose parcel information lives in a
+        random term has nothing about individual parcels in its fixed effects, so those terms are
+        offered first rather than letting the coefficient view fall back to observed means without
+        saying why.
+        """
+        from nvitk.stats.brain_map import brain_group_coefficient_terms
+
+        groups = self._groups.text().strip() or self._region_column_name()
+        terms = (
+            brain_group_coefficient_terms(self._last_result, group_column=groups)
+            if self._last_result is not None else []
+        )
+        if not terms:
+            return _BRAIN_PLOTS
+        offered = [
+            (
+                "Per-parcel "
+                + ("intercept" if term.strip("()").lower() == "intercept" else f"{term} slope"),
+                f"group:{term}",
+            )
+            for term in terms
+        ]
+        return (*offered, *_BRAIN_PLOTS)
+
+    def _brain_atlas_key(self) -> str:
+        """
+        The atlas to draw on — the picker's choice, or the one the plotted measurement was made
+        under.
+
+        A measurement loaded under the vascular parcellation carries no Desikan parcels at all, so
+        silently defaulting to Desikan there draws nothing and makes a configuration mismatch look
+        like a modelling failure.
+        """
+        chosen = str(self._brain_atlas.currentData() or "")
+        if chosen:
+            return chosen
+
+        specs = list(self._measurements.specs())
+        outcome = self._last_outcome or self._primary_column()
+        spec = next((s for s in specs if s.column() == outcome), specs[0] if specs else None)
+        atlas = str(getattr(spec, "atlas", "") or "")
+        return "vascular" if atlas.startswith("vascular") else "desikan"
+
+    def _plot_brain(self) -> None:
+        """Draw the fit's per-parcel numbers on the cortical surface."""
+        try:
+            import matplotlib.pyplot as plt
+
+            from nvitk.stats.brain_map import (
+                parcel_resolver,
+                parcel_values_from_result,
+                plot_brain_map,
+                regions_without_geometry,
+            )
+
+            df = self._last_model_df
+            groups = (
+                self._plot_group.currentText().strip()
+                or self._groups.text().strip()
+                or self._region_column_name()
+            )
+            if df is None or groups not in df.columns:
+                self._plot.show_error(
+                    f"The brain map needs a per-parcel term: {groups!r} is not in the model frame. "
+                    f"Group the measurement by region and put it in the formula."
+                )
+                return
+
+            atlas = self._brain_atlas_key()
+            # Say *why* a map would be blank before drawing one. A FLAIR frame parcellates into
+            # white-matter zones, not cortical parcels, so none of its levels resolve — reporting
+            # that is far more useful than an empty brain the reader has to diagnose.
+            levels = [str(v) for v in pd.unique(df[groups].astype(str))]
+            undrawable = regions_without_geometry(levels, atlas=atlas)
+            if len(undrawable) == len(levels):
+                self._plot.show_error(
+                    f"None of the {len(levels)} level(s) of {groups!r} are parcels of the "
+                    f"{atlas!r} atlas — e.g. {', '.join(undrawable[:4])}. This measurement is not "
+                    f"parcellated by it; FLAIR white-matter zones, whole-head scalars and 4D-flow "
+                    f"vessels have no cortical geometry. Use the vascular map for vessels, or "
+                    f"group the measurement by a region the atlas carries."
+                )
+                return
+
+            view = str(self._mediation_plot.currentData() or "estimate")
+            contrast = str(self._vasc_contrast.currentData() or "")
+            if view in {"means", "emmeans"} or view.startswith("group:"):
+                contrast = ""
+            if view.startswith("group:"):
+                source = view
+            elif view == "means":
+                source = "mean"
+            elif view == "emmeans":
+                source = "emmeans"
+            else:
+                source = "coefficient"
+
+            outcome = self._last_outcome or self._primary_column()
+            try:
+                values, pvalues, note = parcel_values_from_result(
+                    self._last_result, group_column=groups, source=source, data=df,
+                    outcome=outcome, contrast=contrast, atlas=atlas,
+                )
+            except ValueError:
+                if source == "coefficient":
+                    values, pvalues, note = parcel_values_from_result(
+                        self._last_result, group_column=groups, source="mean", data=df,
+                        outcome=outcome, atlas=atlas,
+                    )
+                else:
+                    raise
+
+            # The Groups checklist drives this map the way it drives every other plot. Both sides go
+            # through the atlas resolver, so an aggregate level such as a lobe keeps every parcel it
+            # stands for instead of hiding all of them.
+            resolve, _ = parcel_resolver(atlas)
+            checked = self._plot.checked_levels()
+            hide: list[int] = []
+            if checked:
+                keep = {index for level in checked for index in resolve(level)}
+                hide = [index for index in values if index not in keep]
+
+            mode = "pvalue" if view.startswith("pvalue") else "estimate"
+            mask = bool(pvalues) and view in {"estimate", "pvalue"}
+            with plt.style.context("default"):
+                fig = plot_brain_map(
+                    values,
+                    pvalues=pvalues,
+                    mode=mode,
+                    mask_nonsignificant=mask,
+                    hide=hide,
+                    cmap=str(self._vasc_cmap.currentData() or "") or None,
+                    atlas=atlas,
+                    hemisphere=str(self._brain_hemi.currentData() or "both"),
+                    views=str(self._brain_views.currentData() or "lateral,medial"),
+                    surface=str(self._brain_surface.currentData() or "pial"),
+                    # The pane's existing Interactive toggle: a Plotly figure goes to the web view
+                    # and a Matplotlib one to the canvas, decided by the figure's own type.
+                    interactive=self._interactive_plot.isChecked(),
+                    shading=self._brain_shading.isChecked(),
+                    blend=self._brain_blend.isChecked(),
+                    opacity=float(self._brain_opacity.value()),
+                    threshold=(self._brain_threshold.value() or None),
+                    title=f"{outcome} — {note}",
+                    label="p" if mode == "pvalue" else outcome,
+                )
+            self._plot.show_figure(fig)
+
+            if self._interactive_plot.isChecked():
+                self._plot.set_status(
+                    f"{len(values) - len(hide)} parcel(s) on a rotatable 3-D surface — drag to "
+                    f"turn it, scroll to zoom. Same values and colour scale as the static view; "
+                    f"grey is non-significant and unpainted is no estimate."
+                )
+                return
+
+            skipped = len(undrawable)
+            self._plot.set_status(
+                f"{len(values) - len(hide)} parcel(s) drawn from {note} on the {atlas} atlas"
+                + (f", {len(hide)} hidden by the group checklist" if hide else "")
+                + (f", {skipped} level(s) with no geometry in this atlas" if skipped else "")
+                + ". "
+                + (
+                    "Colour is −log₁₀(p): brighter means stronger evidence, and nothing about "
+                    "direction or size."
+                    if mode == "pvalue"
+                    else (
+                        "Grey parcels did not reach significance; an unpainted parcel means the "
+                        "model has no estimate for it."
+                        if mask
+                        else "Significance is not shown — every parcel with an estimate is "
+                             "coloured. An unpainted parcel has no estimate."
+                    )
+                )
+            )
+        except Exception as exc:
+            log.debug("Brain map failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Brain map unavailable: {exc}")
+
     def _plot_vascular(self) -> None:
         """Draw the fit's per-vessel numbers on the cerebral circulation schematic."""
         try:
@@ -3147,6 +3720,7 @@ class StatmodelsWindow(QMainWindow):
 
             from nvitk.stats.vascular_map import (
                 plot_vascular_map,
+                unmapped_vessel_labels,
                 vascular_values_from_result,
             )
 
@@ -3161,6 +3735,32 @@ class StatmodelsWindow(QMainWindow):
                     f"The vascular map needs a per-vessel term: {groups!r} is not in the model "
                     f"frame. Group the measurement vessel-wise and put it in the formula."
                 )
+                return
+
+            # Say why before drawing a partial figure. ASL perfusion territories are the case that
+            # matters: ``left_mca_8`` shares its name with the MCA, so it *looks* drawable, and
+            # painting perfusion along an artery is a category error rather than a missing value.
+            levels = [str(v) for v in pd.unique(df[groups].astype(str))]
+            unmapped = unmapped_vessel_labels(levels)
+            if len(unmapped) == len(levels):
+                from nvitk.stats.vascular_map import is_perfusion_territory
+
+                perfusion = [u for u in unmapped if is_perfusion_territory(u)]
+                if perfusion:
+                    self._plot.show_error(
+                        f"These are ASL perfusion territories, not vessels — e.g. "
+                        f"{', '.join(perfusion[:4])}. They measure the parenchyma an artery "
+                        f"supplies (mL/100 g/min), so they do not belong on a schematic of the "
+                        f"arteries themselves (mL/min).\n"
+                        f"Switch Display to “Brain map” with the vascular atlas, which is that "
+                        f"territory parcellation."
+                    )
+                else:
+                    self._plot.show_error(
+                        f"None of the {len(levels)} level(s) of {groups!r} are vessels this "
+                        f"schematic draws — e.g. {', '.join(unmapped[:4])}. Cortical parcels and "
+                        f"whole-head scalars belong on the brain map instead."
+                    )
                 return
 
             view = str(self._mediation_plot.currentData() or "estimate")
@@ -3518,6 +4118,13 @@ class StatmodelsWindow(QMainWindow):
             "lme4_family": str(self._lme4_family.currentData() or "gaussian"),
             "lme4_reml": self._lme4_reml.isChecked(),
             "mmrm": {"method": str(self._mmrm_method.currentData() or "Satterthwaite")},
+            "sem": {
+                "backend": str(self._sem_backend.currentData() or ""),
+                "estimator": str(self._sem_estimator.currentData() or "ML"),
+                "missing": str(self._sem_missing.currentData() or "listwise"),
+                "group": str(self._sem_group.currentData() or ""),
+                "standardize": self._sem_standardize.isChecked(),
+            },
             "nonlinear": {
                 "model": str(self._nl_model.currentData() or ""),
                 "x": self._nl_x.currentText(),
@@ -3527,6 +4134,14 @@ class StatmodelsWindow(QMainWindow):
             "mediation": self._mediation_form.spec().to_dict(),
             "pipeline_id": QVTPY_PIPELINE_ID,
             "plot_display": str(self._plot_display.currentData() or "overview"),
+            "brain_atlas": str(self._brain_atlas.currentData() or ""),
+            "brain_hemisphere": str(self._brain_hemi.currentData() or "both"),
+            "brain_views": str(self._brain_views.currentData() or "lateral,medial"),
+            "brain_surface": str(self._brain_surface.currentData() or "pial"),
+            "brain_shading": self._brain_shading.isChecked(),
+            "brain_blend": self._brain_blend.isChecked(),
+            "brain_opacity": float(self._brain_opacity.value()),
+            "brain_threshold": float(self._brain_threshold.value()),
             "plot_mode": str(self._plot_mode.currentData() or "auto"),
             "plot_x": self._plot_x.currentText().strip(),
             "include_points": self._include_points.isChecked(),
@@ -3634,6 +4249,25 @@ class StatmodelsWindow(QMainWindow):
             if midx >= 0:
                 self._mmrm_method.setCurrentIndex(midx)
 
+        sem_cfg = cfg.get("sem")
+        if isinstance(sem_cfg, dict):
+            # The group list is rebuilt from whatever frame is loaded, so a saved choice only
+            # restores when that column is still there — which is the correct behaviour, not a
+            # silent fallback to a different grouping.
+            self._sync_sem_groups()
+            for key, combo in (
+                ("backend", self._sem_backend),
+                ("estimator", self._sem_estimator),
+                ("missing", self._sem_missing),
+                ("group", self._sem_group),
+            ):
+                if key in sem_cfg:
+                    index = combo.findData(str(sem_cfg[key] or ""))
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+            if "standardize" in sem_cfg:
+                self._sem_standardize.setChecked(bool(sem_cfg["standardize"]))
+
         nonlinear = cfg.get("nonlinear")
         if isinstance(nonlinear, dict):
             midx = self._nl_model.findData(str(nonlinear.get("model") or ""))
@@ -3657,6 +4291,25 @@ class StatmodelsWindow(QMainWindow):
             didx = self._plot_display.findData(plot_display)
             if didx >= 0:
                 self._plot_display.setCurrentIndex(didx)
+        # "" is a real choice for the atlas (auto), so an absent key and an empty one differ.
+        for key, combo in (
+            ("brain_atlas", self._brain_atlas),
+            ("brain_hemisphere", self._brain_hemi),
+            ("brain_views", self._brain_views),
+            ("brain_surface", self._brain_surface),
+        ):
+            if key in cfg:
+                index = combo.findData(str(cfg[key] or ""))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        if "brain_shading" in cfg:
+            self._brain_shading.setChecked(bool(cfg["brain_shading"]))
+        if "brain_blend" in cfg:
+            self._brain_blend.setChecked(bool(cfg["brain_blend"]))
+        if "brain_opacity" in cfg:
+            self._brain_opacity.setValue(float(cfg["brain_opacity"] or 1.0))
+        if "brain_threshold" in cfg:
+            self._brain_threshold.setValue(float(cfg["brain_threshold"] or 0.0))
         plot_mode = str(cfg.get("plot_mode") or "")
         if plot_mode:
             midx = self._plot_mode.findData(plot_mode)

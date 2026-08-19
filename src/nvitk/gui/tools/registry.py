@@ -50,6 +50,15 @@ class GuiToolSpec:
     run_mode: RunMode = "layer"
     cli_command: str = ""
     description: str = ""
+    #: The operation is meaningful **per label**, so a multi-label selection runs it once on each
+    #: label and recombines the results with the original ids, instead of on their binary union.
+    #:
+    #: Set this only where per-label and per-union genuinely differ and the per-label reading is the
+    #: one a user means. Connected components qualifies: on a union, two touching labels report one
+    #: component and a disjoint smaller label is dropped outright. The mask set-ops (``seg_mask_*``)
+    #: do not — a union is exactly what they are for — and neither does ``label_cc``, which
+    #: *assigns* new ids and would need a documented offset scheme per label rather than a flag.
+    multilabel: bool = False
 
 
 TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
@@ -249,15 +258,16 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ),
         ),
     ),
-    GuiToolSpec("dilate", "Morphology", "Dilate", _MORPH_PARAMS),
-    GuiToolSpec("erode", "Morphology", "Erode", _MORPH_PARAMS),
-    GuiToolSpec("open", "Morphology", "Open", _MORPH_PARAMS),
-    GuiToolSpec("close", "Morphology", "Close", _MORPH_PARAMS),
+    GuiToolSpec("dilate", "Morphology", "Dilate", _MORPH_PARAMS, multilabel=True),
+    GuiToolSpec("erode", "Morphology", "Erode", _MORPH_PARAMS, multilabel=True),
+    GuiToolSpec("open", "Morphology", "Open", _MORPH_PARAMS, multilabel=True),
+    GuiToolSpec("close", "Morphology", "Close", _MORPH_PARAMS, multilabel=True),
     GuiToolSpec(
         "fill_holes",
         "Morphology",
         "Fill holes",
         (ParamSpec("connectivity", "Connectivity", "int", 1, min=1, max=3),),
+        multilabel=True,
     ),
     GuiToolSpec(
         "label_cc",
@@ -273,6 +283,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("min_size", "Min size (voxels)", "int", 64, min=1, max=1_000_000),
             ParamSpec("connectivity", "Connectivity", "int", 1, min=1, max=3),
         ),
+        multilabel=True,
     ),
     GuiToolSpec(
         "morph_biggest_cc",
@@ -283,12 +294,14 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("connectivity", "Connectivity", "int", 1, min=1, max=3),
         ),
         needs_3d=True,
+        multilabel=True,
     ),
     GuiToolSpec(
         "skeletonize",
         "Morphology",
         "Skeletonize / centerline",
         needs_3d=True,
+        multilabel=True,
     ),
     GuiToolSpec(
         "centerline_detect_junctions",
@@ -409,6 +422,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Convex hull (slice-wise)",
         (ParamSpec("hull_axis", "Slice axis (0/1/2)", "int", 2, min=0, max=2),),
         needs_3d=True,
+        multilabel=True,
     ),
     GuiToolSpec(
         "seg_convex_hull_3d",
@@ -416,6 +430,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Convex hull (3D)",
         (),
         needs_3d=True,
+        multilabel=True,
     ),
     GuiToolSpec(
         "seg_distance_transform",
@@ -485,6 +500,7 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Segmentation",
         "Connected components",
         (ParamSpec("n_largest", "Keep N largest", "int", 1, min=1, max=1000),),
+        multilabel=True,
     ),
     GuiToolSpec(
         "seg_split_lr_cc",

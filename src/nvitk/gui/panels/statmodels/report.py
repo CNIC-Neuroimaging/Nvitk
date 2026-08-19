@@ -380,6 +380,38 @@ class ModelReportPanel(QGroupBox):
                 group_effects,
                 headers={"factor": "Factor", "level": "Level"},
             )
+        # A measurement model is a different table from the structural one — a loading says how well
+        # an indicator measures its factor, a path says how one variable predicts another — so it
+        # gets its own tab rather than being concatenated into the coefficients.
+        loadings = info.get("sem_loadings")
+        if isinstance(loadings, pd.DataFrame) and not loadings.empty:
+            self._add_table_tab(
+                "Loadings",
+                loadings,
+                headers={
+                    "parameter": "Loading",
+                    "coef": "Estimate",
+                    "std_err": "Std.Err",
+                    "z": "z",
+                    "p_value": "P-value",
+                    "ci_low": "CI low",
+                    "ci_high": "CI high",
+                    "sig": "Sig",
+                },
+            )
+        # Where the model misfits. Diagnostics, not results — see ``sem_modification_indices``.
+        modindices = info.get("sem_modification_indices")
+        if isinstance(modindices, pd.DataFrame) and not modindices.empty:
+            self._add_table_tab(
+                "Modifications",
+                modindices,
+                headers={
+                    "parameter": "Fixed parameter",
+                    "mi": "Modification index",
+                    "epc": "Expected change",
+                    "sepc_all": "Standardized",
+                },
+            )
         # Robust engines report how much each observation was trusted. Sorted worst-first by the
         # backend, so the rows the fit discounted are the ones on screen.
         weights = info.get("robust_weights")

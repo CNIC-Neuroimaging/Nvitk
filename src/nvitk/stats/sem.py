@@ -198,9 +198,47 @@ class SemSpec:
     standardize: bool = True
     #: Drop rows missing any modelled variable. ``False`` asks the backend for FIML instead.
     listwise: bool = True
+    #: Grouping column for a multi-group fit — the same model estimated separately in each group,
+    #: which is how you ask whether a path *differs* between them rather than assuming it does not.
+    #: ``lavaan`` only; ``semopy`` has no multi-group support and the fit is refused rather than
+    #: silently pooled, since a pooled estimate is not the question that was asked.
+    group: str = ""
 
-    def variables(self) -> list[str]:
-        """Observed variables the syntax mentions, in order of first appearance."""
+    def _statements(self) -> list[tuple[str, str, str]]:
+        """
+        ``(lhs, operator, rhs)`` for every non-comment line, longest operator first.
+
+        Order matters: ``~~`` and ``=~`` both contain a character that would otherwise split as
+        ``~``, so a naive scan reads ``f =~ x1 + x2`` as a regression of ``f =`` on ``x1``.
+        """
+        out: list[tuple[str, str, str]] = []
+        for raw in self.syntax.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            for operator in ("=~", "~~", "~*~", "~"):
+                if operator in line:
+                    lhs, _, rhs = line.partition(operator)
+                    out.append((lhs.strip(), operator, rhs.strip()))
+                    break
+        return out
+
+    def latent(self) -> list[str]:
+        """
+        Latent variables — the left-hand sides of ``=~`` measurement lines.
+
+        A latent is defined *by* the model, not measured: ``f1 =~ x1 + x2 + x3`` says the three
+        indicators share a common cause called ``f1``. It is therefore not a column of the data, and
+        every check that assumes "every name is a column" has to know the difference.
+        """
+        names: list[str] = []
+        for lhs, operator, _rhs in self._statements():
+            if operator == "=~" and lhs and lhs not in names:
+                names.append(lhs)
+        return names
+
+    def tokens(self) -> list[str]:
+        """Every identifier the syntax mentions, in order of first appearance."""
         names: list[str] = []
         for line in self.syntax.splitlines():
             line = line.split("#", 1)[0].strip()
@@ -211,35 +249,77 @@ class SemSpec:
                     names.append(token)
         return names
 
+    def observed(self) -> list[str]:
+        """
+        Variables that must exist as columns — every token that is not a latent.
+
+        This is what the frame has to supply. A latent appears in the syntax and *not* here, which
+        is the whole reason the two are separated: validating a CFA against the columns would
+        otherwise reject the factor it was written to estimate.
+        """
+        latents = set(self.latent())
+        return [name for name in self.tokens() if name not in latents]
+
+    def variables(self) -> list[str]:
+        """
+        Observed variables the syntax mentions — the columns the model needs.
+
+        Kept as the historical name for :meth:`observed`; the path models that predate latent
+        support call it, and for them the two are identical because there are no latents.
+        """
+        return self.observed()
+
     def endogenous(self) -> list[str]:
-        """Variables the model gives an equation to — the left-hand sides of ``~``."""
+        """
+        Variables the model gives an equation to — the left-hand sides of ``~``.
+
+        A latent with indicators counts too: ``f1 =~ x1 + x2`` gives ``f1`` a measurement equation,
+        so a residual covariance on it is a *residual* like any other and must not be reported as
+        pairing a modelled variable with an unmodelled one.
+        """
         names: list[str] = []
-        for line in self.syntax.splitlines():
-            line = line.split("#", 1)[0].strip()
-            if not line or "~" not in line or "~~" in line:
-                continue
-            lhs = line.split("~", 1)[0].strip()
-            if lhs and lhs not in names:
+        for lhs, operator, _rhs in self._statements():
+            if operator in {"~", "=~"} and lhs and lhs not in names:
                 names.append(lhs)
         return names
 
     def covariances(self) -> list[tuple[str, str]]:
         """``(left, right)`` pairs from the residual-covariance (``~~``) lines."""
-        pairs: list[tuple[str, str]] = []
-        for line in self.syntax.splitlines():
-            line = line.split("#", 1)[0].strip()
-            if "~~" not in line:
+        return [
+            (lhs, rhs)
+            for lhs, operator, rhs in self._statements()
+            if operator == "~~" and lhs and rhs
+        ]
+
+    def indicators(self) -> dict[str, list[str]]:
+        """``{latent: [indicator, …]}`` from the ``=~`` measurement lines."""
+        out: dict[str, list[str]] = {}
+        for lhs, operator, rhs in self._statements():
+            if operator != "=~" or not lhs:
                 continue
-            left, _, right = line.partition("~~")
-            left, right = left.strip(), right.strip()
-            if left and right:
-                pairs.append((left, right))
-        return pairs
+            names = [t for t in re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", rhs)]
+            out.setdefault(lhs, []).extend(n for n in names if n not in out.get(lhs, []))
+        return out
 
     def validate(self, data: pd.DataFrame) -> str:
         """Empty when the model can be fitted against *data*, otherwise the reason it cannot."""
         if "~" not in self.syntax:
-            return "The model syntax contains no structural equation (nothing of the form 'y ~ x')."
+            return (
+                "The model syntax contains no equation (nothing of the form 'y ~ x' or "
+                "'factor =~ indicator1 + indicator2')."
+            )
+
+        # A latent needs enough indicators to be identified at all. Two is the practical floor and
+        # only with other constraints; one is a rename of the indicator, which lavaan reports as a
+        # non-convergence deep in the optimiser rather than as the modelling error it is.
+        for latent, indicators in self.indicators().items():
+            if len(indicators) < 2:
+                return (
+                    f"Latent variable '{latent}' has {len(indicators)} indicator"
+                    f"{'' if len(indicators) == 1 else 's'}. A factor needs at least two to be "
+                    f"identified — with one it is just that indicator under another name. Add "
+                    f"indicators, or drop the '=~' line and use the observed variable directly."
+                )
 
         # A residual covariance is only defined between two variables of the same kind: both with
         # equations of their own, or neither. Mixing them fails deep inside the backend with a bare
@@ -292,10 +372,28 @@ def prepare_sem_frame(
     as ``sex`` is dummy-coded here rather than being silently dropped by the backend. Anything with
     more than two levels is refused, because which contrast it should get is a modelling decision,
     not something to guess.
+
+    Latent variables are *not* included — they are estimated, not supplied — and a multi-group
+    column rides along untouched: it labels the rows rather than entering the covariance matrix, so
+    dummy-coding or standardizing it would destroy the very grouping it is there to provide.
     """
     variables = [v for v in spec.variables() if v in data.columns]
     frame = data.loc[:, variables].copy()
     coding: dict[str, str] = {}
+
+    group_column = str(spec.group or "")
+    if group_column:
+        if group_column not in data.columns:
+            raise ValueError(
+                f"{group_column!r} is not in the frame, so the model cannot be grouped by it."
+            )
+        if group_column in variables:
+            raise ValueError(
+                f"{group_column!r} is both the grouping column and a modelled variable. A "
+                f"multi-group fit already estimates a separate model per level; naming it in the "
+                f"syntax as well asks for its effect *within* each of its own levels, where it is "
+                f"constant."
+            )
 
     for column in variables:
         series = frame[column]
@@ -342,8 +440,22 @@ def prepare_sem_frame(
     if spec.standardize:
         frame = (frame - pd.Series(centres)) / pd.Series(scales)
 
+    # Attached after standardizing, and after the dropna that decided which rows survive, so the
+    # labels line up with the rows they belong to and are never scaled.
+    if group_column:
+        frame[group_column] = data.loc[frame.index, group_column].astype(str)
+        levels = sorted(frame[group_column].unique())
+        if len(levels) < 2:
+            raise ValueError(
+                f"{group_column!r} has {len(levels)} level(s) in the retained rows — a multi-group "
+                f"fit needs at least two groups to compare."
+            )
+        log.info("SEM: multi-group over %s (%s).", group_column, ", ".join(levels))
+
     meta = {
         "variables": variables,
+        "latent": spec.latent(),
+        "group": group_column,
         "coding": coding,
         "n_rows_input": n_input,
         "n_rows": int(len(frame)),
@@ -411,6 +523,13 @@ def _fit_semopy(frame: pd.DataFrame, spec: SemSpec) -> Any:
     """Fit through ``semopy``."""
     import semopy
 
+    if spec.group:
+        raise ValueError(
+            f"A multi-group fit over {spec.group!r} needs the lavaan backend — semopy estimates one "
+            f"model for the whole sample. Switch the backend to lavaan, or drop the grouping and "
+            f"add {spec.group} as an ordinary covariate (which tests a mean shift, not whether the "
+            f"paths themselves differ)."
+        )
     model = semopy.Model(spec.syntax)
     # semopy names its objectives differently from lavaan; MLR has no direct equivalent, so it
     # falls back to ML rather than failing on a name the backend has never heard of.
@@ -429,12 +548,16 @@ def _fit_lavaan(frame: pd.DataFrame, spec: SemSpec) -> Any:
     with localconverter(default_converter + pandas2ri.converter):
         r_data = conversion.get_conversion().py2rpy(frame.reset_index(drop=True))
     missing = "listwise" if spec.listwise else "fiml"
-    return globalenv[".nvitk_sem_fit"](r_data, spec.syntax, spec.estimator, missing)
+    return globalenv[".nvitk_sem_fit"](
+        r_data, spec.syntax, spec.estimator, missing, spec.group
+    )
 
 
 _R_SEM_HELPERS = """
-.nvitk_sem_fit <- function(data, syntax, estimator, missing) {
-  lavaan::sem(model = syntax, data = data, estimator = estimator, missing = missing)
+.nvitk_sem_fit <- function(data, syntax, estimator, missing, group) {
+  args <- list(model = syntax, data = data, estimator = estimator, missing = missing)
+  if (nzchar(group)) args$group <- group
+  do.call(lavaan::sem, args)
 }
 
 .nvitk_sem_params <- function(fit) {
@@ -452,6 +575,23 @@ _R_SEM_HELPERS = """
   # are absent this returns an empty frame rather than erroring.
   p <- lavaan::parameterEstimates(fit, standardized = TRUE)
   as.data.frame(p[p$op == ":=", , drop = FALSE])
+}
+
+.nvitk_sem_modindices <- function(fit, minimum) {
+  # Saturated or just-identified models have no degrees of freedom left to free a parameter with,
+  # and modificationIndices() errors rather than returning nothing. An empty frame is the honest
+  # answer there: there is no misfit to attribute.
+  out <- try(lavaan::modificationIndices(fit, sort. = TRUE, minimum.value = minimum),
+             silent = TRUE)
+  if (inherits(out, "try-error")) {
+    return(data.frame(lhs = character(0), op = character(0), rhs = character(0),
+                      mi = numeric(0), epc = numeric(0), sepc.all = numeric(0)))
+  }
+  as.data.frame(out)
+}
+
+.nvitk_sem_standardized <- function(fit) {
+  as.data.frame(lavaan::standardizedSolution(fit))
 }
 """
 
@@ -472,9 +612,20 @@ def _ensure_lavaan_helpers() -> None:
 # ---------------------------------------------------------------------------
 # Reading the fit
 # ---------------------------------------------------------------------------
-def sem_paths_frame(fit: Any, *, backend: str = "") -> pd.DataFrame:
+def sem_paths_frame(
+    fit: Any, *, backend: str = "", latent: Sequence[str] = ()
+) -> pd.DataFrame:
     """
     Path estimates in one shape whichever backend produced them.
+
+    Parameters
+    ----------
+    latent : sequence of str
+        Names of the model's latent variables. Needed only for ``semopy``, which reports a
+        measurement line as an ordinary regression of the indicator on the factor (``x1 ~ f1``)
+        and so loses the distinction lavaan keeps. Passing the latents lets those rows be restored
+        to ``f1 =~ x1``, which is what makes the two backends' tables genuinely interchangeable —
+        without it a CFA fitted through semopy reports no loadings at all.
 
     Returns
     -------
@@ -491,6 +642,22 @@ def sem_paths_frame(fit: Any, *, backend: str = "") -> pd.DataFrame:
             "lhs", "op", "rhs", "parameter", "coef", "std_err", "z", "p_value",
             "ci_low", "ci_high", "sig",
         ])
+
+    factors = {str(name) for name in (latent or ())}
+    if factors and backend != "lavaan":
+        # A measurement line has a latent on the right and an *observed* indicator on the left.
+        # ``f2 ~ f1`` has latents on both sides — that is a structural path between two factors, and
+        # tagging it as a loading would claim f1 is measured by f2.
+        is_loading = (
+            (raw["op"].astype(str) == "~")
+            & raw["rhs"].astype(str).isin(factors)
+            & ~raw["lhs"].astype(str).isin(factors)
+        )
+        if is_loading.any():
+            # Swap into lavaan's orientation: the factor is the common cause, so it is the lhs.
+            lhs, rhs = raw.loc[is_loading, "lhs"].copy(), raw.loc[is_loading, "rhs"].copy()
+            raw.loc[is_loading, "lhs"], raw.loc[is_loading, "rhs"] = rhs, lhs
+            raw.loc[is_loading, "op"] = "=~"
 
     raw["parameter"] = raw["lhs"].astype(str) + " " + raw["op"].astype(str) + " " + raw["rhs"].astype(str)
     raw["sig"] = [significance_stars(p) for p in raw["p_value"]]
@@ -537,6 +704,91 @@ def _lavaan_params(fit: Any) -> pd.DataFrame:
         if column in out.columns:
             out[column] = pd.to_numeric(out[column], errors="coerce")
     return out
+
+
+def sem_modification_indices(
+    fit: Any, *, backend: str = "", minimum: float = 3.84, limit: int = 25
+) -> pd.DataFrame:
+    """
+    Parameters the model does **not** estimate, ranked by how much freeing each would improve fit.
+
+    A poor global fit says the network as specified cannot reproduce the observed covariances; it
+    does not say which edge is wrong. This does: each row is a path or covariance the model fixes at
+    zero, with the χ² drop expected from letting it go free (``mi``) and the value it would take
+    (``epc``, and ``sepc_all`` standardized).
+
+    Read them as *hypotheses*, not fixes. ``minimum`` defaults to 3.84 — the 5% χ²(1) critical
+    value — so the table only lists modifications that would be individually significant, but a
+    model rebuilt by chasing this list is fitted to its own residuals and its p-values mean nothing.
+    The useful reading is anatomical: a large index on a path the anatomy predicts is evidence the
+    topology is missing an edge; one on an implausible path is evidence of nothing.
+
+    Returns an empty frame for ``semopy`` (which does not compute them) and for a saturated model
+    (which has no fixed parameter left to free).
+    """
+    columns = ["lhs", "op", "rhs", "parameter", "mi", "epc", "sepc_all"]
+    backend = backend or ("lavaan" if _looks_like_lavaan(fit) else "semopy")
+    if backend != "lavaan":
+        log.info("Modification indices need the lavaan backend; semopy does not compute them.")
+        return pd.DataFrame(columns=columns)
+
+    from rpy2.robjects import default_converter, globalenv, pandas2ri
+    from rpy2.robjects.conversion import localconverter
+
+    _ensure_lavaan_helpers()
+    with localconverter(default_converter + pandas2ri.converter):
+        raw = pd.DataFrame(globalenv[".nvitk_sem_modindices"](fit, float(minimum)))
+    if raw.empty:
+        return pd.DataFrame(columns=columns)
+
+    out = raw.rename(columns={"sepc.all": "sepc_all"}).copy()
+    out["parameter"] = (
+        out["lhs"].astype(str) + " " + out["op"].astype(str) + " " + out["rhs"].astype(str)
+    )
+    for column in ("mi", "epc", "sepc_all"):
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+    out = out.loc[:, [c for c in columns if c in out.columns]]
+    return out.sort_values("mi", ascending=False).head(int(limit)).reset_index(drop=True)
+
+
+def sem_standardized_solution(fit: Any, *, backend: str = "") -> pd.DataFrame:
+    """
+    Every parameter on the standardized (SD-per-SD) scale, with its own standard error.
+
+    Different from the ``coef_std`` column :func:`sem_paths_frame` already carries: that one is a
+    point rescaling of the unstandardized estimate, whereas ``lavaan``'s standardized solution
+    propagates the uncertainty properly by the delta method, so its intervals are the ones to quote
+    for a standardized coefficient.
+
+    Empty for ``semopy``, which reports only the rescaled point estimate.
+    """
+    columns = ["lhs", "op", "rhs", "parameter", "est_std", "std_err", "z", "p_value",
+               "ci_low", "ci_high"]
+    backend = backend or ("lavaan" if _looks_like_lavaan(fit) else "semopy")
+    if backend != "lavaan":
+        return pd.DataFrame(columns=columns)
+
+    from rpy2.robjects import default_converter, globalenv, pandas2ri
+    from rpy2.robjects.conversion import localconverter
+
+    _ensure_lavaan_helpers()
+    with localconverter(default_converter + pandas2ri.converter):
+        raw = pd.DataFrame(globalenv[".nvitk_sem_standardized"](fit))
+    if raw.empty:
+        return pd.DataFrame(columns=columns)
+
+    out = raw.rename(columns={
+        "est.std": "est_std", "se": "std_err", "pvalue": "p_value",
+        "ci.lower": "ci_low", "ci.upper": "ci_high",
+    }).copy()
+    out["parameter"] = (
+        out["lhs"].astype(str) + " " + out["op"].astype(str) + " " + out["rhs"].astype(str)
+    )
+    for column in ("est_std", "std_err", "z", "p_value", "ci_low", "ci_high"):
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out.loc[:, [c for c in columns if c in out.columns]].reset_index(drop=True)
 
 
 def sem_fit_measures(fit: Any, *, backend: str = "") -> dict[str, float]:
@@ -594,20 +846,30 @@ def sem_info_dict(
     """Structured report in the shape the GUI report panel expects from every engine."""
     meta = dict(meta or {})
     backend = str(meta.get("backend") or "")
-    paths = sem_paths_frame(fit, backend=backend)
+    paths = sem_paths_frame(fit, backend=backend, latent=meta.get("latent", ()))
     measures = sem_fit_measures(fit, backend=backend)
 
     regressions = paths.loc[paths["op"] == "~"] if "op" in paths.columns else paths
     covariances = paths.loc[paths["op"] == "~~"] if "op" in paths.columns else pd.DataFrame()
+    loadings = paths.loc[paths["op"] == "=~"] if "op" in paths.columns else pd.DataFrame()
+
+    latents = list(meta.get("latent", []))
+    kind = "Measurement model" if (len(loadings) and not len(regressions)) else "Path model"
+    if len(loadings) and len(regressions):
+        kind = "Structural equation model"
+    formula = f"{len(regressions)} structural path(s)"
+    if len(loadings):
+        formula += f", {len(loadings)} loading(s) on {len(latents)} latent(s)"
+    formula += f" over {len(meta.get('variables', []))} observed variables"
 
     header = {
-        "model": f"Path model ({backend})",
+        "model": f"{kind} ({backend})",
         "outcome": outcome_name,
-        "group": group_name,
-        "formula": f"{len(regressions)} structural path(s) over {len(meta.get('variables', []))} variables",
+        "group": str(meta.get("group") or "") or group_name,
+        "formula": formula,
         "estimator": meta.get("estimator", ""),
         "n_obs": int(meta.get("n_rows", 0) or 0),
-        "n_groups": 0,
+        "n_groups": int(measures.get("ngroups", 0) or 0),
         "converged": bool(measures) or not regressions.empty,
         "backend": meta.get("backend_summary", ""),
         "standardized": bool(meta.get("standardized", False)),
@@ -636,16 +898,32 @@ def sem_info_dict(
             "sd": np.sqrt(pd.to_numeric(covariances["coef"], errors="coerce").abs()),
         })
 
+    # The structural table is what the report leads with. When the model is a pure CFA there are no
+    # structural paths at all, and leading with an empty table would read as a failed fit — so the
+    # loadings take that slot instead, which is the thing that model actually estimated.
+    fixed_effects = regressions if len(regressions) or loadings.empty else loadings
+
     return {
         "header": header,
-        "fixed_effects": regressions.reset_index(drop=True),
+        "fixed_effects": fixed_effects.reset_index(drop=True),
         "random_effects": random_effects,
         "cov_re": pd.DataFrame(),
         "fit_statistics": {k: v for k, v in fit_statistics.items() if v is not None},
         "has_vcomp": not random_effects.empty,
         "group_effects": pd.DataFrame(),
         "sem_syntax": meta.get("syntax", ""),
+        "sem_loadings": loadings.reset_index(drop=True),
+        "sem_modification_indices": _safe_modification_indices(fit, backend),
     }
+
+
+def _safe_modification_indices(fit: Any, backend: str) -> pd.DataFrame:
+    """Modification indices, or an empty frame — a diagnostic must never break the report."""
+    try:
+        return sem_modification_indices(fit, backend=backend)
+    except Exception as exc:
+        log.debug("Modification indices unavailable: %s", exc)
+        return pd.DataFrame(columns=["lhs", "op", "rhs", "parameter", "mi", "epc", "sepc_all"])
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +998,7 @@ def plot_sem_paths(
     *,
     max_paths: int = 30,
     title: str = "Path coefficients",
+    op: str = "~",
 ) -> Any:
     """
     Forest plot of the structural paths, strongest first.
@@ -727,12 +1006,19 @@ def plot_sem_paths(
     Reading it: a path whose interval excludes zero is an edge the data supports at the assumed
     direction. Edge magnitudes are comparable to each other only when the fit was standardized —
     otherwise a path in mL/min per mL/min sits beside one in mL/min per year.
+
+    Parameters
+    ----------
+    op : str
+        Which kind of parameter to draw — ``"~"`` for structural paths, ``"=~"`` for factor
+        loadings. Empty draws whatever the frame contains, which is what makes this reusable for a
+        table that has already been filtered.
     """
     import matplotlib.pyplot as plt
 
-    edges = paths.loc[paths["op"] == "~"] if "op" in paths.columns else paths
+    edges = paths.loc[paths["op"] == op] if (op and "op" in paths.columns) else paths
     if edges.empty:
-        raise ValueError("No structural paths to plot.")
+        raise ValueError(f"No parameters with op={op!r} to plot." if op else "Nothing to plot.")
 
     frame = edges.reindex(
         edges["coef"].abs().sort_values(ascending=False).index
@@ -767,7 +1053,7 @@ def plot_sem_network(
     paths: pd.DataFrame,
     *,
     node_labels: Mapping[str, str] | None = None,
-    title: str = "Fitted vascular network",
+    title: str = "Fitted path model",
 ) -> Any:
     """
     The fitted network as a diagram: nodes laid out by depth, edges weighted by their coefficient.
@@ -779,7 +1065,22 @@ def plot_sem_network(
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyArrowPatch
 
-    edges = paths.loc[paths["op"] == "~"] if "op" in paths.columns else paths
+    if "op" in paths.columns:
+        structural = paths.loc[paths["op"] == "~"]
+        loadings = paths.loc[paths["op"] == "=~"]
+    else:
+        structural, loadings = paths, paths.iloc[0:0]
+
+    # A loading points from the factor to its indicator — the factor is the common cause, and
+    # drawing it the other way round (indicator → factor) inverts the model's whole claim. lavaan
+    # writes it as ``factor =~ indicator``, i.e. lhs → rhs, which is the opposite orientation from a
+    # regression's ``outcome ~ predictor``, so the two are flipped into one convention here.
+    latents = sorted(set(loadings["lhs"].astype(str))) if len(loadings) else []
+    if len(loadings):
+        flipped = loadings.rename(columns={"lhs": "rhs", "rhs": "lhs"})
+        edges = pd.concat([structural, flipped], ignore_index=True)
+    else:
+        edges = structural
     edges = edges.loc[edges["lhs"].astype(str) != edges["rhs"].astype(str)]
     if edges.empty:
         raise ValueError("No structural paths to draw.")
@@ -834,9 +1135,23 @@ def plot_sem_network(
 
     labels = dict(node_labels or {})
     for node, (x, y) in positions.items():
+        # The path-diagram convention: a latent variable is an ellipse, an observed one a box. It
+        # is not decoration — the shape is what tells the reader which nodes were measured and which
+        # the model invented.
+        latent = node in latents
         ax.annotate(
             labels.get(node, node), (x, y), ha="center", va="center", fontsize=9,
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="#555555"),
+            bbox=dict(
+                boxstyle="round,pad=0.55" if latent else "square,pad=0.4",
+                facecolor="#eef3fb" if latent else "white",
+                edgecolor="#4C72B0" if latent else "#555555",
+                linewidth=1.6 if latent else 1.0,
+            ),
+        )
+    if latents:
+        ax.annotate(
+            "rounded / blue = latent variable", xy=(0.5, 0.0), xycoords="axes fraction",
+            ha="center", va="bottom", fontsize=8, color="#555555",
         )
 
     xs = [p[0] for p in positions.values()]
@@ -850,6 +1165,61 @@ def plot_sem_network(
     return fig
 
 
+def plot_sem_loadings(
+    paths: pd.DataFrame, *, max_paths: int = 40, title: str = "Factor loadings"
+) -> Any:
+    """
+    Forest plot of the measurement model — how strongly each indicator loads on its factor.
+
+    Reading it: a loading whose interval excludes zero is an indicator the factor accounts for. A
+    factor whose loadings are all small is one the indicators do not actually share, whatever the
+    global fit indices say — which is the check a CFA exists to make.
+    """
+    loadings = paths.loc[paths["op"] == "=~"] if "op" in paths.columns else paths
+    if loadings.empty:
+        raise ValueError(
+            "This model has no measurement lines ('factor =~ indicator1 + indicator2'), so there "
+            "are no loadings to plot."
+        )
+    return plot_sem_paths(loadings, max_paths=max_paths, title=title, op="=~")
+
+
+def plot_sem_modification_indices(
+    indices: pd.DataFrame, *, max_rows: int = 20, title: str = "Modification indices"
+) -> Any:
+    """
+    Bar chart of the parameters that would most improve fit if freed, largest first.
+
+    A reading aid for *where the model misfits*, not a to-do list — see
+    :func:`sem_modification_indices` for why rebuilding a model from this table invalidates its
+    own p-values.
+    """
+    import matplotlib.pyplot as plt
+
+    if indices is None or indices.empty:
+        raise ValueError(
+            "No modification indices are available. They need the lavaan backend, and a model with "
+            "degrees of freedom left — a saturated model has no fixed parameter to free."
+        )
+
+    frame = indices.head(int(max_rows)).iloc[::-1]
+    fig, ax = plt.subplots(figsize=(9, max(3.5, 0.34 * len(frame) + 1.4)))
+    y = np.arange(len(frame))
+    values = pd.to_numeric(frame["mi"], errors="coerce").to_numpy(float)
+    ax.barh(y, values, color="#4C72B0", alpha=0.85)
+    ax.set_yticks(y)
+    ax.set_yticklabels([str(p) for p in frame["parameter"]], fontsize=9)
+    ax.set_xlabel("Modification index (expected χ² drop)")
+    ax.axvline(3.84, color="#c44e52", ls="--", lw=1.2)
+    ax.annotate("χ²(1) at p=0.05", xy=(3.84, len(frame) - 0.5), fontsize=7.5,
+                color="#c44e52", va="top", ha="left")
+    ax.set_title(title)
+    ax.grid(True, axis="x", alpha=0.25)
+    fig.tight_layout()
+    fig.linked_axes = [ax]
+    return fig
+
+
 __all__ = [
     "ANALYSIS_SEM",
     "INSTALL_HINT",
@@ -859,11 +1229,15 @@ __all__ = [
     "SemSpec",
     "fit_sem",
     "path_effects",
+    "plot_sem_loadings",
+    "plot_sem_modification_indices",
     "plot_sem_network",
     "plot_sem_paths",
     "prepare_sem_frame",
     "sem_backend_status",
     "sem_fit_measures",
     "sem_info_dict",
+    "sem_modification_indices",
     "sem_paths_frame",
+    "sem_standardized_solution",
 ]

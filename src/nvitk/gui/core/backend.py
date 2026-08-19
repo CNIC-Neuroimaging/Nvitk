@@ -45,6 +45,32 @@ def napari_array(out: Any) -> np.ndarray:
     return arr.astype(np.float64)
 
 
+def napari_label_array(out: Any) -> np.ndarray:
+    """
+    NumPy array for Napari that **keeps its integer dtype**, for label-map results.
+
+    :func:`napari_array` casts to ``float64``, which is right for intensities and wrong for a label
+    map: the ids survive the round trip numerically, but the layer can no longer be added as a
+    Napari ``Labels`` layer without a second cast, and every downstream ``unique`` comes back as
+    floats. Tools that return a parcellation use this instead.
+
+    A non-integer result is left alone rather than rounded — silently quantising a float map into
+    label ids would invent a parcellation that the operation never produced.
+    """
+    from nvitk.types import Image
+
+    if isinstance(out, Image):
+        out = out.data
+    if isinstance(out, tuple) and out:
+        out = out[0]
+    arr = to_numpy(out)
+    if arr.dtype == bool:
+        return arr.astype(np.uint8)
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr
+    return arr.astype(np.float64)
+
+
 def run_with_backend():
     """Context manager scoped to the current global backend."""
     return using(get_global_backend(), allow_fallback=True)

@@ -15,5 +15,9 @@
             "netrc_file": "~/.netrc",
             "verify":     false
         }
+    },
+    "atlas": {
+        "root": "/run/user/11503/gvfs/smb-share:server=tierra.cnic.es,share=sc/LAB_VF-ICH/LAB/MCC LAB/_IgnacioMarcos/LabVF/PESA-Brain/DB/raw/ATLAS/",
+        "vascular": "/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DB/raw/ATLAS/ctx_arterial_atlas_watershed_filled.nii.gz"
     }
 }

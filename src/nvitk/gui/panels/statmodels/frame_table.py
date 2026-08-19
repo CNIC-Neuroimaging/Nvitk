@@ -601,6 +601,7 @@ class AnalysisFrameView(QWidget):
     restoreRequested()               put every dropped column back
     typeChangeRequested(column, kind) recast a column (numeric / factor / …)
     referenceRequested(column, level) make a level the model's reference
+    subjectPlotRequested(subject_uid) open the per-subject viewer for one subject
     """
 
     filtersRequested = Signal(str)
@@ -616,6 +617,7 @@ class AnalysisFrameView(QWidget):
     restoreRequested = Signal()
     typeChangeRequested = Signal(str, str)
     referenceRequested = Signal(str, str)
+    subjectPlotRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the table view over a sorting proxy and wire the header context menu."""
@@ -638,6 +640,11 @@ class AnalysisFrameView(QWidget):
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.horizontalHeader().setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.horizontalHeader().customContextMenuRequested.connect(self._on_header_menu)
+        # A cell menu as well as a header one: the header answers "what about this variable", the
+        # cell answers "what about this row" — and for the subject column that is a different and
+        # frequently-wanted question.
+        self._table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_cell_menu)
         self._table.verticalHeader().setDefaultSectionSize(22)
 
         lay = QVBoxLayout(self)
@@ -697,6 +704,40 @@ class AnalysisFrameView(QWidget):
             return (preferred.index(name), "") if name in preferred else (len(preferred), name)
 
         return sorted(out, key=rank)
+
+    def _on_cell_menu(self, point) -> None:
+        """
+        Per-row menu, offered only where a row identifies something worth viewing on its own.
+
+        Today that is ``subject_uid``: one row of the analysis frame is one subject × region, and
+        the interesting question about a subject is what *all* their regions look like together —
+        which is a picture of anatomy, not a cell value. Right-clicking anywhere else falls through
+        to the header menu's territory and does nothing here, rather than offering an action that
+        would not mean anything for that column.
+        """
+        index = self._table.indexAt(point)
+        if not index.isValid():
+            return
+        # The view sorts through a proxy, so the visible row is not the frame's row. Map back before
+        # reading anything, or a sorted table reports the wrong subject.
+        source = self._proxy.mapToSource(index)
+        column = self._column_at(source.column())
+        if column != "subject_uid":
+            return
+
+        frame = self._model.frame()
+        if source.row() >= len(frame):
+            return
+        subject = str(frame.iloc[source.row()][column])
+        if not subject or subject.lower() == "nan":
+            return
+
+        menu = QMenu(self)
+        menu.addAction(
+            f"Visualize subject “{subject}”…",
+            lambda: self.subjectPlotRequested.emit(subject),
+        )
+        menu.exec(self._table.viewport().mapToGlobal(point))
 
     def _on_header_menu(self, point) -> None:
         """Build and run the per-column header menu."""

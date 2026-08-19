@@ -61,11 +61,13 @@ from nvitk.measure.hemodynamics import (
     CONSERVATION_TOL_ARTERIAL,
     CONSERVATION_TOL_DISTAL,
     CONSERVATION_TOL_VENOUS,
+    PROXIMAL_SEGMENT_MM,
     SEGMENT_CV_TOL,
     anterior_posterior_share_pct,
     anterior_posterior_split_flag,
     flow_plausibility_score,
     is_plausibly_hypoplastic,
+    proximal_station_mask,
     segment_flow_consistency_cv,
 )
 
@@ -123,6 +125,21 @@ AUTOQC_CONSERVATION: tuple[tuple[str, tuple[str, ...], float], ...] = (
 #: the arterial root groups, so a venous node listed here (or anywhere) would simply never match.
 SEGMENT_CV_EXCLUDED_NODES: frozenset[str] = frozenset()
 
+#: Vessels whose along-segment CV is read over the **proximal** part of the trunk only.
+#:
+#: The branched territories are the ones that need it. :func:`is_main_path_station` already drops
+#: their bifurcation arms, but the trunk it keeps runs all the way *into* the bifurcation, and its
+#: last stations sit where the lumen flares and the cross-section planes start cutting the daughter
+#: vessels obliquely. Those stations move the flow without saying anything about how well the vessel
+#: was segmented, which is what this check is for.
+#:
+#: The unbranched vessels are deliberately absent: an ICA, a vertebral or the basilar is one tube
+#: over its whole sampled length, so narrowing the window there would throw away good stations and
+#: make the CV noisier, not cleaner.
+SEGMENT_CV_PROXIMAL_NODES: frozenset[str] = frozenset(
+    {"lmca", "rmca", "laca", "raca", "lpca", "rpca"}
+)
+
 
 @dataclass(frozen=True)
 class AutoQcConfig:
@@ -140,6 +157,10 @@ class AutoQcConfig:
     conservation_tol_distal: float = CONSERVATION_TOL_DISTAL
     conservation_tol_venous: float = CONSERVATION_TOL_VENOUS
     segment_cv_tol: float = SEGMENT_CV_TOL
+    #: Proximal window (mm) the along-segment CV of a branched vessel is read over — see
+    #: :data:`SEGMENT_CV_PROXIMAL_NODES`. ``0`` or non-finite uses the whole trunk, which is the
+    #: pre-window behaviour.
+    segment_cv_proximal_mm: float = PROXIMAL_SEGMENT_MM
     score_flag_below: float = QC_SCORE_FLAG_BELOW
     anterior_pct: float = ANTERIOR_SHARE_PCT
     anterior_tol_pct: float = ANTERIOR_SHARE_TOL_PCT
@@ -676,7 +697,9 @@ def is_main_path_station(branch_name: Any, label_id: int) -> bool:
     return key in {trunk, str(qvtpy_vessel_name(int(label_id))).upper()}
 
 
-def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
+def compute_segment_cv_from_profiles(
+    profiles: pd.DataFrame, *, config: AutoQcConfig | None = None
+) -> pd.DataFrame:
     """
     Along-segment flow CV **per individual vessel**, from a concatenated ``pitc_profile.csv`` frame.
 
@@ -690,6 +713,15 @@ def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
       :data:`SEGMENT_CV_EXCLUDED_NODES`.
     - **Main path only.** For the branched territories (ACA / MCA / PCA) only the trunk centerline
       counts; the bifurcation arms are dropped (:func:`is_main_path_station`).
+    - **Proximal segment only, for the branched territories.** Dropping the arms is not enough: the
+      trunk that survives runs all the way into the bifurcation, and its last stations sit where the
+      lumen flares and the sampling planes start cutting the daughter vessels obliquely. For the
+      vessels in :data:`SEGMENT_CV_PROXIMAL_NODES` the CV is therefore read over the first
+      ``config.segment_cv_proximal_mm`` of the trunk only (:func:`~nvitk.measure.hemodynamics.
+      proximal_station_mask`), measured from that vessel's own proximal station — ``distance_mm``
+      is cumulative over the whole tree, so its absolute value carries the upstream root's length.
+      Unbranched vessels keep the full trunk: an ICA or the basilar is one tube over its whole
+      sampled length, and narrowing it there would only discard good stations.
 
     ``region_id`` is emitted as the plain vessel name (``LMCA``, not ``LMCA-M1``) so it joins the
     published flow rows directly.
@@ -698,6 +730,8 @@ def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
     """
     from nvitk.pipes.qvtpy.labels import qvtpy_branch_parent_label, qvtpy_vessel_name
     from nvitk.stats.vessel_network import canonical_node
+
+    config = config or AutoQcConfig()
 
     columns = ["subject_uid", "region_id", "value"]
     if profiles is None or profiles.empty:
@@ -752,15 +786,48 @@ def compute_segment_cv_from_profiles(profiles: pd.DataFrame) -> pd.DataFrame:
     )
 
     work["_vessel"] = [qvtpy_vessel_name(int(v)) for v in work["_label"]]
+
+    # ---- Per-vessel CV, over the proximal window for the branched territories ------------------
+    window_mm = float(config.segment_cv_proximal_mm)
+    has_distance = "distance_mm" in work.columns
+    if window_mm > 0.0 and not has_distance:
+        # Pre-window profiles have no arc length, so the window cannot be applied at all. Say so
+        # once rather than silently reverting to the old whole-trunk behaviour.
+        log.warning(
+            "autoqc: pitc_profile.csv carries no 'distance_mm' — the along-segment CV falls back "
+            "to the whole trunk for every vessel. Re-run stage 6 to get the proximal window."
+        )
+    n_windowed = 0
+    n_fallback = 0
+
     rows: list[dict[str, Any]] = []
     for (subject, vessel), group in work.groupby(["subject_uid", "_vessel"], sort=False):
         node = canonical_node(vessel)
         if node and node in SEGMENT_CV_EXCLUDED_NODES:
             continue
-        cv = segment_flow_consistency_cv(group["_flow"].to_numpy())
+
+        flows = group["_flow"].to_numpy()
+        if window_mm > 0.0 and has_distance and node in SEGMENT_CV_PROXIMAL_NODES:
+            keep = proximal_station_mask(
+                group["distance_mm"].to_numpy(), window_mm=window_mm
+            )
+            if bool(keep.all()):
+                n_fallback += 1
+            else:
+                n_windowed += 1
+                flows = flows[keep]
+
+        cv = segment_flow_consistency_cv(flows)
         if not np.isfinite(cv):
             continue
         rows.append({"subject_uid": str(subject), "region_id": str(vessel), "value": float(cv)})
+
+    if n_windowed or n_fallback:
+        log.info(
+            "autoqc: proximal window (%.3g mm) applied to %d branched vessel(s); %d kept the full "
+            "trunk (already inside the window, or narrowing it would leave <3 stations).",
+            window_mm, n_windowed, n_fallback,
+        )
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -1289,7 +1356,7 @@ def run_autoqc(
             if wanted is None and not flows.empty:
                 wanted = sorted(flows["subject_uid"].astype(str).unique())
             profiles = load_pitc_profiles(profile_root, subjects=wanted)
-            segment_cv = compute_segment_cv_from_profiles(profiles)
+            segment_cv = compute_segment_cv_from_profiles(profiles, config=config)
             if segment_cv.empty:
                 log.info(
                     "autoqc: no along-segment CV computable from pitc_profile.csv under %s "
@@ -1462,6 +1529,17 @@ def _open_repo(dataset: Any = None) -> Any:
     help="Along-segment flow CV beyond which a vessel is considered inconsistent.",
 )
 @click.option(
+    "--segment-cv-proximal-mm",
+    type=float,
+    default=PROXIMAL_SEGMENT_MM,
+    show_default=True,
+    help=(
+        "Proximal window (mm) the along-segment CV of a branched vessel (MCA / ACA / PCA) is read "
+        "over, so the flare into the bifurcation does not inflate it. 0 uses the whole trunk. "
+        "Unbranched vessels (ICA, VA, basilar) always use the whole trunk."
+    ),
+)
+@click.option(
     "--score-flag-below",
     type=float,
     default=QC_SCORE_FLAG_BELOW,
@@ -1540,6 +1618,7 @@ def main(
     flow_scale: float | None,
     conservation_tol: float,
     segment_cv_tol: float,
+    segment_cv_proximal_mm: float,
     score_flag_below: float,
     submit: str,
     results_root: Path | None,
@@ -1576,6 +1655,7 @@ def main(
         flow_to_ml_min=flow_scale,
         conservation_tol=conservation_tol,
         segment_cv_tol=segment_cv_tol,
+        segment_cv_proximal_mm=segment_cv_proximal_mm,
         score_flag_below=score_flag_below,
     )
     source = None

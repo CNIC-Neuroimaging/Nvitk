@@ -91,6 +91,10 @@ ANALYSIS_PANEL_KINDS: frozenset[str] = frozenset(
         ANALYSIS_GLM,
         ANALYSIS_LMROB,
         ANALYSIS_NONLINEAR,
+        # SEM has no family of curves to panel, but this set also gates the Display picker, and the
+        # anatomical maps are exactly where a fitted path model is worth looking at: they read the
+        # coefficient table, which SEM produces like every other engine.
+        ANALYSIS_SEM,
     }
 )
 
@@ -144,7 +148,11 @@ ANALYSIS_HINTS: dict[str, str] = {
         "Writes the vasculature as a system of regressions — basi ~ lva + rva, lpca ~ basi + "
         "lpcomm — and fits every junction at once, so an exogenous effect splits into the part "
         "travelling through the network and the part that does not. The mediation analysis is the "
-        "three-node special case. Needs semopy (pip) or R with lavaan.\n"
+        "three-node special case.\n"
+        "Also takes latent variables: 'f1 =~ x1 + x2 + x3' says three measurements share a common "
+        "cause and estimates it, which is what a CFA is. Mix the two for a full structural model. "
+        "Needs semopy (pip) or R with lavaan; latent-variable diagnostics — modification indices, "
+        "the standardized solution, multi-group fits — are lavaan only.\n"
         "Cross-sectional data: the direction is an anatomical assumption written into the model, "
         "not something the fit establishes."
     ),

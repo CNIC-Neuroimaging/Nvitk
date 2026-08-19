@@ -224,14 +224,28 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+#: Appended to every per-label tool's description, so the behaviour is documented once instead of
+#: being restated (and drifting) in a dozen strings.
+MULTILABEL_NOTE: str = (
+    "With several labels selected, runs once per label and combines the results, keeping the "
+    "input's label ids."
+)
+
+
 def tool_description_text(tool_id: str, *, fallback_label: str = "") -> str:
     """Human-readable description for *tool_id* from ``TOOL_DESCRIPTIONS``, falling back to
-    *fallback_label* (or a generic prompt) when no description or tool id is available."""
+    *fallback_label* (or a generic prompt) when no description or tool id is available.
+
+    Per-label tools (``GuiToolSpec.multilabel``) get :data:`MULTILABEL_NOTE` appended."""
     if not tool_id:
         return "Select a category and operation."
-    text = TOOL_DESCRIPTIONS.get(tool_id, "").strip()
-    if text:
-        return text
-    if fallback_label:
-        return fallback_label
-    return ""
+    text = TOOL_DESCRIPTIONS.get(tool_id, "").strip() or fallback_label
+    if not text:
+        return ""
+
+    from nvitk.gui.tools.registry import tool_by_id
+
+    spec = tool_by_id(tool_id)
+    if spec is not None and spec.multilabel:
+        return f"{text} {MULTILABEL_NOTE}"
+    return text
