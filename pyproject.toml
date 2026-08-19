@@ -33,6 +33,7 @@ dependencies = [
   "numpy>=2.3.3",                 # Array processing
   "scipy>=1.15.3",                # Scientific computing + Image processing
   "pandas>=2.3.2",                # Dataframe processing
+  "polars>=1.43.2",               # Dataframe processing (faster than pandas)
   "pyarrow>=21.0.0",              # Arrow file format
   "click>=8.2.1",                 # Command line interface
   "jupyter>=1.1.1",               # Jupyter Notebook
@@ -62,7 +63,7 @@ dependencies = [
   "tifffile>=2025.5.26",           # TIFF file processing
   "nd2>=0.10.3",                   # ND2 file processing
   "dicom2nifti>=2.6.1",            # DICOM to NIfTI conversion
-  "pydicom>=2.4.5,<=3",            # DICOM file processing
+  # "pydicom==3.0.1",                # DICOM file processing
   "pylibjpeg>=2.0.1",              # JPEG image processing
   "h5py>=3.16.0",                  # HDF5 file processing
 
@@ -78,7 +79,7 @@ dependencies = [
   "nipype>=1.11.0",                # Neuroimaging data analysis
   "gudhi>=3.12.0",                 # Gudhi for topological data analysis
   "antspynet>=0.3.2",              # AntsPyNet for ANTs-based image processing
-  # "pyradiomics>=3.0.1",          # Radiomics analysis
+  # "pyradiomics==3.0.1",          # Radiomics analysis
 
   # ────────────────────────── Segmentation tools ───────────────────────────────
   "totalsegmentator>=2.11.0",      # TotalSegmentator nnUNetv2-based segmentation
@@ -96,7 +97,6 @@ dependencies = [
   "scikit-posthocs>=0.14.0",       # Statistical post-hoc tests
   "semopy>=2.3.11",                # Structural Equation Modeling
   
-
   # -----------------------------------------------------------------------------
   # API / Database dependencies
   # -----------------------------------------------------------------------------
@@ -130,28 +130,6 @@ dev = [
   "pydata-sphinx-theme>=0.20.0",
   "interrogate>=1.7.0",
 ]
-# ──────────────────────── GPU dependencies ──────────────────────────────────────
-gpu = [
-  "torch>=2.9.0", # +cu130
-  "torchvision>=0.24.0", # +cu130
-  "cupy-cuda13x>=13.6.0",
-  "cutensor-cu13>=2.6.0",
-  "nvidia-nccl-cu13>=2.27.7",
-  "nvidia-cublas>=13.0.0.19",
-  "nvidia-cuda-cupti>=13.0.48",
-  "nvidia-cuda-nvrtc>=13.0.48",
-  "nvidia-cuda-runtime>=13.0.48",
-  "nvidia-cudnn-cu13>=9.13.0.50",
-  "nvidia-cufft>=12.0.0.15",
-  "nvidia-cufile>=1.15.0.42",
-  "nvidia-curand>=10.4.0.35",
-  "nvidia-cusolver>=12.0.3.29",
-  "nvidia-cusparse>=12.6.2.49",
-  "nvidia-cusparselt-cu13>=0.8.0",
-  "nvidia-nvjitlink>=13.0.39",
-  "nvidia-nvshmem-cu13>=3.3.24",
-  "nvidia-nvtx>=13.0.39",
-]
 # ──────────────────────── GUI dependencies ──────────────────────────────────────
 gui = [
   "napari[all]>=0.7.0",
@@ -159,39 +137,91 @@ gui = [
   "superqt>=0.6.0",
   "PyQt6-WebEngine>=6.11.0",
 ]
-# ────────────────────────── R dependencies ──────────────────────────────────────
-r = [
-  "r-base>=4.3.0",                 # R base
-  "r-lme4>=1.1.31",                # R lme4
-  "r-lmertest>=3.1.2",             # R lmertest
-  "r-mmrm>=1.1.2",                 # R mmrm
-  "r-emmeans>=1.7.0",              # R emmeans
-  "r-lmertest>=3.1.2",             # R lmertest
-  "r-parameters>=1.1.2",           # R parameters
-  "r-performance>=1.1.2",          # R performance
-  "r-report>=1.1.2",               # R report
-  "r-tibble>=1.1.2",               # R tibble
-  "r-broom>=1.1.2",                # R broom
-  "r-broom.mixed>=1.1.2",          # R broom.mixed
-  "r-insight>=1.1.2",              # R insight
-  "rpy2>=3.6.0",                   # R interface for Python
-]
+
 # ──────────────────────── MATLAB dependencies ──────────────────────────────────
 matlab = [
   "matlabengine==25.2.2",      # MATLAB engine for MATLAB version 2025b
 ]
-# ──────────────────────── Conda dependencies ────────────────────────────────────
-conda-packages = [
-  # NOTE: pip extras cannot express "install from conda channels".
-  # Use the repo's `environment.yml` to install these conda-only deps:
-  # - freeimage>=3.18.0 (conda-forge)
-  # - mrtrix3>=3.0.8 (mrtrix3)
-  # - libstdcxx-ng>=15.2.0 (conda-forge)
-]
-
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scripts
+# Pixi configuration
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.pixi.project]
+channels = ["conda-forge", "mrtrix3", "bioconda", "defaults"]
+platforms = ["linux-64"]    #, "osx-64", "win-64"]
+
+# ──────────────────────────────────────────────────────────────────────
+# Conda-only dependencies
+# ──────────────────────────────────────────────────────────────────────
+[tool.pixi.dependencies]
+mrtrix3 = ">=3.0.8"
+freeimage = ">=3.18.0"
+libstdcxx-ng = ">=15.2.0"
+
+[tool.pixi.pypi-dependencies]
+nvitk = { path = ".", editable = true }
+pyradiomics = "==3.0.1"
+pydicom = "==3.0.1"
+
+# pyradiomics/pydicom keep the special build handling install.sh used to do by hand
+[tool.pixi.pypi-options]
+no-build-isolation = ["pyradiomics", "pydicom"]
+
+# ──────────────────────── GPU Features ──────────────────────────────────────
+[tool.pixi.feature.gpu]
+channels = ["morpheme", "mosaic", "nvidia", "pytorch"]   # additive to project channels
+
+[tool.pixi.feature.gpu.dependencies]
+python = ">=3.11"
+numpy = ">=2.3.3"
+
+[tool.pixi.feature.gpu.pypi-dependencies]
+torch = {version = ">=2.9.0", index = "https://download.pytorch.org/whl/cu130"}
+torchvision = {version = ">=0.24.0", index = "https://download.pytorch.org/whl/cu130"}
+cupy-cuda13x = ">=13.6.0"
+cutensor-cu13 = ">=2.6.0"
+nvidia-nccl-cu13 = ">=2.27.0"
+
+# ──────────────────────── R Features ──────────────────────────────────────
+[tool.pixi.feature.stats]
+channels = ["conda-forge", "bioconda", "defaults", "ejolly"]
+
+[tool.pixi.feature.stats.dependencies]
+r-base = ">=4.3.0"
+r-lme4 = "*"
+r-lmertest = "*"
+r-mmrm = "*"
+r-emmeans = "*"
+r-parameters = "*"
+r-performance = "*"
+r-report = "*"
+r-tibble = "*"
+r-broom = "*"
+r-broom-mixed = "*"
+r-insight = "*"
+r-robustbase = "*"       
+rpy2 = ">=3.6.0"
+pymer4 = ">=0.9.2"
+
+[tool.pixi.feature.stats.pypi-dependencies]
+great-tables = "*"
+formulae = "*"
+
+[tool.pixi.environments]
+default = { features = [] }
+gui     = { features = ["gui"] }
+gpu     = { features = ["gui","gpu"] }
+stats   = { features = ["gui","stats"] }
+dev     = { features = ["gui","gpu","stats","dev"] }
+all     = { features = ["gui", "gpu", "stats"] }
+
+[tool.pixi.tasks]
+verify = "pyhelp --no-interactive"
+test   = "pytest tests/"
+docs   = "sphinx-build -b html docs docs/_build/html"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI Commands
 # ──────────────────────────────────────────────────────────────────────────────
 [project.scripts]
 # -----------------------------------------------------------------------------

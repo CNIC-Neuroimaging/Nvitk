@@ -30,7 +30,7 @@ notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
 # .nvitk/sge.json
 
 src/nvitk.egg-info/
-tests/
+# tests/
 test/
 skills/
 
