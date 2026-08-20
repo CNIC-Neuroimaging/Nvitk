@@ -1,0 +1,65 @@
+name: Publish conda package
+
+# Builds recipe/recipe.yaml with rattler-build, smoke-tests the result in a fresh
+# environment (a real `conda create`, which triggers recipe/post-link.sh), and uploads to
+# the `cnic` Anaconda.org channel. See recipe/recipe.yaml and recipe/post-link.sh for why
+# dependencies are split between conda run-requirements and pip-only post-link installs.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+env:
+  CHANNELS: -c conda-forge -c bioconda -c mrtrix3 -c ejolly
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+          channel-priority: strict
+
+      - name: Install rattler-build
+        shell: bash -l {0}
+        run: mamba install -y -n base -c conda-forge rattler-build
+
+      - name: Build nvitk conda package
+        shell: bash -l {0}
+        run: |
+          rattler-build build \
+            -r recipe/recipe.yaml \
+            $CHANNELS \
+            --output-dir output
+
+      - name: Smoke-test install from local build output
+        # Uses `conda create`, not `mamba create`: verified locally that mamba does not
+        # execute post-link.sh at all (a known gap across mamba/micromamba), which would
+        # silently skip the entire pip-only dependency stack and make this step fail for
+        # the wrong reason. Only classic `conda` reliably runs post-link/pre-unlink.
+        shell: bash -l {0}
+        run: |
+          conda create -y -n nvitk-smoketest \
+            -c ./output $CHANNELS \
+            nvitk
+          conda run -n nvitk-smoketest python -c "import nvitk"
+          conda run -n nvitk-smoketest pyhelp --no-interactive
+          conda run -n nvitk-smoketest nvitk-totalseg --help
+
+      - name: Publish to Anaconda.org (cnic)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash -l {0}
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+        run: |
+          rattler-build upload anaconda \
+            --owner cnic \
+            --api-key "$ANACONDA_API_TOKEN" \
+            output/noarch/nvitk-*.conda

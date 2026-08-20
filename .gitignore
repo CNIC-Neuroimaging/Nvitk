@@ -24,6 +24,7 @@ notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/
 notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/*
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
+.nvitk/*
 
 
 # Site-local SGE overrides
