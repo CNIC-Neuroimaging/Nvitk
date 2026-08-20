@@ -48,20 +48,20 @@ requirements:
     - numpy >=2.3.3
     # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
-    - r-base >=4.3.0
-    - r-lme4
-    - r-lmertest
-    - r-mmrm
-    - r-emmeans
-    - r-parameters
-    - r-performance
-    - r-report
-    - r-tibble
-    - r-broom
-    - r-broom.mixed
-    - r-insight
-    - r-robustbase
+    - r-base >=4.5.3
     - rpy2 >=3.6.0
+    - r-lme4 >=2.0_6
+    - r-lmertest >=3.2_1
+    - r-mmrm >=0.3.18
+    - r-emmeans >=2.0.4
+    - r-parameters >=0.29.2
+    - r-performance >=0.17.1
+    - r-report >=0.6.4
+    - r-tibble >=3.3.1
+    - r-broom >=1.0.13
+    - r-broom.mixed >=0.2.9.7
+    - r-insight >=1.5.2
+    - r-robustbase >=0.99_7
     # ── Conda-only extras ([tool.pixi.dependencies]) ────────
     - mrtrix3 >=3.0.8
     - freeimage >=3.18.0
