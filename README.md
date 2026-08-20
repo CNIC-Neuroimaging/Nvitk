@@ -145,6 +145,8 @@ nvitk-transform resample -i pet.nii.gz -r ct.nii.gz -o pet_on_ct.nii.gz
  
 Module CLIs accept `-i`/`-o` and optional `--submit local|sge` — configure cluster
 defaults in `.nvitk/sge.json`.
+
+> *(To specify json-specific configuration schemas.)*
  
 ### Pipelines — PESA-Fat
  
@@ -153,34 +155,31 @@ defaults in `.nvitk/sge.json`.
 | `nvitk-pesa-fat` | Batch driver |
 | `nvitk-pesa-fat-ctpet` | CT/PET pipeline |
 | `nvitk-pesa-fat-dixon` | Dixon pipeline |
-| `nvitk-pesa-fat-hotspot` | Hotspot detection |
 | `nvitk-pesa-fat-qc` | QC stage |
 | `nvitk-pesa-fat-qc-portal` | QC review portal |
 | `nvitk-pesa-fat-sync-measurements` | Sync measurements |
  
-### Pipelines — PESA-Brain (bbtpy / qvtpy)
+### Pipelines — PESA-Brain (qvtpy)
  
 | Command | Purpose |
 |---|---|
-| `nvitk-bbtpy` | PESA-Brain cohort pipeline |
 | `nvitk-qvtpy` | 4D-flow hemodynamics pipeline |
-| `nvitk-qvtpy-flowshow` | Flow visualization |
 | `nvitk-qvtpy-xnat-upload` | XNAT upload |
 | `nvitk-qvtpy-autoqc` | Automated QC |
  
-### Database / Sync
+<!-- ### Database / Sync
  
 | Command | Purpose |
 |---|---|
 | `nvitk-xnat-sync` | XNAT dataset sync |
-| `nvitk-xnat-pipeline-sync` | XNAT pipeline-resource sync |
+| `nvitk-xnat-pipeline-sync` | XNAT pipeline-resource sync | -->
  
 ### GUI
  
 | Command | Purpose |
 |---|---|
-| `nvitk-gui` | Napari workbench — tool catalog dock, mesh reconstruction, pipeline export |
-| `nvitk-statsmodels` | Mixed-effects / mediation modeling explorer |
+| `nvitk-gui` | Napari workbench — Tool catalog dock (imaging | mesh), pipeline export, ... |
+| `nvitk-statsmodels` | Statistical modeling workbench — Python and R models |
  
 ### General
  
@@ -191,8 +190,6 @@ defaults in `.nvitk/sge.json`.
 ```bash
 pyhelp                    # interactive tree; Enter selects a command and prints --help
 pyhelp --no-interactive   # full static tree
-pyhelp --flat             # legacy flat listing
-source scripts/pyhelp-shell.bash && pyhelp-select   # puts the pick on your prompt line
 ```
  
 ---
@@ -201,16 +198,12 @@ source scripts/pyhelp-shell.bash && pyhelp-select   # puts the pick on your prom
  
 Scripted 3D Slicer modules live under `slicer/`, loaded via Slicer's **Additional module
 paths** rather than `pip`/`conda` — they don't import `nvitk` directly, so they run
-without the full dependency stack. `slicer/qvt_plus_singularity.def` packages these
-alongside FSL/MATLAB Runtime/SPM12 for cluster use (see the prerequisites table above).
- 
-> **I don't have the exact module list** — I couldn't reach project knowledge to pull the
-> contents of `slicer/README.md` this round. Paste it (or `ls slicer/`) and I'll fill in
-> real names/descriptions below instead of guessing.
+without the full dependency stack.
  
 | Module | Purpose |
 |---|---|
-| _pending_ | _pending_ |
+| MouseTOFCoW | Semi-automatic segmentation of the main Circle of Willis artery trees for Mouse TOF MRI |
+| MouseTOFMorphometrics | Morphometric characterization of the CoW arteries for Mouse/Human TOF MRI |
  
 ---
  
@@ -234,7 +227,6 @@ imsave("out/pet_copy.nii.gz", img)
 ```bash
 nvitk-restore bilateral -i pet.nii.gz -o pet_denoised.nii.gz --backend gpu
 nvitk-measure volume -i mask.nii.gz -o vol.txt
-pyhelp   # browse every tool interactively
 ```
  
 ---
