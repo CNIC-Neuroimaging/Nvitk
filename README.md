@@ -129,11 +129,11 @@ all interactively with `pyhelp`. All tools are also individually included on the
  
 | Command | Purpose |
 |---|---|
-| `nvitk-morph` | Morphology — dilate, centerline, siphon-correct |
-| `nvitk-restore` | Restoration — bilateral denoising |
-| `nvitk-filter` | Filters — sliding-threshold |
-| `nvitk-measure` | Metrics — volume, SUV, Dice, surface |
-| `nvitk-transform` | Resample, isotropy, oblique slice |
+| `nvitk-morph` | Morphology — dilate, centerline, siphon-correct, ... |
+| `nvitk-restore` | Restoration — bilateral denoising, bias field correction, ... |
+| `nvitk-filter` | Filters — sliding-threshold, vesselness, ... |
+| `nvitk-measure` | Metrics — volume, SUV, Dice, surface, hemodynamics, morphometrics, ... |
+| `nvitk-transform` | Resample, isotropy, oblique slice, ... |
  
 ```bash
 nvitk-restore bilateral -i pet.nii.gz -o pet_denoised.nii.gz --backend gpu
@@ -144,7 +144,7 @@ nvitk-transform resample -i pet.nii.gz -r ct.nii.gz -o pet_on_ct.nii.gz
 ```
  
 Module CLIs accept `-i`/`-o` and optional `--submit local|sge` — configure cluster
-defaults in `.nvitk/sge.json` under `pipelines.image_tools`.
+defaults in `.nvitk/sge.json`.
  
 ### Pipelines — PESA-Fat
  

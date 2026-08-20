@@ -25,6 +25,9 @@ notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/*
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
 .nvitk/*
+.nvitk/xnat-dev.json
+.nvitk/sge.json
+.nvitk/settings.json
 
 
 # Site-local SGE overrides
