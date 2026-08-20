@@ -7,19 +7,6 @@
 # (`[tool.pixi.feature.gpu.dependencies]`), and the R stack + rpy2
 # (`[tool.pixi.feature.stats.dependencies]`). Everything else stays pip-only.
 #
-# This was verified empirically, not assumed: an earlier attempt at classifying far more
-# packages as conda-native (matching by name+version against conda-forge/bioconda/ejolly)
-# repeatedly failed `rattler-build`'s test-environment solve with real, unrelated C-library
-# conflicts that don't exist when those same packages are pip wheels — e.g. simpleitk's
-# conda-forge build pins libitk==5.3.0 while antspyx's pins libitk>=5.4.5 (mutually
-# exclusive; pip wheels for both bundle their own ITK privately); h5py's conda-forge build
-# pulls a very recent hdf5 that's only compatible with Qt6-only vtk-base builds, which
-# conflict with mrtrix3's Qt5 requirement; the ejolly-channel pymer4 conda package declares
-# pyarrow>=19.0.1,<20 against nvitk's own pyarrow>=21.0.0; and vtk/opencv's newest
-# conda-forge builds are Qt6-only, again conflicting with mrtrix3's Qt5 need. All of that
-# disappears once those packages go back to being pip-installed, exactly as pixi already
-# does. See post-link.sh for the full pip-only list and per-package reasoning.
-#
 # `version` is kept in manual sync with [project].version in ../pyproject.toml (that
 # field is static there, not setuptools_scm-driven).
 context:
@@ -56,10 +43,10 @@ requirements:
   run:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.
     - pip
-    # ── Conda-native core (matches [tool.pixi.feature.gpu.dependencies]) ────
+    # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
     - python >=3.10,<3.12
     - numpy >=2.3.3
-    # ── Stats / R (matches [tool.pixi.feature.stats.dependencies] exactly;
+    # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
     - r-base >=4.3.0
     - r-lme4
@@ -75,7 +62,7 @@ requirements:
     - r-insight
     - r-robustbase
     - rpy2 >=3.6.0
-    # ── Conda-only extras (matches [tool.pixi.dependencies] exactly) ────────
+    # ── Conda-only extras ([tool.pixi.dependencies]) ────────
     - mrtrix3 >=3.0.8
     - freeimage >=3.18.0
     - libstdcxx-ng >=15.2.0

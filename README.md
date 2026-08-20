@@ -6,8 +6,8 @@
  
 Developed at CNIC for intracranial and vascular research, including specific image processing pipelines such as 4D flow MRI Hemodynamics, TOF Morphometrics, whole-body PET/CT quantification.
 
-> Full API reference and step-by-step tutorials are yet to be assessed.
-> *(link once published)*
+> Full API reference and step-by-step tutorials: **[ignacio-ms.github.io/Nvitk](https://ignacio-ms.github.io/Nvitk/)**
+> *(live once the one-time GitHub Pages setup step is done — see `docs/`)*
 
 ## Contents
  

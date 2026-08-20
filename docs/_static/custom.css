@@ -1,0 +1,38 @@
+/* Light polish on top of pydata-sphinx-theme defaults — no layout overrides,
+   just spacing/accent tweaks so the homepage card grid and code blocks read
+   closer to the scipy.org / scikit-image.org visual bar. */
+
+:root {
+  --nvitk-accent: #2c5aa0;
+}
+html[data-theme="dark"] {
+  --nvitk-accent: #6fa8dc;
+}
+
+/* Homepage feature-card grid */
+.nvitk-home-grid .sd-card {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  border-radius: 0.5rem;
+}
+.nvitk-home-grid .sd-card:hover {
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+.nvitk-home-grid .sd-card-title {
+  font-weight: 600;
+}
+
+/* Tighter, more scannable option/stage tables used throughout the CLI and
+   pipeline reference pages. */
+table.docutils {
+  font-size: 0.92rem;
+}
+table.docutils th {
+  background-color: var(--pst-color-surface);
+}
+
+/* De-emphasize the auto-generated autoapi module summary tables slightly so
+   hand-written landing-page prose stays visually primary. */
+.autoapisummary {
+  font-size: 0.9rem;
+}

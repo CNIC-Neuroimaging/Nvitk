@@ -14,6 +14,7 @@ data/
 # !tests/
 # !tests/**/*.py
 # docs/
+docs/_build/
 .config/
 .config/*
 .nvitk/xnat.json

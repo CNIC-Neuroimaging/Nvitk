@@ -128,6 +128,8 @@ dev = [
   "myst-parser>=5.1.0",
   "sphinx-click>=6.2.0",
   "pydata-sphinx-theme>=0.20.0",
+  "sphinx-design>=0.6.1",
+  "sphinx-copybutton>=0.5.2",
   "interrogate>=1.7.0",
 ]
 # ──────────────────────── GUI dependencies ──────────────────────────────────────

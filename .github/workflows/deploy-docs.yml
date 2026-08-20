@@ -1,0 +1,71 @@
+name: Deploy documentation
+
+# Builds the Sphinx site (docs/) and publishes it to GitHub Pages. Uses static AST-based
+# autoapi parsing (not import), so only the `dev` doc-tooling extra is needed — no GPU/R/ANTs
+# runtime stack. See docs/conf.py for the autoapi/theme configuration.
+#
+# One-time repo setup required before this workflow can publish (cannot be done from here):
+# Settings -> Pages -> Source -> "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/nvitk/**"
+      - "pyproject.toml"
+      - ".github/workflows/deploy-docs.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install doc-tooling packages
+        # Intentionally NOT `pip install -e ".[dev]"` — that would also pull in nvitk's full
+        # [project.dependencies] (vtk, antspyx, totalsegmentator, ...), which the docs build
+        # doesn't need: autoapi parses ../src/nvitk via static AST analysis, never importing
+        # nvitk itself, so only the doc-tooling packages themselves have to be installed.
+        run: |
+          pip install "sphinx>=9.0.4" "sphinx-autoapi>=3.8.0" "myst-parser>=5.1.0" \
+            "sphinx-click>=6.2.0" "pydata-sphinx-theme>=0.20.0" \
+            "sphinx-design>=0.6.1" "sphinx-copybutton>=0.5.2"
+
+      - name: Build Sphinx site
+        # No -W: some autoapi-generated pages surface pre-existing RST-syntax rough edges in
+        # source docstrings (undefined substitutions, indentation) that are warnings/errors
+        # Sphinx already degrades gracefully around, not build-breaking docs-site problems.
+        # Fixing those means editing docstrings across the application, out of scope here.
+        run: sphinx-build -b html docs docs/_build/html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
