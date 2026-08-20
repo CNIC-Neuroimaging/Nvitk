@@ -34,6 +34,7 @@ jobs:
       - name: Build nvitk conda package
         shell: bash -l {0}
         run: |
+          conda activate base
           rattler-build build \
             -r recipe/recipe.yaml \
             $CHANNELS \
