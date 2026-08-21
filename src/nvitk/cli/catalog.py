@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -219,10 +220,33 @@ def _general_tools(scripts: Iterable[tuple[str, str]]) -> list[ToolEntry]:
     return sorted(tools, key=lambda t: t.command)
 
 
+def discover_installed_scripts(distribution_name: str = "nvitk") -> list[tuple[str, str]]:
+    """Read *distribution_name*'s registered ``console_scripts`` entry points from installed
+    package metadata — works for any install method (conda, pip, an editable/dev checkout)
+    since ``entry_points.txt`` is always written at install time, unlike
+    :func:`parse_pyproject_scripts`, which needs a source ``pyproject.toml`` on disk and
+    finds none in a real (non-source-checkout) installed environment."""
+    try:
+        dist = importlib.metadata.distribution(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return []
+    return [(ep.name, ep.value) for ep in dist.entry_points if ep.group == "console_scripts"]
+
+
+def discover_scripts() -> list[tuple[str, str]]:
+    """Resolve nvitk's registered CLI commands: prefer installed package metadata (accurate
+    for any install method), falling back to parsing ``pyproject.toml`` directly only if that
+    finds nothing (e.g. running against a source tree with no install at all)."""
+    scripts = discover_installed_scripts()
+    if scripts:
+        return scripts
+    return parse_pyproject_scripts()
+
+
 def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[CatalogNode]:
     """Build top-level catalog nodes (Image Processing, Pipelines, General)."""
     if scripts is None:
-        scripts = parse_pyproject_scripts()
+        scripts = discover_scripts()
 
     submodules = {
         "conversion": CatalogNode("conversion", "conversion"),

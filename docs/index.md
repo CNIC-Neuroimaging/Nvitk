@@ -21,11 +21,12 @@ Developed at [CNIC](https://www.cnic.es/) for intracranial and vascular research
 4D-flow MRI hemodynamics, TOF morphometrics, and whole-body PET/CT quantification.
 
 [![Conda Version](https://anaconda.org/cnic/nvitk/badges/version.svg)](https://anaconda.org/cnic/nvitk)
+[![Last updated](https://anaconda.org/cnic/nvitk/badges/latest_release_date.svg)](https://anaconda.org/cnic/nvitk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ignacio-ms/Nvitk/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue.svg)](installation)
 
 ```{code-block} bash
-conda install -c cnic -c conda-forge -c bioconda -c mrtrix3 -c ejolly nvitk
+conda install -c conda-forge -c cnic -c bioconda -c mrtrix3 -c ejolly nvitk
 ```
 
 ::::{grid} 1 2 2 3

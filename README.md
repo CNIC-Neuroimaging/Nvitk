@@ -1,6 +1,6 @@
 # Nvitk | Neuro-Vascular Imaging ToolKit
 
-[![Conda Version](https://anaconda.org/cnic/nvitk/badges/version.svg)](https://anaconda.org/cnic/nvitk) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue.svg)](pyproject.toml)
+[![Conda Version](https://anaconda.org/cnic/nvitk/badges/version.svg)](https://anaconda.org/cnic/nvitk) [![Last updated](https://anaconda.org/cnic/nvitk/badges/latest_release_date.svg)](https://anaconda.org/cnic/nvitk) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue.svg)](pyproject.toml)
 
 **nvitk** is a research toolkit for neurological and vascular biomedical image processing — CT, PET, and MRI/MRA — covering I/O, filtering, restoration, segmentation, registration, imaging metrics, mesh reconstruction, statistics, and full research pipelines, with an optional Napari-based GUI and a NumPy/CuPy dual backend for CPU/GPU execution.
  
@@ -25,12 +25,11 @@ Developed at CNIC for intracranial and vascular research, including specific ima
 `nvitk` is published on Anaconda.org under the `cnic` channel with the full `nvitk[all]` feature set (GUI, GPU/CUDA 13, and R-based stats) bundled in no separate CPU/GPU profile to pick. 
 
 ```bash
-conda config --add channels conda-forge
 conda config --add channels bioconda
 conda config --add channels mrtrix3
 conda config --add channels ejolly
-
 conda config --add channels cnic
+conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 conda create -n nvitk-env nvitk
@@ -42,6 +41,8 @@ conda install nvitk
 > **Note:** This pulls in the CUDA 13 PyTorch/CuPy stack automatically as part of installation. Packages with no conda equivalent (e.g. `totalsegmentator`, `nnunetv2`, ...) are installed via `pip` through a post-link step — see `recipe/post-link.sh` for the exact list.
 >
 > **Use `conda create`/`conda install`, not `mamba create`/`mamba install`.** `mamba` does not run post-link scripts (a known gap across mamba/micromamba), so a mamba-based install silently skips the entire pip-only dependency stack above — the command succeeds, but `import nvitk` then fails. Installing with plain `conda` (even with the libmamba solver enabled) works correctly, since conda's own transaction executor still runs the post-link step regardless of which solver resolved it.
+>
+> **Note:** It is important that the conda-forge channel is on top.
 
 Run **`pyhelp`** after activation for an interactive catalog of every CLI tool (`pyhelp --no-interactive` for CI/scripts).
 

@@ -7,11 +7,11 @@ channel with the full `nvitk[all]` feature set (GUI, GPU/CUDA 13, and R-based st
 bundled in — there is no separate CPU/GPU profile to choose.
 
 ```bash
-conda config --add channels conda-forge
 conda config --add channels bioconda
 conda config --add channels mrtrix3
 conda config --add channels ejolly
 conda config --add channels cnic
+conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 conda create -n nvitk-env nvitk
@@ -33,6 +33,10 @@ silently skips the entire pip-only dependency stack above — the command succee
 `import nvitk` then fails. Plain `conda` (even with the libmamba solver enabled) works
 correctly, since conda's own transaction executor still runs the post-link step regardless
 of which solver resolved the environment.
+```
+
+```{warning}
+**Note:** It is important that the conda-forge channel is on top.
 ```
 
 Run {doc}`pyhelp <api/cli-catalog>` after activation for an interactive catalog of every

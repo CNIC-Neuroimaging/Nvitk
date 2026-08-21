@@ -16,8 +16,7 @@ if str(_src_dir) not in sys.path:
 from nvitk.core.click_backend import backend_click_option  # noqa: E402
 from nvitk.cli.catalog import (  # noqa: E402
     build_catalog_tree,
-    find_pyproject_toml,
-    parse_pyproject_scripts,
+    discover_scripts,
     total_tool_count,
 )
 from nvitk.util.colors import bcolors as Colors  # noqa: E402
@@ -67,12 +66,7 @@ def get_command_color(category: str) -> str:
 def list_cli_commands_flat() -> None:
     """Print every registered CLI command, grouped by category, in a flat (non-tree) console listing."""
     log = _get_log()
-    pyproject_path = find_pyproject_toml()
-    if not pyproject_path:
-        log.error("Error: pyproject.toml not found")
-        return
-
-    commands = parse_pyproject_scripts(pyproject_path)
+    commands = discover_scripts()
     if not commands:
         log.warning("No CLI commands found")
         return
@@ -146,7 +140,7 @@ def main(no_interactive: bool, flat: bool, shell: bool, pick: bool) -> None:
         list_cli_commands_flat()
         return
 
-    scripts = parse_pyproject_scripts()
+    scripts = discover_scripts()
     roots = build_catalog_tree(scripts)
     installed = len(scripts)
 
