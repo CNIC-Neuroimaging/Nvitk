@@ -958,16 +958,18 @@ def build_tool_panel(
     ) -> None:
         """Run the tool selected by ``category``/``operation`` on the active (or last) layer with the
         collected parameters, then add or replace a layer with the result and record the step."""
-        if not viewer.layers:
-            notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)
-            return
         tool_id = tool_id_from_label(category, operation)
         if not tool_id:
             notify("Select a valid operation.", error=True)
             return
         spec = tool_by_id(tool_id)
+        # Most tools operate on the active layer's data; a few (a directory- or database-driven
+        # analysis that manages its own output) have nothing to check a layer against.
+        if (spec is None or spec.requires_layer) and not viewer.layers:
+            notify("No layers loaded. Open an image first (Ctrl+O or drag-and-drop).", error=True)
+            return
         run_mode = spec.run_mode if spec else "layer"
-        layer = viewer.layers.selection.active or viewer.layers[-1]
+        layer = viewer.layers.selection.active or (viewer.layers[-1] if viewer.layers else None)
 
         ids = []
         if get_label_ids is not None:

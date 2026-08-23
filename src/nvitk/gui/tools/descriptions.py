@@ -129,6 +129,20 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "seg_totalsegmentator": "Run TotalSegmentator on the active image.",
     "seg_eicab": "Run EICAB segmentation (cluster or local).",
     "viz_pet_hotspots": "Highlight high-SUV voxels as Napari points.",
+    "viz_voxelwise_3d": (
+        "Suprathreshold voxels inside a translucent brain shell, in 3-D. Needs no active layer. "
+        "Draws any of the maps randomise wrote - the corrected 1-p maps for where the evidence "
+        "is, the t-statistic for how large and which direction the effect is - thresholded on a "
+        "window picked from the map's own distribution. Clusters as iso-surfaces or as points "
+        "coloured by value; the shell is drawn either way."
+    ),
+    "measure_voxelwise": (
+        "Mass-univariate voxelwise GLM over a cohort (FSL randomise), with permutation-based "
+        "family-wise-error correction. Needs no active layer: the images come from a flat "
+        "directory of MNI-normalised volumes and the design matrix from database measurements, "
+        "so the two can be different modalities. Opens its own window; also loads a finished "
+        "results folder without re-running. Corrected maps are 1-p, so 0.95 means p < 0.05. The 3-D scene is a separate tool under Visualization."
+    ),
     "viz_flowshow": (
         "4D flow velocity vectors in Napari: all phases precomputed, arrow length and "
         "color from speed (mm/s). Syncs to the cardiac-phase slider; optional auto-play."

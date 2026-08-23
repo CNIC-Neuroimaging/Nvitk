@@ -44,6 +44,8 @@ from qtpy.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -158,6 +160,14 @@ from nvitk.stats.mediation import (
 from nvitk.gui.core.flow_layout import FlowRow
 from nvitk.gui.core.geometry import cap_minimum_size, fit_to_screen
 from nvitk.stats.brain_map import BRAIN_ATLASES, BRAIN_SURFACES, BRAIN_VIEWS
+from nvitk.stats.voxelwise_map import (
+    VIEW_KINDS as VOXELWISE_VIEW_KINDS,
+    VOXELWISE_COLORMAPS,
+    cut_axes_for,
+    display_modes_for,
+    supports_cut_coords,
+    supports_opacity,
+)
 
 from .constants import (
     MAX_CATEGORICAL_LEVELS,
@@ -286,10 +296,16 @@ _BRAIN_PLOTS: tuple[tuple[str, str], ...] = (
     ("Observed mean per parcel", "means"),
 )
 
+
 #: Display keys that draw a *map of anatomy* rather than a family of curves. They share every
 #: control the plot pane gates on — the figure picker, the group checklist, the colormap — so the
 #: gating asks "is this a map" once instead of naming each one at every branch.
-_MAP_DISPLAYS: frozenset[str] = frozenset({"vascular", "brain"})
+_MAP_DISPLAYS: frozenset[str] = frozenset({"vascular", "brain", "voxelwise"})
+
+#: The one map that is *not* a view of the current fit. It reads a results folder written by
+#: ``nvitk-voxelwise``, so it must bypass every gate that requires a fitted model — and it must
+#: never be offered the fit's own contrast list, which describes a different model entirely.
+_DISPLAY_VOXELWISE = "voxelwise"
 
 _MRF_PLOTS: tuple[tuple[str, str], ...] = (
     ("Smoothed field", "field"),
@@ -793,6 +809,7 @@ class StatmodelsWindow(QMainWindow):
         self._plot_display.addItem("Grouped", "grouped")
         self._plot_display.addItem("Vascular map", "vascular")
         self._plot_display.addItem("Brain map", "brain")
+        self._plot_display.addItem("Voxelwise", _DISPLAY_VOXELWISE)
         self._display_tooltip = (
             "Overview draws every group on one pair of axes.\n"
             "Grouped splits them into a grid of anatomical panels — carotids / anterior / "
@@ -805,7 +822,12 @@ class StatmodelsWindow(QMainWindow):
             "volumetry — on the cortical surface, since those are parcellated by Desikan rather "
             "than by vessel. Grey means measured but not significant; an unpainted parcel means "
             "the model has no estimate for it, which is not the same thing.\n"
-            "This is a view of the same fit: the population estimate is identical in every panel."
+            "Voxelwise loads a finished FSL randomise results folder and draws its corrected "
+            "p-maps. Alone among the displays it is not a view of the fit above — it has its own "
+            "cohort, design and permutations, written by `nvitk-voxelwise run`. The colours are "
+            "1 - p, so 0.95 means p < 0.05.\n"
+            "The other displays are a view of the same fit: the population estimate is identical "
+            "in every panel."
         )
         self._plot_display.setToolTip(self._display_tooltip)
 
@@ -853,6 +875,128 @@ class StatmodelsWindow(QMainWindow):
         )
         self._vasc_contrast.currentIndexChanged.connect(lambda *_: self._on_plot())
         self._vasc_contrast_label = QLabel("contrast")
+
+        # ---- Voxelwise-only controls ---------------------------------------------
+        # A results folder, not a fit: this display is load-only by design. Running an analysis
+        # belongs to `nvitk-voxelwise run` and the napari tool, both of which write a folder this
+        # picker then reads — one implementation, three ways in.
+        self._vox_dir = QLineEdit()
+        self._vox_dir.setMinimumWidth(220)
+        self._vox_dir.setPlaceholderText("randomise results folder…")
+        self._vox_dir.setToolTip(
+            "Folder written by `nvitk-voxelwise run` — the one holding manifest.json and the "
+            "<root>_tfce_corrp_tstat*.nii.gz maps, not its parent."
+        )
+        self._vox_dir.editingFinished.connect(
+            lambda: (self._sync_map_contrasts(self._map_display()), self._on_plot())
+        )
+        self._vox_dir_label = QLabel("results")
+        self._vox_browse = QPushButton("Browse…")
+        self._vox_browse.clicked.connect(self._pick_voxelwise_dir)
+
+        # The threshold is a *window* on 1 - p, not a single cut. 0.95 - 1.000 is the conventional
+        # p < 0.05; narrowing the top to 0.99 isolates the marginal shell from the voxels that pass
+        # overwhelmingly, which no single threshold can express.
+        self._vox_pmin = QDoubleSpinBox()
+        self._vox_pmin.setRange(0.0, 1.0)
+        self._vox_pmin.setDecimals(3)
+        self._vox_pmin.setSingleStep(0.005)
+        self._vox_pmin.setValue(0.950)
+        self._vox_pmin.setMaximumWidth(90)
+        self._vox_pmin.setToolTip(
+            "Lower edge of the 1 - p window. 0.950 is p < 0.05, 0.990 is p < 0.01.\n"
+            "Voxels below it are zeroed rather than dimmed: 1 - p = 0.6 is no evidence, and a "
+            "faint colour would say otherwise."
+        )
+        self._vox_pmin.valueChanged.connect(lambda *_: self._on_plot())
+        self._vox_pmin_label = QLabel("1-p ≥")
+
+        self._vox_pmax = QDoubleSpinBox()
+        self._vox_pmax.setRange(0.0, 1.0)
+        self._vox_pmax.setDecimals(3)
+        self._vox_pmax.setSingleStep(0.005)
+        self._vox_pmax.setValue(1.000)
+        self._vox_pmax.setMaximumWidth(90)
+        self._vox_pmax.setToolTip(
+            "Upper edge of the 1 - p window. Leave at 1.000 for a plain threshold.\n"
+            "Below 1.000 this hides the *most* significant voxels as well as the least, so the "
+            "figure is a window and not a threshold — the caption says so."
+        )
+        self._vox_pmax.valueChanged.connect(lambda *_: self._on_plot())
+        self._vox_pmax_label = QLabel("≤")
+
+        self._vox_cmap = QComboBox()
+        for label, key in VOXELWISE_COLORMAPS:
+            self._vox_cmap.addItem(label, key)
+        self._vox_cmap.setToolTip(
+            "Colormap for the map.\n\n"
+            "Sequential only: 1 - p is one-sided and has no meaningful midpoint, so a diverging "
+            "map would invite centring a quantity that cannot be centred."
+        )
+        self._vox_cmap.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._vox_cmap_label = QLabel("cmap")
+
+        self._vox_display_mode = QComboBox()
+        self._vox_display_mode.setMinimumWidth(90)
+        self._vox_display_mode.setToolTip(
+            "Which projection or slice layout to draw.\n\n"
+            "The glass brain and the slice view accept different sets — 'lyrz' is a four-panel "
+            "projection only the glass brain has, 'mosaic' only the slice view — so this list "
+            "changes with the figure picker."
+        )
+        self._vox_display_mode.currentIndexChanged.connect(
+            lambda *_: (self._sync_analysis_type(), self._on_plot())
+        )
+        self._vox_display_mode_label = QLabel("mode")
+
+        self._vox_cut_auto = QCheckBox("auto cuts")
+        # Off by default: the sliders are the point of the slice view, and hiding them behind a
+        # checkbox that starts checked means nobody finds them.
+        self._vox_cut_auto.setChecked(False)
+        self._vox_cut_auto.setToolTip(
+            "Let nilearn pick the cut coordinates — it centres them on the map's own maxima.\n"
+            "Turn off to drive them by hand with the sliders."
+        )
+        self._vox_cut_auto.stateChanged.connect(
+            lambda *_: (self._sync_analysis_type(), self._on_plot())
+        )
+
+        # Sliders are in millimetres, and their range comes from the loaded map's own affine —
+        # see _sync_voxelwise_cut_ranges. A slider clamped to a hardcoded MNI box silently refuses
+        # to reach half of a 4 mm or cropped grid.
+        self._vox_cuts: dict[str, QSlider] = {}
+        self._vox_cut_labels: dict[str, QLabel] = {}
+        for axis in ("x", "y", "z"):
+            slider = QSlider(Qt.Horizontal)
+            slider.setMinimumWidth(90)
+            slider.setMaximumWidth(140)
+            slider.setRange(-100, 100)
+            slider.setValue(0)
+            slider.setToolTip(f"{axis.upper()} cut coordinate in mm (MNI).")
+            slider.valueChanged.connect(lambda *_: self._on_plot())
+            self._vox_cuts[axis] = slider
+            self._vox_cut_labels[axis] = QLabel(f"{axis} 0")
+
+        self._vox_ncuts = QSpinBox()
+        self._vox_ncuts.setRange(1, 12)
+        self._vox_ncuts.setValue(6)
+        self._vox_ncuts.setMaximumWidth(60)
+        self._vox_ncuts.setToolTip(
+            "Number of cuts for a montage. A single-axis mode ('z') and 'mosaic' take a count "
+            "instead of coordinates, which is how you get a strip of slices through the volume."
+        )
+        self._vox_ncuts.valueChanged.connect(lambda *_: self._on_plot())
+        self._vox_ncuts_label = QLabel("n cuts")
+
+        self._vox_kind = QComboBox()
+        self._vox_kind.setMinimumWidth(150)
+        self._vox_kind.setToolTip(
+            "Which map to draw. TFCE-corrected is the default and the one to report; the "
+            "unpermuted t-statistic is there to check the direction and size of an effect the "
+            "corrected map only says exists."
+        )
+        self._vox_kind.currentIndexChanged.connect(lambda *_: self._on_plot())
+        self._vox_kind_label = QLabel("map")
 
         # ---- Brain-map-only controls ---------------------------------------------
         self._brain_atlas = QComboBox()
@@ -1021,6 +1165,25 @@ class StatmodelsWindow(QMainWindow):
         lay.addWidget(self._brain_opacity)
         lay.addWidget(self._brain_shading)
         lay.addWidget(self._brain_blend)
+        lay.addWidget(self._vox_dir_label)
+        lay.addWidget(self._vox_dir)
+        lay.addWidget(self._vox_browse)
+        lay.addWidget(self._vox_kind_label)
+        lay.addWidget(self._vox_kind)
+        lay.addWidget(self._vox_cmap_label)
+        lay.addWidget(self._vox_cmap)
+        lay.addWidget(self._vox_pmin_label)
+        lay.addWidget(self._vox_pmin)
+        lay.addWidget(self._vox_pmax_label)
+        lay.addWidget(self._vox_pmax)
+        lay.addWidget(self._vox_display_mode_label)
+        lay.addWidget(self._vox_display_mode)
+        lay.addWidget(self._vox_cut_auto)
+        for axis in ("x", "y", "z"):
+            lay.addWidget(self._vox_cut_labels[axis])
+            lay.addWidget(self._vox_cuts[axis])
+        lay.addWidget(self._vox_ncuts_label)
+        lay.addWidget(self._vox_ncuts)
         return widget
 
     def _build_covariate_box(self, title: str, domain: str) -> QWidget:
@@ -1119,6 +1282,11 @@ class StatmodelsWindow(QMainWindow):
         self._show_ci.stateChanged.connect(lambda *_: self._on_plot())
         self._plot.optionsChanged.connect(self._on_plot)
         self._mediation_plot.currentIndexChanged.connect(lambda *_: self._sync_display_enabled())
+        # Re-gate the option row too, not just the plot: the voxelwise controls differ per figure
+        # (a glass brain has no cut sliders, a surface has no projection mode). Without this a
+        # figure whose draw fails leaves the previous figure's controls on screen, so the setting
+        # that would fix it is unreachable.
+        self._mediation_plot.currentIndexChanged.connect(lambda *_: self._sync_analysis_type())
         self._mediation_plot.currentIndexChanged.connect(lambda *_: self._on_plot())
 
         self._chips.rulesChanged.connect(lambda: self._recompute_frame())
@@ -2517,35 +2685,61 @@ class StatmodelsWindow(QMainWindow):
         # Panelling needs a family of curves over anatomical levels to split up.
         for widget in (self._plot_display, self._plot_display_label):
             widget.setVisible(kind in ANALYSIS_PANEL_KINDS)
-        # The colormap applies to both maps; the contrast picker to both; atlas / hemisphere / views
-        # only to the cortical one, which is the only display with a choice of geometry.
+        # The contrast picker applies to all three maps; atlas / hemisphere / views only to the
+        # cortical one, which is the only display with a choice of geometry.
         # The whole second row belongs to the maps, so it appears and disappears with them.
         self._plot.set_map_options_visible(bool(display))
-        for widget in (self._vasc_cmap, self._vasc_cmap_label):
-            widget.setVisible(bool(display))
+        # Atlas, effect-size threshold and the curvature pair are the brain map's alone: a
+        # voxelwise result has no parcellation, and plot_img_on_surf has no shading control.
         for widget in (self._brain_atlas, self._brain_atlas_label,
-                       self._brain_hemi, self._brain_hemi_label,
-                       self._brain_views, self._brain_views_label,
-                       self._brain_surface, self._brain_surface_label,
                        self._brain_threshold, self._brain_threshold_label,
-                       self._brain_opacity, self._brain_opacity_label,
                        self._brain_shading, self._brain_blend):
             widget.setVisible(display == "brain")
+        # Geometry and opacity mean the same thing on either surface, so the voxelwise display
+        # shares these rather than growing a duplicate set that could drift out of step.
+        surface_display = display in {"brain", _DISPLAY_VOXELWISE}
+        vox_view = self._voxelwise_view() if display == _DISPLAY_VOXELWISE else ""
+        on_surface = display == "brain" or vox_view == "surface"
+        for widget in (self._brain_hemi, self._brain_hemi_label,
+                       self._brain_surface, self._brain_surface_label):
+            widget.setVisible(surface_display and on_surface)
+        opacity_ok = display == "brain" or (
+            display == _DISPLAY_VOXELWISE and supports_opacity(vox_view)
+        )
+        for widget in (self._brain_opacity, self._brain_opacity_label):
+            widget.setVisible(surface_display and opacity_ok)
+
+        for widget in (self._vox_dir, self._vox_dir_label, self._vox_browse,
+                       self._vox_kind, self._vox_kind_label,
+                       self._vox_cmap, self._vox_cmap_label,
+                       self._vox_pmin, self._vox_pmin_label,
+                       self._vox_pmax, self._vox_pmax_label):
+            widget.setVisible(display == _DISPLAY_VOXELWISE)
+        self._sync_voxelwise_cut_controls(vox_view)
+        # The colormap belongs to the two fit-derived maps. A 1-p map is one-sided and always drawn
+        # on a sequential scale, so offering a diverging colormap would invite centring a quantity
+        # that has no midpoint.
+        for widget in (self._vasc_cmap, self._vasc_cmap_label):
+            widget.setVisible(bool(display) and display != _DISPLAY_VOXELWISE)
         self._brain_blend.setEnabled(self._brain_shading.isChecked())
         # No view angle to pick when a flat map shows the whole cortex at once, nor in 3-D where
         # the view is whatever you rotate the brain to.
-        fixed_view = display == "brain" and (
+        # No view angle to pick when a flat map shows the whole cortex at once, nor in 3-D where
+        # the view is whatever you rotate the brain to.
+        fixed_view = (
             str(self._brain_surface.currentData() or "") == "flat"
             or self._interactive_plot.isChecked()
         )
         for widget in (self._brain_views, self._brain_views_label):
-            widget.setVisible(display == "brain" and not fixed_view)
+            widget.setVisible(surface_display and on_surface and not fixed_view)
         self._sync_map_contrasts(display)
         self._sync_display_enabled()
         # A map display is checked first because it *replaces* the engine's own figure set: left
         # after the engine branches, an MMRM or lmrob fit kept offering only its own plots and the
         # map's estimate/p-value views were unreachable.
-        if display == "vascular":
+        if display == _DISPLAY_VOXELWISE:
+            self._set_plot_kinds(VOXELWISE_VIEW_KINDS)
+        elif display == "vascular":
             self._set_plot_kinds(self._vascular_plot_kinds())
         elif display == "brain":
             self._set_plot_kinds(self._brain_plot_kinds())
@@ -2839,6 +3033,12 @@ class StatmodelsWindow(QMainWindow):
         kind = self._analysis_kind()
         if kind == ANALYSIS_MEDIATION:
             self._plot_mediation()
+            return
+        # Ahead of the fit guard: this display reads a results folder, not the fit, and gating it
+        # on a fitted model would make a finished analysis unviewable until an unrelated one had
+        # been run in the pane above.
+        if self._map_display() == _DISPLAY_VOXELWISE:
+            self._plot_voxelwise()
             return
         if self._last_result is None or self._last_model_df is None:
             return
@@ -3466,6 +3666,9 @@ class StatmodelsWindow(QMainWindow):
         unreachable.
         """
         contrasts: list[str] = []
+        if display == _DISPLAY_VOXELWISE:
+            self._sync_voxelwise_contrasts()
+            return
         if display and self._last_result is not None:
             groups = self._plot_group.currentText().strip() or self._region_column_name()
             try:
@@ -3576,6 +3779,233 @@ class StatmodelsWindow(QMainWindow):
         spec = next((s for s in specs if s.column() == outcome), specs[0] if specs else None)
         atlas = str(getattr(spec, "atlas", "") or "")
         return "vascular" if atlas.startswith("vascular") else "desikan"
+
+    def _voxelwise_view(self) -> str:
+        """Which voxelwise rendering the figure picker currently names."""
+        keys = {key for _label, key in VOXELWISE_VIEW_KINDS}
+        view = str(self._mediation_plot.currentData() or "")
+        return view if view in keys else "surface"
+
+    def _sync_voxelwise_cut_controls(self, view: str) -> None:
+        """Show the projection and cut controls that *view* can actually use.
+
+        nilearn's registries differ by builder and each ``display_mode`` consumes a different
+        number of coordinates, so offering all of them everywhere means half the settings fail at
+        draw time. This repopulates the mode list for the view and shows exactly the sliders the
+        chosen mode reads.
+        """
+        voxelwise = self._map_display() == _DISPLAY_VOXELWISE
+        modes = display_modes_for(view) if voxelwise else ()
+
+        for widget in (self._vox_display_mode, self._vox_display_mode_label):
+            widget.setVisible(bool(modes))
+        if modes:
+            current = str(self._vox_display_mode.currentData() or "")
+            if [self._vox_display_mode.itemData(i) for i in range(self._vox_display_mode.count())] \
+                    != list(modes):
+                self._vox_display_mode.blockSignals(True)
+                self._vox_display_mode.clear()
+                for mode in modes:
+                    self._vox_display_mode.addItem(mode, mode)
+                index = self._vox_display_mode.findData(current)
+                self._vox_display_mode.setCurrentIndex(index if index >= 0 else 0)
+                self._vox_display_mode.blockSignals(False)
+
+        mode = str(self._vox_display_mode.currentData() or "ortho") if modes else ""
+        axes = cut_axes_for(mode) if modes else ()
+        auto = self._vox_cut_auto.isChecked()
+        # A single-axis mode and 'mosaic' take a *count* rather than coordinates — that is how
+        # nilearn spells a montage.
+        montage = bool(modes) and (mode == "mosaic" or len(axes) == 1)
+        # A glass brain projects *through* the volume rather than cutting it, and nilearn's
+        # plot_glass_brain takes no cut coordinates at all. Showing sliders there would be a
+        # control that moves nothing.
+        cuttable = bool(modes) and supports_cut_coords(view)
+
+        self._vox_cut_auto.setVisible(cuttable)
+        for axis in ("x", "y", "z"):
+            show = cuttable and not auto and axis in axes and not montage
+            self._vox_cuts[axis].setVisible(show)
+            self._vox_cut_labels[axis].setVisible(show)
+        for widget in (self._vox_ncuts, self._vox_ncuts_label):
+            widget.setVisible(cuttable and montage and not auto)
+
+        # These visibility changes land *after* the row was measured in _sync_analysis_type, and a
+        # flow layout wraps on the widgets it can see. Re-measure, or a row that just gained the
+        # cut sliders keeps its old height and clips them.
+        self._plot.set_map_options_visible(bool(self._map_display()))
+
+    def _sync_voxelwise_cut_ranges(self, image: Any) -> None:
+        """Clamp the cut sliders to *image*'s own world bounding box.
+
+        Read from the map's affine rather than assumed to be MNI152's box: a 4 mm grid, a cropped
+        field of view or a non-MNI template all have different extents, and a slider clamped to the
+        wrong range refuses to reach part of the brain with no indication why.
+        """
+        from nvitk.stats.voxelwise_map import world_bounds
+
+        try:
+            bounds = world_bounds(image)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Could not derive world bounds: %s", exc)
+            return
+        for axis, (lo, hi) in bounds.items():
+            slider = self._vox_cuts[axis]
+            was = slider.value()
+            slider.blockSignals(True)
+            slider.setRange(int(np.floor(lo)), int(np.ceil(hi)))
+            slider.setValue(int(np.clip(was, np.floor(lo), np.ceil(hi))))
+            slider.blockSignals(False)
+            self._vox_cut_labels[axis].setText(f"{axis} {slider.value()}")
+
+    def _voxelwise_cut_coords(self, mode: str) -> Any:
+        """The ``cut_coords`` argument for *mode*, or ``None`` to let nilearn choose."""
+        if self._vox_cut_auto.isChecked():
+            return None
+        axes = cut_axes_for(mode)
+        if mode == "mosaic" or len(axes) == 1:
+            return int(self._vox_ncuts.value())
+        if not axes:
+            return None
+        return tuple(int(self._vox_cuts[axis].value()) for axis in axes)
+
+    def _pick_voxelwise_dir(self) -> None:
+        """Choose a randomise results folder, then reload its contrasts and redraw."""
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Select a voxelwise results folder", self._vox_dir.text()
+        )
+        if not chosen:
+            return
+        self._vox_dir.setText(chosen)
+        self._sync_map_contrasts(self._map_display())
+        self._on_plot()
+
+    def _load_voxelwise_result(self) -> Any:
+        """The result at the current folder, or ``None`` when there is nothing loadable there."""
+        directory = self._vox_dir.text().strip()
+        if not directory:
+            return None
+        try:
+            from nvitk.measure.voxelwise import load_voxelwise_result
+
+            return load_voxelwise_result(directory)
+        except Exception as exc:
+            log.debug("Voxelwise result load failed: %s", exc, exc_info=True)
+            return None
+
+    def _sync_voxelwise_contrasts(self) -> None:
+        """Fill the contrast and map pickers from the loaded folder's manifest.
+
+        The fit in the pane above has its own contrasts and they are not these. Reusing the shared
+        picker without repopulating it would silently offer a term from one model as a contrast of
+        another.
+        """
+        result = self._load_voxelwise_result()
+        names = list(result.contrast_names) if result is not None else []
+        kinds = sorted(result.maps) if result is not None else []
+
+        for widget in (self._vasc_contrast, self._vasc_contrast_label):
+            widget.setVisible(bool(names))
+        if names:
+            previous = str(self._vasc_contrast.currentData() or "")
+            self._vasc_contrast.blockSignals(True)
+            self._vasc_contrast.clear()
+            for name in names:
+                self._vasc_contrast.addItem(name, name)
+            index = self._vasc_contrast.findData(previous)
+            self._vasc_contrast.setCurrentIndex(index if index >= 0 else 0)
+            self._vasc_contrast.blockSignals(False)
+
+        if kinds:
+            from nvitk.measure.voxelwise import STAT_KINDS
+
+            previous = str(self._vox_kind.currentData() or "") or (
+                result.primary_kind() if result is not None else ""
+            )
+            self._vox_kind.blockSignals(True)
+            self._vox_kind.clear()
+            for kind in kinds:
+                self._vox_kind.addItem(STAT_KINDS.get(kind, kind), kind)
+            index = self._vox_kind.findData(previous)
+            self._vox_kind.setCurrentIndex(index if index >= 0 else 0)
+            self._vox_kind.blockSignals(False)
+
+    def _plot_voxelwise(self) -> None:
+        """Draw one contrast of a loaded randomise result.
+
+        Load-only: the pane never runs an analysis. Rendering goes through
+        :mod:`nvitk.stats.voxelwise_map`, the same module the napari tool calls, so the two viewers
+        cannot disagree about the threshold or about what the colour means.
+        """
+        try:
+            import matplotlib.pyplot as plt
+
+            from nvitk.stats.voxelwise_map import load_map, plot_voxelwise_result
+
+            result = self._load_voxelwise_result()
+            if result is None:
+                self._plot.show_error(
+                    "Choose a voxelwise results folder — the one holding manifest.json and the "
+                    "<root>_tfce_corrp_tstat*.nii.gz maps, written by `nvitk-voxelwise run`. "
+                    "This display loads a finished analysis; it does not run one."
+                )
+                return
+
+            contrast = str(self._vasc_contrast.currentData() or "")
+            if not contrast:
+                names = result.contrast_names
+                if not names:
+                    self._plot.show_error(f"{result.out_root.name} has no contrasts to draw.")
+                    return
+                contrast = names[0]
+
+            kind = str(self._vox_kind.currentData() or "") or result.primary_kind()
+            view = self._voxelwise_view()
+            mode = str(self._vox_display_mode.currentData() or "ortho")
+
+            # The sliders are in millimetres on this map's grid, so their range has to follow the
+            # map that is about to be drawn — not the one that happened to be loaded first.
+            self._sync_voxelwise_cut_ranges(load_map(result.map_path(kind, contrast)))
+            for axis, slider in self._vox_cuts.items():
+                self._vox_cut_labels[axis].setText(f"{axis} {slider.value()}")
+
+            lo = float(self._vox_pmin.value())
+            hi = float(self._vox_pmax.value())
+            if hi <= lo:
+                self._plot.show_error(
+                    f"The 1 - p window is empty: {lo:g} is not below {hi:g}. Raise the upper edge "
+                    "or lower the lower one."
+                )
+                return
+
+            with plt.style.context("default"):
+                fig, caption = plot_voxelwise_result(
+                    result,
+                    contrast=contrast,
+                    kind=kind,
+                    view=view,
+                    lo=lo,
+                    hi=hi,
+                    cmap=str(self._vox_cmap.currentData() or "hot"),
+                    views=str(self._brain_views.currentData() or "lateral,medial").split(","),
+                    hemispheres=(
+                        ["left", "right"]
+                        if str(self._brain_hemi.currentData() or "both") == "both"
+                        else [str(self._brain_hemi.currentData())]
+                    ),
+                    surface=str(self._brain_surface.currentData() or "pial"),
+                    display_mode=mode,
+                    cut_coords=self._voxelwise_cut_coords(mode),
+                    opacity=float(self._brain_opacity.value()),
+                    # The pane's own Interactive checkbox, as every other display uses it. Only the
+                    # surface view has a 3-D form; the projections are static either way.
+                    interactive=self._interactive_plot.isChecked(),
+                )
+            self._plot.show_figure(fig)
+            self._plot.set_status(caption)
+        except Exception as exc:
+            log.debug("Voxelwise map failed: %s", exc, exc_info=True)
+            self._plot.show_error(f"Voxelwise map unavailable: {exc}")
 
     def _plot_brain(self) -> None:
         """Draw the fit's per-parcel numbers on the cortical surface."""
@@ -4142,6 +4572,17 @@ class StatmodelsWindow(QMainWindow):
             "brain_blend": self._brain_blend.isChecked(),
             "brain_opacity": float(self._brain_opacity.value()),
             "brain_threshold": float(self._brain_threshold.value()),
+            # The results folder is the whole state of the voxelwise display, and it is the one
+            # thing worth reopening a saved config for.
+            "voxelwise_dir": self._vox_dir.text().strip(),
+            "voxelwise_pmin": float(self._vox_pmin.value()),
+            "voxelwise_pmax": float(self._vox_pmax.value()),
+            "voxelwise_kind": str(self._vox_kind.currentData() or ""),
+            "voxelwise_cmap": str(self._vox_cmap.currentData() or "hot"),
+            "voxelwise_display_mode": str(self._vox_display_mode.currentData() or ""),
+            "voxelwise_cut_auto": self._vox_cut_auto.isChecked(),
+            "voxelwise_ncuts": int(self._vox_ncuts.value()),
+            "voxelwise_cuts": {a: int(sl.value()) for a, sl in self._vox_cuts.items()},
             "plot_mode": str(self._plot_mode.currentData() or "auto"),
             "plot_x": self._plot_x.currentText().strip(),
             "include_points": self._include_points.isChecked(),
@@ -4300,6 +4741,31 @@ class StatmodelsWindow(QMainWindow):
         ):
             if key in cfg:
                 index = combo.findData(str(cfg[key] or ""))
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        if "voxelwise_dir" in cfg:
+            self._vox_dir.setText(str(cfg["voxelwise_dir"] or ""))
+            # Repopulate before the alpha/kind restore below: both pick by data, and the kind combo
+            # is empty until a folder has been read.
+            self._sync_voxelwise_contrasts()
+        if "voxelwise_pmin" in cfg:
+            self._vox_pmin.setValue(float(cfg["voxelwise_pmin"]))
+        if "voxelwise_pmax" in cfg:
+            self._vox_pmax.setValue(float(cfg["voxelwise_pmax"]))
+        if "voxelwise_cut_auto" in cfg:
+            self._vox_cut_auto.setChecked(bool(cfg["voxelwise_cut_auto"]))
+        if "voxelwise_ncuts" in cfg:
+            self._vox_ncuts.setValue(int(cfg["voxelwise_ncuts"]))
+        for axis, value in dict(cfg.get("voxelwise_cuts") or {}).items():
+            if axis in self._vox_cuts:
+                self._vox_cuts[axis].setValue(int(value))
+        for key, combo in (
+            ("voxelwise_kind", self._vox_kind),
+            ("voxelwise_cmap", self._vox_cmap),
+            ("voxelwise_display_mode", self._vox_display_mode),
+        ):
+            if cfg.get(key):
+                index = combo.findData(str(cfg[key]))
                 if index >= 0:
                     combo.setCurrentIndex(index)
         if "brain_shading" in cfg:

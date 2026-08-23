@@ -15,6 +15,7 @@ Python function here first, importable and scriptable independently of the GUI.
 | `region_algebra`, `region_groups` | Row-wise arithmetic across anatomical regions (e.g. composite flow variables) and named region groupings. |
 | `qc_filters` | Filtering rules applied before fitting. |
 | `brain_map`, `vascular_map`, `vessel_network`, `_vessel_territory_map` | Cohort-level spatial plotting — cortical-parcel and circle-of-Willis schematic maps. |
+| `voxelwise_map` | Figures for an FSL `randomise` result — surface, glass brain and slice views, plus the shared threshold and caption logic. Colours are 1 − p, not effect size. |
 | `distribution_plots`, `violin_hemodynamics` | Distribution and violin-plot helpers. |
 | `interactive`, `interactive_adapters` | Plotly-based interactive figures (forest/matrix/network plots) shared with the Stats GUI. |
 | `summaries` | Model-summary formatting. |

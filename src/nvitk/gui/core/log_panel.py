@@ -50,14 +50,21 @@ def run_subprocess_logged(
     *,
     cwd = None,
     on_line = None,
+    env = None,
 ) -> int:
-    """Run a command and stream stdout/stderr into :func:`gui_log`."""
+    """Run a command and stream stdout/stderr into :func:`gui_log`.
+
+    *env* replaces the child's whole environment when given — pass ``{**os.environ, ...}`` to add
+    to it rather than to start from nothing. It exists so a caller can hand a subprocess
+    credentials it must not print: the command line is echoed to the log, the environment is not.
+    """
     cmd = " ".join(argv)
     gui_log(f"$ {cmd}" + (f"  (cwd={cwd})" if cwd else ""))
     try:
         proc = subprocess.Popen(
             argv,
             cwd=cwd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

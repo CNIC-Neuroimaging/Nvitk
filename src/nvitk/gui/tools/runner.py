@@ -441,6 +441,14 @@ def run_gui_tool(
         _run_viz_vessel_cross_sections(viewer, layer, params)
         return None
 
+    if tool_id == "measure_voxelwise":
+        _run_measure_voxelwise(viewer)
+        return None
+
+    if tool_id == "viz_voxelwise_3d":
+        _run_viz_voxelwise_3d(viewer)
+        return None
+
     if tool_id == "lab_mouse_tof_cow":
         from nvitk.gui.lab.mouse_tof_cow import start_mouse_tof_cow
 
@@ -2643,6 +2651,32 @@ def _prepare_vessel_hemo_for_viz(
     if not regions:
         raise ValueError(f"No hemodynamics geometry available for root region {root_region!r}.")
     return hemo, regions, reference_layer
+
+
+def _run_viz_voxelwise_3d(viewer: Any) -> None:
+    """Open the 3-D voxelwise window.
+
+    Reachable on its own: viewing a finished result should not require opening the analysis dialog
+    that would have run it.
+    """
+    from nvitk.gui.viz.voxelwise_3d_panel import start_voxelwise_3d
+
+    start_voxelwise_3d(viewer)
+    notify("Voxelwise 3-D window open. Choose a results folder to draw it.")
+
+
+def _run_measure_voxelwise(viewer: Any) -> None:
+    """Open the voxelwise configure/run/load window.
+
+    Takes no layer: the analysis reads a whole cohort from a directory, and the design matrix comes
+    from the database, so there is nothing about the active layer that would inform it.
+    """
+    from nvitk.gui.viz.voxelwise_panel import start_voxelwise
+
+    start_voxelwise(viewer)
+    notify(
+        "Voxelwise analysis window open. Configure a run, or load an existing results folder."
+    )
 
 
 def _run_viz_vessel_hemo(viewer: Any, layer: Any, params: dict[str, Any]) -> None:

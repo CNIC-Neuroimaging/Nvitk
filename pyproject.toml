@@ -256,6 +256,7 @@ nvitk-restore = "nvitk.cli.restoration:main"
 nvitk-filter = "nvitk.cli.filters:main"
 nvitk-measure = "nvitk.cli.measure:main"
 nvitk-transform = "nvitk.cli.transform:main"
+nvitk-voxelwise = "nvitk.cli.voxelwise:main"
 
 # -----------------------------------------------------------------------------
 # Miscellaneous scripts
@@ -301,6 +302,9 @@ nvitk = "nvitk.gui:napari.yaml"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests", "test"]
+markers = [
+  "slow: takes seconds to minutes (permutation tests, model fits) — deselect with -m 'not slow'",
+]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Setuptools configuration

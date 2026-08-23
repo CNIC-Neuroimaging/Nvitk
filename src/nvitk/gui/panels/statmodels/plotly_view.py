@@ -157,6 +157,27 @@ class PlotlyView(QWidget):
         view.load(QUrl.fromLocalFile(str(path)))
         view.setVisible(True)
 
+    def show_html(self, html: str, *, source: Any = None) -> None:
+        """Render a self-contained HTML document into the view.
+
+        Nilearn's interactive views (``view_img_on_surf``, ``view_img``) are ``HTMLDocument``
+        objects, not Plotly figures — they carry their own bundled JS and are handed here as a
+        finished document. Everything else about hosting them is identical to a Plotly figure, so
+        this shares the uuid-per-redraw discipline: the web view caches aggressively and reusing
+        one path leaves the previous figure on screen.
+
+        *source* is stashed as the "figure" so :meth:`has_figure` and the pane's Export button
+        behave; note that :meth:`save_figure` cannot render it (Kaleido only speaks Plotly).
+        """
+        view = self._ensure_view()
+        path = asset_dir() / f"figure-{uuid.uuid4().hex}.html"
+        path.write_text(html, encoding="utf-8")
+        self._discard_previous()
+        self._figure = source
+        self._html_path = path
+        view.load(QUrl.fromLocalFile(str(path)))
+        view.setVisible(True)
+
     def _discard_previous(self) -> None:
         """Delete the previously rendered HTML; the shared JS bundle stays."""
         if self._html_path is None:
@@ -206,6 +227,12 @@ class PlotlyView(QWidget):
         """
         if self._figure is None:
             raise RuntimeError("There is no plot to export — fit a model first.")
+        if not hasattr(self._figure, "write_image"):
+            raise RuntimeError(
+                "This view is a self-contained HTML document, not a Plotly figure, so there is "
+                "nothing for Kaleido to render. Use the browser's own screenshot, or switch "
+                "Interactive off to export the static figure."
+            )
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -219,7 +246,7 @@ class PlotlyView(QWidget):
 
     def set_legend_visible(self, visible: bool) -> None:
         """Show or hide the legend, re-rendering in place."""
-        if self._figure is None:
+        if self._figure is None or not hasattr(self._figure, "update_layout"):
             return
         self._figure.update_layout(showlegend=bool(visible))
         self.show_figure(self._figure)

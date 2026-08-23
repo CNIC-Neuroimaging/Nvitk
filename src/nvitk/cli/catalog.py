@@ -93,6 +93,7 @@ _LIBRARY_TOOLS: dict[str, list[ToolEntry]] = {
         ToolEntry("", "nvitk.measure.morphometrics", label="CoW TOF morphometrics", requires_mask=True, library_only=True),
         ToolEntry("", "nvitk.measure.radiomics", label="PyRadiomics wrapper", requires_mask=True, library_only=True),
         ToolEntry("", "nvitk.measure.compare", label="intensity correlation (Pearson / Spearman / RMSE)", library_only=True),
+        ToolEntry("", "nvitk.measure.voxelwise", label="voxelwise GLM / permutation tests (FSL randomise)", library_only=True),
     ],
     "transform": [
         ToolEntry("", "nvitk.transform.resampling", label="resample-to", library_only=True),
@@ -135,6 +136,7 @@ _CMD_TO_SUBMODULE: dict[str, str] = {
     "nvitk-filter": "filters",
     "nvitk-measure": "measure",
     "nvitk-transform": "transform",
+    "nvitk-voxelwise": "measure",
 }
 
 _GPU_COMMANDS = frozenset({

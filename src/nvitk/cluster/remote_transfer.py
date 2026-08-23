@@ -7,7 +7,7 @@ import shlex
 import stat
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from nvitk.cluster import sge_json
 
@@ -226,6 +226,59 @@ def upload_directory(
                 sftp.put(str(lp), rp)
 
 
+def upload_files(
+    sftp: Any,
+    pairs: Sequence[tuple[Path, str]],
+    *,
+    skip_existing: bool = True,
+    on_progress: Any = None,
+) -> tuple[int, int]:
+    """Upload an explicit ``(local, remote)`` list; return ``(uploaded, skipped)``.
+
+    Neither existing helper fits a filtered transfer: :func:`upload_file` takes one path, and
+    :func:`upload_directory` sends a whole tree with no skip logic. A cohort analysis selects a few
+    hundred volumes out of several thousand in the same directory, so the *list* is the unit.
+
+    ``skip_existing`` compares the remote size against the local one. Re-running the same cohort
+    for a second contrast would otherwise re-send every volume — minutes of transfer for files that
+    are already there. Size rather than checksum: an SFTP stat is one round trip, hashing a few
+    hundred volumes is not.
+
+    ``on_progress(done, total)`` is called as the transfer advances; a silent twenty-minute upload
+    is indistinguishable from a hang.
+    """
+    total = len(pairs)
+    uploaded = skipped = 0
+    seen_dirs: set[str] = set()
+
+    for index, (local_path, remote_path) in enumerate(pairs, start=1):
+        local = Path(local_path)
+        if not local.is_file():
+            raise FileNotFoundError(f"Cannot upload, not a file: {local}")
+
+        parent = remote_path.rsplit("/", 1)[0]
+        if parent and parent not in seen_dirs:
+            ensure_remote_dir(sftp, parent)
+            seen_dirs.add(parent)
+
+        if skip_existing:
+            try:
+                if sftp.stat(remote_path).st_size == local.stat().st_size:
+                    skipped += 1
+                    if on_progress is not None:
+                        on_progress(index, total)
+                    continue
+            except IOError:
+                pass  # not there, or unstatable — upload it
+
+        sftp.put(str(local), remote_path)
+        uploaded += 1
+        if on_progress is not None:
+            on_progress(index, total)
+
+    return uploaded, skipped
+
+
 def upload_staged_job(
     *,
     host: str,
@@ -326,5 +379,6 @@ __all__ = [
     "ssh_exec",
     "upload_directory",
     "upload_file",
+    "upload_files",
     "upload_staged_job",
 ]

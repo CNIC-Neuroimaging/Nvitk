@@ -50,6 +50,11 @@ class GuiToolSpec:
     run_mode: RunMode = "layer"
     cli_command: str = ""
     description: str = ""
+    #: False only for a tool that has nothing to do with the active layer at all — it reads a
+    #: directory, a database, or a results folder, and manages its own output (napari layers, a
+    #: dialog). Defaults to True because almost every tool here operates on the active layer's
+    #: data; the Tools panel's "no layers loaded" gate consults this before running anything.
+    requires_layer: bool = True
     #: The operation is meaningful **per label**, so a multi-label selection runs it once on each
     #: label and recombines the results with the original ids, instead of on their binary union.
     #:
@@ -1444,6 +1449,35 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "measure_voxelwise",
+        "Measure",
+        "Voxelwise analysis (FSL randomise)",
+        (),
+        run_mode="notify",
+        cli_command="nvitk-voxelwise",
+        requires_layer=False,
+        description=(
+            "Cohort voxelwise GLM with permutation FWE correction. Opens its own window to "
+            "configure the image directory, cohort, EVs and contrasts, and run locally or on the "
+            "cluster — or to load a finished results folder. Corrected maps land as layers over "
+            "the MNI template; the 3-D scene is under Visualization."
+        ),
+    ),
+    GuiToolSpec(
+        "viz_voxelwise_3d",
+        "Visualization",
+        "Voxelwise 3D scene",
+        (),
+        run_mode="notify",
+        requires_layer=False,
+        description=(
+            "Suprathreshold voxels inside a translucent brain shell, in 3-D. Opens its own window "
+            "to pick the results folder, the map (corrected 1-p or the t-statistic), the "
+            "contrasts, the threshold window and whether clusters are drawn as iso-surfaces or "
+            "coloured points."
+        ),
+    ),
+    GuiToolSpec(
         "lab_mouse_tof_cow",
         "Lab",
         "Mouse TOF CoW",
@@ -1575,6 +1609,8 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "seg_split_lr_midline",
     "seg_adjust_masks",
     "lab_mouse_tof_cow",
+    "measure_voxelwise",
+    "viz_voxelwise_3d",
     "reg_flirt_rigid",
     "reg_flirt_apply",
     "siphon_correct",

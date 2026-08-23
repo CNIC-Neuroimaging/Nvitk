@@ -169,6 +169,17 @@ class PlotPanel(QGroupBox):
         """Whether *figure* is a Plotly figure rather than a Matplotlib one."""
         return type(figure).__module__.startswith("plotly")
 
+    def _is_html_document(self, figure: Any) -> bool:
+        """Whether *figure* is a self-contained HTML document rather than a drawable figure.
+
+        Nilearn's interactive views (``view_img_on_surf``, ``view_img``) return an
+        ``HTMLDocument``, which is neither a Matplotlib figure nor a Plotly one — it has no
+        ``.patch``, so the Matplotlib path would raise inside ``whiten_figure``. Duck-typed on
+        ``get_standalone`` rather than imported, so nilearn stays an optional dependency of the
+        pane.
+        """
+        return hasattr(figure, "get_standalone") and not self._is_interactive(figure)
+
     def _build_groups_box(self) -> QWidget:
         """Scrollable checklist of the grouping column's levels."""
         box = QGroupBox("Groups")
@@ -381,6 +392,9 @@ class PlotPanel(QGroupBox):
         if self._is_interactive(fig):
             self._show_interactive(fig)
             return
+        if self._is_html_document(fig):
+            self._show_html_document(fig)
+            return
         whiten_figure(fig)
         canvas = FigureCanvasQTAgg(fig)
         # Without this the canvas insists on the figure's own inch size and the pane grows past the
@@ -457,6 +471,30 @@ class PlotPanel(QGroupBox):
         self._disable_axis_sliders()
         self._btn_export.setEnabled(True)
         self.apply_legend_visibility()
+
+    def _show_html_document(self, document: Any) -> None:
+        """Hand a nilearn ``HTMLDocument`` to the web view, and stand the axis sliders down.
+
+        Same hosting as a Plotly figure — the document brings its own JS — so this reuses the web
+        view rather than adding a second one.
+        """
+        from .plotly_view import PlotlyView
+
+        if self._plotly is None:
+            self._plotly = PlotlyView()
+        self._host_layout.addWidget(self._plotly)
+        self._plotly.setVisible(True)
+        try:
+            self._plotly.show_html(document.get_standalone(), source=document)
+        except RuntimeError as exc:
+            # No web engine: say so where the plot would have been rather than failing the fit.
+            self._plotly = None
+            self.show_error(str(exc))
+            return
+        self._fig = document
+        self._interactive = True
+        self._disable_axis_sliders()
+        self._btn_export.setEnabled(True)
 
     @staticmethod
     def _fit_layout(fig: Any) -> None:
