@@ -18,7 +18,7 @@ log "removing pip-only dependencies installed by post-link.sh..."
   nilearn nipype gudhi antspynet totalsegmentator nnunetv2 fireants \
   pingouin networkx scikit-learn scikit-posthocs semopy great-tables formulae pymer4 \
   xnat pyyaml paramiko fastapi uvicorn keyring \
-  napari magicgui superqt PyQt6-WebEngine \
+  PyQt6-WebEngine \
   pyradiomics pydicom \
   torch torchvision \
   cupy-cuda13x cutensor-cu13 nvidia-nccl-cu13 \

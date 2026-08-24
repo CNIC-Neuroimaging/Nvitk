@@ -1,9 +1,10 @@
 #!/bin/bash
 # Installs every dependency from pyproject.toml that pixi itself already treats as a PyPI
 # dependency (i.e. everything except the small conda-native core in recipe.yaml's
-# requirements/run: python, numpy, the R stack + rpy2, mrtrix3, freeimage, libstdcxx-ng —
-# see the comment at the top of recipe.yaml for why that split exists and how it was
-# verified). Runs once, right after `conda`/`mamba` links nvitk into the target env.
+# requirements/run: python, numpy, the R stack + rpy2, mrtrix3, freeimage, libstdcxx-ng,
+# and the Qt/GUI stack except PyQt6-WebEngine — see the comment at the top of recipe.yaml
+# for why that split exists and how it was verified). Runs once, right after `conda`/`mamba`
+# links nvitk into the target env.
 #
 # Version pins below are copied verbatim from pyproject.toml / [tool.pixi.*] — do not
 # relax them here even where a conda package would technically satisfy the constraint.
@@ -59,9 +60,8 @@ log "installing API/database..."
   "uvicorn>=0.27.0" "keyring>=24.0.0" \
   >>"$LOG" 2>&1
 
-log "installing GUI stack..."
-"$PIP" install --no-cache-dir \
-  "napari[all]>=0.7.0" "magicgui>=0.8.0" "superqt>=0.6.0" "PyQt6-WebEngine>=6.11.0" \
+log "installing PyQt6-WebEngine (no conda-forge package yet; --no-deps keeps conda pyqt6)..."
+"$PIP" install --no-cache-dir --no-deps "PyQt6-WebEngine>=6.11.0" \
   >>"$LOG" 2>&1
 
 log "installing pyradiomics/pydicom (no-build-isolation, matching pixi's handling)..."

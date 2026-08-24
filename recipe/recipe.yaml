@@ -4,8 +4,10 @@
 # works in production: pixi treats [project.dependencies] and the `gui` extra as PyPI
 # dependencies by default, and only overrides a small set of names to conda-native
 # sourcing — mrtrix3/freeimage/libstdcxx-ng (`[tool.pixi.dependencies]`), python/numpy
-# (`[tool.pixi.feature.gpu.dependencies]`), and the R stack + rpy2
-# (`[tool.pixi.feature.stats.dependencies]`). Everything else stays pip-only.
+# (`[tool.pixi.feature.gpu.dependencies]`), the R stack + rpy2
+# (`[tool.pixi.feature.stats.dependencies]`), and the Qt/GUI stack (pyqt6/napari/qtpy
+# here; PyQt6-WebEngine alone stays pip-only in post-link.sh until conda-forge ships
+# it). Everything else stays pip-only.
 #
 # `version` is kept in manual sync with [project].version in ../pyproject.toml (that
 # field is static there, not setuptools_scm-driven).
@@ -20,7 +22,7 @@ source:
   path: ../
 
 build:
-  number: 0
+  number: 1
   noarch: python
   script:
     - pip install . --no-deps -vv
@@ -32,6 +34,12 @@ build:
     - cp "$RECIPE_DIR/post-link.sh" "$PREFIX/bin/.nvitk-post-link.sh"
     - cp "$RECIPE_DIR/pre-unlink.sh" "$PREFIX/bin/.nvitk-pre-unlink.sh"
     - chmod +x "$PREFIX/bin/.nvitk-post-link.sh" "$PREFIX/bin/.nvitk-pre-unlink.sh"
+    # Activation hooks: prepend $CONDA_PREFIX/lib to LD_LIBRARY_PATH so conda Qt/font
+    # libraries win over HPC module paths (see activate.d/nvitk-gui.sh).
+    - mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"
+    - cp "$RECIPE_DIR/activate.d/nvitk-gui.sh" "$PREFIX/etc/conda/activate.d/nvitk-gui.sh"
+    - cp "$RECIPE_DIR/deactivate.d/nvitk-gui.sh" "$PREFIX/etc/conda/deactivate.d/nvitk-gui.sh"
+    - chmod +x "$PREFIX/etc/conda/activate.d/nvitk-gui.sh" "$PREFIX/etc/conda/deactivate.d/nvitk-gui.sh"
 
 requirements:
   host:
@@ -67,6 +75,14 @@ requirements:
     - mrtrix3 >=3.0.8
     - freeimage >=3.18.0
     - libstdcxx-ng >=15.2.0
+    # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
+    #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
+    #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
+    - qtpy
+    - pyqt6 >=6.11.0
+    - napari >=0.7.0
+    - magicgui >=0.8.0
+    - superqt >=0.6.0
 
 tests:
   # A real `import nvitk` needs the pip-only packages post-link.sh installs, which
