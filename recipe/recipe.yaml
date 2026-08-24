@@ -49,7 +49,7 @@ requirements:
     - wheel
     - setuptools_scm >=6.0
   run:
-    # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.
+    # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
     - pip
     # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
     - python ==3.11.15
@@ -78,7 +78,7 @@ requirements:
     # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
     #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
     #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
-    - qt ==6.11.0
+    - main::qt ==6.11.0
     - qtpy ==2.4.3
     - pyqt6 ==6.11.0
     - napari ==0.7.0
