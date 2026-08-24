@@ -40,7 +40,7 @@ jobs:
             -r recipe/recipe.yaml \
             $CHANNELS \
             --output-dir output \
-            --channel-priority disabled \ 
+            --channel-priority disabled \
             --test skip
 
       - name: Smoke-test install from local build output
