@@ -27,13 +27,14 @@ class SgeConnectionSettings:
 
 
 def _default_host() -> str:
-    """Default SSH host alias for the connection dialog (first known alias, else ``"samwise"``)."""
-    paths = sge_json.paths_section()
-    aliases = sge_json.merge_cluster_host_aliases({}, paths, {})
-    for name in ("samwise", "login", "cluster"):
-        if name in aliases:
-            return name
-    return "samwise"
+    """Default SSH host for the connection dialog: the first configured cluster alias.
+
+    Aliases come from ``sge.json`` ``paths.cluster_host_aliases``; there is no built-in
+    hostname, so an unconfigured install shows an empty field for the user to fill rather than
+    pre-filling somebody else's cluster.
+    """
+    aliases = sge_json.merge_cluster_host_aliases({}, sge_json.paths_section(), {})
+    return next(iter(aliases), "")
 
 
 def _default_remote_job_root() -> str:
@@ -63,7 +64,7 @@ class SgeSubmitDialog(QDialog):
         default_root = _default_remote_job_root()
         self.remote_job_root = QLineEdit(default_root)
         self.remote_job_root.setPlaceholderText(
-            default_root or "/data3/BIOIT_IMAGE/nvitk-sge/gui/<job_id>"
+            default_root or "set paths.gui_sge_job_root in sge.json, or type a path"
         )
 
         form = QFormLayout()

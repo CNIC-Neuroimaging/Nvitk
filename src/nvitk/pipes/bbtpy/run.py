@@ -45,6 +45,7 @@ from nvitk.pipes.bbtpy import (
 )
 from nvitk.pipes.bbtpy.util import paths
 from nvitk.pipes.bbtpy.util.eicab_masks import EicabMaskKind
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -127,6 +128,7 @@ def _parse_subjects(
 
 
 @click.command("nvitk-bbtpy")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--subjects",

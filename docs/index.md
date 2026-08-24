@@ -3,6 +3,7 @@
 :maxdepth: 2
 
 installation
+configuration
 quickstart
 api/index
 gui/index
@@ -38,6 +39,13 @@ conda install -c conda-forge -c cnic -c bioconda -c mrtrix3 -c ejolly nvitk
 :link-type: doc
 Install via conda (recommended, ready-to-use) or set up a pixi development environment
 from a clone.
+:::
+
+:::{grid-item-card} {octicon}`gear` Configuration
+:link: configuration
+:link-type: doc
+Where nvitk looks for `sge.json` / `settings.json` / `xnat.json`, and how to create them with
+`nvitk-config init`.
 :::
 
 :::{grid-item-card} {octicon}`play` Quickstart

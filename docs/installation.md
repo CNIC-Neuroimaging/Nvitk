@@ -39,6 +39,109 @@ of which solver resolved the environment.
 **Note:** It is important that the conda-forge channel is on top.
 ```
 
+Then create a configuration — nvitk ships no site paths of its own, so this is required
+before any pipeline will run:
+
+```bash
+nvitk-config init        # writes ~/.config/nvitk/{sge,settings,xnat}.json
+nvitk-config validate    # shows what still needs filling in
+```
+
+See {doc}`configuration` for what each key means and where the files are searched for, then
+{ref}`get-the-data` below.
+
+(get-the-data)=
+## Configuration and dataset retrieval
+
+nvitk ships **code only**. Site configuration and research data are deliberately kept out of
+the package: they are specific to one institution, and the data is not ours to distribute.
+How you obtain them depends on whether you have access to CNIC storage.
+
+### If you have access (CNIC)
+
+**Configuration** lives in a private repository. From a clone of nvitk:
+
+```bash
+git submodule update --init .nvitk
+```
+
+That directory is search location #8, so a clone with the submodule checked out is configured
+with nothing further to do. If you installed from conda and have no clone, put it wherever
+nvitk looks instead:
+
+```bash
+git clone git@github.com:ignacio-ms/nvitk-config.git ~/.config/nvitk
+```
+
+**The dataset** is tracked with DVC. The pointer files are public — they are content hashes and
+reveal nothing — while the content sits on CNIC storage, so access is enforced by the storage
+location rather than by the repository:
+
+```bash
+nvitk-dataset status       # what is configured, and what is already present
+nvitk-dataset pull         # catalog + measurement tables  (~19 MB)
+nvitk-dataset pull --all   # + the prebuilt SQLite index   (~1.3 GB)
+```
+
+This works from a plain conda install with no checkout: `dvc get` reads the pointers straight
+out of the public repository and fetches the content from the configured remote. It needs the
+storage mounted and `dvc` installed (`conda install -c conda-forge dvc`).
+
+```{tip}
+`--all` is rarely worth it. The SQLite index is derived from the tables and rebuilds locally in
+about 15 seconds — far quicker than transferring 1.3 GB:
+
+    python -m nvitk.db.sqlite_index --dataset-root <db.root>
+```
+
+`nvitk-dataset pull --rev v0.1.0` pins retrieval to a git tag, giving you the dataset as it was
+at a particular release.
+
+The two settings it uses, in `settings.json`:
+
+| Key | Meaning |
+|---|---|
+| `db.root` | Where the dataset is written |
+| `db.dvc_repo` | Repository holding the pointer files (defaults to the public nvitk repo) |
+| `db.dvc_remote_url` | Where the content lives. Leave empty to use the repository's own default |
+
+### If you are outside the organisation
+
+You cannot fetch CNIC's configuration or data, and you do not need them — nvitk works against
+any dataset in its layout. Three steps:
+
+**1. Create a configuration and fill in your own paths.**
+
+```bash
+nvitk-config init
+nvitk-config path        # shows which file is in use
+```
+
+Only `db.root` in `settings.json` is needed for the library, I/O and image-processing CLIs.
+The `sge.json` sections matter only if you run pipelines on a cluster; delete what you do not
+use, and nvitk will name any key it needs but cannot find.
+
+**2. Create an empty dataset.**
+
+```python
+from nvitk.db.catalog import DatasetCatalog
+DatasetCatalog.create_scaffold("~/my-dataset")     # then set db.root to this path
+```
+
+This writes the catalog manifests and JSON schemas that define the dataset layout, plus empty
+`tables/` and `cache/` directories, and works from an installed package with no checkout.
+
+**3. Leave the DVC settings empty.** `db.dvc_repo` / `db.dvc_remote_url` only apply to CNIC
+storage; `nvitk-dataset` is not used outside the organisation.
+
+```{note}
+Much of nvitk needs no dataset at all. The image-processing CLIs (`nvitk-morph`,
+`nvitk-filter`, `nvitk-restore`, `nvitk-transform`, `nvitk-measure`), the conversion tools and
+the Python API all operate on files you pass them. A dataset is only required for the
+cohort-level pieces: the pipelines, the {doc}`Stats GUI <stats-gui/index>` and the database
+layer.
+```
+
 Run {doc}`pyhelp <api/cli-catalog>` after activation for an interactive catalog of every
 CLI tool (`pyhelp --no-interactive` for CI/scripts).
 

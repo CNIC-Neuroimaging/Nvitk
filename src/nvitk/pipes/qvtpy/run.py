@@ -92,6 +92,7 @@ from .stages import (
     STAGE_XNAT_UPLOAD,
     parse_stages as _parse_stages,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -853,6 +854,7 @@ def _submit_qvtpy_sge_subjects_remote(
 
 
 @click.command("nvitk-qvtpy")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--dicom-root",

@@ -1,63 +1,33 @@
-"""Load optional repo-local ``.nvitk/sge.json`` and merge overlays onto Python defaults."""
+"""Read ``sge.json`` and merge its overlays onto Python defaults.
+
+Where the file lives is decided by :mod:`nvitk.core.config_paths`; this module only knows how
+to interpret its contents.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from nvitk.core import config_paths
 
-def _find_repo_root() -> Path | None:
-    """Ascend from this file until ``pyproject.toml`` + ``src/nvitk`` exist."""
-    here = Path(__file__).resolve()
-    for anc in [here.parent, *here.parents]:
-        if (anc / "pyproject.toml").is_file() and (anc / "src" / "nvitk").is_dir():
-            return anc
-    return None
+SGE_JSON_NAME = "sge.json"
 
 
 def sge_json_path() -> Path | None:
-    """Locate ``.nvitk/sge.json`` (repo, cwd, ``NVITK_HOME``, or ``NVITK_SGE_JSON``)."""
-    candidates: list[Path] = []
-    root = _find_repo_root()
-    if root is not None:
-        candidates.append(root / ".nvitk" / "sge.json")
-    candidates.append(Path.cwd() / ".nvitk" / "sge.json")
-    env_home = os.environ.get("NVITK_HOME", "").strip()
-    if env_home:
-        candidates.append(Path(env_home).expanduser() / ".nvitk" / "sge.json")
-    env_json = os.environ.get("NVITK_SGE_JSON", "").strip()
-    if env_json:
-        candidates.append(Path(env_json).expanduser())
-    seen: set[Path] = set()
-    for p in candidates:
-        try:
-            key = p.resolve()
-        except OSError:
-            key = p
-        if key in seen:
-            continue
-        seen.add(key)
-        if p.is_file():
-            return p
-    return None
+    """Locate ``sge.json``; see :func:`nvitk.core.config_paths.describe_search` for where."""
+    return config_paths.config_file(SGE_JSON_NAME)
 
 
 def load_sge_document() -> dict[str, Any]:
-    """Return parsed ``sge.json`` or empty dict if missing / invalid."""
-    path = sge_json_path()
-    if path is None:
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError) as exc:
-        import warnings
+    """Parsed ``sge.json``, or an empty dict when it is absent or unreadable.
 
-        warnings.warn(f"Could not load {path}: {exc}", stacklevel=2)
-        return {}
+    Cached by :mod:`~nvitk.core.config_paths`, so the repeated ``paths_section()`` /
+    ``defaults_section()`` / ``pipeline_section()`` calls throughout the codebase no longer
+    re-read and re-parse the file each time.
+    """
+    return config_paths.load_json(SGE_JSON_NAME)
 
 
 def paths_section() -> dict[str, Any]:
@@ -84,8 +54,17 @@ def gui_sge_job_root() -> str:
     return str(raw).strip().rstrip("/")
 
 
-def resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: Path | None = None) -> Path:
-    """Cluster nvitk Singularity image from pipeline override, ``sge.json``, or container registry."""
+def resolve_nvitk_container(
+    *, pipe: Mapping[str, Any] | None = None, fallback: Path | None = None
+) -> Path | None:
+    """Cluster nvitk Singularity image from pipeline override, ``sge.json``, or the registry.
+
+    ``None`` when nothing is configured. There is deliberately no built-in image path: one
+    would be specific to a single institution's filesystem, and silently returning it makes an
+    unconfigured install fail later with a confusing "no such file" instead of saying which
+    setting is missing. Callers that must have an image should pass the result through
+    :func:`nvitk.core.config_paths.require`.
+    """
     if pipe:
         for key in ("default_sge_container_root", "sge_container_root", "container_path"):
             raw = pipe.get(key)
@@ -103,9 +82,7 @@ def resolve_nvitk_container(*, pipe: Mapping[str, Any] | None = None, fallback: 
             return reg_path
     except Exception:
         pass
-    if fallback is not None:
-        return fallback
-    return Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
+    return fallback
 
 
 def defaults_section() -> dict[str, Any]:

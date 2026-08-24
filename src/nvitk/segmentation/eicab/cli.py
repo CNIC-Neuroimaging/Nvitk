@@ -19,6 +19,7 @@ from nvitk.cluster.sge import SgeResources, write_script_header
 from . import config as cfg
 from .cluster import submit_eicab_job
 from .runner import run_eicab
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -40,6 +41,7 @@ def _default_emit_script(input_path: Path) -> Path:
 
 
 @click.command("nvitk-eicab", context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--input",

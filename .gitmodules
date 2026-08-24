@@ -7,3 +7,6 @@
 [submodule "src/nvitk/pipes/qvtplus/src"]
 	path = src/nvitk/pipes/qvtplus/src
 	url = git@github.com:ignacio-ms/QVTplus.git
+[submodule ".nvitk"]
+	path = .nvitk
+	url = git@github.com:ignacio-ms/nvitk-config.git

@@ -7,12 +7,19 @@ import sys
 import click
 
 from nvitk.core.click_backend import apply_cli_backend, backend_click_option
+from nvitk.core.click_config import config_dir_click_option
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 @backend_click_option(default="cpu")
 def main(backend: str) -> None:
-    """Launch the Napari workbench for nvitk image tools."""
+    """Launch the Napari workbench for nvitk image tools.
+
+    Every import that reads configuration happens inside this function rather than at module
+    level, so the eager ``--config-dir`` callback has already redirected the lookup by the time
+    any of them run.
+    """
     try:
         import napari  
     except ImportError as exc:

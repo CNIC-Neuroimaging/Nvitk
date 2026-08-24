@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import tempfile
 from pathlib import Path
 
 from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths
 from nvitk.pipes.pesa_fat.common.paths import DEFAULT_MODEL_ROOT
 from nvitk.pipes.pesa_fat.dixon_v5.labels import (
     HEAD_LABELS,
@@ -234,34 +236,45 @@ SGE_QUEUE       = None
 SGE_CPU_H_VMEM  = "32G"
 SGE_CPU_NGPU    = 0
  
-SGE_LOG_DIR     = Path("/data3/BIOIT_IMAGE/BioImaging/env/logs/PESAFatV5")
-SGE_ERR_DIR     = Path("/data3/BIOIT_IMAGE/BioImaging/env/errs/PESAFatV5")
+SGE_LOG_DIR     = Path(tempfile.gettempdir()) / "nvitk-sge" / "logs" / "PESAFat-DIXON"
+SGE_ERR_DIR     = Path(tempfile.gettempdir()) / "nvitk-sge" / "errs" / "PESAFat-DIXON"
 
-CONTAINER_PATH  = Path("/data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif")
+CONTAINER_PATH: Path | None = None  # sge.json: pipelines.pesa_fat_dixon.default_sge_container_root
 MODELS_PATH     = DEFAULT_MODEL_ROOT
 
-_pipe_dx = _sj.merged_pipeline_flat("pesa_fat_dixon")
-_paths_dx = _sj.paths_section()
-if (v := _pipe_dx.get("sge_project")) is not None:
-    SGE_PROJECT = str(v)
-if (v := _pipe_dx.get("sge_account")) is not None:
-    SGE_ACCOUNT = str(v)
-if (v := _pipe_dx.get("sge_ngpu")) is not None:
-    SGE_NGPU = int(v)
-if (v := _pipe_dx.get("sge_h_vmem")) is not None:
-    SGE_H_VMEM = str(v)
-if "sge_queue" in _pipe_dx:
-    SGE_QUEUE = _pipe_dx["sge_queue"]
-if (v := _pipe_dx.get("sge_cpu_h_vmem")) is not None:
-    SGE_CPU_H_VMEM = str(v)
-if (v := _pipe_dx.get("sge_cpu_ngpu")) is not None:
-    SGE_CPU_NGPU = int(v)
-_lg_dx, _er_dx = _sj.resolve_log_err_dirs(
-    paths=_paths_dx,
-    pipe=_pipe_dx,
-    fallback_log=SGE_LOG_DIR,
-    fallback_err=SGE_ERR_DIR,
-)
+def _apply_config() -> None:
+    """Merge ``sge.json`` over this module's defaults.
+
+    Run once at import and again whenever the configuration directory is redirected,
+    so a late ``--config-dir`` reaches these constants too.
+    """
+    global SGE_ACCOUNT, SGE_CPU_H_VMEM, SGE_CPU_NGPU, SGE_H_VMEM, SGE_NGPU, SGE_PROJECT, SGE_QUEUE, _er_dx, _lg_dx, _paths_dx, _pipe_dx
+    _pipe_dx = _sj.merged_pipeline_flat("pesa_fat_dixon")
+    _paths_dx = _sj.paths_section()
+    if (v := _pipe_dx.get("sge_project")) is not None:
+        SGE_PROJECT = str(v)
+    if (v := _pipe_dx.get("sge_account")) is not None:
+        SGE_ACCOUNT = str(v)
+    if (v := _pipe_dx.get("sge_ngpu")) is not None:
+        SGE_NGPU = int(v)
+    if (v := _pipe_dx.get("sge_h_vmem")) is not None:
+        SGE_H_VMEM = str(v)
+    if "sge_queue" in _pipe_dx:
+        SGE_QUEUE = _pipe_dx["sge_queue"]
+    if (v := _pipe_dx.get("sge_cpu_h_vmem")) is not None:
+        SGE_CPU_H_VMEM = str(v)
+    if (v := _pipe_dx.get("sge_cpu_ngpu")) is not None:
+        SGE_CPU_NGPU = int(v)
+    _lg_dx, _er_dx = _sj.resolve_log_err_dirs(
+        paths=_paths_dx,
+        pipe=_pipe_dx,
+        fallback_log=SGE_LOG_DIR,
+        fallback_err=SGE_ERR_DIR,
+    )
+
+
+_apply_config()
+config_paths.register_reload_hook(_apply_config)
 SGE_LOG_DIR, SGE_ERR_DIR = _lg_dx, _er_dx
 if (v := _pipe_dx.get("default_sge_container_root") or _pipe_dx.get("container_path")):
     CONTAINER_PATH = Path(os.path.expanduser(str(v)))

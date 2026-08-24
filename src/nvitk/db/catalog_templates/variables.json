@@ -1,0 +1,3455 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-08-12T08:50:23+00:00",
+  "variables": [
+    {
+      "variable_id": "age_at_cog_months",
+      "source_column": "age_at_cog_months",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "age_at_cog_months",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "age_at_cog_months"
+      ]
+    },
+    {
+      "variable_id": "age_at_cog_years",
+      "source_column": "age_at_cog_years",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "age_at_cog_years",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "age_at_cog_years"
+      ]
+    },
+    {
+      "variable_id": "age_at_mri",
+      "source_column": "age_at_mri",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "age_at_mri"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "age_at_mri",
+      "value_kind": "numeric",
+      "unit": "Years"
+    },
+    {
+      "variable_id": "apoe",
+      "source_column": "apoe",
+      "source_file": "PESABrain_APOE_20260318.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "apoe"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "apoe",
+      "value_kind": "text",
+      "unit": "Apolipoprotein E Aplotype Status"
+    },
+    {
+      "variable_id": "apoe_e2_carrier",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e2 carrier (1 = at least one e2 allele)",
+      "source_column": "apoe_e2_carrier",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_e2_count",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e2 allele count (0\u20132)",
+      "source_column": "apoe_e2_count",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_e3_count",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e3 allele count (0\u20132)",
+      "source_column": "apoe_e3_count",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_e3e3",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e3/e3 homozygote (1 = reference genotype)",
+      "source_column": "apoe_e3e3",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_e4_carrier",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e4 carrier (1 = at least one e4 allele)",
+      "source_column": "apoe_e4_carrier",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_e4_count",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE e4 allele count (0\u20132)",
+      "source_column": "apoe_e4_count",
+      "source_file": "clinical_measurements",
+      "source_sheet": "derived",
+      "value_kind": "float",
+      "derived_from": "apoe"
+    },
+    {
+      "variable_id": "apoe_group",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "APOE risk grouping",
+      "source_column": "apoe_group",
+      "source_file": "import_new_vars",
+      "source_sheet": "derived",
+      "aliases": [
+        "apoe_group"
+      ],
+      "value_kind": "categorical"
+    },
+    {
+      "variable_id": "att_cov",
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "asl",
+      "label": "ATT coefficient of variation",
+      "source_column": "cov",
+      "source_file": "ATT_native_results.csv",
+      "unit": "%"
+    },
+    {
+      "variable_id": "att_mean",
+      "source_column": "corrected_mean",
+      "source_file": "PESABrain_ASLPerfusion_VascularAtlas_MeanATT_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left_ACA-0",
+        "Left_ACA-8",
+        "Left_Basilar-0",
+        "Left_Basilar-8",
+        "Left_MCA-0",
+        "Left_MCA-8",
+        "Left_PCA-0",
+        "Left_PCA-8",
+        "Right_ACA-0",
+        "Right_ACA-8",
+        "Right_Basilar-0",
+        "Right_Basilar-8",
+        "Right_MCA-0",
+        "Right_MCA-8",
+        "Right_PCA-0",
+        "Right_PCA-8",
+        "Watershed-0",
+        "Watershed-8",
+        "mri_id.1",
+        "att_mean"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "asl",
+      "label": "ATT mean (vascular atlas)",
+      "value_kind": "text",
+      "unit": "s"
+    },
+    {
+      "variable_id": "att_median",
+      "source_column": "mri_id.1",
+      "source_file": "PESABrain_ASLPerfusion_VascularAtlas_MedianATT_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left_ACA-0",
+        "Left_ACA-8",
+        "Left_Basilar-0",
+        "Left_Basilar-8",
+        "Left_MCA-0",
+        "Left_MCA-8",
+        "Left_PCA-0",
+        "Left_PCA-8",
+        "Right_ACA-0",
+        "Right_ACA-8",
+        "Right_Basilar-0",
+        "Right_Basilar-8",
+        "Right_MCA-0",
+        "Right_MCA-8",
+        "Right_PCA-0",
+        "Right_PCA-8",
+        "Watershed-0",
+        "Watershed-8",
+        "mri_id.1",
+        "att_median"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "asl",
+      "label": "ATT median (vascular atlas)",
+      "value_kind": "text",
+      "unit": "s"
+    },
+    {
+      "variable_id": "bmi",
+      "source_column": "bmi",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "bmi"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "bmi",
+      "value_kind": "numeric",
+      "unit": "kg/m2"
+    },
+    {
+      "variable_id": "bpxdim",
+      "source_column": "BPXDIM",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "BPXDIM"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "BPXDIM",
+      "value_kind": "numeric",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "bpxpls",
+      "source_column": "BPXPLS",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "BPXPLS"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "BPXPLS",
+      "value_kind": "numeric",
+      "unit": "bpm"
+    },
+    {
+      "variable_id": "bpxsym",
+      "source_column": "BPXSYM",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "BPXSYM"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "BPXSYM",
+      "value_kind": "numeric",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "cdr_activdomesticas",
+      "source_column": "CDR_ActivDomesticas",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_ActivDomesticas",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_ActivDomesticas"
+      ]
+    },
+    {
+      "variable_id": "cdr_activfueradecasa",
+      "source_column": "CDR_ActivFueraDeCasa",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_ActivFueraDeCasa",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_ActivFueraDeCasa"
+      ]
+    },
+    {
+      "variable_id": "cdr_cuidadopersonal",
+      "source_column": "CDR_CuidadoPersonal",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_CuidadoPersonal",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_CuidadoPersonal"
+      ]
+    },
+    {
+      "variable_id": "cdr_global",
+      "source_column": "CDR_Global",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_Global",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_Global"
+      ]
+    },
+    {
+      "variable_id": "cdr_memoria",
+      "source_column": "CDR_Memoria",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_Memoria",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_Memoria"
+      ]
+    },
+    {
+      "variable_id": "cdr_orientacion",
+      "source_column": "CDR_Orientacion",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_Orientacion",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_Orientacion"
+      ]
+    },
+    {
+      "variable_id": "cdr_razonamiento",
+      "source_column": "CDR_Razonamiento",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_Razonamiento",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_Razonamiento"
+      ]
+    },
+    {
+      "variable_id": "cdr_sumofboxes",
+      "source_column": "CDR_SumOfBoxes",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CDR_SumOfBoxes",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CDR_SumOfBoxes"
+      ]
+    },
+    {
+      "variable_id": "cn_errores",
+      "source_column": "CN_errores",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "CN_errores",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "CN_errores"
+      ]
+    },
+    {
+      "variable_id": "cohort_ia",
+      "source_column": "cohort_IA",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "cohort_IA",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "cohort_IA"
+      ]
+    },
+    {
+      "variable_id": "cohort_pbrain",
+      "source_column": "cohort_PBrain",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "cohort_PBrain",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "cohort_PBrain"
+      ]
+    },
+    {
+      "variable_id": "cov_cbf",
+      "source_column": "ctx-rh-insula",
+      "source_file": "PESABrain_ASLPerfusion_CovCBF_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "ctx-whole-brain",
+        "ctx-left-hemisphere",
+        "ctx-right-hemisphere",
+        "ctx-Left-Frontal-Lobe",
+        "ctx-Right-Frontal-Lobe",
+        "ctx-Left-Parietal-Lobe",
+        "ctx-Right-Parietal-Lobe",
+        "ctx-Left-Occipital-Lobe",
+        "ctx-Right-Occipital-Lobe",
+        "ctx-Left-Temporal-Lobe",
+        "ctx-Right-Temporal-Lobe",
+        "ctx-Left-Anterior-Cingulate",
+        "ctx-Right-Anterior-Cingulate",
+        "ctx-lh-bankssts",
+        "ctx-rh-bankssts",
+        "ctx-lh-caudalanteriorcingulate",
+        "ctx-rh-caudalanteriorcingulate",
+        "ctx-lh-caudalmiddlefrontal",
+        "ctx-rh-caudalmiddlefrontal",
+        "ctx-lh-cuneus",
+        "ctx-rh-cuneus",
+        "ctx-lh-entorhinal",
+        "ctx-rh-entorhinal",
+        "ctx-lh-fusiform",
+        "ctx-rh-fusiform",
+        "ctx-lh-inferiorparietal",
+        "ctx-rh-inferiorparietal",
+        "ctx-lh-inferiortemporal",
+        "ctx-rh-inferiortemporal",
+        "ctx-lh-isthmuscingulate",
+        "ctx-rh-isthmuscingulate",
+        "ctx-lh-lateraloccipital",
+        "ctx-rh-lateraloccipital",
+        "ctx-lh-lateralorbitofrontal",
+        "ctx-rh-lateralorbitofrontal",
+        "ctx-lh-lingual",
+        "ctx-rh-lingual",
+        "ctx-lh-medialorbitofrontal",
+        "ctx-rh-medialorbitofrontal",
+        "ctx-lh-middletemporal",
+        "ctx-rh-middletemporal",
+        "ctx-lh-parahippocampal",
+        "ctx-rh-parahippocampal",
+        "ctx-lh-paracentral",
+        "ctx-rh-paracentral",
+        "ctx-lh-parsopercularis",
+        "ctx-rh-parsopercularis",
+        "ctx-lh-parsorbitalis",
+        "ctx-rh-parsorbitalis",
+        "ctx-lh-parstriangularis",
+        "ctx-rh-parstriangularis",
+        "ctx-lh-pericalcarine",
+        "ctx-rh-pericalcarine",
+        "ctx-lh-postcentral",
+        "ctx-rh-postcentral",
+        "ctx-lh-posteriorcingulate",
+        "ctx-rh-posteriorcingulate",
+        "ctx-lh-precentral",
+        "ctx-rh-precentral",
+        "ctx-lh-precuneus",
+        "ctx-rh-precuneus",
+        "ctx-lh-rostralanteriorcingulate",
+        "ctx-rh-rostralanteriorcingulate",
+        "ctx-lh-rostralmiddlefrontal",
+        "ctx-rh-rostralmiddlefrontal",
+        "ctx-lh-superiorfrontal",
+        "ctx-rh-superiorfrontal",
+        "ctx-lh-superiorparietal",
+        "ctx-rh-superiorparietal",
+        "ctx-lh-superiortemporal",
+        "ctx-rh-superiortemporal",
+        "ctx-lh-supramarginal",
+        "ctx-rh-supramarginal",
+        "ctx-lh-frontalpole",
+        "ctx-rh-frontalpole",
+        "ctx-lh-temporalpole",
+        "ctx-rh-temporalpole",
+        "ctx-lh-transversetemporal",
+        "ctx-rh-transversetemporal",
+        "ctx-lh-insula",
+        "ctx-rh-insula"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "asl",
+      "label": "ctx-rh-insula",
+      "value_kind": "numeric",
+      "unit": "%"
+    },
+    {
+      "variable_id": "dpxdim",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "escolarizacion_anos",
+      "source_column": "Escolarizacion_anos",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Escolarizacion_anos",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Escolarizacion_anos"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_diferido_claves",
+      "source_column": "FCSRT_Diferido_Claves",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Diferido_Claves",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Diferido_Claves"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_diferido_intrusiones",
+      "source_column": "FCSRT_Diferido_Intrusiones",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Diferido_Intrusiones",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Diferido_Intrusiones"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_diferido_libre",
+      "source_column": "FCSRT_Diferido_Libre",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Diferido_Libre",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Diferido_Libre"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_diferido_repeticiones",
+      "source_column": "FCSRT_Diferido_Repeticiones",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Diferido_Repeticiones",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Diferido_Repeticiones"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_diferido_total",
+      "source_column": "FCSRT_Diferido_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Diferido_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Diferido_Total"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_indiceretencion",
+      "source_column": "FCSRT_IndiceRetencion",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_IndiceRetencion",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_IndiceRetencion"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_claves_01",
+      "source_column": "FCSRT_Inmediato_Claves_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Claves_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Claves_01"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_claves_02",
+      "source_column": "FCSRT_Inmediato_Claves_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Claves_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Claves_02"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_claves_03",
+      "source_column": "FCSRT_Inmediato_Claves_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Claves_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Claves_03"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_claves_total",
+      "source_column": "FCSRT_Inmediato_Claves_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Claves_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Claves_Total"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_intrusiones_01",
+      "source_column": "FCSRT_Inmediato_Intrusiones_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Intrusiones_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Intrusiones_01"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_intrusiones_02",
+      "source_column": "FCSRT_Inmediato_Intrusiones_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Intrusiones_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Intrusiones_02"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_intrusiones_03",
+      "source_column": "FCSRT_Inmediato_Intrusiones_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Intrusiones_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Intrusiones_03"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_libre_01",
+      "source_column": "FCSRT_Inmediato_Libre_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Libre_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Libre_01"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_libre_02",
+      "source_column": "FCSRT_Inmediato_Libre_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Libre_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Libre_02"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_libre_03",
+      "source_column": "FCSRT_Inmediato_Libre_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Libre_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Libre_03"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_libre_total",
+      "source_column": "FCSRT_Inmediato_Libre_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Libre_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Libre_Total"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_repeticiones_01",
+      "source_column": "FCSRT_Inmediato_Repeticiones_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Repeticiones_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Repeticiones_01"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_repeticiones_02",
+      "source_column": "FCSRT_Inmediato_Repeticiones_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Repeticiones_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Repeticiones_02"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_repeticiones_03",
+      "source_column": "FCSRT_Inmediato_Repeticiones_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Repeticiones_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Repeticiones_03"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_inmediato_total",
+      "source_column": "FCSRT_Inmediato_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Inmediato_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Inmediato_Total"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_suma_intrusiones",
+      "source_column": "FCSRT_Suma_Intrusiones",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Suma_Intrusiones",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Suma_Intrusiones"
+      ]
+    },
+    {
+      "variable_id": "fcsrt_suma_repeticiones",
+      "source_column": "FCSRT_Suma_Repeticiones",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FCSRT_Suma_Repeticiones",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FCSRT_Suma_Repeticiones"
+      ]
+    },
+    {
+      "variable_id": "fecha_cognitivos",
+      "source_column": "Fecha_Cognitivos",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Fecha_Cognitivos",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Fecha_Cognitivos"
+      ]
+    },
+    {
+      "variable_id": "fecha_nacimiento",
+      "source_column": "Fecha_Nacimiento",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Fecha_Nacimiento",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Fecha_Nacimiento"
+      ]
+    },
+    {
+      "variable_id": "flow_mean",
+      "source_column": "Right Communicating",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ICA",
+        "Right ICA",
+        "Basilar",
+        "Left MCA",
+        "Right MCA",
+        "Left PCA",
+        "Right PCA",
+        "Left ACA",
+        "Right ACA",
+        "Straight Sinus",
+        "Right Transverse",
+        "Sagital Sinus",
+        "Left Transverse",
+        "Left Communicating",
+        "Right Communicating"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Communicating",
+      "value_kind": "numeric",
+      "unit": "mL/min"
+    },
+    {
+      "variable_id": "flow_tseries",
+      "source_column": "wide_frame",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeseriesFlow_Wide_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "wide_frame",
+        "flow",
+        "flow_tseries",
+        "Flow time series"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Flow time series",
+      "value_kind": "numeric",
+      "unit": "mL/min"
+    },
+    {
+      "variable_id": "fs_01",
+      "source_column": "FS_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_01"
+      ]
+    },
+    {
+      "variable_id": "fs_02",
+      "source_column": "FS_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_02"
+      ]
+    },
+    {
+      "variable_id": "fs_03",
+      "source_column": "FS_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_03"
+      ]
+    },
+    {
+      "variable_id": "fs_04",
+      "source_column": "FS_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_04"
+      ]
+    },
+    {
+      "variable_id": "fs_repetition",
+      "source_column": "FS_repetition",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_repetition",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_repetition"
+      ]
+    },
+    {
+      "variable_id": "fs_total",
+      "source_column": "FS_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "FS_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "FS_Total"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_01",
+      "source_column": "HADS_Ans_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_01"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_02",
+      "source_column": "HADS_Ans_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_02"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_03",
+      "source_column": "HADS_Ans_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_03"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_04",
+      "source_column": "HADS_Ans_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_04"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_05",
+      "source_column": "HADS_Ans_05",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_05",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_05"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_06",
+      "source_column": "HADS_Ans_06",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_06",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_06"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_07",
+      "source_column": "HADS_Ans_07",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_07",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_07"
+      ]
+    },
+    {
+      "variable_id": "hads_ans_total",
+      "source_column": "HADS_Ans_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Ans_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Ans_Total"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_01",
+      "source_column": "HADS_Dep_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_01"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_02",
+      "source_column": "HADS_Dep_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_02"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_03",
+      "source_column": "HADS_Dep_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_03"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_04",
+      "source_column": "HADS_Dep_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_04"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_05",
+      "source_column": "HADS_Dep_05",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_05",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_05"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_06",
+      "source_column": "HADS_Dep_06",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_06",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_06"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_07",
+      "source_column": "HADS_Dep_07",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_07",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_07"
+      ]
+    },
+    {
+      "variable_id": "hads_dep_total",
+      "source_column": "HADS_Dep_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Dep_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Dep_Total"
+      ]
+    },
+    {
+      "variable_id": "hads_total",
+      "source_column": "HADS_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "HADS_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "HADS_Total"
+      ]
+    },
+    {
+      "variable_id": "height",
+      "source_column": "height",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "height"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "height",
+      "value_kind": "numeric",
+      "unit": "cm"
+    },
+    {
+      "variable_id": "hematocrit",
+      "source_column": "Hematocrit",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Hematocrit"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "Hematocrit",
+      "value_kind": "numeric",
+      "unit": "%"
+    },
+    {
+      "variable_id": "lateralidad",
+      "source_column": "Lateralidad",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Lateralidad",
+      "value_kind": "text",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Lateralidad"
+      ]
+    },
+    {
+      "variable_id": "lbdldl",
+      "source_column": "LBDLDL",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LBDLDL"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "LBDLDL",
+      "value_kind": "numeric",
+      "unit": "mg/dL"
+    },
+    {
+      "variable_id": "lbdlld",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mg/dL"
+    },
+    {
+      "variable_id": "lbxhdd",
+      "source_column": "LBXHDD",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LBXHDD"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "LBXHDD",
+      "value_kind": "numeric",
+      "unit": "mg/dL"
+    },
+    {
+      "variable_id": "lbxtc",
+      "source_column": "LBXTC",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LBXTC"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "LBXTC",
+      "value_kind": "numeric",
+      "unit": "mg/dL"
+    },
+    {
+      "variable_id": "left_carotid_plaque_vol",
+      "source_column": "left_carotid_plaque_vol",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "left_carotid_plaque_vol"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "left_carotid_plaque_vol",
+      "value_kind": "numeric",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "left_femoral_plaque_vol",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "lm_diferido",
+      "source_column": "LM_Diferido",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "LM_Diferido",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LM_Diferido"
+      ]
+    },
+    {
+      "variable_id": "lm_inmediato",
+      "source_column": "LM_Inmediato",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "LM_Inmediato",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LM_Inmediato"
+      ]
+    },
+    {
+      "variable_id": "lm_preguntas",
+      "source_column": "LM_Preguntas",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "LM_Preguntas",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LM_Preguntas"
+      ]
+    },
+    {
+      "variable_id": "lm_total",
+      "source_column": "LM_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "LM_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "LM_Total"
+      ]
+    },
+    {
+      "variable_id": "mean_cbf",
+      "source_column": "Watershed-12",
+      "source_file": "PESABrain_ASLPerfusion_VascularAtlas_MeanCBF_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "ctx-whole-brain",
+        "ctx-left-hemisphere",
+        "ctx-right-hemisphere",
+        "ctx-Left-Frontal-Lobe",
+        "ctx-Right-Frontal-Lobe",
+        "ctx-Left-Parietal-Lobe",
+        "ctx-Right-Parietal-Lobe",
+        "ctx-Left-Occipital-Lobe",
+        "ctx-Right-Occipital-Lobe",
+        "ctx-Left-Temporal-Lobe",
+        "ctx-Right-Temporal-Lobe",
+        "ctx-Left-Anterior-Cingulate",
+        "ctx-Right-Anterior-Cingulate",
+        "ctx-lh-bankssts",
+        "ctx-rh-bankssts",
+        "ctx-lh-caudalanteriorcingulate",
+        "ctx-rh-caudalanteriorcingulate",
+        "ctx-lh-caudalmiddlefrontal",
+        "ctx-rh-caudalmiddlefrontal",
+        "ctx-lh-cuneus",
+        "ctx-rh-cuneus",
+        "ctx-lh-entorhinal",
+        "ctx-rh-entorhinal",
+        "ctx-lh-fusiform",
+        "ctx-rh-fusiform",
+        "ctx-lh-inferiorparietal",
+        "ctx-rh-inferiorparietal",
+        "ctx-lh-inferiortemporal",
+        "ctx-rh-inferiortemporal",
+        "ctx-lh-isthmuscingulate",
+        "ctx-rh-isthmuscingulate",
+        "ctx-lh-lateraloccipital",
+        "ctx-rh-lateraloccipital",
+        "ctx-lh-lateralorbitofrontal",
+        "ctx-rh-lateralorbitofrontal",
+        "ctx-lh-lingual",
+        "ctx-rh-lingual",
+        "ctx-lh-medialorbitofrontal",
+        "ctx-rh-medialorbitofrontal",
+        "ctx-lh-middletemporal",
+        "ctx-rh-middletemporal",
+        "ctx-lh-parahippocampal",
+        "ctx-rh-parahippocampal",
+        "ctx-lh-paracentral",
+        "ctx-rh-paracentral",
+        "ctx-lh-parsopercularis",
+        "ctx-rh-parsopercularis",
+        "ctx-lh-parsorbitalis",
+        "ctx-rh-parsorbitalis",
+        "ctx-lh-parstriangularis",
+        "ctx-rh-parstriangularis",
+        "ctx-lh-pericalcarine",
+        "ctx-rh-pericalcarine",
+        "ctx-lh-postcentral",
+        "ctx-rh-postcentral",
+        "ctx-lh-posteriorcingulate",
+        "ctx-rh-posteriorcingulate",
+        "ctx-lh-precentral",
+        "ctx-rh-precentral",
+        "ctx-lh-precuneus",
+        "ctx-rh-precuneus",
+        "ctx-lh-rostralanteriorcingulate",
+        "ctx-rh-rostralanteriorcingulate",
+        "ctx-lh-rostralmiddlefrontal",
+        "ctx-rh-rostralmiddlefrontal",
+        "ctx-lh-superiorfrontal",
+        "ctx-rh-superiorfrontal",
+        "ctx-lh-superiorparietal",
+        "ctx-rh-superiorparietal",
+        "ctx-lh-superiortemporal",
+        "ctx-rh-superiortemporal",
+        "ctx-lh-supramarginal",
+        "ctx-rh-supramarginal",
+        "ctx-lh-frontalpole",
+        "ctx-rh-frontalpole",
+        "ctx-lh-temporalpole",
+        "ctx-rh-temporalpole",
+        "ctx-lh-transversetemporal",
+        "ctx-rh-transversetemporal",
+        "ctx-lh-insula",
+        "ctx-rh-insula",
+        "Left_ACA-0",
+        "Left_ACA-8",
+        "Left_ACA-12",
+        "Left_Basilar-0",
+        "Left_Basilar-8",
+        "Left_Basilar-12",
+        "Left_MCA-0",
+        "Left_MCA-8",
+        "Left_MCA-12",
+        "Left_PCA-0",
+        "Left_PCA-8",
+        "Left_PCA-12",
+        "Right_ACA-0",
+        "Right_ACA-8",
+        "Right_ACA-12",
+        "Right_Basilar-0",
+        "Right_Basilar-8",
+        "Right_Basilar-12",
+        "Right_MCA-0",
+        "Right_MCA-8",
+        "Right_MCA-12",
+        "Right_PCA-0",
+        "Right_PCA-8",
+        "Right_PCA-12",
+        "Watershed-0",
+        "Watershed-8",
+        "Watershed-12"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "asl",
+      "label": "Watershed-12",
+      "value_kind": "numeric",
+      "unit": "mL/100g/min"
+    },
+    {
+      "variable_id": "moca_abstraction",
+      "source_column": "MOCA_abstraction",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_abstraction",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_abstraction"
+      ]
+    },
+    {
+      "variable_id": "moca_animals",
+      "source_column": "MOCA_animals",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_animals",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_animals"
+      ]
+    },
+    {
+      "variable_id": "moca_characters",
+      "source_column": "MOCA_characters",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_characters",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_characters"
+      ]
+    },
+    {
+      "variable_id": "moca_clock",
+      "source_column": "MOCA_clock",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_clock",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_clock"
+      ]
+    },
+    {
+      "variable_id": "moca_cube",
+      "source_column": "MOCA_cube",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_cube",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_cube"
+      ]
+    },
+    {
+      "variable_id": "moca_digitspan",
+      "source_column": "MOCA_digitspan",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_digitspan",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_digitspan"
+      ]
+    },
+    {
+      "variable_id": "moca_memory_cue",
+      "source_column": "MOCA_memory_cue",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_memory_cue",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_memory_cue"
+      ]
+    },
+    {
+      "variable_id": "moca_memory_free",
+      "source_column": "MOCA_memory_free",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_memory_free",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_memory_free"
+      ]
+    },
+    {
+      "variable_id": "moca_memory_recognition",
+      "source_column": "MOCA_memory_recognition",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_memory_recognition",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_memory_recognition"
+      ]
+    },
+    {
+      "variable_id": "moca_orientation",
+      "source_column": "MOCA_orientation",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_orientation",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_orientation"
+      ]
+    },
+    {
+      "variable_id": "moca_repetition",
+      "source_column": "MOCA_repetition",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_repetition",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_repetition"
+      ]
+    },
+    {
+      "variable_id": "moca_subtraction",
+      "source_column": "MOCA_subtraction",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_subtraction",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_subtraction"
+      ]
+    },
+    {
+      "variable_id": "moca_tmt_m",
+      "source_column": "MOCA_tmt_m",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_tmt_m",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_tmt_m"
+      ]
+    },
+    {
+      "variable_id": "moca_total",
+      "source_column": "MOCA_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_Total"
+      ]
+    },
+    {
+      "variable_id": "moca_words",
+      "source_column": "MOCA_words",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_words",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_words"
+      ]
+    },
+    {
+      "variable_id": "moca_words_number",
+      "source_column": "MOCA_words_number",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "MOCA_words_number",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "MOCA_words_number"
+      ]
+    },
+    {
+      "variable_id": "pedframi10",
+      "source_column": "PEDFRAMI10",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PEDFRAMI10"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "PEDFRAMI10",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "pedframi30",
+      "source_column": "PEDFRAMI30",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PEDFRAMI30"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "PEDFRAMI30",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "pesa_id",
+      "source_column": "pesa_id",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "pesa_id",
+      "value_kind": "text",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "pesa_id"
+      ]
+    },
+    {
+      "variable_id": "pi",
+      "source_column": "Right Communicating_PI",
+      "source_file": "PESABrain_4DFlowv2_LocalizedPI_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Left ICA_PI",
+        "Right ICA_PI",
+        "Basilar_PI",
+        "Left MCA_PI",
+        "Right MCA_PI",
+        "Left PCA_PI",
+        "Right PCA_PI",
+        "Left ACA_PI",
+        "Right ACA_PI",
+        "Straight Sinus_PI",
+        "Right Transverse_PI",
+        "Sagital Sinus_PI",
+        "Left Transverse_PI",
+        "Left Communicating_PI",
+        "Right Communicating_PI"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "Right Communicating",
+      "value_kind": "numeric",
+      "unit": "dimensionless"
+    },
+    {
+      "variable_id": "pp",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Pulse pressure (sys - dias)",
+      "source_column": "pp",
+      "aliases": [
+        "pp",
+        "sys_dias_delta"
+      ],
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "psqeduca",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Educational attainment (PSQEDUCA, ordinal level)",
+      "source_column": "PSQEDUCA",
+      "source_file": "PESABrain_Clinical_AllXNAT_20260216.xlsx",
+      "source_sheet": "Datos",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "psqto000",
+      "source_column": "PSQTO000",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PSQTO000"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "PSQTO000",
+      "value_kind": "numeric",
+      "unit": "0: non; 1: active; 2: former; 3: social"
+    },
+    {
+      "variable_id": "pulse_pressure_map",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "bpxdim + (1/3)\u00b7pp",
+      "source_column": "pulse_pressure_map",
+      "source_file": "import_new_vars",
+      "source_sheet": "derived",
+      "aliases": [
+        "pulse_pressure_map",
+        "map"
+      ],
+      "value_kind": "float",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "pv_efficiency",
+      "source_column": "PV_efficiency",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_efficiency",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_efficiency"
+      ]
+    },
+    {
+      "variable_id": "pv_max_puzzle",
+      "source_column": "PV_max_puzzle",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_max_puzzle",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_max_puzzle"
+      ]
+    },
+    {
+      "variable_id": "pv_success_01",
+      "source_column": "PV_success_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_01"
+      ]
+    },
+    {
+      "variable_id": "pv_success_02",
+      "source_column": "PV_success_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_02"
+      ]
+    },
+    {
+      "variable_id": "pv_success_03",
+      "source_column": "PV_success_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_03"
+      ]
+    },
+    {
+      "variable_id": "pv_success_04",
+      "source_column": "PV_success_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_04"
+      ]
+    },
+    {
+      "variable_id": "pv_success_05",
+      "source_column": "PV_success_05",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_05",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_05"
+      ]
+    },
+    {
+      "variable_id": "pv_success_06",
+      "source_column": "PV_success_06",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_06",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_06"
+      ]
+    },
+    {
+      "variable_id": "pv_success_07",
+      "source_column": "PV_success_07",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_07",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_07"
+      ]
+    },
+    {
+      "variable_id": "pv_success_08",
+      "source_column": "PV_success_08",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_08",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_08"
+      ]
+    },
+    {
+      "variable_id": "pv_success_09",
+      "source_column": "PV_success_09",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_09",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_09"
+      ]
+    },
+    {
+      "variable_id": "pv_success_10",
+      "source_column": "PV_success_10",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_10",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_10"
+      ]
+    },
+    {
+      "variable_id": "pv_success_11",
+      "source_column": "PV_success_11",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_11",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_11"
+      ]
+    },
+    {
+      "variable_id": "pv_success_12",
+      "source_column": "PV_success_12",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_12",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_12"
+      ]
+    },
+    {
+      "variable_id": "pv_success_13",
+      "source_column": "PV_success_13",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_13",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_13"
+      ]
+    },
+    {
+      "variable_id": "pv_success_14",
+      "source_column": "PV_success_14",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_14",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_14"
+      ]
+    },
+    {
+      "variable_id": "pv_success_15",
+      "source_column": "PV_success_15",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_15",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_15"
+      ]
+    },
+    {
+      "variable_id": "pv_success_16",
+      "source_column": "PV_success_16",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_16",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_16"
+      ]
+    },
+    {
+      "variable_id": "pv_success_17",
+      "source_column": "PV_success_17",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_17",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_17"
+      ]
+    },
+    {
+      "variable_id": "pv_success_18",
+      "source_column": "PV_success_18",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_18",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_18"
+      ]
+    },
+    {
+      "variable_id": "pv_success_19",
+      "source_column": "PV_success_19",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_19",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_19"
+      ]
+    },
+    {
+      "variable_id": "pv_success_20",
+      "source_column": "PV_success_20",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_20",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_20"
+      ]
+    },
+    {
+      "variable_id": "pv_success_21",
+      "source_column": "PV_success_21",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_21",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_21"
+      ]
+    },
+    {
+      "variable_id": "pv_success_22",
+      "source_column": "PV_success_22",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_22",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_22"
+      ]
+    },
+    {
+      "variable_id": "pv_success_23",
+      "source_column": "PV_success_23",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_23",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_23"
+      ]
+    },
+    {
+      "variable_id": "pv_success_24",
+      "source_column": "PV_success_24",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_24",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_24"
+      ]
+    },
+    {
+      "variable_id": "pv_success_25",
+      "source_column": "PV_success_25",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_25",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_25"
+      ]
+    },
+    {
+      "variable_id": "pv_success_26",
+      "source_column": "PV_success_26",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_success_26",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_success_26"
+      ]
+    },
+    {
+      "variable_id": "pv_time_01",
+      "source_column": "PV_time_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_01"
+      ]
+    },
+    {
+      "variable_id": "pv_time_02",
+      "source_column": "PV_time_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_02"
+      ]
+    },
+    {
+      "variable_id": "pv_time_03",
+      "source_column": "PV_time_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_03"
+      ]
+    },
+    {
+      "variable_id": "pv_time_04",
+      "source_column": "PV_time_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_04"
+      ]
+    },
+    {
+      "variable_id": "pv_time_05",
+      "source_column": "PV_time_05",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_05",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_05"
+      ]
+    },
+    {
+      "variable_id": "pv_time_06",
+      "source_column": "PV_time_06",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_06",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_06"
+      ]
+    },
+    {
+      "variable_id": "pv_time_07",
+      "source_column": "PV_time_07",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_07",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_07"
+      ]
+    },
+    {
+      "variable_id": "pv_time_08",
+      "source_column": "PV_time_08",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_08",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_08"
+      ]
+    },
+    {
+      "variable_id": "pv_time_09",
+      "source_column": "PV_time_09",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_09",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_09"
+      ]
+    },
+    {
+      "variable_id": "pv_time_10",
+      "source_column": "PV_time_10",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_10",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_10"
+      ]
+    },
+    {
+      "variable_id": "pv_time_11",
+      "source_column": "PV_time_11",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_11",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_11"
+      ]
+    },
+    {
+      "variable_id": "pv_time_12",
+      "source_column": "PV_time_12",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_12",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_12"
+      ]
+    },
+    {
+      "variable_id": "pv_time_13",
+      "source_column": "PV_time_13",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_13",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_13"
+      ]
+    },
+    {
+      "variable_id": "pv_time_14",
+      "source_column": "PV_time_14",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_14",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_14"
+      ]
+    },
+    {
+      "variable_id": "pv_time_15",
+      "source_column": "PV_time_15",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_15",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_15"
+      ]
+    },
+    {
+      "variable_id": "pv_time_16",
+      "source_column": "PV_time_16",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_16",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_16"
+      ]
+    },
+    {
+      "variable_id": "pv_time_17",
+      "source_column": "PV_time_17",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_17",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_17"
+      ]
+    },
+    {
+      "variable_id": "pv_time_18",
+      "source_column": "PV_time_18",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_18",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_18"
+      ]
+    },
+    {
+      "variable_id": "pv_time_19",
+      "source_column": "PV_time_19",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_19",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_19"
+      ]
+    },
+    {
+      "variable_id": "pv_time_20",
+      "source_column": "PV_time_20",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_20",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_20"
+      ]
+    },
+    {
+      "variable_id": "pv_time_21",
+      "source_column": "PV_time_21",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_21",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_21"
+      ]
+    },
+    {
+      "variable_id": "pv_time_22",
+      "source_column": "PV_time_22",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_22",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_22"
+      ]
+    },
+    {
+      "variable_id": "pv_time_23",
+      "source_column": "PV_time_23",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_23",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_23"
+      ]
+    },
+    {
+      "variable_id": "pv_time_24",
+      "source_column": "PV_time_24",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_24",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_24"
+      ]
+    },
+    {
+      "variable_id": "pv_time_25",
+      "source_column": "PV_time_25",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_25",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_25"
+      ]
+    },
+    {
+      "variable_id": "pv_time_26",
+      "source_column": "PV_time_26",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_26",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_26"
+      ]
+    },
+    {
+      "variable_id": "pv_time_total",
+      "source_column": "PV_time_total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "PV_time_total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "PV_time_total"
+      ]
+    },
+    {
+      "variable_id": "qc_ap_flag",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Anterior/posterior split flag (1 = outside 72\u00b110%)",
+      "source_column": "qc_ap_flag",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_ap_share",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Anterior share of cerebral inflow (%)",
+      "source_column": "qc_ap_share",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_conservation",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Junction mass-conservation residual",
+      "source_column": "qc_conservation",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_conservation"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_flag",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Vessel QC flag (1 = review)",
+      "source_column": "qc_flag",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_flag"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_flow_plausible",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Flow plausibility (literature band, 0\u20131)",
+      "source_column": "qc_flow_plausible",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_flow_plausible"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_hypoplastic",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Plausibly hypoplastic (<0.8 mm)",
+      "source_column": "qc_hypoplastic",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_hypoplastic"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_score",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Combined per-vessel QC score (0\u20131)",
+      "source_column": "qc_score",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_score"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_segment_cv",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Along-segment flow CV",
+      "source_column": "qc_segment_cv",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "aliases": [
+        "qc_segment_cv"
+      ],
+      "modality": "4dflow",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "qc_subject_flag",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Subject QC flag (1 = any vessel or subject check failed)",
+      "source_column": "qc_subject_flag",
+      "source_file": "stage9_autoqc",
+      "source_sheet": "autoqc",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "right_carotid_plaque_vol",
+      "source_column": "right_carotid_plaque_vol",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "right_carotid_plaque_vol"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "right_carotid_plaque_vol",
+      "value_kind": "numeric",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "right_femoral_plaque_vol",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "scd_01",
+      "source_column": "SCD_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_01"
+      ]
+    },
+    {
+      "variable_id": "scd_02",
+      "source_column": "SCD_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_02"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_01",
+      "source_column": "SCD_Plus_01",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_01",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_01"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_02",
+      "source_column": "SCD_Plus_02",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_02",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_02"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_03",
+      "source_column": "SCD_Plus_03",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_03",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_03"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_04",
+      "source_column": "SCD_Plus_04",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_04",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_04"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_05",
+      "source_column": "SCD_Plus_05",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_05",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_05"
+      ]
+    },
+    {
+      "variable_id": "scd_plus_06",
+      "source_column": "SCD_Plus_06",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Plus_06",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Plus_06"
+      ]
+    },
+    {
+      "variable_id": "scd_total",
+      "source_column": "SCD_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "SCD_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCD_Total"
+      ]
+    },
+    {
+      "variable_id": "score2",
+      "source_column": "SCORE2",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "SCORE2"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "SCORE2",
+      "value_kind": "numeric",
+      "unit": null
+    },
+    {
+      "variable_id": "seqn",
+      "source_column": "seqn",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "seqn",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "seqn"
+      ]
+    },
+    {
+      "variable_id": "sex",
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "label": "Sex (0 = female, 1 = male)",
+      "source_column": "sex",
+      "source_file": "derived",
+      "source_sheet": "sex",
+      "aliases": [
+        "sex",
+        "Sex",
+        "gender",
+        "Gender"
+      ],
+      "value_kind": "numeric"
+    },
+    {
+      "variable_id": "sys_dias_delta",
+      "source_column": "sys_dias_delta",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "sys_dias_delta"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "sys_dias_delta",
+      "value_kind": "numeric",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "t1_cortical_volume",
+      "source_column": "subject",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "ID",
+        "side",
+        "measurement",
+        "region",
+        "value",
+        "subject"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "t1",
+      "label": "subject",
+      "value_kind": "text",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "t1_curvature_index",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Intrinsic curvature index",
+      "source_column": "CurvInd",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_folding_index",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Folding index",
+      "source_column": "FoldInd",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_gaussian_curvature",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Integrated rectified Gaussian curvature",
+      "source_column": "GausCurv",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "1/mm2"
+    },
+    {
+      "variable_id": "t1_gray_volume",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Cortical grey-matter volume",
+      "source_column": "GrayVol",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "t1_index_unitless",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Dimensionless FreeSurfer index",
+      "source_column": "unitless",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_intensity_max",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Normalized intensity (max)",
+      "source_column": "normMax",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_intensity_mean",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Normalized intensity (mean)",
+      "source_column": "normMean",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_intensity_min",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Normalized intensity (min)",
+      "source_column": "normMin",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_intensity_range",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Normalized intensity (range)",
+      "source_column": "normRange",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_intensity_std",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Normalized intensity (SD)",
+      "source_column": "normStdDev",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float"
+    },
+    {
+      "variable_id": "t1_mean_curvature",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Integrated rectified mean curvature",
+      "source_column": "MeanCurv",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "1/mm"
+    },
+    {
+      "variable_id": "t1_num_vertices",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Surface vertex count",
+      "source_column": "NumVert",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "count"
+    },
+    {
+      "variable_id": "t1_num_voxels",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Segmented voxel count",
+      "source_column": "NVoxels",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "count"
+    },
+    {
+      "variable_id": "t1_subcortical_volume",
+      "source_column": "subject",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "ID",
+        "measurement",
+        "region",
+        "value",
+        "subject"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "t1",
+      "label": "subject",
+      "value_kind": "text",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "t1_surface_area",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Cortical surface area",
+      "source_column": "SurfArea",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "mm2"
+    },
+    {
+      "variable_id": "t1_thickness_avg",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Cortical thickness (mean)",
+      "source_column": "ThickAvg",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "mm"
+    },
+    {
+      "variable_id": "t1_thickness_std",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Cortical thickness (SD within parcel)",
+      "source_column": "ThickStd",
+      "source_file": "PESABrain_T1_cortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "mm"
+    },
+    {
+      "variable_id": "t1_volume_mm3",
+      "domain": "image",
+      "table": "image_measurements",
+      "label": "Segmented volume",
+      "source_column": "Volume_mm3",
+      "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx",
+      "source_sheet": "Sheet1",
+      "modality": "t1",
+      "value_kind": "float",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "tacsctot",
+      "source_column": "tacsctot",
+      "source_file": "PESABrain_TAC_20260318.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "tacsctot"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "tacsctot",
+      "value_kind": "numeric",
+      "unit": "Agaston Units"
+    },
+    {
+      "variable_id": "tacsctot_group",
+      "source_column": "tacsctot_group",
+      "source_file": "PESABrain_TAC_20260318.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "tacsctot_group"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "tacsctot_group",
+      "value_kind": "text",
+      "unit": null
+    },
+    {
+      "variable_id": "tad",
+      "source_column": "TAD",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "TAD"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "TAD",
+      "value_kind": "numeric",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "tas",
+      "source_column": "TAS",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "TAS"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "TAS",
+      "value_kind": "numeric",
+      "unit": "mmHg"
+    },
+    {
+      "variable_id": "tcbf",
+      "source_column": "TCBF",
+      "source_file": "PESABrain_4DFlowv2_LocalizedTimeAvgFlow_202602410.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "TCBF"
+      ],
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "4dflow",
+      "label": "TCBF",
+      "value_kind": "numeric",
+      "unit": "mL/min"
+    },
+    {
+      "variable_id": "total_carotid_plaque_vol",
+      "source_column": "total_carotid_plaque_vol",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "total_carotid_plaque_vol"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "total_carotid_plaque_vol",
+      "value_kind": "numeric",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "total_femoral_plaque_vol",
+      "source_column": "total_femoral_plaque_vol",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "total_femoral_plaque_vol"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "total_femoral_plaque_vol",
+      "value_kind": "numeric",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "total_plaque_vol",
+      "source_column": "total_plaque_vol",
+      "source_file": "PESABrain_Echography_CarotidePlaque_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "total_plaque_vol"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "total_plaque_vol",
+      "value_kind": "numeric",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "wais_clavenum_puntuacion",
+      "source_column": "WAIS_ClaveNum_Puntuacion",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_ClaveNum_Puntuacion",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_ClaveNum_Puntuacion"
+      ]
+    },
+    {
+      "variable_id": "wais_digitos_creciente",
+      "source_column": "WAIS_Digitos_Creciente",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Digitos_Creciente",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Digitos_Creciente"
+      ]
+    },
+    {
+      "variable_id": "wais_digitos_directo",
+      "source_column": "WAIS_Digitos_Directo",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Digitos_Directo",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Digitos_Directo"
+      ]
+    },
+    {
+      "variable_id": "wais_digitos_inverso",
+      "source_column": "WAIS_Digitos_Inverso",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Digitos_Inverso",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Digitos_Inverso"
+      ]
+    },
+    {
+      "variable_id": "wais_digitos_total",
+      "source_column": "WAIS_Digitos_Total",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Digitos_Total",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Digitos_Total"
+      ]
+    },
+    {
+      "variable_id": "wais_puzles",
+      "source_column": "WAIS_Puzles",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Puzles",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Puzles"
+      ]
+    },
+    {
+      "variable_id": "wais_span_creciente",
+      "source_column": "WAIS_Span_Creciente",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Span_Creciente",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Span_Creciente"
+      ]
+    },
+    {
+      "variable_id": "wais_span_directo",
+      "source_column": "WAIS_Span_Directo",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Span_Directo",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Span_Directo"
+      ]
+    },
+    {
+      "variable_id": "wais_span_inverso",
+      "source_column": "WAIS_Span_Inverso",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "WAIS_Span_Inverso",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "WAIS_Span_Inverso"
+      ]
+    },
+    {
+      "variable_id": "weight",
+      "source_column": "weight",
+      "source_file": "PESABrain_Clinical_20260216.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "weight"
+      ],
+      "domain": "clinical",
+      "table": "clinical_measurements",
+      "modality": null,
+      "label": "weight",
+      "value_kind": "numeric",
+      "unit": "kg"
+    },
+    {
+      "variable_id": "wmh_dist",
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "flair",
+      "label": "WMH Les/LesTot",
+      "source_file": "WMH_MergedBatches_Averaged.csv",
+      "unit": "ratio"
+    },
+    {
+      "variable_id": "wmh_freq",
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "flair",
+      "label": "WMH Les/Reg",
+      "source_file": "WMH_MergedBatches_Averaged.csv",
+      "unit": "ratio"
+    },
+    {
+      "variable_id": "wmh_les",
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "flair",
+      "label": "WMH lesion volume",
+      "source_file": "WMH_MergedBatches_Averaged.csv",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "wmh_reg",
+      "domain": "image",
+      "table": "image_measurements",
+      "modality": "flair",
+      "label": "WMH region volume",
+      "source_file": "WMH_MergedBatches_Averaged.csv",
+      "unit": "mm3"
+    },
+    {
+      "variable_id": "z_compo_attworkmemospeed",
+      "source_column": "Z_COMPO_AttWorkMemoSpeed",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_AttWorkMemoSpeed",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_AttWorkMemoSpeed"
+      ]
+    },
+    {
+      "variable_id": "z_compo_epismemory",
+      "source_column": "Z_COMPO_EpisMemory",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_EpisMemory",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_EpisMemory"
+      ]
+    },
+    {
+      "variable_id": "z_compo_globalfull",
+      "source_column": "Z_COMPO_GlobalFull",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_GlobalFull",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_GlobalFull"
+      ]
+    },
+    {
+      "variable_id": "z_compo_pacc_bbrc",
+      "source_column": "Z_COMPO_PACC_BBRC",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_PACC_BBRC",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_PACC_BBRC"
+      ]
+    },
+    {
+      "variable_id": "z_compo_pacc_bbrc_plus",
+      "source_column": "Z_COMPO_PACC_BBRC_plus",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_PACC_BBRC_plus",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_PACC_BBRC_plus"
+      ]
+    },
+    {
+      "variable_id": "z_compo_processingspeed",
+      "source_column": "Z_COMPO_ProcessingSpeed",
+      "domain": "cognitive",
+      "table": "cognitive_measurements",
+      "label": "Z_COMPO_ProcessingSpeed",
+      "value_kind": "numeric",
+      "source_file": "PESABrain_Cognitives_20260201.xlsx",
+      "source_sheet": "Sheet1",
+      "aliases": [
+        "Z_COMPO_ProcessingSpeed"
+      ]
+    }
+  ]
+}

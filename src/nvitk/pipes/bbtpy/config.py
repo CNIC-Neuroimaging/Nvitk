@@ -2,26 +2,50 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+from nvitk.cluster import sge_json as _sj
+from nvitk.core import lazy_config
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Host data roots (bbtpy defaults; no qvtpy import)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PESA_BRAIN_DATA = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain")
+#: ``sge.json`` section holding this pipeline's data roots.
+PIPELINE_PATHS_ID = "bbtpy_paths"
 
-DEFAULT_DICOM_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "DICOM"
-DEFAULT_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
-DEFAULT_RESULTS_ROOT: Path | None = _PESA_BRAIN_DATA / "RESULTS" / "res_PESABrain"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# qvtpy TOF / eICAB (notebooks, reports, methods layout)
-# ──────────────────────────────────────────────────────────────────────────────
+def _pipe_paths() -> dict:
+    """The ``pipelines.bbtpy_paths`` block of ``sge.json`` (empty when unset)."""
+    return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
-DEFAULT_QVTPY_NIFTI_ROOT: Path = _PESA_BRAIN_DATA / "DATA" / "NIFTI"
-DEFAULT_QVTPY_RESULTS_ROOT: Path = _PESA_BRAIN_DATA / "RESULTS" / "res_QVTPy"
 
-DEFAULT_EICAB_RESULTS_ROOT: Path | None = DEFAULT_QVTPY_RESULTS_ROOT
+def _opt_root(key: str):
+    """A configured root as a path, or ``None``.
+
+    ``None`` rather than an error: these are read at import time as Click option defaults, so
+    an unconfigured machine must still be able to print ``--help``. ``run.py`` reports the
+    missing root by name when it actually needs one.
+    """
+    raw = _pipe_paths().get(key)
+    if raw is None or not str(raw).strip():
+        return None
+    return Path(os.path.expanduser(str(raw).strip()))
+
+
+_RESOLVERS: dict[str, lazy_config.Resolver] = {
+    "DEFAULT_DICOM_ROOT": lambda: _opt_root("dicom_root"),
+    "DEFAULT_NIFTI_ROOT": lambda: _opt_root("nifti_root"),
+    "DEFAULT_RESULTS_ROOT": lambda: _opt_root("results_root"),
+    "DEFAULT_QVTPY_NIFTI_ROOT": lambda: _opt_root("qvtpy_nifti_root") or _opt_root("nifti_root"),
+    "DEFAULT_QVTPY_RESULTS_ROOT": lambda: _opt_root("qvtpy_results_root"),
+    "DEFAULT_EICAB_RESULTS_ROOT": lambda: (
+        _opt_root("eicab_results_root") or _opt_root("qvtpy_results_root")
+    ),
+}
+
+__getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
 # ---- Relative NIfTI paths and stage directories ------------------------------
 

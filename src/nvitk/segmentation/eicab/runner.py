@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -35,7 +36,9 @@ _EICAB_PYTHONPATH = f"{_CPU_LIMIT_SITE}:{_EICAB_EXPRESS_HOME}"
 # ComputeVED writes Scale_*/Ved_* into process CWD, then moves them. Parallel SGE
 # jobs must not share a CWD (home / SGE_O_WORKDIR) or they steal each other's files.
 # Cluster node-local scratch is /data_tmp (no $TMPDIR on this site).
-_DEFAULT_METRIC_SCRATCH_ROOT = "/data_tmp"
+#: Fallback host scratch root; the configured value comes from
+#: ``sge.json`` ``pipelines.eicab.eicab_metric_scratch_root``.
+_DEFAULT_METRIC_SCRATCH_ROOT = tempfile.gettempdir()
 # Force container CWD onto a path we also bind from node-local scratch.
 _EICAB_CONTAINER_PWD = "/tmp/ved_cwd"
 

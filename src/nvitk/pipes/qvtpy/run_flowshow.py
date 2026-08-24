@@ -51,6 +51,7 @@ from nvitk.viz.flowshow import (
 )
 
 from . import config as cfg
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -244,6 +245,7 @@ def _resolve_nii_optional(folder: Path, stem: str) -> Path | None:
 
 
 @click.command("nvitk-qvtpy-flowshow")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--pipeline-output-root",

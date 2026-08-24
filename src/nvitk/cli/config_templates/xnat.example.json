@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "nvitk XNAT connection profile. Copy to a config directory (see `nvitk-config path`) as",
+    "'xnat.json' and replace every <PLACEHOLDER>.",
+    "",
+    "CREDENTIALS: do not put a password in this file, and prefer keeping the username out of",
+    "it too — this file is easy to copy into a repo or a shared drive by accident. nvitk",
+    "resolves credentials in this order, and any of them is a better home than this file:",
+    "",
+    "  1. ~/.netrc            (set 'netrc_file' below; chmod 600)",
+    "  2. system keyring      (set 'password_keyring': true — service 'nvitk', key",
+    "                          'xnat:<server>'; store it with the `keyring` CLI)",
+    "  3. $XNAT_USER / $XNAT_PASSWORD environment variables",
+    "",
+    "$XNAT_SERVER and $XNAT_PROJECT likewise override the values below, so a shared profile",
+    "can be committed while per-user details stay in the environment."
+  ],
+
+  "server": "<https://xnat.example.org>",
+  "project": "<XNAT_PROJECT_ID>",
+
+  "netrc_file": "~/.netrc",
+  "password_keyring": false,
+
+  "_comment_verify": [
+    "TLS certificate verification. Keep true. Set false only for a server behind an internal",
+    "CA whose root certificate you cannot install."
+  ],
+  "verify": true,
+
+  "default_timeout": 600
+}

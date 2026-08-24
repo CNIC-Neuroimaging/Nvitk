@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NVITK Study Dataset Variables Manifest",
+  "type": "object",
+  "required": ["schema_version", "variables"],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "last_updated": {
+      "type": "string"
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["variable_id", "domain", "table"],
+        "properties": {
+          "variable_id": {
+            "type": "string"
+          },
+          "source_column": {
+            "type": "string"
+          },
+          "source_file": {
+            "type": "string"
+          },
+          "source_sheet": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "domain": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "modality": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value_kind": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "original_name": {
+            "type": "string"
+          },
+          "export_name": {
+            "type": "string"
+          },
+          "origin_name": {
+            "type": "string"
+          },
+          "description_en": {
+            "type": "string"
+          },
+          "glossary": {
+            "type": "string"
+          },
+          "min_value": {},
+          "max_value": {},
+          "missing_allowed": {},
+          "allowed_values": {
+            "type": "array",
+            "items": {}
+          },
+          "comments": {
+            "type": "string"
+          },
+          "codebook": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

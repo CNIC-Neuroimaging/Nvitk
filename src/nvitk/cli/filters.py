@@ -34,9 +34,11 @@ from nvitk.filters.snakes import (
     SNAKES_W_LINE_DEFAULT,
     snakes_filter,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Image filtering tools."""
 

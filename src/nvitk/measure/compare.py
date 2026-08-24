@@ -1,7 +1,7 @@
 """
 Intensity correlation utilities (Pearson, Spearman, MAE, RMSE).
 
-Port of the numeric core of [BioImaging _pet_correlation.py](/home/imarcoss/BioImaging/src/imaging/measure/_pet_correlation.py).
+Port of the numeric core of the BioImaging ``_pet_correlation.py`` module.
 Plotting and report generation are intentionally left out; they can live in a
 separate optional submodule if/when needed.
 

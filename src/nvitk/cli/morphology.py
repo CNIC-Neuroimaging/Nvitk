@@ -23,9 +23,11 @@ from nvitk.morphology import (
     label_connected,
     open,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Morphology tools (binary ops, centerlines, ICA siphon correction)."""
 

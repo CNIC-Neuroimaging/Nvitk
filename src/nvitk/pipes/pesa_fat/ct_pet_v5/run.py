@@ -17,7 +17,7 @@ Local run for one subject, only stage 2::
 Submit the full chain of every subject on the cluster::
 
     nvitk-pesa-fat-ctpet --batch 202602_Week4 --submit sge \
-        --container /data3/BIOIT_IMAGE/Containers/gpu-pesa-fat_v2025.5.27.sif \
+        --container /path/to/nvitk.sif \
         --src-dir /path/to/nvitk/src
 
 The ``--base-hold`` flag should be set when a stage 0 job is already in
@@ -66,6 +66,7 @@ from nvitk.pipes.pesa_fat.ct_pet_v5 import (
     stage2_postprocess,
     stage3_measure,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -390,6 +391,7 @@ def _run_sge(
 
 
 @click.command("nvitk-pesa-fat-ctpet")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--batch",

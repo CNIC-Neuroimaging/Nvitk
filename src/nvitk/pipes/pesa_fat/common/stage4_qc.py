@@ -49,6 +49,7 @@ from nvitk.pipes.pesa_fat.qc.pyvista_scenes import (
     export_dixon_overview_html,
 )
 from nvitk.pipes.pesa_fat.run_hotspot import _resolve_measure_ctpet
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -369,6 +370,7 @@ def run_qc(
 
 
 @click.command("nvitk-pesa-fat-qc")
+@config_dir_click_option()
 @backend_click_option()
 @click.option("--batch", required=True, help="Batch name (e.g. '202602_Week4').")
 @click.option(

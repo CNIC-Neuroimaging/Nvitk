@@ -34,8 +34,8 @@ from nvitk.db.pipeline_assets import (
     XNAT_RESOURCE_QVTPY,
     resource_label_to_asset_slot,
 )
+from nvitk.core import config_paths
 from nvitk.db.repo import DataRepo, get_repo_from_settings
-from nvitk.db.settings_paths import _find_repo_root
 from nvitk.db.xnat_pipeline_resources import list_pipeline_assets_for_subject
 from nvitk.db.xnat_projects import get_xnat_project, list_xnat_project_ids
 from nvitk.gui.core.log_panel import gui_log
@@ -311,13 +311,8 @@ class QcPanel(QWidget):
 
         self._config_path = QLineEdit()
         self._config_path.setPlaceholderText("XNAT config path")
-        repo_root = _find_repo_root()
-        default_cfg = (
-            (repo_root / ".nvitk" / "xnat.json")
-            if repo_root is not None
-            else Path.cwd() / ".nvitk" / "xnat.json"
-        )
-        if default_cfg.is_file():
+        default_cfg = config_paths.config_file("xnat.json")
+        if default_cfg is not None:
             self._config_path.setText(str(default_cfg))
 
         cfg_row = QHBoxLayout()

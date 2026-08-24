@@ -4803,7 +4803,7 @@ class StatmodelsWindow(QMainWindow):
 
     def _on_save(self) -> None:
         """
-        Save the fitted model, its configuration and its report under ``nvitk-statmodels/<name>/``.
+        Save the fitted model, its configuration and its report under ``<statmodels_root>/<name>/``.
 
         The engines serialize very differently — a statsmodels result pickles, an lme4 or MMRM fit
         lives in R, a non-linear fit is a dict holding a closure — so the model artifact is written
@@ -5023,9 +5023,10 @@ class StatmodelsWindow(QMainWindow):
         """
         Decide whether to evaluate expression-kind derived columns from a loaded config.
 
-        Expressions are code. A config saved by this tool under the dataset's own
-        ``nvitk-statmodels/`` directory is the user's own work; one browsed to from anywhere else
-        might not be, so ask before evaluating it.
+        Expressions are code. A config saved by this tool under the configured model directory
+        (``db.statmodels_root``) is the user's own work; one browsed to from anywhere else might
+        not be, so ask before evaluating it. The boundary follows :func:`statmodels_root`, so
+        pointing that setting elsewhere moves the trusted location with it.
         """
         expressions = [
             d for d in (cfg.get("derived") or []) if str(d.get("kind")) == "expression"
@@ -5041,7 +5042,7 @@ class StatmodelsWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Evaluate derived expressions?",
-            f"This config comes from outside the dataset's nvitk-statmodels directory and defines "
+            f"This config comes from outside the configured model directory and defines "
             f"{len(expressions)} derived column(s) as expressions, which will be evaluated:\n\n"
             f"{listing}\n\nEvaluate them?",
             QMessageBox.Yes | QMessageBox.No,

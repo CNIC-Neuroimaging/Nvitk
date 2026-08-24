@@ -44,7 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Models are saved under <dataset>/nvitk-statmodels/. Use --load <name> to reopen one."
+            "Models are saved under db.statmodels_root (see `nvitk-config show`). "
+            "Use --load <name> to reopen one."
         ),
     )
     parser.add_argument(
@@ -64,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--load",
         metavar="NAME_OR_PATH",
         help=(
-            "Restore a saved model configuration: a name under <dataset>/nvitk-statmodels/, or a "
+            "Restore a saved model configuration: a name under the configured model directory, or a "
             "path to a config.json."
         ),
     )
@@ -72,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--reload",
         action="store_true",
         help="Build the analysis frame immediately instead of waiting for 'Reload data'.",
+    )
+    parser.add_argument(
+        "--config-dir",
+        metavar="PATH",
+        help=(
+            "Directory holding nvitk's sge.json / settings.json / xnat.json "
+            "(default: $NVITK_CONFIG_DIR, then ~/.config/nvitk). See `nvitk-config path`."
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -83,13 +92,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_config(path_or_name: str, repo_root: Path) -> Path:
-    """Locate a saved ``config.json`` from a bare model name or an explicit path."""
+    """Locate a saved ``config.json`` from a bare model name or an explicit path.
+
+    Bare names resolve against the configured model directory, so ``--load`` looks wherever
+    ``_on_save`` actually wrote — not at a second, independently-built guess.
+    """
     candidate = Path(path_or_name)
     if candidate.is_file():
         return candidate
     if candidate.is_dir():
         return candidate / "config.json"
-    saved = repo_root / "nvitk-statmodels" / path_or_name
+    from .helpers import statmodels_root
+
+    saved = statmodels_root() / path_or_name
     if saved.is_dir():
         return saved / "config.json"
     raise FileNotFoundError(
@@ -99,6 +114,12 @@ def _resolve_config(path_or_name: str, repo_root: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``nvitk-statsmodels`` command."""
+    # Before argparse and before the Qt/window imports below, so that anything reading
+    # configuration as it is imported already sees the redirected directory.
+    from nvitk.core.click_config import preparse_config_dir
+
+    preparse_config_dir(argv)
+
     args = build_parser().parse_args(argv)
     Logger(level=args.log_level)
 

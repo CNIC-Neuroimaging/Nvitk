@@ -11,11 +11,13 @@ from nvitk.cli._common import backend_option, io_options, mask_option, submit_op
 from nvitk.core.logger import Logger
 from nvitk.io import imread
 from nvitk.measure import dice, surface_metrics, suv_stats, volume_cc, volume_mm3
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Measurement tools."""
 

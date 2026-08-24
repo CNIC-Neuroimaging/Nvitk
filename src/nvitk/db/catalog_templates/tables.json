@@ -1,0 +1,459 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-08-12T08:50:23+00:00",
+  "tables": {
+    "subjects": {
+      "path": "tables/subjects.parquet",
+      "kind": "entities",
+      "description": "Canonical subject-level rows used across tabular and image assets.",
+      "key_columns": [
+        "subject_uid"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "primary_patient_id",
+        "primary_seqn"
+      ],
+      "columns": {
+        "subject_uid": "str",
+        "primary_patient_id": "str",
+        "primary_seqn": "object",
+        "sex": "object",
+        "birth_date": "datetime64[s]",
+        "notes": "object",
+        "source_batch_id": "str",
+        "updated_at": "str"
+      },
+      "row_count": 1427,
+      "last_updated": "2026-07-17T08:13:03+00:00",
+      "provenance": {
+        "written_at": "2026-07-17T08:13:03+00:00",
+        "source": "xnat",
+        "project": "PESA_Brain",
+        "server": "https://xnat.cnic.es",
+        "importer": "rebuild_subjects_table"
+      }
+    },
+    "subject_ids": {
+      "path": "tables/subject_ids.parquet",
+      "kind": "identifier_mapping",
+      "description": "Mappings between subject_uid and external identifiers.",
+      "key_columns": [
+        "subject_uid",
+        "id_namespace",
+        "id_value"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "id_namespace",
+        "id_value"
+      ],
+      "columns": {
+        "subject_uid": "string",
+        "id_namespace": "string",
+        "id_value": "string",
+        "id_source": "string",
+        "source_file": "object",
+        "source_sheet": "object",
+        "is_primary": "boolean",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      },
+      "row_count": 17983,
+      "last_updated": "2026-07-17T08:13:03+00:00",
+      "provenance": {
+        "written_at": "2026-07-17T08:13:03+00:00",
+        "importer": "import_pesabrain_db_directory",
+        "source": "xnat",
+        "project": "PESA_Brain",
+        "server": "https://xnat.cnic.es"
+      }
+    },
+    "sessions": {
+      "path": "tables/sessions.parquet",
+      "kind": "image_inventory",
+      "description": "Imaging sessions or experiments associated with each subject.",
+      "key_columns": [
+        "session_uid"
+      ],
+      "index_columns": [
+        "session_uid",
+        "subject_uid",
+        "experiment_label"
+      ],
+      "columns": {
+        "session_uid": "string",
+        "subject_uid": "string",
+        "project_id": "string",
+        "experiment_label": "string",
+        "modality": "string",
+        "visit_label": "string",
+        "scanner": "string",
+        "available_scans": "string",
+        "acquired_at": "datetime64[us]",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      },
+      "row_count": 2669,
+      "last_updated": "2026-07-17T08:13:03+00:00",
+      "provenance": {
+        "written_at": "2026-07-17T08:13:03+00:00",
+        "importer": "enrich_sessions_available_scans",
+        "source": "xnat",
+        "project": "PESA_Brain",
+        "server": "https://xnat.cnic.es"
+      }
+    },
+    "scans": {
+      "path": "tables/scans.parquet",
+      "kind": "image_inventory",
+      "description": "XNAT scan inventory with sequence classification and optional local cache locations.",
+      "key_columns": [
+        "scan_uid"
+      ],
+      "index_columns": [
+        "scan_uid",
+        "session_uid",
+        "subject_uid",
+        "scan_id",
+        "modality",
+        "orientation",
+        "asset_slot"
+      ],
+      "columns": {
+        "scan_uid": "string",
+        "session_uid": "string",
+        "subject_uid": "string",
+        "scan_id": "string",
+        "scan_label": "string",
+        "series_description": "string",
+        "quality": "string",
+        "modality": "string",
+        "orientation": "str",
+        "resource_label": "string",
+        "local_cache_path": "object",
+        "xnat_uri": "string",
+        "asset_slot": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      },
+      "row_count": 11008,
+      "last_updated": "2026-07-17T08:13:03+00:00",
+      "provenance": {
+        "written_at": "2026-07-17T08:13:03+00:00",
+        "source": "xnat",
+        "project": "PESA_Brain",
+        "server": "https://xnat.cnic.es"
+      }
+    },
+    "clinical_measurements": {
+      "path": "tables/clinical_measurements.parquet",
+      "kind": "measurements",
+      "description": "Long-form clinical variables linked to subjects and optional visits.",
+      "key_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "wide_index_columns": [
+        "subject_uid",
+        "visit_id"
+      ],
+      "wide_key_columns": [
+        "variable_id"
+      ],
+      "value_columns": [
+        "value_num",
+        "value_text"
+      ],
+      "columns": {
+        "subject_uid": "string",
+        "visit_id": "string",
+        "variable_id": "string",
+        "value_num": "float64",
+        "value_text": "string",
+        "unit": "string",
+        "value_kind": "string",
+        "source_table": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_column": "string",
+        "source_batch_id": "string",
+        "measured_at": "datetime64[ns]"
+      },
+      "row_count": 36133,
+      "last_updated": "2026-08-12T08:50:23+00:00",
+      "provenance": {
+        "written_at": "2026-08-12T08:50:23+00:00",
+        "importer": "import_apoe_grouping",
+        "step": "apoe_group",
+        "encoding": "0=female,1=male",
+        "parent_variable": "flow_mean",
+        "operation": "drop_subject_qvtpy",
+        "subjects": "PESA15808576",
+        "rows_removed": 3,
+        "action": "purge_stale_qc",
+        "source_file": "PESABrain_Clinical_AllXNAT_20260216.xlsx",
+        "derived_from": "apoe"
+      }
+    },
+    "image_measurements": {
+      "path": "tables/image_measurements.parquet",
+      "kind": "measurements",
+      "description": "Long-form image-derived variables linked to sessions, modalities, and regions.",
+      "key_columns": [
+        "subject_uid",
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id",
+        "pipeline_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id",
+        "pipeline_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "wide_index_columns": [
+        "subject_uid",
+        "session_id"
+      ],
+      "wide_key_columns": [
+        "modality",
+        "region_id",
+        "frame_index",
+        "variable_id",
+        "pipeline_id"
+      ],
+      "value_columns": [
+        "value_num",
+        "value_text"
+      ],
+      "columns": {
+        "subject_uid": "string",
+        "session_id": "string",
+        "modality": "string",
+        "region_id": "string",
+        "region_label": "string",
+        "frame_index": "Float64",
+        "variable_id": "string",
+        "value_num": "float64",
+        "value_text": "string",
+        "unit": "string",
+        "value_kind": "string",
+        "pipeline_id": "string",
+        "pipeline_name": "string",
+        "qc_status": "object",
+        "source_asset": "object",
+        "source_table": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_column": "string",
+        "source_batch_id": "string",
+        "measured_at": "datetime64[ns]"
+      },
+      "row_count": 2609166,
+      "last_updated": "2026-08-11T17:36:50+00:00",
+      "provenance": {
+        "written_at": "2026-08-11T17:36:50+00:00",
+        "importer": "stage9_autoqc",
+        "step": "att_vascular_att_median",
+        "pipeline": "dixon-v5",
+        "excel_path": "<PATH_TO_SOURCE_WORKBOOK>",
+        "pipelines": [
+          "4dflow_v3",
+          "tof_morpho_v1"
+        ],
+        "action": "purge_stale_qc",
+        "pipeline_id": "4dflow_v3",
+        "n_subjects": 520,
+        "n_dropped": 148520,
+        "test": "att",
+        "parent_variable": "flow_mean",
+        "operation": "drop_subject_qvtpy",
+        "subjects": "PESA15808576",
+        "rows_removed": 289,
+        "source_file": "PESABrain_T1_subcortical_regs_20250605.xlsx"
+      }
+    },
+    "cognitive_measurements": {
+      "path": "tables/cognitive_measurements.parquet",
+      "kind": "measurements",
+      "description": "Long-form cognitive test variables linked to subjects and optional visits.",
+      "key_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "index_columns": [
+        "subject_uid",
+        "visit_id",
+        "variable_id",
+        "source_file",
+        "source_sheet",
+        "source_column"
+      ],
+      "wide_index_columns": [
+        "subject_uid",
+        "visit_id"
+      ],
+      "wide_key_columns": [
+        "variable_id"
+      ],
+      "value_columns": [
+        "value_num",
+        "value_text"
+      ],
+      "columns": {
+        "subject_uid": "string",
+        "visit_id": "str",
+        "variable_id": "string",
+        "value_num": "float64",
+        "value_text": "string",
+        "unit": "string",
+        "value_kind": "string",
+        "source_table": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_column": "string",
+        "source_batch_id": "string",
+        "measured_at": "datetime64[s]"
+      },
+      "row_count": 201368,
+      "last_updated": "2026-06-08T10:14:17+00:00",
+      "provenance": {
+        "written_at": "2026-06-08T10:14:17+00:00",
+        "importer": "normalize_measurement_visit_ids",
+        "step": "cognitive"
+      }
+    },
+    "assets": {
+      "path": "tables/assets.parquet",
+      "kind": "assets",
+      "description": "Local files associated with raw caches or derived pipelines.",
+      "key_columns": [
+        "asset_uid"
+      ],
+      "index_columns": [
+        "asset_uid",
+        "subject_uid",
+        "session_uid",
+        "modality",
+        "asset_type",
+        "asset_slot"
+      ],
+      "columns": {
+        "asset_uid": "string",
+        "subject_uid": "string",
+        "session_uid": "string",
+        "modality": "string",
+        "asset_type": "string",
+        "asset_path": "string",
+        "resource_label": "string",
+        "source": "string",
+        "pipeline_name": "str",
+        "pipeline_id": "str",
+        "exists_locally": "boolean",
+        "metadata_json": "string",
+        "source_batch_id": "string",
+        "updated_at": "string",
+        "asset_slot": "string"
+      },
+      "row_count": 13225,
+      "last_updated": "2026-07-31T10:57:13+00:00",
+      "provenance": {
+        "written_at": "2026-07-31T10:57:13+00:00",
+        "source": "xnat_pipeline",
+        "project_id": "PESA_Brain",
+        "resource_label": "4dflows"
+      }
+    },
+    "cohort_membership": {
+      "path": "tables/cohort_membership.parquet",
+      "kind": "cohorts",
+      "description": "Named subject subsets such as processed cohorts or modality-specific availability.",
+      "key_columns": [
+        "cohort_id",
+        "subject_uid"
+      ],
+      "index_columns": [
+        "cohort_id",
+        "subject_uid"
+      ],
+      "columns": {
+        "cohort_id": "string",
+        "subject_uid": "string",
+        "membership_source": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      },
+      "row_count": 1427,
+      "last_updated": "2026-07-17T08:13:03+00:00",
+      "provenance": {
+        "written_at": "2026-07-17T08:13:03+00:00",
+        "cohort_id": "PESA-Brain",
+        "importer": "upsert_cohort_membership_for_subjects"
+      }
+    },
+    "source_tables": {
+      "path": "tables/source_tables.parquet",
+      "kind": "metadata",
+      "description": "Inventory of imported workbook sheets, their layouts, and original columns.",
+      "key_columns": [
+        "source_uid"
+      ],
+      "index_columns": [
+        "source_file",
+        "source_sheet",
+        "source_kind",
+        "domain",
+        "modality"
+      ],
+      "columns": {
+        "source_uid": "string",
+        "source_file": "string",
+        "source_sheet": "string",
+        "source_kind": "string",
+        "domain": "string",
+        "modality": "str",
+        "layout": "string",
+        "n_rows": "Int64",
+        "n_columns": "Int64",
+        "columns_json": "string",
+        "source_batch_id": "string",
+        "updated_at": "string"
+      },
+      "row_count": 18,
+      "last_updated": "2026-06-08T09:55:55+00:00",
+      "provenance": {
+        "written_at": "2026-06-08T09:55:55+00:00",
+        "importer": "import_pesabrain_db_directory"
+      }
+    }
+  }
+}

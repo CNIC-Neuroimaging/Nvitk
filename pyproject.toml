@@ -63,7 +63,11 @@ dependencies = [
   "tifffile>=2025.5.26",           # TIFF file processing
   "nd2>=0.10.3",                   # ND2 file processing
   "dicom2nifti>=2.6.1",            # DICOM to NIfTI conversion
-  # "pydicom==3.0.1",                # DICOM file processing
+  # pydicom is pulled in by dicom2nifti anyway; the floor is what matters. 3.0.0 downloads
+  # ~8 MB of DICOM sample files from the internet on `import pydicom` (upstream bug, fixed in
+  # 3.0.1), which makes `import nvitk` hit the network and fails outright on an offline
+  # cluster node. pixi and recipe/post-link.sh pin ==3.0.1; this floor covers plain pip.
+  "pydicom>=3.0.1",                # DICOM file processing
   "pylibjpeg>=2.0.1",              # JPEG image processing
   "h5py>=3.16.0",                  # HDF5 file processing
 
@@ -262,6 +266,8 @@ nvitk-voxelwise = "nvitk.cli.voxelwise:main"
 # Miscellaneous scripts
 # -----------------------------------------------------------------------------
 pyhelp = "nvitk.util.list_cli_commands:main"
+nvitk-config = "nvitk.cli.config_cmd:main"
+nvitk-dataset = "nvitk.cli.dataset_cmd:main"
 nvitk-xnat-sync = "nvitk.db.xnat:main"
 nvitk-xnat-pipeline-sync = "nvitk.db.xnat_pipeline_resources:main"
 
@@ -319,6 +325,13 @@ include = ["nvitk", "nvitk.*"]
 
 [tool.setuptools.package-data]
 "nvitk.gui" = ["napari.yaml"]
+# Starter configs for `nvitk-config init`. Packaged rather than left in the repo so the
+# command works from an installed distribution, which is exactly where it is needed.
+"nvitk.cli" = ["config_templates/*.json"]
+# Catalog manifests + JSON schemas used by DatasetCatalog.create_scaffold to build a new,
+# empty dataset. Packaged for the same reason as the config templates: scaffolding a dataset
+# is something an installed user does, and the repo's dataset/ directory is not shipped.
+"nvitk.db" = ["catalog_templates/*.json", "catalog_templates/schema/*.json"]
 
 [tool.poetry]
 packages = [

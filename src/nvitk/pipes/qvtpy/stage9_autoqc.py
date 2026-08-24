@@ -70,6 +70,7 @@ from nvitk.measure.hemodynamics import (
     proximal_station_mask,
     segment_flow_consistency_cv,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -1474,6 +1475,7 @@ def _open_repo(dataset: Any = None) -> Any:
 
 
 @click.command("nvitk-qvtpy-autoqc")
+@config_dir_click_option()
 @click.option(
     "--dataset",
     type=click.Path(path_type=Path),

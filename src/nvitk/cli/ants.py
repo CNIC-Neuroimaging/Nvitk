@@ -9,11 +9,13 @@ import click
 from nvitk.core.click_backend import apply_cli_backend
 from nvitk.core.logger import Logger
 from nvitk.registration.ants import ants_apply, ants_register
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
 
 @click.group("nvitk-ants", context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 @click.option(
     "--backend",
     type=click.Choice(["cpu", "gpu"], case_sensitive=False),

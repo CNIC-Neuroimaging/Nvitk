@@ -10,12 +10,18 @@ from nvitk.core.logger import Logger
 from nvitk.pipes.pesa_fat.common.paths import DEFAULT_RESULTS_ROOT, layout
 from nvitk.pipes.pesa_fat.common.stage4_qc import RES_QC_DIR
 from nvitk.pipes.pesa_fat.qc.portal import create_qc_portal_app
+from nvitk.core.click_config import config_dir_click_option
 
-DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/PESA-Fat/Visit-5-DIXON_PET-CT/VALIDATION/")
-DEFAULT_HOST = "10.149.82.75"
+# DEFAULT_RESULTS_ROOT is imported above from common.paths, which resolves it through
+# sge.json. It used to be reassigned here to a hardcoded path, which discarded that override
+# and made the import dead.
+#: Bind address for the review portal. Loopback by default — this serves unblinded QC images,
+#: so exposing it on a routable interface is an explicit `--host` decision, not a default.
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8008
 
 @click.command("nvitk-pesa-fat-qc-portal")
+@config_dir_click_option()
 @click.option("--batch", required=False, default=None, help="Optional batch name (e.g. '202602_Week4').")
 @click.option("--results-root", type=click.Path(path_type=Path), default=DEFAULT_RESULTS_ROOT)
 @click.option("--host", default=DEFAULT_HOST, show_default=True)

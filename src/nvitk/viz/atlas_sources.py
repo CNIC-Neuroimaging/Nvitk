@@ -47,7 +47,6 @@ from __future__ import annotations
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies
 # ──────────────────────────────────────────────────────────────────────────────
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -82,21 +81,10 @@ ATLAS_SUFFIXES: tuple[str, ...] = (".nii", ".nii.gz", ".mgz", ".annot")
 # Settings
 # ---------------------------------------------------------------------------
 def load_atlas_settings_block() -> dict[str, Any]:
-    """Parse the ``atlas`` section of ``.nvitk/settings.json``, or return ``{}``."""
-    from nvitk.db.settings_paths import settings_json_path
+    """The ``atlas`` section of ``settings.json``, or ``{}``."""
+    from nvitk.db.settings_paths import load_settings_document
 
-    path = settings_json_path()
-    if path is None:
-        return {}
-    try:
-        with path.open(encoding="utf-8") as handle:
-            doc = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        log.debug("Could not read %s for the atlas block: %s", path, exc)
-        return {}
-    if not isinstance(doc, dict):
-        return {}
-    block = doc.get("atlas")
+    block = load_settings_document().get("atlas")
     return block if isinstance(block, dict) else {}
 
 

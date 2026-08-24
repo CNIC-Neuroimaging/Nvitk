@@ -49,6 +49,7 @@ from nvitk.pipes.pesa_fat.dixon_v5 import (
     stage2_postprocess,
     stage3_measure,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -371,6 +372,7 @@ def _run_sge(
 
 
 @click.command("nvitk-pesa-fat-dixon")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--batch",

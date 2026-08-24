@@ -46,6 +46,7 @@ requirements:
     # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
     - python >=3.10,<3.12
     - numpy >=2.3.3
+    - dvc >=3.67.1
     # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
     - r-base >=4.5.3

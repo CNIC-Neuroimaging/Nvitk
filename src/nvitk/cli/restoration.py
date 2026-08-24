@@ -21,9 +21,11 @@ from nvitk.restoration import (
     mri_super_resolution,
     n4_bias_field_correction,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Image restoration tools."""
 

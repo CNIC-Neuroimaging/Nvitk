@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import tempfile
 from pathlib import Path
 
 from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths
 from nvitk.pipes.pesa_fat.common.paths import DEFAULT_MODEL_ROOT
 from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     BODY_LABELS,
@@ -199,36 +201,47 @@ SGE_QUEUE: str | None = None
 SGE_CPU_H_VMEM: str = "32G"
 SGE_CPU_NGPU: int = 0
 
-SGE_LOG_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/logs/PESAFatV5")
-SGE_ERR_DIR: Path = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS/errs/PESAFatV5")
+SGE_LOG_DIR: Path = Path(tempfile.gettempdir()) / "nvitk-sge" / "logs" / "PESAFat-CT-PET"
+SGE_ERR_DIR: Path = Path(tempfile.gettempdir()) / "nvitk-sge" / "errs" / "PESAFat-CT-PET"
 
-CONTAINER_PATH: Path = Path("/data3/BIOIT_IMAGE/Containers/nvitk_v2026.05.27.sif")
+CONTAINER_PATH: Path | None = None  # sge.json: paths.nvitk_container
 MODELS_PATH: Path = DEFAULT_MODEL_ROOT
 
-_pipe_ct = _sj.merged_pipeline_flat("pesa_fat_ct_pet")
-_paths_ct = _sj.paths_section()
-if (v := _pipe_ct.get("sge_project")) is not None:
-    SGE_PROJECT = str(v)
-if (v := _pipe_ct.get("sge_account")) is not None:
-    SGE_ACCOUNT = str(v)
-if (v := _pipe_ct.get("sge_ngpu")) is not None:
-    SGE_NGPU = int(v)
-if (v := _pipe_ct.get("sge_h_vmem")) is not None:
-    SGE_H_VMEM = str(v)
-if "sge_queue" in _pipe_ct:
-    SGE_QUEUE = _pipe_ct["sge_queue"]
-if (v := _pipe_ct.get("sge_cpu_h_vmem")) is not None:
-    SGE_CPU_H_VMEM = str(v)
-if (v := _pipe_ct.get("sge_cpu_ngpu")) is not None:
-    SGE_CPU_NGPU = int(v)
-_lg_ct, _er_ct = _sj.resolve_log_err_dirs(
-    paths=_paths_ct,
-    pipe=_pipe_ct,
-    fallback_log=SGE_LOG_DIR,
-    fallback_err=SGE_ERR_DIR,
-)
-SGE_LOG_DIR, SGE_ERR_DIR = _lg_ct, _er_ct
-CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe_ct, fallback=CONTAINER_PATH)
+def _apply_config() -> None:
+    """Merge ``sge.json`` over this module's defaults.
+
+    Run once at import and again whenever the configuration directory is redirected,
+    so a late ``--config-dir`` reaches these constants too.
+    """
+    global CONTAINER_PATH, SGE_ACCOUNT, SGE_CPU_H_VMEM, SGE_CPU_NGPU, SGE_ERR_DIR, SGE_H_VMEM, SGE_LOG_DIR, SGE_NGPU, SGE_PROJECT, SGE_QUEUE, _er_ct, _lg_ct, _paths_ct, _pipe_ct
+    _pipe_ct = _sj.merged_pipeline_flat("pesa_fat_ct_pet")
+    _paths_ct = _sj.paths_section()
+    if (v := _pipe_ct.get("sge_project")) is not None:
+        SGE_PROJECT = str(v)
+    if (v := _pipe_ct.get("sge_account")) is not None:
+        SGE_ACCOUNT = str(v)
+    if (v := _pipe_ct.get("sge_ngpu")) is not None:
+        SGE_NGPU = int(v)
+    if (v := _pipe_ct.get("sge_h_vmem")) is not None:
+        SGE_H_VMEM = str(v)
+    if "sge_queue" in _pipe_ct:
+        SGE_QUEUE = _pipe_ct["sge_queue"]
+    if (v := _pipe_ct.get("sge_cpu_h_vmem")) is not None:
+        SGE_CPU_H_VMEM = str(v)
+    if (v := _pipe_ct.get("sge_cpu_ngpu")) is not None:
+        SGE_CPU_NGPU = int(v)
+    _lg_ct, _er_ct = _sj.resolve_log_err_dirs(
+        paths=_paths_ct,
+        pipe=_pipe_ct,
+        fallback_log=SGE_LOG_DIR,
+        fallback_err=SGE_ERR_DIR,
+    )
+    SGE_LOG_DIR, SGE_ERR_DIR = _lg_ct, _er_ct
+    CONTAINER_PATH = _sj.resolve_nvitk_container(pipe=_pipe_ct, fallback=CONTAINER_PATH)
+
+
+_apply_config()
+config_paths.register_reload_hook(_apply_config)
 if (v := _pipe_ct.get("default_sge_model_root") or _pipe_ct.get("models_path")):
     MODELS_PATH = Path(os.path.expanduser(str(v)))
 

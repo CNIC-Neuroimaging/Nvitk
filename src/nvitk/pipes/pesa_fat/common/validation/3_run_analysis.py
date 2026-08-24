@@ -34,7 +34,11 @@ from nvitk.core.logger import Logger
 warnings.filterwarnings("ignore")
 
 sys.path.insert(0, __file__.rsplit("\\", 1)[0])
-from config import COMBINED_TABLE_PATH, METRICS_PATH, REPORT_PATH, OUT_DIR
+from config import COMBINED_TABLE_PATH, METRICS_PATH, REPORT_PATH, output_dir
+
+# This script writes figures and reports, so it is the thing that should create the output
+# directory. Importing the config module no longer does it as a side effect.
+OUT_DIR = output_dir(create=True)
 
 log = Logger()
 

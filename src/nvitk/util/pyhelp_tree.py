@@ -143,7 +143,7 @@ def _format_branch_row(node: CatalogNode, depth: int) -> str:
 def _format_tool_row(tool: ToolEntry, depth: int) -> str:
     """Render one tool as a Rich-markup row: an installable command (with gpu/mask tags) or a library-only reference."""
     indent = _indent(depth)
-    if tool.library_only or not tool.command:
+    if not tool.is_command:
         name = f"[italic dim]{tool.display_label}[/]"
         tag = " [dim yellow](library)[/]"
         mod = f"\n{indent}    [dim]↳ {tool.module}[/]" if tool.module else ""
@@ -159,8 +159,9 @@ def _format_tool_row(tool: ToolEntry, depth: int) -> str:
         cmd_style = "bold cyan"
     gpu = " [dim green]gpu[/]" if tool.supports_gpu else ""
     mask = " [dim magenta]mask[/]" if tool.requires_mask else ""
+    missing = "" if tool.installed else " [dim red](not installed)[/]"
     mod = f" [dim]→ {tool.module}[/]" if tool.module else ""
-    return f"{indent}  ● [{cmd_style}]{tool.command}[/]{gpu}{mask}{mod}"
+    return f"{indent}  ● [{cmd_style}]{tool.command}[/]{gpu}{mask}{missing}{mod}"
 
 
 def _build_table(roots: list[CatalogNode], cursor: int) -> Table:
@@ -498,7 +499,7 @@ def _format_static_tool_line(tool: ToolEntry, submodule_id: str) -> Text:
     """One compact tool line for the static catalog."""
     theme = _theme_for_submodule(submodule_id)
 
-    if tool.library_only or not tool.command:
+    if not tool.is_command:
         return Text.assemble(
             ("    ", "dim"),
             (tool.display_label, "italic dim"),
@@ -510,6 +511,8 @@ def _format_static_tool_line(tool: ToolEntry, submodule_id: str) -> Text:
         badges.append("[dim green]gpu[/]")
     if tool.requires_mask:
         badges.append("[dim magenta]mask[/]")
+    if not tool.installed:
+        badges.append("[dim red]not installed[/]")
     badge_str = ("  " + "  ".join(badges)) if badges else ""
     return Text.from_markup(f"  [{theme['cmd']}]{tool.command}[/]{badge_str}")
 

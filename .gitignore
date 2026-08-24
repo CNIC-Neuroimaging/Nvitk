@@ -17,18 +17,18 @@ data/
 docs/_build/
 .config/
 .config/*
-.nvitk/xnat.json
-.nvitk/xnat-dev.json
+# .nvitk/xnat.json
+# .nvitk/xnat-dev.json
 notebooks/exploration/pesabrain-anatomy/checkpoints/
 notebooks/exploration/pesabrain-anatomy/checkpoints/*
 notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/
 notebooks/exploration/pesabrain-anatomy/checkpoints_nocut/*
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/
 notebooks/exploration/pesabrain-anatomy/checkpoints_partial/*
-.nvitk/*
-.nvitk/xnat-dev.json
-.nvitk/sge.json
-.nvitk/settings.json
+# .nvitk/*
+# .nvitk/xnat-dev.json
+# .nvitk/sge.json
+# .nvitk/settings.json
 
 
 # Site-local SGE overrides
@@ -116,10 +116,14 @@ htmlcov/
 data/
 results/
 outputs/
+# Dataset content is tracked by DVC, not git: the bytes live on the DVC remote and only the
+# small *.dvc pointer files are versioned here. The negations matter — a blanket `dataset/`
+# rule silently makes the pointers unstageable, and DVC then appears to work while nothing is
+# actually versioned.
 dataset/
-dataset/*
-dataset/cache/*
-!dataset/cache/.gitkeep
+!dataset/**/
+!dataset/**/*.dvc
+!dataset/**/.gitignore
 
 # Large microscopy / imaging files (edit extensions as needed)
 *.tif

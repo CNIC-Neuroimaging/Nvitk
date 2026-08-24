@@ -26,7 +26,7 @@ class StatmodelsPanel(QWidget):
         hint = QLabel(
             "Explore mixed-effects models and mediation over 4D-flow, ASL, T1, FLAIR WMH or TOF "
             "morphometrics — several measurements at once — plus clinical / cognitive covariates "
-            "from the dataset catalog. Models are saved under <dataset>/nvitk-statmodels/."
+            "from the dataset catalog. Models are saved under db.statmodels_root."
         )
         hint.setWordWrap(True)
 

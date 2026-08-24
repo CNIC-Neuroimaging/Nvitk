@@ -63,16 +63,28 @@ KEYRING_SERVICE = "nvitk"
 
 
 def _default_config_paths() -> list[Path]:
-    """Candidate default XNAT config file paths under ``~/.config/nvitk/``, in lookup order."""
-    base = Path.home() / ".config" / "nvitk"
-    return [base / "xnat.yaml", base / "xnat.yml", base / "xnat.json"]
+    """Candidate XNAT profile paths, in lookup order.
+
+    Every configuration directory :mod:`nvitk.core.config_paths` knows about, crossed with the
+    three accepted suffixes. Previously this looked only under ``~/.config/nvitk/``, so a
+    profile sitting in the same ``.nvitk/`` directory as ``sge.json`` and ``settings.json`` was
+    invisible unless a GUI panel or CLI flag named it explicitly.
+    """
+    from nvitk.core import config_paths
+
+    out: list[Path] = []
+    for directory, _why in config_paths.candidate_dirs():
+        out.extend(
+            [directory / "xnat.yaml", directory / "xnat.yml", directory / "xnat.json"]
+        )
+    return out
 
 
 def load_xnat_profile(path: Path | None = None) -> dict[str, Any]:
-    """Load ``xnat`` profile dict from JSON or YAML.
+    """Load an ``xnat`` profile dict from JSON or YAML.
 
-    If ``path`` is ``None``, uses ``NVITK_XNAT_CONFIG`` if set, else the first
-    existing file among ``~/.config/nvitk/xnat.{yaml,yml,json}``.
+    If ``path`` is ``None``, uses ``NVITK_XNAT_CONFIG`` if set, else the first existing
+    ``xnat.{yaml,yml,json}`` in any nvitk configuration directory.
 
     YAML requires PyYAML (``pip install pyyaml`` or ``nvitk[xnat]``).
     """

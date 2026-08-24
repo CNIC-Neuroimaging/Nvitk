@@ -36,6 +36,7 @@ from nvitk.pipes.pesa_fat.common.paths import (
 )
 from nvitk.pipes.pesa_fat.common.stage3_batch_summary import aggregate_stage3_summary
 from nvitk.pipes.pesa_fat.qc.measurements_table import stage3_measurements_xlsx_path
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -287,6 +288,7 @@ def sync_measurements(
 
 
 @click.command("nvitk-pesa-fat-sync-measurements")
+@config_dir_click_option()
 @click.option("--batch", required=True, help="Batch name (e.g. '202602_Week2').")
 @click.option(
     "--subjects",

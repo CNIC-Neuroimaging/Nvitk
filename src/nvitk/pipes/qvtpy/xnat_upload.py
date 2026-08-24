@@ -20,6 +20,7 @@ from nvitk.pipes.qvtpy.util.io.xnat_upload import (
     parse_require_stages,
     run_xnat_upload,
 )
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -27,6 +28,7 @@ _DEFAULT_REQUIRE_STAGES = ",".join(DEFAULT_XNAT_UPLOAD_STAGES)
 
 
 @click.command("nvitk-qvtpy-xnat-upload")
+@config_dir_click_option()
 @click.option(
     "--submit",
     type=click.Choice(["local", "sge"], case_sensitive=False),

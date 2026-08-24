@@ -24,6 +24,7 @@ from .cluster import ClusterPaths, SegmentationJob
 from . import config as ts_cfg
 from .runner import run_totalsegmentator
 from .sge_stage import submit_totalsegmentator_stage
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -37,6 +38,7 @@ def _default_emit_script(task: str) -> Path:
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--input",

@@ -29,8 +29,8 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.core.logger import Logger
+from nvitk.core import config_paths
 from nvitk.db.repo import DataRepo, _default_dataset_root, get_repo_from_settings
-from nvitk.db.settings_paths import _find_repo_root
 from nvitk.db.pipeline_assets import PIPELINE_FILTER_SLOTS
 from nvitk.db.xnat import (
     asset_slot_display_label,
@@ -366,13 +366,8 @@ class DataBrowserPanel(QWidget):
 
         self._config_path = QLineEdit()
         self._config_path.setPlaceholderText("XNAT YAML/JSON config path")
-        repo_root = _find_repo_root()
-        default_cfg = (
-            (repo_root / ".nvitk" / "xnat.json")
-            if repo_root is not None
-            else Path.cwd() / ".nvitk" / "xnat.json"
-        )
-        if default_cfg.is_file():
+        default_cfg = config_paths.config_file("xnat.json")
+        if default_cfg is not None:
             self._config_path.setText(str(default_cfg))
         browse_config = QPushButton("Browse…")
         browse_config.clicked.connect(self._browse_config)

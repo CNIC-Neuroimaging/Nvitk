@@ -15,11 +15,13 @@ from nvitk.core.logger import Logger
 from nvitk.registration.fsl.flirt import flirt_apply_rigid, flirt_register_rigid
 from nvitk.registration.ants import ANTSPY_TYPE_OF_TRANSFORM, ants_apply, ants_register
 from nvitk.registration.fireants import fireants_apply, fireants_register
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 @click.option(
     "--backend",
     type=click.Choice(["cpu", "gpu"], case_sensitive=False),

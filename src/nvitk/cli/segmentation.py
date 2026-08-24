@@ -38,11 +38,13 @@ from nvitk.segmentation.mouse_brain import (
     mouse_brain_segmentation,
 )
 from nvitk.segmentation.mra_vessel import mra_vessel_segmentation
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Segmentation tools."""
 

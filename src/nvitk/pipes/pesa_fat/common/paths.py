@@ -13,40 +13,64 @@ All pipelines derive their per-subject paths from :class:`BatchLayout`.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths, lazy_config
 
-DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
-DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
-DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
+#: ``sge.json`` section holding this pipeline's data roots.
+PIPELINE_PATHS_ID = "pesa_fat_paths"
 
-# LOCAL_DEFAULT_DICOM_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/DICOM")
-# LOCAL_DEFAULT_NIFTI_ROOT   = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/NIFTI")
-# LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/BioIT/PESA-Fat/RESULTS")
-# LOCAL_DEFAULT_MODEL_ROOT   = Path("/home/imarcoss/ai_models/TotalSegmentator/v2.0.0")
-LOCAL_DEFAULT_DICOM_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/DICOM")
-LOCAL_DEFAULT_NIFTI_ROOT   = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/DATA/NIFTI")
-LOCAL_DEFAULT_RESULTS_ROOT = Path("/data3/BIOIT_IMAGE/PESA_Fat/DATA/Visit-5-DIXON_PET-CT/RESULTS")
-LOCAL_DEFAULT_MODEL_ROOT   = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
 
-DEFAULT_NVITK_SRC_DIR = Path("/data3/BIOIT_IMAGE/nvitk/src")
-DEFAULT_SGE_SCRIPTS_DIR = Path("/data3/BIOIT_IMAGE/nvitk-sge/SGE_SCRIPTS")
+def _pipe_paths() -> dict:
+    """The ``pipelines.pesa_fat_paths`` block, read fresh (and cached) on each use."""
+    return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
-CLUSTER_HOST_ALIASES: dict[str, str] = {'samwise': '10.149.80.48'}
 
-_ppaths = _sj.paths_section()
-_ppipe_paths = _sj.pipeline_section("pesa_fat_paths")
-if (v := _ppaths.get("nvitk_src_dir")):
-    DEFAULT_NVITK_SRC_DIR = Path(os.path.expanduser(str(v)))
-if (v := _ppaths.get("sge_scripts_dir")):
-    DEFAULT_SGE_SCRIPTS_DIR = Path(os.path.expanduser(str(v)))
-CLUSTER_HOST_ALIASES = _sj.merge_cluster_host_aliases(
-    CLUSTER_HOST_ALIASES, _ppaths, _ppipe_paths
-)
+def _opt_root(key: str):
+    """The configured root *key* as a path, or ``None`` when unset.
+
+    Does not raise: these names are read at import time as Click option defaults, so an
+    unconfigured machine must still be able to print ``--help``. The actionable error comes
+    from :func:`layout_local` / :func:`layout_cluster` when the value is needed.
+    """
+    raw = _pipe_paths().get(key)
+    if raw is None or not str(raw).strip():
+        return None
+    return Path(os.path.expanduser(str(raw).strip()))
+
+
+_RESOLVERS: dict[str, lazy_config.Resolver] = {
+    "DEFAULT_DICOM_ROOT": lambda: _opt_root("cluster_dicom_root"),
+    "DEFAULT_NIFTI_ROOT": lambda: _opt_root("cluster_nifti_root"),
+    "DEFAULT_RESULTS_ROOT": lambda: _opt_root("cluster_results_root"),
+    "DEFAULT_MODEL_ROOT": lambda: _opt_root("cluster_model_root"),
+    "LOCAL_DEFAULT_DICOM_ROOT": lambda: _opt_root("local_dicom_root"),
+    "LOCAL_DEFAULT_NIFTI_ROOT": lambda: _opt_root("local_nifti_root"),
+    "LOCAL_DEFAULT_RESULTS_ROOT": lambda: _opt_root("local_results_root"),
+    "LOCAL_DEFAULT_MODEL_ROOT": lambda: _opt_root("local_model_root"),
+    "DEFAULT_NVITK_SRC_DIR": lambda: _sj.resolve_nvitk_src_dir(),
+    "DEFAULT_SGE_SCRIPTS_DIR": lambda: (
+        _opt_path(_sj.paths_section().get("sge_scripts_dir"))
+        or Path(tempfile.gettempdir()) / "nvitk-sge" / "scripts"
+    ),
+    "CLUSTER_HOST_ALIASES": lambda: _sj.merge_cluster_host_aliases(
+        {}, _sj.paths_section(), _pipe_paths()
+    ),
+}
+
+
+def _opt_path(value):
+    """A configured value as an expanded path, or ``None`` when unset."""
+    if value is None or not str(value).strip():
+        return None
+    return Path(os.path.expanduser(str(value).strip()))
+
+
+__getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
 SUBJECT_GLOB = "PESA*"
 
@@ -162,27 +186,31 @@ def layout(
     """Build a :class:`BatchLayout` for ``batch``, falling back to defaults."""
     return BatchLayout(
         batch=batch,
-        dicom_root=Path(dicom_root) if dicom_root else DEFAULT_DICOM_ROOT,
-        nifti_root=Path(nifti_root) if nifti_root else DEFAULT_NIFTI_ROOT,
-        results_root=Path(results_root) if results_root else DEFAULT_RESULTS_ROOT,
-        model_root=Path(model_root) if model_root else DEFAULT_MODEL_ROOT,
+        dicom_root=_cluster_path_from_config(
+            "cluster_dicom_root", fallback=Path(dicom_root) if dicom_root else None
+        ),
+        nifti_root=_cluster_path_from_config(
+            "cluster_nifti_root", fallback=Path(nifti_root) if nifti_root else None
+        ),
+        results_root=_cluster_path_from_config(
+            "cluster_results_root", fallback=Path(results_root) if results_root else None
+        ),
+        model_root=_cluster_path_from_config(
+            "cluster_model_root", fallback=Path(model_root) if model_root else None
+        ),
     )
 
 
 def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
     """Resolve workstation root: CLI flag > ``local_*`` in sge.json > :data:`LOCAL_DEFAULT_*`."""
-    config_key = f"local_{key}"
-    raw = _ppipe_paths.get(config_key)
     if fallback is not None:
         return Path(fallback)
-    if raw is not None and str(raw).strip():
-        return Path(os.path.expanduser(str(raw).strip()))
-    return {
-        "dicom_root": LOCAL_DEFAULT_DICOM_ROOT,
-        "nifti_root": LOCAL_DEFAULT_NIFTI_ROOT,
-        "results_root": LOCAL_DEFAULT_RESULTS_ROOT,
-        "model_root": LOCAL_DEFAULT_MODEL_ROOT,
-    }[key]
+    raw = _pipe_paths().get(f"local_{key}")
+    return Path(os.path.expanduser(str(config_paths.require(
+        raw,
+        key=f"pipelines.{PIPELINE_PATHS_ID}.local_{key}",
+        hint="Set it, or pass the matching --*-root flag.",
+    )).strip()))
 
 
 def layout_local(
@@ -218,17 +246,16 @@ def layout_local(
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
     """Resolve a cluster path setting *key*: the raw ``sge.json`` value if set, else *fallback*, else
     the hardcoded cluster default."""
-    raw = _ppipe_paths.get(key)
+    raw = _pipe_paths().get(key)
     if raw is not None and str(raw).strip():
         return Path(os.path.expanduser(str(raw).strip()))
     if fallback is not None:
         return Path(fallback)
-    return {
-        "cluster_dicom_root": DEFAULT_DICOM_ROOT,
-        "cluster_nifti_root": DEFAULT_NIFTI_ROOT,
-        "cluster_results_root": DEFAULT_RESULTS_ROOT,
-        "cluster_model_root": DEFAULT_MODEL_ROOT,
-    }[key]
+    return Path(os.path.expanduser(str(config_paths.require(
+        None,
+        key=f"pipelines.{PIPELINE_PATHS_ID}.{key}",
+        hint="Set it, or pass the matching --*-root flag.",
+    ))))
 
 
 def layout_cluster(

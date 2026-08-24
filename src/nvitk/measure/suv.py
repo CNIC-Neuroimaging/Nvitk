@@ -1,7 +1,7 @@
 """
 Standardized Uptake Value (SUV) utilities for PET.
 
-Port of [BioImaging _pet.py](/home/imarcoss/BioImaging/src/imaging/measure/_pet.py)
+Port of the BioImaging ``_pet.py`` module
 with the following fixes:
 
 - Drops the stray ``from curses import raw`` import.

@@ -206,7 +206,7 @@ def write_parquet_table(path: str | Path, df: pd.DataFrame) -> None:
     # df.to_parquet(tmp, index=False, engine="pyarrow")
     # print(f"tmp write OK: {tmp}")
     # # prueba de diagnóstico
-    # debug_target = "/data3/BIOIT_IMAGE/nvitk-db/nvitk-dataset/tables/test2.parquet"
+    # debug_target = "<dataset>/tables/test2.parquet"
     # df.to_parquet(
     #     debug_target,
     #     index=False,

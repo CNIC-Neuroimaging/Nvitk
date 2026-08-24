@@ -1,0 +1,5 @@
+[cache]
+    type = "hardlink,symlink"
+[core]
+    autostage = true
+    remote = lab

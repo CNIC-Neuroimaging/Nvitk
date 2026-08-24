@@ -7,18 +7,24 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
+from nvitk.core import config_paths
+
 _NVITK_CONTAINER_RE = re.compile(r"nvitk_v[\d.]+\.sif", re.IGNORECASE)
-_DEFAULT_CLUSTER_ROOT = Path("/data3/BIOIT_IMAGE/Containers")
+#: Directory the registry assumes cluster images live in when an entry does not name a
+#: full ``cluster_sif_path``. Configured via ``sge.json`` ``paths.container_root``; there is
+#: no built-in default, since any would be site-specific.
+_DEFAULT_CLUSTER_ROOT: Path | None = None
 _NVITK_PROJECT = "nvitk"
 
 
 def _find_repo_root() -> Path | None:
-    """Walk up from this file to the repo root (dir with ``pyproject.toml`` and ``src/nvitk``)."""
-    here = Path(__file__).resolve()
-    for anc in [here.parent, *here.parents]:
-        if (anc / "pyproject.toml").is_file() and (anc / "src" / "nvitk").is_dir():
-            return anc
-    return None
+    """The source-checkout root, for locating the ``registry/`` submodule.
+
+    Unlike configuration — which now resolves through :mod:`nvitk.core.config_paths` and lives
+    in user-owned directories — the container registry is a *repo asset* checked out as a git
+    submodule, so a checkout really is the right (and only) place to look for it.
+    """
+    return config_paths.source_checkout_root()
 
 
 def registry_path() -> Path | None:
@@ -78,9 +84,25 @@ def _version_entry(project: dict[str, Any], version: str | None) -> tuple[str, d
     return ver, entry
 
 
-def default_cluster_sif_path(project_name: str, version: str) -> Path:
-    """Default samwise deploy path when ``cluster_sif_path`` is absent."""
-    return _DEFAULT_CLUSTER_ROOT / f"{project_name}_{version}.sif"
+def cluster_container_root() -> Path | None:
+    """Directory cluster images are deployed to, from ``sge.json`` ``paths.container_root``."""
+    from nvitk.cluster import sge_json
+
+    raw = sge_json.paths_section().get("container_root")
+    if raw is None or not str(raw).strip():
+        return _DEFAULT_CLUSTER_ROOT
+    return Path(str(raw).strip()).expanduser()
+
+
+def default_cluster_sif_path(project_name: str, version: str) -> Path | None:
+    """Conventional deploy path for a project image, or ``None`` if no root is configured.
+
+    Used only when a registry entry omits an explicit ``cluster_sif_path``.
+    """
+    root = cluster_container_root()
+    if root is None:
+        return None
+    return root / f"{project_name}_{version}.sif"
 
 
 def resolve_cluster_sif_path(
@@ -176,11 +198,12 @@ def sync_default_sge_json(
     version: str | None = None,
     dry_run: bool = False,
 ) -> Path:
-    """Sync repo ``.nvitk/sge.json`` from registry latest nvitk."""
-    root = _find_repo_root()
-    if root is None:
-        raise FileNotFoundError("Could not locate repository root")
-    sge_path = root / ".nvitk" / "sge.json"
-    if not sge_path.is_file():
-        raise FileNotFoundError(f"Missing {sge_path}")
+    """Sync the resolved ``sge.json`` from the registry's latest nvitk container."""
+    sge_path = config_paths.config_file("sge.json")
+    if sge_path is None:
+        raise FileNotFoundError(
+            "No sge.json found to sync.\n"
+            f"Looked in: {config_paths.describe_search('sge.json')}\n"
+            "Run `nvitk-config init` to create one."
+        )
     return sync_sge_nvitk_container(sge_path, version=version, dry_run=dry_run)

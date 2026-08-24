@@ -85,6 +85,7 @@ from nvitk.pipes.pesa_fat.dixon_v5 import config as dixon_cfg
 from nvitk.pipes.pesa_fat.dixon_v5 import run as dixon_run
 from nvitk.pipes.pesa_fat.common.sge_db import pesa_fat_sge_db_submission
 from nvitk.pipes.pesa_fat.common.stage4_qc import run_qc as run_stage4_qc
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -814,6 +815,7 @@ def _run_sge(
 
 
 @click.command("nvitk-pesa-fat")
+@config_dir_click_option()
 @backend_click_option()
 @click.option(
     "--batch",

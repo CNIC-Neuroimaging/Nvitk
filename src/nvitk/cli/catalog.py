@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -19,11 +19,25 @@ class ToolEntry:
     supports_gpu: bool = False
     requires_mask: bool = False
     library_only: bool = False
+    #: Whether ``command`` is a console script actually registered by the installed
+    #: distribution. Set by :func:`build_catalog_tree` from :func:`discover_scripts`;
+    #: only meaningful when :attr:`is_command` is true.
+    installed: bool = True
 
     @property
     def display_label(self) -> str:
         """Human-facing label: explicit ``label``, else the command, else the trailing module segment."""
         return self.label or self.command or self.module.rsplit(".", 1)[-1]
+
+    @property
+    def is_command(self) -> bool:
+        """True if this entry names a CLI command.
+
+        Declaring a ``command`` is what makes an entry a command — it wins over
+        ``library_only``, so a catalog entry can be promoted from a library reference to a
+        command by naming one, without also having to clear the ``library_only`` flag.
+        """
+        return bool(self.command)
 
 
 @dataclass
@@ -268,15 +282,23 @@ def build_catalog_tree(scripts: list[tuple[str, str]] | None = None) -> list[Cat
         if sub_id and sub_id in submodules:
             submodules[sub_id].tools.append(_tool_from_script(cmd, module))
 
+    # Commands the installed distribution actually registers, so a catalog entry that names
+    # a command it doesn't have can be flagged rather than silently looking like it works.
+    installed_cmds = {cmd for cmd, _ in scripts}
+
     for sub_id, lib_tools in _LIBRARY_TOOLS.items():
         existing_cmds = {t.command for t in submodules[sub_id].tools}
         for entry in lib_tools:
             if entry.command and entry.command in existing_cmds:
                 continue
-            submodules[sub_id].tools.append(entry)
+            # replace() rather than mutating: _LIBRARY_TOOLS holds module-level singletons
+            # that would otherwise carry state across calls.
+            submodules[sub_id].tools.append(
+                replace(entry, installed=entry.command in installed_cmds) if entry.command else entry
+            )
 
     for node in submodules.values():
-        node.tools.sort(key=lambda t: (t.library_only, t.command or t.display_label))
+        node.tools.sort(key=lambda t: (not t.is_command, t.command or t.display_label))
 
     image_children = [
         submodules[k]

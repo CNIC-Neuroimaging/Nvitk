@@ -9,9 +9,11 @@ import click
 from nvitk.cli._common import backend_option, dispatch_tool, io_options, submit_options
 from nvitk.io import imread
 from nvitk.transform import isotropy, oblique_slice, resample_to, rotate_volume
+from nvitk.core.click_config import config_dir_click_option
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Geometric transform tools."""
 

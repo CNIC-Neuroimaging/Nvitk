@@ -52,6 +52,7 @@ from nvitk.transform.resampling import resample_mask_to_pet
 from nvitk.types import Image
 from nvitk.viz import HotspotMode, show_hotspots
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
+from nvitk.core.click_config import config_dir_click_option
 
 
 log = Logger()
@@ -345,6 +346,7 @@ def _load_dixon_inputs(lay: BatchLayout, subject: str, resolved: DixonResolved) 
 
 
 @click.command("nvitk-pesa-fat-hotspot")
+@config_dir_click_option()
 @backend_click_option()
 @click.option("--subject", required=False, help="Subject id (e.g. PESA123).")
 @click.option("--measure", required=False, help="Measure id (use --list-measures).")

@@ -1,68 +1,38 @@
-"""Locate ``.nvitk/settings.json`` and read the ``db`` block."""
+"""Read ``settings.json`` and expose its ``db`` block.
+
+Where the file lives is decided by :mod:`nvitk.core.config_paths`; this module only knows how
+to interpret its contents.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
 
+from nvitk.core import config_paths
 
-def _find_repo_root() -> Path | None:
-    """Walk up from this file to find the repo root (the ancestor with ``pyproject.toml`` and
-    ``src/nvitk/``); ``None`` if not found (e.g. an installed, non-editable package)."""
-    here = Path(__file__).resolve()
-    for anc in [here.parent, *here.parents]:
-        if (anc / "pyproject.toml").is_file() and (anc / "src" / "nvitk").is_dir():
-            return anc
-    return None
+SETTINGS_JSON_NAME = "settings.json"
 
 
 def settings_json_path() -> Path | None:
-    """Return the first existing ``.nvitk/settings.json`` on the search path."""
-    candidates: list[Path] = []
-    root = _find_repo_root()
-    if root is not None:
-        candidates.append(root / ".nvitk" / "settings.json")
-    candidates.append(Path.cwd() / ".nvitk" / "settings.json")
-    env_home = os.environ.get("NVITK_HOME", "").strip()
-    if env_home:
-        candidates.append(Path(env_home).expanduser() / ".nvitk" / "settings.json")
-    env_json = os.environ.get("NVITK_SETTINGS_JSON", "").strip()
-    if env_json:
-        candidates.append(Path(env_json).expanduser())
-    # Installed package layout: …/src/nvitk/db/settings_paths.py -> repo root
-    pkg_parents = Path(__file__).resolve().parents
-    if len(pkg_parents) >= 4:
-        candidates.append(pkg_parents[3] / ".nvitk" / "settings.json")
+    """Locate ``settings.json``; see :func:`nvitk.core.config_paths.describe_search` for where."""
+    return config_paths.config_file(SETTINGS_JSON_NAME)
 
-    seen: set[Path] = set()
-    for path in candidates:
-        try:
-            key = path.resolve()
-        except OSError:
-            key = path
-        if key in seen:
-            continue
-        seen.add(key)
-        if path.is_file():
-            return path
-    return None
+
+def load_settings_document() -> dict[str, Any]:
+    """The whole parsed ``settings.json`` (``{}`` when absent).
+
+    ``nvitk.viz.atlas_sources`` needs the ``atlas`` block, which this module previously did not
+    expose — it re-opened and re-parsed the file itself. Exposing the document keeps a single
+    reader.
+    """
+    return config_paths.load_json(SETTINGS_JSON_NAME)
 
 
 def load_db_settings_block() -> dict[str, Any]:
-    """Parse the ``db`` section from settings, or return ``{}``."""
-    path = settings_json_path()
-    if path is None:
-        return {}
-    try:
-        with path.open(encoding="utf-8") as handle:
-            doc = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(doc, dict):
-        return {}
-    db = doc.get("db")
+    """The ``db`` section of settings, or ``{}``."""
+    db = load_settings_document().get("db")
     return db if isinstance(db, dict) else {}
 
 

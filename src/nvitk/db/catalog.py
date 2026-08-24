@@ -87,10 +87,16 @@ class DatasetCatalog:
         """Create a minimal dataset tree at *root* by copying the packaged catalog templates
         (manifests + schema) and creating empty ``tables/``/``cache/`` directories."""
         destination = Path(root).expanduser().resolve()
-        package_root = Path(__file__).resolve().parents[3]
-        template_root = package_root / "dataset" / "catalog"
-        if not template_root.exists():
-            template_root = package_root / "dataset" / "nvitk-dataset" / "catalog"
+        # Templates ship inside the package. They used to be read from
+        # ``<repo>/dataset/nvitk-dataset/catalog``, which only exists in a source checkout — so
+        # for a conda/pip install this produced an empty ``catalog/`` and no error, and the
+        # resulting "dataset" failed later with a missing-manifest message that pointed nowhere.
+        template_root = Path(__file__).resolve().parent / "catalog_templates"
+        if not template_root.is_dir():
+            raise FileNotFoundError(
+                f"Catalog templates are missing from the installation ({template_root}). "
+                "Reinstall nvitk, or create the dataset from an existing one."
+            )
         destination.mkdir(parents=True, exist_ok=True)
 
         catalog_files = (

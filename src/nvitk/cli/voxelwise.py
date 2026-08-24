@@ -10,6 +10,7 @@ from typing import Any, Sequence
 import click
 
 from nvitk.core.logger import Logger
+from nvitk.core.click_config import config_dir_click_option
 
 log = Logger()
 
@@ -501,6 +502,7 @@ def friendly_errors(f):
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@config_dir_click_option()
 def main() -> None:
     """Voxelwise analysis (FSL randomise).
 

@@ -1,4 +1,13 @@
-"""Filesystem layout helpers for qvtpy (local workstation vs cluster)."""
+"""Filesystem layout helpers for qvtpy (local workstation vs cluster).
+
+Every root comes from ``sge.json``'s ``pipelines.qvtpy_paths`` section — there are no
+installation paths in this file. A root that is needed but not configured raises
+:class:`~nvitk.core.config_paths.ConfigError` naming the key and the search path, rather than
+silently resolving to somebody else's filesystem.
+
+Configuration is read on use, not on import, so ``--config-dir`` and a mid-process
+:func:`~nvitk.core.config_paths.set_config_dir` are both honoured.
+"""
 
 from __future__ import annotations
 
@@ -7,27 +16,52 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nvitk.cluster import sge_json as _sj
+from nvitk.core import config_paths, lazy_config
 
-# Cluster defaults (SGE binds).
-DEFAULT_DICOM_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/DICOM")
-DEFAULT_NIFTI_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/DATA/NIFTI")
-DEFAULT_RESULTS_ROOT = Path("/data_lab_MCC/imarcoss/LabMCC/RESULTS/QVTPy")
-DEFAULT_TOTALSEG_MODEL_ROOT = Path("/data3/BIOIT_IMAGE/References/TotalSegmentator_v2/")
+#: ``sge.json`` section holding this pipeline's data roots.
+PIPELINE_PATHS_ID = "qvtpy_paths"
 
-# Workstation defaults (local machine).
-LOCAL_DEFAULT_DICOM_ROOT = Path("/home/imarcoss/DATA/LabVF/PESA-Brain/DATA/DICOM")
-LOCAL_DEFAULT_NIFTI_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/DATA/NIFTI")
-# LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/LabVF/PESA-Brain/RESULTS/res_QVTPy")
-LOCAL_DEFAULT_RESULTS_ROOT = Path("/home/imarcoss/DATA/LabVF/res_QVTPy")
-LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT = Path("/home/imarcoss/NetVolumes/LAB_MCC/ai_models/imaging/TotalSegmentator/v2.0.0")
 
-_ppaths = _sj.paths_section()
-_ppipe_paths = _sj.pipeline_section("qvtpy_paths")
+def _pipe_paths() -> dict:
+    """The ``pipelines.qvtpy_paths`` block, read fresh (and cached) on each use."""
+    return _sj.pipeline_section(PIPELINE_PATHS_ID)
 
-CLUSTER_HOST_ALIASES: dict[str, str] = {"samwise": "10.149.80.48"}
-CLUSTER_HOST_ALIASES = _sj.merge_cluster_host_aliases(
-    CLUSTER_HOST_ALIASES, _ppaths, _ppipe_paths
-)
+
+def _resolve_host_aliases() -> dict[str, str]:
+    """Cluster host aliases from ``paths.cluster_host_aliases`` plus this pipeline's overrides."""
+    return _sj.merge_cluster_host_aliases({}, _sj.paths_section(), _pipe_paths())
+
+
+def _opt_root(key: str):
+    """The configured root *key* as a :class:`~pathlib.Path`, or ``None`` if it is unset.
+
+    Deliberately does not raise. These names are read at import time as Click option defaults
+    (``default=cfg.DEFAULT_NIFTI_ROOT``), so raising here would break ``--help`` on a machine
+    with no configuration. ``None`` becomes "no default", and the error — naming the key and
+    the search path — is raised by :func:`layout_local` / :func:`layout_cluster` when the value
+    is actually needed to do work.
+    """
+    raw = _pipe_paths().get(key)
+    if raw is None or not str(raw).strip():
+        return None
+    return Path(os.path.expanduser(str(raw).strip()))
+
+
+#: Roots exposed as module attributes for backwards compatibility. The *values* live only in
+#: ``sge.json``; these are accessors, not defaults.
+_RESOLVERS: dict[str, lazy_config.Resolver] = {
+    "CLUSTER_HOST_ALIASES": _resolve_host_aliases,
+    "DEFAULT_DICOM_ROOT": lambda: _opt_root("cluster_dicom_root"),
+    "DEFAULT_NIFTI_ROOT": lambda: _opt_root("cluster_nifti_root"),
+    "DEFAULT_RESULTS_ROOT": lambda: _opt_root("cluster_results_root"),
+    "DEFAULT_TOTALSEG_MODEL_ROOT": lambda: _opt_root("cluster_model_root"),
+    "LOCAL_DEFAULT_DICOM_ROOT": lambda: _opt_root("local_dicom_root"),
+    "LOCAL_DEFAULT_NIFTI_ROOT": lambda: _opt_root("local_nifti_root"),
+    "LOCAL_DEFAULT_RESULTS_ROOT": lambda: _opt_root("local_results_root"),
+    "LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT": lambda: _opt_root("local_model_root"),
+}
+
+__getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
 
 
 @dataclass(frozen=True)
@@ -48,37 +82,37 @@ class QvtpyPaths:
 
 
 def _local_path_from_config(key: str, *, fallback: Path | None) -> Path:
-    """Resolve a local-workstation path setting *key* (e.g. ``"nifti_root"``): *fallback* if given,
-    else the ``local_<key>`` value from ``sge.json``, else the hardcoded local default."""
-    config_key = f"local_{key}"
-    raw = _ppipe_paths.get(config_key)
+    """A local-workstation root: *fallback* (the CLI flag) if given, else ``local_<key>``.
+
+    The CLI flag wins here. Under ``--submit sge`` the opposite holds — see
+    :func:`_cluster_path_from_config`.
+    """
     if fallback is not None:
         return Path(fallback)
-    if raw is not None and str(raw).strip():
-        return Path(os.path.expanduser(str(raw).strip()))
-    return {
-        "dicom_root": LOCAL_DEFAULT_DICOM_ROOT,
-        "nifti_root": LOCAL_DEFAULT_NIFTI_ROOT,
-        "results_root": LOCAL_DEFAULT_RESULTS_ROOT,
-        "model_root": LOCAL_DEFAULT_TOTALSEG_MODEL_ROOT,
-    }[key]
+    raw = _pipe_paths().get(f"local_{key}")
+    return Path(os.path.expanduser(str(config_paths.require(
+        raw,
+        key=f"pipelines.{PIPELINE_PATHS_ID}.local_{key}",
+        hint="Set it, or pass the matching --*-root flag.",
+    )).strip()))
 
 
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
-    """Resolve a cluster path setting *key*: the ``cluster_<key>`` value from ``sge.json`` if set,
-    else *fallback*, else the hardcoded cluster default."""
-    config_key = f"cluster_{key}"
-    raw = _ppipe_paths.get(config_key)
+    """Resolve a cluster path setting *key* (e.g. ``"nifti_root"``): the ``cluster_<key>`` value
+    from ``sge.json`` if set, else *fallback*, else the hardcoded cluster default.
+
+    *key* is unprefixed, matching :func:`_local_path_from_config`. The prefix is added here.
+    """
+    raw = _pipe_paths().get(f"cluster_{key}")
     if raw is not None and str(raw).strip():
         return Path(os.path.expanduser(str(raw).strip()))
     if fallback is not None:
         return Path(fallback)
-    return {
-        "cluster_dicom_root": DEFAULT_DICOM_ROOT,
-        "cluster_nifti_root": DEFAULT_NIFTI_ROOT,
-        "cluster_results_root": DEFAULT_RESULTS_ROOT,
-        "model_root": DEFAULT_TOTALSEG_MODEL_ROOT,
-    }[key]
+    return Path(os.path.expanduser(str(config_paths.require(
+        None,
+        key=f"pipelines.{PIPELINE_PATHS_ID}.cluster_{key}",
+        hint="Set it, or pass the matching --*-root flag.",
+    ))))
 
 
 def _local_totalseg_model_from_config(*, fallback: Path | None) -> Path:
@@ -142,13 +176,13 @@ def layout_cluster(
     """Cluster-side layout for SGE Singularity binds."""
     return QvtpyPaths(
         dicom_root=_cluster_path_from_config(
-            "cluster_dicom_root", fallback=Path(dicom_root) if dicom_root else None
+            "dicom_root", fallback=Path(dicom_root) if dicom_root else None
         ),
         nifti_root=_cluster_path_from_config(
-            "cluster_nifti_root", fallback=Path(nifti_root) if nifti_root else None
+            "nifti_root", fallback=Path(nifti_root) if nifti_root else None
         ),
         results_root=_cluster_path_from_config(
-            "cluster_results_root", fallback=Path(results_root) if results_root else None
+            "results_root", fallback=Path(results_root) if results_root else None
         ),
     )
 
