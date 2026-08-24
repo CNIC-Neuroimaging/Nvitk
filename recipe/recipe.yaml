@@ -78,7 +78,7 @@ requirements:
     # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
     #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
     #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
-    - qt ==5.15.15
+    - qt ==6.11.0
     - qtpy ==2.4.3
     - pyqt6 ==6.11.0
     - napari ==0.7.0
