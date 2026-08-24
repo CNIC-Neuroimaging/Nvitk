@@ -58,7 +58,7 @@ requirements:
     # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
     - r-base ==4.5.3
-    - rpy2 ==3.6.0
+    - rpy2 ==3.6.2
     - r-lme4 ==2.0_6
     - r-lmertest ==3.2_1
     - r-mmrm ==0.3.18
