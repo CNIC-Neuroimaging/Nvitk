@@ -43,11 +43,11 @@ build:
 
 requirements:
   host:
-    - python ==3.11.15
-    - pip
-    - setuptools >=61.0
-    - wheel
-    - setuptools_scm >=6.0
+    - conda-forge::python ==3.11.15
+    - conda-forge::pip
+    - conda-forge::setuptools >=61.0
+    - conda-forge::wheel
+    - conda-forge::setuptools_scm >=6.0
   run:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
     - conda-forge::pip
