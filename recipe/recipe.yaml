@@ -43,7 +43,7 @@ build:
 
 requirements:
   host:
-    - python >=3.10,<3.12
+    - python ==3.11.15
     - pip
     - setuptools >=61.0
     - wheel
@@ -52,37 +52,38 @@ requirements:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.
     - pip
     # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
-    - python >=3.10,<3.12
-    - numpy >=2.3.3
-    - dvc >=3.67.1
+    - python ==3.11.15
+    - numpy ==2.3.3
+    - dvc ==3.67.1
     # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
-    - r-base >=4.5.3
-    - rpy2 >=3.6.0
-    - r-lme4 >=2.0_6
-    - r-lmertest >=3.2_1
-    - r-mmrm >=0.3.18
-    - r-emmeans >=2.0.4
-    - r-parameters >=0.29.2
-    - r-performance >=0.17.1
-    - r-report >=0.6.4
-    - r-tibble >=3.3.1
-    - r-broom >=1.0.13
-    - r-broom.mixed >=0.2.9.7
-    - r-insight >=1.5.2
-    - r-robustbase >=0.99_7
+    - r-base ==4.5.3
+    - rpy2 ==3.6.0
+    - r-lme4 ==2.0_6
+    - r-lmertest ==3.2_1
+    - r-mmrm ==0.3.18
+    - r-emmeans ==2.0.4
+    - r-parameters ==0.29.2
+    - r-performance ==0.17.1
+    - r-report ==0.6.4
+    - r-tibble ==3.3.1
+    - r-broom ==1.0.13
+    - r-broom.mixed ==0.2.9.7
+    - r-insight ==1.5.2
+    - r-robustbase ==0.99_7
     # ── Conda-only extras ([tool.pixi.dependencies]) ────────
-    - mrtrix3 >=3.0.8
-    - freeimage >=3.18.0
-    - libstdcxx-ng >=15.2.0
+    - mrtrix3 ==3.0.8
+    - freeimage ==3.18.0
+    - libstdcxx-ng ==15.2.0
     # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
     #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
     #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
-    - qtpy
-    - pyqt6 >=6.11.0
-    - napari >=0.7.0
-    - magicgui >=0.8.0
-    - superqt >=0.6.0
+    - qt ==5.15.15
+    - qtpy ==2.4.3
+    - pyqt6 ==6.11.0
+    - napari ==0.7.0
+    - magicgui ==0.10.2
+    - superqt ==0.8.2
 
 tests:
   # A real `import nvitk` needs the pip-only packages post-link.sh installs, which
