@@ -51,6 +51,7 @@ requirements:
   run:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
     # - conda-forge::pip
+    - pip
     # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
     - python ==3.11.15
     - numpy ==2.3.3

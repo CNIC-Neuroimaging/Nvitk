@@ -37,7 +37,7 @@ log "installing image IO..."
 
 log "installing general image processing (simpleitk/antspyx: see recipe.yaml for why these can't be conda run-deps)..."
 "$PIP" install --no-cache-dir \
-  "scikit-image==0.25.2" "opencv-python==4.11" "vtk==9.3.1" "SimpleITK==2.2.1" "antspyx==0.6.3" \
+  "scikit-image==0.25.2" "opencv-python==4.13.0.92" "vtk==9.6.1" "SimpleITK==2.2.1" "antspyx==0.6.3" \
   >>"$LOG" 2>&1
 
 log "installing neuroimaging/segmentation tools..."
