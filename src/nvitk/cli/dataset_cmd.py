@@ -59,16 +59,38 @@ def _require_dvc() -> str:
 
 
 def _dataset_root() -> Path:
-    """Where the dataset should land, from ``db.root``."""
-    root = _setting("root")
-    if not root:
+    """Where the dataset should land.
+
+    Uses the *same* resolution as :class:`~nvitk.db.repo.DataRepo` rather than reading
+    ``db.root`` directly — ``local_fallback_root`` takes precedence over ``root`` there, so
+    resolving it independently here would download the data to one directory while the rest of
+    nvitk read from another.
+    """
+    from nvitk.db.repo import _local_dataset_root_from_settings
+
+    db = load_db_settings_block()
+    if not db:
         raise click.ClickException(
             "No dataset location configured.\n"
             f'Set "db.root" in settings.json — looked in: '
             f"{config_paths.describe_search('settings.json')}\n"
             "Run `nvitk-config init` if you have no configuration yet."
         )
-    return Path(root).expanduser()
+    if not (str(db.get("local_fallback_root") or "").strip() or str(db.get("root") or "").strip()):
+        raise click.ClickException(
+            'Neither "db.root" nor "db.local_fallback_root" is set in settings.json.\n'
+            f"Looked in: {config_paths.describe_search('settings.json')}"
+        )
+    return Path(_local_dataset_root_from_settings(db)).expanduser()
+
+
+def _root_origin() -> str:
+    """Which setting produced the destination, for output that can be sanity-checked."""
+    if _setting("local_fallback_root"):
+        return "from db.local_fallback_root"
+    if _setting("root"):
+        return "from db.root"
+    return "default location — set db.local_fallback_root to choose another"
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -106,7 +128,7 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool) -> Non
     skipped = [t for t in TARGETS if not (want_all or not t[1])]
 
     click.echo(f"repository : {repo}")
-    click.echo(f"destination: {root}")
+    click.echo(f"destination: {root}   ({_root_origin()})")
     if remote_url:
         click.echo(f"remote     : {remote_url}  (from db.dvc_remote_url)")
     else:
@@ -160,7 +182,7 @@ def status_cmd() -> None:
         click.echo(f"destination     : {click.style('not configured', fg='yellow')}")
         click.echo(f"\n{exc.message}")
         return
-    click.echo(f"destination     : {root}")
+    click.echo(f"destination     : {root}   ({_root_origin()})")
     click.echo(f"dvc             : {shutil.which('dvc') or click.style('not installed', fg='yellow')}")
     click.echo("")
     for name, heavy, description in TARGETS:

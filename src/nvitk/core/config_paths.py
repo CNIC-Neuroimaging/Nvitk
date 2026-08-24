@@ -203,6 +203,19 @@ def default_config_dir() -> Path:
     return xdg / "nvitk"
 
 
+def default_data_dir() -> Path:
+    """Where nvitk keeps user data it manages itself (datasets, and similar).
+
+    ``$XDG_DATA_HOME/nvitk`` or ``~/.local/share/nvitk`` — the standard location for
+    application data on Linux, and the counterpart of :func:`default_config_dir`. Notably *not*
+    a repository-shaped path: someone who installed from conda has no checkout, and a
+    ``~/nvitk/dataset/...`` directory appearing in their home both looks like a clone and
+    invites confusion with a real one.
+    """
+    xdg = _expand(os.environ.get("XDG_DATA_HOME")) or (Path.home() / ".local" / "share")
+    return xdg / "nvitk"
+
+
 def config_dir() -> Path | None:
     """The first existing configuration directory, or ``None`` if none exists."""
     for path, _why in candidate_dirs():
@@ -329,6 +342,7 @@ __all__ = [
     "config_dir",
     "config_file",
     "default_config_dir",
+    "default_data_dir",
     "source_checkout_root",
     "describe_search",
     "generation",

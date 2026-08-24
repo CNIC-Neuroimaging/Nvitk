@@ -47,11 +47,25 @@ log = Logger()
 
 
 def _default_dataset_root() -> Path:
-    """Resolve the dataset root: ``NVITK_DATASET_ROOT`` if set, else ``<repo>/dataset/nvitk-dataset``."""
+    """The dataset root when nothing is configured.
+
+    ``NVITK_DATASET_ROOT`` wins. Otherwise a source checkout keeps its dataset where it always
+    has (``<repo>/dataset/nvitk-dataset``), and an installed package uses the standard user
+    data directory — ``~/.local/share/nvitk/dataset``.
+
+    The installed case matters: this used to be ``Path(__file__).parents[3]/dataset/...``,
+    which in a conda install resolves to a nonexistent directory beside ``site-packages``, and
+    a repository-shaped path is meaningless to someone who never cloned anything.
+    """
+    from nvitk.core import config_paths
+
     env_root = os.getenv("NVITK_DATASET_ROOT")
     if env_root:
         return Path(env_root).expanduser().resolve()
-    return Path(__file__).resolve().parents[3] / "dataset" / "nvitk-dataset"
+    checkout = config_paths.source_checkout_root()
+    if checkout is not None:
+        return checkout / "dataset" / "nvitk-dataset"
+    return config_paths.default_data_dir() / "dataset"
 
 
 def _local_dataset_root_from_settings(db: dict[str, Any]) -> str | Path:

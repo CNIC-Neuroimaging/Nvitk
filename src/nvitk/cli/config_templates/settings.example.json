@@ -31,10 +31,13 @@
     "statmodels_root": "<PATH_FOR_SAVED_STATS_MODELS>",
 
     "_comment_fallback": [
-      "local_fallback_root takes precedence over root when set — it exists so a laptop can",
-      "point at a local copy without editing 'root'. Leave it null unless you need it."
+      "Where the dataset actually lives on THIS machine. Takes precedence over 'root', so a",
+      "shared configuration can name the canonical location in 'root' while each user keeps a",
+      "local copy here. '~' expands per user, so one value works for everybody.",
+      "Left unset, nvitk uses ~/.local/share/nvitk/dataset for an installed package, or",
+      "<repo>/dataset/nvitk-dataset inside a source checkout."
     ],
-    "local_fallback_root": null,
+    "local_fallback_root": "~/.local/share/nvitk/dataset",
 
     "_comment_sge": "Dataset root as seen from inside a cluster job / container.",
     "sge_root": "<PATH_TO_NVITK_DATASET_ON_CLUSTER>",

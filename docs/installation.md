@@ -87,6 +87,13 @@ This works from a plain conda install with no checkout: `dvc get` reads the poin
 out of the public repository and fetches the content from the configured remote. It needs the
 storage mounted and `dvc` installed (`conda install -c conda-forge dvc`).
 
+The dataset is written to `db.local_fallback_root` (or `db.root` if that is unset). With
+neither set, nvitk uses `~/.local/share/nvitk/dataset` for an installed package, or
+`<repo>/dataset/nvitk-dataset` inside a source checkout — so a conda install never invents a
+repository-shaped directory in your home. `nvitk-dataset status` prints the resolved location
+*and which setting produced it*, which is the check worth running before a multi-gigabyte
+transfer.
+
 ```{tip}
 `--all` is rarely worth it. The SQLite index is derived from the tables and rebuilds locally in
 about 15 seconds — far quicker than transferring 1.3 GB:
