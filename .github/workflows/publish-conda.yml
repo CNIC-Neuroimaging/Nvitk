@@ -11,7 +11,8 @@ on:
   workflow_dispatch: {}
 
 env:
-  CHANNELS: -c conda-forge -c bioconda -c mrtrix3 -c ejolly -c main
+  # -c ejolly -c bioconda
+  CHANNELS: -c conda-forge -c mrtrix3 -c main
 
 jobs:
   build-and-publish:

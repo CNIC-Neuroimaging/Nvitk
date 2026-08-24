@@ -6,13 +6,14 @@
 channel with the full `nvitk[all]` feature set (GUI, GPU/CUDA 13, and R-based statistics)
 bundled in — there is no separate CPU/GPU profile to choose.
 
-```bash
-conda config --add channels bioconda
-conda config --add channels mrtrix3
+<!-- conda config --add channels bioconda
 conda config --add channels ejolly
+conda config --set channel_priority strict -->
+
+```bash
+conda config --add channels mrtrix3
 conda config --add channels cnic
 conda config --add channels conda-forge
-conda config --set channel_priority strict
 
 conda create -n nvitk-env nvitk
 conda activate nvitk-env
