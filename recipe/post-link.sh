@@ -64,20 +64,25 @@ log "installing PyQt6-WebEngine (no conda-forge package yet; --no-deps keeps con
 "$PIP" install --no-cache-dir --no-deps "PyQt6-WebEngine>=6.11.0" \
   >>"$LOG" 2>&1
 
-log "installing pyradiomics/pydicom (no-build-isolation, matching pixi's handling)..."
-"$PIP" install --no-cache-dir --no-build-isolation \
-  "pyradiomics==3.0.1" "pydicom==3.0.1" \
-  >>"$LOG" 2>&1
-
 log "installing CUDA 13 PyTorch stack from the cu130 wheel index..."
 "$PIP" install --no-cache-dir \
   --extra-index-url https://download.pytorch.org/whl/cu130 \
-  "torch==2.9.0" "torchvision==0.24.0" \
+  "torch>=2.9.0" "torchvision>=0.24.0" \
   >>"$LOG" 2>&1
 
 log "installing remaining CUDA 13 GPU stack (cupy/cutensor/nccl)..."
 "$PIP" install --no-cache-dir \
-  "cupy-cuda13x==13.6.0" "cutensor-cu13==2.6.0" "nvidia-nccl-cu13==2.27.7" \
+  "cupy-cuda13x>=13.6.0" "cutensor-cu13>=2.6.0" "nvidia-nccl-cu13>=2.27.7" \
+  >>"$LOG" 2>&1
+
+log "installing pyradiomics (no-build-isolation, matching pixi's handling)..."
+"$PIP" install --no-cache-dir --no-build-isolation \
+  "pyradiomics==3.0.1" \
+  >>"$LOG" 2>&1
+
+log "installing pydicom (no-build-isolation, matching pixi's handling)..."
+"$PIP" install --no-cache-dir --no-build-isolation \
+  "pydicom==3.0.1" \
   >>"$LOG" 2>&1
 
 log "done."
