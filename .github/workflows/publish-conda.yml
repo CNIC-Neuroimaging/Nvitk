@@ -38,7 +38,8 @@ jobs:
           rattler-build build \
             -r recipe/recipe.yaml \
             $CHANNELS \
-            --output-dir output
+            --output-dir output \
+            --channel-priority disabled
 
       - name: Smoke-test install from local build output
         # Uses `conda create`, not `mamba create`: verified locally that mamba does not
