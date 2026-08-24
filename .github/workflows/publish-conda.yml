@@ -11,8 +11,8 @@ on:
   workflow_dispatch: {}
 
 env:
-  # -c ejolly -c bioconda
-  CHANNELS: -c conda-forge -c mrtrix3 -c main
+  # -c ejolly -c bioconda -c mrtrix3 -c main
+  CHANNELS: -c conda-forge 
 
 jobs:
   build-and-publish:
@@ -39,9 +39,7 @@ jobs:
           rattler-build build \
             -r recipe/recipe.yaml \
             $CHANNELS \
-            --output-dir output \
-            --channel-priority disabled \
-            --test skip
+            --output-dir output
 
       - name: Smoke-test install from local build output
         # Uses `conda create`, not `mamba create`: verified locally that mamba does not

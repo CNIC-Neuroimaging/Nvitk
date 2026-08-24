@@ -43,48 +43,47 @@ build:
 
 requirements:
   host:
-    - conda-forge::python ==3.11.15
-    - conda-forge::pip
-    - conda-forge::setuptools >=61.0
-    - conda-forge::wheel
-    - conda-forge::setuptools_scm >=6.0
+    - python ==3.11.15
+    - pip
+    - setuptools >=61.0
+    - wheel
+    - setuptools_scm >=6.0
   run:
     # pip itself must be present at runtime for post-link.sh / pre-unlink.sh to use.  
     # - conda-forge::pip
     # ── Conda-native core ([tool.pixi.feature.gpu.dependencies]) ────
-    - conda-forge::python ==3.11.15
-    - conda-forge::numpy ==2.3.3
-    - conda-forge::dvc ==3.67.1
+    - python ==3.11.15
+    - numpy ==2.3.3
+    - dvc ==3.67.1
     # ── Stats / R ([tool.pixi.feature.stats.dependencies];
     #    pymer4/great-tables/formulae stay pip-only, see post-link.sh) ───────
-    - conda-forge::r-base ==4.5.3
-    - conda-forge::rpy2 ==3.6.2
-    - conda-forge::r-lme4 ==2.0_6
-    - conda-forge::r-lmertest ==3.2_1
-    - conda-forge::r-mmrm ==0.3.18
-    - conda-forge::r-emmeans ==2.0.4
-    - conda-forge::r-parameters ==0.29.2
-    - conda-forge::r-performance ==0.17.1
-    - conda-forge::r-report ==0.6.4
-    - conda-forge::r-tibble ==3.3.1
-    - conda-forge::r-broom ==1.0.13
-    - conda-forge::r-broom.mixed ==0.2.9.7
-    - conda-forge::r-insight ==1.5.2
-    - conda-forge::r-robustbase ==0.99_7
+    - r-base ==4.5.3
+    - rpy2 ==3.6.2
+    - r-lme4 ==2.0_6
+    - r-lmertest ==3.2_1
+    - r-mmrm ==0.3.18
+    - r-emmeans ==2.0.4
+    - r-parameters ==0.29.2
+    - r-performance ==0.17.1
+    - r-report ==0.6.4
+    - r-tibble ==3.3.1
+    - r-broom ==1.0.13
+    - r-broom.mixed ==0.2.9.7
+    - r-insight ==1.5.2
+    - r-robustbase ==0.99_7
     # ── Conda-only extras ([tool.pixi.dependencies]) ────────
-    - mrtrix3::mrtrix3 ==3.0.8
-    - conda-forge::freeimage ==3.18.0
-    - conda-forge::libstdcxx-ng ==15.2.0
+    # - mrtrix3::mrtrix3 ==3.0.8
+    - freeimage ==3.18.0
+    - libstdcxx-ng ==15.2.0
     # ── GUI ([project.optional-dependencies].gui; Qt from conda-forge for a
     #    consistent harfbuzz/freetype stack — PyQt6-WebEngine stays pip-only in
     #    post-link.sh until conda-forge ships pyqt6-webengine) ───────────────
-    # - main::qt ==6.11.0
-    - conda-forge::qt6-main ==6.11.0
-    - conda-forge::qtpy ==2.4.3
-    - conda-forge::pyqt6 ==6.11.0
-    - conda-forge::napari ==0.7.0
-    - conda-forge::magicgui ==0.10.2
-    - conda-forge::superqt ==0.8.2
+    - pyqt6 ==6.11.0
+    - qt6-main ==6.11.0
+    - qtpy ==2.4.3
+    - napari ==0.7.0
+    - magicgui ==0.10.2
+    - superqt ==0.8.2
 
 tests:
   # A real `import nvitk` needs the pip-only packages post-link.sh installs, which
