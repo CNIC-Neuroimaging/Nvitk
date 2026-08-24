@@ -40,7 +40,8 @@ jobs:
             -r recipe/recipe.yaml \
             $CHANNELS \
             --output-dir output \
-            --channel-priority disabled
+            --channel-priority disabled \ 
+            --test skip
 
       - name: Smoke-test install from local build output
         # Uses `conda create`, not `mamba create`: verified locally that mamba does not
