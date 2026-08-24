@@ -19,25 +19,25 @@ log "starting pip-only dependency install into $PREFIX"
 
 log "installing core (data/plotting/logging)..."
 "$PIP" install --no-cache-dir \
-  "scipy==1.15.3" "pandas==2.3.2" "polars==1.43.2" "pyarrow==21.0.0" "click==8.2.1" \
-  "jupyter==1.1.1" "ipywidgets==8.1.5" "openpyxl==3.1.5" "lazy-loader==0.4" \
+  "scipy>=1.15.3" "pandas>=2.3.2" "polars>=1.43.2" "pyarrow>=21.0.0" "click>=8.2.1" \
+  "jupyter>=1.1.1" "ipywidgets>=8.1.5" "openpyxl>=3.1.5" "lazy-loader>=0.4" \
   >>"$LOG" 2>&1
 
 log "installing visualization/plotting/logging..."
 "$PIP" install --no-cache-dir \
-  "matplotlib==3.8.0" "plotly==6.3.0" "kaleido==1.0.0" "pyvista==0.48.0" \
-  "seaborn==0.13.2" "rich==14.1.0" "trame==3.6.0" "trame-vtk==2.5.8,<2.11.9" \
+  "matplotlib>=3.8.0" "plotly>=6.3.0" "kaleido>=1.0.0" "pyvista>=0.48.0" \
+  "seaborn>=0.13.2" "rich>=14.1.0" "trame>=3.6.0" "trame-vtk>=2.5.8,<2.11.9" \
   >>"$LOG" 2>&1
 
 log "installing image IO..."
 "$PIP" install --no-cache-dir \
-  "imageio==2.37.0" "pillow==11.0.0" "nibabel==5.3.2" "tifffile==2025.5.26" \
-  "nd2==0.10.3" "dicom2nifti==2.6.1" "pylibjpeg==2.0.1" "h5py==3.16.0" \
+  "imageio>=2.37.0" "pillow>=11.0.0" "nibabel>=5.3.2" "tifffile>=2025.5.26" \
+  "nd2>=0.10.3" "dicom2nifti>=2.6.1" "pylibjpeg>=2.0.1" "h5py>=3.16.0" \
   >>"$LOG" 2>&1
 
 log "installing general image processing (simpleitk/antspyx: see recipe.yaml for why these can't be conda run-deps)..."
 "$PIP" install --no-cache-dir \
-  "scikit-image>=0.25.2" "opencv-python>=4.13.0.92" "vtk>=9.6.1" "SimpleITK>=2.2.1" "antspyx>=0.6.3" \
+  "scikit-image>=0.25.2" "opencv-python>=4.13.0.92" "vtk>=9.6.1" "SimpleITK==2.2.1" "antspyx>=0.6.3" \
   >>"$LOG" 2>&1
 
 log "installing neuroimaging/segmentation tools..."
@@ -66,7 +66,7 @@ log "installing PyQt6-WebEngine (no conda-forge package yet; --no-deps keeps con
 
 log "installing pyradiomics/pydicom (no-build-isolation, matching pixi's handling)..."
 "$PIP" install --no-cache-dir --no-build-isolation \
-  "pyradiomics>=3.0.1" "pydicom>=3.0.1" \
+  "pyradiomics==3.0.1" "pydicom==3.0.1" \
   >>"$LOG" 2>&1
 
 log "installing CUDA 13 PyTorch stack from the cu130 wheel index..."
