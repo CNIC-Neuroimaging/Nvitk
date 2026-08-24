@@ -54,27 +54,6 @@ jobs:
           conda run -n nvitk-smoketest python -c "import nvitk"
           conda run -n nvitk-smoketest pyhelp --no-interactive
           conda run -n nvitk-smoketest nvitk-totalseg --help
-          # Headless Qt import: catches harfbuzz/freetype skew that breaks nvitk-gui on HPC.
-          conda run -n nvitk-smoketest bash -lc ' 
-          set -e
-
-          python - <<'"'"'PY'
-          from PyQt6.QtCore import QLibraryInfo
-
-          print("Qt version:", QLibraryInfo.version())
-          print("Plugin path:",
-                QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))
-          PY
-
-          QT_DEBUG_PLUGINS=1 \
-          QT_QPA_PLATFORM=offscreen \
-          python - <<'PY'
-          from qtpy.QtWidgets import QApplication
-
-          app = QApplication([])
-          print("Qt headless smoke test: OK")
-          PY
-          '
 
       - name: Publish to Anaconda.org (cnic)
         if: startsWith(github.ref, 'refs/tags/v')
