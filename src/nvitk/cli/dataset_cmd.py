@@ -84,6 +84,66 @@ def _dataset_root() -> Path:
     return Path(_local_dataset_root_from_settings(db)).expanduser()
 
 
+def _entries(path: Path) -> list[Path]:
+    """Visible entries directly under *path*, or ``[]`` when it is not a readable directory."""
+    if not path.is_dir():
+        return []
+    try:
+        return [p for p in path.iterdir() if not p.name.startswith(".")]
+    except OSError:
+        return []
+
+
+def _file_count(path: Path) -> int:
+    """Number of files anywhere under *path* (0 when it is missing or holds only directories)."""
+    if not path.is_dir():
+        return 0
+    try:
+        return sum(1 for f in path.rglob("*") if f.is_file() and not f.name.startswith("."))
+    except OSError:
+        return 0
+
+
+def _is_populated(path: Path) -> bool:
+    """True when *path* contains at least one file, anywhere beneath it.
+
+    Counting *files* rather than entries matters: ``DatasetCatalog.create_scaffold`` leaves a
+    ``catalog/schema/`` subdirectory behind, so an "is it empty" test based on directory
+    entries calls that tree populated and skips the download — the user then sees a confident
+    "already present" over an empty dataset.
+    """
+    return _file_count(path) > 0
+
+
+def _nested_inside(path: Path, name: str) -> Path | None:
+    """The ``path/name`` directory when *path* holds only that — the shape a nested fetch leaves.
+
+    ``dvc get -o DIR`` places the fetched directory *inside* ``DIR`` when ``DIR`` already
+    exists, producing ``tables/tables/…``. Detecting it lets the fetch repair itself and lets
+    :func:`status_cmd` report a tree left broken by an earlier run.
+    """
+    inner = path / name
+    entries = _entries(path)
+    if inner.is_dir() and len(entries) == 1 and entries[0].name == name:
+        return inner
+    return None
+
+
+def _describe(path: Path, name: str) -> tuple[str, str]:
+    """``(state, detail)`` for *path*: what is there, and how much of it."""
+    if not path.exists():
+        return "missing", ""
+    if not path.is_dir():
+        return "not a directory", ""
+    if _nested_inside(path, name) is not None:
+        return "NESTED", f"contents are under {name}/{name}/ — re-run with --force"
+    files = _file_count(path)
+    if files == 0:
+        return "empty", "no files — not yet downloaded"
+    total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return "present", f"{files} files, {total / 1e6:.1f} MB"
+
+
 def _root_origin() -> str:
     """Which setting produced the destination, for output that can be sanity-checked."""
     if _setting("local_fallback_root"):
@@ -138,11 +198,17 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool) -> Non
     failures = 0
     for name, _heavy, description in selected:
         destination = root / name
-        if destination.exists() and not force:
-            click.echo(f"  {name:9} already present — skipping (use --force to replace)")
+        if _is_populated(destination) and _nested_inside(destination, name) is None and not force:
+            state, detail = _describe(destination, name)
+            click.echo(f"  {name:9} already present ({detail}) — skipping, use --force to replace")
             continue
 
-        command = [dvc, "get", repo, f"{REPO_DATASET_PATH}/{name}", "-o", str(destination)]
+        # Fetch into a staging path that cannot already exist. `dvc get -o DIR` puts the
+        # fetched directory *inside* DIR when DIR exists, which yields tables/tables/… and
+        # leaves the data where nothing can find it. Staging also means a failed or partial
+        # download never touches whatever is already in place.
+        staging = root / f".{name}.incoming"
+        command = [dvc, "get", repo, f"{REPO_DATASET_PATH}/{name}", "-o", str(staging)]
         if rev:
             command += ["--rev", rev]
         # Lets a user whose mount differs from the committed one override it without editing
@@ -152,16 +218,35 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool) -> Non
 
         if dry_run:
             click.echo("  " + " ".join(command))
+            click.echo(f"  {'':9} then move {staging.name} -> {name}")
             continue
 
         click.echo(f"  {name:9} {description}")
+        shutil.rmtree(staging, ignore_errors=True)
         result = subprocess.run(command)
-        if result.returncode != 0:
+
+        if result.returncode != 0 or not _is_populated(staging):
             failures += 1
+            shutil.rmtree(staging, ignore_errors=True)
             click.echo(
                 click.style(f"  {name:9} FAILED", fg="red")
                 + " — is the storage location mounted, and do you have access to it?"
             )
+            continue
+
+        # Defensive: if a future DVC still nests despite the fresh path, flatten it rather
+        # than handing back an unusable tree.
+        inner = _nested_inside(staging, name)
+        if inner is not None:
+            lifted = root / f".{name}.lifted"
+            shutil.rmtree(lifted, ignore_errors=True)
+            inner.rename(lifted)
+            shutil.rmtree(staging, ignore_errors=True)
+            lifted.rename(staging)
+
+        if destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        staging.rename(destination)
 
     for name, _heavy, description in skipped:
         click.echo(f"\n  {name} not fetched ({description}). Use --all to include it, or rebuild it with:")
@@ -185,10 +270,20 @@ def status_cmd() -> None:
     click.echo(f"destination     : {root}   ({_root_origin()})")
     click.echo(f"dvc             : {shutil.which('dvc') or click.style('not installed', fg='yellow')}")
     click.echo("")
+    problems = 0
     for name, heavy, description in TARGETS:
-        present = (root / name).exists()
-        mark = click.style("present", fg="green") if present else "missing"
-        click.echo(f"  {name:9} {mark:18} {description}{'  [--all]' if heavy else ''}")
+        state, detail = _describe(root / name, name)
+        colour = {"present": "green", "missing": None, "empty": "yellow"}.get(state, "red")
+        if state not in {"present", "missing"}:
+            problems += 1
+        label = click.style(state, fg=colour) if colour else state
+        click.echo(f"  {name:9} {label:24} {detail or description}{'  [--all]' if heavy else ''}")
+
+    if problems:
+        click.echo(
+            "\nSomething is only partly there. `nvitk-dataset pull --force` replaces a target "
+            "cleanly; an empty directory is fetched by a plain `pull`."
+        )
 
 
 if __name__ == "__main__":

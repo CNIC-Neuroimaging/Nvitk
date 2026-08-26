@@ -24,6 +24,7 @@ from nvitk.gui.core.log_panel import build_log_dock_widget
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
 from nvitk.gui.panels.image_properties import ImagePropertiesPanel
+from nvitk.gui.viz.ct_window_panel import CTWindowPanel
 from nvitk.gui.tools.dock import build_tools_dock
 from nvitk.gui.core.warnings import install_napari_display_warnings
 
@@ -116,6 +117,8 @@ def run_app() -> None:
     )
     dicom_tags_panel = DicomTagsPanel()
     image_props_panel = ImagePropertiesPanel()
+    ct_window_panel = CTWindowPanel()
+    ct_window_panel.set_viewer(viewer)
 
     def _on_xnat_inputs_opened(paths: list[str]) -> None:
         """Record newly opened XNAT/data-browser input paths in the app registry."""
@@ -420,6 +423,7 @@ def run_app() -> None:
     layers_layout.addWidget(layer_list)
     layers_layout.addWidget(layers_panel.native)
     layers_layout.addWidget(layers_refresh_panel.native)
+    layers_layout.addWidget(ct_window_panel)
     layers_layout.addStretch(1)
     layers_tab.setLayout(layers_layout)
 

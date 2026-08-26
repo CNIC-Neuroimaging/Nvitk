@@ -69,6 +69,12 @@ log "installing CUDA 13 PyTorch stack from the cu130 wheel index..."
   --extra-index-url https://download.pytorch.org/whl/cu130 \
   "torch>=2.9.0" "torchvision>=0.24.0" \
   >>"$LOG" 2>&1
+  
+log "installing PyTorch/nnSSL extras..."
+"$PIP" install --no-cache-dir \
+  "lightning-bolts>=0.7.0" "pytorch-msssim>=1.0.0" "torchio>=1.2.1" \
+  "lpips>=0.1.4" "loguru==0.7.3" "wandb==0.28.1" \
+  >>"$LOG" 2>&1
 
 log "installing remaining CUDA 13 GPU stack (cupy/cutensor/nccl)..."
 "$PIP" install --no-cache-dir \

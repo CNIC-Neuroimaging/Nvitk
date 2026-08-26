@@ -20,6 +20,7 @@ from . import (
     protrusion_filter,
     region_growing,
     total_segmentator,
+    vessel_postprocess,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "protrusion_filter",
     "region_growing",
     "total_segmentator",
+    "vessel_postprocess",
 ]

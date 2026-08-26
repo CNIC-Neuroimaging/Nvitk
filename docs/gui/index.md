@@ -26,13 +26,48 @@ The main window (`nvitk.gui.app.run_app`) is napari's viewer plus a right-hand d
 | **Image properties** | Spacing, affine, orientation, and other metadata for the active layer. |
 | **DICOM tags** | DICOM header inspection. |
 | **Mesh** | Reconstructs a `Mesh` from the active binary/label layer via marching cubes and adds it as a napari Surface layer. |
-| **Layers** | Layer management, plus a "record pipeline steps" toggle. |
+| **Layers** | Layer management, a "record pipeline steps" toggle, and the CT display window picker (below). |
 | **Export** | Layer export to disk. |
 | **Pipeline** | Writes the recorded step sequence (open/mesh/export/...) as JSON. |
 
 Keybindings: <kbd>Ctrl</kbd>+<kbd>T</kbd> transpose axes, <kbd>Ctrl</kbd>+<kbd>O</kbd> open,
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> save the active layer. A bottom dock streams
 the shared nvitk logger's output.
+
+## CT display windows
+
+CT is the one modality with a physically calibrated intensity scale — Hounsfield units are fixed
+by definition (−1000 air, 0 water) — so a *fixed* display window shows the same tissue contrast
+on every scan. Napari's default is per-layer auto-contrast, which for CT is actively unhelpful:
+two scans of the same anatomy look different because one happened to include more bone in the
+field of view.
+
+The **Layers** tab therefore carries a window picker backed by
+{mod}`nvitk.viz.ct_windows`, a registry of standard windows stored as level/width in HU:
+
+| Window | Level / Width | For |
+|---|---|---|
+| Brain | 40 / 80 | Grey-white differentiation; the head-CT default |
+| CT angiography | 300 / 600 | Contrast-filled lumen against wall and tissue |
+| Stroke / posterior fossa | 35 / 30 | Narrow window for early infarct |
+| Subdural | 70 / 200 | Extra-axial collection against adjacent bone |
+| Bone | 500 / 2000 | Cortical detail and fractures |
+| Soft tissue, Mediastinum, Lung, Liver, Full range | — | General review |
+
+Choosing a preset applies it immediately to the selected Image layer. Level and width can also
+be typed directly, in which case the picker switches to *Custom* — unless the values happen to
+match a registered window, when it snaps back to that name. **Apply to all image layers** windows
+the whole viewer at once, and **Auto** restores napari's per-layer min/max.
+
+```{note}
+Only CT is offered a window. MR intensities are arbitrary units with no fixed zero, so an HU
+range is meaningless there — the picker detects this from layer modality metadata (falling back
+to the intensity range, since CT goes well below zero and MR magnitude data never does), disables
+itself, and says why. "Apply to all" skips non-CT layers rather than blanking them.
+```
+
+The registry is display-only and never modifies voxels. For intensity rescaling that feeds a
+model, see {mod}`nvitk.normalization.intensity`.
 
 ## Tool catalog
 

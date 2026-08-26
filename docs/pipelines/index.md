@@ -14,6 +14,7 @@ qvtpy
 qvtpy-hemodynamics
 qvtpy-morphometrics
 qvtpy-autoqc
+topbrain
 ```
 
 ::::{grid} 1 2 2 2
@@ -32,10 +33,18 @@ and volume measurement, batch QC.
 4D-flow MRI hemodynamics — eICAB segmentation, FSL registration, centerline-based flow
 measurement, and TOF morphometrics, in 12 chainable stages.
 :::
+
+:::{grid-item-card} {octicon}`beaker` TopBrain
+:link: topbrain
+:link-type: doc
+36-class whole-brain vessel segmentation for the ToPBrain / ToPAneu challenges —
+self-supervised pre-training with nnssl, nnU-Net fine-tuning with selectable losses, and a
+Grand Challenge submission container.
+:::
 ::::
 
 ```{note}
-This section currently covers PESA-Fat and QVTPy. Sibling cohort pipelines already exist in
+This section currently covers PESA-Fat, QVTPy and TopBrain. Sibling cohort pipelines already exist in
 the codebase (`nvitk-bbtpy`, and a GPETPy tool referenced from the {doc}`Main GUI
 <../gui/index>`'s Pipelines category) and are planned for future documentation passes.
 ```

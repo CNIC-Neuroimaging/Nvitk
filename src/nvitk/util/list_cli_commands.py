@@ -44,6 +44,8 @@ def categorize_command(cmd: str, module: str) -> str:
         return "PESA-Fat Analysis"
     if cmd.startswith("nvitk-qvtpy") or cmd.startswith("nvitk-bbtpy") or cmd.startswith("nvitk-gpetpy"):
         return "PESA-Brain Analysis"
+    if cmd.startswith("nvitk-topbrain"):
+        return "Vessel Segmentation Challenges"
     if cmd.startswith((
         "nvitk-morph", "nvitk-restore", "nvitk-filter", "nvitk-measure", "nvitk-transform",
         "nvitk-voxelwise",

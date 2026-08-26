@@ -1,0 +1,17 @@
+# nnunetv2 is deliberately absent: the in-tree build is COPYed into the image instead, because
+# only it can resolve the ToPBrain trainer classes the model was trained with. Everything below
+# is what that build needs.
+dynamic-network-architectures>=0.4.4
+batchgeneratorsv2
+graphviz
+yacs
+SimpleITK>=2.2.1
+nibabel>=5.0
+numpy>=1.24
+scipy>=1.10
+scikit-image>=0.22
+blosc2>=3.0.0
+batchgenerators>=0.25
+acvl-utils>=0.2
+einops
+tqdm

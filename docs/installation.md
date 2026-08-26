@@ -94,7 +94,10 @@ neither set, nvitk uses `~/.local/share/nvitk/dataset` for an installed package,
 `<repo>/dataset/nvitk-dataset` inside a source checkout — so a conda install never invents a
 repository-shaped directory in your home. `nvitk-dataset status` prints the resolved location
 *and which setting produced it*, which is the check worth running before a multi-gigabyte
-transfer.
+transfer. It reports each target as `present` (with a file count and size), `empty` or
+`missing` — an empty directory left by a scaffold is not mistaken for a completed download —
+and fetches land flat: a target is downloaded to a staging path and moved into place, so a
+pre-existing directory never ends up holding a nested `tables/tables/` copy.
 
 ```{tip}
 `--all` is rarely worth it. The SQLite index is derived from the tables and rebuilds locally in

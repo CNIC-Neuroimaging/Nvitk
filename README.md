@@ -24,10 +24,11 @@ Developed at CNIC for intracranial and vascular research, including specific ima
 
 `nvitk` is published on Anaconda.org under the `cnic` channel with the full `nvitk[all]` feature set (GUI, GPU/CUDA 13, and R-based stats) bundled in no separate CPU/GPU profile to pick. 
 
-```bash
-conda config --add channels bioconda
+<!-- conda config --add channels bioconda
 conda config --add channels mrtrix3
-conda config --add channels ejolly
+conda config --add channels ejolly -->
+
+```bash
 conda config --add channels cnic
 conda config --add channels conda-forge
 conda config --set channel_priority strict

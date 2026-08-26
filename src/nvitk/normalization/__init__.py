@@ -1,7 +1,28 @@
-"""Intensity normalization utilities (reserved namespace).
+"""Intensity normalisation utilities.
 
-Placeholder for intensity-normalization tools (z-score, percentile / white-stripe,
-histogram matching, PET SUV scaling). SUV scaling currently lives in
-:mod:`nvitk.measure.suv`; general normalization helpers should be collected here
-as they are factored out of the pipelines.
+:mod:`~nvitk.normalization.intensity` harmonises calibrated (CT/HU) and uncalibrated
+(MR/TOF) volumes onto a shared range, so a mixed-modality dataset can be trained through a
+single input channel. PET SUV scaling still lives in :mod:`nvitk.measure.suv`; further
+normalisation helpers (white-stripe, histogram matching) belong here as they are factored out
+of the pipelines.
 """
+
+from __future__ import annotations
+
+from .intensity import (
+    CTA_WINDOW,
+    MR_PERCENTILES,
+    TARGET_RANGE,
+    harmonize_modality,
+    robust_scale,
+    window_ct,
+)
+
+__all__ = [
+    "CTA_WINDOW",
+    "MR_PERCENTILES",
+    "TARGET_RANGE",
+    "harmonize_modality",
+    "robust_scale",
+    "window_ct",
+]

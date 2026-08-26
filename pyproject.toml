@@ -286,6 +286,7 @@ nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 # ────────────────── PESA-Brain cohort pipelines (bbtpy / gpetpy) ─────────────
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
+nvitk-topbrain = "nvitk.pipes.topbrain.run:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 nvitk-qvtpy-xnat-upload = "nvitk.pipes.qvtpy.xnat_upload:main"
 nvitk-qvtpy-autoqc = "nvitk.pipes.qvtpy.stage9_autoqc:main"
@@ -325,6 +326,9 @@ include = ["nvitk", "nvitk.*"]
 
 [tool.setuptools.package-data]
 "nvitk.gui" = ["napari.yaml"]
+# Adjacency tables for the challenge metrics, and the Grand Challenge docker assets
+# that stage 7 copies into its build context.
+"nvitk.pipes.topbrain" = ["data/*.json", "docker/*"]
 # Starter configs for `nvitk-config init`. Packaged rather than left in the repo so the
 # command works from an installed distribution, which is exactly where it is needed.
 "nvitk.cli" = ["config_templates/*.json"]
