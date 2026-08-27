@@ -23,6 +23,7 @@ STAGE_TRAIN = "stage2"
 STAGE_EVALUATE = "stage3"
 STAGE_INFER = "stage4"
 STAGE_PACKAGE = "stage5"
+STAGE_SELFTRAIN = "stage6"
 
 STAGE_ALIASES: dict[str, str] = {
     "stage0": STAGE_DATAPREP, "stage0_dataprep": STAGE_DATAPREP,
@@ -37,10 +38,14 @@ STAGE_ALIASES: dict[str, str] = {
     "infer": STAGE_INFER, "predict": STAGE_INFER,
     "stage5": STAGE_PACKAGE, "stage5_package": STAGE_PACKAGE,
     "package": STAGE_PACKAGE, "docker": STAGE_PACKAGE,
+    "stage6": STAGE_SELFTRAIN, "stage6_selftrain": STAGE_SELFTRAIN,
+    "selftrain": STAGE_SELFTRAIN, "pseudo": STAGE_SELFTRAIN,
+    "pseudolabel": STAGE_SELFTRAIN,
 }
 
 STAGES_ORDERED: tuple[str, ...] = (
     STAGE_DATAPREP, STAGE_PRETRAIN, STAGE_TRAIN, STAGE_EVALUATE, STAGE_INFER, STAGE_PACKAGE,
+    STAGE_SELFTRAIN,
 )
 
 ALL_STAGES: tuple[str, ...] = STAGES_ORDERED
@@ -54,6 +59,7 @@ STAGE_LABELS: dict[str, str] = {
     STAGE_EVALUATE: "evaluation",
     STAGE_INFER: "inference",
     STAGE_PACKAGE: "packaging",
+    STAGE_SELFTRAIN: "self-training (pseudo-labelling)",
 }
 
 #: Every stage runs once for the whole cohort: nnU-Net and nnssl own their own per-case
@@ -84,5 +90,5 @@ def parse_stages(spec: str) -> list[str]:
 __all__ = [
     "ALL_STAGES", "COHORT_STAGES", "DEFAULT_STAGES", "STAGES_ORDERED",
     "STAGE_ALIASES", "STAGE_DATAPREP", "STAGE_EVALUATE", "STAGE_INFER", "STAGE_LABELS",
-    "STAGE_PACKAGE", "STAGE_PRETRAIN", "STAGE_TRAIN", "parse_stages",
+    "STAGE_PACKAGE", "STAGE_PRETRAIN", "STAGE_SELFTRAIN", "STAGE_TRAIN", "parse_stages",
 ]

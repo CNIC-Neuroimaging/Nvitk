@@ -49,6 +49,8 @@ from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.util import losses as loss_util
 from nvitk.pipes.topbrain.util import nnunet_run
+from nvitk.pipes.topbrain.util import sampling as sampling_util
+from nvitk.pipes.topbrain.util import tensorboard as tb
 from nvitk.pipes.topbrain.util.nnunet_env import nnunet_env
 from nvitk.pipes.topbrain.util.paths import (
     DATASET_IDS,
@@ -294,8 +296,31 @@ def run_train(
     plan_only: bool = False,
     continue_training: bool = False,
     from_scratch: bool = False,
+    tensorboard: bool = False,
+    tensorboard_dir: Path | None = None,
+    tensorboard_interval: float = tb.DEFAULT_INTERVAL,
+    sampling: str = "default",
+    sampling_temperature: float = sampling_util.DEFAULT_TEMPERATURE,
+    sampling_oversample: float | None = None,
 ) -> Path:
-    """Preprocess against the pre-training plan and fine-tune; returns the results directory."""
+    """Preprocess against the pre-training plan and fine-tune; returns the results directory.
+
+    Parameters
+    ----------
+    tensorboard
+        Mirror each fold's per-epoch log into TensorBoard events under
+        ``<results_root>/tensorboard/stage2/`` as it trains. The per-class pseudo-dice series
+        are named from *label_set*, so a stalled side-road vessel is identifiable at a glance
+        rather than hidden inside a 36-class mean.
+    tensorboard_dir
+        Overrides that location; left unset the pipeline layout is used, which is what puts
+        stage 1 and stage 2 under one server.
+    sampling
+        ``default`` leaves nnU-Net's patch sampling alone. ``rare_aware`` oversamples the cases
+        carrying rare classes and, inside them, the rare class itself — see
+        :mod:`nvitk.pipes.topbrain.util.sampling`. It changes what the network sees, not what it
+        optimises, so it composes with any ``--loss`` and should be measured against the same one.
+    """
     loss = loss or cfg.DEFAULT_LOSS
     loss_config = dict(loss_config or {})
     if adaptation_mode not in ADAPTATION_MODES:
@@ -315,13 +340,26 @@ def run_train(
     env = nnunet_env(paths, num_processes=num_processes)
     # A custom loss cannot be passed as a trainer argument; the trainer reads it from here.
     env[loss_util.LOSS_SPEC_ENV] = loss_util.loss_spec_payload(loss, loss_config)
+    # Same out-of-band route as the loss: nnU-Net's CLI can only pass a trainer name.
+    env[sampling_util.SAMPLING_SPEC_ENV] = sampling_util.sampling_spec_payload(
+        sampling, temperature=sampling_temperature, oversample_percent=sampling_oversample
+    )
     if num_epochs is not None:
         env[loss_util.EPOCHS_ENV] = str(int(num_epochs))
 
     log.info(
-        "stage2 | dataset=%s bundle=%s arch=%s trainer=%s loss=%s mode=%s folds=%s",
+        "stage2 | dataset=%s bundle=%s arch=%s trainer=%s loss=%s mode=%s folds=%s sampling=%s",
         dataset_name, pretrain_name, architecture, trainer, loss, adaptation_mode, list(folds),
+        sampling,
     )
+    if sampling == "rare_aware" and not (
+        paths.nnunet_raw / dataset_name / sampling_util.CASE_CLASSES_FILE
+    ).is_file():
+        log.warning(
+            "--sampling rare_aware needs %s in %s, which stage 0 writes. Without it the "
+            "trainer falls back to nnU-Net's default sampling — re-run stage 0.",
+            sampling_util.CASE_CLASSES_FILE, paths.nnunet_raw / dataset_name,
+        )
 
     # ---- 1. Baseline plan ---------------------------------------------------
     # preprocess_like_nnssl adapts an existing plan; without one it asserts. The baseline also
@@ -378,13 +416,20 @@ def run_train(
         return results_dir
 
     # ---- 3. Fine-tune -------------------------------------------------------
-    for fold in folds:
-        log.info("--- fold %s ---", fold)
-        nnunet_run.train_pretrained(
-            dataset_id, CONFIGURATION, fold, env=env, trainer=trainer,
-            plans_identifier=plans_identifier, device=device, num_gpus=num_gpus,
-            continue_training=continue_training, from_scratch=from_scratch,
-        )
+    # The mirror watches the results tree rather than the subprocess, so it picks each fold's
+    # directory up as nnU-Net creates it and keeps working across the fold boundary. Wrapping
+    # the whole loop (not each fold) means one watcher for the run.
+    with tb.monitoring(
+        paths, stages=("stage2",), enabled=tensorboard, label_set=label_set,
+        event_root=tensorboard_dir, interval=tensorboard_interval,
+    ):
+        for fold in folds:
+            log.info("--- fold %s ---", fold)
+            nnunet_run.train_pretrained(
+                dataset_id, CONFIGURATION, fold, env=env, trainer=trainer,
+                plans_identifier=plans_identifier, device=device, num_gpus=num_gpus,
+                continue_training=continue_training, from_scratch=from_scratch,
+            )
 
     marker_dir = paths.results_root / STAGE2_TRAIN_DIR / dataset_name
     marker_dir.mkdir(parents=True, exist_ok=True)
@@ -402,6 +447,8 @@ def run_train(
                 "target_spacing": list(target_spacing) if target_spacing else None,
                 "plans_identifier": plans_identifier, "configuration": CONFIGURATION,
                 "patched_plans": patched,
+                "sampling": sampling, "sampling_temperature": sampling_temperature,
+                "sampling_oversample": sampling_oversample,
                 "folds": [str(f) for f in folds], "num_epochs": num_epochs,
                 "from_scratch": from_scratch, "device": device,
                 "results_dir": str(results_dir),
@@ -480,6 +527,19 @@ def _worker_argv(**o) -> list[str]:
                       ("--from-scratch", "from_scratch")):
         if o.get(key):
             argv.append(flag)
+    if o.get("sampling") and o["sampling"] != "default":
+        argv.extend(["--sampling", str(o["sampling"])])
+        if o.get("sampling_temperature") is not None:
+            argv.extend(["--sampling-temperature", str(float(o["sampling_temperature"]))])
+        if o.get("sampling_oversample") is not None:
+            argv.extend(["--sampling-oversample", str(float(o["sampling_oversample"]))])
+    if o.get("tensorboard"):
+        # No --tensorboard-dir: the worker's results_root is already the container-side mount,
+        # so the default layout resolves to the same shared tree the workstation sees.
+        argv.append("--tensorboard")
+        argv.extend(["--tensorboard-interval", str(float(
+            o.get("tensorboard_interval") or tb.DEFAULT_INTERVAL
+        ))])
     return argv
 
 
@@ -524,7 +584,9 @@ def submit_sge(
               help="Registry name or 'package.module:Callable'.")
 @click.option("--loss-config", type=str, default=None,
               help="JSON object, or path to a JSON file, of loss keyword arguments.")
-@click.option("--folds", type=str, default="0", show_default=True)
+@click.option("--folds", type=str, default=None,
+              help="Comma list of folds, or 'all'. Defaults to every fold (see --num-folds in "
+                   "stage 0): a single fold holds out too few patients to rank anything.")
 @click.option("--adaptation-mode", type=click.Choice(list(ADAPTATION_MODES)),
               default="default_nnunet", show_default=True,
               help="How spacing/normalisation are derived from the pre-training plan.")
@@ -550,15 +612,36 @@ def submit_sge(
 @click.option("--continue-training", is_flag=True, default=False)
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
+@click.option("--sampling", type=click.Choice(list(sampling_util.SAMPLING_MODES)),
+              default="default", show_default=True,
+              help="Patch sampling. 'rare_aware' oversamples the cases carrying rare classes "
+                   "and centres their patches on the rare class; 'default' is nnU-Net's own.")
+@click.option("--sampling-temperature", type=float,
+              default=sampling_util.DEFAULT_TEMPERATURE, show_default=True,
+              help="Inverse-frequency exponent for --sampling rare_aware. 0 is uniform, 1 is "
+                   "full inverse-frequency.")
+@click.option("--sampling-oversample", type=float, default=None,
+              help="Fraction of patches forced to contain foreground under rare_aware "
+                   f"(default {sampling_util.DEFAULT_OVERSAMPLE_PERCENT}; nnU-Net uses 0.33).")
+@click.option("--tensorboard", is_flag=True, default=False,
+              help="Mirror each fold's training log into TensorBoard events under "
+                   "<results-root>/tensorboard/stage2/.")
+@click.option("--tensorboard-dir", type=click.Path(path_type=Path), default=None,
+              help="Event directory (default: <results-root>/tensorboard).")
+@click.option("--tensorboard-interval", type=float, default=tb.DEFAULT_INTERVAL,
+              show_default=True, help="Seconds between mirror passes.")
 def main(
     nnunet_raw: Path, nnunet_preprocessed: Path, nnunet_results: Path, results_root: Path,
     bundle: Path, label_set: str, pretrain_name: str | None, loss: str | None,
-    loss_config: str | None, folds: str, adaptation_mode: str,
+    loss_config: str | None, folds: str | None, adaptation_mode: str,
     baseline_planner: str, skip_planning: bool, verify_integrity: bool,
     target_spacing: tuple[float, float, float] | None,
     patch_size: tuple[int, int, int] | None, batch_size: int | None, num_epochs: int | None,
     device: str | None, num_gpus: int, num_processes: int, skip_preprocessing: bool,
-    plan_only: bool, continue_training: bool, from_scratch: bool, backend: str = "gpu",
+    plan_only: bool, continue_training: bool, from_scratch: bool,
+    sampling: str, sampling_temperature: float, sampling_oversample: float | None,
+    tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
+    backend: str = "gpu",
 ) -> None:
     """CLI entry point: transfer-learning training with the in-tree nnU-Net build."""
     Logger()
@@ -571,7 +654,8 @@ def main(
     run_train(
         paths=paths, bundle=bundle, label_set=label_set, pretrain_name=pretrain_name,
         loss=loss, loss_config=loss_util.parse_loss_config(loss_config),
-        folds=parse_folds(folds), adaptation_mode=adaptation_mode,
+        folds=parse_folds(folds or ",".join(str(i) for i in range(int(cfg.DEFAULT_NUM_FOLDS)))),
+        adaptation_mode=adaptation_mode,
         baseline_planner=baseline_planner, skip_planning=skip_planning,
         verify_integrity=verify_integrity,
         target_spacing=target_spacing or None, patch_size=patch_size or None,
@@ -579,6 +663,10 @@ def main(
         device=device or torch_device_for_backend(backend), num_gpus=num_gpus,
         num_processes=num_processes, skip_preprocessing=skip_preprocessing,
         plan_only=plan_only, continue_training=continue_training, from_scratch=from_scratch,
+        tensorboard=tensorboard, tensorboard_dir=tensorboard_dir,
+        tensorboard_interval=tensorboard_interval,
+        sampling=sampling, sampling_temperature=sampling_temperature,
+        sampling_oversample=sampling_oversample,
     )
 
 

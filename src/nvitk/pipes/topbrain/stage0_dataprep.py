@@ -24,6 +24,22 @@ no CT normalisation and no way to compute one. CTA is calibrated (Hounsfield uni
 a mixed set correctly. Mapping both onto a shared ``[0, 1]`` range here is what makes one
 modality-agnostic model legitimate.
 
+Optional context channel
+------------------------
+``--ct-context-window`` adds a **second input channel** carrying a wide intensity window
+alongside the narrow vessel window of channel 0. The default CTA window (300-600 HU) is chosen
+so contrast-filled lumen stays separable from bone, but it clips away everything below 300 HU —
+parenchyma, CSF, air — and with it the anatomical context that distinguishes classes defined by
+*where* they run rather than by how they look (R-M2 vs R-M3, the carotid canal, the A2/A3
+boundary). A second channel restores that without giving up the first.
+
+MR gets an analogous wide-percentile channel, not because TOF has the same problem but because
+nnU-Net requires every case to have the same channel count.
+
+Pre-trained weights survive this: the in-tree nnU-Net build repeats the pre-trained stem
+projection across the extra channel and divides by the channel count, so the activation scale
+is preserved (see ``pretrainedTrainer.load_pretrained_weights``).
+
 Geometry
 --------
 Spacing, affine and orientation (LPS, frequently oblique on MR) pass through untouched:
@@ -40,7 +56,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Sequence, TextIO
+from typing import Any, Iterator, Mapping, Sequence, TextIO
 
 import click
 
@@ -55,6 +71,7 @@ from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.util import collection as corpus_util
 from nvitk.pipes.topbrain.util import folds as fold_util
+from nvitk.pipes.topbrain.util import sampling
 from nvitk.pipes.topbrain.util.nnssl_env import apply_nnssl_env
 from nvitk.pipes.topbrain.util.paths import (
     CORPUS_DATASET_ID,
@@ -84,6 +101,12 @@ DONE_MARKER: str = "topbrain_stage0.json"
 #: stores both at float32 precision, so exact equality is too strict.
 AFFINE_ATOL: float = 1e-4
 
+#: Channel-1 defaults when a context channel is requested without explicit bounds. The CT
+#: window spans soft tissue through cancellous bone; the MR range is the full robust span, since
+#: TOF's problem is scale rather than clipping.
+DEFAULT_CT_CONTEXT_WINDOW: tuple[float, float] = (-100.0, 900.0)
+DEFAULT_MR_CONTEXT_PERCENTILES: tuple[float, float] = (0.0, 100.0)
+
 #: ``name=/images:/labels[:modality]`` — an extra annotated cohort.
 _EXTRA_RE = re.compile(r"^(?P<name>[^=]+)=(?P<images>[^:]+):(?P<labels>[^:]+)(?::(?P<modality>\w+))?$")
 
@@ -96,6 +119,13 @@ class ExtraCohort:
     images_dir: Path
     labels_dir: Path
     modality: str
+    train_only: bool = False
+    """Never hold these cases out for validation.
+
+    Set for pseudo-labelled cohorts (stage 6): their masks are a previous model's output, so a
+    fold that validated on them would be measuring agreement with that model rather than
+    accuracy, and the cross-validation would quietly stop meaning what it says.
+    """
 
     def iter_cases(self) -> Iterator[ReleaseCase]:
         """Pair images with same-named masks; the case id is prefixed with the cohort name.
@@ -126,7 +156,7 @@ class ExtraCohort:
             )
 
 
-def parse_extra_train(spec: str) -> ExtraCohort:
+def parse_extra_train(spec: str, *, train_only: bool = False) -> ExtraCohort:
     """Parse ``--extra-train name=/images:/labels[:modality]``."""
     match = _EXTRA_RE.match(spec.strip())
     if match is None:
@@ -145,6 +175,7 @@ def parse_extra_train(spec: str) -> ExtraCohort:
         images_dir=Path(match["images"]).expanduser(),
         labels_dir=Path(match["labels"]).expanduser(),
         modality=modality,
+        train_only=bool(train_only),
     )
 
 
@@ -178,8 +209,14 @@ def _convert_case(
     ct_window: Sequence[float],
     mr_percentiles: Sequence[float],
     overwrite: bool,
+    ct_context_window: Sequence[float] | None = None,
+    mr_context_percentiles: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Harmonise and write one labelled case; returns a provenance record.
+
+    Writes ``<case>_0000.nii.gz`` always, and ``<case>_0001.nii.gz`` when a context window is
+    configured — see the module docstring on why the narrow vessel window alone is a lossy
+    representation of a CTA.
 
     Raises
     ------
@@ -189,8 +226,25 @@ def _convert_case(
     """
     out_image = images_dir / f"{case.case_id}_0000.nii.gz"
     out_label = labels_dir / f"{case.case_id}.nii.gz"
-    if not overwrite and out_image.is_file() and out_label.is_file():
-        return {"case": case.case_id, "modality": case.modality, "skipped": True}
+    context_enabled = ct_context_window is not None or mr_context_percentiles is not None
+    out_context = images_dir / f"{case.case_id}_0001.nii.gz"
+    # A resumed run must not leave a case one channel short of the rest of the dataset, so the
+    # skip test covers every file this configuration is meant to produce.
+    complete = out_image.is_file() and out_label.is_file() and (
+        out_context.is_file() or not context_enabled
+    )
+    if not overwrite and complete:
+        # Still read the class list off the already-written mask: the fold stratification and
+        # the presence table are built from it, and a resumed run must not silently produce a
+        # blind split just because the conversion was a no-op.
+        existing = imread(out_label)
+        return {
+            "case": case.case_id, "modality": case.modality, "patient": case.patient_id,
+            "classes_present": sorted(
+                int(v) for v in to_numpy(np.unique(existing.data)) if int(v) != 0
+            ),
+            "skipped": True,
+        }
     if not case.label_path.is_file():
         raise FileNotFoundError(f"[{case.case_id}] label mask not found: {case.label_path}")
 
@@ -232,6 +286,20 @@ def _convert_case(
     imsave(out_image, harmonised.astype(np.float32))
     imsave(out_label, label.astype(np.uint8))
 
+    # ---- 3b. Optional context channel, from the same read ---------------------
+    if context_enabled:
+        context = harmonize_modality(
+            image, case.modality,
+            ct_window=ct_context_window or DEFAULT_CT_CONTEXT_WINDOW,
+            mr_percentiles=mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES,
+        )
+        imsave(out_context, context.astype(np.float32))
+    elif out_context.is_file():
+        # Left over from a run that had the context channel on. nnU-Net counts channels per
+        # case against dataset.json, so a stale second channel makes the dataset invalid.
+        out_context.unlink()
+        log.warning("[%s] removed a stale context channel from a previous run.", case.case_id)
+
     foreground = int(to_numpy((label.data > 0).sum()))
     # Plain Python: multiplying three ints does not need a GPU round-trip, and ``np.array`` on a
     # shape tuple would build a device array to do it.
@@ -244,6 +312,7 @@ def _convert_case(
         "spacing_mm": [round(float(s), 6) for s in (image.spacing or ())],
         "classes_present": sorted(v for v in present if v != 0),
         "foreground_fraction": round(foreground / total, 6) if total else 0.0,
+        "num_channels": 2 if context_enabled else 1,
         "skipped": False,
     }
     log.step(
@@ -251,6 +320,51 @@ def _convert_case(
         f"classes={len(record['classes_present'])} fg={record['foreground_fraction']:.4%}"
     )
     return record
+
+
+def _write_presence_sidecars(
+    dataset_dir: Path,
+    table: Sequence[fold_util.ClassFoldPresence],
+    rendered: str,
+    class_presence: Mapping[str, Sequence[int]],
+) -> None:
+    """Write the per-class × per-fold presence table beside the dataset.
+
+    Three views of the table because three different things read them: ``.txt`` for a human
+    about to decide whether a comparison is worth running, ``.csv`` for a spreadsheet, ``.json``
+    for stage 3 to mark which classes its per-fold numbers cannot support.
+
+    ``case_classes.json`` is the raw per-case form, and is what stage 2's rare-class-aware
+    sampler reads to work out which volumes are worth drawing more often — see
+    :mod:`nvitk.pipes.topbrain.util.sampling`.
+    """
+    import csv as _csv
+
+    (dataset_dir / sampling.CASE_CLASSES_FILE).write_text(
+        json.dumps({cid: list(values) for cid, values in sorted(class_presence.items())},
+                   indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    (dataset_dir / "class_presence.txt").write_text(rendered + "\n", encoding="utf-8")
+    (dataset_dir / "class_presence.json").write_text(
+        json.dumps([row.as_dict() for row in table], indent=2) + "\n", encoding="utf-8"
+    )
+    num_folds = len(table[0].val_counts) if table else 0
+    with (dataset_dir / "class_presence.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = _csv.writer(handle)
+        writer.writerow([
+            "label", "name", "num_cases", "num_patients",
+            *(f"train_fold{i}" for i in range(num_folds)),
+            *(f"val_fold{i}" for i in range(num_folds)),
+        ])
+        for row in table:
+            writer.writerow([
+                row.label, row.name, row.num_cases, row.num_patients,
+                *row.train_counts, *row.val_counts,
+            ])
+    log.info("Wrote class_presence.{txt,csv,json} and %s -> %s",
+             sampling.CASE_CLASSES_FILE, dataset_dir)
 
 
 def build_training_dataset(
@@ -267,6 +381,8 @@ def build_training_dataset(
     overwrite: bool,
     workers: int,
     include_challenge: bool = True,
+    ct_context_window: Sequence[float] | None = None,
+    mr_context_percentiles: Sequence[float] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Build the nnU-Net raw dataset; returns ``(dataset_dir, provenance)``."""
     _verify_label_map(challenge_root, label_set)
@@ -298,16 +414,28 @@ def build_training_dataset(
         return _convert_case(
             case, images_dir=images_dir, labels_dir=labels_dir, label_set=label_set,
             ct_window=ct_window, mr_percentiles=mr_percentiles, overwrite=overwrite,
+            ct_context_window=ct_context_window,
+            mr_context_percentiles=mr_context_percentiles,
         )
 
     records = map_in_thread_pool(_convert, cases, max_workers=int(workers))
 
+    context_enabled = ct_context_window is not None or mr_context_percentiles is not None
+    if context_enabled:
+        log.info(
+            "context channel on | ct_window=%s mr_percentiles=%s -> 2 input channels",
+            tuple(ct_context_window or DEFAULT_CT_CONTEXT_WINDOW),
+            tuple(mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES),
+        )
+
     (dataset_dir / "dataset.json").write_text(
         json.dumps(
             {
-                # The channel is already modality-harmonised, so a per-case z-score is right;
+                # Both channels are already modality-harmonised, so a per-case z-score is right;
                 # 'ct' here would re-apply an HU-based normalisation to non-HU data.
-                "channel_names": {"0": "zscore"},
+                "channel_names": (
+                    {"0": "zscore", "1": "zscore"} if context_enabled else {"0": "zscore"}
+                ),
                 "labels": lbl.nnunet_labels(label_set),
                 "numTraining": len(cases),
                 "file_ending": ".nii.gz",
@@ -322,11 +450,43 @@ def build_training_dataset(
         encoding="utf-8",
     )
 
-    splits = fold_util.grouped_folds(cases, num_folds=num_folds, seed=seed)
+    # ---- Folds, stratified on which classes each patient actually carries ----
+    # Built from the conversion records rather than re-read from disk: every case has just been
+    # inspected, and the side-road classes this stratifies on are exactly the ones a blind
+    # shuffle strands in a fold with no positive example.
+    class_presence = {
+        str(record["case"]): tuple(record.get("classes_present") or ())
+        for record in records
+    }
+    missing_presence = [cid for cid, values in class_presence.items() if not values]
+    if missing_presence:
+        log.warning(
+            "%d case(s) report no foreground classes, e.g. %s; the split is stratified on the "
+            "rest.", len(missing_presence), missing_presence[:3],
+        )
+
+    train_only_ids = sorted(
+        case.case_id
+        for cohort in extra_cohorts if cohort.train_only
+        for case in cohort.iter_cases()
+    )
+    splits = fold_util.grouped_folds(
+        cases, num_folds=num_folds, seed=seed, class_presence=class_presence,
+        train_only=train_only_ids,
+    )
     fold_util.check_no_patient_leak(splits)
     (dataset_dir / "splits_final.json").write_text(
         json.dumps(splits, indent=2) + "\n", encoding="utf-8"
     )
+
+    # ---- Per-class × per-fold presence: what this cross-validation can measure ----
+    presence_table = fold_util.class_presence_table(
+        cases, splits, class_presence, label_map=lbl.label_map(label_set)
+    )
+    rendered = fold_util.format_presence_table(presence_table)
+    log.info("class presence per fold (rarest first):\n%s", rendered)
+    presence_warnings = fold_util.warn_empty_classes(presence_table)
+    _write_presence_sidecars(dataset_dir, presence_table, rendered, class_presence)
 
     provenance = {
         "dataset": dataset_name,
@@ -336,14 +496,22 @@ def build_training_dataset(
         "include_challenge": include_challenge,
         "extra_cohorts": [
             {"name": c.name, "images": str(c.images_dir), "labels": str(c.labels_dir),
-             "modality": c.modality} for c in extra_cohorts
+             "modality": c.modality, "train_only": c.train_only} for c in extra_cohorts
         ],
+        "num_train_only_cases": len(train_only_ids),
         "num_cases": len(cases),
         "num_patients": len(fold_util.group_by_patient(cases)),
         "num_folds": num_folds,
         "fold_seed": seed,
         "ct_window_hu": list(ct_window),
         "mr_percentiles": list(mr_percentiles),
+        "num_input_channels": 2 if context_enabled else 1,
+        "ct_context_window_hu": list(ct_context_window) if ct_context_window else None,
+        "mr_context_percentiles": (
+            list(mr_context_percentiles) if mr_context_percentiles else None
+        ),
+        "class_presence": [row.as_dict() for row in presence_table],
+        "class_presence_warnings": presence_warnings,
         "cases": records,
     }
     converted = sum(1 for r in records if not r.get("skipped"))
@@ -427,12 +595,15 @@ def run_dataprep(
     label_set: str = "ta36",
     modality: str = "both",
     extra_train: Sequence[str] = (),
+    extra_train_only: Sequence[str] = (),
     include_challenge: bool = True,
     corpus_sources: Sequence[str] = (),
     num_folds: int | None = None,
     seed: int | None = None,
     ct_window: Sequence[float] | None = None,
     mr_percentiles: Sequence[float] | None = None,
+    ct_context_window: Sequence[float] | None = None,
+    mr_context_percentiles: Sequence[float] | None = None,
     harmonize_corpus: bool = True,
     overwrite: bool = False,
     workers: int = 1,
@@ -442,6 +613,15 @@ def run_dataprep(
     seed = cfg.DEFAULT_FOLD_SEED if seed is None else seed
     ct_window = tuple(ct_window) if ct_window else cfg.DEFAULT_CT_WINDOW
     mr_percentiles = tuple(mr_percentiles) if mr_percentiles else cfg.DEFAULT_MR_PERCENTILES
+
+    # Either context flag turns the second channel on for *both* modalities: nnU-Net counts
+    # channels per case against dataset.json, so a CT-only second channel makes the MR cases
+    # invalid rather than simply unaugmented.
+    if ct_context_window is not None or mr_context_percentiles is not None:
+        ct_context_window = tuple(ct_context_window or DEFAULT_CT_CONTEXT_WINDOW)
+        mr_context_percentiles = tuple(
+            mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES
+        )
 
     if target not in ("train", "corpus", "both"):
         raise ValueError(f"Unknown --target {target!r}; expected train, corpus or both.")
@@ -454,7 +634,10 @@ def run_dataprep(
     }
 
     if target in ("train", "both"):
-        cohorts = [parse_extra_train(s) for s in extra_train]
+        cohorts = [
+            *(parse_extra_train(spec) for spec in extra_train),
+            *(parse_extra_train(spec, train_only=True) for spec in extra_train_only),
+        ]
         _, train_meta = build_training_dataset(
             challenge_root=paths.challenge_root,
             nnunet_raw=paths.nnunet_raw,
@@ -465,6 +648,8 @@ def run_dataprep(
             seed=seed,
             ct_window=ct_window,
             mr_percentiles=mr_percentiles,
+            ct_context_window=ct_context_window,
+            mr_context_percentiles=mr_context_percentiles,
             overwrite=overwrite,
             workers=workers,
             include_challenge=include_challenge,
@@ -520,12 +705,20 @@ def _worker_argv(**options) -> list[str]:
     ]
     for spec in options.get("extra_train", ()):
         argv.extend(["--extra-train", quote_path(spec)])
+    for spec in options.get("extra_train_only", ()):
+        argv.extend(["--extra-train-only", quote_path(spec)])
     for spec in options.get("corpus_sources", ()):
         argv.extend(["--corpus-source", quote_path(spec)])
     if not options.get("include_challenge", True):
         argv.append("--no-challenge")
     if options.get("overwrite"):
         argv.append("--overwrite")
+    if options.get("ct_context_window"):
+        argv.extend(["--ct-context-window",
+                     *[str(float(v)) for v in options["ct_context_window"]]])
+    if options.get("mr_context_percentiles"):
+        argv.extend(["--mr-context-percentiles",
+                     *[str(float(v)) for v in options["mr_context_percentiles"]]])
     return argv
 
 
@@ -570,6 +763,10 @@ def submit_sge(
               show_default=True)
 @click.option("--extra-train", multiple=True,
               help="Extra annotated cohort: 'name=/images:/labels:modality'. Repeatable.")
+@click.option("--extra-train-only", multiple=True,
+              help="Same syntax as --extra-train, but the cases go in every fold's training "
+                   "half and in no validation half. Use it for stage 6's pseudo-labelled "
+                   "cohort: validating against model output measures agreement, not accuracy.")
 @click.option("--no-challenge", is_flag=True, default=False,
               help="Exclude the challenge cases; train only on --extra-train cohorts.")
 @click.option("--corpus-source", "corpus_sources", multiple=True,
@@ -578,6 +775,13 @@ def submit_sge(
 @click.option("--seed", type=int, default=None, help="Patient-grouped fold assignment seed.")
 @click.option("--ct-window", type=float, nargs=2, default=None, help="CT clip window in HU.")
 @click.option("--mr-percentiles", type=float, nargs=2, default=None)
+@click.option("--ct-context-window", type=float, nargs=2, default=None,
+              help="Add a second input channel with this wide CT window (e.g. -100 900). "
+                   "Channel 0 keeps the narrow vessel window; channel 1 restores the "
+                   "parenchymal context it clips away.")
+@click.option("--mr-context-percentiles", type=float, nargs=2, default=None,
+              help="Percentiles for the MR half of the context channel (default 0 100). "
+                   "Implied by --ct-context-window: nnU-Net needs equal channel counts.")
 @click.option("--no-harmonize-corpus", is_flag=True, default=False,
               help="Reference corpus volumes as-is. Only safe for a single-modality corpus.")
 @click.option("--overwrite", is_flag=True, default=True)
@@ -585,9 +789,12 @@ def submit_sge(
 def main(
     challenge_root: Path, nnunet_raw: Path, nnssl_raw: Path, nnssl_preprocessed: Path,
     nnssl_results: Path, corpus_root: Path, results_root: Path, target: str, label_set: str,
-    modality: str, extra_train: tuple[str, ...], no_challenge: bool,
+    modality: str, extra_train: tuple[str, ...], extra_train_only: tuple[str, ...],
+    no_challenge: bool,
     corpus_sources: tuple[str, ...], num_folds: int | None, seed: int | None,
     ct_window: tuple[float, float] | None, mr_percentiles: tuple[float, float] | None,
+    ct_context_window: tuple[float, float] | None,
+    mr_context_percentiles: tuple[float, float] | None,
     no_harmonize_corpus: bool, overwrite: bool, workers: int,
 ) -> None:
     """CLI entry point: prepare training data and/or a pre-training corpus."""
@@ -600,14 +807,18 @@ def main(
     )
     run_dataprep(
         paths=paths, target=target, label_set=label_set, modality=modality,
-        extra_train=extra_train, include_challenge=not no_challenge,
+        extra_train=extra_train, extra_train_only=extra_train_only,
+        include_challenge=not no_challenge,
         corpus_sources=corpus_sources, num_folds=num_folds, seed=seed,
         ct_window=ct_window or None, mr_percentiles=mr_percentiles or None,
+        ct_context_window=ct_context_window or None,
+        mr_context_percentiles=mr_context_percentiles or None,
         harmonize_corpus=not no_harmonize_corpus, overwrite=overwrite, workers=workers,
     )
 
 
 __all__ = [
+    "DEFAULT_CT_CONTEXT_WINDOW", "DEFAULT_MR_CONTEXT_PERCENTILES",
     "ExtraCohort", "build_corpus", "build_sge_command", "build_training_dataset",
     "main", "parse_extra_train", "run_dataprep", "submit_sge",
 ]

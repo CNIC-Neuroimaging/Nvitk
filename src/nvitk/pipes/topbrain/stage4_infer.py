@@ -12,8 +12,19 @@
 - ``.../topbrain_stage4.json`` — provenance
 
 Post-processing is applied as a separate pass over a *retained* copy of the raw predictions, so
-the effect of a threshold change can be measured (stage 6 can score either directory) without
+the effect of a threshold change can be measured (stage 3 can score either directory) without
 re-running inference, which is by far the expensive half.
+
+Two tiers of post-processing
+----------------------------
+``--min-volume-mm3`` / ``--largest-only``
+    Island removal — see :mod:`nvitk.segmentation.vessel_postprocess`. Always applied.
+``--repair-gaps-mm`` / ``--repair-adjacency`` / ``--repair-lateral``
+    Topology repair — see :mod:`nvitk.segmentation.vessel_topology`. Off by default, because
+    each is a hypothesis about the failure mode, and three of the six challenge metrics (β0
+    error, clDice, invalid neighbours) are sensitive enough to them that they must be **tuned
+    on cross-validation** and never on leaderboard feedback. Run stage 3 against the raw and
+    postprocessed directories to measure what a setting actually bought.
 """
 
 from __future__ import annotations
@@ -22,7 +33,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence, TextIO
+from typing import Any, Sequence, TextIO
 
 import click
 
@@ -46,6 +57,7 @@ from nvitk.pipes.topbrain.util.sge_stage import (
     submit_stage_job,
 )
 from nvitk.segmentation.vessel_postprocess import postprocess_labelmap
+from nvitk.segmentation.vessel_topology import RepairReport, repair_topology
 
 setup(globals())
 
@@ -65,16 +77,53 @@ def postprocess_folder(
     min_volume_mm3: float | None,
     largest_only: bool,
     workers: int = 1,
-) -> int:
-    """Post-process every prediction in *source_dir*; returns the number written."""
+    repair_gaps_mm: float | None = None,
+    repair_adjacency: bool = False,
+    repair_lateral: bool = False,
+    repair_close_radius: int = 0,
+    repair_fragment_fraction: float | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Post-process every prediction in *source_dir*; returns ``(count, repair_summary)``.
+
+    Island removal runs first and unconditionally: the topology steps reason about connected
+    components, and speckle would give them spurious ones to reason about. The repair steps
+    then run in the order :func:`~nvitk.segmentation.vessel_topology.repair_topology` fixes.
+
+    Parameters
+    ----------
+    repair_gaps_mm
+        Bridge same-class gaps up to this many millimetres. ``None`` disables.
+    repair_adjacency
+        Reassign fragments touching anatomically impossible labels, using this label set's
+        adjacency table. Note that TA36's table is *derived*, not published — see
+        :func:`nvitk.pipes.topbrain.labels.valid_neighbours` — so this repairs against our own
+        reading of the anatomy.
+    repair_lateral
+        Mirror fragments of a lateralised class found on the wrong side of the midline.
+    """
     destination_dir.mkdir(parents=True, exist_ok=True)
     labels = sorted(lbl.label_map(label_set))
     cases = sorted(source_dir.glob("*.nii.gz"))
     if not cases:
         log.warning("No predictions to post-process under %s", source_dir)
-        return 0
+        return 0, {}
 
-    def _one(path: Path) -> Path:
+    neighbours = lbl.valid_neighbours(label_set) if repair_adjacency else None
+    pairs = lbl.lateral_pairs(label_set) if repair_lateral else None
+    repairing = repair_gaps_mm is not None or repair_adjacency or repair_lateral
+    if repairing:
+        log.info(
+            "topology repair | gaps=%s adjacency=%s lateral=%s (%d mirrored pair(s))",
+            f"{repair_gaps_mm} mm" if repair_gaps_mm is not None else "off",
+            repair_adjacency, repair_lateral, len(pairs or {}),
+        )
+
+    extra = (
+        {"max_fragment_fraction": float(repair_fragment_fraction)}
+        if repair_fragment_fraction is not None else {}
+    )
+
+    def _one(path: Path) -> tuple[Path, RepairReport | None]:
         """Post-process one prediction, preserving its geometry."""
         image = imread(path)
         cleaned = postprocess_labelmap(
@@ -84,13 +133,41 @@ def postprocess_folder(
             min_volume_mm3=min_volume_mm3,
             largest_only=largest_only,
         )
+        report = None
+        if repairing:
+            cleaned, report = repair_topology(
+                cleaned,
+                labels=labels,
+                spacing=image.spacing,
+                affine=image.affine,
+                valid_neighbours=neighbours,
+                lateral_pairs=pairs,
+                bridge_gaps_mm=repair_gaps_mm,
+                close_radius=int(repair_close_radius),
+                **extra,
+            )
         out = destination_dir / path.name
         imsave(out, cleaned.astype(np.uint8))
-        return out
+        return out, report
 
-    written = map_in_thread_pool(_one, cases, max_workers=int(workers))
-    log.ok(f"post-processed {len(written)} prediction(s) -> {destination_dir}")
-    return len(written)
+    results = map_in_thread_pool(_one, cases, max_workers=int(workers))
+    summary: dict[str, Any] = {}
+    if repairing:
+        reports = [r for _, r in results if r is not None]
+        summary = {
+            "cases": {
+                path.name[: -len(".nii.gz")]: report.as_dict()
+                for path, report in results if report is not None
+            },
+            "totals": {
+                key: sum(int(r.as_dict()[key]) for r in reports)
+                for key in ("bridged_voxels", "reassigned_components", "reassigned_voxels",
+                            "mirrored_components", "mirrored_voxels")
+            },
+        }
+        log.ok("topology repair totals: %s", summary["totals"])
+    log.ok(f"post-processed {len(results)} prediction(s) -> {destination_dir}")
+    return len(results), summary
 
 
 def run_infer(
@@ -110,6 +187,10 @@ def run_infer(
     output_name: str | None = None,
     min_volume_mm3: float | None = 5.0,
     largest_only: bool = False,
+    repair_gaps_mm: float | None = None,
+    repair_adjacency: bool = False,
+    repair_lateral: bool = False,
+    repair_close_radius: int = 0,
     device: str = "cuda",
     num_processes: int = 3,
     workers: int = 1,
@@ -170,12 +251,16 @@ def run_infer(
             num_processes=num_processes,
         )
 
-    count = postprocess_folder(
+    count, repair_summary = postprocess_folder(
         raw_dir, post_dir,
         label_set=label_set,
         min_volume_mm3=min_volume_mm3,
         largest_only=largest_only,
         workers=workers,
+        repair_gaps_mm=repair_gaps_mm,
+        repair_adjacency=repair_adjacency,
+        repair_lateral=repair_lateral,
+        repair_close_radius=repair_close_radius,
     )
 
     (base / "topbrain_stage4.json").write_text(
@@ -190,6 +275,10 @@ def run_infer(
                 "input_dir": str(input_dir),
                 "raw_dir": str(raw_dir), "postprocessed_dir": str(post_dir),
                 "min_volume_mm3": min_volume_mm3, "largest_only": largest_only,
+                "repair_gaps_mm": repair_gaps_mm, "repair_adjacency": repair_adjacency,
+                "repair_lateral": repair_lateral,
+                "repair_close_radius": repair_close_radius,
+                "topology_repair": repair_summary,
                 "num_cases": count, "device": device,
             },
             indent=2,
@@ -205,10 +294,12 @@ def run_infer(
 
 
 def _worker_argv(
-    *, label_set: str, loss: str, folds: Sequence[int | str], plans_identifier: str,
-    configuration_name: str, checkpoint_name: str, min_volume_mm3: float | None,
+    *, label_set: str, loss: str, folds: Sequence[int | str], plans_identifier: str | None,
+    configuration_name: str | None, checkpoint_name: str, min_volume_mm3: float | None,
     largest_only: bool, device: str, num_processes: int, workers: int,
     skip_prediction: bool, backend: str, input_subdir: str = "imagesTr_topbrain",
+    repair_gaps_mm: float | None = None, repair_adjacency: bool = False,
+    repair_lateral: bool = False, repair_close_radius: int = 0,
 ) -> list[str]:
     """Worker argv for stage 5, built against the container-side layout."""
     from nvitk.cluster.sge import python_module_argv
@@ -225,19 +316,32 @@ def _worker_argv(
         "--label-set", label_set,
         "--loss", quote_path(loss),
         "--folds", quote_path(",".join(str(f) for f in folds)),
-        "--plans-identifier", plans_identifier,
-        "--configuration", configuration_name,
         "--checkpoint-name", checkpoint_name,
         "--device", device,
         "--num-processes", str(int(num_processes)),
         "--workers", str(int(workers)),
     ]
+    # Omitted when unknown: the worker reads them from stage 2's provenance, which is the only
+    # place that knows the spacing preprocess_like_nnssl settled on at run time. Emitting a
+    # literal "None" would build a run directory name that does not exist.
+    if plans_identifier:
+        argv.extend(["--plans-identifier", quote_path(plans_identifier)])
+    if configuration_name:
+        argv.extend(["--configuration", quote_path(configuration_name)])
     if min_volume_mm3 is None:
         argv.append("--no-postprocess")
     else:
         argv.extend(["--min-volume-mm3", str(float(min_volume_mm3))])
     if largest_only:
         argv.append("--largest-only")
+    if repair_gaps_mm is not None:
+        argv.extend(["--repair-gaps-mm", str(float(repair_gaps_mm))])
+    if repair_adjacency:
+        argv.append("--repair-adjacency")
+    if repair_lateral:
+        argv.append("--repair-lateral")
+    if repair_close_radius:
+        argv.extend(["--repair-close-radius", str(int(repair_close_radius))])
     if skip_prediction:
         argv.append("--skip-prediction")
     return argv
@@ -291,6 +395,18 @@ def submit_sge(
 @click.option("--no-postprocess", is_flag=True, default=False)
 @click.option("--largest-only", is_flag=True, default=False,
               help="Also reduce each class to its single largest component.")
+@click.option("--repair-gaps-mm", type=float, default=None,
+              help="Bridge same-class gaps up to this many mm. Targets the beta0 and "
+                   "centerline metrics; tune it on cross-validation, not on the leaderboard.")
+@click.option("--repair-adjacency", is_flag=True, default=False,
+              help="Reassign fragments touching anatomically impossible labels. TA36's "
+                   "adjacency table is derived rather than published — see labels.py.")
+@click.option("--repair-lateral", is_flag=True, default=False,
+              help="Mirror fragments of a lateralised class found on the wrong side of the "
+                   "midline. Declines to act when the left/right convention is unreadable.")
+@click.option("--repair-close-radius", type=int, default=0, show_default=True,
+              help="Per-class morphological closing before bridging. Helps beta0, costs "
+                   "Dice/clDice precision.")
 @click.option("--device", type=click.Choice(["cuda", "cpu", "mps"]), default=None)
 @click.option("--num-processes", type=int, default=3, show_default=True)
 @click.option("--workers", type=int, default=1, show_default=True)
@@ -301,6 +417,8 @@ def main(
     results_root: Path, label_set: str, loss: str | None, folds: str,
     plans_identifier: str | None, configuration_name: str | None, checkpoint_name: str,
     output_name: str | None, min_volume_mm3: float, no_postprocess: bool, largest_only: bool,
+    repair_gaps_mm: float | None, repair_adjacency: bool, repair_lateral: bool,
+    repair_close_radius: int,
     device: str | None, num_processes: int, workers: int, skip_prediction: bool,
     backend: str = "gpu",
 ) -> None:
@@ -311,11 +429,17 @@ def main(
     run_infer(
         input_dir=input_dir, nnunet_raw=nnunet_raw, nnunet_preprocessed=nnunet_preprocessed,
         nnunet_results=nnunet_results, results_root=results_root, label_set=label_set,
-        loss=loss, architecture=architecture, folds=parse_folds(folds), plans_identifier=plans_identifier,
+        # architecture is deliberately not a flag: it comes from stage 2's provenance, which is
+        # the only place that knows which checkpoint family was actually fine-tuned.
+        loss=loss, architecture=None, folds=parse_folds(folds),
+        plans_identifier=plans_identifier,
         configuration_name=configuration_name, checkpoint_name=checkpoint_name,
         output_name=output_name,
         min_volume_mm3=None if no_postprocess else min_volume_mm3,
-        largest_only=largest_only, device=device or torch_device_for_backend(backend),
+        largest_only=largest_only,
+        repair_gaps_mm=repair_gaps_mm, repair_adjacency=repair_adjacency,
+        repair_lateral=repair_lateral, repair_close_radius=repair_close_radius,
+        device=device or torch_device_for_backend(backend),
         num_processes=num_processes, workers=workers, skip_prediction=skip_prediction,
     )
 

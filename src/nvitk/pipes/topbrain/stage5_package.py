@@ -246,7 +246,7 @@ def _require_docker() -> None:
 
 
 def _worker_argv(
-    *, label_set: str, loss: str, plans_identifier: str, configuration_name: str,
+    *, label_set: str, loss: str, plans_identifier: str | None, configuration_name: str | None,
     folds: Sequence[int | str], checkpoint: str, name: str, tag: str,
     build: bool, save: bool, backend: str,
 ) -> list[str]:
@@ -261,13 +261,17 @@ def _worker_argv(
         "--results-root", quote_path(inside.results_root),
         "--label-set", label_set,
         "--loss", quote_path(loss),
-        "--plans-identifier", plans_identifier,
-        "--configuration", configuration_name,
         "--folds", quote_path(",".join(str(f) for f in folds)),
         "--checkpoint", checkpoint,
         "--name", quote_path(name),
         "--tag", quote_path(tag),
     ]
+    # Omitted when unknown: the worker reads them from stage 2's provenance, which is the only
+    # place that knows the spacing preprocess_like_nnssl settled on at run time.
+    if plans_identifier:
+        argv.extend(["--plans-identifier", quote_path(plans_identifier)])
+    if configuration_name:
+        argv.extend(["--configuration", quote_path(configuration_name)])
     # Deliberately never --build on the cluster: Docker is not available inside Singularity.
     return argv
 
@@ -320,7 +324,9 @@ def main(
     Logger()
     run_package(
         nnunet_results=nnunet_results, results_root=results_root, label_set=label_set,
-        loss=loss, architecture=architecture, plans_identifier=plans_identifier, configuration_name=configuration_name,
+        # architecture comes from stage 2's provenance, not from a flag.
+        loss=loss, architecture=None, plans_identifier=plans_identifier,
+        configuration_name=configuration_name,
         folds=parse_folds(folds), checkpoint=checkpoint, name=name, tag=tag,
         build=build, save=save,
     )

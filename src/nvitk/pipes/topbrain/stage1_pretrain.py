@@ -50,6 +50,7 @@ from nvitk.core.logger import Logger
 from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain.util import checkpoints as ckpt_util
 from nvitk.pipes.topbrain.util import losses as loss_util
+from nvitk.pipes.topbrain.util import tensorboard as tb
 from nvitk.pipes.topbrain.util.nnssl_env import apply_nnssl_env
 from nvitk.pipes.topbrain.util.paths import (
     CORPUS_DATASET_ID,
@@ -293,8 +294,22 @@ def run_pretrain(
     skip_planning: bool = False,
     skip_preprocessing: bool = False,
     overwrite: bool = False,
+    tensorboard: bool = False,
+    tensorboard_dir: Path | None = None,
+    tensorboard_interval: float = tb.DEFAULT_INTERVAL,
 ) -> Path:
-    """Obtain a pre-trained bundle; returns its directory."""
+    """Obtain a pre-trained bundle; returns its directory.
+
+    Parameters
+    ----------
+    tensorboard
+        Mirror the nnssl trainer's per-epoch log into TensorBoard events under
+        ``<results_root>/tensorboard/stage1/`` while it trains. Only meaningful for
+        ``--source scratch``: the openmind route downloads a checkpoint and trains nothing.
+    tensorboard_dir
+        Overrides that location. Left unset the pipeline's own layout is used, which is what
+        keeps stage 1 and stage 2 under a single server.
+    """
     provenance: dict[str, Any] = {
         "stage": "stage1",
         "created": datetime.now().isoformat(timespec="seconds"),
@@ -430,7 +445,14 @@ def run_pretrain(
     if torch.cuda.is_available():
         cudnn.deterministic = False
         cudnn.benchmark = True
-    trainer.run_training()
+
+    # Monitoring only ever *reads* the trainer's log files, so it cannot perturb the run; a
+    # failure inside it is warned about and swallowed rather than aborting hours of training.
+    with tb.monitoring(
+        paths, stages=("stage1",), enabled=tensorboard, event_root=tensorboard_dir,
+        interval=tensorboard_interval,
+    ):
+        trainer.run_training()
 
     produced = Path(trainer.output_folder) / "checkpoint_final.pth"
     plan = _plan_for(produced)
@@ -489,6 +511,13 @@ def _worker_argv(**o) -> list[str]:
         argv.append("--no-export-model")
     if o.get("overwrite"):
         argv.append("--overwrite")
+    if o.get("tensorboard"):
+        # No --tensorboard-dir: the worker's results_root is already the container-side mount,
+        # so the default layout resolves to the same shared tree the workstation sees.
+        argv.append("--tensorboard")
+        argv.extend(["--tensorboard-interval", str(float(
+            o.get("tensorboard_interval") or tb.DEFAULT_INTERVAL
+        ))])
     return argv
 
 
@@ -553,6 +582,13 @@ def submit_sge(
 @click.option("--skip-planning", is_flag=True, default=False)
 @click.option("--skip-preprocessing", is_flag=True, default=False)
 @click.option("--overwrite", is_flag=True, default=False)
+@click.option("--tensorboard", is_flag=True, default=False,
+              help="Mirror the training log into TensorBoard events under "
+                   "<results-root>/tensorboard/stage1/.")
+@click.option("--tensorboard-dir", type=click.Path(path_type=Path), default=None,
+              help="Event directory (default: <results-root>/tensorboard).")
+@click.option("--tensorboard-interval", type=float, default=tb.DEFAULT_INTERVAL,
+              show_default=True, help="Seconds between mirror passes.")
 def main(
     nnssl_raw: Path, nnssl_preprocessed: Path, nnssl_results: Path, corpus_root: Path,
     results_root: Path, model_root: Path, source: str, name: str | None,
@@ -561,7 +597,9 @@ def main(
     ssl_loss_config: str | None, patch_size: tuple[int, int, int] | None, batch_size: int | None,
     num_epochs: int | None, initial_lr: float | None, init_checkpoint_name: str | None,
     device: str | None, num_processes: int, num_classes: int, no_export_model: bool,
-    skip_planning: bool, skip_preprocessing: bool, overwrite: bool, backend: str = "gpu",
+    skip_planning: bool, skip_preprocessing: bool, overwrite: bool,
+    tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
+    backend: str = "gpu",
 ) -> None:
     """CLI entry point: obtain the pre-trained bundle."""
     Logger()
@@ -581,6 +619,8 @@ def main(
         device=device or torch_device_for_backend(backend), num_processes=num_processes,
         num_classes=num_classes, export_model=not no_export_model,
         skip_planning=skip_planning, skip_preprocessing=skip_preprocessing, overwrite=overwrite,
+        tensorboard=tensorboard, tensorboard_dir=tensorboard_dir,
+        tensorboard_interval=tensorboard_interval,
     )
 
 

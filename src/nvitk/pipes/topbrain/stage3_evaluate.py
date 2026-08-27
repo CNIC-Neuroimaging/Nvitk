@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence, TextIO
@@ -47,7 +48,14 @@ import click
 
 from nvitk.core.logger import Logger
 from nvitk.io import imread
-from nvitk.measure.segmentation_metrics import CaseMetrics, aggregate_cases, evaluate_case
+from nvitk.measure.segmentation_metrics import (
+    CaseMetrics,
+    PairedComparison,
+    aggregate_cases,
+    evaluate_case,
+    fold_spread,
+    paired_comparison,
+)
 from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.util.paths import STAGE3_EVAL_DIR, parse_case_id
 from nvitk.pipes.topbrain.util.sge_backend import sge_backend_cli_args
@@ -156,6 +164,94 @@ def _match_cases(prediction_dir: Path, reference_dir: Path) -> list[tuple[str, P
     return pairs
 
 
+def load_case_aggregates(source: Path) -> dict[str, dict[str, float]]:
+    """Read a previous run's per-case aggregate metrics; case id → metric → value.
+
+    Accepts a ``metrics.json`` file or any directory containing one — a stage 3 output
+    directory, most usefully — so the baseline can be named the way it is actually remembered.
+
+    Raises
+    ------
+    FileNotFoundError, ValueError
+        If no report is there, or it predates per-case reporting. Both mean the comparison
+        cannot be made, and a silently empty baseline would be reported as "no difference".
+    """
+    source = Path(source)
+    report_path = source if source.is_file() else source / "metrics.json"
+    if not report_path.is_file():
+        raise FileNotFoundError(
+            f"No stage 3 report at {report_path}. Point --baseline at a stage3_evaluate run "
+            f"directory or its metrics.json."
+        )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    per_case = report.get("per_case")
+    if not per_case:
+        raise ValueError(f"{report_path} holds no 'per_case' block; nothing to pair against.")
+    return {
+        str(entry["case_id"]): {k: float(v) for k, v in (entry.get("aggregate") or {}).items()}
+        for entry in per_case
+    }
+
+
+def read_case_folds(splits_path: Path) -> dict[str, int]:
+    """Case id → index of the fold that held it out, from ``splits_final.json``.
+
+    Needed to report the fold-to-fold spread: with five folds of five patients, the spread is
+    what says whether a difference between two runs is a result or a coin toss.
+    """
+    splits_path = Path(splits_path)
+    if not splits_path.is_file():
+        log.warning("No splits at %s; per-fold spread will not be reported.", splits_path)
+        return {}
+    splits = json.loads(splits_path.read_text(encoding="utf-8"))
+    return {
+        str(case_id): index
+        for index, fold in enumerate(splits)
+        for case_id in fold.get("val", ())
+    }
+
+
+def format_comparison(rows: Sequence[PairedComparison], *, baseline_name: str) -> str:
+    """Render a paired comparison as fixed-width text.
+
+    ``win/loss`` is deliberately next to the mean: they disagree often enough on 50 correlated
+    cases that reading either one alone is misleading.
+    """
+    if not rows:
+        return "(nothing comparable)"
+    header = (
+        f"{'metric':<24} {'baseline':>9} {'candidate':>9} {'delta':>9} "
+        f"{'win/loss':>9} {'p':>9}"
+    )
+    lines = [f"paired per-case comparison vs {baseline_name}", header, "-" * len(header)]
+    for row in rows:
+        lines.append(
+            f"{row.metric:<24} {row.baseline_mean:>9.4f} {row.candidate_mean:>9.4f} "
+            f"{row.mean_delta:>+9.4f} {f'{row.num_better}/{row.num_worse}':>9} "
+            f"{row.wilcoxon_p:>9.3g}"
+        )
+    lines.append("(delta is sign-corrected: positive always favours the candidate)")
+    return "\n".join(lines)
+
+
+def _write_comparison_csv(rows: Sequence[PairedComparison], output_dir: Path) -> None:
+    """Write the paired comparison as a CSV beside the metrics."""
+    path = output_dir / "comparison_vs_baseline.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([
+            "metric", "num_cases", "baseline_mean", "candidate_mean", "mean_delta",
+            "median_delta", "num_better", "num_worse", "num_tied", "wilcoxon_p",
+        ])
+        for row in rows:
+            writer.writerow([
+                row.metric, row.num_cases, row.baseline_mean, row.candidate_mean,
+                row.mean_delta, row.median_delta, row.num_better, row.num_worse,
+                row.num_tied, row.wilcoxon_p,
+            ])
+    log.info("Wrote %s", path.name)
+
+
 def _write_csvs(cases: Sequence[CaseMetrics], output_dir: Path, label_map: dict[int, str]) -> None:
     """Write the per-case and per-class CSV views of *cases*."""
     per_case = output_dir / "metrics_per_case.csv"
@@ -191,8 +287,22 @@ def run_evaluate(
     run_name: str | None = None,
     iou_threshold: float | None = None,
     skip_neighbours: bool = False,
+    baseline: Path | None = None,
+    splits_path: Path | None = None,
 ) -> Path:
-    """Score every prediction and write the reports; returns the output directory."""
+    """Score every prediction and write the reports; returns the output directory.
+
+    Parameters
+    ----------
+    baseline
+        A previous stage 3 run to compare against, case by case — most usefully the
+        ``--from-scratch`` control, which is the only comparison that says whether the
+        pre-training bought anything. Cohort means cannot answer that at this cohort size: see
+        :func:`~nvitk.measure.segmentation_metrics.paired_comparison`.
+    splits_path
+        ``splits_final.json``, for the per-fold spread. Defaults to the copy stage 0 wrote
+        beside the reference masks.
+    """
     label_map = lbl.label_map(label_set)
     labels = sorted(label_map)
     sideroad = lbl.sideroad_labels(label_set)
@@ -240,6 +350,21 @@ def run_evaluate(
         if subset:
             by_modality[modality] = aggregate_cases(subset)
 
+    # ---- Per-fold spread: the yardstick any difference has to clear ----------
+    case_folds = read_case_folds(
+        Path(splits_path) if splits_path is not None
+        else Path(reference_dir).parent / "splits_final.json"
+    )
+    spread = fold_spread(cases, case_folds) if case_folds else {}
+
+    # ---- Paired comparison against a baseline run ----------------------------
+    comparison: list[PairedComparison] = []
+    if baseline is not None:
+        comparison = paired_comparison(
+            load_case_aggregates(Path(baseline)),
+            {case.case_id: case.aggregate for case in cases},
+        )
+
     report = {
         "stage": "stage3",
         "created": datetime.now().isoformat(timespec="seconds"),
@@ -252,10 +377,15 @@ def run_evaluate(
         "partial_cross_validation_missing_folds": list(partial_folds),
         "cohort": summary,
         "by_modality": by_modality,
+        "fold_spread": spread,
+        "baseline": str(baseline) if baseline is not None else None,
+        "comparison_vs_baseline": [row.as_dict() for row in comparison],
         "per_case": [c.as_dict() for c in cases],
     }
     (output_dir / "metrics.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     _write_csvs(cases, output_dir, label_map)
+    if comparison:
+        _write_comparison_csv(comparison, output_dir)
     (output_dir / "topbrain_stage3.json").write_text(
         json.dumps({k: v for k, v in report.items() if k != "per_case"}, indent=2) + "\n",
         encoding="utf-8",
@@ -263,7 +393,14 @@ def run_evaluate(
 
     log.ok(f"stage3 complete: {len(cases)} case(s) -> {output_dir}")
     for key in sorted(summary):
-        log.info("  %-28s %.4f", key, summary[key])
+        entry = spread.get(key)
+        if entry and not math.isnan(entry["std"]):
+            # The spread belongs next to the mean, not in a file nobody opens: a 0.02 gain on a
+            # metric whose folds vary by 0.05 is not a gain yet.
+            log.info("  %-28s %.4f   (per-fold %.4f +/- %.4f, range %.4f-%.4f)",
+                     key, summary[key], entry["mean"], entry["std"], entry["min"], entry["max"])
+        else:
+            log.info("  %-28s %.4f", key, summary[key])
     for modality, values in by_modality.items():
         log.info(
             "  [%s] dice=%.4f clDice=%.4f b0err=%.2f hd95=%.2f",
@@ -273,6 +410,9 @@ def run_evaluate(
             values.get("class_avg_b0_error", float("nan")),
             values.get("class_avg_hd95", float("nan")),
         )
+    if comparison:
+        for line in format_comparison(comparison, baseline_name=str(baseline)).splitlines():
+            log.info("  %s", line)
     return output_dir
 
 
@@ -284,7 +424,8 @@ def run_evaluate(
 def _worker_argv(
     *, label_set: str, prediction_subdir: str | None = None, run_name: str | None = None,
     folds_spec: str = "0,1,2,3,4",
-    iou_threshold: float | None = None, skip_neighbours: bool = False, backend: str = "cpu",
+    iou_threshold: float | None = None, skip_neighbours: bool = False,
+    baseline: str | None = None, backend: str = "cpu",
 ) -> list[str]:
     """Worker argv for stage 3, built against the container-side layout."""
     from nvitk.cluster.sge import python_module_argv
@@ -310,6 +451,13 @@ def _worker_argv(
         argv.extend(["--iou-threshold", str(float(iou_threshold))])
     if skip_neighbours:
         argv.append("--skip-neighbours")
+    if baseline:
+        # A bare name is resolved against the container's own stage3 directory; an absolute
+        # host path would not exist inside the container.
+        argv.extend(["--baseline", quote_path(
+            baseline if Path(baseline).is_absolute()
+            else inside.results_root / STAGE3_EVAL_DIR / baseline
+        )])
     return argv
 
 
@@ -344,8 +492,9 @@ def submit_sge(
               help="Required by --predictions-from folder.")
 @click.option("--nnunet-results", type=click.Path(path_type=Path), default=None,
               help="Required by --predictions-from cv.")
-@click.option("--run-name", "train_run_name", type=str, default=None,
-              help="Training run directory (<trainer>__<plans>__3d_fullres). Required by cv.")
+@click.option("--train-run-name", "train_run_name", type=str, default=None,
+              help="Training run directory (<trainer>__<plans>__3d_fullres). Defaults to what "
+                   "stage 2's provenance records.")
 @click.option("--folds", type=str, default="0,1,2,3,4", show_default=True,
               help="Folds to gather in cv mode.")
 @click.option("--reference-dir", type=click.Path(path_type=Path), required=True)
@@ -357,10 +506,16 @@ def submit_sge(
               help="Side-road detection IoU threshold (default: the challenge's 0.25).")
 @click.option("--skip-neighbours", is_flag=True, default=False,
               help="Skip the invalid-neighbour metric.")
+@click.option("--baseline", type=click.Path(path_type=Path), default=None,
+              help="A previous stage 3 run (directory or metrics.json) to compare against case "
+                   "by case — normally the --from-scratch control run.")
+@click.option("--splits", "splits_path", type=click.Path(path_type=Path), default=None,
+              help="splits_final.json for the per-fold spread (default: beside the references).")
 def main(
     predictions_from: str, prediction_dir: Path | None, nnunet_results: Path | None,
     train_run_name: str | None, folds: str, reference_dir: Path, results_root: Path,
     label_set: str, run_name: str | None, iou_threshold: float | None, skip_neighbours: bool,
+    baseline: Path | None, splits_path: Path | None,
 ) -> None:
     """CLI entry point: score predictions against reference masks."""
     from nvitk.pipes.topbrain.stage2_train import dataset_name_for, parse_folds
@@ -388,11 +543,13 @@ def main(
         prediction_dir=prediction_dir, partial_folds=partial, reference_dir=reference_dir,
         results_root=results_root, label_set=label_set, run_name=run_name or train_run_name,
         iou_threshold=iou_threshold, skip_neighbours=skip_neighbours,
+        baseline=baseline, splits_path=splits_path,
     )
 
 
 __all__ = [
-    "build_sge_command", "collect_cv_predictions", "main", "run_evaluate", "submit_sge",
+    "build_sge_command", "collect_cv_predictions", "format_comparison", "load_case_aggregates",
+    "main", "read_case_folds", "run_evaluate", "submit_sge",
 ]
 
 

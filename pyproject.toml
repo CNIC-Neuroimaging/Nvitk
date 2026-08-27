@@ -50,6 +50,9 @@ dependencies = [
   "pyvista>=0.48.0",              # 3D plotting
   "seaborn>=0.13.2",              # Statistical data visualization
   "rich>=14.1.0",                 # Rich text formatting for logging
+  # Live training curves. Needed both to write event files (torch.utils.tensorboard is only a
+  # shim over this package) and to serve them — see nvitk.core.tensorboard.
+  "tensorboard>=2.16.0",          # TensorBoard for DL training monitoring
   "trame>=3.6.0",                 # Trame for web-based visualization
   "trame-vtk>=2.5.8,<2.11.9",     # Trame VTK for 3D plotting
 
@@ -287,6 +290,7 @@ nvitk-pesa-fat-sync-measurements = "nvitk.pipes.pesa_fat.sync_measurements:main"
 nvitk-bbtpy = "nvitk.pipes.bbtpy.run:main"
 nvitk-qvtpy = "nvitk.pipes.qvtpy.run:main"
 nvitk-topbrain = "nvitk.pipes.topbrain.run:main"
+nvitk-tensorboard = "nvitk.core.tensorboard:main"
 nvitk-qvtpy-flowshow = "nvitk.pipes.qvtpy.run_flowshow:main"
 nvitk-qvtpy-xnat-upload = "nvitk.pipes.qvtpy.xnat_upload:main"
 nvitk-qvtpy-autoqc = "nvitk.pipes.qvtpy.stage9_autoqc:main"

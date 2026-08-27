@@ -1,4 +1,4 @@
-data/
+# data/
 *.nii
 *.nii.gz
 *.mha
@@ -113,7 +113,7 @@ htmlcov/
 *.swp
 
 # Data files (edit to your needs)
-data/
+# data/
 results/
 outputs/
 # Dataset content is tracked by DVC, not git: the bytes live on the DVC remote and only the

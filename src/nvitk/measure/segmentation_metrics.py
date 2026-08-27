@@ -349,6 +349,208 @@ def evaluate_case(
     return metrics
 
 
+#: Whether a larger value of each aggregate metric is better. Used to give a paired comparison
+#: a consistent sign, so "positive delta = the candidate won" holds for every row of the table.
+METRIC_POLARITY: dict[str, bool] = {
+    "class_avg_dice": True,
+    "class_avg_cl_dice": True,
+    "sideroad_f1": True,
+    "class_avg_b0_error": False,
+    "class_avg_hd95": False,
+    "invalid_neighbours": False,
+}
+
+
+@dataclass(frozen=True)
+class PairedComparison:
+    """One metric, compared case by case between two models on the same cases.
+
+    A cohort mean hides the thing you need to know when 50 cases are all you have: whether the
+    candidate beat the baseline *on the same case*. Two models within a point of each other on
+    average can disagree on two thirds of the cases, and a mean cannot tell you that.
+    """
+
+    metric: str
+    num_cases: int
+    """Cases where both models produced a finite value for this metric."""
+
+    mean_delta: float
+    """Mean of (candidate − baseline), sign-corrected so positive always favours the candidate."""
+
+    median_delta: float
+    num_better: int
+    num_worse: int
+    num_tied: int
+    wilcoxon_p: float
+    """Two-sided Wilcoxon signed-rank p-value, or NaN when it cannot be computed.
+
+    Paired and non-parametric, which is what 50 correlated cases with a skewed metric warrant;
+    a t-test would assume a normality that HD95 and β0 error plainly do not have.
+    """
+
+    baseline_mean: float
+    candidate_mean: float
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-serialisable form."""
+        return {
+            "metric": self.metric, "num_cases": self.num_cases,
+            "mean_delta": self.mean_delta, "median_delta": self.median_delta,
+            "num_better": self.num_better, "num_worse": self.num_worse,
+            "num_tied": self.num_tied, "wilcoxon_p": self.wilcoxon_p,
+            "baseline_mean": self.baseline_mean, "candidate_mean": self.candidate_mean,
+        }
+
+
+def _wilcoxon_p(deltas: Sequence[float]) -> float:
+    """Two-sided Wilcoxon signed-rank p-value for *deltas*; NaN when undefined.
+
+    SciPy raises when every difference is zero and warns when the sample is tiny; both mean
+    "no evidence here", which is better reported as NaN than as an exception in the middle of
+    a reporting run.
+    """
+    non_zero = [d for d in deltas if d != 0.0]
+    if len(non_zero) < 6:
+        return float("nan")
+    try:
+        from scipy.stats import wilcoxon
+
+        return float(wilcoxon(non_zero).pvalue)
+    except Exception as exc:  # degenerate sample; not worth aborting a report for
+        log.debug("Wilcoxon test unavailable (%s).", exc)
+        return float("nan")
+
+
+def paired_comparison(
+    baseline: Mapping[str, Mapping[str, float]],
+    candidate: Mapping[str, Mapping[str, float]],
+    *,
+    metrics: Sequence[str] | None = None,
+    polarity: Mapping[str, bool] | None = None,
+) -> list[PairedComparison]:
+    """Compare two models case by case on the cases they share.
+
+    Parameters
+    ----------
+    baseline, candidate
+        Case id → metric → value, e.g. the ``aggregate`` dict of each :class:`CaseMetrics`.
+        Only case ids present in both are compared; anything else is not a pair.
+    metrics
+        Which metrics to compare. Defaults to every metric both models report.
+    polarity
+        Metric → whether larger is better. Defaults to :data:`METRIC_POLARITY`; metrics absent
+        from it are assumed larger-is-better.
+
+    Returns
+    -------
+    list of PairedComparison
+        One row per metric, in the order given (or sorted when defaulted).
+
+    Raises
+    ------
+    ValueError
+        If the two mappings share no case ids at all — almost always a mismatched run rather
+        than a genuinely empty comparison.
+    """
+    polarity = dict(METRIC_POLARITY if polarity is None else polarity)
+    shared = sorted(set(baseline) & set(candidate))
+    if not shared:
+        raise ValueError(
+            f"No case ids in common between the two runs ({len(baseline)} vs "
+            f"{len(candidate)} cases). They did not score the same cohort."
+        )
+    if len(shared) < max(len(baseline), len(candidate)):
+        log.warning(
+            "Comparing %d case(s) present in both runs (baseline has %d, candidate %d).",
+            len(shared), len(baseline), len(candidate),
+        )
+
+    if metrics is None:
+        metrics = sorted(
+            {k for cid in shared for k in baseline[cid]}
+            & {k for cid in shared for k in candidate[cid]}
+        )
+
+    rows: list[PairedComparison] = []
+    for metric in metrics:
+        sign = 1.0 if polarity.get(metric, True) else -1.0
+        pairs = [
+            (float(baseline[cid][metric]), float(candidate[cid][metric]))
+            for cid in shared
+            if metric in baseline[cid] and metric in candidate[cid]
+            and not np.isnan(baseline[cid][metric]) and not np.isnan(candidate[cid][metric])
+        ]
+        if not pairs:
+            continue
+        deltas = [sign * (new - old) for old, new in pairs]
+        rows.append(PairedComparison(
+            metric=metric,
+            num_cases=len(pairs),
+            mean_delta=float(np.mean(deltas)),
+            median_delta=float(np.median(deltas)),
+            num_better=sum(1 for d in deltas if d > 0),
+            num_worse=sum(1 for d in deltas if d < 0),
+            num_tied=sum(1 for d in deltas if d == 0),
+            wilcoxon_p=_wilcoxon_p(deltas),
+            baseline_mean=float(np.mean([old for old, _ in pairs])),
+            candidate_mean=float(np.mean([new for _, new in pairs])),
+        ))
+    return rows
+
+
+def fold_spread(
+    cases: Sequence[CaseMetrics],
+    case_folds: Mapping[str, int],
+    *,
+    metrics: Sequence[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Per-fold means of each metric, plus their spread across folds.
+
+    The spread is the number that decides whether a difference between two runs means anything.
+    If the candidate is 0.02 Dice ahead on the cohort mean but the fold-to-fold standard
+    deviation is 0.05, the comparison has not resolved anything and needs either more folds or
+    a paired test — see :func:`paired_comparison`.
+
+    Parameters
+    ----------
+    case_folds
+        Case id → index of the fold that held that case out. Cases absent from the mapping are
+        skipped, so a partial cross-validation still reports on the folds it does have.
+    """
+    grouped: dict[int, list[CaseMetrics]] = {}
+    for case in cases:
+        fold = case_folds.get(case.case_id)
+        if fold is not None:
+            grouped.setdefault(int(fold), []).append(case)
+    if not grouped:
+        return {}
+
+    folds = sorted(grouped)
+    per_fold = {fold: aggregate_cases(grouped[fold]) for fold in folds}
+    if metrics is None:
+        metrics = sorted({key for summary in per_fold.values() for key in summary})
+
+    spread: dict[str, dict[str, Any]] = {}
+    for metric in metrics:
+        values = [
+            per_fold[fold][metric] for fold in folds
+            if metric in per_fold[fold] and not np.isnan(per_fold[fold][metric])
+        ]
+        if not values:
+            continue
+        spread[metric] = {
+            "per_fold": {str(fold): per_fold[fold].get(metric) for fold in folds},
+            "mean": float(np.mean(values)),
+            # Sample standard deviation: five folds are a sample of the splits we could have
+            # drawn, not the population, and ddof=0 would understate the spread we care about.
+            "std": float(np.std(values, ddof=1)) if len(values) > 1 else float("nan"),
+            "min": float(np.min(values)),
+            "max": float(np.max(values)),
+            "num_folds": len(values),
+        }
+    return spread
+
+
 def aggregate_cases(cases: Sequence[CaseMetrics]) -> dict[str, float]:
     """Cohort means of each aggregate metric, ignoring cases where a metric was undefined."""
     if not cases:
@@ -367,7 +569,9 @@ def aggregate_cases(cases: Sequence[CaseMetrics]) -> dict[str, float]:
 
 __all__ = [
     "HD95_MISSING_PENALTY",
+    "METRIC_POLARITY",
     "CaseMetrics",
+    "PairedComparison",
     "aggregate_cases",
     "betti_zero_error",
     "cl_dice",
@@ -378,5 +582,7 @@ __all__ = [
     "f1_from_counts",
     "hd95",
     "invalid_neighbour_error",
+    "fold_spread",
     "neighbouring_labels",
+    "paired_comparison",
 ]

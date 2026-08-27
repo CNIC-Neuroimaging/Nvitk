@@ -78,6 +78,12 @@ STAGE2_TRAIN_DIR: str = "stage2_train"
 STAGE3_EVAL_DIR: str = "stage3_evaluate"
 STAGE4_INFER_DIR: str = "stage4_infer"
 STAGE5_PACKAGE_DIR: str = "stage5_package"
+STAGE6_SELFTRAIN_DIR: str = "stage6_selftrain"
+
+#: TensorBoard event tree, shared by every stage that trains. Lives under ``results_root`` so
+#: it is bind-mounted on the cluster and visible through the same mount on the workstation —
+#: which is what lets a cluster run be watched locally.
+TENSORBOARD_DIR: str = "tensorboard"
 
 #: Root keys of ``pipelines.topbrain_paths``, without the ``local_``/``cluster_`` prefix.
 ROOT_KEYS: tuple[str, ...] = (
@@ -368,6 +374,8 @@ __all__ = [
     "STAGE3_EVAL_DIR",
     "STAGE4_INFER_DIR",
     "STAGE5_PACKAGE_DIR",
+    "STAGE6_SELFTRAIN_DIR",
+    "TENSORBOARD_DIR",
     "ReleaseCase",
     "TopBrainPaths",
     "iter_release_cases",

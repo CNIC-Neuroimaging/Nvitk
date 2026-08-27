@@ -163,8 +163,17 @@ def main() -> None:
 @click.option("--rev", default=None, help="Git revision of the pointers (tag/branch/commit). Default: the repo's default branch.")
 @click.option("--force", is_flag=True, help="Overwrite targets that already exist locally.")
 @click.option("--dry-run", is_flag=True, help="Print the dvc commands without running them.")
-def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool) -> None:
-    """Download the dataset into ``db.root``."""
+@click.option(
+    "--no-build",
+    is_flag=True,
+    help="Skip building the SQLite index when it was not downloaded.",
+)
+def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool, no_build: bool) -> None:
+    """Download the dataset, then build the SQLite index if it was not fetched.
+
+    Without ``--all`` the ~1.3 GB index is not transferred; it is rebuilt locally instead,
+    which is both quicker and produces exactly the same file.
+    """
     dvc = _require_dvc()
     root = _dataset_root()
     repo = _setting("dvc_repo", DEFAULT_DVC_REPO)
@@ -248,12 +257,38 @@ def pull_cmd(want_all: bool, rev: str | None, force: bool, dry_run: bool) -> Non
             shutil.rmtree(destination, ignore_errors=True)
         staging.rename(destination)
 
-    for name, _heavy, description in skipped:
-        click.echo(f"\n  {name} not fetched ({description}). Use --all to include it, or rebuild it with:")
-        click.echo(f"    python -m nvitk.db.sqlite_index --dataset-root {root}")
-
     if failures:
         raise SystemExit(1)
+
+    # The SQLite index was not downloaded, so build it instead. It is derived entirely from
+    # the tables and takes a few seconds, which is far less than transferring the ~1.3 GB it
+    # occupies — and leaving it absent would give a dataset that opens but answers no queries.
+    if skipped and not dry_run and not no_build:
+        _build_index(root)
+    elif skipped and dry_run:
+        for name, _heavy, description in skipped:
+            click.echo(f"\n  {name} not fetched ({description}); the index would be built locally.")
+
+
+def _build_index(root: Path) -> None:
+    """Build the SQLite index for the dataset at *root*, reporting rather than raising."""
+    click.echo("\n  building the SQLite index from the tables …")
+    try:
+        from nvitk.db.catalog import DatasetCatalog
+        from nvitk.db.sqlite_index import SQLiteIndex
+
+        catalog = DatasetCatalog(root)
+        out = SQLiteIndex(catalog.sqlite_index_path).build(catalog)
+    except Exception as exc:  # a usable dataset was still downloaded; do not fail the pull
+        click.echo(
+            click.style("  index build failed", fg="yellow")
+            + f": {exc}\n"
+            f"  The data is in place. Build it later with:\n"
+            f"    python -m nvitk.db.sqlite_index --dataset-root {root}"
+        )
+        return
+    size = Path(out).stat().st_size / 1e9 if Path(out).exists() else 0.0
+    click.echo(f"  index ready: {out} ({size:.2f} GB)")
 
 
 @main.command("status")

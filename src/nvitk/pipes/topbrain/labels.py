@@ -260,6 +260,26 @@ def label_map(label_set: str) -> dict[int, str]:
         ) from None
 
 
+def lateral_pairs(label_set: str) -> dict[int, str]:
+    """Right label → left label, for the classes that exist as a mirrored pair.
+
+    Derived from the ``R-`` / ``L-`` name prefixes rather than hard-coded, so it follows the
+    label map instead of drifting from it. Unpaired classes (BA, Acom, the 3rd-A2/A3 variants)
+    are absent by construction: they have no side, and giving them one is how a post-processing
+    step invents anatomy.
+    """
+    names = label_map(label_set)
+    by_name = {name: value for value, name in names.items()}
+    pairs: dict[int, str] = {}
+    for value, name in sorted(names.items()):
+        if not name.startswith("R-"):
+            continue
+        partner = by_name.get("L-" + name[2:])
+        if partner is not None:
+            pairs[int(value)] = int(partner)
+    return pairs
+
+
 def num_foreground(label_set: str) -> int:
     """Number of foreground classes in *label_set* (36, 40 or 42)."""
     return len(label_map(label_set))
@@ -299,6 +319,7 @@ __all__ = [
     "V1_CT_LABELS",
     "V1_MR_LABELS",
     "label_map",
+    "lateral_pairs",
     "max_label",
     "nnunet_labels",
     "num_foreground",

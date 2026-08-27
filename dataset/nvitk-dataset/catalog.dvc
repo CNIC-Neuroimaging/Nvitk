@@ -1,0 +1,6 @@
+outs:
+- md5: d0c10de8a6042508fa4dbfcf2fbcd3d6.dir
+  size: 118527
+  nfiles: 7
+  hash: md5
+  path: catalog
