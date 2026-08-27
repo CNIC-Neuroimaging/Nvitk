@@ -81,6 +81,90 @@ BUNDLE_MODEL: str = "segmentation_model.pth"
 BUNDLE_META: str = "bundle.json"
 
 
+#: Written *last* by nnssl's ``preprocess_dataset``, after every case has been mapped. Its
+#: presence is therefore the only trustworthy "preprocessing finished" signal — the per-case
+#: outputs appear as work proceeds and say nothing about whether the run completed.
+PREPROCESS_DONE_MARKER: str = "valid_imgs.json"
+
+#: nnssl's fingerprint and plans filenames, in the corpus's preprocessed directory.
+FINGERPRINT_FILE: str = "dataset_fingerprint.json"
+PLANS_FILE: str = "nnsslPlans.json"
+
+
+def corpus_preprocessed_dir(paths: TopBrainPaths) -> Path:
+    """``<nnssl_preprocessed>/Dataset511_TopBrainCorpus`` — where planning and preprocessing land."""
+    return Path(paths.nnssl_preprocessed) / paths.corpus_dataset_name
+
+
+def planning_complete(paths: TopBrainPaths) -> tuple[bool, str]:
+    """Whether the corpus fingerprint and plans are already on disk; with a reason either way."""
+    directory = corpus_preprocessed_dir(paths)
+    for name in (FINGERPRINT_FILE, PLANS_FILE):
+        if not (directory / name).is_file():
+            return False, f"{name} is missing"
+    return True, f"{FINGERPRINT_FILE} and {PLANS_FILE} are present"
+
+
+def preprocessing_complete(
+    paths: TopBrainPaths, configuration_name: str
+) -> tuple[bool, str]:
+    """Whether the corpus is already preprocessed **for this configuration**.
+
+    nnssl re-reads, re-resamples and re-writes every volume unconditionally —
+    ``preprocess_and_save`` has no existence check — so on a corpus of several hundred volumes
+    an accidental repeat is hours of work for nothing. This is the guard that makes a re-run
+    cheap.
+
+    Completeness is judged on four things, in order of how badly they fail:
+
+    - the plans file, without which nothing can be checked;
+    - ``pretrain_data__<configuration>.json``, written early by ``preprocess_dataset`` and the
+      only per-configuration artefact;
+    - :data:`PREPROCESS_DONE_MARKER`, written last, so a job killed part-way is correctly
+      reported as incomplete;
+    - that the marker is **not older** than the per-configuration collection. That ordering is
+      what distinguishes "finished this configuration" from "finished a different one earlier",
+      since the marker itself is not configuration-specific.
+
+    Returns
+    -------
+    tuple
+        ``(complete, reason)`` — the reason is logged either way, so a decision to redo hours
+        of preprocessing is never silent.
+    """
+    directory = corpus_preprocessed_dir(paths)
+    plans_path = directory / PLANS_FILE
+    if not plans_path.is_file():
+        return False, f"{PLANS_FILE} is missing"
+
+    collection = directory / f"pretrain_data__{configuration_name}.json"
+    if not collection.is_file():
+        return False, f"{collection.name} is missing"
+
+    marker = directory / PREPROCESS_DONE_MARKER
+    if not marker.is_file():
+        return False, f"{PREPROCESS_DONE_MARKER} is missing — a previous run did not finish"
+    if marker.stat().st_mtime < collection.stat().st_mtime:
+        return False, (
+            f"{PREPROCESS_DONE_MARKER} is older than {collection.name}, so it belongs to a "
+            f"different configuration"
+        )
+
+    try:
+        identifier = json.loads(plans_path.read_text(encoding="utf-8"))[
+            "configurations"][configuration_name]["data_identifier"]
+    except (KeyError, ValueError, TypeError):
+        return False, f"{PLANS_FILE} has no data_identifier for configuration {configuration_name!r}"
+
+    output_dir = directory / str(identifier)
+    if not output_dir.is_dir():
+        return False, f"{identifier}/ does not exist"
+    count = sum(1 for _ in output_dir.rglob("*.b2nd"))
+    if count == 0:
+        return False, f"{identifier}/ holds no preprocessed volumes"
+    return True, f"{count} preprocessed volume(s) under {identifier}/"
+
+
 def bundle_dir(results_root: Path, name: str) -> Path:
     """Directory holding the pre-trained bundle *name*."""
     return Path(results_root) / STAGE1_PRETRAIN_DIR / name
@@ -293,6 +377,7 @@ def run_pretrain(
     export_model: bool = True,
     skip_planning: bool = False,
     skip_preprocessing: bool = False,
+    continue_training: bool = False,
     overwrite: bool = False,
     tensorboard: bool = False,
     tensorboard_dir: Path | None = None,
@@ -302,6 +387,14 @@ def run_pretrain(
 
     Parameters
     ----------
+    continue_training
+        Resume from ``checkpoint_latest.pth`` in the trainer's output folder instead of
+        starting at epoch 0. Worth setting on any cluster run: nnssl writes that checkpoint
+        every epoch, but nothing ever reads it back, so a job stopped by a wall-clock limit
+        otherwise loses everything it did.
+    overwrite
+        Redo planning and preprocessing even when they are already complete. Without it both
+        are reused — nnssl itself has no such check and would re-resample every volume.
     tensorboard
         Mirror the nnssl trainer's per-epoch log into TensorBoard events under
         ``<results_root>/tensorboard/stage1/`` while it trains. Only meaningful for
@@ -380,10 +473,31 @@ def run_pretrain(
             "0.3-0.6 mm across; sub-millimetre structures will not survive it."
         )
 
-    if not skip_planning:
+    # ---- Planning: reuse what is on disk unless asked to redo it -------------
+    plan_done, plan_reason = planning_complete(paths)
+    if skip_planning:
+        log.info("stage1: --skip-planning (%s).", plan_reason)
+    elif plan_done and not overwrite:
+        log.info("stage1: reusing the existing fingerprint and plans (%s). "
+                 "Pass --overwrite to redo them.", plan_reason)
+    else:
+        log.info("stage1: fingerprinting and planning the corpus (%s).", plan_reason)
+        # clean=True is nnssl's own default here and forces a fresh fingerprint; that is what
+        # we want once we have decided to redo this step at all.
         extract_fingerprints([CORPUS_DATASET_ID], num_processes=num_processes, clean=True)
         plan_experiments([CORPUS_DATASET_ID])
-    if not skip_preprocessing:
+
+    # ---- Preprocessing: the expensive half -----------------------------------
+    preprocess_done, preprocess_reason = preprocessing_complete(paths, configuration_name)
+    if skip_preprocessing:
+        log.info("stage1: --skip-preprocessing (%s).", preprocess_reason)
+    elif preprocess_done and not overwrite:
+        log.info("stage1: corpus already preprocessed for %r (%s). Reusing it; pass "
+                 "--overwrite to redo.", configuration_name, preprocess_reason)
+    else:
+        log.info("stage1: preprocessing the corpus for %r (%s). Every volume is re-read and "
+                 "re-resampled — nnssl has no per-case skip.",
+                 configuration_name, preprocess_reason)
         preprocess(
             [CORPUS_DATASET_ID], plans_identifier="nnsslPlans",
             configurations=(configuration_name,), num_processes=num_processes,
@@ -427,8 +541,31 @@ def run_pretrain(
     if applied:
         log.info("Trainer overrides: %s", applied)
 
+    # ---- Resume before anything touches the weights --------------------------
+    resumed_from: str | None = None
+    if continue_training:
+        latest = Path(trainer.output_folder) / "checkpoint_latest.pth"
+        if latest.is_file():
+            # load_checkpoint() calls initialize() itself when needed and restores
+            # current_epoch, so run_training()'s loop starts where the last run stopped.
+            trainer.load_checkpoint(str(latest))
+            resumed_from = str(latest)
+            log.ok(f"resuming at epoch {trainer.current_epoch} from {latest}")
+        else:
+            log.warning(
+                "--continue-training, but no checkpoint_latest.pth under %s; starting from "
+                "epoch 0.", trainer.output_folder,
+            )
+
     seed_report = None
-    if init_checkpoint_name:
+    if init_checkpoint_name and resumed_from is not None:
+        # Seeding now would overwrite the encoder we just restored with the published one,
+        # silently discarding every epoch already trained.
+        log.info(
+            "Resumed from a checkpoint, so --init-checkpoint-name %r is ignored: the resumed "
+            "weights already carry the pre-training it was meant to seed.", init_checkpoint_name,
+        )
+    elif init_checkpoint_name:
         from nvitk.pipes.topbrain.util.weight_adapter import load_encoder_into
 
         seed = ckpt_util.resolve_checkpoint(
@@ -460,6 +597,7 @@ def run_pretrain(
         "trainer": trainer_name, "configuration": configuration_name,
         "ssl_loss": ssl_loss, "ssl_loss_config": ssl_loss_config, "overrides": applied,
         "seeded_encoder": seed_report, "device": device,
+        "continue_training": continue_training, "resumed_from": resumed_from,
         "source_checkpoint": str(produced),
         "architecture": (plan.get("architecture_plans") or {}).get("arch_class_name"),
         "nnssl_output_folder": str(trainer.output_folder_base),
@@ -509,6 +647,11 @@ def _worker_argv(**o) -> list[str]:
         argv.extend(["--patch-size", *[str(int(p)) for p in o["patch_size"]]])
     if not o.get("export_model", True):
         argv.append("--no-export-model")
+    for flag, key in (("--skip-planning", "skip_planning"),
+                      ("--skip-preprocessing", "skip_preprocessing"),
+                      ("--continue-training", "continue_training")):
+        if o.get(key):
+            argv.append(flag)
     if o.get("overwrite"):
         argv.append("--overwrite")
     if o.get("tensorboard"):
@@ -579,9 +722,14 @@ def submit_sge(
               help="Placeholder class count for the exported generic segmentation model.")
 @click.option("--no-export-model", is_flag=True, default=False,
               help="Skip materialising segmentation_model.pth.")
-@click.option("--skip-planning", is_flag=True, default=False)
-@click.option("--skip-preprocessing", is_flag=True, default=False)
-@click.option("--overwrite", is_flag=True, default=False)
+@click.option("--skip-planning", is_flag=True, default=False,
+              help="Never fingerprint or plan, even if they are missing.")
+@click.option("--skip-preprocessing", is_flag=True, default=False,
+              help="Never preprocess, even if the corpus has not been.")
+@click.option("--continue-training", is_flag=True, default=False,
+              help="Resume from checkpoint_latest.pth instead of starting at epoch 0.")
+@click.option("--overwrite", is_flag=True, default=False,
+              help="Redo planning and preprocessing even when they are already complete.")
 @click.option("--tensorboard", is_flag=True, default=False,
               help="Mirror the training log into TensorBoard events under "
                    "<results-root>/tensorboard/stage1/.")
@@ -597,7 +745,7 @@ def main(
     ssl_loss_config: str | None, patch_size: tuple[int, int, int] | None, batch_size: int | None,
     num_epochs: int | None, initial_lr: float | None, init_checkpoint_name: str | None,
     device: str | None, num_processes: int, num_classes: int, no_export_model: bool,
-    skip_planning: bool, skip_preprocessing: bool, overwrite: bool,
+    skip_planning: bool, skip_preprocessing: bool, continue_training: bool, overwrite: bool,
     tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
     backend: str = "gpu",
 ) -> None:
@@ -618,14 +766,21 @@ def main(
         initial_lr=initial_lr, init_checkpoint_name=init_checkpoint_name,
         device=device or torch_device_for_backend(backend), num_processes=num_processes,
         num_classes=num_classes, export_model=not no_export_model,
-        skip_planning=skip_planning, skip_preprocessing=skip_preprocessing, overwrite=overwrite,
+        skip_planning=skip_planning, skip_preprocessing=skip_preprocessing,
+        continue_training=continue_training, overwrite=overwrite,
         tensorboard=tensorboard, tensorboard_dir=tensorboard_dir,
         tensorboard_interval=tensorboard_interval,
     )
 
 
 __all__ = [
-    "BUNDLE_CHECKPOINT", "BUNDLE_META", "BUNDLE_MODEL", "BUNDLE_PLAN", "SPACING_STYLES",
+    "BUNDLE_CHECKPOINT",
+    "FINGERPRINT_FILE",
+    "PLANS_FILE",
+    "PREPROCESS_DONE_MARKER",
+    "corpus_preprocessed_dir",
+    "planning_complete",
+    "preprocessing_complete", "BUNDLE_META", "BUNDLE_MODEL", "BUNDLE_PLAN", "SPACING_STYLES",
     "bundle_dir", "build_sge_command", "export_segmentation_model", "main", "run_pretrain",
     "submit_sge",
 ]

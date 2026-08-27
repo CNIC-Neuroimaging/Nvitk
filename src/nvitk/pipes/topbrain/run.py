@@ -137,6 +137,9 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             device=o["device"], num_processes=o["num_processes"],
             export_model=o["export_model"], overwrite=o["overwrite"], backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
+            skip_planning=o["ssl_skip_planning"],
+            skip_preprocessing=o["ssl_skip_preprocessing"],
+            continue_training=o["ssl_continue"],
         ),
         st.STAGE_TRAIN: dict(
             bundle=bundle_name, label_set=o["label_set"], pretrain_name=bundle_name,
@@ -515,6 +518,15 @@ def _submit_via_login_node(
 @click.option("--ssl-lr", type=float, default=None)
 @click.option("--init-checkpoint-name", type=str, default=None,
               help="Seed --pretrain-source scratch from a published checkpoint.")
+@click.option("--ssl-skip-planning", is_flag=True, default=False,
+              help="Stage 1: never fingerprint or plan the corpus. Rarely needed — completed "
+                   "planning is reused automatically unless --overwrite.")
+@click.option("--ssl-skip-preprocessing", is_flag=True, default=False,
+              help="Stage 1: never preprocess the corpus. Rarely needed — a completed corpus "
+                   "is reused automatically unless --overwrite.")
+@click.option("--ssl-continue", is_flag=True, default=False,
+              help="Stage 1: resume pre-training from checkpoint_latest.pth rather than "
+                   "restarting at epoch 0. Worth setting on any cluster run.")
 @click.option("--no-export-model", is_flag=True, default=False,
               help="Skip materialising the bundle's segmentation_model.pth.")
 # ---- stage 2: transfer training ---------------------------------------------
@@ -696,6 +708,7 @@ def main(**kw: Any) -> None:
             "ct_context_window", "mr_context_percentiles",
             "pretrain_source", "checkpoint_name", "bundle_name", "ssl_loss", "ssl_loss_config",
             "ssl_patch_size", "ssl_batch_size", "ssl_epochs", "ssl_lr", "init_checkpoint_name",
+            "ssl_skip_planning", "ssl_skip_preprocessing", "ssl_continue",
             "loss_config", "adaptation_mode", "baseline_planner", "target_spacing",
             "patch_size", "batch_size",
             "num_epochs", "num_gpus", "tensorboard", "tensorboard_interval", "compare_to",
