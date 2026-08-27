@@ -461,10 +461,17 @@ def _worker_argv(
     return argv
 
 
+def _user_data_paths(**options) -> list[Path]:
+    """``--baseline`` when it is an absolute path rather than a run name."""
+    raw = str(options.get("baseline") or "").strip()
+    return [Path(raw)] if raw.startswith("/") else []
+
+
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **options) -> str:
-    """Host shell command for the stage 6 SGE task."""
+    """Host shell command for the stage 3 SGE task."""
     return build_stage_command(
         "stage3", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**options),
         backend=options.get("backend", "cpu"), request_gpu=False,
         job_suffix=options.get("label_set", ""),
     )
@@ -474,9 +481,10 @@ def submit_sge(
     *, paths, container: Path, src_dir: Path | None = None, hold_jid: str | None = None,
     dry_run: bool = False, emit: TextIO | None = None, **options,
 ) -> str:
-    """Emit or submit the stage 6 SGE job."""
+    """Emit or submit the stage 3 SGE job."""
     return submit_stage_job(
         "stage3", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**options),
         backend=options.get("backend", "cpu"), request_gpu=False,
         job_suffix=options.get("label_set", ""),
         hold_jid=hold_jid, dry_run=dry_run, emit=emit,

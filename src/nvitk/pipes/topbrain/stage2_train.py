@@ -543,10 +543,17 @@ def _worker_argv(**o) -> list[str]:
     return argv
 
 
+def _user_data_paths(**o) -> list[Path]:
+    """``--loss-config`` when it names a file rather than carrying inline JSON."""
+    raw = str(o.get("loss_config") or "").strip()
+    return [Path(raw)] if raw.startswith("/") else []
+
+
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **o) -> str:
     """Host shell command for the stage 2 SGE task."""
     return build_stage_command(
         "stage2", _worker_argv(**o), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
         job_suffix=f"{o.get('label_set', '')}_{o.get('loss', '')}".strip("_")[:24],
@@ -560,6 +567,7 @@ def submit_sge(
     """Emit or submit the stage 2 SGE job."""
     return submit_stage_job(
         "stage2", _worker_argv(**o), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
         job_suffix=f"{o.get('label_set', '')}_{o.get('loss', '')}".strip("_")[:24],

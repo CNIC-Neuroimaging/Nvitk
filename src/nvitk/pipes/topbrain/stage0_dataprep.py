@@ -722,10 +722,28 @@ def _worker_argv(**options) -> list[str]:
     return argv
 
 
+def _user_data_paths(paths, **options) -> list[Path]:
+    """Host locations the stage 0 argv names: corpus source roots and cohort directories.
+
+    Parsed with the same functions the worker uses, so the submitting side and the worker can
+    never disagree about what a spec means. A malformed spec therefore fails at submission
+    rather than inside the container.
+    """
+    roots: list[Path] = []
+    for spec in options.get("corpus_sources", ()):
+        source = corpus_util.parse_source_spec(spec, challenge_root=paths.challenge_root)
+        roots.append(Path(source.root))
+    for spec in (*options.get("extra_train", ()), *options.get("extra_train_only", ())):
+        cohort = parse_extra_train(spec)
+        roots.extend((cohort.images_dir, cohort.labels_dir))
+    return roots
+
+
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **options) -> str:
     """Host shell command for the stage 0 SGE task."""
     return build_stage_command(
         "stage0", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(paths, **options),
         backend=options.get("backend", "cpu"),
         # Harmonisation is voxelwise array work; it benefits from CuPy but never needs SGE to
         # reserve a GPU, and asking for one would queue behind the training jobs.
@@ -740,6 +758,7 @@ def submit_sge(
     """Emit or submit the stage 0 SGE job."""
     return submit_stage_job(
         "stage0", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(paths, **options),
         backend=options.get("backend", "cpu"), request_gpu=False,
         job_suffix=options.get("label_set", ""), hold_jid=hold_jid, dry_run=dry_run, emit=emit,
     )
