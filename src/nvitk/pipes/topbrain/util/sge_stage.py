@@ -49,7 +49,9 @@ submission with a message naming it, rather than after an hour in the GPU queue.
 
 from __future__ import annotations
 
+import os
 import shlex
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence, TextIO
 
@@ -174,6 +176,44 @@ def warn_if_stale(deployed: Path, local: Path) -> bool:
         str(local).rstrip("/"), str(deployed).rstrip("/"),
     )
     return True
+
+
+def resolve_container(container: Path | str) -> Path:
+    """Validate the Singularity image exists and is readable on this host.
+
+    Checked at submission because the alternative is what it replaces: the job queues, starts,
+    and singularity reports ``could not open image ... no such file or directory`` into an
+    ``.err`` file, having consumed a slot and told you nothing about which images do exist.
+
+    Raises
+    ------
+    FileNotFoundError
+        Naming the missing image and listing the ``.sif`` files that *are* in its directory,
+        newest first, so the fix is visible in the error itself.
+    """
+    image = Path(container).expanduser()
+    if image.is_file() and os.access(image, os.R_OK):
+        return image
+
+    available: list[str] = []
+    parent = image.parent
+    if parent.is_dir():
+        candidates = sorted(
+            (c for c in parent.glob("*.sif") if os.access(c, os.R_OK)),
+            key=lambda c: c.stat().st_mtime, reverse=True,
+        )
+        available = [f"{c.name} ({datetime.fromtimestamp(c.stat().st_mtime):%Y-%m-%d})"
+                     for c in candidates[:8]]
+
+    reason = "is not readable" if image.exists() else "does not exist"
+    hint = (
+        f" Images available in {parent}: {', '.join(available)}."
+        if available else f" No readable .sif images found in {parent}."
+    )
+    raise FileNotFoundError(
+        f"Container image {image} {reason}.{hint} Pass --container, or fix "
+        f"pipelines.{cfg.PIPELINE_NAME}.default_sge_container_root in sge.json."
+    )
 
 
 def container_mount_points(extra: Sequence[tuple[Path, str]] = ()) -> tuple[str, ...]:
@@ -313,7 +353,7 @@ def build_stage_spec(
 
     cluster_paths = ClusterPaths(
         src=resolve_src_dir(src_dir),
-        container=Path(container),
+        container=resolve_container(container),
         models=paths.model_root,
         data_root=paths.challenge_root,
         output_root=paths.results_root,
@@ -384,6 +424,7 @@ __all__ = [
     "host_binds",
     "plan_data_binds",
     "quote_path",
+    "resolve_container",
     "resolve_src_dir",
     "submit_stage_job",
     "warn_if_stale",
