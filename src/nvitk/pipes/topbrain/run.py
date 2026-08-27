@@ -17,6 +17,15 @@ Stages
 ``stage6``  self-training *(optional)* — pseudo-label the unlabeled cohort with the stage-2
             model, keep what survives scrutiny, and print the command that feeds it back
 
+Submitting to SGE
+-----------------
+A workstation has no ``qsub``. ``--submit sge`` therefore emits the whole run as one bash
+driver script — every stage's ``singularity exec`` payload and ``qsub`` invocation, with the
+``-hold_jid`` chain resolved through shell variables — and then executes that script where
+``qsub`` exists: locally if this *is* a submit host, otherwise over SSH to a login node
+(SFTP the script, ``bash`` it, parse the job ids back). ``--remote-host`` / ``--remote-user``
+skip the prompts; the password is always prompted for. ``--no-remote`` stops after writing.
+
 Data layout
 -----------
 All roots come from ``sge.json`` ``pipelines.topbrain_paths``; see
@@ -53,7 +62,10 @@ from typing import Any, Callable, Sequence, TextIO
 
 import click
 
+from nvitk.cluster.remote_submit import prompt_ssh_credentials, run_sge_script_ssh_capture
 from nvitk.cluster.sge import write_script_header
+from nvitk.cluster.sge_chunk import parse_sge_submission_job_ids
+from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.click_config import config_dir_click_option
 from nvitk.core.logger import Logger, PipelineRunTracker
@@ -338,13 +350,10 @@ def _tensorboard_for_sge(
         )
         return
     if serve_mode == "local":
-        if emit is not None or dry_run:
-            log.info("Would serve TensorBoard locally: %s",
-                     tb.local_serve_command(event_root, sources=sources, port=port))
-            return
-        tb.watch_and_serve(
-            here, stages=selected, label_set=label_set, port=port, interval=interval
-        )
+        # The server itself starts after the jobs are submitted (it blocks), so all this does
+        # is record the command that will be used.
+        log.info("Will serve TensorBoard locally once submitted: %s",
+                 tb.local_serve_command(event_root, sources=sources, port=port))
         return
     if enabled:
         # 'none' is the default for SGE: the cluster tree is mounted here, so serving it
@@ -352,6 +361,103 @@ def _tensorboard_for_sge(
         log.info("TensorBoard events -> %s", event_root)
         log.info("  watch them with: %s",
                  tb.local_serve_command(event_root, sources=sources, port=port))
+
+
+def _submit_via_login_node(
+    *,
+    active: Any, local: Any, selected: Sequence[str], options: dict[str, dict[str, Any]],
+    container: Path, src_dir: Path | None, base_hold: str | None, label_set: str, loss: str,
+    emit_script: Path | None, dry_run: bool, no_remote: bool,
+    remote_host: str | None, remote_user: str | None,
+    tensorboard: dict[str, Any],
+) -> list[str]:
+    """Emit the whole submission as one bash driver, then run it where ``qsub`` exists.
+
+    A workstation has no ``qsub``, so submitting from here cannot work directly — which is what
+    the ``FileNotFoundError: 'qsub'`` was. Every other cluster pipeline in this repo solves it
+    the same way and so does this one now: build a single driver script containing every
+    stage's ``singularity exec`` payload and ``qsub`` invocation, then execute that script on a
+    login node. The script captures each job id in a shell variable, so the ``-hold_jid`` chain
+    is resolved on the cluster rather than here.
+
+    Where it runs
+    -------------
+    ``qsub`` on this host
+        Run it locally — you are already on a submit host, and prompting for a password would
+        be pointless.
+    otherwise
+        SFTP it to ``SGE_SCRIPTS_DIR`` and ``bash`` it over SSH.
+    ``--no-remote``
+        Write it and stop, printing the command to run by hand.
+
+    Returns
+    -------
+    list of str
+        Submitted SGE job ids, parsed from the driver's output. Empty when nothing was run.
+    """
+    import shutil
+    import subprocess
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    local_script, remote_script = resolve_sge_script_paths(
+        Path(emit_script) if emit_script is not None else None,
+        remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+        default_basename=f"submit_topbrain_{label_set}_{stamp}.sh",
+    )
+
+    with open(local_script, "w", encoding="utf-8") as handle:
+        write_script_header(
+            handle, log_dir=cfg.SGE_LOG_DIR, err_dir=cfg.SGE_ERR_DIR,
+            title=f"topbrain label_set={label_set} loss={loss} stages={','.join(selected)}",
+        )
+        _run_sge(active, selected, options, container=container, src_dir=src_dir,
+                 base_hold=base_hold, dry_run=True, emit=handle)
+        _tensorboard_for_sge(
+            local=local, cluster=active, container=container, src_dir=src_dir,
+            dry_run=True, emit=handle, **tensorboard,
+        )
+    log.info("  local script : %s", local_script)
+    log.info("  cluster path : %s", remote_script)
+
+    if dry_run:
+        log.ok(f"--dry-run: submission script written, nothing submitted -> {local_script}")
+        return []
+    if no_remote:
+        log.ok(f"--no-remote: run it yourself on the login node:\n    bash {remote_script}")
+        return []
+
+    if shutil.which("qsub"):
+        log.info("qsub found on this host; running the driver script locally.")
+        completed = subprocess.run(
+            ["bash", str(local_script)], check=False, capture_output=True, text=True
+        )
+        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
+    else:
+        host, user, password = prompt_ssh_credentials(
+            remote_host=remote_host, remote_user=remote_user,
+            host_aliases=pth.CLUSTER_HOST_ALIASES,
+        )
+        cluster_path = publish_sge_driver_script(
+            local_script, remote_script, host=host, user=user, password=password,
+        )
+        exit_code, stdout, stderr = run_sge_script_ssh_capture(
+            host, user, password, cluster_path, local_script_path=local_script,
+        )
+
+    if stdout.strip():
+        log.info("submission output:\n%s", stdout.strip()[-4000:])
+    if stderr.strip():
+        log.warning("submission stderr:\n%s", stderr.strip()[-4000:])
+    if exit_code != 0:
+        raise click.ClickException(
+            f"The submission script exited with code {exit_code}. Nothing may have been "
+            f"queued; check the output above and {local_script}."
+        )
+
+    job_ids = parse_sge_submission_job_ids(stdout, stderr)
+    log.ok(f"submitted {len(job_ids)} job(s): {', '.join(job_ids) or '(none parsed)'}")
+    return job_ids
 
 
 @click.command("nvitk-topbrain")
@@ -483,8 +589,19 @@ def _tensorboard_for_sge(
 @click.option("--container", type=click.Path(path_type=Path), default=None)
 @click.option("--src-dir", type=click.Path(path_type=Path), default=None)
 @click.option("--base-hold", type=str, default=None)
-@click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None)
-@click.option("--dry-run", is_flag=True, default=False)
+@click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None,
+              help="Where to write the driver script (default: a staged temporary file).")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Write the submission script and stop; queue nothing.")
+@click.option("--no-remote", is_flag=True, default=False,
+              help="Write the script but do not run it — print the command to run by hand on "
+                   "the login node.")
+@click.option("--remote-host", type=str, default=None,
+              help="Cluster login node (short alias or hostname). Prompted for if omitted, "
+                   "and skipped entirely when qsub exists on this host.")
+@click.option("--remote-user", type=str, default=None,
+              help="SSH user for the login node. Prompted for if omitted; the password is "
+                   "always prompted for and never taken from an argument.")
 # ---- monitoring ---------------------------------------------------------------
 @click.option("--tensorboard", is_flag=True, default=False,
               help="Mirror stage 1 / stage 2 training logs into TensorBoard events under "
@@ -624,32 +741,28 @@ def main(**kw: Any) -> None:
             "--submit sge needs a container: pass --container, or set "
             "pipelines.topbrain.default_sge_container_root in sge.json."
         )
-    if kw["emit_script"] is not None:
-        emit_script = Path(kw["emit_script"])
-        emit_script.parent.mkdir(parents=True, exist_ok=True)
-        with open(emit_script, "w", encoding="utf-8") as handle:
-            write_script_header(
-                handle, log_dir=cfg.SGE_LOG_DIR, err_dir=cfg.SGE_ERR_DIR,
-                title=f"topbrain label_set={label_set} loss={loss}",
-            )
-            _run_sge(active, selected, options, container=container, src_dir=kw["src_dir"],
-                     base_hold=kw["base_hold"], dry_run=True, emit=handle)
-            _tensorboard_for_sge(
-                local=local, cluster=active, container=container, src_dir=kw["src_dir"],
-                serve_mode=serve_mode, enabled=kw["tensorboard"], selected=selected,
-                label_set=label_set, port=kw["tensorboard_port"],
-                interval=kw["tensorboard_interval"], dry_run=True, emit=handle,
-            )
-        log.ok(f"wrote submission script: {emit_script}")
-        return
-    _run_sge(active, selected, options, container=container, src_dir=kw["src_dir"],
-             base_hold=kw["base_hold"], dry_run=kw["dry_run"], emit=None)
-    _tensorboard_for_sge(
-        local=local, cluster=active, container=container, src_dir=kw["src_dir"],
+    tensorboard_kwargs = dict(
         serve_mode=serve_mode, enabled=kw["tensorboard"], selected=selected,
         label_set=label_set, port=kw["tensorboard_port"],
-        interval=kw["tensorboard_interval"], dry_run=kw["dry_run"], emit=None,
+        interval=kw["tensorboard_interval"],
     )
+    _submit_via_login_node(
+        active=active, local=local, selected=selected, options=options,
+        container=container, src_dir=kw["src_dir"], base_hold=kw["base_hold"],
+        label_set=label_set, loss=loss, emit_script=kw["emit_script"],
+        dry_run=kw["dry_run"], no_remote=kw["no_remote"],
+        remote_host=kw["remote_host"], remote_user=kw["remote_user"],
+        tensorboard=tensorboard_kwargs,
+    )
+
+    # Serving blocks, so it has to come after the jobs are queued. The submitted jobs are
+    # unaffected by stopping it.
+    if serve_mode == "local" and kw["tensorboard"] and not kw["dry_run"] and not kw["no_remote"]:
+        here, _mounted = tb.workstation_view(active, local)
+        tb.watch_and_serve(
+            here, stages=selected, label_set=label_set,
+            port=kw["tensorboard_port"], interval=kw["tensorboard_interval"],
+        )
 
 
 __all__ = ["STAGE_MODULES", "main"]
