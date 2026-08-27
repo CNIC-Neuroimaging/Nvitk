@@ -23,6 +23,30 @@ from nvitk.core.logger import Logger
 log = Logger()
 
 
+#: Set by ``--sge-project`` for the lifetime of one CLI invocation. Module state rather than a
+#: parameter threaded through eight stages' submit functions: it is process-scoped CLI
+#: configuration, exactly like the lazily-read ``config`` values it overrides.
+_PROJECT_OVERRIDE: str | None = None
+
+
+def set_sge_project_override(project: str | None) -> None:
+    """Override the configured SGE project for this process.
+
+    The project decides both the queue the job lands in and how ``qsub`` must be asked for a
+    GPU (``-l ngpu`` vs ``-l lgpu|sgpu|xsgpu``), so switching between a CPU and a GPU queue
+    otherwise means editing ``sge.json`` between runs.
+    """
+    global _PROJECT_OVERRIDE
+    _PROJECT_OVERRIDE = str(project).strip() if project and str(project).strip() else None
+
+
+def sge_project() -> str | None:
+    """The SGE project to submit under: ``--sge-project`` if given, else ``sge.json``."""
+    from nvitk.pipes.topbrain import config as cfg
+
+    return _PROJECT_OVERRIDE or cfg.SGE_PROJECT
+
+
 def sge_backend_cli_args(backend: str = "gpu") -> list[str]:
     """Shell-quoted ``--backend <backend>`` argv fragment for a worker command."""
     return ["--backend", shlex.quote(str(backend).strip().lower())]
@@ -81,7 +105,7 @@ def sge_topbrain_stage_resources(
     from nvitk.pipes.topbrain import config as cfg
 
     return SgeResources(
-        project=cfg.SGE_PROJECT,
+        project=sge_project(),
         account=cfg.SGE_ACCOUNT,
         ngpu=sge_stage_ngpu(backend, request_gpu=request_gpu),
         h_vmem=h_vmem if h_vmem is not None else cfg.SGE_H_VMEM,
@@ -114,8 +138,10 @@ def torch_device_for_backend(backend: str, *, device: str | None = None) -> str:
 
 
 __all__ = [
+    "set_sge_project_override",
     "sge_backend_cli_args",
     "sge_backend_is_gpu",
+    "sge_project",
     "sge_stage_extra_env",
     "sge_stage_ngpu",
     "sge_stage_use_nv",

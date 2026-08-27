@@ -16,7 +16,7 @@ from nvitk.core.exceptions import ValidationError
 from nvitk.types.image import Image
 
 from ._common import guess_read_type, guess_write_type, reorder_axes
-from .readers import read_dicom, read_mha, read_nd2, read_nifti, read_pil, read_tiff
+from .readers import read_b2nd, read_dicom, read_mha, read_nd2, read_nifti, read_pil, read_pkl, read_tiff
 from .writers import write_mha, write_nifti, write_pil, write_tiff
 
 _READERS = {
@@ -26,6 +26,8 @@ _READERS = {
     "nd2": read_nd2,
     "mha": read_mha,
     "pil": read_pil,
+    "b2nd": read_b2nd,
+    "pkl": read_pkl,
 }
 
 _WRITERS = {
@@ -59,7 +61,7 @@ def imread(
     axes
         If set, reorder reader output to this axis string (reader-dependent).
     force_type
-        Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, …
+        Skip extension sniffing: ``nifti``, ``dicom``, ``tiff``, ``mha``, ``pil``, ``nd2``, ``b2nd``, …
     backend
         ``numpy`` or ``cupy`` for the returned :class:`~nvitk.types.image.Image` array.
     **kwargs
@@ -86,7 +88,7 @@ def imread(
                     data=as_backend_array(data, backend=backend),
                     metadata=md,
                     axes=md.get("axes"),
-                    name=source.stem,
+                    name=md.get("name") or source.stem,
                     orientation=md.get("orientation"),
                 )
             )
@@ -98,7 +100,7 @@ def imread(
         data=as_backend_array(data, backend=backend),
         metadata=md,
         axes=md.get("axes"),
-        name=source.stem,
+        name=md.get("name") or source.stem,
         orientation=md.get("orientation"),
     )
 

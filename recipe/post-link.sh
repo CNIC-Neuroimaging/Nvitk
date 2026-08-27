@@ -33,6 +33,7 @@ log "installing image IO..."
 "$PIP" install --no-cache-dir \
   "imageio>=2.37.0" "pillow>=11.0.0" "nibabel>=5.3.2" "tifffile>=2025.5.26" \
   "nd2>=0.10.3" "dicom2nifti>=2.6.1" "pylibjpeg>=2.0.1" "h5py>=3.16.0" \
+  "blosc2>=3.0.0" \
   >>"$LOG" 2>&1
 
 log "installing general image processing (simpleitk/antspyx: see recipe.yaml for why these can't be conda run-deps)..."

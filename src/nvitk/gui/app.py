@@ -400,7 +400,9 @@ def run_app() -> None:
             None,
             "Open image",
             "",
-            "Images (*.nii *.nii.gz *.mha *.tif *.tiff);;All (*)",
+            "Images (*.nii *.nii.gz *.mha *.tif *.tiff *.b2nd);;"
+            "Preprocessed (nnU-Net/nnssl) (*.b2nd *.pkl);;"
+            "All (*)",
         )
         for p in paths:
             open_paths_with_nvitk(viewer, p)

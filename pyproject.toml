@@ -73,6 +73,7 @@ dependencies = [
   "pydicom>=3.0.1",                # DICOM file processing
   "pylibjpeg>=2.0.1",              # JPEG image processing
   "h5py>=3.16.0",                  # HDF5 file processing
+  "blosc2>=3.0.0",                 # Blosc2 .b2nd file processing (nnU-Net/nnssl preprocessed cases)
 
   # ─────────────────────────── General dependencies ────────────────────────────
   "scikit-image>=0.25.2",          # Scikit-image for image processing

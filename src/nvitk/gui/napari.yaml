@@ -22,4 +22,6 @@ contributions:
         - "*.bmp"
         - "*.gif"
         - "*.dcm"
+        - "*.b2nd"
+        - "*.pkl"
       accepts_directories: true

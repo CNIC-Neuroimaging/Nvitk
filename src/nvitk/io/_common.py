@@ -30,6 +30,10 @@ _TYPE_ALIASES = {
     "jpeg": "pil",
     "bmp": "pil",
     "gif": "pil",
+    "b2nd": "b2nd",
+    "blosc2": "b2nd",
+    "pkl": "pkl",
+    "pickle": "pkl",
 }
 
 
@@ -80,7 +84,7 @@ def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
     Resolve which reader registry key to use (``nifti``, ``dicom``, …).
 
     If *force_type* is set, it wins after :func:`normalize_type`. Otherwise uses extension;
-    directories default to ``dicom``.
+    directories default to ``dicom`` unless they hold NIfTI or Blosc2 (``.b2nd``) volumes.
     """
     normalized = normalize_type(force_type)
     if normalized:
@@ -94,6 +98,7 @@ def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
         # Prefer NIfTI when the folder clearly contains volumes and no DICOM files.
         has_nifti = False
         has_dicom = False
+        has_b2nd = False
         try:
             for child in p.iterdir():
                 if not child.is_file():
@@ -103,12 +108,16 @@ def guess_read_type(path: str | Path, force_type: str | None = None) -> str:
                     has_nifti = True
                 elif name.endswith(".dcm") or name == "dicomdir":
                     has_dicom = True
+                elif name.endswith(".b2nd"):
+                    has_b2nd = True
                 if has_nifti and has_dicom:
                     break
         except OSError:
             pass
         if has_nifti and not has_dicom:
             return "nifti"
+        if has_b2nd and not has_dicom and not has_nifti:
+            return "b2nd"
         # By convention, reading a directory means DICOM source.
         return "dicom"
 

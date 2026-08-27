@@ -1,4 +1,4 @@
-"""Load images into Napari via :mod:`nvitk.io` (NIfTI, DICOM, TIFF, MHA, ND2, …)."""
+"""Load images into Napari via :mod:`nvitk.io` (NIfTI, DICOM, TIFF, MHA, ND2, Blosc2, …)."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from nvitk.types import Image
 _NVITK_OPEN_SUFFIXES = frozenset({
     ".nii", ".nii.gz", ".mha", ".mhd", ".tif", ".tiff", ".nd2",
     ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".dcm",
+    # nnU-Net / nnssl preprocessed cases: the Blosc2 array and its geometry sidecar.
+    ".b2nd", ".pkl",
 })
 
 LayerData = tuple[Any, dict[str, Any], str]
@@ -49,7 +51,7 @@ def _nvitk_can_open(path: Path) -> bool:
     if path.suffix.lower() in _NVITK_OPEN_SUFFIXES:
         return True
     try:
-        return guess_read_type(path) in ("nifti", "dicom", "tiff", "mha", "pil", "nd2")
+        return guess_read_type(path) in ("nifti", "dicom", "tiff", "mha", "pil", "nd2", "b2nd", "pkl")
     except Exception:
         return False
 

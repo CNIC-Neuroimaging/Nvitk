@@ -31,7 +31,14 @@ def backend_click_option(*, default: str = "gpu") -> Callable[[F], F]:
             help="Array backend: cpu (NumPy) or gpu (CuPy).",
         )(f)
 
-        accepts_backend = "backend" in inspect.signature(f).parameters
+        # A command written as ``def main(**kw)`` has no parameter *named* ``backend``, but it
+        # can still receive one. Without the VAR_KEYWORD check the flag was popped here and
+        # never forwarded, so such a command silently saw the default no matter what the user
+        # passed — and on a cluster pipeline that means a CPU run submitted as a GPU job.
+        parameters = inspect.signature(f).parameters
+        accepts_backend = "backend" in parameters or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+        )
 
         @wraps(f)
         def wrapper(*args: Any, **kwargs: Any) -> Any:

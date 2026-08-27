@@ -75,7 +75,10 @@ from nvitk.pipes.topbrain.util import losses as loss_util
 from nvitk.pipes.topbrain.util import paths as pth
 from nvitk.pipes.topbrain.util import sampling as sampling_util
 from nvitk.pipes.topbrain.util import tensorboard as tb
-from nvitk.pipes.topbrain.util.sge_backend import torch_device_for_backend
+from nvitk.pipes.topbrain.util.sge_backend import (
+    set_sge_project_override,
+    torch_device_for_backend,
+)
 
 log = Logger()
 
@@ -578,15 +581,19 @@ def _submit_via_login_node(
               help="Stage 6: keep at most this many pseudo-cases, best first.")
 # ---- shared ------------------------------------------------------------------
 @click.option("--device", type=click.Choice(["cuda", "cpu", "mps"]), default=None)
-@click.option("--num-processes", type=int, default=8, show_default=True)
+@click.option("--num-processes", type=int, default=1, show_default=True)
 @click.option("--workers", type=int, default=4, show_default=True)
-@click.option("--overwrite", is_flag=True, default=True)
+@click.option("--overwrite", is_flag=True, default=False)
 @click.option("--challenge-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
 # ---- submission ---------------------------------------------------------------
 @click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
               default="local", show_default=True)
 @click.option("--container", type=click.Path(path_type=Path), default=None)
+@click.option("--sge-project", type=str, default=None,
+              help="SGE project (-P), overriding sge.json. The project selects the queue and "
+                   "how a GPU is requested, so a CPU run usually needs a different one. "
+                   "List valid names on the login node with: qconf -sprjl")
 @click.option("--src-dir", type=click.Path(path_type=Path), default=None)
 @click.option("--base-hold", type=str, default=None)
 @click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None,
@@ -701,6 +708,8 @@ def main(**kw: Any) -> None:
             "overwrite",
         )},
     )
+
+    set_sge_project_override(kw["sge_project"])
 
     serve_mode = tb.resolve_serve_mode(kw["tensorboard_serve"], submit=submit)
     if serve_mode == "cluster":
