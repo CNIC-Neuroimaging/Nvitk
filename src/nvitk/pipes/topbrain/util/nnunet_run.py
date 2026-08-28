@@ -175,6 +175,64 @@ def find_generated_plans(
     return matches[-1].stem
 
 
+def move_plans(
+    source_dataset_id: int,
+    target_dataset_id: int,
+    plans_identifier: str,
+    *,
+    env: dict[str, str],
+) -> None:
+    """Copy a plans file from one dataset to another, unchanged except for its dataset fields.
+
+    This is what makes two datasets **weight-compatible**. ``load_pretrained_weights`` copies
+    parameters by name and shape and asserts they match, so a model trained on dataset A can
+    only seed a model on dataset B if both networks were built from the same configuration —
+    same target spacing, same patch size, same architecture. Planning each dataset separately
+    would derive both from its own fingerprint and produce two subtly different networks.
+
+    The moved plans keep pointing at the same nnssl checkpoint, so the pre-trained encoder is
+    still loaded when training the target dataset.
+
+    Invoked through ``python -c`` rather than ``-m``: this build's helper has no ``__main__``.
+    """
+    snippet = (
+        "from nnunetv2.experiment_planning.plans_for_pretraining."
+        "move_plans_between_datasets import move_plans_between_datasets; "
+        f"move_plans_between_datasets({int(source_dataset_id)}, {int(target_dataset_id)}, "
+        f"{plans_identifier!r})"
+    )
+    log.info("$ move plans %s: dataset %d -> %d",
+             plans_identifier, int(source_dataset_id), int(target_dataset_id))
+    completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError(f"Moving plans failed with exit code {completed.returncode}.")
+
+
+def preprocess_with_plans(
+    dataset_id: int,
+    *,
+    env: dict[str, str],
+    plans_identifier: str,
+    configuration: str,
+    num_processes: int = 8,
+) -> None:
+    """Preprocess a dataset against an existing plans file.
+
+    The counterpart to :func:`move_plans`: once the target dataset has the source's plans, its
+    data has to be resampled and normalised to them. ``preprocess_like_nnssl`` cannot be used
+    here — it would derive a *new* plan from the checkpoint and defeat the point.
+    """
+    snippet = (
+        "from nnunetv2.experiment_planning.plan_and_preprocess_api import preprocess; "
+        f"preprocess([{int(dataset_id)}], plans_identifier={plans_identifier!r}, "
+        f"configurations=({configuration!r},), num_processes=({int(num_processes)},))"
+    )
+    log.info("$ preprocess dataset %d against %s", int(dataset_id), plans_identifier)
+    completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError(f"Preprocessing failed with exit code {completed.returncode}.")
+
+
 def train_pretrained(
     dataset_id: int,
     configuration: str,
@@ -187,6 +245,7 @@ def train_pretrained(
     num_gpus: int = 1,
     continue_training: bool = False,
     from_scratch: bool = False,
+    pretrained_weights: Path | str | None = None,
 ) -> None:
     """Fine-tune from the pre-trained weights the plans file points at.
 
@@ -195,6 +254,10 @@ def train_pretrained(
     from_scratch
         Train the same architecture with random initialisation. The control run every
         pre-trained result should be compared against.
+    pretrained_weights
+        Checkpoint of a **previous nnU-Net run** to initialise from, applied after the plans'
+        own nnssl weights so it wins. Every parameter except the ``.seg_layers.`` heads is
+        copied, which is what lets a binary vessel model seed a 37-class one.
     """
     args: list[str] = [
         str(dataset_id), configuration, str(fold),
@@ -207,6 +270,8 @@ def train_pretrained(
         args.append("--c")
     if from_scratch:
         args.append("--from_scratch")
+    if pretrained_weights is not None:
+        args.extend(["-pretrained_weights", str(pretrained_weights)])
     run_module(MODULE_TRAIN_PRETRAINED, args, env=env)
 
 
@@ -247,6 +312,8 @@ __all__ = [
     "MODULE_TRAIN_PRETRAINED",
     "find_generated_plans",
     "has_baseline_plans",
+    "move_plans",
+    "preprocess_with_plans",
     "plan_baseline",
     "predict",
     "preprocess_like_nnssl",

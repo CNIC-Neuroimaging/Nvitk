@@ -169,6 +169,39 @@ def trained_run_name(results_root: Path, label_set: str) -> str:
     ))
 
 
+def run_checkpoint(
+    results_root: Path,
+    label_set: str,
+    *,
+    fold: int | str = "all",
+    checkpoint: str = "checkpoint_final.pth",
+) -> Path:
+    """Path to a finished stage 2 run's checkpoint, read from its provenance.
+
+    Used to chain fine-tunings: the multi-class run initialises from whatever the binary run
+    produced, without anyone having to reconstruct a directory name whose plans identifier
+    embeds a spacing chosen at run time.
+
+    Raises
+    ------
+    FileNotFoundError
+        If that stage 2 run has not finished, naming the file that is missing.
+    """
+    provenance = read_training_provenance(results_root, label_set)
+    results_dir = provenance.get("results_dir")
+    if not results_dir:
+        raise FileNotFoundError(
+            f"Stage 2 provenance for label set {label_set!r} records no results_dir; re-run it."
+        )
+    path = Path(results_dir) / f"fold_{fold}" / checkpoint
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"No {checkpoint} for label set {label_set!r} at {path}. The {label_set} training "
+            f"must finish before a run can initialise from it."
+        )
+    return path
+
+
 def dataset_name_for(label_set: str) -> str:
     """nnU-Net dataset folder name for *label_set*."""
     return f"Dataset{DATASET_IDS[label_set]:03d}_{DATASET_SUFFIXES[label_set]}"
@@ -299,6 +332,9 @@ def run_train(
     tensorboard: bool = False,
     tensorboard_dir: Path | None = None,
     tensorboard_interval: float = tb.DEFAULT_INTERVAL,
+    plans_from_label_set: str | None = None,
+    pretrained_weights: Path | None = None,
+    init_from_label_set: str | None = None,
     sampling: str = "default",
     sampling_temperature: float = sampling_util.DEFAULT_TEMPERATURE,
     sampling_oversample: float | None = None,
@@ -315,6 +351,14 @@ def run_train(
     tensorboard_dir
         Overrides that location; left unset the pipeline layout is used, which is what puts
         stage 1 and stage 2 under one server.
+    plans_from_label_set
+        Borrow another label set's ``ptPlans`` instead of deriving one from this dataset's own
+        fingerprint. Two datasets must share a plan for a model trained on one to initialise a
+        model on the other — see :func:`~nvitk.pipes.topbrain.util.nnunet_run.move_plans`. Used
+        by the binary stage so its network is identical to the multi-class one bar the head.
+    pretrained_weights
+        Checkpoint of a previous stage 2 run to start from. Everything except the segmentation
+        heads is copied, so a binary vessel model can seed the 37-class model.
     sampling
         ``default`` leaves nnU-Net's patch sampling alone. ``rare_aware`` oversamples the cases
         carrying rare classes and, inside them, the rare class itself — see
@@ -328,6 +372,10 @@ def run_train(
             f"Unknown --adaptation-mode {adaptation_mode!r}; expected "
             f"{', '.join(ADAPTATION_MODES)}."
         )
+
+    if init_from_label_set and pretrained_weights is None:
+        pretrained_weights = run_checkpoint(paths.results_root, init_from_label_set)
+        log.info("Initialising from the %r run: %s", init_from_label_set, pretrained_weights)
 
     checkpoint, _, architecture = read_bundle(bundle)
     pretrain_name = pretrain_name or Path(bundle).name
@@ -365,7 +413,12 @@ def run_train(
     # preprocess_like_nnssl adapts an existing plan; without one it asserts. The baseline also
     # fixes the target spacing that --adaptation-mode default_nnunet inherits.
     existing = nnunet_run.has_baseline_plans(paths.nnunet_preprocessed, dataset_name)
-    if skip_planning:
+    if plans_from_label_set:
+        log.info(
+            "Plans are borrowed from label set %r, so this dataset needs no baseline planning.",
+            plans_from_label_set,
+        )
+    elif skip_planning:
         if existing is None:
             raise FileNotFoundError(
                 f"--skip-planning but no baseline plans under "
@@ -382,15 +435,55 @@ def run_train(
         )
 
     # ---- 2. Plans + preprocessing derived from the pre-training plan --------
-    if not skip_preprocessing:
-        nnunet_run.preprocess_like_nnssl(
-            dataset_id, env=env, pretrain_name=pretrain_name, checkpoint=checkpoint,
-            adaptation_mode=adaptation_mode, spacing=target_spacing,
-            num_processes=num_processes,
+    if plans_from_label_set:
+        # Borrowed geometry. The source dataset must already have been planned; its plans are
+        # copied here unchanged so both networks come out identical, and only then is this
+        # dataset's data resampled to them.
+        source_dataset = dataset_name_for(plans_from_label_set)
+        source_id = DATASET_IDS[plans_from_label_set]
+        try:
+            plans_identifier = nnunet_run.find_generated_plans(
+                paths.nnunet_preprocessed, source_dataset, pretrain_name
+            )
+        except FileNotFoundError:
+            # The borrowing stage usually runs *before* the stage that owns the plans, so
+            # generating them here is the normal path, not a fallback. The source dataset is
+            # planned exactly as it would plan itself, so the run that owns it later finds
+            # its own plans already in place.
+            log.info(
+                "Label set %r has not been planned yet; planning it now so its geometry can "
+                "be shared.", plans_from_label_set,
+            )
+            if nnunet_run.has_baseline_plans(paths.nnunet_preprocessed, source_dataset) is None:
+                nnunet_run.plan_baseline(
+                    source_id, env=env, planner=baseline_planner,
+                    num_processes=num_processes, verify_integrity=verify_integrity,
+                )
+            nnunet_run.preprocess_like_nnssl(
+                source_id, env=env, pretrain_name=pretrain_name, checkpoint=checkpoint,
+                adaptation_mode=adaptation_mode, spacing=target_spacing,
+                num_processes=num_processes,
+            )
+            plans_identifier = nnunet_run.find_generated_plans(
+                paths.nnunet_preprocessed, source_dataset, pretrain_name
+            )
+        log.info("Borrowing plans %s from %s", plans_identifier, source_dataset)
+        nnunet_run.move_plans(source_id, dataset_id, plans_identifier, env=env)
+        if not skip_preprocessing:
+            nnunet_run.preprocess_with_plans(
+                dataset_id, env=env, plans_identifier=plans_identifier,
+                configuration=CONFIGURATION, num_processes=num_processes,
+            )
+    else:
+        if not skip_preprocessing:
+            nnunet_run.preprocess_like_nnssl(
+                dataset_id, env=env, pretrain_name=pretrain_name, checkpoint=checkpoint,
+                adaptation_mode=adaptation_mode, spacing=target_spacing,
+                num_processes=num_processes,
+            )
+        plans_identifier = nnunet_run.find_generated_plans(
+            paths.nnunet_preprocessed, dataset_name, pretrain_name
         )
-    plans_identifier = nnunet_run.find_generated_plans(
-        paths.nnunet_preprocessed, dataset_name, pretrain_name
-    )
     log.info("Using generated plans: %s", plans_identifier)
 
     patched = None
@@ -429,6 +522,7 @@ def run_train(
                 dataset_id, CONFIGURATION, fold, env=env, trainer=trainer,
                 plans_identifier=plans_identifier, device=device, num_gpus=num_gpus,
                 continue_training=continue_training, from_scratch=from_scratch,
+                pretrained_weights=pretrained_weights,
             )
 
     marker_dir = paths.results_root / STAGE2_TRAIN_DIR / dataset_name
@@ -447,6 +541,8 @@ def run_train(
                 "target_spacing": list(target_spacing) if target_spacing else None,
                 "plans_identifier": plans_identifier, "configuration": CONFIGURATION,
                 "patched_plans": patched,
+                "plans_from_label_set": plans_from_label_set,
+                "pretrained_weights": str(pretrained_weights) if pretrained_weights else None,
                 "sampling": sampling, "sampling_temperature": sampling_temperature,
                 "sampling_oversample": sampling_oversample,
                 "folds": [str(f) for f in folds], "num_epochs": num_epochs,
@@ -527,6 +623,12 @@ def _worker_argv(**o) -> list[str]:
                       ("--from-scratch", "from_scratch")):
         if o.get(key):
             argv.append(flag)
+    for flag, key in (("--plans-from-label-set", "plans_from_label_set"),
+                      ("--init-from-label-set", "init_from_label_set")):
+        if o.get(key):
+            argv.extend([flag, str(o[key])])
+    if o.get("pretrained_weights"):
+        argv.extend(["--pretrained-weights", quote_path(str(o["pretrained_weights"]))])
     if o.get("sampling") and o["sampling"] != "default":
         argv.extend(["--sampling", str(o["sampling"])])
         if o.get("sampling_temperature") is not None:
@@ -552,7 +654,8 @@ def _user_data_paths(**o) -> list[Path]:
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **o) -> str:
     """Host shell command for the stage 2 SGE task."""
     return build_stage_command(
-        "stage2", _worker_argv(**o), paths=paths, container=container, src_dir=src_dir,
+        o.get("stage_id", "stage2"), _worker_argv(**o), paths=paths, container=container,
+        src_dir=src_dir,
         data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
@@ -566,7 +669,8 @@ def submit_sge(
 ) -> str:
     """Emit or submit the stage 2 SGE job."""
     return submit_stage_job(
-        "stage2", _worker_argv(**o), paths=paths, container=container, src_dir=src_dir,
+        o.get("stage_id", "stage2"), _worker_argv(**o), paths=paths, container=container,
+        src_dir=src_dir,
         data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
@@ -584,7 +688,7 @@ def submit_sge(
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
 @click.option("--bundle", type=click.Path(path_type=Path), required=True,
               help="Stage 1 bundle directory.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default="ta36",
+@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]), default="ta36",
               show_default=True)
 @click.option("--pretrain-name", type=str, default=None,
               help="Name embedded in the generated plans (default: the bundle directory name).")
@@ -620,6 +724,16 @@ def submit_sge(
 @click.option("--continue-training", is_flag=True, default=False)
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
+@click.option("--plans-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+              default=None,
+              help="Borrow this label set's ptPlans instead of planning from this dataset's own "
+                   "fingerprint. Required for two runs to be weight-compatible.")
+@click.option("--init-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+              default=None,
+              help="Initialise from that label set's finished stage 2 run (everything but the "
+                   "segmentation heads). Resolved from its provenance.")
+@click.option("--pretrained-weights", type=click.Path(path_type=Path), default=None,
+              help="Explicit checkpoint to initialise from; overrides --init-from-label-set.")
 @click.option("--sampling", type=click.Choice(list(sampling_util.SAMPLING_MODES)),
               default="default", show_default=True,
               help="Patch sampling. 'rare_aware' oversamples the cases carrying rare classes "
@@ -647,6 +761,8 @@ def main(
     patch_size: tuple[int, int, int] | None, batch_size: int | None, num_epochs: int | None,
     device: str | None, num_gpus: int, num_processes: int, skip_preprocessing: bool,
     plan_only: bool, continue_training: bool, from_scratch: bool,
+    plans_from_label_set: str | None, init_from_label_set: str | None,
+    pretrained_weights: Path | None,
     sampling: str, sampling_temperature: float, sampling_oversample: float | None,
     tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
     backend: str = "gpu",
@@ -675,13 +791,15 @@ def main(
         tensorboard_interval=tensorboard_interval,
         sampling=sampling, sampling_temperature=sampling_temperature,
         sampling_oversample=sampling_oversample,
+        plans_from_label_set=plans_from_label_set, init_from_label_set=init_from_label_set,
+        pretrained_weights=pretrained_weights,
     )
 
 
 __all__ = [
     "ADAPTATION_MODES", "CONFIGURATION", "build_sge_command", "dataset_name_for",
     "install_splits", "main", "parse_folds", "patch_plans_patch_size", "read_bundle",
-    "run_train", "submit_sge",
+    "run_checkpoint", "run_train", "submit_sge",
 ]
 
 

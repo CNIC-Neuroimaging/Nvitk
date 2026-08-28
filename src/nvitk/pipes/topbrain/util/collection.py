@@ -65,6 +65,14 @@ class CorpusSource:
     ``None`` falls back to the filename stem, which is right for a flat directory of volumes.
     """
 
+    subject_template: str | None = None
+    """Format string over the :attr:`subject_regex` groups, e.g. ``"{center}_{pid}"``.
+
+    Needed when the subject key is not one contiguous span of the filename — TopAneu writes
+    ``topaneu_<center>_<modality>_<patient>``, so the modality sits between the two halves of
+    the subject and no single regex group can capture it. ``None`` uses the ``subject`` group.
+    """
+
     session: str = "ses-1"
     """Session id. These cohorts are single-session; nnssl requires the level to exist."""
 
@@ -93,6 +101,19 @@ BUILTIN_SOURCES: dict[str, dict[str, Any]] = {
         "pattern": "imagesTr_topbrain/topcow_*_0000.nii.gz",
         "modality": "auto",
         "subject_regex": r"topcow_(?P<modality>ct|mr)_(?P<subject>\d+)_0000\.nii\.gz$",
+    },
+    # TopAneu release: the only source here that brings CTA in quantity. Pre-training on a
+    # TOF-only corpus biases the encoder toward MR, and half the benchmark is CT.
+    "topaneu": {
+        "pattern": "images/topaneu_*_0000.nii.gz",
+        "modality": "auto",
+        "subject_regex": (
+            r"topaneu_(?P<center>center\d+)_(?P<modality>ct|mr)_(?P<pid>\d+)"
+            r"(?:_(?P<repeat>\d+))?_0000\.nii\.gz$"
+        ),
+        # Both modalities of one patient — and both scans of a longitudinal pair — share a
+        # subject, so the repeat index is deliberately left out of the key.
+        "subject_template": "{center}_{pid}",
     },
     # PESA-Brain TOF-MRA: same modality family as the MRA track.
     "pesa_tof": {
@@ -188,8 +209,11 @@ def iter_source_volumes(source: CorpusSource) -> Iterator[CorpusVolume]:
             if match is None:
                 log.debug("[%s] %s does not match subject_regex; skipping.", source.name, relative)
                 continue
-            subject = match.group("subject")
             groups = match.groupdict()
+            subject = (
+                source.subject_template.format(**groups)
+                if source.subject_template else match.group("subject")
+            )
             modality = (
                 groups.get("modality") or source.modality
                 if source.modality == "auto"

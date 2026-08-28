@@ -70,7 +70,13 @@ LABEL_SET_JSONS: dict[str, str] = {
 }
 
 #: Modalities each label set covers. ``ta36`` is modality-agnostic; the v1 sets are not.
+#: Foreground of the binary vessel label set: one class, "is this voxel a vessel".
+#: Not a released label set — it is derived by collapsing any TA36/v1 mask, which is what makes
+#: silver-standard masks usable as a first fine-tuning stage (see :mod:`stage2_train`).
+BINARY_LABELS: dict[int, str] = {1: "vessel"}
+
 LABEL_SET_MODALITIES: dict[str, tuple[str, ...]] = {
+    "binary": ("ct", "mr"),
     "ta36": ("ct", "mr"),
     "v1_ct": ("ct",),
     "v1_mr": ("mr",),
@@ -149,7 +155,11 @@ V1_MR_LABELS: dict[int, str] = _COMMON | {
     42: "L-MMA",
 }
 
+#: Name of the derived binary label set.
+BINARY_LABEL_SET: str = "binary"
+
 _LABEL_MAPS: dict[str, dict[int, str]] = {
+    BINARY_LABEL_SET: BINARY_LABELS,
     "ta36": TA36_LABELS,
     "v1_ct": V1_CT_LABELS,
     "v1_mr": V1_MR_LABELS,
@@ -195,6 +205,11 @@ _NEIGHBOUR_FILES: dict[str, str] = {
 
 
 @lru_cache(maxsize=None)
+def is_binary(label_set: str) -> bool:
+    """Whether *label_set* is the derived single-class vessel set."""
+    return str(label_set) == BINARY_LABEL_SET
+
+
 def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
     """Label → labels it may anatomically touch, for the invalid-neighbour metric.
 
@@ -213,6 +228,12 @@ def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
     Treat the TA36 invalid-neighbour numbers as a self-consistent internal signal for comparing
     runs, not as a reproduction of the organisers' score.
     """
+    if is_binary(label_set):
+        # One class cannot touch another, so every adjacency is trivially valid and the metric
+        # is meaningless rather than perfect. Returning an empty table makes callers score 0
+        # violations, which is the honest answer.
+        return {}
+
     if label_set in _NEIGHBOUR_FILES:
         path = DATA_DIR / _NEIGHBOUR_FILES[label_set]
         if not path.is_file():
@@ -293,6 +314,8 @@ def max_label(label_set: str) -> int:
 def sideroad_labels(label_set: str) -> tuple[int, ...]:
     """Side-road vessel values scored by the detection-F1 metric for *label_set*."""
     label_map(label_set)  # validate
+    if is_binary(label_set):
+        return ()  # no side roads to distinguish when there is one class
     return SIDEROAD_LABELS[label_set]
 
 
@@ -315,7 +338,10 @@ __all__ = [
     "LabelSet",
     "SIDEROAD_COMMON",
     "SIDEROAD_LABELS",
+    "BINARY_LABELS",
+    "BINARY_LABEL_SET",
     "TA36_LABELS",
+    "is_binary",
     "V1_CT_LABELS",
     "V1_MR_LABELS",
     "label_map",

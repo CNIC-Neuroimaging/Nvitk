@@ -19,6 +19,7 @@ import click
 
 STAGE_DATAPREP = "stage0"
 STAGE_PRETRAIN = "stage1"
+STAGE_BINARY = "stage2a"
 STAGE_TRAIN = "stage2"
 STAGE_EVALUATE = "stage3"
 STAGE_INFER = "stage4"
@@ -30,6 +31,8 @@ STAGE_ALIASES: dict[str, str] = {
     "dataprep": STAGE_DATAPREP, "data": STAGE_DATAPREP, "convert": STAGE_DATAPREP,
     "stage1": STAGE_PRETRAIN, "stage1_pretrain": STAGE_PRETRAIN,
     "pretrain": STAGE_PRETRAIN, "ssl": STAGE_PRETRAIN,
+    "stage2a": STAGE_BINARY, "stage2a_binary": STAGE_BINARY,
+    "binary": STAGE_BINARY, "binary_pretrain": STAGE_BINARY, "silver": STAGE_BINARY,
     "stage2": STAGE_TRAIN, "stage2_train": STAGE_TRAIN,
     "train": STAGE_TRAIN, "finetune": STAGE_TRAIN, "transfer": STAGE_TRAIN,
     "stage3": STAGE_EVALUATE, "stage3_evaluate": STAGE_EVALUATE,
@@ -44,8 +47,8 @@ STAGE_ALIASES: dict[str, str] = {
 }
 
 STAGES_ORDERED: tuple[str, ...] = (
-    STAGE_DATAPREP, STAGE_PRETRAIN, STAGE_TRAIN, STAGE_EVALUATE, STAGE_INFER, STAGE_PACKAGE,
-    STAGE_SELFTRAIN,
+    STAGE_DATAPREP, STAGE_PRETRAIN, STAGE_BINARY, STAGE_TRAIN, STAGE_EVALUATE, STAGE_INFER,
+    STAGE_PACKAGE, STAGE_SELFTRAIN,
 )
 
 ALL_STAGES: tuple[str, ...] = STAGES_ORDERED
@@ -55,6 +58,7 @@ DEFAULT_STAGES: str = f"{STAGE_DATAPREP},{STAGE_PRETRAIN},{STAGE_TRAIN}"
 STAGE_LABELS: dict[str, str] = {
     STAGE_DATAPREP: "data preparation",
     STAGE_PRETRAIN: "pre-training",
+    STAGE_BINARY: "binary vessel fine-tuning (silver)",
     STAGE_TRAIN: "transfer training",
     STAGE_EVALUATE: "evaluation",
     STAGE_INFER: "inference",
@@ -90,5 +94,6 @@ def parse_stages(spec: str) -> list[str]:
 __all__ = [
     "ALL_STAGES", "COHORT_STAGES", "DEFAULT_STAGES", "STAGES_ORDERED",
     "STAGE_ALIASES", "STAGE_DATAPREP", "STAGE_EVALUATE", "STAGE_INFER", "STAGE_LABELS",
-    "STAGE_PACKAGE", "STAGE_PRETRAIN", "STAGE_SELFTRAIN", "STAGE_TRAIN", "parse_stages",
+    "STAGE_BINARY", "STAGE_PACKAGE", "STAGE_PRETRAIN", "STAGE_SELFTRAIN", "STAGE_TRAIN",
+    "parse_stages",
 ]

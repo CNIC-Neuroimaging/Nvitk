@@ -70,6 +70,7 @@ from nvitk.core.click_backend import backend_click_option
 from nvitk.core.click_config import config_dir_click_option
 from nvitk.core.logger import Logger, PipelineRunTracker
 from nvitk.pipes.topbrain import config as cfg
+from nvitk.pipes.topbrain import labels as lbl_mod
 from nvitk.pipes.topbrain import stages as st
 from nvitk.pipes.topbrain.util import losses as loss_util
 from nvitk.pipes.topbrain.util import paths as pth
@@ -86,6 +87,7 @@ log = Logger()
 STAGE_MODULES: dict[str, str] = {
     st.STAGE_DATAPREP: "nvitk.pipes.topbrain.stage0_dataprep",
     st.STAGE_PRETRAIN: "nvitk.pipes.topbrain.stage1_pretrain",
+    st.STAGE_BINARY: "nvitk.pipes.topbrain.stage2_train",
     st.STAGE_TRAIN: "nvitk.pipes.topbrain.stage2_train",
     st.STAGE_EVALUATE: "nvitk.pipes.topbrain.stage3_evaluate",
     st.STAGE_INFER: "nvitk.pipes.topbrain.stage4_infer",
@@ -121,6 +123,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             target=o["dataprep_target"], label_set=o["label_set"], modality=o["modality"],
             extra_train=list(o["extra_train"]),
             extra_train_only=list(o["extra_train_only"]),
+            binary_sources=list(o["binary_sources"]),
             include_challenge=o["include_challenge"],
             corpus_sources=list(o["corpus_sources"]), num_folds=o["num_folds"], seed=o["seed"],
             overwrite=o["overwrite"], workers=o["workers"], backend=o["backend"],
@@ -151,6 +154,28 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling=o["sampling"], sampling_temperature=o["sampling_temperature"],
+            sampling_oversample=o["sampling_oversample"],
+            init_from_label_set=(
+                lbl_mod.BINARY_LABEL_SET if o["init_from_binary"] else None
+            ),
+        ),
+        st.STAGE_BINARY: dict(
+            stage_id="stage2a",
+            bundle=bundle_name, label_set=lbl_mod.BINARY_LABEL_SET, pretrain_name=bundle_name,
+            loss=o["binary_loss"], loss_config=None,
+            # No honest validation split exists for silver labels, so the binary model trains
+            # on everything. 'all' is nnU-Net's own name for that.
+            folds=["all"],
+            # The multi-class dataset is planned first and the binary one borrows its geometry;
+            # without that the two networks differ and the weights cannot transfer.
+            plans_from_label_set=o["label_set"],
+            adaptation_mode=o["adaptation_mode"], baseline_planner=o["baseline_planner"],
+            target_spacing=o["target_spacing"], patch_size=o["patch_size"],
+            batch_size=o["batch_size"], num_epochs=o["binary_epochs"] or o["num_epochs"],
+            device=o["device"], num_gpus=o["num_gpus"], num_processes=o["num_processes"],
+            from_scratch=False, backend=o["backend"],
+            tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
+            sampling="default", sampling_temperature=o["sampling_temperature"],
             sampling_oversample=o["sampling_oversample"],
         ),
         st.STAGE_EVALUATE: dict(
@@ -271,6 +296,13 @@ def _local_runners(active: Any, options: dict[str, dict[str, Any]]) -> dict[str,
             **_strip(st.STAGE_PACKAGE)
         )
 
+    def _binary() -> Any:
+        """Stage 2a locally: the binary vessel fine-tuning on silver labels."""
+        opts = _strip(st.STAGE_BINARY, "stage_id")
+        opts["bundle"] = stage1_pretrain.bundle_dir(active.results_root, str(opts["bundle"]))
+        opts["loss_config"] = loss_util.parse_loss_config(opts.get("loss_config"))
+        return stage2_train.run_train(paths=active, **opts)
+
     def _selftrain() -> Any:
         """Stage 6 locally, pseudo-labelling the unlabeled corpus."""
         return stage6_selftrain.run_selftrain(
@@ -283,7 +315,7 @@ def _local_runners(active: Any, options: dict[str, dict[str, Any]]) -> dict[str,
     return {
         st.STAGE_DATAPREP: _dataprep, st.STAGE_PRETRAIN: _pretrain, st.STAGE_TRAIN: _train,
         st.STAGE_EVALUATE: _evaluate, st.STAGE_INFER: _infer, st.STAGE_PACKAGE: _package,
-        st.STAGE_SELFTRAIN: _selftrain,
+        st.STAGE_SELFTRAIN: _selftrain, st.STAGE_BINARY: _binary,
     }
 
 
@@ -311,6 +343,7 @@ def _run_sge(
     submitters = {
         st.STAGE_DATAPREP: stage0_dataprep.submit_sge,
         st.STAGE_PRETRAIN: stage1_pretrain.submit_sge,
+        st.STAGE_BINARY: stage2_train.submit_sge,
         st.STAGE_TRAIN: stage2_train.submit_sge,
         st.STAGE_EVALUATE: stage3_evaluate.submit_sge,
         st.STAGE_INFER: stage4_infer.submit_sge,
@@ -472,26 +505,37 @@ def _submit_via_login_node(
 # ---- selection -------------------------------------------------------------
 @click.option("--stages", type=str, default=st.DEFAULT_STAGES, show_default=True,
               help="Comma-separated stage ids or aliases.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default=None)
+@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default=None,
+              help="Multi-class label set. The binary dataset is derived, never selected here.")
 @click.option("--list-losses", is_flag=True, default=False, help="Print the losses and exit.")
 @click.option("--list-checkpoints", is_flag=True, default=False,
               help="Print the published checkpoints and exit.")
 @click.option("--list-trainers", is_flag=True, default=False,
               help="Print the self-supervised trainers and exit.")
+@click.option("--list-cohorts", is_flag=True, default=False,
+              help="Print the built-in annotated cohorts and exit.")
 # ---- stage 0: data preparation ---------------------------------------------
-@click.option("--dataprep-target", type=click.Choice(["train", "corpus", "both"]),
-              default="train", show_default=True)
+@click.option("--dataprep-target",
+              type=click.Choice(["train", "corpus", "both", "binary", "all"]),
+              default="train", show_default=True,
+              help="'all' also builds the derived binary vessel dataset from --binary-source.")
 @click.option("--modality", type=click.Choice(["both", "ct", "mr"]), default="both",
               show_default=True)
 @click.option("--extra-train", multiple=True,
               help="Extra annotated cohort: 'name=/images:/labels:modality'. Repeatable.")
+@click.option("--binary-source", "binary_sources", multiple=True,
+              help="Silver cohort forming the stage 2a binary dataset, e.g. "
+                   "'topaneu=/release/root'. The annotated cases are deliberately kept out of "
+                   "it. Repeatable.")
 @click.option("--extra-train-only", multiple=True,
-              help="Same syntax, but never held out for validation. This is how stage 6's "
-                   "pseudo-labelled cohort is fed back in. Repeatable.")
+              help="Same syntax, but never held out for validation — for pseudo-labelled "
+                   "cohorts (stage 6's output, or a release whose masks are model output such "
+                   "as 'topaneu=/release/root'). See --list-cohorts. Repeatable.")
 @click.option("--no-challenge", is_flag=True, default=False,
               help="Exclude the challenge cases from the training set.")
 @click.option("--corpus-source", "corpus_sources", multiple=True,
-              help="Unlabeled corpus source: 'name:modality=/path[:glob]'. Repeatable.")
+              help="Unlabeled corpus source: a built-in name ('topbrain', 'topaneu=/root', "
+                   "'pesa_tof=/root') or 'name:modality=/path[:glob]'. Repeatable.")
 @click.option("--num-folds", type=int, default=None)
 @click.option("--seed", type=int, default=None)
 @click.option("--ct-context-window", type=float, nargs=2, default=None,
@@ -550,6 +594,16 @@ def _submit_via_login_node(
 @click.option("--num-gpus", type=int, default=1, show_default=True)
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
+# ---- stage 2a: binary vessel fine-tuning -------------------------------------
+@click.option("--binary-loss", type=str, default="dice_ce", show_default=True,
+              help="Stage 2a loss. The binary task has no side roads and no adjacency, so the "
+                   "topology-aware losses have much less to work with than at stage 2.")
+@click.option("--binary-epochs", type=int, default=None,
+              help="Stage 2a epochs (default: --num-epochs). The silver dataset is far larger "
+                   "than the annotated one, so fewer epochs already means many more steps.")
+@click.option("--init-from-binary", is_flag=True, default=False,
+              help="Stage 2 initialises from the stage 2a model instead of straight from the "
+                   "stage 1 bundle. Implied when stage2a is in --stages.")
 @click.option("--sampling", type=click.Choice(["default", "rare_aware"]), default="default",
               show_default=True,
               help="Patch sampling. 'rare_aware' oversamples the cases carrying rare classes "
@@ -646,6 +700,11 @@ def main(**kw: Any) -> None:
 
         click.echo(describe_ssl_trainers())
         return
+    if kw["list_cohorts"]:
+        from nvitk.pipes.topbrain.util.cohorts import describe_builtin_cohorts
+
+        click.echo(describe_builtin_cohorts())
+        return
     if kw["list_checkpoints"]:
         from nvitk.pipes.topbrain.util import checkpoints as ckpt_util
 
@@ -672,6 +731,15 @@ def main(**kw: Any) -> None:
         loss_util.validate_loss_name(kw["ssl_loss"], registry=loss_util.SSL_LOSSES)
 
     selected = st.parse_stages(kw["stages"])
+
+    # Running the binary stage and then the multi-class one in the same invocation only makes
+    # sense if the second starts from the first; requiring a separate flag for that would be a
+    # trap. An explicit --init-from-binary still works when the two are run separately.
+    init_from_binary = kw["init_from_binary"] or (
+        st.STAGE_BINARY in selected and st.STAGE_TRAIN in selected
+    )
+    if init_from_binary and st.STAGE_TRAIN in selected:
+        log.info("stage2 will initialise from the stage2a binary model.")
 
     # Every fold by default. A single fold is 5 held-out patients; with 36 classes, several of
     # them rare, the fold-to-fold spread is larger than the differences worth measuring, so a
@@ -702,8 +770,9 @@ def main(**kw: Any) -> None:
             kw["sampling_temperature"] if kw["sampling_temperature"] is not None
             else sampling_util.DEFAULT_TEMPERATURE
         ),
+        init_from_binary=init_from_binary,
         **{k: kw[k] for k in (
-            "dataprep_target", "modality", "extra_train", "extra_train_only",
+            "dataprep_target", "modality", "extra_train", "extra_train_only", "binary_sources",
             "corpus_sources", "num_folds", "seed",
             "ct_context_window", "mr_context_percentiles",
             "pretrain_source", "checkpoint_name", "bundle_name", "ssl_loss", "ssl_loss_config",
@@ -713,6 +782,7 @@ def main(**kw: Any) -> None:
             "patch_size", "batch_size",
             "num_epochs", "num_gpus", "tensorboard", "tensorboard_interval", "compare_to",
             "sampling", "sampling_oversample",
+            "binary_loss", "binary_epochs",
             "from_scratch", "min_volume_mm3", "largest_only", "num_processes", "workers",
             "repair_gaps_mm", "repair_adjacency", "repair_lateral", "repair_close_radius",
             "pseudo_modality", "pseudo_agreement", "pseudo_max_components",

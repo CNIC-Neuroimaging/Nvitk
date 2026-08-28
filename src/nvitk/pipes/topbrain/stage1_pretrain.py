@@ -36,7 +36,9 @@ The bundle
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -96,13 +98,86 @@ def corpus_preprocessed_dir(paths: TopBrainPaths) -> Path:
     return Path(paths.nnssl_preprocessed) / paths.corpus_dataset_name
 
 
+#: Sidecar recording which corpus the preprocessed data was built from. Without it, "already
+#: preprocessed" cannot distinguish *this* corpus from a different one preprocessed earlier.
+CORPUS_SIGNATURE_FILE: str = "topbrain_corpus_signature.json"
+
+
+def corpus_signature(paths: TopBrainPaths) -> str | None:
+    """Content hash of the corpus descriptor's volume list, or ``None`` when it is absent.
+
+    Hashes the sorted set of ``.nii.gz`` references in ``pretrain_data.json`` rather than the
+    file's bytes: that captures exactly what matters — *which volumes are in the corpus* —
+    while ignoring key ordering and any formatting change. The descriptor carries no
+    timestamps, so the same corpus always hashes the same.
+
+    This is what makes adding a source detectable. Stage 0 rewrites the descriptor whenever the
+    corpus is rebuilt, but an mtime comparison would force a re-preprocess after *every* stage 0
+    run even when nothing changed; the hash only fires when the composition genuinely differs.
+    """
+    descriptor = Path(paths.nnssl_raw) / paths.corpus_dataset_name / "pretrain_data.json"
+    if not descriptor.is_file():
+        return None
+    volumes = sorted(set(re.findall(r"[^\"\s]+\.nii\.gz", descriptor.read_text(encoding="utf-8"))))
+    return hashlib.sha256("\n".join(volumes).encode("utf-8")).hexdigest()
+
+
+def read_corpus_signature(paths: TopBrainPaths) -> dict[str, Any]:
+    """The recorded corpus signature sidecar, or ``{}`` when absent or unreadable."""
+    path = corpus_preprocessed_dir(paths) / CORPUS_SIGNATURE_FILE
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def write_corpus_signature(
+    paths: TopBrainPaths, *, planned: bool = False, configuration_name: str | None = None
+) -> None:
+    """Record which corpus the fingerprint/plans, or the preprocessed data, were built from.
+
+    Read-modify-write, because planning and preprocessing are recorded at different moments:
+    planning stamps ``planned_signature``, preprocessing stamps ``signature`` plus the
+    configuration it produced.
+    """
+    signature = corpus_signature(paths)
+    if signature is None:
+        return
+    record = read_corpus_signature(paths)
+    if planned:
+        record["planned_signature"] = signature
+    if configuration_name is not None:
+        record["signature"] = signature
+        record["configuration"] = configuration_name
+    record["written"] = datetime.now().isoformat(timespec="seconds")
+    directory = corpus_preprocessed_dir(paths)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / CORPUS_SIGNATURE_FILE).write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def planning_complete(paths: TopBrainPaths) -> tuple[bool, str]:
     """Whether the corpus fingerprint and plans are already on disk; with a reason either way."""
     directory = corpus_preprocessed_dir(paths)
     for name in (FINGERPRINT_FILE, PLANS_FILE):
         if not (directory / name).is_file():
             return False, f"{name} is missing"
-    return True, f"{FINGERPRINT_FILE} and {PLANS_FILE} are present"
+
+    # The fingerprint is a summary of the corpus — median spacing, intensity statistics — so a
+    # corpus that gained a source invalidates it just as surely as it invalidates the
+    # preprocessed data. Reusing it would preprocess the new volumes to the old corpus's plan.
+    signature = corpus_signature(paths)
+    if signature is not None:
+        recorded = read_corpus_signature(paths).get("planned_signature")
+        if recorded is None:
+            return False, (
+                f"{CORPUS_SIGNATURE_FILE} does not record what {FINGERPRINT_FILE} was built "
+                f"from, so it cannot be matched to the current corpus"
+            )
+        if recorded != signature:
+            return False, "the corpus has changed since it was fingerprinted and planned"
+    return True, f"{FINGERPRINT_FILE} and {PLANS_FILE} match the current corpus"
 
 
 def preprocessing_complete(
@@ -162,7 +237,34 @@ def preprocessing_complete(
     count = sum(1 for _ in output_dir.rglob("*.b2nd"))
     if count == 0:
         return False, f"{identifier}/ holds no preprocessed volumes"
-    return True, f"{count} preprocessed volume(s) under {identifier}/"
+
+    # ---- Does this preprocessed data belong to the corpus we are about to use? ----
+    # Adding a --corpus-source changes the corpus but touches nothing above, so without this
+    # the run would silently pre-train on the previous corpus.
+    signature = corpus_signature(paths)
+    sidecar = directory / CORPUS_SIGNATURE_FILE
+    if signature is not None:
+        if not sidecar.is_file():
+            return False, (
+                f"{CORPUS_SIGNATURE_FILE} is missing, so the {count} preprocessed volume(s) "
+                f"cannot be matched to the current corpus. Pass --ssl-skip-preprocessing if "
+                f"you know they are the right ones"
+            )
+        try:
+            recorded = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False, f"{CORPUS_SIGNATURE_FILE} is unreadable"
+        if recorded.get("signature") != signature:
+            return False, (
+                f"the corpus has changed since it was preprocessed "
+                f"({count} volume(s) on disk no longer match pretrain_data.json)"
+            )
+        if recorded.get("configuration") != configuration_name:
+            return False, (
+                f"the preprocessed data was built for configuration "
+                f"{recorded.get('configuration')!r}, not {configuration_name!r}"
+            )
+    return True, f"{count} preprocessed volume(s) under {identifier}/, matching the corpus"
 
 
 def bundle_dir(results_root: Path, name: str) -> Path:
@@ -486,6 +588,7 @@ def run_pretrain(
         # we want once we have decided to redo this step at all.
         extract_fingerprints([CORPUS_DATASET_ID], num_processes=num_processes, clean=True)
         plan_experiments([CORPUS_DATASET_ID])
+        write_corpus_signature(paths, planned=True)
 
     # ---- Preprocessing: the expensive half -----------------------------------
     preprocess_done, preprocess_reason = preprocessing_complete(paths, configuration_name)
@@ -502,6 +605,7 @@ def run_pretrain(
             [CORPUS_DATASET_ID], plans_identifier="nnsslPlans",
             configurations=(configuration_name,), num_processes=num_processes,
         )
+        write_corpus_signature(paths, configuration_name=configuration_name)
 
     import torch
     from batchgenerators.utilities.file_and_folder_operations import join, load_json
@@ -778,7 +882,11 @@ __all__ = [
     "FINGERPRINT_FILE",
     "PLANS_FILE",
     "PREPROCESS_DONE_MARKER",
+    "CORPUS_SIGNATURE_FILE",
     "corpus_preprocessed_dir",
+    "corpus_signature",
+    "read_corpus_signature",
+    "write_corpus_signature",
     "planning_complete",
     "preprocessing_complete", "BUNDLE_META", "BUNDLE_MODEL", "BUNDLE_PLAN", "SPACING_STYLES",
     "bundle_dir", "build_sge_command", "export_segmentation_model", "main", "run_pretrain",

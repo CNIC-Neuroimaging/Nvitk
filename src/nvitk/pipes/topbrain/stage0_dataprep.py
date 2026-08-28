@@ -69,6 +69,7 @@ from nvitk.io import imread, imsave
 from nvitk.normalization import harmonize_modality
 from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain import labels as lbl
+from nvitk.pipes.topbrain.util import cohorts
 from nvitk.pipes.topbrain.util import collection as corpus_util
 from nvitk.pipes.topbrain.util import folds as fold_util
 from nvitk.pipes.topbrain.util import sampling
@@ -118,7 +119,9 @@ class ExtraCohort:
     name: str
     images_dir: Path
     labels_dir: Path
-    modality: str
+    modality: str | None = None
+    """Modality for the whole cohort, or ``None`` when *layout* resolves it per case."""
+
     train_only: bool = False
     """Never hold these cases out for validation.
 
@@ -127,12 +130,41 @@ class ExtraCohort:
     accuracy, and the cross-validation would quietly stop meaning what it says.
     """
 
+    layout: cohorts.CohortLayout | None = None
+    """Built-in release layout, when the cohort was named rather than spelled out."""
+
+    root: Path | None = None
+    """Release root that *layout* is read relative to."""
+
     def iter_cases(self) -> Iterator[ReleaseCase]:
         """Pair images with same-named masks; the case id is prefixed with the cohort name.
 
         Prefixing keeps ids unique against the challenge's ``topcow_*`` cases and makes the
         provenance obvious in ``splits_final.json``.
         """
+        if self.layout is not None:
+            # For a named release, self.modality is a *filter* rather than a declaration: the
+            # layout reads each case's own modality from its filename.
+            # A named release: the layout knows both modality and subject per case, which the
+            # two-directory form cannot express.
+            for case in self.layout.iter_cases(
+                self.root or self.images_dir, only_modality=self.modality
+            ):
+                # The release already namespaces its own files (topaneu_…); prefixing again
+                # would produce topaneu_topaneu_… and make splits_final.json unreadable.
+                case_id = (
+                    case.case_id if case.case_id.startswith(f"{self.name}_")
+                    else f"{self.name}_{case.case_id}"
+                )
+                yield ReleaseCase(
+                    case_id=case_id,
+                    modality=case.modality,
+                    patient_id=f"{self.name}-{case.subject}",
+                    image_path=case.image_path,
+                    label_path=case.label_path,
+                )
+            return
+
         if not self.images_dir.is_dir():
             raise FileNotFoundError(f"Extra cohort {self.name!r}: {self.images_dir} not found")
         if not self.labels_dir.is_dir():
@@ -157,11 +189,56 @@ class ExtraCohort:
 
 
 def parse_extra_train(spec: str, *, train_only: bool = False) -> ExtraCohort:
-    """Parse ``--extra-train name=/images:/labels[:modality]``."""
-    match = _EXTRA_RE.match(spec.strip())
+    """Parse an ``--extra-train`` / ``--extra-train-only`` value.
+
+    Two forms::
+
+        topaneu=/path/to/release          # a built-in layout (see util.cohorts)
+        name=/images:/labels:modality     # two directories and one modality
+
+    Raises
+    ------
+    click.BadParameter
+        On a malformed spec, on a non-built-in cohort without an explicit modality, or on a
+        pseudo-labelled release passed as ``--extra-train``. The last is a correctness guard:
+        masks that are model output may be trained on but must never be validated against.
+    """
+    text = spec.strip()
+    head, _, rest = text.partition("=")
+    name, _, only_modality = head.strip().partition(":")
+    name, only_modality = name.strip(), only_modality.strip().lower() or None
+    parts = [p for p in rest.split(":")] if rest else []
+
+    if name in cohorts.BUILTIN_COHORTS and len(parts) == 1 and parts[0].strip():
+        if only_modality is not None and only_modality not in ("ct", "mr"):
+            raise click.BadParameter(
+                f"Cohort {name!r}: modality filter must be 'ct' or 'mr', got {only_modality!r}."
+            )
+        layout = cohorts.BUILTIN_COHORTS[name]
+        if layout.pseudo_labels and not train_only:
+            raise click.BadParameter(
+                f"Cohort {name!r} ships model-predicted masks, not annotations, so it must be "
+                f"passed as --extra-train-only. With --extra-train its cases would land in "
+                f"validation splits and the cross-validation would be scoring agreement with "
+                f"the model that produced them."
+            )
+        root = Path(parts[0].strip()).expanduser()
+        return ExtraCohort(
+            name=name,
+            images_dir=root / layout.images_subdir,
+            labels_dir=root / layout.labels_subdir,
+            modality=only_modality or layout.modality,
+            train_only=bool(train_only),
+            layout=layout,
+            root=root,
+        )
+
+    match = _EXTRA_RE.match(text)
     if match is None:
         raise click.BadParameter(
-            f"--extra-train {spec!r} is malformed; expected 'name=/images:/labels[:modality]'."
+            f"--extra-train {spec!r} is malformed. Expected 'name=/images:/labels[:modality]', "
+            f"or one of the built-in releases: "
+            f"{', '.join(f'{n}=/root' for n in sorted(cohorts.BUILTIN_COHORTS))}."
         )
     modality = (match["modality"] or "").strip().lower()
     if modality not in ("ct", "mr"):
@@ -243,6 +320,7 @@ def _convert_case(
             "classes_present": sorted(
                 int(v) for v in to_numpy(np.unique(existing.data)) if int(v) != 0
             ),
+            "num_channels": 2 if context_enabled else 1,
             "skipped": True,
         }
     if not case.label_path.is_file():
@@ -264,6 +342,8 @@ def _convert_case(
         )
 
     # ---- 2. Label values must belong to the declared label set ----------------
+    # For the binary set the source mask is a full TA36/v1 map that is about to be collapsed,
+    # so it is checked against the widest set rather than against {0, 1}.
     # ``values`` stays on the active backend: ``np`` is CuPy under ``--backend gpu``, so pulling
     # it to the host first and then calling ``np.round`` on it would mix a NumPy array into a
     # CuPy ufunc. Convert once, afterwards, for the Python-level iteration that genuinely needs
@@ -272,7 +352,9 @@ def _convert_case(
     if not bool((values == np.round(values)).all()):
         raise ValueError(f"[{case.case_id}] label mask holds non-integral values.")
     present = [int(v) for v in to_numpy(values)]
-    unexpected = sorted(v for v in present if v > lbl.max_label(label_set) or v < 0)
+    ceiling = max(lbl.max_label(s) for s in ("ta36", "v1_ct", "v1_mr")) \
+        if lbl.is_binary(label_set) else lbl.max_label(label_set)
+    unexpected = sorted(v for v in present if v > ceiling or v < 0)
     if unexpected:
         raise ValueError(
             f"[{case.case_id}] label values {unexpected} are outside label set {label_set!r} "
@@ -284,7 +366,13 @@ def _convert_case(
         image, case.modality, ct_window=ct_window, mr_percentiles=mr_percentiles
     )
     imsave(out_image, harmonised.astype(np.float32))
-    imsave(out_label, label.astype(np.uint8))
+    if lbl.is_binary(label_set):
+        # Collapse every vessel class to one. Done here rather than by the trainer so the
+        # dataset on disk *is* the binary task and nnU-Net's fingerprint, class locations and
+        # oversampling all see a single foreground class.
+        imsave(out_label, label.with_data((label.data > 0).astype(np.uint8)))
+    else:
+        imsave(out_label, label.astype(np.uint8))
 
     # ---- 3b. Optional context channel, from the same read ---------------------
     if context_enabled:
@@ -310,7 +398,10 @@ def _convert_case(
         "patient": case.patient_id,
         "shape": [int(s) for s in image.shape],
         "spacing_mm": [round(float(s), 6) for s in (image.spacing or ())],
-        "classes_present": sorted(v for v in present if v != 0),
+        "classes_present": (
+            [1] if lbl.is_binary(label_set) and any(v != 0 for v in present)
+            else sorted(v for v in present if v != 0)
+        ),
         "foreground_fraction": round(foreground / total, 6) if total else 0.0,
         "num_channels": 2 if context_enabled else 1,
         "skipped": False,
@@ -385,7 +476,13 @@ def build_training_dataset(
     mr_context_percentiles: Sequence[float] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Build the nnU-Net raw dataset; returns ``(dataset_dir, provenance)``."""
-    _verify_label_map(challenge_root, label_set)
+    if not lbl.is_binary(label_set):
+        _verify_label_map(challenge_root, label_set)
+    else:
+        log.info(
+            "stage0: building the derived binary vessel dataset — every source class is "
+            "collapsed to 1. No published label map to cross-check against."
+        )
 
     dataset_name = f"Dataset{DATASET_IDS[label_set]:03d}_{DATASET_SUFFIXES[label_set]}"
     dataset_dir = Path(nnunet_raw) / dataset_name
@@ -596,6 +693,7 @@ def run_dataprep(
     modality: str = "both",
     extra_train: Sequence[str] = (),
     extra_train_only: Sequence[str] = (),
+    binary_sources: Sequence[str] = (),
     include_challenge: bool = True,
     corpus_sources: Sequence[str] = (),
     num_folds: int | None = None,
@@ -623,8 +721,17 @@ def run_dataprep(
             mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES
         )
 
-    if target not in ("train", "corpus", "both"):
-        raise ValueError(f"Unknown --target {target!r}; expected train, corpus or both.")
+    if target not in ("train", "corpus", "both", "binary", "all"):
+        raise ValueError(
+            f"Unknown --target {target!r}; expected train, corpus, both, binary or all."
+        )
+    if target in ("binary", "all") and not binary_sources:
+        raise ValueError(
+            "--target binary needs at least one --binary-source. The binary dataset is built "
+            "from silver-standard cohorts, e.g. 'topaneu=/release/root'; the annotated "
+            "challenge cases are deliberately excluded so the multi-class cross-validation "
+            "stays honest."
+        )
 
     provenance: dict[str, Any] = {
         "stage": "stage0",
@@ -633,7 +740,7 @@ def run_dataprep(
         "challenge_root": str(paths.challenge_root),
     }
 
-    if target in ("train", "both"):
+    if target in ("train", "both", "all"):
         cohorts = [
             *(parse_extra_train(spec) for spec in extra_train),
             *(parse_extra_train(spec, train_only=True) for spec in extra_train_only),
@@ -656,7 +763,28 @@ def run_dataprep(
         )
         provenance["train"] = train_meta
 
-    if target in ("corpus", "both"):
+    # ---- The derived binary dataset, from silver cohorts only -----------------
+    # Kept free of the annotated cases on purpose: the binary model seeds the multi-class one,
+    # so anything it trained on has effectively been seen by every fold of the multi-class
+    # cross-validation.
+    if target in ("binary", "all"):
+        binary_dir, binary_meta = build_training_dataset(
+            challenge_root=paths.challenge_root, nnunet_raw=paths.nnunet_raw,
+            label_set=lbl.BINARY_LABEL_SET, modality=modality,
+            extra_cohorts=[
+                parse_extra_train(spec, train_only=True) for spec in binary_sources
+            ],
+            num_folds=num_folds or cfg.DEFAULT_NUM_FOLDS,
+            seed=seed or cfg.DEFAULT_FOLD_SEED,
+            ct_window=ct_window, mr_percentiles=mr_percentiles,
+            ct_context_window=ct_context_window,
+            mr_context_percentiles=mr_context_percentiles,
+            overwrite=overwrite, workers=workers, include_challenge=False,
+        )
+        provenance["binary"] = binary_meta
+        log.ok(f"stage0 binary dataset -> {binary_dir}")
+
+    if target in ("corpus", "both", "all"):
         if not corpus_sources:
             raise ValueError(
                 "--target corpus needs at least one --corpus-source. The training data is "
@@ -707,6 +835,8 @@ def _worker_argv(**options) -> list[str]:
         argv.extend(["--extra-train", quote_path(spec)])
     for spec in options.get("extra_train_only", ()):
         argv.extend(["--extra-train-only", quote_path(spec)])
+    for spec in options.get("binary_sources", ()):
+        argv.extend(["--binary-source", quote_path(spec)])
     for spec in options.get("corpus_sources", ()):
         argv.extend(["--corpus-source", quote_path(spec)])
     if not options.get("include_challenge", True):
@@ -733,9 +863,20 @@ def _user_data_paths(paths, **options) -> list[Path]:
     for spec in options.get("corpus_sources", ()):
         source = corpus_util.parse_source_spec(spec, challenge_root=paths.challenge_root)
         roots.append(Path(source.root))
-    for spec in (*options.get("extra_train", ()), *options.get("extra_train_only", ())):
-        cohort = parse_extra_train(spec)
-        roots.extend((cohort.images_dir, cohort.labels_dir))
+    # Parsed with the same train_only flag the worker will use: a pseudo-labelled release
+    # refuses to parse as --extra-train, and planning the binds must not trip that guard.
+    for spec, train_only in (
+        *((s, False) for s in options.get("extra_train", ())),
+        *((s, True) for s in options.get("extra_train_only", ())),
+        *((s, True) for s in options.get("binary_sources", ())),
+    ):
+        cohort = parse_extra_train(spec, train_only=train_only)
+        # A named release only needs its root bound; the two-directory form needs both, and
+        # they may live on different filesystems.
+        roots.extend(
+            (cohort.root,) if cohort.root is not None
+            else (cohort.images_dir, cohort.labels_dir)
+        )
     return roots
 
 
@@ -774,14 +915,20 @@ def submit_sge(
 @click.option("--nnssl-results", type=click.Path(path_type=Path), required=True)
 @click.option("--corpus-root", type=click.Path(path_type=Path), required=True)
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
-@click.option("--target", type=click.Choice(["train", "corpus", "both"]), default="train",
-              show_default=True, help="Labelled training data, unlabeled corpus, or both.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default="ta36",
+@click.option("--target", type=click.Choice(["train", "corpus", "both", "binary", "all"]),
+              default="train", show_default=True,
+              help="Labelled training data, unlabeled corpus, the derived binary dataset, or "
+                   "combinations ('both' = train+corpus, 'all' = train+corpus+binary).")
+@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+              default="ta36",
               show_default=True)
 @click.option("--modality", type=click.Choice(["both", "ct", "mr"]), default="both",
               show_default=True)
 @click.option("--extra-train", multiple=True,
               help="Extra annotated cohort: 'name=/images:/labels:modality'. Repeatable.")
+@click.option("--binary-source", "binary_sources", multiple=True,
+              help="Silver cohort forming the binary vessel dataset, same syntax as "
+                   "--extra-train (e.g. 'topaneu=/release/root'). Repeatable.")
 @click.option("--extra-train-only", multiple=True,
               help="Same syntax as --extra-train, but the cases go in every fold's training "
                    "half and in no validation half. Use it for stage 6's pseudo-labelled "
@@ -809,7 +956,7 @@ def main(
     challenge_root: Path, nnunet_raw: Path, nnssl_raw: Path, nnssl_preprocessed: Path,
     nnssl_results: Path, corpus_root: Path, results_root: Path, target: str, label_set: str,
     modality: str, extra_train: tuple[str, ...], extra_train_only: tuple[str, ...],
-    no_challenge: bool,
+    binary_sources: tuple[str, ...], no_challenge: bool,
     corpus_sources: tuple[str, ...], num_folds: int | None, seed: int | None,
     ct_window: tuple[float, float] | None, mr_percentiles: tuple[float, float] | None,
     ct_context_window: tuple[float, float] | None,
@@ -827,7 +974,7 @@ def main(
     run_dataprep(
         paths=paths, target=target, label_set=label_set, modality=modality,
         extra_train=extra_train, extra_train_only=extra_train_only,
-        include_challenge=not no_challenge,
+        binary_sources=binary_sources, include_challenge=not no_challenge,
         corpus_sources=corpus_sources, num_folds=num_folds, seed=seed,
         ct_window=ct_window or None, mr_percentiles=mr_percentiles or None,
         ct_context_window=ct_context_window or None,

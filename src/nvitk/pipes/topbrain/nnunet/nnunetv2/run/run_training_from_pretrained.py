@@ -84,7 +84,8 @@ def train_pretrained(
     disable_checkpointing: bool = False,
     val_with_best: bool = False,
     device: torch.device = torch.device("cuda"),
-    overwrite_ckpt_path: str =None
+    overwrite_ckpt_path: str = None,
+    pretrained_weights: str = None,
 ):
     if isinstance(fold, str):
         if fold != "all":
@@ -154,7 +155,14 @@ def train_pretrained(
 
         # Still needed to allow continuation of incomplete (i.e. interrupted) trainings.
         # ToDo: Find a way to not pre-load the same checkpoints that get overriden by the --continue flag.
-        maybe_load_checkpoint(nnunet_trainer, continue_training, only_run_validation, None)
+        # -pretrained_weights initialises from a *previous nnU-Net run* rather than from the
+        # nnssl checkpoint the plans point at. maybe_load_checkpoint() builds the network first
+        # and then copies every matching parameter except the '.seg_layers.' heads, which is
+        # what allows a binary vessel model to seed a multi-class one: same encoder, same
+        # decoder, a head sized for the new label count.
+        maybe_load_checkpoint(
+            nnunet_trainer, continue_training, only_run_validation, pretrained_weights
+        )
 
         if torch.cuda.is_available():
             cudnn.deterministic = False
@@ -239,6 +247,16 @@ def train_pretrained_entrypoint():
         "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_train [...] instead!",
     )
     parser.add_argument(
+        "-pretrained_weights",
+        type=str,
+        default=None,
+        required=False,
+        help="Checkpoint of a previous nnU-Net run to initialise from. Every parameter except "
+             "the segmentation heads is copied, so a model trained for a different number of "
+             "classes on the same plans can be used. Applied after the plans' own pre-trained "
+             "weights, so it wins.",
+    )
+    parser.add_argument(
         "-overwrite_ckpt_path",
         type=str,
         default=None,
@@ -280,7 +298,8 @@ def train_pretrained_entrypoint():
         args.disable_checkpointing,
         args.val_best,
         device=device,
-        overwrite_ckpt_path=args.overwrite_ckpt_path
+        overwrite_ckpt_path=args.overwrite_ckpt_path,
+        pretrained_weights=args.pretrained_weights,
     )
 
 

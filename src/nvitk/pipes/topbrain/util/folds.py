@@ -208,9 +208,16 @@ def grouped_folds(
     fixed = {str(c) for c in (train_only or ())}
     splittable = [case for case in cases if case.case_id not in fixed]
     if fixed and not splittable:
-        raise ValueError(
-            f"All {len(fixed)} case(s) are marked train-only; there is nothing left to hold out."
+        # Legitimate for a silver-standard dataset built entirely from model-predicted masks:
+        # there is nothing honest to hold out, and it is trained with fold 'all'. Emit folds
+        # with an empty validation half rather than refusing, so the dataset is still usable.
+        log.warning(
+            "All %d case(s) are train-only, so no fold has a validation half. This dataset can "
+            "only be trained with --folds all; any metric computed on it would be scored "
+            "against the labels it was trained on.", len(fixed),
         )
+        everything = sorted(fixed)
+        return [{"train": everything, "val": []} for _ in range(int(num_folds))]
     if fixed:
         log.info(
             "%d case(s) are train-only and will appear in every fold's training half.",
