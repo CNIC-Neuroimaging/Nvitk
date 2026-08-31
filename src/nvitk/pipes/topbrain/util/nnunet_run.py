@@ -175,6 +175,56 @@ def find_generated_plans(
     return matches[-1].stem
 
 
+def prepare_borrowed_plans_dataset(
+    source_dataset_id: int,
+    target_dataset_id: int,
+    *,
+    env: dict[str, str],
+) -> None:
+    """Create what a dataset needs in ``nnUNet_preprocessed`` before it can receive plans.
+
+    A dataset that is never planned is missing three things the rest of nnU-Net assumes the
+    planner left behind:
+
+    ``nnUNet_preprocessed/<dataset>/``
+        ``move_plans_between_datasets`` writes straight into it and does not create it.
+    ``dataset.json``
+        ``DefaultPreprocessor.run`` reads it from the *preprocessed* folder, not from
+        ``nnUNet_raw``. Normally the experiment planner copies it across.
+    ``dataset_fingerprint.json``
+        ``nnUNetTrainer.on_train_start`` copies it into the results folder, so training aborts
+        without it.
+
+    The fingerprint is taken from the **source** dataset rather than extracted afresh. Nothing
+    reads the target's own: preprocessing normalises from the intensity statistics baked into
+    the borrowed plans, and the trainer only files the fingerprint alongside its outputs. The
+    source's is therefore both the cheap answer and the accurate one — it is the fingerprint
+    that produced the plans actually in use. Extracting the target's would re-read every volume
+    to produce a file no code consults.
+    """
+    snippet = (
+        "import shutil; "
+        "from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p; "
+        "from nnunetv2.paths import nnUNet_raw, nnUNet_preprocessed; "
+        "from nnunetv2.utilities.dataset_name_id_conversion import convert_id_to_dataset_name; "
+        f"src = convert_id_to_dataset_name({int(source_dataset_id)}); "
+        f"tgt = convert_id_to_dataset_name({int(target_dataset_id)}); "
+        "out = join(nnUNet_preprocessed, tgt); "
+        "maybe_mkdir_p(out); "
+        "shutil.copy(join(nnUNet_raw, tgt, 'dataset.json'), join(out, 'dataset.json')); "
+        "shutil.copy(join(nnUNet_preprocessed, src, 'dataset_fingerprint.json'), "
+        "            join(out, 'dataset_fingerprint.json'))"
+    )
+    log.info("$ prepare dataset %d to receive plans from %d",
+             int(target_dataset_id), int(source_dataset_id))
+    completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Preparing dataset {target_dataset_id} for borrowed plans failed with exit code "
+            f"{completed.returncode}."
+        )
+
+
 def move_plans(
     source_dataset_id: int,
     target_dataset_id: int,
@@ -313,6 +363,7 @@ __all__ = [
     "find_generated_plans",
     "has_baseline_plans",
     "move_plans",
+    "prepare_borrowed_plans_dataset",
     "preprocess_with_plans",
     "plan_baseline",
     "predict",

@@ -468,6 +468,9 @@ def run_train(
                 paths.nnunet_preprocessed, source_dataset, pretrain_name
             )
         log.info("Borrowing plans %s from %s", plans_identifier, source_dataset)
+        # The target has never been planned, so nothing has created its preprocessed
+        # directory, copied its dataset.json there, or left a fingerprint for the trainer.
+        nnunet_run.prepare_borrowed_plans_dataset(source_id, dataset_id, env=env)
         nnunet_run.move_plans(source_id, dataset_id, plans_identifier, env=env)
         if not skip_preprocessing:
             nnunet_run.preprocess_with_plans(
