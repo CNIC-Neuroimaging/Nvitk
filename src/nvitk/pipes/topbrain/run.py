@@ -518,10 +518,10 @@ def _submit_via_login_node(
 @click.option("--list-models", is_flag=True, default=False,
               help="Print the models stage 2 has trained and exit.")
 # ---- stage 0: data preparation ---------------------------------------------
-@click.option("--dataprep-target",
-              type=click.Choice(["train", "corpus", "both", "binary", "all"]),
-              default="train", show_default=True,
-              help="'all' also builds the derived binary vessel dataset from --binary-source.")
+@click.option("--dataprep-target", type=str, default="train", show_default=True,
+              help="Comma list of: train, corpus, binary. Shorthands: 'both' = train,corpus; "
+                   "'all' = train,corpus,binary. Use 'train,binary' when the corpus is already "
+                   "built and you are only adding a new labelled experiment.")
 @click.option("--modality", type=click.Choice(["both", "ct", "mr"]), default="both",
               show_default=True)
 @click.option("--extra-train", multiple=True,

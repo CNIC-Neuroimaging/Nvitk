@@ -188,6 +188,45 @@ class ExtraCohort:
             )
 
 
+#: The three datasets stage 0 can build, in the order it builds them.
+DATAPREP_TARGETS: tuple[str, ...] = ("train", "corpus", "binary")
+
+#: Shorthands kept for the combinations that already had names.
+_TARGET_ALIASES: dict[str, tuple[str, ...]] = {
+    "both": ("train", "corpus"),
+    "all": ("train", "corpus", "binary"),
+}
+
+
+def parse_targets(spec: str) -> set[str]:
+    """Parse ``--target`` into the set of datasets to build.
+
+    Accepts a comma list of :data:`DATAPREP_TARGETS` — ``train,binary`` is the combination that
+    matters once the corpus already exists — plus the ``both`` and ``all`` shorthands. Naming
+    every combination would need a word per subset; a list does not.
+
+    Raises
+    ------
+    ValueError
+        On an unknown token, listing the valid ones.
+    """
+    tokens = [t.strip().lower() for t in str(spec).split(",") if t.strip()]
+    if not tokens:
+        raise ValueError("--target cannot be empty.")
+    selected: set[str] = set()
+    for token in tokens:
+        if token in _TARGET_ALIASES:
+            selected.update(_TARGET_ALIASES[token])
+        elif token in DATAPREP_TARGETS:
+            selected.add(token)
+        else:
+            raise ValueError(
+                f"Unknown --target {token!r}. Valid: {', '.join(DATAPREP_TARGETS)}, "
+                f"{', '.join(_TARGET_ALIASES)} — or a comma list, e.g. 'train,binary'."
+            )
+    return selected
+
+
 def parse_extra_train(spec: str, *, train_only: bool = False) -> ExtraCohort:
     """Parse an ``--extra-train`` / ``--extra-train-only`` value.
 
@@ -721,26 +760,31 @@ def run_dataprep(
             mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES
         )
 
-    if target not in ("train", "corpus", "both", "binary", "all"):
-        raise ValueError(
-            f"Unknown --target {target!r}; expected train, corpus, both, binary or all."
-        )
-    if target in ("binary", "all") and not binary_sources:
+    targets = parse_targets(target)
+    if "binary" in targets and not binary_sources:
         raise ValueError(
             "--target binary needs at least one --binary-source. The binary dataset is built "
             "from silver-standard cohorts, e.g. 'topaneu=/release/root'; the annotated "
             "challenge cases are deliberately excluded so the multi-class cross-validation "
             "stays honest."
         )
+    if "corpus" in targets and not corpus_sources:
+        raise ValueError(
+            "--target corpus needs at least one --corpus-source. The training data is "
+            "deliberately not a valid corpus source; see the module docstring. If the corpus "
+            "is already built and you only want the labelled datasets, use "
+            "--dataprep-target train,binary."
+        )
+    log.info("stage0 | building: %s", ", ".join(sorted(targets)))
 
     provenance: dict[str, Any] = {
         "stage": "stage0",
         "created": datetime.now().isoformat(timespec="seconds"),
-        "target": target,
+        "target": sorted(targets),
         "challenge_root": str(paths.challenge_root),
     }
 
-    if target in ("train", "both", "all"):
+    if "train" in targets:
         cohorts = [
             *(parse_extra_train(spec) for spec in extra_train),
             *(parse_extra_train(spec, train_only=True) for spec in extra_train_only),
@@ -767,7 +811,7 @@ def run_dataprep(
     # Kept free of the annotated cases on purpose: the binary model seeds the multi-class one,
     # so anything it trained on has effectively been seen by every fold of the multi-class
     # cross-validation.
-    if target in ("binary", "all"):
+    if "binary" in targets:
         # The binary set is chosen by the multi-class set it will seed, so a CT-only and an
         # MR-only curriculum get separate datasets and separate provenance instead of
         # overwriting one shared slot.
@@ -799,12 +843,7 @@ def run_dataprep(
         provenance["binary"] = binary_meta
         log.ok(f"stage0 binary dataset -> {binary_dir}")
 
-    if target in ("corpus", "both", "all"):
-        if not corpus_sources:
-            raise ValueError(
-                "--target corpus needs at least one --corpus-source. The training data is "
-                "deliberately not a valid corpus source; see the module docstring."
-            )
+    if "corpus" in targets:
         _, corpus_meta = build_corpus(
             paths=paths, sources=corpus_sources, harmonize=harmonize_corpus,
             overwrite=overwrite, workers=workers,
@@ -930,10 +969,10 @@ def submit_sge(
 @click.option("--nnssl-results", type=click.Path(path_type=Path), required=True)
 @click.option("--corpus-root", type=click.Path(path_type=Path), required=True)
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
-@click.option("--target", type=click.Choice(["train", "corpus", "both", "binary", "all"]),
-              default="train", show_default=True,
-              help="Labelled training data, unlabeled corpus, the derived binary dataset, or "
-                   "combinations ('both' = train+corpus, 'all' = train+corpus+binary).")
+@click.option("--target", type=str, default="train", show_default=True,
+              help="Comma list of: train, corpus, binary. Shorthands: 'both' = train,corpus; "
+                   "'all' = train,corpus,binary. Use 'train,binary' when the corpus already "
+                   "exists.")
 @click.option("--label-set",
               type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct",
                                  "binary_mr"]), default="ta36",
@@ -1000,7 +1039,8 @@ def main(
 
 
 __all__ = [
-    "DEFAULT_CT_CONTEXT_WINDOW", "DEFAULT_MR_CONTEXT_PERCENTILES",
+    "DATAPREP_TARGETS", "DEFAULT_CT_CONTEXT_WINDOW", "DEFAULT_MR_CONTEXT_PERCENTILES",
+    "parse_targets",
     "ExtraCohort", "build_corpus", "build_sge_command", "build_training_dataset",
     "main", "parse_extra_train", "run_dataprep", "submit_sge",
 ]
