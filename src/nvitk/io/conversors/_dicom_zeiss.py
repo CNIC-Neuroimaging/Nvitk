@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -26,11 +27,226 @@ except Exception:
 RAW_DATA_SOP_UID = "1.2.840.10008.5.1.4.1.1.66"
 
 __all__ = [
+    "ZeissOctCube",
+    "ZEISS_OCT_CUBE_CONTAINERS",
+    "extract_zeiss_oct_cubes",
     "extract_zeiss_raw_oct",
+    "has_zeiss_oct_cubes",
     "is_zeiss_raw_storage",
 ]
 
 log = Logger()
+
+
+# ---------------------------------------------------------------------------
+# Zeiss CIRRUS "CapeCod" private OCT containers
+# ---------------------------------------------------------------------------
+#
+# A CIRRUS Raw Data Storage object wraps every image stack it carries in its own
+# private 99CZM_CapeCod_OctGeneral (0407) sequence. Each container holds a
+# geometry header plus a per-frame sub-sequence with the encoded frames:
+#
+#   (0407,1001) US  rows of the decoded frame (A-scans across the B-scan)
+#   (0407,1002) US  columns of the decoded frame (depth samples)
+#   (0407,1003) US  number of frames (B-scans)
+#   (0407,1005) SQ  per-frame sequence; each item carries (0407,1006) OB
+#   (0407,100A/100B/100C) DS  device-reported x / depth / y spacing in mm
+#
+# An OCT-angiography acquisition stores two co-registered cubes in one object -
+# the structural ("anatomical") cube and the flow cube - in distinct containers,
+# so they split by tag and need no anatomical heuristic.
+ZEISS_OCT_CUBE_CONTAINERS: dict[int, str] = {
+    0x10A1: "cube_z",  # structural / anatomical OCT cube
+    0x10AD: "FlowCube_z",  # OCT-angiography flow (decorrelation) cube
+}
+
+_TAG_FRAME_ROWS = (0x0407, 0x1001)
+_TAG_FRAME_COLS = (0x0407, 0x1002)
+_TAG_FRAME_COUNT = (0x0407, 0x1003)
+_TAG_FRAME_SEQUENCE = (0x0407, 0x1005)
+_TAG_FRAME_DATA = (0x0407, 0x1006)
+_TAG_SPACING_X = (0x0407, 0x100A)
+_TAG_SPACING_DEPTH = (0x0407, 0x100B)
+_TAG_SPACING_Y = (0x0407, 0x100C)
+_TAG_SCAN_PATTERN = (0x0405, 0x1001)  # e.g. ANGIO_6MM, MACULAR_CUBE
+
+
+@dataclass(frozen=True)
+class ZeissOctCube:
+    """One volumetric cube extracted from a Zeiss private OCT container."""
+
+    kind: str
+    array: np.ndarray
+    affine: np.ndarray
+    meta: dict[str, Any]
+
+
+def _container_spacing_mm(item: Any) -> tuple[float, float, float] | None:
+    """Device-reported ``(x, depth, y)`` voxel spacing in mm from a container header.
+
+    Returns None unless all three of (0407,100A/100B/100C) are present and positive
+    (the en-face containers store zeros).
+    """
+    values = []
+    for tag in (_TAG_SPACING_X, _TAG_SPACING_DEPTH, _TAG_SPACING_Y):
+        try:
+            values.append(float(item[tag].value))
+        except Exception:
+            return None
+    return (values[0], values[1], values[2]) if all(value > 0 for value in values) else None
+
+
+def _decode_zeiss_frame(payload: Any, expected_shape: tuple[int, int] | None = None) -> np.ndarray | None:
+    """Decode one private-block payload into a 2-D array.
+
+    Handles JPEG 2000 (via glymur, else PIL), any other codec PIL can read, and -
+    when *expected_shape* is known - a raw uncompressed 8-bit buffer. Returns None
+    when the payload is not decodable image data.
+    """
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) < 16:
+        return None
+    payload = bytes(payload)
+    is_jp2_file = len(payload) >= 12 and payload[4:8] == b"jP  "
+    is_jp2_codestream = payload.startswith(b"\xff\x4f")
+
+    if is_jp2_file or is_jp2_codestream:
+        try:
+            import glymur
+
+            temp_file = tempfile.NamedTemporaryFile(suffix=".jp2", delete=False)
+            try:
+                temp_file.write(payload)
+                temp_file.flush()
+                temp_file.close()
+                arr = glymur.Jp2k(temp_file.name)[:]
+                if arr.ndim == 3 and Image is not None:
+                    arr = np.asarray(Image.fromarray(arr).convert("L"))
+                return np.asarray(arr)
+            finally:
+                try:
+                    os.unlink(temp_file.name)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if Image is not None:
+        try:
+            img = Image.open(io.BytesIO(payload))
+            img.load()
+            return np.asarray(img.convert("L"))
+        except Exception:
+            pass
+
+    if expected_shape is not None and len(payload) == expected_shape[0] * expected_shape[1]:
+        try:
+            return np.frombuffer(payload, dtype=np.uint8).reshape(expected_shape)
+        except Exception:
+            return None
+    return None
+
+
+def _extract_container_cube(
+    ds: Any,
+    element: int,
+    kind: str,
+    debug_mode: bool = False,
+) -> ZeissOctCube | None:
+    """Decode the private container ``(0407,<element>)`` of *ds* into a cube, or None when it is absent/undecodable."""
+    container = ds.get((0x0407, element))
+    if container is None or not getattr(container, "value", None):
+        return None
+    item = container.value[0]
+    try:
+        rows = int(item[_TAG_FRAME_ROWS].value)
+        cols = int(item[_TAG_FRAME_COLS].value)
+        frame_items = item[_TAG_FRAME_SEQUENCE].value
+    except Exception:
+        return None
+    if rows <= 0 or cols <= 0 or not frame_items:
+        return None
+    declared = item.get(_TAG_FRAME_COUNT)
+    declared = int(getattr(declared, "value", 0) or 0)
+    if declared and declared != len(frame_items):
+        # A short sequence yields a cube whose slice count disagrees with the
+        # header the y-spacing was derived for.
+        log.warning(
+            f"[Zeiss cubes] container 0407,{element:04X} ({kind}) declares {declared} "
+            f"frames but carries {len(frame_items)}"
+        )
+
+    frames: list[np.ndarray] = []
+    for frame_item in frame_items:
+        try:
+            payload = frame_item[_TAG_FRAME_DATA].value
+        except Exception:
+            return None
+        decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
+        if decoded is None or decoded.shape != (rows, cols):
+            if debug_mode:
+                log.debug(
+                    f"[Zeiss cubes] container 0407,{element:04X} ({kind}): frame "
+                    f"{len(frames)} not decodable as {rows}x{cols}; skipping container"
+                )
+            return None
+        frames.append(decoded)
+
+    # CIRRUS stores the B-scans in reverse of the export order used by the raw
+    # .img cubes; reversing here reproduces that slice order.
+    volume = np.stack(frames[::-1], axis=2)
+
+    scan_pattern = ds.get(_TAG_SCAN_PATTERN)
+    scan_pattern = getattr(scan_pattern, "value", None) if scan_pattern is not None else None
+
+    spacing = _container_spacing_mm(item)
+    spacing_source = "dicom_private_tags"
+    if spacing is None:
+        spacing = (1.0, 1.0, 1.0)
+        spacing_source = "unknown"
+        log.warning(
+            f"[Zeiss cubes] container 0407,{element:04X} ({kind}) carries no usable "
+            f"spacing in (0407,100A/100B/100C); writing unit spacing"
+        )
+
+    affine = np.diag([spacing[0], spacing[1], spacing[2], 1.0])
+    meta = {
+        "method": "zeiss_private_container",
+        "zeiss_container_tag": f"0407,{element:04X}",
+        "zeiss_cube_kind": kind,
+        "zeiss_scan_pattern": str(scan_pattern) if scan_pattern is not None else None,
+        "zeiss_spacing_source": spacing_source,
+        "zeiss_spacing_mm": list(spacing),
+        "num_slices": int(volume.shape[2]),
+        "chosen_shape": tuple(int(size) for size in volume.shape),
+    }
+    if debug_mode:
+        log.debug(f"[Zeiss cubes] {kind}: shape={volume.shape} spacing={spacing} source={spacing_source}")
+    return ZeissOctCube(kind=kind, array=volume, affine=affine, meta=meta)
+
+
+def has_zeiss_oct_cubes(ds: Any) -> bool:
+    """True when *ds* carries at least one private OCT cube container."""
+    return any((0x0407, element) in ds for element in ZEISS_OCT_CUBE_CONTAINERS)
+
+
+def extract_zeiss_oct_cubes(
+    ds_list: list[Any],
+    debug_mode: bool = False,
+) -> list[ZeissOctCube]:
+    """Extract every volumetric cube stored in the private containers of *ds_list*.
+
+    An angiography acquisition yields two cubes - the structural ``cube_z`` and the
+    flow ``FlowCube_z`` - while a plain cube scan yields only ``cube_z``. Returns an
+    empty list when no container is decodable, leaving the caller to fall back to
+    :func:`extract_zeiss_raw_oct`.
+    """
+    cubes: list[ZeissOctCube] = []
+    for ds in ds_list:
+        for element, kind in ZEISS_OCT_CUBE_CONTAINERS.items():
+            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode)
+            if cube is not None:
+                cubes.append(cube)
+    return cubes
 
 
 def _is_zeiss_raw_storage(ds: Any) -> bool:
@@ -197,43 +413,8 @@ def _extract_zeiss_raw_oct(
         )
 
     def try_decode_image_block(payload: bytes):
-        """Attempt to decode a private-block payload as a raw Zeiss OCT image, guessing dtype/shape from its size."""
-        if not isinstance(payload, (bytes, bytearray)) or len(payload) < 16:
-            return None
-        is_jp2_file = len(payload) >= 12 and payload[4:8] == b"jP  "
-        is_jp2_codestream = payload.startswith(b"\xff\x4f")
-
-        if is_jp2_file or is_jp2_codestream:
-            try:
-                import glymur
-
-                temp_file = tempfile.NamedTemporaryFile(suffix=".jp2", delete=False)
-                try:
-                    temp_file.write(payload)
-                    temp_file.flush()
-                    temp_file.close()
-                    jp2 = glymur.Jp2k(temp_file.name)
-                    arr = jp2[:]
-                    if arr.ndim == 3 and Image is not None:
-                        arr = np.asarray(Image.fromarray(arr).convert("L"))
-                    return np.asarray(arr)
-                finally:
-                    try:
-                        os.unlink(temp_file.name)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-        if Image is None:
-            return None
-        try:
-            img = Image.open(io.BytesIO(payload))
-            img.load()
-            img2 = img.convert("L")
-            return np.asarray(img2)
-        except Exception:
-            return None
+        """Attempt to decode a private-block payload as a raw Zeiss OCT image (shape guessed by the decoder)."""
+        return _decode_zeiss_frame(payload)
 
     blocks_by_instance = defaultdict(list)
     for idx, tag, vr, length, value in all_blocks:

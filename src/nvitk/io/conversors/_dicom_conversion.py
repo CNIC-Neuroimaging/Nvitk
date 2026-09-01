@@ -23,7 +23,7 @@ from .._common import default_nifti_axes, orientation_codes_from_affine, reorder
 
 from ._dicom_rtstructs import integrate_rtstruct_processing
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
-from ._dicom_zeiss import extract_zeiss_raw_oct, is_zeiss_raw_storage
+from ._dicom_zeiss import extract_zeiss_oct_cubes, extract_zeiss_raw_oct, is_zeiss_raw_storage
 
 try:
     import nibabel as nib
@@ -1840,7 +1840,28 @@ def _load_zeiss_series_arrays(
     *,
     force_ras: bool,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
-    """Load a Zeiss private raw-OCT series (:func:`extract_zeiss_raw_oct`), applying reorientation and returning one output array."""
+    """Load a Zeiss private raw-OCT series, applying reorientation and returning one output array per cube.
+
+    An angiography acquisition returns two arrays (structural ``cube_z`` and flow
+    ``FlowCube_z``); other Zeiss raw series return a single array.
+    """
+    cubes = _extract_zeiss_cubes_or_empty(ds_list)
+    if cubes:
+        outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
+        for cube in cubes:
+            image = nib.Nifti1Image(cube.array, cube.affine)
+            image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
+            outputs.append(
+                _prepare_array_output(
+                    np.asanyarray(image.dataobj),
+                    md,
+                    affine=image.affine,
+                    rescale_type="DV",
+                    extra_metadata=cube.meta,
+                )
+            )
+        return outputs
+
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
@@ -2310,6 +2331,80 @@ def _process_tissue_series(
         return None
 
 
+def _extract_zeiss_cubes_or_empty(ds_list: list[Any]) -> list[Any]:
+    """Extract the private Zeiss OCT cube containers, returning ``[]`` when they are absent or undecodable."""
+    try:
+        return extract_zeiss_oct_cubes(ds_list, debug_mode=False)
+    except Exception as exc:
+        _debug(f"Zeiss private-container extraction failed, falling back to heuristics: {exc}")
+        return []
+
+
+def _zeiss_output_metadata(md: dict[str, Any], extra: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the ``(sidecar, header)`` metadata pair for a Zeiss output, merging the extraction diagnostics."""
+    md_full = {
+        k: v
+        for k, v in md.items()
+        if not (pydicom is not None and isinstance(v, (np.ndarray, pydicom.dataset.Dataset)))
+    }
+    md_full.update(extra)
+    md_header = md.copy()
+    md_header.update(extra)
+    _ensure_output_metadata_fields(md_full, rescale_type="DV")
+    _ensure_output_metadata_fields(md_header, rescale_type="DV")
+    return md_full, md_header
+
+
+def _split_nifti_extension(path: str) -> tuple[str, str]:
+    """Split *path* into ``(stem, extension)``, treating ``.nii.gz`` as a single extension."""
+    for ext in (".nii.gz", ".nii"):
+        if path.endswith(ext):
+            return path[: -len(ext)], ext
+    return path, ""
+
+
+def _insert_nifti_suffix(path: str, suffix: str) -> str:
+    """Append ``_<suffix>`` to *path*'s stem, keeping its NIfTI extension."""
+    stem, ext = _split_nifti_extension(path)
+    return f"{stem}_{suffix}{ext}"
+
+
+def _unique_nifti_path(path: str) -> str:
+    """Return *path*, or the first ``_<n>``-suffixed variant that does not already exist."""
+    stem, ext = _split_nifti_extension(path)
+    candidate = path
+    count = 1
+    while os.path.exists(candidate):
+        candidate = f"{stem}_{count}{ext}"
+        count += 1
+    return candidate
+
+
+def _zeiss_series_output_path(
+    output_folder: str,
+    md: dict[str, Any],
+    mod: str,
+    *,
+    laterality: str | None,
+    compress: bool,
+) -> str:
+    """Build the default output path for a Zeiss raw-OCT series from its series identity and laterality."""
+    ext = _get_nifti_extension(compress)
+    pid = _sanitize_filename(md.get("PatientID", "UnknownPID"))
+    sn = _sanitize_filename(md.get("SeriesNumber", "0"))
+    desc = _sanitize_filename(md.get("SeriesDescription", ""))
+    if desc and mod and sn:
+        base = f"{desc}_{mod}_{sn}"
+    elif pid and sn and mod:
+        base = f"{pid}_{mod}_{sn}"
+    else:
+        date = _sanitize_filename(md.get("StudyDate", ""))
+        base = f"{date}_{mod}_{sn}"
+    if laterality:
+        base = f"{base}_{laterality}"
+    return os.path.join(output_folder, f"{base}{ext}")
+
+
 def _process_zeiss_series(
     ds_list: list[Any],
     output_folder: str,
@@ -2324,51 +2419,53 @@ def _process_zeiss_series(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
 ) -> list[str] | None:
-    """Save a Zeiss private raw-OCT series as a single NIfTI volume, with the extraction diagnostics merged into metadata."""
+    """Save a Zeiss private raw-OCT series as NIfTI, with the extraction diagnostics merged into metadata.
+
+    An angiography acquisition writes two volumes - the structural ``cube_z`` and the
+    flow ``FlowCube_z`` - and other Zeiss raw series write a single volume.
+    """
     try:
+        cubes = _extract_zeiss_cubes_or_empty(ds_list)
+        if cubes:
+            base_path = explicit_output_path or _zeiss_series_output_path(
+                output_folder, md, mod, laterality=laterality, compress=compress
+            )
+            # A single cube with an explicitly requested path keeps that exact name;
+            # otherwise every volume is tagged with the cube it holds.
+            name_by_kind = len(cubes) > 1 or not explicit_output_path
+            outputs: list[str] = []
+            for cube in cubes:
+                image = nib.Nifti1Image(cube.array, cube.affine)
+                image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
+                md_full, md_header = _zeiss_output_metadata(md, cube.meta)
+                path = _insert_nifti_suffix(base_path, cube.kind) if name_by_kind else base_path
+                if skip_existing and os.path.exists(path):
+                    outputs.append(path)
+                    continue
+                path = _unique_nifti_path(path)
+                _save_image_with_metadata(image, path, md_header, additional_tags)
+                if save_metadata:
+                    _save_metadata_json(path, md_full)
+                _info(f"Saved Zeiss OCT {cube.kind} to {path}")
+                outputs.append(path)
+            return outputs
+
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         image = nib.Nifti1Image(vol, affine)
         image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
-
-        md_full = {
-            k: v
-            for k, v in md.items()
-            if not (pydicom is not None and isinstance(v, (np.ndarray, pydicom.dataset.Dataset)))
-        }
-        md_full.update(extra)
-        md_header = md.copy()
-        md_header.update(extra)
-        _ensure_output_metadata_fields(md_full, rescale_type="DV")
-        _ensure_output_metadata_fields(md_header, rescale_type="DV")
+        md_full, md_header = _zeiss_output_metadata(md, extra)
 
         if explicit_output_path:
             final_output_path = explicit_output_path
             if skip_existing and os.path.exists(final_output_path):
                 return [final_output_path]
         else:
-            ext = _get_nifti_extension(compress)
-            pid = _sanitize_filename(md.get("PatientID", "UnknownPID"))
-            sn = _sanitize_filename(md.get("SeriesNumber", "0"))
-            desc = _sanitize_filename(md.get("SeriesDescription", ""))
-            if desc and mod and sn:
-                base = f"{desc}_{mod}_{sn}"
-            elif pid and sn and mod:
-                base = f"{pid}_{mod}_{sn}"
-            else:
-                date = _sanitize_filename(md.get("StudyDate", ""))
-                base = f"{date}_{mod}_{sn}"
-            fname = f"{base}{ext}"
-            if laterality:
-                base_name = fname.replace(".nii.gz", "").replace(".nii", "")
-                fname = f"{base_name}_{laterality}{ext}"
-            final_output_path = os.path.join(output_folder, fname)
+            final_output_path = _zeiss_series_output_path(
+                output_folder, md, mod, laterality=laterality, compress=compress
+            )
             if skip_existing and os.path.exists(final_output_path):
                 return [final_output_path]
-            cnt = 1
-            base_name = fname.replace(".nii.gz", "").replace(".nii", "")
-            while os.path.exists(final_output_path):
-                final_output_path = os.path.join(output_folder, f"{base_name}_{cnt}{ext}")
-                cnt += 1
+            final_output_path = _unique_nifti_path(final_output_path)
 
         _save_image_with_metadata(image, final_output_path, md_header, additional_tags)
         if save_metadata:
