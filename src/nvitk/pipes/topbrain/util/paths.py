@@ -343,6 +343,54 @@ def _layout(prefix: str, **overrides: Path | None) -> TopBrainPaths:
     )
 
 
+#: Minimum number of path components an existing ancestor must have before it counts as
+#: evidence of a mount. ``/data`` existing means nothing; ``/data_lab_MCC/user/LabMCC`` does.
+_MOUNT_EVIDENCE_DEPTH: int = 4
+
+
+def tree_visible(path: Path) -> bool:
+    """Whether *path*, or a specific enough ancestor of it, exists on this host.
+
+    A root the cluster has not written to yet exists nowhere, so testing it directly would
+    report "not mounted" on a perfectly good mount before the first run. Walking up to the
+    deepest existing ancestor answers the question actually being asked: is this filesystem
+    reachable from here?
+    """
+    current = Path(path)
+    while len(current.parts) >= _MOUNT_EVIDENCE_DEPTH:
+        if current.is_dir():
+            return True
+        current = current.parent
+    return False
+
+
+def layout_auto(**overrides: Path | None) -> tuple[TopBrainPaths, str]:
+    """The layout an interactive tool on this host should read; with which one it picked.
+
+    Cluster storage is commonly NFS-mounted on the workstation at the *same absolute paths*, so
+    the ``cluster_*`` roots — the ones jobs actually write to — are usually readable here, while
+    the ``local_*`` roots are a separate working copy holding nothing a cluster job produced. A
+    tool that defaulted to ``local`` would therefore report "no trained models" while the models
+    sat right there.
+
+    Prefers the cluster roots when they are reachable, falls back to local otherwise, and says
+    which in the returned string so the choice is never silent.
+
+    Returns
+    -------
+    tuple
+        ``(paths, origin)`` with *origin* one of ``"cluster"`` / ``"local"``.
+    """
+    local = layout_local(**overrides)
+    try:
+        cluster = layout_cluster(**overrides)
+    except Exception:  # cluster roots are optional on a workstation-only install
+        return local, "local"
+    if tree_visible(cluster.results_root) or Path(cluster.challenge_root).is_dir():
+        return cluster, "cluster"
+    return local, "local"
+
+
 def layout_local(**overrides: Path | None) -> TopBrainPaths:
     """Roots for running on the analysis workstation (``local_*`` config keys).
 
@@ -380,7 +428,9 @@ __all__ = [
     "ReleaseCase",
     "TopBrainPaths",
     "iter_release_cases",
+    "layout_auto",
     "layout_cluster",
     "layout_local",
+    "tree_visible",
     "parse_case_id",
 ]

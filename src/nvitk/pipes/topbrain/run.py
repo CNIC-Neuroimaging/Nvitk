@@ -514,6 +514,8 @@ def _submit_via_login_node(
               help="Print the self-supervised trainers and exit.")
 @click.option("--list-cohorts", is_flag=True, default=False,
               help="Print the built-in annotated cohorts and exit.")
+@click.option("--list-models", is_flag=True, default=False,
+              help="Print the models stage 2 has trained and exit.")
 # ---- stage 0: data preparation ---------------------------------------------
 @click.option("--dataprep-target",
               type=click.Choice(["train", "corpus", "both", "binary", "all"]),
@@ -699,6 +701,15 @@ def main(**kw: Any) -> None:
         from nvitk.pipes.topbrain.util.trainers import describe_ssl_trainers
 
         click.echo(describe_ssl_trainers())
+        return
+    if kw["list_models"]:
+        from nvitk.pipes.topbrain.util.models import describe_models
+
+        local_layout, _cluster, active_layout = _resolve_layout(
+            kw["submit"].lower(), challenge_root=kw["challenge_root"],
+            results_root=kw["results_root"],
+        )
+        click.echo(describe_models(active_layout.results_root, active_layout.nnunet_results))
         return
     if kw["list_cohorts"]:
         from nvitk.pipes.topbrain.util.cohorts import describe_builtin_cohorts

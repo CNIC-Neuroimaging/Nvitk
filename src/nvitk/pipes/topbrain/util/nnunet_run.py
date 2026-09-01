@@ -43,6 +43,10 @@ BASELINE_PLANS: tuple[str, ...] = (
 )
 MODULE_PREDICT: str = "nnunetv2.inference.predict_from_raw_data"
 
+#: Its console-script function. ``python -m`` on that module runs a hardcoded demo
+#: instead of parsing arguments, so the entry point has to be called by name.
+PREDICT_ENTRY_POINT: str = "predict_entry_point"
+
 
 def run_module(
     module: str, args: Sequence[str], *, env: dict[str, str], check: bool = True
@@ -58,6 +62,35 @@ def run_module(
     if check and completed.returncode != 0:
         raise RuntimeError(f"{module} failed with exit code {completed.returncode}.")
     return completed
+
+
+def run_entry_point(
+    module: str, function: str, args: Sequence[str], *, env: dict[str, str]
+) -> None:
+    """Call a console-script entry point in a subprocess, with *args* as its ``sys.argv``.
+
+    Needed where ``python -m <module>`` is **not** equivalent to the installed command. Some
+    nnU-Net modules keep a hand-written demo under ``if __name__ == '__main__'`` — 
+    ``predict_from_raw_data`` runs a hardcoded Hippocampus example — so ``-m`` silently ignores
+    every argument passed to it and predicts the wrong thing rather than failing outright. The
+    real CLI lives in the entry-point function the console script points at, and this calls it.
+
+    Raises
+    ------
+    RuntimeError
+        On a non-zero exit, naming the entry point.
+    """
+    argv = [function, *[str(a) for a in args]]
+    snippet = (
+        "import sys; "
+        f"sys.argv = {argv!r}; "
+        f"from {module} import {function}; "
+        f"{function}()"
+    )
+    log.info("$ %s %s", function, " ".join(str(a) for a in args))
+    completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError(f"{module}:{function} failed with exit code {completed.returncode}.")
 
 
 def has_baseline_plans(nnunet_preprocessed: Path, dataset_name: str) -> str | None:
@@ -351,13 +384,15 @@ def predict(
     ]
     if save_probabilities:
         args.append("--save_probabilities")
-    run_module(MODULE_PREDICT, args, env=env)
+    # Deliberately not run_module(): this module's __main__ is a demo, not its CLI.
+    run_entry_point(MODULE_PREDICT, PREDICT_ENTRY_POINT, args, env=env)
 
 
 __all__ = [
     "BASELINE_PLANS",
     "MODULE_PLAN_AND_PREPROCESS",
     "MODULE_PREDICT",
+    "PREDICT_ENTRY_POINT",
     "MODULE_PREPROCESS_LIKE_NNSSL",
     "MODULE_TRAIN_PRETRAINED",
     "find_generated_plans",
@@ -368,6 +403,7 @@ __all__ = [
     "plan_baseline",
     "predict",
     "preprocess_like_nnssl",
+    "run_entry_point",
     "run_module",
     "train_pretrained",
 ]

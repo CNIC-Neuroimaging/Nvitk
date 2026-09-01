@@ -53,6 +53,7 @@ from nvitk.core.tensorboard import (
     tensorboard_available,
 )
 from nvitk.pipes.topbrain import labels as lbl
+from nvitk.pipes.topbrain.util import paths as pth
 from nvitk.pipes.topbrain.util.paths import TENSORBOARD_DIR, TopBrainPaths
 
 log = Logger()
@@ -192,27 +193,6 @@ def resolve_serve_mode(serve: str, *, submit: str) -> str:
     return "local" if str(submit).lower() != "sge" else "none"
 
 
-#: Minimum number of path components an existing ancestor must have before it counts as
-#: evidence of a mount. ``/data`` existing means nothing; ``/data_lab_MCC/user/LabMCC`` does.
-_MOUNT_EVIDENCE_DEPTH: int = 4
-
-
-def _tree_visible(path: Path) -> bool:
-    """Whether *path*, or a specific enough ancestor of it, exists on this host.
-
-    A results root the cluster has not written to yet does not exist anywhere, so testing it
-    directly would report "not mounted" on a perfectly good mount before the first run. Walking
-    up to the deepest existing ancestor answers the question actually being asked: is this
-    filesystem reachable from here?
-    """
-    current = Path(path)
-    while len(current.parts) >= _MOUNT_EVIDENCE_DEPTH:
-        if current.is_dir():
-            return True
-        current = current.parent
-    return False
-
-
 def workstation_view(cluster: TopBrainPaths, local: TopBrainPaths) -> tuple[TopBrainPaths, bool]:
     """Which layout this workstation should read for a run submitted to the cluster.
 
@@ -231,7 +211,7 @@ def workstation_view(cluster: TopBrainPaths, local: TopBrainPaths) -> tuple[TopB
     mounted
         Whether that layout is the cluster mount (``True``) or the local fallback.
     """
-    if _tree_visible(cluster.results_root) or Path(cluster.challenge_root).is_dir():
+    if pth.tree_visible(cluster.results_root) or Path(cluster.challenge_root).is_dir():
         return cluster, True
     log.warning(
         "Cluster results root %s is not visible from this host; falling back to the local "

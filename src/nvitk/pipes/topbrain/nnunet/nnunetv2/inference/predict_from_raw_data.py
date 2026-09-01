@@ -101,14 +101,32 @@ class nnUNetPredictor(object):
         if trainer_class is None:
             raise RuntimeError(f'Unable to locate trainer class {trainer_name} in nnunetv2.training.nnUNetTrainer. '
                                f'Please place it there (in any .py file)!')
-        network = trainer_class.build_network_architecture(
+        # This build's PretrainedTrainer takes an extra `input_patch_size`: Primus and ResEncL
+        # size their positional embedding from it, so it cannot be defaulted away. Stock
+        # trainers do not take it. Dispatch on the signature rather than hardcoding either
+        # contract, so both kinds of trainer stay loadable at inference time.
+        build_architecture = trainer_class.build_network_architecture
+        common_args = (
             configuration_manager.network_arch_class_name,
             configuration_manager.network_arch_init_kwargs,
             configuration_manager.network_arch_init_kwargs_req_import,
-            num_input_channels,
-            plans_manager.get_label_manager(dataset_json).num_segmentation_heads,
-            enable_deep_supervision=False
         )
+        num_segmentation_heads = plans_manager.get_label_manager(dataset_json).num_segmentation_heads
+        if 'input_patch_size' in inspect.signature(build_architecture).parameters:
+            network = build_architecture(
+                *common_args,
+                configuration_manager.patch_size,
+                num_input_channels,
+                num_segmentation_heads,
+                enable_deep_supervision=False
+            )
+        else:
+            network = build_architecture(
+                *common_args,
+                num_input_channels,
+                num_segmentation_heads,
+                enable_deep_supervision=False
+            )
 
         self.plans_manager = plans_manager
         self.configuration_manager = configuration_manager
