@@ -53,7 +53,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence, TextIO
@@ -768,12 +768,27 @@ def run_dataprep(
     # so anything it trained on has effectively been seen by every fold of the multi-class
     # cross-validation.
     if target in ("binary", "all"):
+        # The binary set is chosen by the multi-class set it will seed, so a CT-only and an
+        # MR-only curriculum get separate datasets and separate provenance instead of
+        # overwriting one shared slot.
+        binary_label_set = lbl.binary_label_set_for(label_set)
+        binary_modality = lbl.binary_modality(binary_label_set)
+        cohorts = [parse_extra_train(spec, train_only=True) for spec in binary_sources]
+        if binary_modality is not None:
+            # Restrict the silver cohort to the modality this variant is for, unless the spec
+            # already narrows it (``topaneu:ct=/root``). Training a CT model's binary stage on
+            # MRA would be a silent domain error.
+            cohorts = [
+                c if c.modality else replace(c, modality=binary_modality) for c in cohorts
+            ]
+        log.info(
+            "stage0 binary | label_set=%s modality=%s from %d cohort(s)",
+            binary_label_set, binary_modality or "both", len(cohorts),
+        )
         binary_dir, binary_meta = build_training_dataset(
             challenge_root=paths.challenge_root, nnunet_raw=paths.nnunet_raw,
-            label_set=lbl.BINARY_LABEL_SET, modality=modality,
-            extra_cohorts=[
-                parse_extra_train(spec, train_only=True) for spec in binary_sources
-            ],
+            label_set=binary_label_set, modality=binary_modality or modality,
+            extra_cohorts=cohorts,
             num_folds=num_folds or cfg.DEFAULT_NUM_FOLDS,
             seed=seed or cfg.DEFAULT_FOLD_SEED,
             ct_window=ct_window, mr_percentiles=mr_percentiles,
@@ -919,8 +934,9 @@ def submit_sge(
               default="train", show_default=True,
               help="Labelled training data, unlabeled corpus, the derived binary dataset, or "
                    "combinations ('both' = train+corpus, 'all' = train+corpus+binary).")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
-              default="ta36",
+@click.option("--label-set",
+              type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct",
+                                 "binary_mr"]), default="ta36",
               show_default=True)
 @click.option("--modality", type=click.Choice(["both", "ct", "mr"]), default="both",
               show_default=True)

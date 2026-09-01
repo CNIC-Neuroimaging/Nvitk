@@ -156,12 +156,13 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             sampling=o["sampling"], sampling_temperature=o["sampling_temperature"],
             sampling_oversample=o["sampling_oversample"],
             init_from_label_set=(
-                lbl_mod.BINARY_LABEL_SET if o["init_from_binary"] else None
+                lbl_mod.binary_label_set_for(o["label_set"]) if o["init_from_binary"] else None
             ),
         ),
         st.STAGE_BINARY: dict(
             stage_id="stage2a",
-            bundle=bundle_name, label_set=lbl_mod.BINARY_LABEL_SET, pretrain_name=bundle_name,
+            bundle=bundle_name, label_set=lbl_mod.binary_label_set_for(o["label_set"]),
+            pretrain_name=bundle_name,
             loss=o["binary_loss"], loss_config=None,
             # No honest validation split exists for silver labels, so the binary model trains
             # on everything. 'all' is nnU-Net's own name for that.

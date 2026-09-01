@@ -661,7 +661,7 @@ def submit_sge(
               help="Defaults to sge.json's topbrain_paths.")
 @click.option("--results-root", type=click.Path(path_type=Path), default=None,
               help="Defaults to sge.json's topbrain_paths.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]),
               default="ta36", show_default=True,
               help="Ignored when --model is given; the model records its own.")
 @click.option("--loss", type=str, default=None, help="Loss the model was trained with.")

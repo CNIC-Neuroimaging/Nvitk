@@ -55,7 +55,11 @@ _IMAGE_RE = re.compile(r"^topcow_(?P<modality>ct|mr)_(?P<pid>\d+)_0000\.nii\.gz$
 
 #: nnU-Net dataset ids per label set. Chosen in the 5xx range to stay clear of the public
 #: MSD/AMOS ids that commonly share an ``nnUNet_raw``.
-DATASET_IDS: dict[str, int] = {"ta36": 501, "v1_ct": 502, "v1_mr": 503, "binary": 504}
+DATASET_IDS: dict[str, int] = {
+    "ta36": 501, "v1_ct": 502, "v1_mr": 503,
+    # One binary dataset per multi-class set it seeds — see labels.BINARY_LABEL_SET_FOR.
+    "binary": 504, "binary_ct": 505, "binary_mr": 506,
+}
 
 #: nnU-Net dataset name suffix per label set.
 DATASET_SUFFIXES: dict[str, str] = {
@@ -63,6 +67,8 @@ DATASET_SUFFIXES: dict[str, str] = {
     "v1_ct": "TopBrainV1CT",
     "v1_mr": "TopBrainV1MR",
     "binary": "TopBrainVesselBinary",
+    "binary_ct": "TopBrainVesselBinaryCT",
+    "binary_mr": "TopBrainVesselBinaryMR",
 }
 
 #: nnssl collection id/name for the self-supervised pre-training corpus.

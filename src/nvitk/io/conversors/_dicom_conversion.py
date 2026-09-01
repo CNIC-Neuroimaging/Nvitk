@@ -20,10 +20,16 @@ import numpy as np
 from nvitk.core.exceptions import BackendUnavailableError, ValidationError
 from nvitk.core.logger import Logger
 from .._common import default_nifti_axes, orientation_codes_from_affine, reorder_axes
+from ..writers.tiff import write_tiff
 
 from ._dicom_rtstructs import integrate_rtstruct_processing
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
-from ._dicom_zeiss import extract_zeiss_oct_cubes, extract_zeiss_raw_oct, is_zeiss_raw_storage
+from ._dicom_zeiss import (
+    extract_zeiss_oct_cubes,
+    extract_zeiss_oct_images,
+    extract_zeiss_raw_oct,
+    is_zeiss_raw_storage,
+)
 
 try:
     import nibabel as nib
@@ -2380,6 +2386,35 @@ def _unique_nifti_path(path: str) -> str:
     return candidate
 
 
+def _save_zeiss_oct_images(
+    ds_list: list[Any],
+    base_path: str,
+    *,
+    skip_existing: bool,
+) -> list[str]:
+    """Write the 2-D images that travel with a Zeiss cube (fundus, iris, en-face) as TIFFs beside *base_path*."""
+    stem, _ = _split_nifti_extension(base_path)
+    outputs: list[str] = []
+    try:
+        images = extract_zeiss_oct_images(ds_list, debug_mode=False)
+    except Exception as exc:
+        _debug(f"Zeiss 2-D image extraction failed: {exc}")
+        return outputs
+    for image in images:
+        path = f"{stem}_{image.kind}.tiff"
+        if skip_existing and os.path.exists(path):
+            outputs.append(path)
+            continue
+        try:
+            write_tiff(path, image.array, axes="YX", metadata=image.meta)
+        except Exception as exc:
+            _err(f"Could not write Zeiss {image.kind} image to {path}: {exc}")
+            continue
+        _info(f"Saved Zeiss OCT {image.kind} to {path}")
+        outputs.append(path)
+    return outputs
+
+
 def _zeiss_series_output_path(
     output_folder: str,
     md: dict[str, Any],
@@ -2448,6 +2483,7 @@ def _process_zeiss_series(
                     _save_metadata_json(path, md_full)
                 _info(f"Saved Zeiss OCT {cube.kind} to {path}")
                 outputs.append(path)
+            outputs.extend(_save_zeiss_oct_images(ds_list, base_path, skip_existing=skip_existing))
             return outputs
 
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)

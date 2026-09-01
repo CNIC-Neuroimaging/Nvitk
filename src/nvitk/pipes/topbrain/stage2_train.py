@@ -691,7 +691,7 @@ def submit_sge(
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
 @click.option("--bundle", type=click.Path(path_type=Path), required=True,
               help="Stage 1 bundle directory.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]), default="ta36",
+@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]), default="ta36",
               show_default=True)
 @click.option("--pretrain-name", type=str, default=None,
               help="Name embedded in the generated plans (default: the bundle directory name).")
@@ -727,11 +727,11 @@ def submit_sge(
 @click.option("--continue-training", is_flag=True, default=False)
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
-@click.option("--plans-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+@click.option("--plans-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]),
               default=None,
               help="Borrow this label set's ptPlans instead of planning from this dataset's own "
                    "fingerprint. Required for two runs to be weight-compatible.")
-@click.option("--init-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary"]),
+@click.option("--init-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]),
               default=None,
               help="Initialise from that label set's finished stage 2 run (everything but the "
                    "segmentation heads). Resolved from its provenance.")

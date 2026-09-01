@@ -77,6 +77,8 @@ BINARY_LABELS: dict[int, str] = {1: "vessel"}
 
 LABEL_SET_MODALITIES: dict[str, tuple[str, ...]] = {
     "binary": ("ct", "mr"),
+    "binary_ct": ("ct",),
+    "binary_mr": ("mr",),
     "ta36": ("ct", "mr"),
     "v1_ct": ("ct",),
     "v1_mr": ("mr",),
@@ -155,11 +157,27 @@ V1_MR_LABELS: dict[int, str] = _COMMON | {
     42: "L-MMA",
 }
 
-#: Name of the derived binary label set.
+#: Name of the modality-agnostic derived binary label set.
 BINARY_LABEL_SET: str = "binary"
 
+#: Binary label set per multi-class set it is meant to seed. Each gets its **own** dataset and
+#: its own stage 2 provenance, so a CT-only and an MR-only curriculum can be trained side by
+#: side without overwriting each other's binary model — one shared slot would mean the second
+#: run silently replaced the first, and ``--init-from-binary`` would then resolve to whichever
+#: finished last.
+BINARY_LABEL_SET_FOR: dict[str, str] = {
+    "ta36": "binary",
+    "v1_ct": "binary_ct",
+    "v1_mr": "binary_mr",
+}
+
+#: Modality each binary variant covers, used to filter its silver cohort.
+BINARY_SET_MODALITY: dict[str, str | None] = {
+    "binary": None, "binary_ct": "ct", "binary_mr": "mr",
+}
+
 _LABEL_MAPS: dict[str, dict[int, str]] = {
-    BINARY_LABEL_SET: BINARY_LABELS,
+    **{name: BINARY_LABELS for name in BINARY_SET_MODALITY},
     "ta36": TA36_LABELS,
     "v1_ct": V1_CT_LABELS,
     "v1_mr": V1_MR_LABELS,
@@ -206,8 +224,31 @@ _NEIGHBOUR_FILES: dict[str, str] = {
 
 @lru_cache(maxsize=None)
 def is_binary(label_set: str) -> bool:
-    """Whether *label_set* is the derived single-class vessel set."""
-    return str(label_set) == BINARY_LABEL_SET
+    """Whether *label_set* is one of the derived single-class vessel sets."""
+    return str(label_set) in BINARY_SET_MODALITY
+
+
+def binary_label_set_for(label_set: str) -> str:
+    """The binary set that seeds *label_set*'s multi-class model.
+
+    Raises
+    ------
+    ValueError
+        For a label set with no binary counterpart, rather than silently falling back to the
+        shared ``binary`` slot and clobbering another experiment's model.
+    """
+    try:
+        return BINARY_LABEL_SET_FOR[str(label_set)]
+    except KeyError:
+        raise ValueError(
+            f"No binary label set defined for {label_set!r}. Known: "
+            f"{', '.join(sorted(BINARY_LABEL_SET_FOR))}."
+        ) from None
+
+
+def binary_modality(label_set: str) -> str | None:
+    """Modality a binary set is restricted to, or ``None`` when it covers both."""
+    return BINARY_SET_MODALITY.get(str(label_set))
 
 
 def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
@@ -340,6 +381,10 @@ __all__ = [
     "SIDEROAD_LABELS",
     "BINARY_LABELS",
     "BINARY_LABEL_SET",
+    "BINARY_LABEL_SET_FOR",
+    "BINARY_SET_MODALITY",
+    "binary_label_set_for",
+    "binary_modality",
     "TA36_LABELS",
     "is_binary",
     "V1_CT_LABELS",

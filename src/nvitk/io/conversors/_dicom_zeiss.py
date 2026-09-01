@@ -28,8 +28,11 @@ RAW_DATA_SOP_UID = "1.2.840.10008.5.1.4.1.1.66"
 
 __all__ = [
     "ZeissOctCube",
+    "ZeissOctImage",
     "ZEISS_OCT_CUBE_CONTAINERS",
+    "ZEISS_OCT_IMAGE_CONTAINERS",
     "extract_zeiss_oct_cubes",
+    "extract_zeiss_oct_images",
     "extract_zeiss_raw_oct",
     "has_zeiss_oct_cubes",
     "is_zeiss_raw_storage",
@@ -60,6 +63,15 @@ ZEISS_OCT_CUBE_CONTAINERS: dict[int, str] = {
     0x10AD: "FlowCube_z",  # OCT-angiography flow (decorrelation) cube
 }
 
+# Single-frame containers holding 2-D images rather than a volume, as
+# ``element -> (output name, quarter turns to apply to the decoded frame)``.
+# The rotations match the orientation the CIRRUS raw export writes.
+ZEISS_OCT_IMAGE_CONTAINERS: dict[int, tuple[str, int]] = {
+    0x10A6: ("lslo", 3),  # line-scanning ophthalmoscope fundus
+    0x10B5: ("iris", 0),  # iris camera
+    0x10A7: ("enface", 0),  # depth projection over the cube's en-face grid
+}
+
 _TAG_FRAME_ROWS = (0x0407, 0x1001)
 _TAG_FRAME_COLS = (0x0407, 0x1002)
 _TAG_FRAME_COUNT = (0x0407, 0x1003)
@@ -78,6 +90,15 @@ class ZeissOctCube:
     kind: str
     array: np.ndarray
     affine: np.ndarray
+    meta: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ZeissOctImage:
+    """One 2-D image (fundus, iris or en-face projection) from a Zeiss private OCT container."""
+
+    kind: str
+    array: np.ndarray
     meta: dict[str, Any]
 
 
@@ -222,6 +243,67 @@ def _extract_container_cube(
     if debug_mode:
         log.debug(f"[Zeiss cubes] {kind}: shape={volume.shape} spacing={spacing} source={spacing_source}")
     return ZeissOctCube(kind=kind, array=volume, affine=affine, meta=meta)
+
+
+def _extract_container_image(
+    ds: Any,
+    element: int,
+    kind: str,
+    quarter_turns: int,
+    debug_mode: bool = False,
+) -> ZeissOctImage | None:
+    """Decode the single-frame container ``(0407,<element>)`` of *ds* into a 2-D image, or None when
+    it is absent/undecodable."""
+    container = ds.get((0x0407, element))
+    if container is None or not getattr(container, "value", None):
+        return None
+    item = container.value[0]
+    try:
+        rows = int(item[_TAG_FRAME_ROWS].value)
+        cols = int(item[_TAG_FRAME_COLS].value)
+        frame_items = item[_TAG_FRAME_SEQUENCE].value
+    except Exception:
+        return None
+    if rows <= 0 or cols <= 0 or not frame_items:
+        return None
+
+    try:
+        payload = frame_items[0][_TAG_FRAME_DATA].value
+    except Exception:
+        return None
+    decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
+    if decoded is None or decoded.shape != (rows, cols):
+        if debug_mode:
+            log.debug(
+                f"[Zeiss images] container 0407,{element:04X} ({kind}): "
+                f"payload not decodable as {rows}x{cols}; skipping"
+            )
+        return None
+
+    array = np.rot90(decoded, quarter_turns) if quarter_turns else decoded
+    spacing = _container_spacing_mm(item)
+    meta = {
+        "zeiss_container_tag": f"0407,{element:04X}",
+        "zeiss_image_kind": kind,
+        "zeiss_spacing_mm": list(spacing) if spacing else None,
+        "shape": tuple(int(size) for size in array.shape),
+    }
+    return ZeissOctImage(kind=kind, array=np.ascontiguousarray(array), meta=meta)
+
+
+def extract_zeiss_oct_images(ds_list: list[Any], debug_mode: bool = False) -> list[ZeissOctImage]:
+    """Extract the 2-D images (fundus, iris, en-face projection) stored alongside the cubes.
+
+    Returns only the containers that are present and decodable, so an acquisition
+    missing one - or carrying an unreadable payload - simply yields fewer images.
+    """
+    images: list[ZeissOctImage] = []
+    for ds in ds_list:
+        for element, (kind, quarter_turns) in ZEISS_OCT_IMAGE_CONTAINERS.items():
+            image = _extract_container_image(ds, element, kind, quarter_turns, debug_mode=debug_mode)
+            if image is not None:
+                images.append(image)
+    return images
 
 
 def has_zeiss_oct_cubes(ds: Any) -> bool:
