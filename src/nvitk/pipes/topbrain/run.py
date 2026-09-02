@@ -152,6 +152,8 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             patch_size=o["patch_size"], batch_size=o["batch_size"], num_epochs=o["num_epochs"], device=o["device"], num_gpus=o["num_gpus"],
             num_processes=o["num_processes"], from_scratch=o["from_scratch"],
             continue_training=o["continue_training"],
+            skip_planning=o["reuse_preprocessed"],
+            skip_preprocessing=o["reuse_preprocessed"],
             backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling=o["sampling"], sampling_temperature=o["sampling_temperature"],
@@ -176,6 +178,8 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             batch_size=o["batch_size"], num_epochs=o["binary_epochs"] or o["num_epochs"],
             device=o["device"], num_gpus=o["num_gpus"], num_processes=o["num_processes"],
             from_scratch=False, continue_training=o["continue_training"],
+            skip_planning=o["reuse_preprocessed"],
+            skip_preprocessing=o["reuse_preprocessed"],
             backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling="default", sampling_temperature=o["sampling_temperature"],
@@ -711,6 +715,11 @@ def _submit_via_login_node(
                    "how a GPU is requested, so a CPU run usually needs a different one. "
                    "List valid names on the login node with: qconf -sprjl")
 @click.option("--src-dir", type=click.Path(path_type=Path), default=None)
+@click.option("--reuse-preprocessed", is_flag=True, default=False,
+              help="Stage 2/2a: take the planning, the preprocessed data and the plans exactly "
+                   "as they are on disk. Needed to relaunch one fold of a run whose other folds "
+                   "are still training — without it the job re-plans, and regenerating the plans "
+                   "resets the patch size under the folds already running.")
 @click.option("--parallel-folds", is_flag=True, default=False,
               help="SGE only: train each fold as its own job instead of one job that walks the "
                    "folds in sequence. A preparation job plans and preprocesses once, the fold "
@@ -851,6 +860,7 @@ def main(**kw: Any) -> None:
             "pretrain_source", "checkpoint_name", "bundle_name", "ssl_loss", "ssl_loss_config",
             "ssl_patch_size", "ssl_batch_size", "ssl_epochs", "ssl_lr", "init_checkpoint_name",
             "ssl_skip_planning", "ssl_skip_preprocessing", "ssl_continue",
+            "reuse_preprocessed",
             "loss_config", "adaptation_mode", "baseline_planner", "target_spacing",
             "patch_size", "batch_size",
             "num_epochs", "num_gpus", "tensorboard", "tensorboard_interval", "compare_to",

@@ -1181,7 +1181,8 @@ def _extract_zeiss_raw_oct(
 # private tags the cubes use inside their containers - but with a different meaning:
 # here (0407,100A) and (0407,100B) are the two IN-PLANE spacings of the map, not the
 # lateral and axial spacings of a B-scan.
-_TAG_REFERENCED_INSTANCES = (0x0008, 0x1140)
+#: ReferencedInstanceSequence, with ReferencedImageSequence as the older alternative.
+_TAG_REFERENCED_SEQUENCES = ((0x0008, 0x114A), (0x0008, 0x1140))
 _TAG_REFERENCED_SOP_INSTANCE = (0x0008, 0x1155)
 _TAG_PURPOSE_OF_REFERENCE = (0x0040, 0xA170)
 _TAG_CODE_MEANING = (0x0008, 0x0104)
@@ -1213,19 +1214,23 @@ def zeiss_referenced_sources(ds: Any) -> list[dict[str, str]]:
     Empty when the object records no reference - which is the case for whole studies, so it
     must not be relied on to identify the parent scan.
     """
-    sequence = ds.get(_TAG_REFERENCED_INSTANCES)
     out: list[dict[str, str]] = []
-    for item in getattr(sequence, "value", None) or []:
-        try:
-            uid = str(item[_TAG_REFERENCED_SOP_INSTANCE].value)
-        except Exception:
-            continue
-        scan_type = ""
-        try:
-            scan_type = str(item[_TAG_PURPOSE_OF_REFERENCE].value[0][_TAG_CODE_MEANING].value)
-        except Exception:
-            pass
-        out.append({"sop_instance_uid": uid, "scan_type": scan_type})
+    seen: set[str] = set()
+    for tag in _TAG_REFERENCED_SEQUENCES:
+        for item in getattr(ds.get(tag), "value", None) or []:
+            try:
+                uid = str(item[_TAG_REFERENCED_SOP_INSTANCE].value)
+            except Exception:
+                continue
+            if uid in seen:
+                continue
+            seen.add(uid)
+            scan_type = ""
+            try:
+                scan_type = str(item[_TAG_PURPOSE_OF_REFERENCE].value[0][_TAG_CODE_MEANING].value)
+            except Exception:
+                pass
+            out.append({"sop_instance_uid": uid, "scan_type": scan_type})
     return out
 
 

@@ -527,10 +527,20 @@ def run_train(
     install_splits(paths.nnunet_raw, paths.nnunet_preprocessed, label_set)
 
     # nnU-Net validates each finished fold against this folder. preprocess_like_nnssl does not
-    # create it, and the failure only surfaces after a fold has fully trained. Done here rather
-    # than beside the training loop so that a --plan-only preparation job covers it for every
-    # fold job holding on it.
-    nnunet_run.ensure_gt_segmentations(dataset_id, env=env)
+    # create it, and the failure only surfaces after a fold has fully trained.
+    #
+    # It belongs to preprocessing -- nnU-Net's own preprocess_dataset writes it as its last
+    # step -- so a job told to skip preprocessing skips it too: under --parallel-folds the
+    # preparation job has already done it, and four fold jobs refreshing the same directory
+    # over NFS is how one of them trips over a file another is replacing. Completeness is still
+    # checked, so a genuinely missing tree is caught here rather than eight hours later.
+    gt_dir = paths.nnunet_preprocessed / dataset_name / "gt_segmentations"
+    expected = len(list((paths.nnunet_raw / dataset_name / "labelsTr").glob("*.nii.gz")))
+    present = len(list(gt_dir.glob("*.nii.gz"))) if gt_dir.is_dir() else 0
+    if skip_preprocessing and expected and present >= expected:
+        log.info("gt_segmentations already complete (%d labels); leaving it untouched.", present)
+    else:
+        nnunet_run.ensure_gt_segmentations(dataset_id, env=env)
 
     results_dir = (
         paths.nnunet_results / dataset_name / f"{trainer}__{plans_identifier}__{CONFIGURATION}"

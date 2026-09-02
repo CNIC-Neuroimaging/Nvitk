@@ -194,22 +194,42 @@ def ensure_gt_segmentations(dataset_id: int, *, env: dict[str, str]) -> None:
     Uses the same copy nnU-Net does, with ``update=True``, so it is idempotent and only
     refreshes labels that changed.
     """
-    snippet = (
-        "from distutils.file_util import copy_file; "
-        "from batchgenerators.utilities.file_and_folder_operations import "
-        "join, load_json, maybe_mkdir_p; "
-        "from nnunetv2.paths import nnUNet_raw, nnUNet_preprocessed; "
-        "from nnunetv2.utilities.dataset_name_id_conversion import convert_id_to_dataset_name; "
-        "from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets; "
-        f"name = convert_id_to_dataset_name({int(dataset_id)}); "
-        "raw = join(nnUNet_raw, name); "
-        "out = join(nnUNet_preprocessed, name, 'gt_segmentations'); "
-        "maybe_mkdir_p(out); "
-        "dj = load_json(join(raw, 'dataset.json')); "
-        "ds = get_filenames_of_train_images_and_targets(raw, dj); "
-        "[copy_file(ds[k]['label'], join(out, k + dj['file_ending']), update=True) for k in ds]; "
-        "print(f'gt_segmentations: {len(ds)} label(s) in {out}')"
-    )
+    # Written through a temporary file and os.replace rather than distutils' copy_file. Two
+    # processes refreshing this directory at once -- which is what --parallel-folds used to do,
+    # and what any hand-launched per-fold job still does -- had copy_file stat a destination
+    # that a neighbour was in the middle of rewriting. Over NFS the exists() check is served
+    # from a cached dentry and the getmtime() that follows is not, so it raised FileNotFoundError
+    # on a file that was there the whole time. os.replace is atomic: a reader sees the old file
+    # or the new one, never a gap.
+    snippet = f"""
+import os, shutil
+from batchgenerators.utilities.file_and_folder_operations import join, load_json, maybe_mkdir_p
+from nnunetv2.paths import nnUNet_raw, nnUNet_preprocessed
+from nnunetv2.utilities.dataset_name_id_conversion import convert_id_to_dataset_name
+from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets
+
+name = convert_id_to_dataset_name({int(dataset_id)})
+raw = join(nnUNet_raw, name)
+out = join(nnUNet_preprocessed, name, 'gt_segmentations')
+maybe_mkdir_p(out)
+dj = load_json(join(raw, 'dataset.json'))
+ds = get_filenames_of_train_images_and_targets(raw, dj)
+
+refreshed = 0
+for key in ds:
+    src, dst = ds[key]['label'], join(out, key + dj['file_ending'])
+    try:
+        if os.path.getmtime(dst) >= os.path.getmtime(src):
+            continue
+    except OSError:
+        pass
+    tmp = f'{{dst}}.tmp.{{os.getpid()}}'
+    shutil.copyfile(src, tmp)
+    shutil.copystat(src, tmp)
+    os.replace(tmp, dst)
+    refreshed += 1
+print(f'gt_segmentations: {{len(ds)}} label(s) in {{out}} ({{refreshed}} refreshed)')
+"""
     log.info("$ ensure gt_segmentations for dataset %d", int(dataset_id))
     completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
     if completed.returncode != 0:
