@@ -376,6 +376,15 @@ def run_train(
     if init_from_label_set and pretrained_weights is None:
         pretrained_weights = run_checkpoint(paths.results_root, init_from_label_set)
         log.info("Initialising from the %r run: %s", init_from_label_set, pretrained_weights)
+    if continue_training and pretrained_weights is not None:
+        # nnU-Net refuses both at once, and rightly: a resumed checkpoint already carries the
+        # weights the initialisation would have supplied, so re-applying them would discard
+        # every epoch trained so far.
+        log.info(
+            "--continue-training: ignoring the initial weights (%s); the resumed checkpoint "
+            "already contains them.", pretrained_weights,
+        )
+        pretrained_weights = None
 
     checkpoint, _, architecture = read_bundle(bundle)
     pretrain_name = pretrain_name or Path(bundle).name
@@ -510,6 +519,10 @@ def run_train(
     if plan_only:
         log.ok(f"stage2: planning and preprocessing complete (--plan-only) -> {results_dir}")
         return results_dir
+
+    # nnU-Net validates each finished fold against this folder. preprocess_like_nnssl does not
+    # create it, and the failure only surfaces after a fold has fully trained.
+    nnunet_run.ensure_gt_segmentations(dataset_id, env=env)
 
     # ---- 3. Fine-tune -------------------------------------------------------
     # The mirror watches the results tree rather than the subprocess, so it picks each fold's

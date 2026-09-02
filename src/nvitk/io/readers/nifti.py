@@ -91,6 +91,56 @@ def _merge_sidecar_dict(metadata: dict[str, Any], raw: Any) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Colour (RGB/RGBA) channel detection
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Trailing-axis lengths that can hold colour samples (RGB / RGBA).
+_RGB_CHANNEL_SIZES = (3, 4)
+
+#: Per-axis voxel-size metadata keys, in array-axis order.
+_RESOLUTION_KEYS = ("x_res", "y_res", "z_res", "t_res")
+
+
+def _channel_axis_from_axes(axes: Any, shape: tuple[int, ...]) -> int | None:
+    """Index of the ``C`` axis in a recorded axis string, when it fits *shape* and is RGB-sized."""
+    if not isinstance(axes, str):
+        return None
+    axes_upper = axes.upper()
+    if len(axes_upper) != len(shape) or axes_upper.count("C") != 1:
+        return None
+    index = axes_upper.index("C")
+    return index if shape[index] in _RGB_CHANNEL_SIZES else None
+
+
+def _guessed_channel_axis(data: np.ndarray) -> int | None:
+    """Trailing axis of a 3-D array that holds colour samples rather than slices.
+
+    Requires 8-bit samples and a plausible image plane, so that a three-slice
+    analysis map (e.g. a Zeiss thickness volume, stored 16-bit) is not mistaken
+    for a colour image.
+    """
+    if data.ndim != 3 or data.shape[-1] not in _RGB_CHANNEL_SIZES:
+        return None
+    if data.dtype != np.uint8:
+        return None
+    if min(data.shape[0], data.shape[1]) < 8:
+        return None
+    return data.ndim - 1
+
+
+def _resolve_channel_axis(data: np.ndarray, stored_axes: Any, rgb: bool | None) -> int | None:
+    """Array axis holding colour samples: from a recorded ``C`` label, else *rgb*, else a guess."""
+    index = _channel_axis_from_axes(stored_axes, data.shape)
+    if index is not None:
+        return index
+    if rgb is False:
+        return None
+    if data.ndim < 3 or data.shape[-1] not in _RGB_CHANNEL_SIZES:
+        return None
+    return data.ndim - 1 if rgb else _guessed_channel_axis(data)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # read_nifti
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -100,6 +150,7 @@ def read_nifti(
     *,
     axes: str | None = None,
     metadata_json: str | Path | None = None,
+    rgb: bool | None = None,
     **_: Any,
 ):
     """
@@ -109,6 +160,10 @@ def read_nifti(
     and merges a sibling JSON sidecar if present (or *metadata_json* when given). NIfTI header
     extension payloads that decode as JSON are merged without overwriting core spatial keys.
     Optional *axes* reorders the array and updates metadata.
+
+    A trailing axis of 3 or 4 is ambiguous - colour samples, or that many slices - so when one
+    is present the reader records its verdict as ``rgb`` and labels a colour axis ``C`` rather
+    than ``Z``, leaving nothing for the viewer to guess. Pass *rgb* to decide explicitly.
 
     Returns
     -------
@@ -148,6 +203,10 @@ def read_nifti(
         metadata["t_res"] = float(zooms[3])
         metadata["temporal_resolution"] = float(zooms[3])
 
+    # The recorded axis string is not adopted wholesale (the array on disk is in NIfTI
+    # order), but it is the most reliable way to spot a colour axis.
+    stored_axes: Any = None
+
     json_path: Path | None = Path(metadata_json) if metadata_json is not None else None
     if json_path is None:
         candidate = _json_sidecar_path(p)
@@ -158,6 +217,8 @@ def read_nifti(
             raise FileNotFoundError(str(json_path))
         with json_path.open(encoding="utf-8") as f:
             sidecar = json.load(f)
+        if isinstance(sidecar, dict):
+            stored_axes = sidecar.get("axes", stored_axes)
         _merge_sidecar_dict(metadata, sidecar)
 
     for extension in proxy.header.extensions:
@@ -171,7 +232,7 @@ def read_nifti(
                 extension_metadata = json.loads(payload.decode("utf-8"))
                 if isinstance(extension_metadata, dict):
                     if "axes" in extension_metadata:
-                        extension_metadata.pop("axes")
+                        stored_axes = extension_metadata.pop("axes")
                     if "shape" in extension_metadata:
                         extension_metadata.pop("shape")
                     if "affine" in extension_metadata:
@@ -191,6 +252,16 @@ def read_nifti(
                     metadata.update(extension_metadata)
         except Exception:
             continue
+
+    channel_axis = _resolve_channel_axis(data, stored_axes, rgb)
+    if data.ndim >= 3 and data.shape[-1] in _RGB_CHANNEL_SIZES:
+        metadata["rgb"] = channel_axis is not None
+    if channel_axis is not None:
+        axis_labels = list(metadata["axes"])
+        axis_labels[channel_axis] = "C"
+        metadata["axes"] = "".join(axis_labels)
+        # A colour axis has no voxel size; the NIfTI zoom for it is a placeholder.
+        metadata.pop(_RESOLUTION_KEYS[channel_axis], None)
 
     if axes and axes != metadata["axes"]:
         data = reorder_axes(data, metadata["axes"], axes)

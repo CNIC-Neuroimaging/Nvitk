@@ -68,19 +68,34 @@ def napari_dim_order_3d(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, 
     return (sup, *rest)
 
 
+def layer_display_ndim(layer: Any) -> int:
+    """*layer*'s displayed dimensionality, which for an RGB layer is one less than its array."""
+    ndim = getattr(layer, "ndim", None)
+    if isinstance(ndim, (int, np.integer)) and int(ndim) > 0:
+        return int(ndim)
+    return int(getattr(getattr(layer, "data", None), "ndim", 0))
+
+
 def _axes_string_from_layer(layer: Any) -> str | None:
     """Recover *layer*'s axis-order string (e.g. ``"XYZT"``) from its ``axis_labels`` or nvitk
     metadata; ``None`` if unavailable."""
+    ndim = layer_display_ndim(layer)
     labels = getattr(layer, "axis_labels", None)
-    if labels is not None and len(labels) == int(getattr(layer.data, "ndim", 0)):
+    if labels is not None and len(labels) == ndim:
         return "".join(str(l) for l in labels)
     meta = getattr(layer, "metadata", None) or {}
     nv = meta.get("nvitk_metadata") if isinstance(meta, dict) else None
+    axes = None
     if isinstance(nv, dict) and nv.get("axes"):
-        return str(nv["axes"])
-    if isinstance(meta, dict) and meta.get("axes"):
-        return str(meta["axes"])
-    return None
+        axes = str(nv["axes"])
+    elif isinstance(meta, dict) and meta.get("axes"):
+        axes = str(meta["axes"])
+    if axes is None:
+        return None
+    if len(axes) == ndim + 1 and axes.upper().count("C") == 1:
+        # An RGB layer drops its channel axis, so the recorded axes describe one axis too many.
+        axes = "".join(ch for ch in axes if ch.upper() != "C")
+    return axes
 
 
 def napari_dim_order(
@@ -431,9 +446,9 @@ def configure_viewer_for_layer(
     try:
         aff = getattr(layer, "affine", None)
         aff_arr = to_numpy(aff).astype(float) if aff is not None else None
-        ndim = int(layer.data.ndim)
+        ndim = layer_display_ndim(layer)
         axes_str = _axes_string_from_layer(layer)
-        shape = layer.data.shape
+        shape = tuple(layer.data.shape)[:ndim]
 
         if ndim > 3:
             ensure_4d_scale_only_layer(layer)

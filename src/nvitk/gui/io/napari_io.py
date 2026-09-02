@@ -135,11 +135,59 @@ def _axis_labels_for_image(img: Image, ndim: int) -> tuple[str, ...]:
     return tuple(default_nifti_axes(ndim))
 
 
+def _rgb_channel_axis(img: Image, ndim: int) -> int | None:
+    """Array axis holding colour samples, from the reader's ``rgb`` verdict and axis labels."""
+    md = img.metadata or {}
+    if md.get("rgb") is False:
+        return None
+    axes = (img.axes or "").upper()
+    if len(axes) == ndim and axes.count("C") == 1 and ndim >= 3:
+        return axes.index("C")
+    if md.get("rgb") is True and ndim >= 3:
+        return ndim - 1
+    return None
+
+
+def _prepare_rgb_layer_tuple(
+    img: Image,
+    path: Path,
+    data: np.ndarray,
+    raw_affine: np.ndarray | None,
+    channel_axis: int,
+) -> LayerData:
+    """Layer tuple for a colour image.
+
+    Napari folds the channel axis into ``rgb``, making the layer one dimension smaller than
+    the array: only the remaining axes take labels and scale, and a voxel-to-world affine
+    sized for the full array no longer fits.
+    """
+    if channel_axis != data.ndim - 1:
+        data = np.moveaxis(data, channel_axis, -1)
+    axes = img.axes or default_nifti_axes(data.ndim)
+    spatial = "".join(ch for i, ch in enumerate(axes) if i != channel_axis)
+    if len(spatial) != data.ndim - 1:
+        spatial = default_nifti_axes(data.ndim - 1)
+    layer_meta: dict[str, Any] = {
+        "name": img.name or path.stem,
+        "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
+        "axis_labels": tuple(spatial),
+        "rgb": True,
+    }
+    md = img.metadata or {}
+    scale = tuple(_resolution_for_axis(md, ch) or 1.0 for ch in spatial)
+    if any(value != 1.0 for value in scale):
+        layer_meta["scale"] = scale
+    return (np.ascontiguousarray(data), layer_meta, "image")
+
+
 def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
     """Build a napari-plugin-style ``(data, layer_kwargs, layer_type)`` tuple for *img*, reorienting
     the array for display and computing scale/affine, axis labels, and nvitk metadata from *path*."""
     data = to_numpy(img.data)
     raw_affine = _napari_affine(img)
+    channel_axis = _rgb_channel_axis(img, data.ndim)
+    if channel_axis is not None:
+        return _prepare_rgb_layer_tuple(img, path, data, raw_affine, channel_axis)
     axis_labels = _axis_labels_for_image(img, data.ndim)
     axes_str = "".join(axis_labels)
     data, affine, scale = prepare_for_napari(
@@ -152,6 +200,8 @@ def _prepare_layer_tuple(img: Image, path: Path) -> LayerData:
         "name": img.name or path.stem,
         "metadata": _nvitk_layer_metadata(img, path, affine_source=raw_affine),
         "axis_labels": _axis_labels_for_image(img, data.ndim),
+        # Napari otherwise reads a trailing axis of 3 or 4 as colour samples.
+        "rgb": False,
     }
     if data.ndim > 3:
         sc = scale or _napari_scale(img, data.ndim)
@@ -221,6 +271,8 @@ def _add_image_to_viewer(viewer: Any, img: Image, path: Path) -> Any:
         kwargs["affine"] = layer_meta["affine"]
     if "axis_labels" in layer_meta:
         kwargs["axis_labels"] = layer_meta["axis_labels"]
+    if "rgb" in layer_meta:
+        kwargs["rgb"] = layer_meta["rgb"]
     with suppress_nonorthogonal_slice_warning():
         layer = viewer.add_image(data, **kwargs)
     configure_viewer_for_layer(

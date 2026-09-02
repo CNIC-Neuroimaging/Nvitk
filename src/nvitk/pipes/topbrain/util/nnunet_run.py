@@ -177,6 +177,48 @@ def preprocess_like_nnssl(
     run_module(MODULE_PREPROCESS_LIKE_NNSSL, args, env=env)
 
 
+def ensure_gt_segmentations(dataset_id: int, *, env: dict[str, str]) -> None:
+    """Make sure ``nnUNet_preprocessed/<dataset>/gt_segmentations/`` exists and is current.
+
+    nnU-Net validates a finished fold by comparing its predictions against this folder — a
+    plain copy of the raw ``labelsTr`` kept beside the preprocessed data so validation still
+    works on a node that only has the preprocessed tree.
+
+    ``preprocess_dataset`` makes it as its last step, but
+    :func:`preprocess_like_nnssl` — which is what plans this pipeline's datasets — does not.
+    The gap is invisible until the *end of the first fold*, where
+    ``perform_actual_validation`` dies with ``FileNotFoundError: .../gt_segmentations`` having
+    already spent the entire training. Cheap to guarantee, so it is guaranteed before training
+    rather than discovered after it.
+
+    Uses the same copy nnU-Net does, with ``update=True``, so it is idempotent and only
+    refreshes labels that changed.
+    """
+    snippet = (
+        "from distutils.file_util import copy_file; "
+        "from batchgenerators.utilities.file_and_folder_operations import "
+        "join, load_json, maybe_mkdir_p; "
+        "from nnunetv2.paths import nnUNet_raw, nnUNet_preprocessed; "
+        "from nnunetv2.utilities.dataset_name_id_conversion import convert_id_to_dataset_name; "
+        "from nnunetv2.utilities.utils import get_filenames_of_train_images_and_targets; "
+        f"name = convert_id_to_dataset_name({int(dataset_id)}); "
+        "raw = join(nnUNet_raw, name); "
+        "out = join(nnUNet_preprocessed, name, 'gt_segmentations'); "
+        "maybe_mkdir_p(out); "
+        "dj = load_json(join(raw, 'dataset.json')); "
+        "ds = get_filenames_of_train_images_and_targets(raw, dj); "
+        "[copy_file(ds[k]['label'], join(out, k + dj['file_ending']), update=True) for k in ds]; "
+        "print(f'gt_segmentations: {len(ds)} label(s) in {out}')"
+    )
+    log.info("$ ensure gt_segmentations for dataset %d", int(dataset_id))
+    completed = subprocess.run([sys.executable, "-c", snippet], env={**os.environ, **env})
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Could not populate gt_segmentations for dataset {dataset_id} (exit "
+            f"{completed.returncode}). Validation at the end of each fold needs it."
+        )
+
+
 def find_generated_plans(
     nnunet_preprocessed: Path, dataset_name: str, pretrain_name: str
 ) -> str:
@@ -395,6 +437,7 @@ __all__ = [
     "PREDICT_ENTRY_POINT",
     "MODULE_PREPROCESS_LIKE_NNSSL",
     "MODULE_TRAIN_PRETRAINED",
+    "ensure_gt_segmentations",
     "find_generated_plans",
     "has_baseline_plans",
     "move_plans",
