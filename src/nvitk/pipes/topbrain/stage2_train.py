@@ -270,6 +270,17 @@ def patch_plans_patch_size(
         )
 
     previous = list(config.get("patch_size", []))
+    if previous == [int(p) for p in patch_size] and (
+        batch_size is None or int(config.get("batch_size", -1)) == int(batch_size)
+    ):
+        # Already patched -- by this run's preparation job, or by an earlier invocation.
+        # Rewriting is not free: the file is truncated for an instant, and a concurrent fold job
+        # reading it to build its network gets either a parse error or, worse, the unpatched
+        # 160^3 geometry. Nothing to change, so nothing is written.
+        log.info("%s already at patch_size %s, batch_size=%s; left untouched.",
+                 plans_path.name, previous, config.get("batch_size"))
+        return {"previous_patch_size": previous, "patch_size": previous,
+                "batch_size": config.get("batch_size")}
     config["patch_size"] = [int(p) for p in patch_size]
     if batch_size is not None:
         config["batch_size"] = int(batch_size)
@@ -300,6 +311,11 @@ def install_splits(nnunet_raw: Path, nnunet_preprocessed: Path, label_set: str) 
             f"nnU-Net would invent a case-level split that leaks patients across folds."
         )
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and destination.read_bytes() == source.read_bytes():
+        # Same content already there. Recopying would blank the file for an instant, and a
+        # concurrent fold job reading its split at start-up would see an empty one.
+        log.info("Patient-grouped splits already installed at %s", destination)
+        return destination
     shutil.copyfile(source, destination)
     log.info("Installed patient-grouped splits -> %s", destination)
     return destination
@@ -468,11 +484,16 @@ def run_train(
             plans_identifier = nnunet_run.find_generated_plans(
                 paths.nnunet_preprocessed, source_dataset, pretrain_name
             )
-        log.info("Borrowing plans %s from %s", plans_identifier, source_dataset)
-        # The target has never been planned, so nothing has created its preprocessed
-        # directory, copied its dataset.json there, or left a fingerprint for the trainer.
-        nnunet_run.prepare_borrowed_plans_dataset(source_id, dataset_id, env=env)
-        nnunet_run.move_plans(source_id, dataset_id, plans_identifier, env=env)
+        borrowed = paths.nnunet_preprocessed / dataset_name / f"{plans_identifier}.json"
+        if skip_preprocessing and borrowed.is_file():
+            log.info("Plans %s already borrowed into %s; not copying them again.",
+                     plans_identifier, dataset_name)
+        else:
+            log.info("Borrowing plans %s from %s", plans_identifier, source_dataset)
+            # The target has never been planned, so nothing has created its preprocessed
+            # directory, copied its dataset.json there, or left a fingerprint for the trainer.
+            nnunet_run.prepare_borrowed_plans_dataset(source_id, dataset_id, env=env)
+            nnunet_run.move_plans(source_id, dataset_id, plans_identifier, env=env)
         if not skip_preprocessing:
             nnunet_run.preprocess_with_plans(
                 dataset_id, env=env, plans_identifier=plans_identifier,
@@ -505,16 +526,44 @@ def run_train(
     # training run starts.
     install_splits(paths.nnunet_raw, paths.nnunet_preprocessed, label_set)
 
+    # nnU-Net validates each finished fold against this folder. preprocess_like_nnssl does not
+    # create it, and the failure only surfaces after a fold has fully trained. Done here rather
+    # than beside the training loop so that a --plan-only preparation job covers it for every
+    # fold job holding on it.
+    nnunet_run.ensure_gt_segmentations(dataset_id, env=env)
+
     results_dir = (
         paths.nnunet_results / dataset_name / f"{trainer}__{plans_identifier}__{CONFIGURATION}"
     )
+    # Provenance is written before training, not after. A run whose folds are trained by
+    # separate jobs needs the complete fold list recorded once, by whoever gets here first,
+    # rather than narrowed to the last writer; and a run that dies mid-fold stays discoverable.
+    marker_dir = paths.results_root / STAGE2_TRAIN_DIR / dataset_name
+    marker = {
+        "stage": "stage2",
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "dataset": dataset_name, "label_set": label_set,
+        "num_output_channels": lbl.num_foreground(label_set) + 1,
+        "bundle": str(bundle), "pretrain_name": pretrain_name,
+        "architecture": architecture, "trainer": trainer,
+        "loss": loss, "loss_config": loss_config,
+        "adaptation_mode": adaptation_mode, "baseline_planner": baseline_planner,
+        "target_spacing": list(target_spacing) if target_spacing else None,
+        "plans_identifier": plans_identifier, "configuration": CONFIGURATION,
+        "patched_plans": patched,
+        "plans_from_label_set": plans_from_label_set,
+        "pretrained_weights": str(pretrained_weights) if pretrained_weights else None,
+        "sampling": sampling, "sampling_temperature": sampling_temperature,
+        "sampling_oversample": sampling_oversample,
+        "folds": [str(f) for f in folds], "num_epochs": num_epochs,
+        "from_scratch": from_scratch, "device": device,
+        "results_dir": str(results_dir),
+    }
+    _write_marker(marker_dir, marker)
+
     if plan_only:
         log.ok(f"stage2: planning and preprocessing complete (--plan-only) -> {results_dir}")
         return results_dir
-
-    # nnU-Net validates each finished fold against this folder. preprocess_like_nnssl does not
-    # create it, and the failure only surfaces after a fold has fully trained.
-    nnunet_run.ensure_gt_segmentations(dataset_id, env=env)
 
     # ---- 3. Fine-tune -------------------------------------------------------
     # The mirror watches the results tree rather than the subprocess, so it picks each fold's
@@ -550,36 +599,52 @@ def run_train(
                 pretrained_weights=fold_weights,
             )
 
-    marker_dir = paths.results_root / STAGE2_TRAIN_DIR / dataset_name
-    marker_dir.mkdir(parents=True, exist_ok=True)
-    (marker_dir / "topbrain_stage2.json").write_text(
-        json.dumps(
-            {
-                "stage": "stage2",
-                "created": datetime.now().isoformat(timespec="seconds"),
-                "dataset": dataset_name, "label_set": label_set,
-                "num_output_channels": lbl.num_foreground(label_set) + 1,
-                "bundle": str(bundle), "pretrain_name": pretrain_name,
-                "architecture": architecture, "trainer": trainer,
-                "loss": loss, "loss_config": loss_config,
-                "adaptation_mode": adaptation_mode, "baseline_planner": baseline_planner,
-                "target_spacing": list(target_spacing) if target_spacing else None,
-                "plans_identifier": plans_identifier, "configuration": CONFIGURATION,
-                "patched_plans": patched,
-                "plans_from_label_set": plans_from_label_set,
-                "pretrained_weights": str(pretrained_weights) if pretrained_weights else None,
-                "sampling": sampling, "sampling_temperature": sampling_temperature,
-                "sampling_oversample": sampling_oversample,
-                "folds": [str(f) for f in folds], "num_epochs": num_epochs,
-                "from_scratch": from_scratch, "device": device,
-                "results_dir": str(results_dir),
-            },
-            indent=2,
-        ) + "\n",
-        encoding="utf-8",
-    )
+    # Refresh so the timestamp reflects the finished training rather than its planning.
+    marker["created"] = datetime.now().isoformat(timespec="seconds")
+    _write_marker(marker_dir, marker)
     log.ok(f"stage2 complete: {len(list(folds))} fold(s) -> {results_dir}")
     return results_dir
+
+
+def _write_marker(marker_dir: Path, payload: dict[str, Any]) -> None:
+    """Write stage 2 provenance, unioning the fold list with any run already recorded there.
+
+    A run's folds may be trained by separate jobs -- ``--parallel-folds``, or five hand-launched
+    ``--folds N`` submissions. Each of those writes this file, and a plain overwrite would leave
+    the marker naming only whichever job finished last, so stage 4 would quietly predict with a
+    single model where five were trained. What is recorded here is what was *requested*;
+    ``TrainedModel.available_folds`` narrows it to the folds with a finished checkpoint.
+    """
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    path = marker_dir / "topbrain_stage2.json"
+    recorded: list[str] = []
+    if path.is_file():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        # Only a marker for the same run directory has comparable folds. A different
+        # trainer/plans combination is a different model that happens to share a dataset, and
+        # its folds say nothing about this one.
+        if previous.get("results_dir") == payload.get("results_dir"):
+            recorded = [str(f) for f in previous.get("folds") or []]
+
+    # A fold with a directory in the run tree belongs to this run whoever launched it. Trusting
+    # only the requested list would drop folds trained before this marker existed -- relaunching
+    # the remaining folds of a half-finished run would then register fewer folds than are on
+    # disk, and stage 4 would ensemble a subset of the models actually trained.
+    run_dir = Path(payload.get("results_dir") or "")
+    trained = sorted(
+        d.name[len("fold_"):] for d in run_dir.glob("fold_*")
+        if d.is_dir() and any(d.glob("checkpoint_*.pth"))
+    ) if run_dir.is_dir() else []
+
+    folds: list[str] = []
+    for fold in [*recorded, *trained, *payload["folds"]]:
+        if fold not in folds:
+            folds.append(fold)
+    payload["folds"] = folds
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def parse_folds(spec: str) -> list[int | str]:
@@ -676,6 +741,22 @@ def _user_data_paths(**o) -> list[Path]:
     return [Path(raw)] if raw.startswith("/") else []
 
 
+def _job_suffix(**o) -> str:
+    """Job-name suffix. Distinct per fold, so parallel fold jobs get their own log and err file.
+
+    Every job of a stage writes to ``logs/<job name>.log``; with the fold missing from the name,
+    concurrent folds interleave into one file and none of them stays readable. The fold is
+    appended after truncation so it always survives.
+    """
+    base = f"{o.get('label_set', '')}_{o.get('loss', '')}".strip("_")[:24]
+    folds = list(o.get("folds") or [])
+    if o.get("plan_only"):
+        return f"{base}_prep".strip("_")
+    if len(folds) == 1:
+        return f"{base}_f{folds[0]}".strip("_")
+    return base
+
+
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **o) -> str:
     """Host shell command for the stage 2 SGE task."""
     return build_stage_command(
@@ -684,7 +765,7 @@ def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **
         data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
-        job_suffix=f"{o.get('label_set', '')}_{o.get('loss', '')}".strip("_")[:24],
+        job_suffix=_job_suffix(**o),
     )
 
 
@@ -699,7 +780,7 @@ def submit_sge(
         data_paths=_user_data_paths(**o),
         backend=o.get("backend", "gpu"), request_gpu=o.get("device", "cuda") != "cpu",
         pe_smp=o.get("num_processes"),
-        job_suffix=f"{o.get('label_set', '')}_{o.get('loss', '')}".strip("_")[:24],
+        job_suffix=_job_suffix(**o),
         hold_jid=hold_jid, dry_run=dry_run, emit=emit,
     )
 

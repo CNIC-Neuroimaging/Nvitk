@@ -54,6 +54,8 @@ def dcm2nii(
     include_private_tags: bool = False,
     skip_existing: bool = False,
     tmp_dir: Path | None = None,
+    align_oct: bool = False,
+    map_zeiss_laterality: bool = False,
 ) -> str | list[str]:
     """Convert a DICOM series (or directory of series) to NIfTI; library entry point behind the ``dcm2nii`` CLI."""
     output_path = Path(output_folder)
@@ -78,6 +80,8 @@ def dcm2nii(
         skip_existing=skip_existing,
         tmp_dir=tmp_dir,
         explicit_output_path=explicit_output_path,
+        align_oct=align_oct,
+        map_zeiss_laterality=map_zeiss_laterality,
     )
     if explicit_output_path and len(outputs) == 1:
         return outputs[0]
@@ -107,6 +111,20 @@ def dcm2nii(
 @_click_option("--additional-tags", type=str, default=None, help='Comma-separated extra metadata tags (e.g. "ProtocolName,SequenceName").')
 @_click_option("--compress", is_flag=True, help="When output is a directory, write compressed .nii.gz files.")
 @_click_option("--skip-existing", is_flag=True, help="Skip already-existing outputs.")
+@_click_option(
+    "--align-oct",
+    is_flag=True,
+    help=(
+        "Place Zeiss OCT cubes in a world frame shared by every scan of one eye: in-plane by "
+        "registering their fundus images, axially by putting the retinal surface at zero. "
+        "Without this flag every cube is written with a zero origin."
+    ),
+)
+@_click_option(
+    "--map-zeiss-laterality",
+    is_flag=True,
+    help="Name Zeiss OCT outputs with the ophthalmic laterality (OD/OS) instead of R/L.",
+)
 @_click_option("--rescale-type", type=click.Choice(["DV", "FP"], case_sensitive=False) if click is not None else None, default="DV", help="Rescale type for scaling conversion: DV or FP.")
 @_click_option("--tmp-dir", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Temporary directory for intermediate files.")
 def main(
@@ -127,6 +145,8 @@ def main(
     skip_existing: bool,
     rescale_type: str,
     tmp_dir: Path | None,
+    align_oct: bool,
+    map_zeiss_laterality: bool,
 ) -> None:
     """CLI entry point: convert one series (or, with ``--multifile``, every immediate subdirectory as a separate case)."""
     if click is None:
@@ -169,6 +189,8 @@ def main(
                         rescale_type=rescale_type,
                         skip_existing=skip_existing,
                         tmp_dir=tmp_dir,
+                        align_oct=align_oct,
+                        map_zeiss_laterality=map_zeiss_laterality,
                     )
                     ok += 1
                 except Exception:
@@ -193,6 +215,8 @@ def main(
             rescale_type=rescale_type,
             skip_existing=skip_existing,
             tmp_dir=tmp_dir,
+            align_oct=align_oct,
+            map_zeiss_laterality=map_zeiss_laterality,
         )
         if isinstance(outputs, str):
             click.echo(outputs)

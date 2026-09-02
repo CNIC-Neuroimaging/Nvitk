@@ -335,9 +335,9 @@ def _run_local(active: Any, selected: Sequence[str], options: dict[str, dict[str
 def _run_sge(
     active: Any, selected: Sequence[str], options: dict[str, dict[str, Any]], *,
     container: Path, src_dir: Path | None, base_hold: str | None,
-    dry_run: bool, emit: TextIO | None,
+    dry_run: bool, emit: TextIO | None, parallel_folds: bool = False,
 ) -> list[str]:
-    """Submit (or emit) one SGE job per stage, each holding on the previous one."""
+    """Submit (or emit) the SGE jobs for each stage, each stage holding on the previous one."""
     from nvitk.pipes.topbrain import (
         stage0_dataprep, stage1_pretrain, stage2_train,
         stage3_evaluate, stage4_infer, stage5_package, stage6_selftrain,
@@ -354,17 +354,57 @@ def _run_sge(
         st.STAGE_SELFTRAIN: stage6_selftrain.submit_sge,
     }
     job_ids: list[str] = []
-    hold: str | None = base_hold
+    hold: Sequence[str] | str | None = base_hold
     for stage in selected:
-        job_id = submitters[stage](
-            paths=active, container=container, src_dir=src_dir,
-            hold_jid=hold, dry_run=dry_run, emit=emit, **options[stage]
+        submitted = _submit_stage(
+            stage, submitters[stage], options[stage], active=active, container=container,
+            src_dir=src_dir, hold=hold, parallel_folds=parallel_folds,
+            dry_run=dry_run, emit=emit,
         )
-        if job_id:
-            job_ids.append(job_id)
-            hold = job_id  # chain: each stage waits for its predecessor
-        log.info("submitted %s -> job %s", stage, job_id or "(emitted)")
+        if submitted:
+            job_ids.extend(submitted)
+            hold = submitted  # chain: each stage waits for all of its predecessor's jobs
     return job_ids
+
+
+def _submit_stage(
+    stage: str, submit: Any, opts: dict[str, Any], *,
+    active: Any, container: Path, src_dir: Path | None,
+    hold: Sequence[str] | str | None, parallel_folds: bool,
+    dry_run: bool, emit: TextIO | None,
+) -> list[str]:
+    """Submit one stage; return the job ids the next stage has to wait for.
+
+    Normally that is a single job. With ``--parallel-folds`` a multi-fold training stage becomes
+    a preparation job plus one job per fold, every fold job holding on the preparation job. The
+    folds then train concurrently on separate GPUs instead of end to end, and the work they
+    share -- planning, preprocessing, the splits, ``gt_segmentations`` -- happens exactly once,
+    before any of them starts, rather than five times over on top of each other.
+    """
+    common = dict(paths=active, container=container, src_dir=src_dir,
+                  dry_run=dry_run, emit=emit)
+    folds = list(opts.get("folds") or [])
+    if not (parallel_folds and stage in (st.STAGE_TRAIN, st.STAGE_BINARY) and len(folds) > 1):
+        job_id = submit(hold_jid=hold, **common, **opts)
+        log.info("submitted %s -> job %s", stage, job_id or "(emitted)")
+        return [job_id] if job_id else []
+
+    prep = submit(hold_jid=hold, **common, **dict(opts, plan_only=True))
+    log.info("submitted %s preparation -> job %s", stage, prep or "(emitted)")
+
+    fold_ids: list[str] = []
+    for fold in folds:
+        # Planning and preprocessing are already done and must not be repeated here: five jobs
+        # regenerating the same plans JSON while their neighbours read it is exactly how a fold
+        # ends up training at the unpatched patch size.
+        job_id = submit(
+            hold_jid=prep, **common,
+            **dict(opts, folds=[fold], skip_planning=True, skip_preprocessing=True),
+        )
+        log.info("submitted %s fold %s -> job %s", stage, fold, job_id or "(emitted)")
+        if job_id:
+            fold_ids.append(job_id)
+    return fold_ids or ([prep] if prep else [])
 
 
 def _tensorboard_for_sge(
@@ -411,7 +451,7 @@ def _submit_via_login_node(
     container: Path, src_dir: Path | None, base_hold: str | None, label_set: str, loss: str,
     emit_script: Path | None, dry_run: bool, no_remote: bool,
     remote_host: str | None, remote_user: str | None,
-    tensorboard: dict[str, Any],
+    tensorboard: dict[str, Any], parallel_folds: bool = False,
 ) -> list[str]:
     """Emit the whole submission as one bash driver, then run it where ``qsub`` exists.
 
@@ -454,7 +494,8 @@ def _submit_via_login_node(
             title=f"topbrain label_set={label_set} loss={loss} stages={','.join(selected)}",
         )
         _run_sge(active, selected, options, container=container, src_dir=src_dir,
-                 base_hold=base_hold, dry_run=True, emit=handle)
+                 base_hold=base_hold, dry_run=True, emit=handle,
+                 parallel_folds=parallel_folds)
         _tensorboard_for_sge(
             local=local, cluster=active, container=container, src_dir=src_dir,
             dry_run=True, emit=handle, **tensorboard,
@@ -670,6 +711,11 @@ def _submit_via_login_node(
                    "how a GPU is requested, so a CPU run usually needs a different one. "
                    "List valid names on the login node with: qconf -sprjl")
 @click.option("--src-dir", type=click.Path(path_type=Path), default=None)
+@click.option("--parallel-folds", is_flag=True, default=False,
+              help="SGE only: train each fold as its own job instead of one job that walks the "
+                   "folds in sequence. A preparation job plans and preprocesses once, the fold "
+                   "jobs hold on it and then run concurrently — five folds finish in the time "
+                   "one takes, given five free GPUs.")
 @click.option("--base-hold", type=str, default=None)
 @click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None,
               help="Where to write the driver script (default: a staged temporary file).")
@@ -768,6 +814,15 @@ def main(**kw: Any) -> None:
         log.info("--folds unset; running all %d folds. Pass --folds 0 for a smoke test.",
                  int(num_folds))
 
+    if kw["parallel_folds"]:
+        if submit != "sge":
+            raise click.UsageError(
+                "--parallel-folds is an SGE submission mode. With --submit local the folds run "
+                "in this process, one after another."
+            )
+        log.info("--parallel-folds: each fold gets its own job, holding on one shared "
+                 "preparation job. Needs a free GPU per fold to actually be faster.")
+
     if kw["pretrain_source"] == "openmind" and not kw["checkpoint_name"] \
             and st.STAGE_PRETRAIN in selected:
         raise click.UsageError(
@@ -863,7 +918,7 @@ def main(**kw: Any) -> None:
         label_set=label_set, loss=loss, emit_script=kw["emit_script"],
         dry_run=kw["dry_run"], no_remote=kw["no_remote"],
         remote_host=kw["remote_host"], remote_user=kw["remote_user"],
-        tensorboard=tensorboard_kwargs,
+        tensorboard=tensorboard_kwargs, parallel_folds=kw["parallel_folds"],
     )
 
     # Serving blocks, so it has to come after the jobs are queued. The submitted jobs are

@@ -25,10 +25,13 @@ from ..writers.tiff import write_tiff
 from ._dicom_rtstructs import integrate_rtstruct_processing
 from ._dicom_tissue import extract_tissue_segmentation_data, is_tissue_segmentation
 from ._dicom_zeiss import (
+    ZeissOctAligner,
+    derived_analysis_affine,
     extract_zeiss_oct_cubes,
     extract_zeiss_oct_images,
     extract_zeiss_raw_oct,
     is_zeiss_raw_storage,
+    zeiss_referenced_sources,
 )
 
 try:
@@ -1845,13 +1848,14 @@ def _load_zeiss_series_arrays(
     md: dict[str, Any],
     *,
     force_ras: bool,
+    aligner: Any = None,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
     """Load a Zeiss private raw-OCT series, applying reorientation and returning one output array per cube.
 
     An angiography acquisition returns two arrays (structural ``cube_z`` and flow
     ``FlowCube_z``); other Zeiss raw series return a single array.
     """
-    cubes = _extract_zeiss_cubes_or_empty(ds_list)
+    cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner)
     if cubes:
         outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
         for cube in cubes:
@@ -1870,6 +1874,7 @@ def _load_zeiss_series_arrays(
 
     try:
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
+        affine = _apply_derived_analysis_geometry(ds_list[0], vol, affine, extra)
         image = nib.Nifti1Image(vol, affine)
         image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
         data = np.asanyarray(image.dataobj)
@@ -1921,6 +1926,7 @@ def _load_one_series_arrays(
     first_ds: Any,
     *,
     force_ras: bool,
+    aligner: Any = None,
     revert_scaling: bool = False,
     rescale_type: str = "DV",
     tmp_dir: Path | None = None,
@@ -1935,7 +1941,7 @@ def _load_one_series_arrays(
         pass
 
     if is_zeiss_raw_storage(ds_list[0]):
-        out = _load_zeiss_series_arrays(ds_list, md, force_ras=force_ras)
+        out = _load_zeiss_series_arrays(ds_list, md, force_ras=force_ras, aligner=aligner)
         if out:
             return out
 
@@ -2337,13 +2343,46 @@ def _process_tissue_series(
         return None
 
 
-def _extract_zeiss_cubes_or_empty(ds_list: list[Any]) -> list[Any]:
+#: Ophthalmic laterality labels used when ``map_zeiss_laterality`` is requested.
+_ZEISS_LATERALITY_LABELS = {"R": "OD", "L": "OS"}
+
+
+def _laterality_label(value: Any, *, map_zeiss: bool) -> str | None:
+    """Filename label for a scan's laterality, optionally as the ophthalmic OD/OS pair."""
+    if value in (None, ""):
+        return None
+    text = str(value).strip().upper()
+    if map_zeiss:
+        text = _ZEISS_LATERALITY_LABELS.get(text, text)
+    return _sanitize_filename(text)
+
+
+def _extract_zeiss_cubes_or_empty(ds_list: list[Any], aligner: Any = None) -> list[Any]:
     """Extract the private Zeiss OCT cube containers, returning ``[]`` when they are absent or undecodable."""
     try:
-        return extract_zeiss_oct_cubes(ds_list, debug_mode=False)
+        return extract_zeiss_oct_cubes(ds_list, debug_mode=False, aligner=aligner)
     except Exception as exc:
         _debug(f"Zeiss private-container extraction failed, falling back to heuristics: {exc}")
         return []
+
+
+def _apply_derived_analysis_geometry(ds: Any, vol: np.ndarray, affine: Any, extra: dict[str, Any]) -> Any:
+    """Give a derived analysis volume the en-face geometry of the scan it was computed from.
+
+    Thickness maps and report analyses share their parent acquisition's en-face grid and
+    record its spacing at the top level of the dataset, so they can be written with real
+    millimetres instead of the unit spacing the generic extractor falls back to.
+    """
+    sources = zeiss_referenced_sources(ds)
+    if sources:
+        extra["zeiss_referenced_sources"] = sources
+        extra["zeiss_referenced_scan_type"] = sources[0].get("scan_type") or None
+    derived = derived_analysis_affine(ds, tuple(vol.shape))
+    if derived is None:
+        return affine
+    extra["zeiss_geometry_source"] = "derived_analysis_grid"
+    extra["zeiss_spacing_mm"] = [float(derived[0, 0]), float(derived[1, 1])]
+    return derived
 
 
 def _zeiss_output_metadata(md: dict[str, Any], extra: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2453,6 +2492,7 @@ def _process_zeiss_series(
     compress: bool = False,
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
+    aligner: Any = None,
 ) -> list[str] | None:
     """Save a Zeiss private raw-OCT series as NIfTI, with the extraction diagnostics merged into metadata.
 
@@ -2460,7 +2500,7 @@ def _process_zeiss_series(
     flow ``FlowCube_z`` - and other Zeiss raw series write a single volume.
     """
     try:
-        cubes = _extract_zeiss_cubes_or_empty(ds_list)
+        cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner)
         if cubes:
             base_path = explicit_output_path or _zeiss_series_output_path(
                 output_folder, md, mod, laterality=laterality, compress=compress
@@ -2487,6 +2527,7 @@ def _process_zeiss_series(
             return outputs
 
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
+        affine = _apply_derived_analysis_geometry(ds_list[0], vol, affine, extra)
         image = nib.Nifti1Image(vol, affine)
         image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
         md_full, md_header = _zeiss_output_metadata(md, extra)
@@ -2538,6 +2579,8 @@ def _process_one_series(
     skip_existing: bool = False,
     tmp_dir: Path | None = None,
     explicit_output_path: str | None = None,
+    aligner: Any = None,
+    map_zeiss_laterality: bool = False,
 ) -> list[str]:
     """Dispatch and save one DICOM series by modality/format: OP photo, tissue segmentation, Zeiss raw-OCT,
     or the standard cross-sectional path (with output filename resolution and the requested rescale/reorient flags).
@@ -2578,7 +2621,7 @@ def _process_one_series(
         #     return out
 
     if is_zeiss_raw_storage(ds_list[0]):
-        laterality = _sanitize_filename(md.get("Laterality", "U")) if md.get("Laterality") else None
+        laterality = _laterality_label(md.get("Laterality"), map_zeiss=map_zeiss_laterality)
         out = _process_zeiss_series(
             ds_list,
             output_folder,
@@ -2586,6 +2629,7 @@ def _process_one_series(
             mod,
             force_ras=force_ras,
             laterality=laterality,
+            aligner=aligner,
             save_metadata=save_metadata,
             additional_tags=additional_tags,
             compress=compress,
@@ -2650,6 +2694,8 @@ def run_dicom2nifti(
     skip_existing: bool = False,
     tmp_dir: Path | None = None,
     explicit_output_path: str | None = None,
+    align_oct: bool = False,
+    map_zeiss_laterality: bool = False,
 ) -> list[str]:
     """Convert every DICOM series found at *input_path* to NIfTI files under *output_folder*.
 
@@ -2657,6 +2703,11 @@ def run_dicom2nifti(
     groups series (:func:`_read_dicom_conversion`), narrows by series number/
     index if requested, then processes and saves each via
     :func:`_process_one_series`. Returns the list of written file paths.
+
+    With *align_oct*, Zeiss OCT cubes are written into a world frame shared by every scan of
+    one eye instead of each starting at the origin: in-plane they are placed by registering
+    their fundus images, and axially their retinal surface is put at world zero. Without it
+    every cube keeps a zero origin.
     """
     _require_deps()
     os.makedirs(output_folder, exist_ok=True)
@@ -2691,6 +2742,15 @@ def run_dicom2nifti(
                 _info(f"Processed {successful_rtstruct}/{total_rtstruct} RT-Struct files")
         except Exception as exc:
             _warn(f"Error processing RT-Struct files: {exc}")
+
+    aligner = None
+    if align_oct:
+        aligner = ZeissOctAligner(debug_mode=False)
+        for ds_list in series_all:
+            try:
+                aligner.add_reference_candidates(ds_list)
+            except Exception as exc:
+                _debug(f"Zeiss alignment reference scan failed: {exc}")
 
     outputs: list[str] = []
     for ds_list, md in zip(series_all, metas):
@@ -2746,6 +2806,8 @@ def run_dicom2nifti(
                                 skip_existing=skip_existing,
                                 tmp_dir=tmp_dir,
                                 explicit_output_path=None,
+                                aligner=aligner,
+                                map_zeiss_laterality=map_zeiss_laterality,
                             )
                         )
                     continue
@@ -2775,6 +2837,8 @@ def run_dicom2nifti(
                     skip_existing=skip_existing,
                     tmp_dir=tmp_dir,
                     explicit_output_path=explicit_output_path,
+                    aligner=aligner,
+                    map_zeiss_laterality=map_zeiss_laterality,
                 )
             )
         except Exception as exc:

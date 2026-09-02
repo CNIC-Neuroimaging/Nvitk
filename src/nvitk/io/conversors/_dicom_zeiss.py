@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
+
 from nvitk.core.logger import Logger
 
 try:
@@ -27,6 +29,11 @@ except Exception:
 RAW_DATA_SOP_UID = "1.2.840.10008.5.1.4.1.1.66"
 
 __all__ = [
+    "ZEISS_FIXATION_MM_PER_UNIT",
+    "derived_analysis_affine",
+    "derived_analysis_geometry",
+    "zeiss_referenced_sources",
+    "ZeissOctAligner",
     "ZeissOctCube",
     "ZeissOctImage",
     "ZEISS_OCT_CUBE_CONTAINERS",
@@ -82,6 +89,22 @@ _TAG_SPACING_DEPTH = (0x0407, 0x100B)
 _TAG_SPACING_Y = (0x0407, 0x100C)
 _TAG_SCAN_PATTERN = (0x0405, 0x1001)  # e.g. ANGIO_6MM, MACULAR_CUBE
 
+# Fixation offset: where the scan was centred, relative to the fovea. Zero for every
+# macula-centred protocol and a fixed non-zero pair for the disc-centred ones, with the
+# horizontal component flipping sign between eyes.
+_TAG_FIXATION_X = (0x0405, 0x1032)  # horizontal, along the A-scan axis
+_TAG_FIXATION_Y = (0x0405, 0x1033)  # vertical, along the B-scan axis
+
+#: Millimetres per unit of the fixation-offset tags.
+#:
+#: Calibrated, not documented - Zeiss's private dictionary is not public. 117 units (the
+#: disc-centred value) measured 4.40 mm and 4.60 mm on the two eyes of the reference study,
+#: by LSLO cross-correlation and by en-face registration, which brackets the expected
+#: fovea-to-disc distance. Treat disc-centred placement as accurate to a few tenths of a
+#: millimetre: the tags record a fixation-target angle, so the distance it subtends on the
+#: retina varies with axial length.
+ZEISS_FIXATION_MM_PER_UNIT = 0.038
+
 
 @dataclass(frozen=True)
 class ZeissOctCube:
@@ -115,6 +138,60 @@ def _container_spacing_mm(item: Any) -> tuple[float, float, float] | None:
         except Exception:
             return None
     return (values[0], values[1], values[2]) if all(value > 0 for value in values) else None
+
+
+def _fixation_offset_units(ds: Any) -> tuple[float, float] | None:
+    """Scan-centre offset from the fovea in raw tag units, or None when the tags are absent."""
+    values = []
+    for tag in (_TAG_FIXATION_X, _TAG_FIXATION_Y):
+        element = ds.get(tag)
+        if element is None:
+            return None
+        try:
+            values.append(float(element.value))
+        except Exception:
+            return None
+    return (values[0], values[1])
+
+
+def _retina_surface_depth_mm(volume: np.ndarray, depth_spacing: float) -> float | None:
+    """Median depth (mm) of the retinal surface across *volume*, or None when it is not detectable.
+
+    The axial position of an OCT cube is set per acquisition by the device's reference arm,
+    so two scans of the same eye can sit hundreds of microns apart in the A-scan for no
+    anatomical reason. The inner retinal surface is the only shared reference the data
+    itself carries. The median resists the foveal pit and the optic cup, which occupy a
+    minority of the field.
+    """
+    sub = volume[::4, :, ::4].astype(np.float32)
+    if sub.size == 0:
+        return None
+    sub = gaussian_filter1d(sub, 4, axis=1)
+    above = sub > sub.max(axis=1, keepdims=True) * 0.35
+    found = above.any(axis=1)
+    if not found.any():
+        return None
+    index = np.argmax(above, axis=1).astype(np.float32)
+    return float(np.median(index[found])) * depth_spacing
+
+
+def _shared_frame_origin(
+    offset_mm: tuple[float, float, float],
+    volume: np.ndarray,
+    spacing: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """World coordinate of voxel ``(0, 0, 0)`` for a cube placed at *offset_mm* in the shared frame.
+
+    In-plane, the cube is centred on its measured offset from the eye's reference scan, so
+    fields of different sizes end up concentric rather than sharing a corner. Axially, the
+    origin is pulled back by the depth of the retinal surface, putting that surface at world
+    zero in every cube.
+    """
+    return (
+        offset_mm[0] - volume.shape[0] * spacing[0] / 2.0,
+        -offset_mm[1],
+        offset_mm[2] - volume.shape[2] * spacing[2] / 2.0,
+    )
 
 
 def _decode_zeiss_frame(payload: Any, expected_shape: tuple[int, int] | None = None) -> np.ndarray | None:
@@ -172,6 +249,7 @@ def _extract_container_cube(
     element: int,
     kind: str,
     debug_mode: bool = False,
+    aligner: "ZeissOctAligner | None" = None,
 ) -> ZeissOctCube | None:
     """Decode the private container ``(0407,<element>)`` of *ds* into a cube, or None when it is absent/undecodable."""
     container = ds.get((0x0407, element))
@@ -229,7 +307,13 @@ def _extract_container_cube(
             f"spacing in (0407,100A/100B/100C); writing unit spacing"
         )
 
+    offset_units = _fixation_offset_units(ds)
     affine = np.diag([spacing[0], spacing[1], spacing[2], 1.0])
+    origin_source = "zero"
+    if aligner is not None:
+        offset_x, offset_y, origin_source = aligner.scan_offset_mm(ds)
+        depth = _retina_surface_depth_mm(volume, spacing[1]) or 0.0
+        affine[:3, 3] = _shared_frame_origin((offset_x, depth, offset_y), volume, spacing)
     meta = {
         "method": "zeiss_private_container",
         "zeiss_container_tag": f"0407,{element:04X}",
@@ -237,6 +321,9 @@ def _extract_container_cube(
         "zeiss_scan_pattern": str(scan_pattern) if scan_pattern is not None else None,
         "zeiss_spacing_source": spacing_source,
         "zeiss_spacing_mm": list(spacing),
+        "zeiss_fixation_offset_units": list(offset_units) if offset_units else None,
+        "zeiss_origin_source": origin_source,
+        "zeiss_origin_mm": [float(value) for value in affine[:3, 3]],
         "num_slices": int(volume.shape[2]),
         "chosen_shape": tuple(int(size) for size in volume.shape),
     }
@@ -306,6 +393,188 @@ def extract_zeiss_oct_images(ds_list: list[Any], debug_mode: bool = False) -> li
     return images
 
 
+# ---------------------------------------------------------------------------
+# Cross-scan alignment
+# ---------------------------------------------------------------------------
+
+_LSLO_CONTAINER = 0x10A6
+
+#: Lowest normalised cross-correlation accepted from an LSLO registration.
+_LSLO_MIN_SCORE = 0.15
+
+
+def _decode_lslo(ds: Any) -> tuple[np.ndarray, tuple[float, float]] | None:
+    """The scan's LSLO fundus image and its ``(row, column)`` spacing in mm, or None."""
+    container = ds.get((0x0407, _LSLO_CONTAINER))
+    if container is None or not getattr(container, "value", None):
+        return None
+    item = container.value[0]
+    try:
+        rows = int(item[_TAG_FRAME_ROWS].value)
+        cols = int(item[_TAG_FRAME_COLS].value)
+        payload = item[_TAG_FRAME_SEQUENCE].value[0][_TAG_FRAME_DATA].value
+        row_mm = float(item[_TAG_SPACING_X].value)
+        col_mm = float(item[_TAG_SPACING_DEPTH].value)
+    except Exception:
+        return None
+    if row_mm <= 0 or col_mm <= 0:
+        return None
+    image = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
+    if image is None or image.shape != (rows, cols):
+        return None
+    return image.astype(np.float32), (row_mm, col_mm)
+
+
+def _vessel_contrast(image: np.ndarray) -> np.ndarray:
+    """High-pass the fundus image so registration follows vessels, not illumination."""
+    return image - gaussian_filter(image, 6)
+
+
+def _ncc(fixed: np.ndarray, moving: np.ndarray, shift: tuple[int, int], min_overlap: tuple[int, int]) -> float | None:
+    """Normalised cross-correlation over the overlap when *moving* is displaced by *shift*."""
+    d_row, d_col = shift
+    height, width = fixed.shape
+    r0, r1 = max(0, d_row), min(height, height + d_row)
+    c0, c1 = max(0, d_col), min(width, width + d_col)
+    if r1 - r0 < min_overlap[0] or c1 - c0 < min_overlap[1]:
+        return None
+    a = fixed[r0:r1, c0:c1]
+    b = moving[r0 - d_row : r1 - d_row, c0 - d_col : c1 - d_col]
+    a = a - a.mean()
+    b = b - b.mean()
+    denominator = float(np.sqrt((a * a).sum()) * np.sqrt((b * b).sum()))
+    return float((a * b).sum() / denominator) if denominator else None
+
+
+def _register_fundus(fixed: np.ndarray, moving: np.ndarray) -> tuple[int, int, float] | None:
+    """Pixel shift ``(row, column)`` aligning *moving* onto *fixed*, with its score.
+
+    Searched coarsely on a 4x decimation and then refined at full resolution, which keeps a
+    +/-6 mm search affordable: the fixation jump between a macular and a disc-centred scan is
+    around 4.5 mm.
+    """
+    if fixed.shape != moving.shape:
+        return None
+    fine_fixed = _vessel_contrast(fixed)
+    fine_moving = _vessel_contrast(moving)
+    coarse_fixed = gaussian_filter(fine_fixed, 2)[::4, ::4]
+    coarse_moving = gaussian_filter(fine_moving, 2)[::4, ::4]
+
+    best = None
+    for d_row in range(-75, 76):
+        for d_col in range(-30, 31):
+            score = _ncc(coarse_fixed, coarse_moving, (d_row, d_col), (40, 75))
+            if score is not None and (best is None or score > best[2]):
+                best = (d_row, d_col, score)
+    if best is None:
+        return None
+
+    centre_row, centre_col = best[0] * 4, best[1] * 4
+    refined = None
+    for d_row in range(centre_row - 5, centre_row + 6):
+        for d_col in range(centre_col - 5, centre_col + 6):
+            score = _ncc(fine_fixed, fine_moving, (d_row, d_col), (160, 300))
+            if score is not None and (refined is None or score > refined[2]):
+                refined = (d_row, d_col, score)
+    return refined
+
+
+class ZeissOctAligner:
+    """Places the cubes of one study in a per-eye world frame shared across scan sizes.
+
+    Each scan's in-plane offset is measured by registering its LSLO fundus image against the
+    eye's reference scan; the fundus images of one session overlap across almost their whole
+    field, which makes this far more reliable than registering the cubes themselves (a 6x6
+    and a disc-centred 4.5x4.5 share only a ~0.8 mm band).
+
+    The fixation-offset tags are the fallback when a fundus image is missing or the
+    registration is too weak to trust. They are nominal - a protocol setting rather than a
+    measurement - so they cannot capture eye movement between acquisitions, which on the
+    reference study reached 0.16 mm even between two macula-centred scans.
+    """
+
+    def __init__(self, debug_mode: bool = False) -> None:
+        self._references: dict[str, tuple[np.ndarray, tuple[float, float], tuple[float, float]]] = {}
+        self._offsets: dict[str, tuple[float, float, str]] = {}
+        self._debug_mode = debug_mode
+
+    @staticmethod
+    def _laterality(ds: Any) -> str:
+        """Eye label used to keep each eye's scans in their own frame."""
+        return str(getattr(ds, "Laterality", "") or "U").strip().upper()
+
+    @staticmethod
+    def _nominal_offset_mm(ds: Any) -> tuple[float, float]:
+        """Scan-centre offset from the fovea implied by the fixation tags."""
+        units = _fixation_offset_units(ds)
+        if units is None:
+            return (0.0, 0.0)
+        return (-units[0] * ZEISS_FIXATION_MM_PER_UNIT, -units[1] * ZEISS_FIXATION_MM_PER_UNIT)
+
+    def add_reference_candidates(self, ds_list: list[Any]) -> None:
+        """Choose the scan each eye's other scans are registered against.
+
+        A macula-centred scan is preferred, so the frame is anchored on the fovea; any scan
+        with a usable fundus image will do otherwise, with its own nominal offset folded in
+        to keep the frame fovea-referenced either way.
+        """
+        for ds in ds_list:
+            if not has_zeiss_oct_cubes(ds):
+                continue
+            laterality = self._laterality(ds)
+            centred = _fixation_offset_units(ds) == (0.0, 0.0)
+            if laterality in self._references and not (centred and self._references[laterality][2] != (0.0, 0.0)):
+                continue
+            decoded = _decode_lslo(ds)
+            if decoded is None:
+                continue
+            image, spacing = decoded
+            self._references[laterality] = (image, spacing, self._nominal_offset_mm(ds))
+            if self._debug_mode:
+                log.debug(f"[Zeiss align] eye {laterality}: reference is {getattr(ds, 'SeriesDescription', '?')}")
+
+    def scan_offset_mm(self, ds: Any) -> tuple[float, float, str]:
+        """In-plane offset ``(x, y)`` in mm of this scan's centre from the fovea, and its source."""
+        key = str(getattr(ds, "SOPInstanceUID", "") or id(ds))
+        cached = self._offsets.get(key)
+        if cached is not None:
+            return cached
+        result = self._measure_offset_mm(ds)
+        self._offsets[key] = result
+        return result
+
+    def _measure_offset_mm(self, ds: Any) -> tuple[float, float, str]:
+        """Register against the eye's reference, falling back to the nominal tag offset."""
+        nominal = self._nominal_offset_mm(ds)
+        reference = self._references.get(self._laterality(ds))
+        decoded = _decode_lslo(ds) if reference is not None else None
+        if reference is not None and decoded is not None:
+            ref_image, (row_mm, col_mm), ref_nominal = reference
+            registered = _register_fundus(ref_image, decoded[0])
+            if registered is not None and registered[2] >= _LSLO_MIN_SCORE:
+                d_row, d_col, score = registered
+                # Validated against the reference study: a fundus row step moves the cube's
+                # A-scan axis in the opposite direction, a column step moves the B-scan axis
+                # in the same direction.
+                offset = (
+                    -d_row * row_mm + ref_nominal[0],
+                    d_col * col_mm + ref_nominal[1],
+                )
+                if self._debug_mode:
+                    log.debug(
+                        f"[Zeiss align] {getattr(ds, 'SeriesDescription', '?')}: "
+                        f"measured ({offset[0]:+.3f}, {offset[1]:+.3f}) mm, ncc={score:.3f}"
+                    )
+                return (offset[0], offset[1], "lslo_registration")
+            if self._debug_mode:
+                score = registered[2] if registered else float("nan")
+                log.debug(
+                    f"[Zeiss align] {getattr(ds, 'SeriesDescription', '?')}: registration too weak "
+                    f"(ncc={score:.3f}); using the fixation tags"
+                )
+        return (nominal[0], nominal[1], "fixation_tags")
+
+
 def has_zeiss_oct_cubes(ds: Any) -> bool:
     """True when *ds* carries at least one private OCT cube container."""
     return any((0x0407, element) in ds for element in ZEISS_OCT_CUBE_CONTAINERS)
@@ -314,6 +583,7 @@ def has_zeiss_oct_cubes(ds: Any) -> bool:
 def extract_zeiss_oct_cubes(
     ds_list: list[Any],
     debug_mode: bool = False,
+    aligner: "ZeissOctAligner | None" = None,
 ) -> list[ZeissOctCube]:
     """Extract every volumetric cube stored in the private containers of *ds_list*.
 
@@ -325,7 +595,7 @@ def extract_zeiss_oct_cubes(
     cubes: list[ZeissOctCube] = []
     for ds in ds_list:
         for element, kind in ZEISS_OCT_CUBE_CONTAINERS.items():
-            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode)
+            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode, aligner=aligner)
             if cube is not None:
                 cubes.append(cube)
     return cubes
@@ -900,6 +1170,81 @@ def _extract_zeiss_raw_oct(
         "Could not reconstruct volume from Zeiss private tags using heuristics. "
         f"Debug: {debug_report}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Derived analysis series
+# ---------------------------------------------------------------------------
+#
+# Analysis objects (thickness maps, report analyses) carry no cube container. They
+# describe a single en-face grid at the top level of the dataset, reusing the same
+# private tags the cubes use inside their containers - but with a different meaning:
+# here (0407,100A) and (0407,100B) are the two IN-PLANE spacings of the map, not the
+# lateral and axial spacings of a B-scan.
+_TAG_REFERENCED_INSTANCES = (0x0008, 0x1140)
+_TAG_REFERENCED_SOP_INSTANCE = (0x0008, 0x1155)
+_TAG_PURPOSE_OF_REFERENCE = (0x0040, 0xA170)
+_TAG_CODE_MEANING = (0x0008, 0x0104)
+
+
+def derived_analysis_geometry(ds: Any) -> tuple[int, int, float, float] | None:
+    """En-face grid ``(nx, ny, spacing_x, spacing_y)`` of a derived analysis series, or None.
+
+    Returns None for cube objects, whose geometry lives inside their containers and means
+    something else.
+    """
+    if has_zeiss_oct_cubes(ds):
+        return None
+    try:
+        nx = int(ds[_TAG_FRAME_ROWS].value)
+        ny = int(ds[_TAG_FRAME_COLS].value)
+        spacing_x = float(ds[_TAG_SPACING_X].value)
+        spacing_y = float(ds[_TAG_SPACING_DEPTH].value)
+    except Exception:
+        return None
+    if nx <= 0 or ny <= 0 or spacing_x <= 0 or spacing_y <= 0:
+        return None
+    return (nx, ny, spacing_x, spacing_y)
+
+
+def zeiss_referenced_sources(ds: Any) -> list[dict[str, str]]:
+    """Acquisitions this derived object was computed from, as ``{"sop_instance_uid", "scan_type"}``.
+
+    Empty when the object records no reference - which is the case for whole studies, so it
+    must not be relied on to identify the parent scan.
+    """
+    sequence = ds.get(_TAG_REFERENCED_INSTANCES)
+    out: list[dict[str, str]] = []
+    for item in getattr(sequence, "value", None) or []:
+        try:
+            uid = str(item[_TAG_REFERENCED_SOP_INSTANCE].value)
+        except Exception:
+            continue
+        scan_type = ""
+        try:
+            scan_type = str(item[_TAG_PURPOSE_OF_REFERENCE].value[0][_TAG_CODE_MEANING].value)
+        except Exception:
+            pass
+        out.append({"sop_instance_uid": uid, "scan_type": scan_type})
+    return out
+
+
+def derived_analysis_affine(ds: Any, shape: tuple[int, ...]) -> np.ndarray | None:
+    """Voxel-to-world affine for a derived analysis volume, or None when its grid does not match.
+
+    The volume is ``(x, y, map)``: two spatial axes over the parent scan's en-face grid, and a
+    stack of analysis maps that carries no physical spacing.
+    """
+    geometry = derived_analysis_geometry(ds)
+    if geometry is None or len(shape) < 2:
+        return None
+    nx, ny, spacing_x, spacing_y = geometry
+    if (int(shape[0]), int(shape[1])) != (nx, ny):
+        log.debug(
+            f"[Zeiss derived] grid {nx}x{ny} does not match volume {shape[:2]}; leaving unit spacing"
+        )
+        return None
+    return np.diag([spacing_x, spacing_y, 1.0, 1.0])
 
 
 def is_zeiss_raw_storage(ds: Any) -> bool:
