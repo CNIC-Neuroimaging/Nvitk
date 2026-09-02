@@ -376,15 +376,7 @@ def run_train(
     if init_from_label_set and pretrained_weights is None:
         pretrained_weights = run_checkpoint(paths.results_root, init_from_label_set)
         log.info("Initialising from the %r run: %s", init_from_label_set, pretrained_weights)
-    if continue_training and pretrained_weights is not None:
-        # nnU-Net refuses both at once, and rightly: a resumed checkpoint already carries the
-        # weights the initialisation would have supplied, so re-applying them would discard
-        # every epoch trained so far.
-        log.info(
-            "--continue-training: ignoring the initial weights (%s); the resumed checkpoint "
-            "already contains them.", pretrained_weights,
-        )
-        pretrained_weights = None
+
 
     checkpoint, _, architecture = read_bundle(bundle)
     pretrain_name = pretrain_name or Path(bundle).name
@@ -533,12 +525,29 @@ def run_train(
         event_root=tensorboard_dir, interval=tensorboard_interval,
     ):
         for fold in folds:
-            log.info("--- fold %s ---", fold)
+            # Resume is decided per fold, not once for the run. A multi-fold job that died
+            # part-way has finished folds and untouched ones, and they need opposite treatment:
+            # nnU-Net refuses to both continue *and* load initial weights, but a fold that has
+            # never trained still needs those weights or it would start from the bundle alone
+            # and silently drop out of the curriculum.
+            fold_dir = results_dir / f"fold_{fold}"
+            resumable = continue_training and any(
+                (fold_dir / name).is_file()
+                for name in ("checkpoint_final.pth", "checkpoint_latest.pth")
+            )
+            fold_weights = None if resumable else pretrained_weights
+            log.info(
+                "--- fold %s --- %s", fold,
+                "resuming from its checkpoint" if resumable
+                else ("starting fresh" + (
+                    f" from {Path(fold_weights).parent.name}" if fold_weights else ""
+                )),
+            )
             nnunet_run.train_pretrained(
                 dataset_id, CONFIGURATION, fold, env=env, trainer=trainer,
                 plans_identifier=plans_identifier, device=device, num_gpus=num_gpus,
-                continue_training=continue_training, from_scratch=from_scratch,
-                pretrained_weights=pretrained_weights,
+                continue_training=resumable, from_scratch=from_scratch,
+                pretrained_weights=fold_weights,
             )
 
     marker_dir = paths.results_root / STAGE2_TRAIN_DIR / dataset_name

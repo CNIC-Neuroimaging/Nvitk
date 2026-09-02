@@ -151,6 +151,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             target_spacing=o["target_spacing"],
             patch_size=o["patch_size"], batch_size=o["batch_size"], num_epochs=o["num_epochs"], device=o["device"], num_gpus=o["num_gpus"],
             num_processes=o["num_processes"], from_scratch=o["from_scratch"],
+            continue_training=o["continue_training"],
             backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling=o["sampling"], sampling_temperature=o["sampling_temperature"],
@@ -174,7 +175,8 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             target_spacing=o["target_spacing"], patch_size=o["patch_size"],
             batch_size=o["batch_size"], num_epochs=o["binary_epochs"] or o["num_epochs"],
             device=o["device"], num_gpus=o["num_gpus"], num_processes=o["num_processes"],
-            from_scratch=False, backend=o["backend"],
+            from_scratch=False, continue_training=o["continue_training"],
+            backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling="default", sampling_temperature=o["sampling_temperature"],
             sampling_oversample=o["sampling_oversample"],
@@ -597,6 +599,10 @@ def _submit_via_login_node(
 @click.option("--num-gpus", type=int, default=1, show_default=True)
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
+@click.option("--continue-training", is_flag=True, default=False,
+              help="Stages 2 and 2a: resume each fold that already has a checkpoint instead of "
+                   "restarting it. Folds with no checkpoint start fresh, keeping whatever "
+                   "initialisation the run asked for.")
 # ---- stage 2a: binary vessel fine-tuning -------------------------------------
 @click.option("--binary-loss", type=str, default="dice_ce", show_default=True,
               help="Stage 2a loss. The binary task has no side roads and no adjacency, so the "
@@ -795,7 +801,8 @@ def main(**kw: Any) -> None:
             "num_epochs", "num_gpus", "tensorboard", "tensorboard_interval", "compare_to",
             "sampling", "sampling_oversample",
             "binary_loss", "binary_epochs",
-            "from_scratch", "min_volume_mm3", "largest_only", "num_processes", "workers",
+            "from_scratch", "continue_training",
+            "min_volume_mm3", "largest_only", "num_processes", "workers",
             "repair_gaps_mm", "repair_adjacency", "repair_lateral", "repair_close_radius",
             "pseudo_modality", "pseudo_agreement", "pseudo_max_components",
             "pseudo_max_fragmented", "pseudo_max_invalid", "pseudo_volume_range",
