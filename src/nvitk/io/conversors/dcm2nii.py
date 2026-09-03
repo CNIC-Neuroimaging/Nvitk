@@ -56,6 +56,7 @@ def dcm2nii(
     tmp_dir: Path | None = None,
     align_oct: bool = False,
     map_zeiss_laterality: bool = False,
+    j2k_decode: bool = False,
 ) -> str | list[str]:
     """Convert a DICOM series (or directory of series) to NIfTI; library entry point behind the ``dcm2nii`` CLI."""
     output_path = Path(output_folder)
@@ -82,6 +83,7 @@ def dcm2nii(
         explicit_output_path=explicit_output_path,
         align_oct=align_oct,
         map_zeiss_laterality=map_zeiss_laterality,
+        j2k_decode=j2k_decode,
     )
     if explicit_output_path and len(outputs) == 1:
         return outputs[0]
@@ -125,6 +127,17 @@ def dcm2nii(
     is_flag=True,
     help="Name Zeiss OCT outputs with the ophthalmic laterality (OD/OS) instead of R/L.",
 )
+@_click_option(
+    "--j2k-decode",
+    is_flag=True,
+    help=(
+        "Attempt to rebuild Zeiss OCT series whose JPEG 2000 payload is stored obfuscated "
+        "(macular / optic-disc / anterior-segment cubes on some exports). EXPERIMENTAL and "
+        "incomplete: the byte ordering is only partly understood, so a frame is kept only "
+        "when its packet walk verifies, and a series is written only when every frame does. "
+        "Without this flag those series are skipped as before."
+    ),
+)
 @_click_option("--rescale-type", type=click.Choice(["DV", "FP"], case_sensitive=False) if click is not None else None, default="DV", help="Rescale type for scaling conversion: DV or FP.")
 @_click_option("--tmp-dir", type=click.Path(path_type=Path) if click is not None else None, default=None, help="Temporary directory for intermediate files.")
 def main(
@@ -147,6 +160,7 @@ def main(
     tmp_dir: Path | None,
     align_oct: bool,
     map_zeiss_laterality: bool,
+    j2k_decode: bool,
 ) -> None:
     """CLI entry point: convert one series (or, with ``--multifile``, every immediate subdirectory as a separate case)."""
     if click is None:
@@ -191,6 +205,7 @@ def main(
                         tmp_dir=tmp_dir,
                         align_oct=align_oct,
                         map_zeiss_laterality=map_zeiss_laterality,
+                        j2k_decode=j2k_decode,
                     )
                     ok += 1
                 except Exception:
@@ -217,6 +232,7 @@ def main(
             tmp_dir=tmp_dir,
             align_oct=align_oct,
             map_zeiss_laterality=map_zeiss_laterality,
+            j2k_decode=j2k_decode,
         )
         if isinstance(outputs, str):
             click.echo(outputs)

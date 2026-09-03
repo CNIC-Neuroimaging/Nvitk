@@ -31,6 +31,7 @@ from ._dicom_zeiss import (
     extract_zeiss_oct_images,
     extract_zeiss_raw_oct,
     is_zeiss_raw_storage,
+    has_obfuscated_cube_payload,
     zeiss_referenced_sources,
 )
 
@@ -1849,13 +1850,14 @@ def _load_zeiss_series_arrays(
     *,
     force_ras: bool,
     aligner: Any = None,
+    j2k_decode: bool = False,
 ) -> list[tuple[np.ndarray, dict[str, Any]]]:
     """Load a Zeiss private raw-OCT series, applying reorientation and returning one output array per cube.
 
     An angiography acquisition returns two arrays (structural ``cube_z`` and flow
     ``FlowCube_z``); other Zeiss raw series return a single array.
     """
-    cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner)
+    cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner, j2k_decode)
     if cubes:
         outputs: list[tuple[np.ndarray, dict[str, Any]]] = []
         for cube in cubes:
@@ -1941,7 +1943,7 @@ def _load_one_series_arrays(
         pass
 
     if is_zeiss_raw_storage(ds_list[0]):
-        out = _load_zeiss_series_arrays(ds_list, md, force_ras=force_ras, aligner=aligner)
+        out = _load_zeiss_series_arrays(ds_list, md, force_ras=force_ras, aligner=aligner, j2k_decode=j2k_decode)
         if out:
             return out
 
@@ -2260,7 +2262,7 @@ def _process_op_series(
             outputs.append(final_output_path)
         return outputs
     except Exception as exc:
-        _debug(f"Error handling Ophthalmic Photography ({mod}) series: {exc}")
+        _warn(f"Error handling Ophthalmic Photography ({mod}) series: {exc}")
         return None
 
 
@@ -2357,12 +2359,12 @@ def _laterality_label(value: Any, *, map_zeiss: bool) -> str | None:
     return _sanitize_filename(text)
 
 
-def _extract_zeiss_cubes_or_empty(ds_list: list[Any], aligner: Any = None) -> list[Any]:
+def _extract_zeiss_cubes_or_empty(ds_list: list[Any], aligner: Any = None, j2k_decode: bool = False) -> list[Any]:
     """Extract the private Zeiss OCT cube containers, returning ``[]`` when they are absent or undecodable."""
     try:
-        return extract_zeiss_oct_cubes(ds_list, debug_mode=False, aligner=aligner)
+        return extract_zeiss_oct_cubes(ds_list, debug_mode=False, aligner=aligner, j2k_decode=j2k_decode)
     except Exception as exc:
-        _debug(f"Zeiss private-container extraction failed, falling back to heuristics: {exc}")
+        _warn(f"Zeiss private-container extraction failed, falling back to heuristics: {exc}")
         return []
 
 
@@ -2461,8 +2463,14 @@ def _zeiss_series_output_path(
     *,
     laterality: str | None,
     compress: bool,
+    source_scan: str | None = None,
 ) -> str:
-    """Build the default output path for a Zeiss raw-OCT series from its series identity and laterality."""
+    """Build the default output path for a Zeiss raw-OCT series from its series identity and laterality.
+
+    Derived analyses repeat one series description per parent acquisition, so several of them
+    collide on the same name within a single study; *source_scan* keeps them apart by the scan
+    each was computed from.
+    """
     ext = _get_nifti_extension(compress)
     pid = _sanitize_filename(md.get("PatientID", "UnknownPID"))
     sn = _sanitize_filename(md.get("SeriesNumber", "0"))
@@ -2476,6 +2484,8 @@ def _zeiss_series_output_path(
         base = f"{date}_{mod}_{sn}"
     if laterality:
         base = f"{base}_{laterality}"
+    if source_scan:
+        base = f"{base}_from_{_sanitize_filename(source_scan)}"
     return os.path.join(output_folder, f"{base}{ext}")
 
 
@@ -2493,6 +2503,7 @@ def _process_zeiss_series(
     skip_existing: bool = False,
     explicit_output_path: str | None = None,
     aligner: Any = None,
+    j2k_decode: bool = False,
 ) -> list[str] | None:
     """Save a Zeiss private raw-OCT series as NIfTI, with the extraction diagnostics merged into metadata.
 
@@ -2500,7 +2511,7 @@ def _process_zeiss_series(
     flow ``FlowCube_z`` - and other Zeiss raw series write a single volume.
     """
     try:
-        cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner)
+        cubes = _extract_zeiss_cubes_or_empty(ds_list, aligner, j2k_decode)
         if cubes:
             base_path = explicit_output_path or _zeiss_series_output_path(
                 output_folder, md, mod, laterality=laterality, compress=compress
@@ -2513,7 +2524,15 @@ def _process_zeiss_series(
                 image = nib.Nifti1Image(cube.array, cube.affine)
                 image = _apply_nifti_reorient_flags(image, force_ras=force_ras, mouse_reorient=False)
                 md_full, md_header = _zeiss_output_metadata(md, cube.meta)
-                path = _insert_nifti_suffix(base_path, cube.kind) if name_by_kind else base_path
+                # An unverified reconstruction must be impossible to mistake for real data.
+                experimental = cube.meta.get("zeiss_j2k_reconstruction") == "experimental"
+                if name_by_kind:
+                    suffix = f"{cube.kind}_EXPERIMENTAL" if experimental else cube.kind
+                    path = _insert_nifti_suffix(base_path, suffix)
+                elif experimental:
+                    path = _insert_nifti_suffix(base_path, "EXPERIMENTAL")
+                else:
+                    path = base_path
                 if skip_existing and os.path.exists(path):
                     outputs.append(path)
                     continue
@@ -2526,6 +2545,19 @@ def _process_zeiss_series(
             outputs.extend(_save_zeiss_oct_images(ds_list, base_path, skip_existing=skip_existing))
             return outputs
 
+        if has_obfuscated_cube_payload(ds_list[0]):
+            # The generic heuristics cannot read these and fail with a large dump; say why once.
+            detail = (
+                "reconstruction did not verify"
+                if j2k_decode
+                else "pass --j2k-decode to attempt reconstruction"
+            )
+            _warn(
+                f"Skipping Zeiss series {md.get('SeriesDescription', '?')} "
+                f"({md.get('Laterality', '?')}): obfuscated JPEG 2000 payload, {detail}."
+            )
+            return []
+
         vol, affine, extra = extract_zeiss_raw_oct(ds_list, md, debug_mode=False)
         affine = _apply_derived_analysis_geometry(ds_list[0], vol, affine, extra)
         image = nib.Nifti1Image(vol, affine)
@@ -2537,8 +2569,14 @@ def _process_zeiss_series(
             if skip_existing and os.path.exists(final_output_path):
                 return [final_output_path]
         else:
+            sources = zeiss_referenced_sources(ds_list[0])
             final_output_path = _zeiss_series_output_path(
-                output_folder, md, mod, laterality=laterality, compress=compress
+                output_folder,
+                md,
+                mod,
+                laterality=laterality,
+                compress=compress,
+                source_scan=sources[0].get("scan_type") if sources else None,
             )
             if skip_existing and os.path.exists(final_output_path):
                 return [final_output_path]
@@ -2581,6 +2619,7 @@ def _process_one_series(
     explicit_output_path: str | None = None,
     aligner: Any = None,
     map_zeiss_laterality: bool = False,
+    j2k_decode: bool = False,
 ) -> list[str]:
     """Dispatch and save one DICOM series by modality/format: OP photo, tissue segmentation, Zeiss raw-OCT,
     or the standard cross-sectional path (with output filename resolution and the requested rescale/reorient flags).
@@ -2630,6 +2669,7 @@ def _process_one_series(
             force_ras=force_ras,
             laterality=laterality,
             aligner=aligner,
+            j2k_decode=j2k_decode,
             save_metadata=save_metadata,
             additional_tags=additional_tags,
             compress=compress,
@@ -2696,6 +2736,7 @@ def run_dicom2nifti(
     explicit_output_path: str | None = None,
     align_oct: bool = False,
     map_zeiss_laterality: bool = False,
+    j2k_decode: bool = False,
 ) -> list[str]:
     """Convert every DICOM series found at *input_path* to NIfTI files under *output_folder*.
 
@@ -2808,6 +2849,7 @@ def run_dicom2nifti(
                                 explicit_output_path=None,
                                 aligner=aligner,
                                 map_zeiss_laterality=map_zeiss_laterality,
+                                j2k_decode=j2k_decode,
                             )
                         )
                     continue
@@ -2839,6 +2881,7 @@ def run_dicom2nifti(
                     explicit_output_path=explicit_output_path,
                     aligner=aligner,
                     map_zeiss_laterality=map_zeiss_laterality,
+                    j2k_decode=j2k_decode,
                 )
             )
         except Exception as exc:

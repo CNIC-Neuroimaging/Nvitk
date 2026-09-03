@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import struct
 import tempfile
 from dataclasses import dataclass
 from typing import Any
@@ -30,6 +31,10 @@ RAW_DATA_SOP_UID = "1.2.840.10008.5.1.4.1.1.66"
 
 __all__ = [
     "ZEISS_FIXATION_MM_PER_UNIT",
+    "has_obfuscated_cube_payload",
+    "decode_obfuscated_frame",
+    "is_obfuscated_payload",
+    "reconstruct_obfuscated_jp2",
     "derived_analysis_affine",
     "derived_analysis_geometry",
     "zeiss_referenced_sources",
@@ -194,7 +199,133 @@ def _shared_frame_origin(
     )
 
 
-def _decode_zeiss_frame(payload: Any, expected_shape: tuple[int, int] | None = None) -> np.ndarray | None:
+# ---------------------------------------------------------------------------
+# Obfuscated payloads (LuraWave-encoded series)
+# ---------------------------------------------------------------------------
+#
+# Some Zeiss scan types (macular, optic-disc and anterior-segment cubes on this export
+# path) store their frames scrambled instead of as a plain JP2: every seventh byte is
+# XORed with 0x5A, and the parts of the JP2 file are written out of order. Undoing the
+# XOR is proven - it makes the container, the codestream markers and the encoder comment
+# parse cleanly - but the byte ordering is only partly understood, so a reconstruction is
+# accepted here ONLY when the packet walk lands exactly on the end of the tile-part.
+_XOR_STRIDE = 7
+_XOR_KEY = 0x5A
+_JP2_SIGNATURE = b"\x00\x00\x00\x0cjP  "
+_SOC_SIZ = b"\xff\x4f\xff\x51"
+_SOD = b"\xff\x93"
+_COD = b"\xff\x52"
+
+
+def _deobfuscate(payload: bytes) -> bytes:
+    """Undo the stride-7 XOR that scrambles these payloads."""
+    buf = np.frombuffer(payload, np.uint8).copy()
+    buf[::_XOR_STRIDE] ^= _XOR_KEY
+    return buf.tobytes()
+
+
+def is_obfuscated_payload(payload: Any) -> bool:
+    """True when *payload* is not a plain JP2 but becomes one once the XOR is undone."""
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) < 64:
+        return False
+    if bytes(payload[:8]) == _JP2_SIGNATURE[:8]:
+        return False
+    return _deobfuscate(bytes(payload)).find(_JP2_SIGNATURE) > 0
+
+
+def _codestream_parameters(data: bytes, soc: int) -> tuple[int, int, int, int, int, int] | None:
+    """``(width, height, levels, layers, xcb, ycb)`` from the SIZ and COD markers."""
+    try:
+        width, height = struct.unpack(">II", data[soc + 8 : soc + 16])
+        cod = data.index(_COD, soc)
+        if data[cod + 4] != 0x00:  # precincts / SOP / EPH are outside what the walker covers
+            return None
+        layers = struct.unpack(">H", data[cod + 6 : cod + 8])[0]
+        levels, xcb, ycb, cbstyle = data[cod + 9], data[cod + 10], data[cod + 11], data[cod + 12]
+        if data[cod + 5] != 0 or cbstyle != 0x00:  # non-LRCP, or multiple codeword segments
+            return None
+    except Exception:
+        return None
+    return width, height, levels, layers, xcb + 2, ycb + 2
+
+
+def reconstruct_obfuscated_jp2(payload: bytes, require_verified: bool = True) -> bytes | None:
+    """Rebuild a plain JP2 from an obfuscated payload, or None when reassembly is impossible.
+
+    Reassembles under the one ordering rule observed to hold: the first packet stays put and
+    the remainder is a single circular run starting ``len(header) + len(first packet)`` bytes
+    in. With *require_verified* the result is returned only when a full packet walk consumes
+    the tile-part exactly; without it the reassembly is returned regardless, which decodes to
+    an image whose pixels are known to be wrong.
+    """
+    from ._j2k_packets import PacketWalker
+
+    data = _deobfuscate(bytes(payload))
+    start = data.find(_JP2_SIGNATURE)
+    if start <= 0:
+        return None
+    try:
+        soc = data.index(_SOC_SIZ, start)
+        sod = data.index(_SOD, soc) + 2
+    except ValueError:
+        return None
+    params = _codestream_parameters(data, soc)
+    if params is None:
+        return None
+    width, height, levels, layers, xcb, ycb = params
+
+    header, leading, trailing, eoc = data[start:sod], data[:start], data[sod : len(data) - 2], data[-2:]
+    walker = PacketWalker(width, height, levels, layers, xcb, ycb)
+    try:
+        header_end, body = walker.packet(trailing, 0, 0, 0)
+    except Exception:
+        return None
+    first = header_end + body
+    rest = leading + trailing[first:]
+    jump = len(header) + first
+    if jump > len(rest):
+        return None
+    packets = trailing[:first] + rest[jump:] + rest[:jump]
+
+    if require_verified:
+        verifier = PacketWalker(width, height, levels, layers, xcb, ycb)
+        try:
+            walk = verifier.walk(packets)
+        except Exception:
+            return None
+        if len(walk) < layers * (levels + 1) or walk[-1][3] + walk[-1][4] != len(packets):
+            return None
+    return header + packets + eoc
+
+
+def decode_obfuscated_frame(payload: Any, expected_shape: tuple[int, int]):
+    """Decode one obfuscated frame, preferring a verified reassembly.
+
+    Returns ``(array, status)`` where status is ``verified``, ``unverified`` (the reassembly
+    decoded but its packet walk did not check out, so the pixels are wrong) or ``failed``.
+    """
+    if Image is None:
+        return None, "failed"
+    for require in (True, False):
+        rebuilt = reconstruct_obfuscated_jp2(payload, require_verified=require)
+        if rebuilt is None:
+            continue
+        try:
+            img = Image.open(io.BytesIO(rebuilt))
+            img.load()
+            array = np.asarray(img.convert("L"))
+        except Exception:
+            continue
+        if array.shape == expected_shape:
+            return array, ("verified" if require else "unverified")
+    return None, "failed"
+
+
+def _decode_zeiss_frame(
+    payload: Any,
+    expected_shape: tuple[int, int] | None = None,
+    j2k_decode: bool = False,
+) -> np.ndarray | None:
     """Decode one private-block payload into a 2-D array.
 
     Handles JPEG 2000 (via glymur, else PIL), any other codec PIL can read, and -
@@ -241,6 +372,17 @@ def _decode_zeiss_frame(payload: Any, expected_shape: tuple[int, int] | None = N
             return np.frombuffer(payload, dtype=np.uint8).reshape(expected_shape)
         except Exception:
             return None
+
+    if j2k_decode and Image is not None and is_obfuscated_payload(payload):
+        rebuilt = reconstruct_obfuscated_jp2(payload)
+        if rebuilt is not None:
+            try:
+                img = Image.open(io.BytesIO(rebuilt))
+                img.load()
+                return np.asarray(img.convert("L"))
+            except Exception as e:
+                log.warning(e)
+                return None
     return None
 
 
@@ -250,6 +392,7 @@ def _extract_container_cube(
     kind: str,
     debug_mode: bool = False,
     aligner: "ZeissOctAligner | None" = None,
+    j2k_decode: bool = False,
 ) -> ZeissOctCube | None:
     """Decode the private container ``(0407,<element>)`` of *ds* into a cube, or None when it is absent/undecodable."""
     container = ds.get((0x0407, element))
@@ -275,12 +418,18 @@ def _extract_container_cube(
         )
 
     frames: list[np.ndarray] = []
+    counts: dict[str, int] = {}
     for frame_item in frame_items:
         try:
             payload = frame_item[_TAG_FRAME_DATA].value
         except Exception:
             return None
         decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
+        if decoded is None and j2k_decode and is_obfuscated_payload(payload):
+            decoded, status = decode_obfuscated_frame(payload, (rows, cols))
+            counts[status] = counts.get(status, 0) + 1
+            if decoded is None:
+                decoded = np.zeros((rows, cols), dtype=np.uint8)
         if decoded is None or decoded.shape != (rows, cols):
             if debug_mode:
                 log.debug(
@@ -327,6 +476,17 @@ def _extract_container_cube(
         "num_slices": int(volume.shape[2]),
         "chosen_shape": tuple(int(size) for size in volume.shape),
     }
+    if counts:
+        meta["zeiss_j2k_reconstruction"] = "experimental"
+        meta["zeiss_j2k_frames_verified"] = counts.get("verified", 0)
+        meta["zeiss_j2k_frames_unverified"] = counts.get("unverified", 0)
+        meta["zeiss_j2k_frames_blank"] = counts.get("failed", 0)
+        log.warning(
+            f"[Zeiss cubes] {kind}: EXPERIMENTAL reconstruction - "
+            f"{counts.get('verified', 0)} frames verified, "
+            f"{counts.get('unverified', 0)} decoded but unverified (wrong pixels), "
+            f"{counts.get('failed', 0)} blank. Not fit for analysis."
+        )
     if debug_mode:
         log.debug(f"[Zeiss cubes] {kind}: shape={volume.shape} spacing={spacing} source={spacing_source}")
     return ZeissOctCube(kind=kind, array=volume, affine=affine, meta=meta)
@@ -358,7 +518,7 @@ def _extract_container_image(
         payload = frame_items[0][_TAG_FRAME_DATA].value
     except Exception:
         return None
-    decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
+    decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols), j2k_decode=j2k_decode)
     if decoded is None or decoded.shape != (rows, cols):
         if debug_mode:
             log.debug(
@@ -584,6 +744,7 @@ def extract_zeiss_oct_cubes(
     ds_list: list[Any],
     debug_mode: bool = False,
     aligner: "ZeissOctAligner | None" = None,
+    j2k_decode: bool = False,
 ) -> list[ZeissOctCube]:
     """Extract every volumetric cube stored in the private containers of *ds_list*.
 
@@ -595,7 +756,7 @@ def extract_zeiss_oct_cubes(
     cubes: list[ZeissOctCube] = []
     for ds in ds_list:
         for element, kind in ZEISS_OCT_CUBE_CONTAINERS.items():
-            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode, aligner=aligner)
+            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode, aligner=aligner, j2k_decode=j2k_decode)
             if cube is not None:
                 cubes.append(cube)
     return cubes
@@ -1206,6 +1367,21 @@ def derived_analysis_geometry(ds: Any) -> tuple[int, int, float, float] | None:
     if nx <= 0 or ny <= 0 or spacing_x <= 0 or spacing_y <= 0:
         return None
     return (nx, ny, spacing_x, spacing_y)
+
+
+def has_obfuscated_cube_payload(ds: Any) -> bool:
+    """True when *ds* holds a cube container whose frames are stored obfuscated."""
+    for element in ZEISS_OCT_CUBE_CONTAINERS:
+        container = ds.get((0x0407, element))
+        if container is None or not getattr(container, "value", None):
+            continue
+        try:
+            payload = container.value[0][_TAG_FRAME_SEQUENCE].value[0][_TAG_FRAME_DATA].value
+        except Exception:
+            continue
+        if is_obfuscated_payload(payload):
+            return True
+    return False
 
 
 def zeiss_referenced_sources(ds: Any) -> list[dict[str, str]]:
