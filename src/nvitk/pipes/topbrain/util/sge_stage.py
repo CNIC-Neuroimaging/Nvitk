@@ -65,6 +65,7 @@ from nvitk.cluster.sge import (
 )
 from nvitk.core.logger import Logger
 from nvitk.pipes.topbrain import config as cfg
+from nvitk.pipes.topbrain.util import paths as pth
 from nvitk.pipes.topbrain.util.paths import TopBrainPaths
 from nvitk.pipes.topbrain.util.sge_backend import (
     sge_stage_extra_env,
@@ -118,7 +119,17 @@ def resolve_src_dir(src_dir: Path | str | None = None) -> Path:
         else:
             resolved, origin = default_nvitk_src_dir(), "installed nvitk package"
 
-    if not (resolved / "nvitk" / "__init__.py").is_file():
+    # These checks answer "did you point me at a real checkout?", and only this host's
+    # filesystem can answer it. When the cluster storage is not mounted here the question is
+    # unanswerable, not failed: the job runs on a node that does see it. Refusing to submit
+    # would be this host vetoing a path it has no view of. The check stays exactly as strict
+    # wherever the tree *is* visible, which is where a typo can still be caught.
+    if not pth.tree_visible(resolved):
+        log.warning(
+            "Cannot see %s from this host, so the nvitk source tree for the job is taken on "
+            "trust. Make sure it is deployed there and up to date.", resolved,
+        )
+    elif not (resolved / "nvitk" / "__init__.py").is_file():
         raise FileNotFoundError(
             f"nvitk source tree for the cluster job not found at {resolved} (from {origin}): "
             f"it has no nvitk/__init__.py. Point --src-dir at a checkout, or fix "
@@ -194,6 +205,12 @@ def resolve_container(container: Path | str) -> Path:
     image = Path(container).expanduser()
     if image.is_file() and os.access(image, os.R_OK):
         return image
+    if not pth.tree_visible(image.parent):
+        log.warning(
+            "Cannot see %s from this host; the container is taken on trust and will be "
+            "resolved on the compute node.", image,
+        )
+        return image
 
     available: list[str] = []
     parent = image.parent
@@ -248,6 +265,15 @@ def plan_data_binds(
     planned: dict[str, tuple[Path, str]] = {}
     for raw in data_paths:
         candidate = Path(raw).expanduser()
+        if not pth.tree_visible(candidate):
+            log.warning(
+                "Cannot see %s from this host; binding it on trust. If the path is wrong the "
+                "job will fail on the node instead of here.", candidate,
+            )
+            resolved = candidate
+            if not any(resolved == root or root in resolved.parents for root in fixed):
+                planned[str(resolved)] = (resolved, str(resolved))
+            continue
         if not candidate.exists():
             raise FileNotFoundError(
                 f"{candidate} does not exist on this host. Under --submit sge the paths on the "

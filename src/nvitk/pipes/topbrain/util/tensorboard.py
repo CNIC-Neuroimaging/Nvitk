@@ -38,6 +38,8 @@ Only one process mirrors a given tree at a time; the rest stand by
 
 from __future__ import annotations
 
+import dataclasses
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Sequence, TextIO
@@ -47,6 +49,7 @@ from nvitk.core.tensorboard import (
     DEFAULT_INTERVAL,
     DEFAULT_PORT,
     SERVER_SIDECAR,
+    TRAINING_LOG_GLOB,
     TensorBoardServer,
     TensorBoardWatcher,
     resolve_port,
@@ -67,7 +70,12 @@ STAGE_SOURCE_ROOTS: dict[str, str] = {
 
 #: ``--tensorboard-serve`` choices. ``auto`` resolves against ``--submit`` — see
 #: :func:`resolve_serve_mode`.
-SERVE_MODES: tuple[str, ...] = ("auto", "local", "cluster", "none")
+SERVE_MODES: tuple[str, ...] = ("auto", "local", "cluster", "ssh", "none")
+
+#: Where ``--tensorboard-serve ssh`` stages the training logs it pulls off the cluster. Under
+#: the *local* results root, never the cluster one -- the whole point of the mode is that the
+#: cluster root is not writable, or even visible, from here.
+REMOTE_STAGING_DIR: str = "tensorboard_remote"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -175,6 +183,171 @@ def monitoring(
 # ──────────────────────────────────────────────────────────────────────────────
 # Serving
 # ──────────────────────────────────────────────────────────────────────────────
+
+
+def remote_staging_layout(
+    local: TopBrainPaths, cluster: TopBrainPaths
+) -> tuple[TopBrainPaths, dict[str, Path]]:
+    """A local layout standing in for *cluster*, plus the remote→local roots to keep in sync.
+
+    Only the roots the mirror reads are redirected into the staging tree. Everything else stays
+    on the local layout, so the events the mirror writes land on local disk instead of being
+    pushed back over the network.
+
+    Returns
+    -------
+    paths
+        The layout to hand to :func:`watch_and_serve`.
+    roots
+        ``{remote root: local root}`` for :class:`RemoteLogSync`, keyed by the cluster's own
+        absolute paths -- what ``find`` is run against on the far side.
+    """
+    staging = Path(local.results_root) / REMOTE_STAGING_DIR
+    redirected = {attr: staging / attr for attr in sorted(set(STAGE_SOURCE_ROOTS.values()))}
+    roots = {
+        str(getattr(cluster, attr)): destination
+        for attr, destination in redirected.items()
+    }
+    return dataclasses.replace(local, **redirected), roots
+
+
+class RemoteLogSync:
+    """Keeps a local copy of a cluster run's training logs current, over one SSH session.
+
+    The counterpart to :class:`~nvitk.core.tensorboard.TensorBoardWatcher` for a cluster whose
+    storage this host cannot see. Only ``training_log_*.txt`` travels -- a few megabytes of text
+    beside a results tree of tens of gigabytes -- because that is all the mirror parses.
+
+    The session is opened once and reused across passes; a dropped connection is caught, logged
+    and retried rather than taking the server down with it, since this is expected to run for
+    the days a training run lasts.
+    """
+
+    def __init__(
+        self,
+        roots: dict[str, Path],
+        *,
+        host: str,
+        user: str,
+        password: str,
+        interval: float = DEFAULT_INTERVAL,
+        pattern: str = TRAINING_LOG_GLOB,
+        port: int = 22,
+        retry: float = 30.0,
+    ) -> None:
+        self.roots = dict(roots)
+        self.host, self.user, self.password, self.port = host, user, password, port
+        self.interval, self.pattern, self.retry = float(interval), pattern, float(retry)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._announced = False
+
+    def start(self) -> None:
+        """Begin syncing in the background."""
+        if self._thread is not None:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="tb-log-sync", daemon=True)
+        self._thread.start()
+        log.info("Syncing training logs from %s@%s every %.0fs -> %s",
+                 self.user, self.host, self.interval,
+                 ", ".join(str(v) for v in self.roots.values()))
+
+    def stop(self) -> None:
+        """Stop syncing and wait for the thread to wind down."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10.0)
+            self._thread = None
+
+    def sync_once(self, client: object, sftp: object) -> tuple[int, int]:
+        """One pass over every root. Returns cumulative ``(seen, fetched)``."""
+        from nvitk.cluster.remote_transfer import sync_remote_glob
+
+        seen = fetched = 0
+        for remote_root, local_root in self.roots.items():
+            found, got = sync_remote_glob(
+                client, sftp, remote_root=remote_root, local_root=local_root,
+                pattern=self.pattern,
+            )
+            seen += found
+            fetched += got
+        return seen, fetched
+
+    def _run(self) -> None:
+        from nvitk.cluster.remote_transfer import sftp_session
+
+        while not self._stop.is_set():
+            try:
+                with sftp_session(
+                    host=self.host, user=self.user, password=self.password, port=self.port
+                ) as (client, sftp):
+                    while not self._stop.is_set():
+                        seen, fetched = self.sync_once(client, sftp)
+                        if not self._announced:
+                            # The first pass is the one that tells you whether the remote roots
+                            # were right; silence here means an empty TensorBoard later.
+                            log.info("Log sync: %d training log(s) found on the cluster, "
+                                     "%d fetched.", seen, fetched)
+                            self._announced = True
+                            if not seen:
+                                log.warning(
+                                    "No training logs under %s. Nothing will appear in "
+                                    "TensorBoard until a job starts writing there.",
+                                    ", ".join(self.roots),
+                                )
+                        elif fetched:
+                            log.info("Log sync: %d log(s) updated.", fetched)
+                        if self._stop.wait(self.interval):
+                            break
+            except Exception as exc:  # noqa: BLE001 - a dropped session must not kill the server
+                if self._stop.is_set():
+                    break
+                log.warning("Log sync lost its SSH session (%s); retrying in %.0fs.",
+                            exc, self.retry)
+                if self._stop.wait(self.retry):
+                    break
+
+
+def watch_and_serve_ssh(
+    *,
+    local: TopBrainPaths,
+    cluster: TopBrainPaths,
+    stages: Sequence[str],
+    host: str,
+    user: str,
+    password: str,
+    label_set: str | None = None,
+    port: int = DEFAULT_PORT,
+    interval: float = DEFAULT_INTERVAL,
+) -> None:
+    """Serve TensorBoard from this host for a cluster run this host cannot see.
+
+    ``local`` mode reads the cluster mount directly; this one exists for the case where there
+    is no mount. The training logs are pulled to a local staging tree over SSH and the ordinary
+    mirror runs against that, so the events, the server and the browser side are unchanged.
+
+    Blocks until interrupted, exactly like :func:`watch_and_serve`.
+    """
+    # Checked before the session is opened: discovering the package is missing after prompting
+    # for a password and pulling the logs would waste both.
+    if not tensorboard_available():
+        raise RuntimeError(
+            "TensorBoard is not installed in this environment (pip install tensorboard). "
+            "--tensorboard-serve ssh mirrors and serves from here, so it needs it locally — "
+            "the copy inside the container is not reachable from this host."
+        )
+    staged, roots = remote_staging_layout(local, cluster)
+    sync = RemoteLogSync(
+        roots, host=host, user=user, password=password, interval=interval
+    )
+    sync.start()
+    try:
+        watch_and_serve(
+            staged, stages=stages, label_set=label_set, port=port, interval=interval,
+        )
+    finally:
+        sync.stop()
 
 
 def resolve_serve_mode(serve: str, *, submit: str) -> str:

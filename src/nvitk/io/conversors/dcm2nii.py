@@ -117,9 +117,9 @@ def dcm2nii(
     "--align-oct",
     is_flag=True,
     help=(
-        "Place Zeiss OCT cubes in a world frame shared by every scan of one eye: in-plane by "
-        "registering their fundus images, axially by putting the retinal surface at zero. "
-        "Without this flag every cube is written with a zero origin."
+        "Place Zeiss OCT cubes in-plane into a world frame shared by every scan of one eye, "
+        "by registering their fundus images. Depth is left untouched. Without this flag every "
+        "cube is written with a zero origin."
     ),
 )
 @_click_option(

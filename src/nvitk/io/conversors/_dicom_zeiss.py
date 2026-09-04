@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from scipy.ndimage import gaussian_filter
 
 from nvitk.core.logger import Logger
 
@@ -159,43 +159,22 @@ def _fixation_offset_units(ds: Any) -> tuple[float, float] | None:
     return (values[0], values[1])
 
 
-def _retina_surface_depth_mm(volume: np.ndarray, depth_spacing: float) -> float | None:
-    """Median depth (mm) of the retinal surface across *volume*, or None when it is not detectable.
-
-    The axial position of an OCT cube is set per acquisition by the device's reference arm,
-    so two scans of the same eye can sit hundreds of microns apart in the A-scan for no
-    anatomical reason. The inner retinal surface is the only shared reference the data
-    itself carries. The median resists the foveal pit and the optic cup, which occupy a
-    minority of the field.
-    """
-    sub = volume[::4, :, ::4].astype(np.float32)
-    if sub.size == 0:
-        return None
-    sub = gaussian_filter1d(sub, 4, axis=1)
-    above = sub > sub.max(axis=1, keepdims=True) * 0.35
-    found = above.any(axis=1)
-    if not found.any():
-        return None
-    index = np.argmax(above, axis=1).astype(np.float32)
-    return float(np.median(index[found])) * depth_spacing
-
-
 def _shared_frame_origin(
-    offset_mm: tuple[float, float, float],
+    offset_mm: tuple[float, float],
     volume: np.ndarray,
     spacing: tuple[float, float, float],
 ) -> tuple[float, float, float]:
     """World coordinate of voxel ``(0, 0, 0)`` for a cube placed at *offset_mm* in the shared frame.
 
-    In-plane, the cube is centred on its measured offset from the eye's reference scan, so
-    fields of different sizes end up concentric rather than sharing a corner. Axially, the
-    origin is pulled back by the depth of the retinal surface, putting that surface at world
-    zero in every cube.
+    Only the in-plane axes are placed: the cube is centred on its measured offset from the
+    eye's reference scan, so fields of different sizes end up concentric rather than sharing a
+    corner. Depth is left at zero - the axial position of an OCT cube is a per-acquisition
+    reference-arm setting with no shared anatomical origin, and nothing in the file records it.
     """
     return (
         offset_mm[0] - volume.shape[0] * spacing[0] / 2.0,
-        -offset_mm[1],
-        offset_mm[2] - volume.shape[2] * spacing[2] / 2.0,
+        0.0,
+        offset_mm[1] - volume.shape[2] * spacing[2] / 2.0,
     )
 
 
@@ -461,8 +440,7 @@ def _extract_container_cube(
     origin_source = "zero"
     if aligner is not None:
         offset_x, offset_y, origin_source = aligner.scan_offset_mm(ds)
-        depth = _retina_surface_depth_mm(volume, spacing[1]) or 0.0
-        affine[:3, 3] = _shared_frame_origin((offset_x, depth, offset_y), volume, spacing)
+        affine[:3, 3] = _shared_frame_origin((offset_x, offset_y), volume, spacing)
     meta = {
         "method": "zeiss_private_container",
         "zeiss_container_tag": f"0407,{element:04X}",
@@ -518,7 +496,7 @@ def _extract_container_image(
         payload = frame_items[0][_TAG_FRAME_DATA].value
     except Exception:
         return None
-    decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols), j2k_decode=j2k_decode)
+    decoded = _decode_zeiss_frame(payload, expected_shape=(rows, cols))
     if decoded is None or decoded.shape != (rows, cols):
         if debug_mode:
             log.debug(
@@ -756,7 +734,9 @@ def extract_zeiss_oct_cubes(
     cubes: list[ZeissOctCube] = []
     for ds in ds_list:
         for element, kind in ZEISS_OCT_CUBE_CONTAINERS.items():
-            cube = _extract_container_cube(ds, element, kind, debug_mode=debug_mode, aligner=aligner, j2k_decode=j2k_decode)
+            cube = _extract_container_cube(
+                ds, element, kind, debug_mode=debug_mode, aligner=aligner, j2k_decode=j2k_decode
+            )
             if cube is not None:
                 cubes.append(cube)
     return cubes

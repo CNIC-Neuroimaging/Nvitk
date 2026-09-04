@@ -114,6 +114,65 @@ def download_remote_file(sftp: Any, remote_path: str, local_path: Path) -> None:
     sftp.get(remote_path, str(local_path))
 
 
+def sync_remote_glob(
+    client: Any,
+    sftp: Any,
+    *,
+    remote_root: str,
+    local_root: Path,
+    pattern: str,
+) -> tuple[int, int]:
+    """Mirror files matching *pattern* under *remote_root* into *local_root*.
+
+    Enumeration is a single ``find`` over the SSH channel rather than a recursive SFTP walk,
+    which costs a round trip per directory and would be painful on a results tree that is one
+    directory per dataset per run per fold. Only files whose size or mtime differs from the
+    local copy are fetched, so a caller polling on an interval re-downloads the handful of logs
+    that actually grew.
+
+    Relative paths are preserved, so the local tree has the same shape as the remote one and
+    anything that discovers runs by structure keeps working against it.
+
+    Returns
+    -------
+    tuple
+        ``(seen, fetched)`` -- files matched remotely, and of those, files transferred.
+    """
+    root = _normalize_remote_path(remote_root).rstrip("/")
+    command = (
+        f"find {shlex.quote(root)} -name {shlex.quote(pattern)} -type f "
+        f"-printf '%s\\t%T@\\t%p\\n'"
+    )
+    _stdin, stdout, _stderr = client.exec_command(command)
+    payload = stdout.read().decode(errors="replace")
+    # find exits non-zero for any unreadable subtree it walked past; the paths it *did* print
+    # are still good, so the status is deliberately not checked.
+    stdout.channel.recv_exit_status()
+
+    seen = fetched = 0
+    for line in payload.splitlines():
+        fields = line.split("\t", 2)
+        if len(fields) != 3:
+            continue
+        raw_size, raw_mtime, remote_path = fields
+        try:
+            size, mtime = int(raw_size), float(raw_mtime)
+        except ValueError:
+            continue
+        seen += 1
+        destination = Path(local_root) / remote_path[len(root):].lstrip("/")
+        try:
+            existing = destination.stat()
+            if existing.st_size == size and existing.st_mtime >= mtime:
+                continue
+        except OSError:
+            pass  # absent locally, or unreadable -- either way, fetch it
+        download_remote_file(sftp, remote_path, destination)
+        os.utime(destination, (mtime, mtime))
+        fetched += 1
+    return seen, fetched
+
+
 def download_directory_sftp(sftp: Any, remote_root: str, local_root: Path) -> int:
     """Recursively download *remote_root* into *local_root*. Returns file count."""
     remote_root = remote_root.rstrip("/")

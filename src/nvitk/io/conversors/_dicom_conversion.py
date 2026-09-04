@@ -2439,7 +2439,7 @@ def _save_zeiss_oct_images(
     try:
         images = extract_zeiss_oct_images(ds_list, debug_mode=False)
     except Exception as exc:
-        _debug(f"Zeiss 2-D image extraction failed: {exc}")
+        _warn(f"Zeiss 2-D image extraction failed ({exc}); no fundus/iris/en-face TIFFs written.")
         return outputs
     for image in images:
         path = f"{stem}_{image.kind}.tiff"
@@ -2745,10 +2745,9 @@ def run_dicom2nifti(
     index if requested, then processes and saves each via
     :func:`_process_one_series`. Returns the list of written file paths.
 
-    With *align_oct*, Zeiss OCT cubes are written into a world frame shared by every scan of
-    one eye instead of each starting at the origin: in-plane they are placed by registering
-    their fundus images, and axially their retinal surface is put at world zero. Without it
-    every cube keeps a zero origin.
+    With *align_oct*, Zeiss OCT cubes are placed in-plane into a world frame shared by every
+    scan of one eye, by registering their fundus images, instead of each starting at the
+    origin. Depth is untouched. Without it every cube keeps a zero origin.
     """
     _require_deps()
     os.makedirs(output_folder, exist_ok=True)

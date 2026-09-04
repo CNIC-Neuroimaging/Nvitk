@@ -424,7 +424,17 @@ def _tensorboard_for_sge(
     local roots; :func:`~nvitk.pipes.topbrain.util.tensorboard.workstation_view` decides which.
     Getting this backwards yields a TensorBoard that loads cleanly and shows nothing.
     """
-    here, _mounted = tb.workstation_view(cluster, local)
+    if serve_mode == "ssh":
+        # workstation_view would warn about the missing mount, which is the premise here rather
+        # than a problem. The staging tree is what gets served, and it is built at serve time.
+        staged, roots = tb.remote_staging_layout(local, cluster)
+        log.info("Will serve TensorBoard here once submitted, syncing logs over SSH:")
+        for remote_root, local_root in roots.items():
+            log.info("    %s -> %s", remote_root, local_root)
+        log.info("  events -> %s", tb.tensorboard_root(staged.results_root))
+        return
+
+    here, mounted = tb.workstation_view(cluster, local)
     sources = tb.stage_sources(here, selected)
     event_root = tb.tensorboard_root(here.results_root)
 
@@ -442,11 +452,17 @@ def _tensorboard_for_sge(
                  tb.local_serve_command(event_root, sources=sources, port=port))
         return
     if enabled:
-        # 'none' is the default for SGE: the cluster tree is mounted here, so serving it
+        # 'none' is the default for SGE: when the cluster tree is mounted here, serving it
         # locally costs no slot and needs no tunnel. Hand over the exact command.
         log.info("TensorBoard events -> %s", event_root)
-        log.info("  watch them with: %s",
-                 tb.local_serve_command(event_root, sources=sources, port=port))
+        if mounted:
+            log.info("  watch them with: %s",
+                     tb.local_serve_command(event_root, sources=sources, port=port))
+        else:
+            # Saying nothing here is how someone ends up serving an empty local tree and
+            # concluding the mirror is broken.
+            log.info("  this host cannot see that tree — re-run with "
+                     "--tensorboard-serve ssh to follow the run over SSH instead.")
 
 
 def _submit_via_login_node(
@@ -456,6 +472,7 @@ def _submit_via_login_node(
     emit_script: Path | None, dry_run: bool, no_remote: bool,
     remote_host: str | None, remote_user: str | None,
     tensorboard: dict[str, Any], parallel_folds: bool = False,
+    credentials: tuple[str, str, str] | None = None,
 ) -> list[str]:
     """Emit the whole submission as one bash driver, then run it where ``qsub`` exists.
 
@@ -521,7 +538,9 @@ def _submit_via_login_node(
         )
         exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
     else:
-        host, user, password = prompt_ssh_credentials(
+        # Already resolved by the caller when TensorBoard will need the same session; asking
+        # for one password twice in one command is the kind of thing people work around badly.
+        host, user, password = credentials or prompt_ssh_credentials(
             remote_host=remote_host, remote_user=remote_user,
             host_aliases=pth.CLUSTER_HOST_ALIASES,
         )
@@ -745,7 +764,9 @@ def _submit_via_login_node(
                    "<results-root>/tensorboard, live.")
 @click.option("--tensorboard-serve", type=click.Choice(list(tb.SERVE_MODES)), default="auto",
               show_default=True,
-              help="Where the TensorBoard server runs. 'auto': locally for --submit local, "
+              help="Where the TensorBoard server runs. 'ssh': here, reading the cluster's "
+                   "training logs over SSH — for a cluster whose storage is not mounted on "
+                   "this host. 'auto': locally for --submit local, "
                    "nowhere for --submit sge (the command to serve the mounted cluster tree "
                    "is logged instead). 'cluster' submits a CPU-only server job.")
 @click.option("--tensorboard-port", type=int, default=tb.DEFAULT_PORT, show_default=True)
@@ -891,6 +912,26 @@ def main(**kw: Any) -> None:
                 "nothing writing events. Add --tensorboard."
             )
 
+    if serve_mode == "ssh":
+        if submit != "sge":
+            raise click.UsageError(
+                "--tensorboard-serve ssh reads a cluster run's logs over SSH; for a local run "
+                "use --tensorboard-serve local."
+            )
+        if not kw["tensorboard"]:
+            raise click.UsageError(
+                "--tensorboard-serve ssh without --tensorboard would sync logs no job is "
+                "writing. Add --tensorboard."
+            )
+        if not tb.tensorboard_available():
+            # Before submission, not after: queueing a run and only then finding out you cannot
+            # watch it is a bad trade for one import check.
+            raise click.UsageError(
+                "--tensorboard-serve ssh mirrors and serves on this host, but TensorBoard is "
+                "not installed here (pip install tensorboard). The copy inside the container "
+                "does not help — that one runs on the compute node."
+            )
+
     log.info("topbrain | submit=%s backend=%s device=%s label_set=%s loss=%s",
              submit, backend, device, label_set, loss)
     log.info("  stages : %s", ", ".join(f"{s} ({st.STAGE_LABELS[s]})" for s in selected))
@@ -922,6 +963,20 @@ def main(**kw: Any) -> None:
         label_set=label_set, port=kw["tensorboard_port"],
         interval=kw["tensorboard_interval"],
     )
+    # One prompt, two uses: the submission SFTPs the driver script and the log sync reads the
+    # results tree, both on the same login node.
+    serving_over_ssh = (
+        serve_mode == "ssh" and kw["tensorboard"]
+        and not kw["dry_run"] and not kw["no_remote"]
+    )
+    credentials = (
+        prompt_ssh_credentials(
+            remote_host=kw["remote_host"], remote_user=kw["remote_user"],
+            host_aliases=pth.CLUSTER_HOST_ALIASES,
+        )
+        if serving_over_ssh else None
+    )
+
     _submit_via_login_node(
         active=active, local=local, selected=selected, options=options,
         container=container, src_dir=kw["src_dir"], base_hold=kw["base_hold"],
@@ -929,6 +984,7 @@ def main(**kw: Any) -> None:
         dry_run=kw["dry_run"], no_remote=kw["no_remote"],
         remote_host=kw["remote_host"], remote_user=kw["remote_user"],
         tensorboard=tensorboard_kwargs, parallel_folds=kw["parallel_folds"],
+        credentials=credentials,
     )
 
     # Serving blocks, so it has to come after the jobs are queued. The submitted jobs are
@@ -937,6 +993,13 @@ def main(**kw: Any) -> None:
         here, _mounted = tb.workstation_view(active, local)
         tb.watch_and_serve(
             here, stages=selected, label_set=label_set,
+            port=kw["tensorboard_port"], interval=kw["tensorboard_interval"],
+        )
+    elif serving_over_ssh and credentials is not None:
+        host, user, password = credentials
+        tb.watch_and_serve_ssh(
+            local=local, cluster=active, stages=selected, label_set=label_set,
+            host=host, user=user, password=password,
             port=kw["tensorboard_port"], interval=kw["tensorboard_interval"],
         )
 
