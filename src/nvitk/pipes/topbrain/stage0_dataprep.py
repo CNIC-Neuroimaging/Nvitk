@@ -107,7 +107,7 @@ AFFINE_ATOL: float = 1e-4
 #: Channel-1 defaults when a context channel is requested without explicit bounds. The CT
 #: window spans soft tissue through cancellous bone; the MR range is the full robust span, since
 #: TOF's problem is scale rather than clipping.
-DEFAULT_CT_CONTEXT_WINDOW: tuple[float, float] = (-100.0, 900.0)
+DEFAULT_CT_CONTEXT_WINDOW: tuple[float, float] = (-50.0, 1100.0)
 DEFAULT_MR_CONTEXT_PERCENTILES: tuple[float, float] = (0.0, 100.0)
 
 #: ``name=/images:/labels[:modality]`` — an extra annotated cohort.

@@ -77,6 +77,7 @@ from nvitk.pipes.topbrain.util import paths as pth
 from nvitk.pipes.topbrain.util import sampling as sampling_util
 from nvitk.pipes.topbrain.util import tensorboard as tb
 from nvitk.pipes.topbrain.util.sge_backend import (
+    set_sge_h_vmem_override,
     set_sge_project_override,
     torch_device_for_backend,
 )
@@ -763,6 +764,8 @@ def _submit_via_login_node(
                    "folds in sequence. A preparation job plans and preprocesses once, the fold "
                    "jobs hold on it and then run concurrently — five folds finish in the time "
                    "one takes, given five free GPUs.")
+@click.option("--sge-h-vmem", type=str, default=None,
+              help="SGE memory limit (-l h_vmem), overriding sge.json.")
 @click.option("--base-hold", type=str, default=None)
 @click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None,
               help="Where to write the driver script (default: a staged temporary file).")
@@ -951,6 +954,7 @@ def main(**kw: Any) -> None:
     )
 
     set_sge_project_override(kw["sge_project"])
+    set_sge_h_vmem_override(kw["sge_h_vmem"])
 
     serve_mode = tb.resolve_serve_mode(kw["tensorboard_serve"], submit=submit)
     if serve_mode == "cluster":

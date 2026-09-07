@@ -27,6 +27,7 @@ log = Logger()
 #: parameter threaded through eight stages' submit functions: it is process-scoped CLI
 #: configuration, exactly like the lazily-read ``config`` values it overrides.
 _PROJECT_OVERRIDE: str | None = None
+_H_VMEM_OVERRIDE: str | None = None
 
 
 def set_sge_project_override(project: str | None) -> None:
@@ -38,6 +39,25 @@ def set_sge_project_override(project: str | None) -> None:
     """
     global _PROJECT_OVERRIDE
     _PROJECT_OVERRIDE = str(project).strip() if project and str(project).strip() else None
+
+
+def set_sge_h_vmem_override(h_vmem: str | None) -> None:
+    """Override the configured ``h_vmem`` for this process.
+
+    On queues that enforce it as an address-space limit, ``h_vmem`` bounds a CUDA process well
+    below the GPU's own memory: the failure looks like a GPU out-of-memory with the device
+    reporting plenty free. Raising it is therefore an experiment worth running per submission,
+    not a value to edit into sge.json between runs.
+    """
+    global _H_VMEM_OVERRIDE
+    _H_VMEM_OVERRIDE = str(h_vmem).strip() if h_vmem and str(h_vmem).strip() else None
+
+
+def sge_h_vmem() -> str | None:
+    """The ``h_vmem`` to request: ``--sge-h-vmem`` if given, else ``sge.json``."""
+    from nvitk.pipes.topbrain import config as cfg
+
+    return _H_VMEM_OVERRIDE or cfg.SGE_H_VMEM
 
 
 def sge_project() -> str | None:
@@ -108,7 +128,7 @@ def sge_topbrain_stage_resources(
         project=sge_project(),
         account=cfg.SGE_ACCOUNT,
         ngpu=sge_stage_ngpu(backend, request_gpu=request_gpu),
-        h_vmem=h_vmem if h_vmem is not None else cfg.SGE_H_VMEM,
+        h_vmem=h_vmem if h_vmem is not None else sge_h_vmem(),
         queue=cfg.SGE_QUEUE,
         pe_smp=int(pe_smp) if pe_smp is not None else None,
     )
