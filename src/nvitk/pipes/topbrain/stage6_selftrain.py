@@ -696,10 +696,17 @@ def _resolved(paths, options: dict) -> dict:
     return {**options, "input_dir": inside} if inside is not None else options
 
 
-def _user_data_paths(**options) -> list[Path]:
-    """``--unlabeled-dir`` when it is outside the fixed mounts, so it gets bind-mounted."""
+def _user_data_paths(paths, **options) -> list[Path]:
+    """``--unlabeled-dir`` only when it needs its own bind.
+
+    A cohort already under a fixed mount is reached by translating the path, not by binding it:
+    binding the *translated* path would ask Singularity for a host directory that does not
+    exist, and binding the host path would shadow the mount it already lives in.
+    """
     raw = options.get("input_dir")
-    return [Path(raw)] if raw else []
+    if not raw or to_container_path(paths, raw) is not None:
+        return []
+    return [Path(raw)]
 
 
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **options) -> str:
@@ -707,7 +714,7 @@ def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **
     return build_stage_command(
         "stage6", _worker_argv(**_resolved(paths, options)), paths=paths,
         container=container, src_dir=src_dir,
-        data_paths=_user_data_paths(**_resolved(paths, options)),
+        data_paths=_user_data_paths(paths, **options),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
@@ -722,7 +729,7 @@ def submit_sge(
     return submit_stage_job(
         "stage6", _worker_argv(**_resolved(paths, options)), paths=paths,
         container=container, src_dir=src_dir,
-        data_paths=_user_data_paths(**_resolved(paths, options)),
+        data_paths=_user_data_paths(paths, **options),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
