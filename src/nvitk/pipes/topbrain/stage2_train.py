@@ -895,6 +895,7 @@ def main(
     plans_from_label_set: str | None, init_from_label_set: str | None,
     pretrained_weights: Path | None,
     sampling: str, sampling_temperature: float, sampling_oversample: float | None,
+    lateral_swap: bool,
     tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
     backend: str = "gpu",
 ) -> None:
@@ -907,6 +908,7 @@ def main(
         results_root=results_root, model_root=results_root, corpus_root=results_root,
     )
     run_train(
+        lateral_swap=lateral_swap,
         paths=paths, bundle=bundle, label_set=label_set, pretrain_name=pretrain_name,
         loss=loss, loss_config=loss_util.parse_loss_config(loss_config),
         folds=parse_folds(folds or ",".join(str(i) for i in range(int(cfg.DEFAULT_NUM_FOLDS)))),

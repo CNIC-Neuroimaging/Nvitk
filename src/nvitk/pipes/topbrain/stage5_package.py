@@ -316,7 +316,7 @@ def submit_sge(
               help="Build, then write a tar.gz for upload to Grand Challenge.")
 def main(
     nnunet_results: Path, results_root: Path, label_set: str, loss: str | None,
-    plans_identifier: str | None, configuration_name: str | None, folds: str,
+    architecture: str | None, plans_identifier: str | None, configuration_name: str | None, folds: str,
     checkpoint: str, name: str, tag: str, build: bool, save: bool,
 ) -> None:
     """CLI entry point: assemble (and optionally build) the submission container."""
@@ -325,8 +325,8 @@ def main(
     Logger()
     run_package(
         nnunet_results=nnunet_results, results_root=results_root, label_set=label_set,
-        # architecture comes from stage 2's provenance, not from a flag.
-        loss=loss, architecture=None, plans_identifier=plans_identifier,
+        # Falls back to stage 2's provenance when --architecture is not given.
+        loss=loss, architecture=architecture, plans_identifier=plans_identifier,
         configuration_name=configuration_name,
         folds=parse_folds(folds), checkpoint=checkpoint, name=name, tag=tag,
         build=build, save=save,
