@@ -335,6 +335,9 @@ class TopBrainPaths:
 
     @property
     def nnssl_raw_dir(self) -> Path:
+        # The *mixed* collection only. Anything that honours --corpus-modality must build its
+        # path from corpus_dataset_name_for() instead; using this one is how a CT corpus ended
+        # up writing its descriptor into Dataset511.
         """``<nnssl_raw>/Dataset511_TopBrainCorpus`` — holds ``pretrain_data.json``."""
         return self.nnssl_raw / self.corpus_dataset_name
 

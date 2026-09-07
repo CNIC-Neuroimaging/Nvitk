@@ -715,7 +715,7 @@ def build_corpus(
         )
     log.ok(f"stage0 corpus: {len(volumes)} volumes {by_source} -> {pretrain_json}")
     return pretrain_json, {
-        "collection": paths.corpus_dataset_name,
+        "collection": corpus_dataset_name_for(corpus_modality),
         "pretrain_data_json": str(pretrain_json),
         "corpus_root": str(paths.corpus_root),
         "harmonized": harmonize,

@@ -122,7 +122,7 @@ def corpus_signature(paths: TopBrainPaths, modality: str = "both") -> str | None
     corpus is rebuilt, but an mtime comparison would force a re-preprocess after *every* stage 0
     run even when nothing changed; the hash only fires when the composition genuinely differs.
     """
-    descriptor = Path(paths.nnssl_raw) / paths.corpus_dataset_name / "pretrain_data.json"
+    descriptor = Path(paths.nnssl_raw) / corpus_dataset_name_for(modality) / "pretrain_data.json"
     if not descriptor.is_file():
         return None
     volumes = sorted(set(re.findall(r"[^\"\s]+\.nii\.gz", descriptor.read_text(encoding="utf-8"))))
@@ -563,7 +563,7 @@ def run_pretrain(
     if ssl_loss:
         loss_util.validate_loss_name(ssl_loss, registry=loss_util.SSL_LOSSES)
 
-    pretrain_json = paths.nnssl_raw_dir / "pretrain_data.json"
+    pretrain_json = paths.nnssl_raw / corpus_dataset_name_for(corpus_modality) / "pretrain_data.json"
     if not pretrain_json.is_file():
         raise FileNotFoundError(
             f"Corpus descriptor not found: {pretrain_json}. Run stage 0 with --target corpus."
