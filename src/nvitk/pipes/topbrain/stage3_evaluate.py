@@ -507,7 +507,7 @@ def submit_sge(
               help="Folds to gather in cv mode.")
 @click.option("--reference-dir", type=click.Path(path_type=Path), required=True)
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default="ta36",
+@click.option("--label-set", type=click.Choice(list(lbl.MULTICLASS_LABEL_SETS)), default="ta36",
               show_default=True)
 @click.option("--run-name", type=str, default=None)
 @click.option("--iou-threshold", type=float, default=None,

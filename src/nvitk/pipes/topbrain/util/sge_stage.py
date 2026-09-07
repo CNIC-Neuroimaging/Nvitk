@@ -243,6 +243,38 @@ def container_mount_points(extra: Sequence[tuple[Path, str]] = ()) -> tuple[str,
     )
 
 
+def to_container_path(paths: TopBrainPaths, host_path: Path | str) -> Path | None:
+    """Rewrite a host path that already lives under a fixed mount into its container path.
+
+    A cohort inside ``corpus_root`` is reachable from the job at ``/corpus/...`` and must be
+    *translated*, not bind-mounted: :func:`plan_data_binds` deliberately skips paths under a
+    fixed root, so binding it would be a no-op and the worker would be handed a host path that
+    does not exist inside the container.
+
+    Returns
+    -------
+    Path or None
+        The container-side path, or ``None`` when *host_path* is outside every fixed root -- in
+        which case it does need an identity bind.
+    """
+    inside = container_layout()
+    candidate = Path(host_path).expanduser()
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        resolved = candidate
+    for attribute in ("corpus_root", "challenge_root", "results_root", "model_root",
+                      "nnunet_raw", "nnunet_preprocessed", "nnunet_results",
+                      "nnssl_raw", "nnssl_preprocessed", "nnssl_results"):
+        root = Path(getattr(paths, attribute))
+        try:
+            relative = resolved.relative_to(root.resolve())
+        except (ValueError, OSError):
+            continue
+        return Path(getattr(inside, attribute)) / relative
+    return None
+
+
 def plan_data_binds(
     paths: TopBrainPaths, data_paths: Iterable[Path | str]
 ) -> tuple[tuple[Path, str], ...]:
@@ -449,6 +481,7 @@ __all__ = [
     "find_unbound_paths",
     "host_binds",
     "plan_data_binds",
+    "to_container_path",
     "quote_path",
     "resolve_container",
     "resolve_src_dir",

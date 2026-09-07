@@ -85,6 +85,7 @@ from nvitk.pipes.topbrain.util.paths import (
 )
 from nvitk.pipes.topbrain.util.sge_backend import sge_backend_cli_args, torch_device_for_backend
 from nvitk.pipes.topbrain.util.sge_stage import (
+    to_container_path,
     build_stage_command,
     container_layout,
     quote_path,
@@ -314,9 +315,57 @@ def _dataset_name(label_set: str) -> str:
     return f"Dataset{DATASET_IDS[label_set]:03d}_{DATASET_SUFFIXES[label_set]}"
 
 
+def stage_unlabeled(
+    input_dir: Path, destination: Path, *, pattern: str = "*.nii.gz"
+) -> list[Path]:
+    """Collect volumes under *input_dir* into a flat, nnU-Net-named folder of symlinks.
+
+    nnU-Net's predictor takes a directory and expects it flat, with ``<case>_0000.nii.gz``
+    names. A corpus tree is neither: volumes sit one or two levels down, and a cohort like
+    ``pesa_tof`` names every one of its 527 files ``TOF.nii.gz``, so a flat copy keyed on the
+    filename would collapse them into one case.
+
+    The case id therefore comes from the filename only when it already carries the ``_0000``
+    convention; otherwise it comes from the containing directory, which is what is unique in
+    these layouts. Symlinks rather than copies: this runs against corpora of hundreds of
+    volumes, and the originals are read-only anyway.
+
+    Returns
+    -------
+    list of Path
+        The staged links, sorted. Empty when nothing matched.
+    """
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    seen: dict[str, Path] = {}
+    collisions: list[str] = []
+
+    for volume in sorted(Path(input_dir).rglob(pattern)):
+        stem = volume.name[: -len(".nii.gz")]
+        case_id = stem[: -len("_0000")] if stem.endswith("_0000") else volume.parent.name
+        case_id = case_id.replace(" ", "_")
+        if case_id in seen:
+            collisions.append(case_id)
+            continue
+        seen[case_id] = volume
+        link = destination / f"{case_id}_0000.nii.gz"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(volume.resolve())
+
+    if collisions:
+        log.warning(
+            "%d volume(s) shared a case id with an earlier one and were skipped, e.g. %s.",
+            len(collisions), ", ".join(collisions[:3]),
+        )
+    log.info("Staged %d unlabeled volume(s) -> %s", len(seen), destination)
+    return sorted(destination.glob("*_0000.nii.gz"))
+
+
 def run_selftrain(
     *,
     input_dir: Path,
+    input_glob: str = "*.nii.gz",
     nnunet_raw: Path,
     nnunet_preprocessed: Path,
     nnunet_results: Path,
@@ -374,9 +423,13 @@ def run_selftrain(
     env = nnunet_env(paths, num_processes=num_processes)
     env[loss_util.LOSS_SPEC_ENV] = loss_util.loss_spec_payload(loss, {})
 
-    volumes = sorted(Path(input_dir).glob("*.nii.gz"))
+    staged_dir = base / "unlabeled"
+    volumes = stage_unlabeled(Path(input_dir), staged_dir, pattern=input_glob)
     if not volumes:
-        raise FileNotFoundError(f"No unlabeled volumes under {input_dir}.")
+        raise FileNotFoundError(
+            f"No volumes matching {input_glob!r} under {input_dir} (searched recursively)."
+        )
+    input_dir = staged_dir
     log.info(
         "stage6 | %d unlabeled volume(s) | model=%s | agreement=%s",
         len(volumes), run_name,
@@ -579,6 +632,7 @@ def _worker_argv(
     min_volume_mm3: float | None = 5.0,
     max_accepted: int | None = None,
     device: str = "cuda", num_processes: int = 3, skip_prediction: bool = False,
+    input_dir: Path | None = None, input_glob: str = "*.nii.gz",
     backend: str = "gpu", plans_identifier: str | None = None,
     configuration_name: str | None = None, **_ignored: Any,
 ) -> list[str]:
@@ -589,8 +643,10 @@ def _worker_argv(
     argv = [
         *python_module_argv("nvitk.pipes.topbrain.stage6_selftrain"),
         *sge_backend_cli_args(backend),
-        # The corpus root is where stage 0 assembled the unlabeled volumes.
-        "--input-dir", quote_path(inside.corpus_root),
+        # An explicit cohort is bind-mounted at its own path (see _user_data_paths); with none,
+        # the corpus root is where stage 0 assembled the unlabeled volumes.
+        "--input-glob", quote_path(input_glob),
+        "--input-dir", quote_path(Path(input_dir) if input_dir else inside.corpus_root),
         "--nnunet-raw", quote_path(inside.nnunet_raw),
         "--nnunet-preprocessed", quote_path(inside.nnunet_preprocessed),
         "--nnunet-results", quote_path(inside.nnunet_results),
@@ -627,10 +683,31 @@ def _worker_argv(
     return argv
 
 
+def _resolved(paths, options: dict) -> dict:
+    """*options* with ``input_dir`` expressed the way the job will see it.
+
+    A cohort under one of the fixed mounts is translated to its container path; anything else
+    keeps its host path and is identity-bound by :func:`_user_data_paths`.
+    """
+    raw = options.get("input_dir")
+    if not raw:
+        return options
+    inside = to_container_path(paths, raw)
+    return {**options, "input_dir": inside} if inside is not None else options
+
+
+def _user_data_paths(**options) -> list[Path]:
+    """``--unlabeled-dir`` when it is outside the fixed mounts, so it gets bind-mounted."""
+    raw = options.get("input_dir")
+    return [Path(raw)] if raw else []
+
+
 def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **options) -> str:
     """Host shell command for the stage 6 SGE task."""
     return build_stage_command(
-        "stage6", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        "stage6", _worker_argv(**_resolved(paths, options)), paths=paths,
+        container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**_resolved(paths, options)),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
@@ -643,7 +720,9 @@ def submit_sge(
 ) -> str:
     """Emit or submit the stage 6 SGE job."""
     return submit_stage_job(
-        "stage6", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        "stage6", _worker_argv(**_resolved(paths, options)), paths=paths,
+        container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**_resolved(paths, options)),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
@@ -660,7 +739,7 @@ def submit_sge(
 @click.option("--nnunet-preprocessed", type=click.Path(path_type=Path), required=True)
 @click.option("--nnunet-results", type=click.Path(path_type=Path), required=True)
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default="ta36",
+@click.option("--label-set", type=click.Choice(list(lbl.MULTICLASS_LABEL_SETS)), default="ta36",
               show_default=True)
 @click.option("--loss", type=str, default=None)
 @click.option("--folds", type=str, default="0,1,2,3,4", show_default=True)
@@ -701,12 +780,14 @@ def main(
     agreement_threshold: float | None, repair_gaps_mm: float | None,
     min_volume_mm3: float, no_postprocess: bool, max_accepted: int | None,
     device: str | None, num_processes: int, skip_prediction: bool, backend: str = "gpu",
+    input_glob: str = "*.nii.gz",
 ) -> None:
     """CLI entry point: pseudo-label an unlabeled cohort and filter it."""
     from nvitk.pipes.topbrain.stage2_train import parse_folds
 
     Logger()
     run_selftrain(
+        input_glob=input_glob,
         input_dir=input_dir, nnunet_raw=nnunet_raw, nnunet_preprocessed=nnunet_preprocessed,
         nnunet_results=nnunet_results, results_root=results_root, label_set=label_set,
         loss=loss, folds=parse_folds(folds), plans_identifier=plans_identifier,

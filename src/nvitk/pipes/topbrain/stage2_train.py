@@ -48,6 +48,7 @@ from nvitk.core.logger import Logger
 from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.util import losses as loss_util
+from nvitk.pipes.topbrain.util import lateral as lateral_util
 from nvitk.pipes.topbrain.util import nnunet_run
 from nvitk.pipes.topbrain.util import sampling as sampling_util
 from nvitk.pipes.topbrain.util import tensorboard as tb
@@ -354,6 +355,7 @@ def run_train(
     sampling: str = "default",
     sampling_temperature: float = sampling_util.DEFAULT_TEMPERATURE,
     sampling_oversample: float | None = None,
+    lateral_swap: bool = False,
 ) -> Path:
     """Preprocess against the pre-training plan and fine-tune; returns the results directory.
 
@@ -411,6 +413,11 @@ def run_train(
     )
     if num_epochs is not None:
         env[loss_util.EPOCHS_ENV] = str(int(num_epochs))
+    if lateral_swap:
+        # The trainer needs the label set to build the R/L swap map; nnU-Net's CLI has no way to
+        # pass it, so it travels out of band like the loss and the sampling spec.
+        env[lateral_util.LATERAL_SWAP_ENV] = "1"
+        env[lateral_util.LABEL_SET_ENV] = label_set
 
     log.info(
         "stage2 | dataset=%s bundle=%s arch=%s trainer=%s loss=%s mode=%s folds=%s sampling=%s",
@@ -563,6 +570,7 @@ def run_train(
         "patched_plans": patched,
         "plans_from_label_set": plans_from_label_set,
         "pretrained_weights": str(pretrained_weights) if pretrained_weights else None,
+        "lateral_swap": lateral_swap,
         "sampling": sampling, "sampling_temperature": sampling_temperature,
         "sampling_oversample": sampling_oversample,
         "folds": [str(f) for f in folds], "num_epochs": num_epochs,
@@ -735,6 +743,8 @@ def _worker_argv(**o) -> list[str]:
             argv.extend(["--sampling-temperature", str(float(o["sampling_temperature"]))])
         if o.get("sampling_oversample") is not None:
             argv.extend(["--sampling-oversample", str(float(o["sampling_oversample"]))])
+    if o.get("lateral_swap"):
+        argv.append("--lateral-swap")
     if o.get("tensorboard"):
         # No --tensorboard-dir: the worker's results_root is already the container-side mount,
         # so the default layout resolves to the same shared tree the workstation sees.
@@ -804,7 +814,7 @@ def submit_sge(
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
 @click.option("--bundle", type=click.Path(path_type=Path), required=True,
               help="Stage 1 bundle directory.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]), default="ta36",
+@click.option("--label-set", type=click.Choice(list(lbl.ALL_LABEL_SETS)), default="ta36",
               show_default=True)
 @click.option("--pretrain-name", type=str, default=None,
               help="Name embedded in the generated plans (default: the bundle directory name).")
@@ -838,13 +848,18 @@ def submit_sge(
 @click.option("--skip-preprocessing", is_flag=True, default=False)
 @click.option("--plan-only", is_flag=True, default=False)
 @click.option("--continue-training", is_flag=True, default=False)
+@click.option("--lateral-swap", is_flag=True, default=False,
+              help="Mirror left/right and swap the R-/L- label ids with it. Plain mirroring is "
+                   "wrong here and stays off; swapping the ids makes it correct, and roughly "
+                   "doubles a single-modality cohort. Declines if the left-right axis cannot "
+                   "be measured from the data.")
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
-@click.option("--plans-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]),
+@click.option("--plans-from-label-set", type=click.Choice(list(lbl.ALL_LABEL_SETS)),
               default=None,
               help="Borrow this label set's ptPlans instead of planning from this dataset's own "
                    "fingerprint. Required for two runs to be weight-compatible.")
-@click.option("--init-from-label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct", "binary_mr"]),
+@click.option("--init-from-label-set", type=click.Choice(list(lbl.ALL_LABEL_SETS)),
               default=None,
               help="Initialise from that label set's finished stage 2 run (everything but the "
                    "segmentation heads). Resolved from its provenance.")

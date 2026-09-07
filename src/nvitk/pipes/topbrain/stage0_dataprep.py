@@ -76,6 +76,8 @@ from nvitk.pipes.topbrain.util import sampling
 from nvitk.pipes.topbrain.util.nnssl_env import apply_nnssl_env
 from nvitk.pipes.topbrain.util.paths import (
     CORPUS_DATASET_ID,
+    corpus_dataset_id,
+    corpus_dataset_name_for,
     DATASET_IDS,
     DATASET_SUFFIXES,
     STAGE0_DATAPREP_DIR,
@@ -663,6 +665,7 @@ def build_corpus(
     paths: TopBrainPaths,
     sources: Sequence[str],
     harmonize: bool,
+    corpus_modality: str = "both",
     overwrite: bool,
     workers: int,
 ) -> tuple[Path, dict[str, Any]]:
@@ -684,8 +687,8 @@ def build_corpus(
     built, volumes = corpus_util.build_collection(
         parsed,
         corpus_root=paths.corpus_root,
-        collection_index=CORPUS_DATASET_ID,
-        collection_name=paths.corpus_dataset_name,
+        collection_index=corpus_dataset_id(corpus_modality),
+        collection_name=corpus_dataset_name_for(corpus_modality),
         harmonize=harmonize,
         overwrite=overwrite,
         workers=workers,
@@ -742,6 +745,7 @@ def run_dataprep(
     ct_context_window: Sequence[float] | None = None,
     mr_context_percentiles: Sequence[float] | None = None,
     harmonize_corpus: bool = True,
+    corpus_modality: str = "both",
     overwrite: bool = False,
     workers: int = 1,
 ) -> dict[str, Any]:
@@ -759,6 +763,23 @@ def run_dataprep(
         mr_context_percentiles = tuple(
             mr_context_percentiles or DEFAULT_MR_CONTEXT_PERCENTILES
         )
+
+    # A modality-restricted label set carries its own filter, and it outranks --modality. The
+    # default is 'both', so trusting the flag would let `--label-set ta36_ct` quietly build a
+    # mixed dataset under a CT-only name -- the masks live in the shared TA36 directory, so
+    # nothing downstream would notice until the model was scored on the wrong cohort.
+    declared = lbl.LABEL_SET_MODALITIES.get(label_set, ("ct", "mr"))
+    if len(declared) == 1:
+        required = declared[0]
+        if modality not in ("both", required):
+            raise ValueError(
+                f"--label-set {label_set!r} covers {required.upper()} only, but --modality "
+                f"{modality!r} was given. Drop --modality, or use a label set that covers it."
+            )
+        if modality == "both":
+            log.info("Label set %r is %s-only; restricting the cohort accordingly.",
+                     label_set, required.upper())
+        modality = required
 
     targets = parse_targets(target)
     if "binary" in targets and not binary_sources:
@@ -846,6 +867,7 @@ def run_dataprep(
     if "corpus" in targets:
         _, corpus_meta = build_corpus(
             paths=paths, sources=corpus_sources, harmonize=harmonize_corpus,
+            corpus_modality=corpus_modality,
             overwrite=overwrite, workers=workers,
         )
         provenance["corpus"] = corpus_meta
@@ -881,6 +903,7 @@ def _worker_argv(**options) -> list[str]:
         "--target", options.get("target", "train"),
         "--label-set", options.get("label_set", "ta36"),
         "--modality", options.get("modality", "both"),
+        "--corpus-modality", str(options.get("corpus_modality", "both")),
         "--num-folds", str(int(options.get("num_folds") or cfg.DEFAULT_NUM_FOLDS)),
         "--seed", str(int(options.get("seed") or cfg.DEFAULT_FOLD_SEED)),
         "--workers", str(int(options.get("workers", 1))),
@@ -974,8 +997,7 @@ def submit_sge(
                    "'all' = train,corpus,binary. Use 'train,binary' when the corpus already "
                    "exists.")
 @click.option("--label-set",
-              type=click.Choice(["ta36", "v1_ct", "v1_mr", "binary", "binary_ct",
-                                 "binary_mr"]), default="ta36",
+              type=click.Choice(list(lbl.ALL_LABEL_SETS)), default="ta36",
               show_default=True)
 @click.option("--modality", type=click.Choice(["both", "ct", "mr"]), default="both",
               show_default=True)
@@ -1003,6 +1025,11 @@ def submit_sge(
 @click.option("--mr-context-percentiles", type=float, nargs=2, default=None,
               help="Percentiles for the MR half of the context channel (default 0 100). "
                    "Implied by --ct-context-window: nnU-Net needs equal channel counts.")
+@click.option("--corpus-modality", type=click.Choice(["both", "ct", "mr"]), default="both",
+              show_default=True,
+              help="Which corpus collection to build. Each modality is a separate nnssl "
+                   "collection (511/512/513), so building a CT-only corpus for a "
+                   "domain-adaptive run leaves the mixed one intact.")
 @click.option("--no-harmonize-corpus", is_flag=True, default=False,
               help="Reference corpus volumes as-is. Only safe for a single-modality corpus.")
 @click.option("--overwrite", is_flag=True, default=True)
@@ -1016,7 +1043,7 @@ def main(
     ct_window: tuple[float, float] | None, mr_percentiles: tuple[float, float] | None,
     ct_context_window: tuple[float, float] | None,
     mr_context_percentiles: tuple[float, float] | None,
-    no_harmonize_corpus: bool, overwrite: bool, workers: int,
+    no_harmonize_corpus: bool, overwrite: bool, workers: int, corpus_modality: str = "both",
 ) -> None:
     """CLI entry point: prepare training data and/or a pre-training corpus."""
     Logger()
@@ -1027,6 +1054,7 @@ def main(
         results_root=results_root, model_root=results_root, corpus_root=corpus_root,
     )
     run_dataprep(
+        corpus_modality=corpus_modality,
         paths=paths, target=target, label_set=label_set, modality=modality,
         extra_train=extra_train, extra_train_only=extra_train_only,
         binary_sources=binary_sources, include_challenge=not no_challenge,

@@ -57,6 +57,8 @@ _IMAGE_RE = re.compile(r"^topcow_(?P<modality>ct|mr)_(?P<pid>\d+)_0000\.nii\.gz$
 #: MSD/AMOS ids that commonly share an ``nnUNet_raw``.
 DATASET_IDS: dict[str, int] = {
     "ta36": 501, "v1_ct": 502, "v1_mr": 503,
+    # TA36 restricted to one modality — its own dataset so it never overwrites 501's mixed one.
+    "ta36_ct": 507, "ta36_mr": 508,
     # One binary dataset per multi-class set it seeds — see labels.BINARY_LABEL_SET_FOR.
     "binary": 504, "binary_ct": 505, "binary_mr": 506,
 }
@@ -66,6 +68,8 @@ DATASET_SUFFIXES: dict[str, str] = {
     "ta36": "TopBrainTA36",
     "v1_ct": "TopBrainV1CT",
     "v1_mr": "TopBrainV1MR",
+    "ta36_ct": "TopBrainTA36CT",
+    "ta36_mr": "TopBrainTA36MR",
     "binary": "TopBrainVesselBinary",
     "binary_ct": "TopBrainVesselBinaryCT",
     "binary_mr": "TopBrainVesselBinaryMR",
@@ -74,6 +78,34 @@ DATASET_SUFFIXES: dict[str, str] = {
 #: nnssl collection id/name for the self-supervised pre-training corpus.
 CORPUS_DATASET_ID: int = 511
 CORPUS_DATASET_SUFFIX: str = "TopBrainCorpus"
+
+#: One collection per corpus modality. A single slot made a CT-only corpus overwrite the mixed
+#: one, so a domain-adaptive CT run and the mixed run could not coexist -- the same
+#: single-occupancy problem the binary label set had. ``both`` keeps 511 so nothing already
+#: built has to be regenerated.
+CORPUS_DATASET_IDS: dict[str, int] = {"both": 511, "ct": 512, "mr": 513}
+
+CORPUS_DATASET_SUFFIXES: dict[str, str] = {
+    "both": CORPUS_DATASET_SUFFIX,
+    "ct": f"{CORPUS_DATASET_SUFFIX}CT",
+    "mr": f"{CORPUS_DATASET_SUFFIX}MR",
+}
+
+
+def corpus_dataset_id(modality: str = "both") -> int:
+    """nnssl collection id for a corpus restricted to *modality*."""
+    try:
+        return CORPUS_DATASET_IDS[str(modality)]
+    except KeyError:
+        raise ValueError(
+            f"Unknown corpus modality {modality!r}; expected one of "
+            f"{', '.join(CORPUS_DATASET_IDS)}."
+        ) from None
+
+
+def corpus_dataset_name_for(modality: str = "both") -> str:
+    """nnssl collection folder name for a corpus restricted to *modality*."""
+    return f"Dataset{corpus_dataset_id(modality):03d}_{CORPUS_DATASET_SUFFIXES[str(modality)]}"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage output subdirectories (under ``results_root``)
@@ -294,8 +326,12 @@ class TopBrainPaths:
 
     @property
     def corpus_dataset_name(self) -> str:
-        """nnssl collection folder name, e.g. ``Dataset511_TopBrainCorpus``."""
-        return f"Dataset{CORPUS_DATASET_ID:03d}_{CORPUS_DATASET_SUFFIX}"
+        """nnssl collection folder name for the mixed corpus, ``Dataset511_TopBrainCorpus``."""
+        return corpus_dataset_name_for("both")
+
+    def corpus_dataset_name_for(self, modality: str = "both") -> str:
+        """nnssl collection folder name for a corpus restricted to *modality*."""
+        return corpus_dataset_name_for(modality)
 
     @property
     def nnssl_raw_dir(self) -> Path:
@@ -416,6 +452,10 @@ def layout_cluster(**overrides: Path | None) -> TopBrainPaths:
 
 __all__ = [
     "CORPUS_DATASET_ID",
+    "CORPUS_DATASET_IDS",
+    "CORPUS_DATASET_SUFFIXES",
+    "corpus_dataset_id",
+    "corpus_dataset_name_for",
     "CORPUS_DATASET_SUFFIX",
     "DATASET_IDS",
     "DATASET_SUFFIXES",

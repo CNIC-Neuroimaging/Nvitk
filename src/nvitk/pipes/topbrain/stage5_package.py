@@ -32,6 +32,7 @@ import click
 import nvitk
 from nvitk.core.logger import Logger
 from nvitk.pipes.topbrain import config as cfg
+from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.stage2_train import resolve_trained_run
 from nvitk.pipes.topbrain.util import losses as loss_util
 from nvitk.pipes.topbrain.util.paths import DATASET_IDS, DATASET_SUFFIXES, STAGE5_PACKAGE_DIR
@@ -299,7 +300,7 @@ def submit_sge(
 @click.command("topbrain-stage5-package")
 @click.option("--nnunet-results", type=click.Path(path_type=Path), required=True)
 @click.option("--results-root", type=click.Path(path_type=Path), required=True)
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default="ta36",
+@click.option("--label-set", type=click.Choice(list(lbl.MULTICLASS_LABEL_SETS)), default="ta36",
               show_default=True)
 @click.option("--loss", type=str, default=None)
 @click.option("--architecture", type=str, default=None,

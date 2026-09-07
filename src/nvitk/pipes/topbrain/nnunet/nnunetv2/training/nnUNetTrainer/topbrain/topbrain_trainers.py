@@ -40,6 +40,7 @@ import os
 import numpy as np
 import torch
 from batchgenerators.utilities.file_and_folder_operations import join
+from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.nnUNetTrainer import nnUNetTrainer as nnunet_trainer_module
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
@@ -48,6 +49,7 @@ from nnunetv2.training.nnUNetTrainer.pretraining.pretrainedTrainer import (
     PretrainedTrainer_Primus,
 )
 
+from nvitk.pipes.topbrain.util import lateral as lateral_util
 from nvitk.pipes.topbrain.util import sampling as sampling_util
 from nvitk.pipes.topbrain.util.losses import (
     EPOCHS_ENV,
@@ -180,7 +182,73 @@ class _TopBrainSamplingMixin:
         )
         return weights, frequencies
 
+    def _lateral_config(self) -> dict | None:
+        """Axis and swap map for the lateral augmentation, or ``None`` when it is off/unreadable.
+
+        The axis is measured from the **preprocessed** segmentations the loader will serve, not
+        from the raw NIfTIs: preprocessing applies the plan's ``transpose_forward``, so the
+        acquisition orientation says nothing about which array axis the trainer sees.
+        """
+        if hasattr(self, "_topbrain_lateral"):
+            return self._topbrain_lateral
+        self._topbrain_lateral = None
+        if not os.environ.get(lateral_util.LATERAL_SWAP_ENV):
+            return None
+        label_set = os.environ.get("TOPBRAIN_LABEL_SET", "")
+        mapping = lateral_util.swap_map(label_set) if label_set else {}
+        if not mapping:
+            self.print_to_log_file(
+                "Lateral swap requested but no mirrored label pairs are defined for "
+                f"{label_set!r}; training without it."
+            )
+            return None
+        if self.dataset_class is None:
+            from nnunetv2.training.dataloading.utils import infer_dataset_class
+
+            self.dataset_class = infer_dataset_class(self.preprocessed_dataset_folder)
+        train_identifiers, _ = self.do_split()
+        loader = self.dataset_class(self.preprocessed_dataset_folder, list(train_identifiers))
+        axis = lateral_util.detect_flip_axis(
+            lateral_util.sample_segmentations(loader, train_identifiers),
+            mapping, label_set=label_set,
+        )
+        if axis is None:
+            self.print_to_log_file(
+                "Lateral swap: the left-right axis could not be measured unambiguously; "
+                "training without it rather than mirroring the wrong axis."
+            )
+            return None
+        self.print_to_log_file(
+            f"Lateral swap ON: mirroring axis {axis} and swapping {len(mapping) // 2} "
+            f"left/right label pair(s), p={lateral_util.DEFAULT_PROBABILITY}."
+        )
+        self._topbrain_lateral = {"axis": axis, "mapping": mapping,
+                                  "p": lateral_util.DEFAULT_PROBABILITY}
+        return self._topbrain_lateral
+
     def get_dataloaders(self):
+        """Build the loaders with the lateral augmentation active, if it is configured."""
+        global _ACTIVE_LATERAL_SWAP
+        _ACTIVE_LATERAL_SWAP = self._lateral_config()
+        try:
+            return self._get_dataloaders_sampled()
+        finally:
+            _ACTIVE_LATERAL_SWAP = None
+
+    @staticmethod
+    def get_training_transforms(*args, **kwargs):
+        """nnU-Net's training transforms, plus the lateral swap when one is configured."""
+        transforms = nnunet_trainer_module.nnUNetTrainer.get_training_transforms(*args, **kwargs)
+        active = _ACTIVE_LATERAL_SWAP
+        if active is not None:
+            # Appended after nnU-Net's own spatial and intensity transforms: it is a relabelling
+            # as much as a flip, and running it last keeps the mask it rewrites the final one.
+            transforms.transforms.append(
+                LateralSwapTransform(active["axis"], active["mapping"], active["p"])
+            )
+        return transforms
+
+    def _get_dataloaders_sampled(self):
         """nnU-Net's dataloaders, with the training one built rare-class-aware.
 
         Implemented by swapping the ``nnUNetDataLoader`` name that
@@ -233,6 +301,52 @@ class _TopBrainSamplingMixin:
             return super().get_dataloaders()
         finally:
             nnunet_trainer_module.nnUNetDataLoader = original
+
+
+#: Set by :meth:`_TopBrainSamplingMixin.get_dataloaders` for the duration of the base call, and
+#: read by the static ``get_training_transforms``. nnU-Net makes that method a ``staticmethod``,
+#: so there is no ``self`` to carry the configuration -- the same reason the dataloader swap
+#: above goes through a module-level name.
+_ACTIVE_LATERAL_SWAP: dict | None = None
+
+
+class LateralSwapTransform(BasicTransform):
+    """Mirror left to right and relabel, so laterality survives the flip.
+
+    Plain mirroring is wrong for this pipeline and is disabled: it produces a volume whose
+    correct labels are the mirrored *class ids*, not the mirrored mask. Swapping the ids as well
+    makes the pair consistent again, and a mirrored head is anatomically plausible -- so this is
+    a genuine doubling of a cohort that is 25 cases per modality, not a distortion of it.
+    """
+
+    def __init__(self, axis: int, mapping: dict, p: float = lateral_util.DEFAULT_PROBABILITY):
+        super().__init__()
+        self.axis, self.mapping, self.p = int(axis), dict(mapping), float(p)
+
+    def get_parameters(self, **data_dict) -> dict:
+        return {"apply": np.random.uniform() < self.p}
+
+    def _flip(self, tensor):
+        """Flip along the spatial axis, counting past the leading channel dimension."""
+        return torch.flip(tensor, dims=(self.axis + 1,))
+
+    def _apply_to_image(self, img, **params):
+        return self._flip(img) if params["apply"] else img
+
+    def _apply_to_segmentation(self, segmentation, **params):
+        if not params["apply"]:
+            return segmentation
+        flipped = self._flip(segmentation)
+        # The lookup table is built once per call rather than chaining replacements: swapping a
+        # value and then swapping its partner back is the classic way to get an identity.
+        table = torch.arange(
+            int(max(int(flipped.max()), max(self.mapping))) + 1, dtype=flipped.dtype,
+            device=flipped.device,
+        )
+        for source, target in self.mapping.items():
+            if source < len(table):
+                table[source] = target
+        return table[flipped.long()].to(flipped.dtype)
 
 
 class _TopBrainLossMixin(_TopBrainSamplingMixin):

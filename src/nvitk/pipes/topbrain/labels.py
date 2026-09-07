@@ -222,6 +222,43 @@ _NEIGHBOUR_FILES: dict[str, str] = {
 }
 
 
+#: TA36 restricted to a single modality. Same 36 classes and the same release masks as ``ta36``;
+#: what differs is which cases enter the dataset. They exist as separate label sets because a
+#: label set is what picks the nnU-Net dataset id, and a CT-only TA36 run has to sit *beside*
+#: the mixed one rather than overwrite it -- the same reason the binary set was split by
+#: modality.
+TA36_MODALITY_SETS: dict[str, str] = {"ta36_ct": "ct", "ta36_mr": "mr"}
+
+
+def _register_modality_variants() -> None:
+    """Give each entry of :data:`TA36_MODALITY_SETS` the TA36 tables and its own binary teacher.
+
+    Everything is inherited from ``ta36`` except the modality filter: the classes, the release
+    directory the masks come from, and the side-road list are the same anatomy either way.
+    """
+    for name, modality in TA36_MODALITY_SETS.items():
+        LABEL_SET_DIRS[name] = LABEL_SET_DIRS["ta36"]
+        LABEL_SET_JSONS[name] = LABEL_SET_JSONS["ta36"]
+        LABEL_SET_MODALITIES[name] = (modality,)
+        _LABEL_MAPS[name] = TA36_LABELS
+        SIDEROAD_LABELS[name] = SIDEROAD_LABELS["ta36"]
+        # The binary teacher for a modality-restricted TA36 model is the modality-restricted
+        # binary model: same images, same vessel-vs-background task. Sharing it means a CT-only
+        # TA36 run reuses the binary_ct model already trained instead of training its twin.
+        BINARY_LABEL_SET_FOR[name] = f"binary_{modality}"
+
+
+_register_modality_variants()
+
+#: Multi-class label sets, in a stable order. The CLIs take their ``--label-set`` choices from
+#: here rather than repeating a literal: nine copies of the same list is how a new label set ends
+#: up accepted by four commands and rejected by the other five.
+MULTICLASS_LABEL_SETS: tuple[str, ...] = ("ta36", "ta36_ct", "ta36_mr", "v1_ct", "v1_mr")
+
+#: Every label set a CLI may be pointed at, including the derived binary ones.
+ALL_LABEL_SETS: tuple[str, ...] = MULTICLASS_LABEL_SETS + tuple(BINARY_SET_MODALITY)
+
+
 @lru_cache(maxsize=None)
 def is_binary(label_set: str) -> bool:
     """Whether *label_set* is one of the derived single-class vessel sets."""
@@ -282,7 +319,9 @@ def valid_neighbours(label_set: str) -> dict[int, tuple[int, ...]]:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return {int(k): tuple(int(v) for v in values) for k, values in raw.items()}
 
-    if label_set != "ta36":
+    # The modality-restricted TA36 sets share TA36's classes exactly, so they share its derived
+    # table: restricting which *cases* enter a dataset does not change which labels may touch.
+    if str(label_set) not in ("ta36", *TA36_MODALITY_SETS):
         raise ValueError(f"Unknown label set {label_set!r}.")
 
     shared: dict[int, set[int]] = {}
@@ -370,6 +409,9 @@ def nnunet_labels(label_set: str) -> dict[str, int]:
 
 
 __all__ = [
+    "ALL_LABEL_SETS",
+    "MULTICLASS_LABEL_SETS",
+    "TA36_MODALITY_SETS",
     "DATA_DIR",
     "HD95_UPPER_BOUND",
     "IOU_THRESHOLD",

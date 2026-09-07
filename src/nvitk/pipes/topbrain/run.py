@@ -125,7 +125,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             extra_train_only=list(o["extra_train_only"]),
             binary_sources=list(o["binary_sources"]),
             include_challenge=o["include_challenge"],
-            corpus_sources=list(o["corpus_sources"]), num_folds=o["num_folds"], seed=o["seed"],
+            corpus_sources=list(o["corpus_sources"]), corpus_modality=o["corpus_modality"], num_folds=o["num_folds"], seed=o["seed"],
             overwrite=o["overwrite"], workers=o["workers"], backend=o["backend"],
             ct_context_window=o["ct_context_window"],
             mr_context_percentiles=o["mr_context_percentiles"],
@@ -140,6 +140,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             device=o["device"], num_processes=o["num_processes"],
             export_model=o["export_model"], overwrite=o["overwrite"], backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
+            corpus_modality=o["corpus_modality"],
             skip_planning=o["ssl_skip_planning"],
             skip_preprocessing=o["ssl_skip_preprocessing"],
             continue_training=o["ssl_continue"],
@@ -157,7 +158,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             backend=o["backend"],
             tensorboard=o["tensorboard"], tensorboard_interval=o["tensorboard_interval"],
             sampling=o["sampling"], sampling_temperature=o["sampling_temperature"],
-            sampling_oversample=o["sampling_oversample"],
+            sampling_oversample=o["sampling_oversample"], lateral_swap=o["lateral_swap"],
             init_from_label_set=(
                 lbl_mod.binary_label_set_for(o["label_set"]) if o["init_from_binary"] else None
             ),
@@ -219,6 +220,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             # As for stages 4-5: the plans name is only knowable after stage 2 has run.
             plans_identifier=None, configuration_name=None,
             checkpoint_name="checkpoint_final.pth", modality=o["pseudo_modality"],
+            input_dir=o["unlabeled_dir"], input_glob=o["unlabeled_glob"],
             max_components=o["pseudo_max_components"],
             max_fragmented_classes=o["pseudo_max_fragmented"],
             max_invalid_neighbours=o["pseudo_max_invalid"],
@@ -312,11 +314,13 @@ def _local_runners(active: Any, options: dict[str, dict[str, Any]]) -> dict[str,
 
     def _selftrain() -> Any:
         """Stage 6 locally, pseudo-labelling the unlabeled corpus."""
+        opts = _strip(st.STAGE_SELFTRAIN)
+        # No cohort named: the corpus root is where stage 0 assembled the unlabeled volumes.
+        opts["input_dir"] = opts.get("input_dir") or active.corpus_root
         return stage6_selftrain.run_selftrain(
-            input_dir=active.corpus_root,
             nnunet_raw=active.nnunet_raw, nnunet_preprocessed=active.nnunet_preprocessed,
             nnunet_results=active.nnunet_results, results_root=active.results_root,
-            **_strip(st.STAGE_SELFTRAIN)
+            **opts
         )
 
     return {
@@ -572,7 +576,7 @@ def _submit_via_login_node(
 # ---- selection -------------------------------------------------------------
 @click.option("--stages", type=str, default=st.DEFAULT_STAGES, show_default=True,
               help="Comma-separated stage ids or aliases.")
-@click.option("--label-set", type=click.Choice(["ta36", "v1_ct", "v1_mr"]), default=None,
+@click.option("--label-set", type=click.Choice(list(lbl_mod.MULTICLASS_LABEL_SETS)), default=None,
               help="Multi-class label set. The binary dataset is derived, never selected here.")
 @click.option("--list-losses", is_flag=True, default=False, help="Print the losses and exit.")
 @click.option("--list-checkpoints", is_flag=True, default=False,
@@ -661,6 +665,10 @@ def _submit_via_login_node(
 @click.option("--batch-size", type=int, default=None)
 @click.option("--num-epochs", type=int, default=None)
 @click.option("--num-gpus", type=int, default=1, show_default=True)
+@click.option("--lateral-swap", is_flag=True, default=False,
+              help="Mirror left/right and swap the R-/L- label ids with it — a valid doubling "
+                   "of the cohort, unlike plain mirroring, which stays off. Most useful for the "
+                   "single-modality models, where the cohort is 25 cases.")
 @click.option("--from-scratch", is_flag=True, default=False,
               help="Same architecture, random initialisation — the control run.")
 @click.option("--continue-training", is_flag=True, default=False,
@@ -702,6 +710,12 @@ def _submit_via_login_node(
 @click.option("--repair-close-radius", type=int, default=0, show_default=True,
               help="Stage 4: per-class closing before gap bridging.")
 # ---- stage 6: self-training ---------------------------------------------------
+@click.option("--unlabeled-dir", type=click.Path(path_type=Path), default=None,
+              help="Stage 6: cohort of unlabeled volumes to pseudo-label. Searched recursively; "
+                   "defaults to the whole corpus root.")
+@click.option("--unlabeled-glob", type=str, default="*.nii.gz", show_default=True,
+              help="Stage 6: glob under --unlabeled-dir. Narrows a mixed cohort to one "
+                   "modality, e.g. '*_ct_*.nii.gz'.")
 @click.option("--pseudo-modality", type=click.Choice(["mr", "ct"]), default="mr",
               show_default=True, help="Stage 6: modality of the unlabeled cohort.")
 @click.option("--pseudo-agreement", type=float, default=None,
@@ -739,6 +753,11 @@ def _submit_via_login_node(
                    "as they are on disk. Needed to relaunch one fold of a run whose other folds "
                    "are still training — without it the job re-plans, and regenerating the plans "
                    "resets the patch size under the folds already running.")
+@click.option("--corpus-modality", type=click.Choice(["both", "ct", "mr"]), default="both",
+              show_default=True,
+              help="Corpus collection for stages 0 and 1. Each modality is its own nnssl "
+                   "collection, so a CT-only domain-adaptive pre-training and the mixed one "
+                   "can coexist instead of overwriting each other.")
 @click.option("--parallel-folds", is_flag=True, default=False,
               help="SGE only: train each fold as its own job instead of one job that walks the "
                    "folds in sequence. A preparation job plans and preprocesses once, the fold "
@@ -863,6 +882,40 @@ def main(**kw: Any) -> None:
         submit, challenge_root=kw["challenge_root"], results_root=kw["results_root"]
     )
 
+    if st.STAGE_BINARY in selected:
+        # One binary model can seed several multi-class label sets -- ta36_ct and v1_ct both
+        # learn from binary_ct, because it is the same vessel-vs-background task on the same
+        # images. That sharing is deliberate, but it means re-running stage2a writes into a run
+        # directory another experiment already depends on, and the marker recording how that
+        # model was trained goes with it.
+        _binary_set = lbl_mod.binary_label_set_for(label_set)
+        try:
+            # Not stage2_train.run_checkpoint: that reads the path the marker recorded, which is
+            # the container's (/nnunet/results/...) and exists only inside the job. discover_models
+            # recomposes it against the results root this host can actually see.
+            from nvitk.pipes.topbrain.util.models import discover_models
+
+            _existing = next(
+                (m.run_dir(active.nnunet_results)
+                 for m in discover_models(active.results_root)
+                 if m.label_set == _binary_set and m.available_folds(active.nnunet_results)),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - absent, unreadable, or not visible from this host
+            _existing = None
+        if _existing is not None:
+            _sharers = sorted(
+                k for k, v in lbl_mod.BINARY_LABEL_SET_FOR.items() if v == _binary_set
+            )
+            log.warning(
+                "stage2a targets %r, which is ALREADY TRAINED: %s\n"
+                "    Re-running it overwrites that run and its provenance. Label set(s) seeded "
+                "from it: %s.\n"
+                "    To keep it, drop stage2a from --stages and pass --init-from-binary — "
+                "stage 2 resolves the existing model from its marker.",
+                _binary_set, _existing, ", ".join(_sharers),
+            )
+
     options = _stage_options(
         label_set=label_set, loss=loss, backend=backend, device=device,
         folds=parse_folds(folds_spec),
@@ -876,7 +929,7 @@ def main(**kw: Any) -> None:
         init_from_binary=init_from_binary,
         **{k: kw[k] for k in (
             "dataprep_target", "modality", "extra_train", "extra_train_only", "binary_sources",
-            "corpus_sources", "num_folds", "seed",
+            "corpus_sources", "corpus_modality", "num_folds", "seed",
             "ct_context_window", "mr_context_percentiles",
             "pretrain_source", "checkpoint_name", "bundle_name", "ssl_loss", "ssl_loss_config",
             "ssl_patch_size", "ssl_batch_size", "ssl_epochs", "ssl_lr", "init_checkpoint_name",
@@ -887,10 +940,10 @@ def main(**kw: Any) -> None:
             "num_epochs", "num_gpus", "tensorboard", "tensorboard_interval", "compare_to",
             "sampling", "sampling_oversample",
             "binary_loss", "binary_epochs",
-            "from_scratch", "continue_training",
+            "from_scratch", "continue_training", "lateral_swap",
             "min_volume_mm3", "largest_only", "num_processes", "workers",
             "repair_gaps_mm", "repair_adjacency", "repair_lateral", "repair_close_radius",
-            "pseudo_modality", "pseudo_agreement", "pseudo_max_components",
+            "unlabeled_dir", "unlabeled_glob", "pseudo_modality", "pseudo_agreement", "pseudo_max_components",
             "pseudo_max_fragmented", "pseudo_max_invalid", "pseudo_volume_range",
             "pseudo_max_accepted",
             "overwrite",

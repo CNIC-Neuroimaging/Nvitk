@@ -56,6 +56,8 @@ from nvitk.pipes.topbrain.util import tensorboard as tb
 from nvitk.pipes.topbrain.util.nnssl_env import apply_nnssl_env
 from nvitk.pipes.topbrain.util.paths import (
     CORPUS_DATASET_ID,
+    corpus_dataset_id,
+    corpus_dataset_name_for,
     STAGE1_PRETRAIN_DIR,
     TopBrainPaths,
 )
@@ -93,9 +95,14 @@ FINGERPRINT_FILE: str = "dataset_fingerprint.json"
 PLANS_FILE: str = "nnsslPlans.json"
 
 
-def corpus_preprocessed_dir(paths: TopBrainPaths) -> Path:
-    """``<nnssl_preprocessed>/Dataset511_TopBrainCorpus`` — where planning and preprocessing land."""
-    return Path(paths.nnssl_preprocessed) / paths.corpus_dataset_name
+def corpus_preprocessed_dir(paths: TopBrainPaths, modality: str = "both") -> Path:
+    """``<nnssl_preprocessed>/Dataset5XX_TopBrainCorpus*`` — where planning and preprocessing land.
+
+    One directory per corpus modality: a CT-only corpus is a different collection, not a
+    rebuild of the mixed one, so a domain-adaptive CT pre-training and the mixed pre-training
+    can exist side by side instead of overwriting each other's preprocessed data.
+    """
+    return Path(paths.nnssl_preprocessed) / corpus_dataset_name_for(modality)
 
 
 #: Sidecar recording which corpus the preprocessed data was built from. Without it, "already
@@ -103,7 +110,7 @@ def corpus_preprocessed_dir(paths: TopBrainPaths) -> Path:
 CORPUS_SIGNATURE_FILE: str = "topbrain_corpus_signature.json"
 
 
-def corpus_signature(paths: TopBrainPaths) -> str | None:
+def corpus_signature(paths: TopBrainPaths, modality: str = "both") -> str | None:
     """Content hash of the corpus descriptor's volume list, or ``None`` when it is absent.
 
     Hashes the sorted set of ``.nii.gz`` references in ``pretrain_data.json`` rather than the
@@ -122,9 +129,9 @@ def corpus_signature(paths: TopBrainPaths) -> str | None:
     return hashlib.sha256("\n".join(volumes).encode("utf-8")).hexdigest()
 
 
-def read_corpus_signature(paths: TopBrainPaths) -> dict[str, Any]:
+def read_corpus_signature(paths: TopBrainPaths, modality: str = "both") -> dict[str, Any]:
     """The recorded corpus signature sidecar, or ``{}`` when absent or unreadable."""
-    path = corpus_preprocessed_dir(paths) / CORPUS_SIGNATURE_FILE
+    path = corpus_preprocessed_dir(paths, modality) / CORPUS_SIGNATURE_FILE
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -132,7 +139,8 @@ def read_corpus_signature(paths: TopBrainPaths) -> dict[str, Any]:
 
 
 def write_corpus_signature(
-    paths: TopBrainPaths, *, planned: bool = False, configuration_name: str | None = None
+    paths: TopBrainPaths,
+    modality: str = "both", *, planned: bool = False, configuration_name: str | None = None
 ) -> None:
     """Record which corpus the fingerprint/plans, or the preprocessed data, were built from.
 
@@ -140,26 +148,26 @@ def write_corpus_signature(
     planning stamps ``planned_signature``, preprocessing stamps ``signature`` plus the
     configuration it produced.
     """
-    signature = corpus_signature(paths)
+    signature = corpus_signature(paths, modality)
     if signature is None:
         return
-    record = read_corpus_signature(paths)
+    record = read_corpus_signature(paths, modality)
     if planned:
         record["planned_signature"] = signature
     if configuration_name is not None:
         record["signature"] = signature
         record["configuration"] = configuration_name
     record["written"] = datetime.now().isoformat(timespec="seconds")
-    directory = corpus_preprocessed_dir(paths)
+    directory = corpus_preprocessed_dir(paths, modality)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / CORPUS_SIGNATURE_FILE).write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
 
 
-def planning_complete(paths: TopBrainPaths) -> tuple[bool, str]:
+def planning_complete(paths: TopBrainPaths, modality: str = "both") -> tuple[bool, str]:
     """Whether the corpus fingerprint and plans are already on disk; with a reason either way."""
-    directory = corpus_preprocessed_dir(paths)
+    directory = corpus_preprocessed_dir(paths, modality)
     for name in (FINGERPRINT_FILE, PLANS_FILE):
         if not (directory / name).is_file():
             return False, f"{name} is missing"
@@ -167,9 +175,9 @@ def planning_complete(paths: TopBrainPaths) -> tuple[bool, str]:
     # The fingerprint is a summary of the corpus — median spacing, intensity statistics — so a
     # corpus that gained a source invalidates it just as surely as it invalidates the
     # preprocessed data. Reusing it would preprocess the new volumes to the old corpus's plan.
-    signature = corpus_signature(paths)
+    signature = corpus_signature(paths, modality)
     if signature is not None:
-        recorded = read_corpus_signature(paths).get("planned_signature")
+        recorded = read_corpus_signature(paths, modality).get("planned_signature")
         if recorded is None:
             return False, (
                 f"{CORPUS_SIGNATURE_FILE} does not record what {FINGERPRINT_FILE} was built "
@@ -181,7 +189,7 @@ def planning_complete(paths: TopBrainPaths) -> tuple[bool, str]:
 
 
 def preprocessing_complete(
-    paths: TopBrainPaths, configuration_name: str
+    paths: TopBrainPaths, modality: str, configuration_name: str
 ) -> tuple[bool, str]:
     """Whether the corpus is already preprocessed **for this configuration**.
 
@@ -207,7 +215,7 @@ def preprocessing_complete(
         ``(complete, reason)`` — the reason is logged either way, so a decision to redo hours
         of preprocessing is never silent.
     """
-    directory = corpus_preprocessed_dir(paths)
+    directory = corpus_preprocessed_dir(paths, modality)
     plans_path = directory / PLANS_FILE
     if not plans_path.is_file():
         return False, f"{PLANS_FILE} is missing"
@@ -241,7 +249,7 @@ def preprocessing_complete(
     # ---- Does this preprocessed data belong to the corpus we are about to use? ----
     # Adding a --corpus-source changes the corpus but touches nothing above, so without this
     # the run would silently pre-train on the previous corpus.
-    signature = corpus_signature(paths)
+    signature = corpus_signature(paths, modality)
     sidecar = directory / CORPUS_SIGNATURE_FILE
     if signature is not None:
         if not sidecar.is_file():
@@ -459,6 +467,7 @@ def _plan_for(checkpoint: Path) -> dict[str, Any]:
 def run_pretrain(
     *,
     paths: TopBrainPaths,
+    corpus_modality: str = "both",
     source: str = "openmind",
     name: str | None = None,
     checkpoint_name: str | None = None,
@@ -576,7 +585,7 @@ def run_pretrain(
         )
 
     # ---- Planning: reuse what is on disk unless asked to redo it -------------
-    plan_done, plan_reason = planning_complete(paths)
+    plan_done, plan_reason = planning_complete(paths, corpus_modality)
     if skip_planning:
         log.info("stage1: --skip-planning (%s).", plan_reason)
     elif plan_done and not overwrite:
@@ -586,12 +595,12 @@ def run_pretrain(
         log.info("stage1: fingerprinting and planning the corpus (%s).", plan_reason)
         # clean=True is nnssl's own default here and forces a fresh fingerprint; that is what
         # we want once we have decided to redo this step at all.
-        extract_fingerprints([CORPUS_DATASET_ID], num_processes=num_processes, clean=True)
-        plan_experiments([CORPUS_DATASET_ID])
-        write_corpus_signature(paths, planned=True)
+        extract_fingerprints([corpus_dataset_id(corpus_modality)], num_processes=num_processes, clean=True)
+        plan_experiments([corpus_dataset_id(corpus_modality)])
+        write_corpus_signature(paths, corpus_modality, planned=True)
 
     # ---- Preprocessing: the expensive half -----------------------------------
-    preprocess_done, preprocess_reason = preprocessing_complete(paths, configuration_name)
+    preprocess_done, preprocess_reason = preprocessing_complete(paths, corpus_modality, configuration_name)
     if skip_preprocessing:
         log.info("stage1: --skip-preprocessing (%s).", preprocess_reason)
     elif preprocess_done and not overwrite:
@@ -602,17 +611,17 @@ def run_pretrain(
                  "re-resampled — nnssl has no per-case skip.",
                  configuration_name, preprocess_reason)
         preprocess(
-            [CORPUS_DATASET_ID], plans_identifier="nnsslPlans",
+            [corpus_dataset_id(corpus_modality)], plans_identifier="nnsslPlans",
             configurations=(configuration_name,), num_processes=num_processes,
         )
-        write_corpus_signature(paths, configuration_name=configuration_name)
+        write_corpus_signature(paths, corpus_modality, configuration_name=configuration_name)
 
     import torch
     from batchgenerators.utilities.file_and_folder_operations import join, load_json
     from nnssl.experiment_planning.experiment_planners.plan import Plan
     from torch.backends import cudnn
 
-    dataset_dir = paths.nnssl_preprocessed / paths.corpus_dataset_name
+    dataset_dir = paths.nnssl_preprocessed / corpus_dataset_name_for(corpus_modality)
     plan_obj = Plan.load_from_file(str(dataset_dir / "nnsslPlans.json"))
     collection_json = load_json(join(str(dataset_dir), f"pretrain_data__{configuration_name}.json"))
 
@@ -734,6 +743,7 @@ def _worker_argv(**o) -> list[str]:
         "--source", o.get("source", "openmind"),
         "--device", o.get("device", "cuda"),
         "--num-processes", str(int(o.get("num_processes", 8))),
+        "--corpus-modality", str(o.get("corpus_modality", "both")),
     ]
     for flag, key in (
         ("--name", "name"), ("--checkpoint-name", "checkpoint_name"),
@@ -822,6 +832,11 @@ def submit_sge(
               help="Seed --source scratch from a published checkpoint (domain adaptation).")
 @click.option("--device", type=click.Choice(["cuda", "cpu", "mps"]), default=None)
 @click.option("--num-processes", type=int, default=8, show_default=True)
+@click.option("--corpus-modality", type=click.Choice(["both", "ct", "mr"]), default="both",
+              show_default=True,
+              help="Which corpus collection to pre-train on. Each modality is its own nnssl "
+                   "collection, so a CT-only domain-adaptive run does not overwrite the mixed "
+                   "corpus (or its preprocessed data).")
 @click.option("--num-classes", type=int, default=GENERIC_NUM_CLASSES, show_default=True,
               help="Placeholder class count for the exported generic segmentation model.")
 @click.option("--no-export-model", is_flag=True, default=False,
@@ -851,7 +866,7 @@ def main(
     device: str | None, num_processes: int, num_classes: int, no_export_model: bool,
     skip_planning: bool, skip_preprocessing: bool, continue_training: bool, overwrite: bool,
     tensorboard: bool, tensorboard_dir: Path | None, tensorboard_interval: float,
-    backend: str = "gpu",
+    corpus_modality: str = "both", backend: str = "gpu",
 ) -> None:
     """CLI entry point: obtain the pre-trained bundle."""
     Logger()
@@ -862,6 +877,7 @@ def main(
         results_root=results_root, model_root=model_root, corpus_root=corpus_root,
     )
     run_pretrain(
+        corpus_modality=corpus_modality,
         paths=paths, source=source, name=name, checkpoint_name=checkpoint_name,
         checkpoint=checkpoint, checkpoint_url=checkpoint_url, trainer_name=trainer_name,
         configuration_name=configuration_name, ssl_loss=ssl_loss,
