@@ -682,7 +682,9 @@ def build_corpus(
         len(parsed), ", ".join(f"{s.name}({s.modality})@{s.root}" for s in parsed),
     )
 
-    dataset_dir = paths.nnssl_raw_dir
+    # Not paths.nnssl_raw_dir: that is always the mixed collection, so a CT-only corpus wrote
+    # its descriptor into Dataset511 and stage 1 then looked for Dataset512 and found nothing.
+    dataset_dir = paths.nnssl_raw / corpus_dataset_name_for(corpus_modality)
     dataset_dir.mkdir(parents=True, exist_ok=True)
     built, volumes = corpus_util.build_collection(
         parsed,
@@ -692,6 +694,7 @@ def build_corpus(
         harmonize=harmonize,
         overwrite=overwrite,
         workers=workers,
+        only_modality=None if corpus_modality == "both" else corpus_modality,
     )
 
     pretrain_json = dataset_dir / "pretrain_data.json"

@@ -129,6 +129,20 @@ def make_source(name: str, root: Path, **overrides: Any) -> CorpusSource:
     settings: dict[str, Any] = dict(BUILTIN_SOURCES.get(name, {}))
     settings.update({k: v for k, v in overrides.items() if v is not None})
     settings.setdefault("modality", "mr")
+    if (
+        name in BUILTIN_SOURCES
+        and BUILTIN_SOURCES[name].get("modality") == "auto"
+        and overrides.get("modality")
+    ):
+        # Overriding an auto-detecting cohort does not select from it, it relabels all of it:
+        # the per-file modality group is only consulted when the source's own modality is
+        # 'auto'. On a mixed cohort that sends MR volumes through CT harmonisation.
+        log.warning(
+            "Source %r detects modality per file, but modality=%r was forced: every volume "
+            "will be treated as %s, including the ones that are not. To take one modality of "
+            "a mixed cohort, drop the override and use the corpus modality instead.",
+            name, overrides["modality"], str(overrides["modality"]).upper(),
+        )
     return CorpusSource(name=name, root=Path(root), **settings)
 
 
@@ -270,6 +284,7 @@ def build_collection(
     harmonize: bool = True,
     overwrite: bool = False,
     workers: int = 1,
+    only_modality: str | None = None,
 ) -> tuple[Any, list[CorpusVolume]]:
     """Build an nnssl ``Collection`` from *sources*.
 
@@ -285,6 +300,16 @@ def build_collection(
     from nnssl.data.raw_dataset import Collection, Dataset, Image, Session, Subject
 
     volumes = [volume for source in sources for volume in iter_source_volumes(source)]
+    if only_modality:
+        # Filtering belongs here, not in the source spec: writing ``topaneu:ct`` sets the
+        # source's modality outright, which *relabels* every volume of a mixed cohort instead
+        # of selecting from it -- and then harmonisation clips MR data with an HU window.
+        kept = [v for v in volumes if v.modality == only_modality]
+        dropped = len(volumes) - len(kept)
+        if dropped:
+            log.info("Corpus restricted to %s: kept %d volume(s), dropped %d.",
+                     only_modality.upper(), len(kept), dropped)
+        volumes = kept
     if not volumes:
         raise FileNotFoundError(
             "No volumes found across "
