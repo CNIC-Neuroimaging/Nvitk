@@ -795,7 +795,11 @@ def main(**kw: Any) -> None:
     label_set = kw["label_set"] or cfg.DEFAULT_LABEL_SET
     loss = kw["loss"] or cfg.DEFAULT_LOSS
     backend = kw.get("backend", "gpu")
-    device = kw["device"] or torch_device_for_backend(backend)
+    # The stage options feed both local runs and SGE workers; which one decides whether
+    # probing this host for CUDA means anything.
+    device = kw["device"] or torch_device_for_backend(
+        backend, remote=(str(kw["submit"]).lower() == "sge")
+    )
     submit = kw["submit"].lower()
 
     loss_util.validate_loss_name(loss, registry=loss_util.SEGMENTATION_LOSSES)

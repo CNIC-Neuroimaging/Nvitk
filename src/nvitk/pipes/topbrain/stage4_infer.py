@@ -773,7 +773,7 @@ def _worker_argv(
         "--results-root", quote_path(inside.results_root),
         "--label-set", label_set,
         "--checkpoint-name", checkpoint_name,
-        "--device", device or torch_device_for_backend(backend),
+        "--device", device or torch_device_for_backend(backend, remote=True),
         "--num-processes", str(int(num_processes)),
         "--workers", str(int(workers)),
     ]

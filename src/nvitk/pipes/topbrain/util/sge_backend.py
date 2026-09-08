@@ -134,17 +134,31 @@ def sge_topbrain_stage_resources(
     )
 
 
-def torch_device_for_backend(backend: str, *, device: str | None = None) -> str:
+def torch_device_for_backend(
+    backend: str, *, device: str | None = None, remote: bool = False
+) -> str:
     """Resolve the torch device for a stage.
 
     An explicit *device* always wins. Otherwise ``--backend gpu`` implies ``cuda`` **if a CUDA
     device is actually visible**, and falls back to ``cpu`` with a warning rather than dying
     inside torch — a workstation without a GPU should still be able to run the light stages.
+
+    Parameters
+    ----------
+    remote
+        The device is for a job that will run somewhere else. The local probe is then not just
+        uninformative but actively wrong, so ``--backend gpu`` is taken at its word.
     """
     if device is not None and str(device).strip():
         return str(device).strip().lower()
     if not sge_backend_is_gpu(backend):
         return "cpu"
+    if remote:
+        # Building a command for a compute node: this host's hardware says nothing about that
+        # one's. Probing here is how a GPU job was submitted with '-device cpu' because the
+        # submitting workstation had a broken torch build -- the job then ran, slowly, on the
+        # CPU of a node holding a GPU it never touched.
+        return "cuda"
     try:
         import torch
 
