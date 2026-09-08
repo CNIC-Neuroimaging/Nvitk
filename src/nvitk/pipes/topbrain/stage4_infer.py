@@ -60,6 +60,7 @@ from nvitk.core.backend import map_in_thread_pool, setup
 from nvitk.core.click_backend import backend_click_option
 from nvitk.core.click_config import config_dir_click_option
 from nvitk.core.logger import Logger
+from nvitk.core.array import to_numpy
 from nvitk.io import imread, imsave
 from nvitk.normalization import harmonize_modality
 from nvitk.pipes.topbrain import config as cfg
@@ -78,7 +79,11 @@ from nvitk.pipes.topbrain.util.sge_stage import (
     quote_path,
     submit_stage_job,
 )
+import posixpath
+
 from nvitk.pipes.topbrain.util import postproc
+from nvitk.pipes.topbrain.util import staging
+from nvitk.pipes.topbrain.util.staging import StagedTransfer
 from nvitk.segmentation.vessel_postprocess import postprocess_labelmap
 from nvitk.segmentation.vessel_topology import RepairReport, repair_topology
 
@@ -94,6 +99,93 @@ def _dataset_name(label_set: str) -> str:
 
 #: ``..._ct_...`` / ``..._mr_...`` — how every cohort this pipeline reads names its modality.
 _MODALITY_TOKEN = re.compile(r"(?:^|_)(ct|mr)(?:_|$)")
+
+
+#: A CT volume in Hounsfield units puts air near -1000. Nothing else this pipeline sees goes
+#: that low: MR and TOF are arbitrary non-negative units, and even a z-scored volume rarely
+#: reaches -5. The gap between -1000 and -5 is what makes the test safe rather than clever.
+CT_AIR_HU: float = -500.0
+
+#: Fraction of voxels that must sit below :data:`CT_AIR_HU` before a volume is called CT. A head
+#: CT is mostly surrounding air, so this is comfortably exceeded; a stray negative outlier in an
+#: MR volume is not.
+CT_AIR_FRACTION: float = 0.05
+
+
+def verify_modality(volumes: Sequence[Path], required: str) -> list[tuple[str, str]]:
+    """Volumes whose measured modality is not *required*, as ``(name, found)`` pairs.
+
+    Volumes whose modality cannot be measured are **not** reported: absence of evidence is not
+    evidence of a mismatch, and refusing them would block every already-normalised cohort.
+    """
+    wrong: list[tuple[str, str]] = []
+    for volume in volumes:
+        try:
+            found = detect_modality(imread(volume))
+        except Exception:  # noqa: BLE001 - unreadable here means "no evidence"
+            continue
+        if found is not None and found != required:
+            wrong.append((Path(volume).name, found))
+    return wrong
+
+
+def detect_modality(volume: Any) -> str | None:
+    """Read the modality off the intensities; ``None`` when they do not say.
+
+    CT is calibrated: air is about -1000 HU and a head scan is mostly air, so a large negative
+    population is decisive. MR and TOF carry arbitrary positive units with no such population.
+    This is physical evidence, unlike a filename, which is a convention that a cohort like
+    ``pesa_tof/<subject>/TOF.nii.gz`` does not follow at all.
+
+    Returns ``None`` rather than guessing when the volume is neither clearly calibrated nor
+    clearly non-negative -- an already-normalised volume, say -- so the caller can fall back to
+    the name or ask.
+    """
+    data = to_numpy(volume.data if hasattr(volume, "data") else volume)
+    if data.size == 0:
+        return None
+    sample = data.ravel()
+    if sample.size > 2_000_000:  # a few million voxels decide this as well as 200 million
+        sample = sample[:: sample.size // 2_000_000]
+    below = float((sample < CT_AIR_HU).mean())
+    if below >= CT_AIR_FRACTION and float(sample.min()) < -900.0:
+        return "ct"
+    if float(sample.min()) >= -1.0:
+        return "mr"
+    return None
+
+
+def resolve_volume_modality(path: Path, *, declared: str | None = None) -> str:
+    """The modality of one volume: measured first, named second, declared last.
+
+    Intensities outrank the filename because they cannot be renamed by accident. When both are
+    readable and they disagree, the mismatch is reported rather than silently resolved -- it
+    means either the file is misnamed or it is not the modality anyone thinks it is.
+    """
+    measured = None
+    try:
+        measured = detect_modality(imread(path))
+    except Exception:  # noqa: BLE001 - unreadable here means "no evidence", not a failure
+        measured = None
+    named = None
+    try:
+        named = infer_modality(path.name)
+    except ValueError:
+        named = None
+
+    if measured and named and measured != named:
+        log.warning(
+            "%s: the intensities look like %s but the name says %s. Trusting the intensities.",
+            path.name, measured.upper(), named.upper(),
+        )
+    resolved = measured or named or declared
+    if resolved is None:
+        raise ValueError(
+            f"Cannot tell the modality of {path.name!r}: its intensities are neither "
+            f"Hounsfield-calibrated nor plainly non-negative, and its name carries no ct/mr "
+            f"token. Pass --modality ct or --modality mr explicitly."
+        )
+    return resolved
 
 
 def infer_modality(name: str) -> str:
@@ -225,7 +317,9 @@ def stage_inputs(
         if modality is None:
             shutil.copyfile(volume, destination)
             continue
-        resolved = infer_modality(volume.name) if modality == "auto" else modality
+        resolved = (
+            resolve_volume_modality(volume) if modality == "auto" else modality
+        )
         image = imread(volume)
         harmonised = harmonize_modality(
             image, resolved, ct_window=ct_window, mr_percentiles=mr_percentiles
@@ -463,17 +557,45 @@ def run_infer(
     all_inputs = [*(inputs or ()), *([input_dir] if input_dir is not None else [])]
     if not all_inputs:
         raise ValueError("No input given: pass --input with one or more files or directories.")
+
+    # ---- Modality: the model's label set outranks the flag --------------------
+    # A modality-specific model harmonising the other modality is silently wrong, not an error:
+    # the numbers come out, they are just computed from intensities normalised the wrong way.
+    # Leaving --modality unset used to mean "already harmonised", which is false for anything
+    # straight off a scanner, so a single-modality model now fills it in.
+    declared = lbl.LABEL_SET_MODALITIES.get(label_set, ("ct", "mr"))
+    if len(declared) == 1:
+        required = declared[0]
+        if modality not in (None, "auto", required):
+            raise ValueError(
+                f"Model {label_set!r} is {required.upper()}-only, but --modality {modality!r} "
+                f"was given. Harmonising {modality.upper()} data as {required.upper()} would "
+                f"produce plausible nonsense; use a model that covers it."
+            )
+        # Measured, not assumed: a mono-modality model fed the other modality is the failure
+        # that produces plausible nonsense rather than an error, so the inputs are checked
+        # against what they actually contain.
+        wrong = verify_modality(expand_inputs(all_inputs), required)
+        if wrong:
+            raise ValueError(
+                f"Model {label_set!r} is {required.upper()}-only, but "
+                f"{len(wrong)} input(s) are not: "
+                + ", ".join(f"{name} ({found})" for name, found in wrong[:5])
+                + (" ..." if len(wrong) > 5 else "")
+                + ". Use a model that covers them, or drop them from the input."
+            )
+        if modality is None:
+            log.info("Model %r is %s-only and the inputs agree; harmonising as %s.",
+                     label_set, required.upper(), required.upper())
+        modality = required
+
     channels = (
         model_input_channels(selected, nnunet_results) if selected is not None else 1
     )
     predict_dir, case_ids = stage_inputs(
         all_inputs, base / "input", modality=modality, expected_channels=channels,
     )
-    if output is not None and len(case_ids) != 1:
-        raise ValueError(
-            f"--output names a single file but {len(case_ids)} case(s) were given. Drop it and "
-            f"collect the predictions from the output directory instead."
-        )
+
 
     paths = TopBrainPaths(
         # Only the nnU-Net roots matter to nnunet_env(); challenge_root just has to be a real
@@ -529,16 +651,31 @@ def run_infer(
     )
 
     if output is not None:
-        produced = post_dir / f"{case_ids[0]}.nii.gz"
-        if not produced.is_file():
-            raise FileNotFoundError(
-                f"No prediction at {produced} to copy to --output. "
-                + ("--skip-prediction was set, so nothing was predicted."
-                   if skip_prediction else "The predictor produced nothing for this case.")
+        # Always a directory, never a file. One case and fifty are then the same call, and no
+        # command has to change shape because the cohort grew -- which is what the old
+        # "--output names a single file but N cases were given" refusal amounted to.
+        destination = Path(output)
+        if destination.is_file() or destination.suffix in (".gz", ".nii", ".mha"):
+            raise ValueError(
+                f"--output must be a directory, not a file ({destination}). The predictions "
+                f"are written inside it, one per case."
             )
-        Path(output).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(produced, output)
-        log.ok(f"prediction -> {output}")
+        destination.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for case_id in case_ids:
+            produced = post_dir / f"{case_id}.nii.gz"
+            if not produced.is_file():
+                log.warning("No prediction for %s at %s.", case_id, produced)
+                continue
+            shutil.copyfile(produced, destination / produced.name)
+            copied += 1
+        if not copied:
+            raise FileNotFoundError(
+                f"Nothing to copy to {destination}. "
+                + ("--skip-prediction was set, so nothing was predicted."
+                   if skip_prediction else "The predictor produced no output.")
+            )
+        log.ok(f"{copied} prediction(s) -> {destination}")
 
     (base / "topbrain_stage4.json").write_text(
         json.dumps(
@@ -629,12 +766,7 @@ def _worker_argv(
     argv = [
         *python_module_argv("nvitk.pipes.topbrain.stage4_infer"),
         *sge_backend_cli_args(backend),
-        # An interactive run names its own images; the master's runs predict the release's
-        # training folder. Cluster paths either way -- translated when they already sit under a
-        # fixed mount, bind-mounted when they do not (see _user_data_paths).
-        "--input-dir", quote_path(
-            _cluster_path(input_dir) if input_dir else inside.challenge_root / input_subdir
-        ),
+        "--label-set", label_set,
         "--nnunet-raw", quote_path(inside.nnunet_raw),
         "--nnunet-preprocessed", quote_path(inside.nnunet_preprocessed),
         "--nnunet-results", quote_path(inside.nnunet_results),
@@ -660,6 +792,14 @@ def _worker_argv(
     missing = [argv[i - 1] for i, a in enumerate(argv) if a is None]
     if missing:
         raise ValueError(f"stage4 worker argv: no value for {', '.join(missing)}.")
+    # Only one source of images. Emitting the release folder as a default *alongside* an
+    # explicit -i is how a single-image job ended up predicting 51 cases: the one asked for
+    # plus the whole training set.
+    if input_dir:
+        argv.extend(["--input-dir", quote_path(_cluster_path(input_dir))])
+    elif not inputs:
+        argv.extend(["--input-dir", quote_path(inside.challenge_root / input_subdir)])
+
     if loss:
         # Optional interactively: --model resolves the trainer from stage 2's provenance, and a
         # literal "None" here would build a run directory name that does not exist.
@@ -721,6 +861,98 @@ def submit_sge(
     )
 
 
+def resolve_from_source(from_source: str | None, submit: str) -> str:
+    """Where the data lives, resolved against where the compute runs.
+
+    ``--submit`` says where inference runs; ``--from-source`` says where the images and the
+    output directory are. They are usually the same, so the default follows the submit target.
+
+    Raises
+    ------
+    click.UsageError
+        For ``--submit local --from-source sge``: pulling the cluster's data down to run here
+        would be a data transfer with none of the reasons to want one. Ask for it explicitly
+        with a cluster path instead.
+    """
+    submit = str(submit).lower()
+    source = str(from_source).lower() if from_source else submit
+    if submit == "local" and source == "sge":
+        raise click.UsageError(
+            "--submit local --from-source sge is not supported: to run here on cluster data, "
+            "point --input-dir at the cluster path directly (it is mounted, or it is not "
+            "reachable at all)."
+        )
+    return source
+
+
+def _local_volumes(options: dict) -> list[Path]:
+    """The volumes named on the command line, as local files.
+
+    Accepts both forms stage 4 takes -- repeated ``-i`` and a ``--input-dir`` -- because a
+    staged run is exactly when someone points at a folder they have in front of them.
+    """
+    volumes: list[Path] = [Path(v) for v in (options.get("inputs") or ())]
+    directory = options.get("input_dir")
+    if directory:
+        volumes.extend(sorted(Path(directory).glob("*.nii.gz")))
+    return [v for v in volumes if v.is_file()]
+
+
+def _staged_submit(
+    *,
+    volumes: Sequence[Path],
+    local_output: Path,
+    credentials: tuple[str, str, str],
+    submit_job: Any,
+    poll_seconds: float,
+) -> StagedTransfer:
+    """Upload, run, retrieve, clean up. Returns what moved in each direction.
+
+    Cleanup is deliberately skipped when anything goes wrong: the uploaded inputs and whatever
+    the job did produce are exactly what is needed to work out why, and they are cheap to
+    delete by hand once they have been looked at.
+    """
+    host, user, password = credentials
+    remote_root = staging.new_remote_root()
+    transfer = StagedTransfer(
+        remote_root=remote_root,
+        remote_input=posixpath.join(remote_root, "input"),
+        remote_output=posixpath.join(remote_root, "output"),
+    )
+    log.info("Staging %d volume(s) through %s", len(volumes), remote_root)
+    transfer.uploaded = staging.upload_inputs(
+        volumes, transfer.remote_input, host=host, user=user, password=password
+    )
+
+    job_ids = submit_job(transfer.remote_input, transfer.remote_output)
+    if not job_ids:
+        transfer.notes.append("nothing was queued")
+        log.warning("No job id came back; the staged data is left at %s", remote_root)
+        return transfer
+
+    finished = staging.wait_for_jobs(
+        job_ids, host=host, user=user, password=password, poll_seconds=poll_seconds
+    )
+    if not finished:
+        transfer.notes.append("timed out waiting for the job")
+        return transfer
+
+    transfer.retrieved = staging.retrieve_outputs(
+        transfer.remote_output, Path(local_output), host=host, user=user, password=password
+    )
+    if not transfer.retrieved:
+        # An empty output directory means the job failed. Keeping the tree is what makes that
+        # diagnosable; the .err file names the reason.
+        transfer.notes.append("the job produced no output; staged data kept for inspection")
+        log.warning("Nothing came back from %s. The job likely failed — check its .err file. "
+                    "Staged data left at %s", transfer.remote_output, remote_root)
+        return transfer
+
+    staging.remove_remote_root(remote_root, host=host, user=user, password=password)
+    transfer.notes.append("staged data removed")
+    return transfer
+
+
 def _submit_to_cluster(
     *,
     container: Path | None,
@@ -733,6 +965,8 @@ def _submit_to_cluster(
     dry_run: bool,
     no_remote: bool,
     options: dict,
+    from_source: str = "sge",
+    poll_seconds: float = 30.0,
 ) -> list[str]:
     """Send one inference job to the cluster, the same way the master pipeline does.
 
@@ -758,20 +992,61 @@ def _submit_to_cluster(
     cluster, _origin = pth.layout_auto()
     label_set = options.get("label_set") or "ta36"
 
-    def _emit(handle: TextIO) -> None:
-        submit_sge(paths=cluster, container=Path(image), src_dir=src_dir,
-                   dry_run=True, emit=handle, **options)
+    def _run(job_options: dict) -> list[str]:
+        """Emit and run the driver for one set of stage 4 options."""
 
-    try:
-        return run_driver_script(
-            _emit,
-            title=f"topbrain inference label_set={label_set}",
-            basename=f"submit_topbrain_infer_{label_set}",
-            emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
-            remote_host=remote_host, remote_user=remote_user,
+        def _emit(handle: TextIO) -> None:
+            submit_sge(paths=cluster, container=Path(image), src_dir=src_dir,
+                       dry_run=True, emit=handle, **job_options)
+
+        try:
+            return run_driver_script(
+                _emit,
+                title=f"topbrain inference label_set={label_set}",
+                basename=f"submit_topbrain_infer_{label_set}",
+                emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
+                remote_host=remote_host, remote_user=remote_user,
+                credentials=credentials,
+            )
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    if from_source != "local":
+        credentials = None
+        return _run(options)
+
+    # ---- Staged: the data is here, the GPU is there --------------------------
+    from nvitk.cluster.remote_submit import prompt_ssh_credentials
+
+    volumes = _local_volumes(options)
+    if not volumes:
+        raise click.UsageError(
+            "--from-source local found no volumes to send. Pass -i FILE (repeatable) or "
+            "--input-dir DIR containing .nii.gz files."
         )
-    except RuntimeError as exc:
-        raise click.ClickException(str(exc)) from exc
+    local_output = Path(options.get("output") or Path.cwd() / "topbrain_predictions")
+    if dry_run or no_remote:
+        log.info("--from-source local would upload %d volume(s) to %s and return the results "
+                 "to %s", len(volumes), staging.staging_root(), local_output)
+
+    # One prompt for the whole round trip: upload, submit, poll, download, clean up.
+    credentials = prompt_ssh_credentials(
+        remote_host=remote_host, remote_user=remote_user,
+        host_aliases=pth.CLUSTER_HOST_ALIASES,
+    )
+
+    def _submit_job(remote_input: str, remote_output: str) -> list[str]:
+        """Queue the job against the staged paths rather than the local ones."""
+        return _run({
+            **options, "inputs": (), "input_dir": remote_input, "output": remote_output,
+        })
+
+    transfer = _staged_submit(
+        volumes=volumes, local_output=local_output, credentials=credentials,
+        submit_job=_submit_job, poll_seconds=poll_seconds,
+    )
+    log.info("staged transfer: %s", transfer.as_dict())
+    return []
 
 
 @click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
@@ -779,6 +1054,14 @@ def _submit_to_cluster(
               help="Where inference runs. 'sge' builds a driver script and executes it on a "
                    "login node, exactly as the master pipeline does — useful when the images "
                    "or the model live where this host cannot reach them.")
+@click.option("--from-source", type=click.Choice(["local", "sge"], case_sensitive=False),
+              default=None,
+              help="Where the images and the output directory live. Defaults to --submit. "
+                   "With '--submit sge --from-source local' the inputs are uploaded to a "
+                   "scratch directory on the cluster, inference runs there, the results come "
+                   "back and the scratch directory is removed.")
+@click.option("--poll-seconds", type=float, default=30.0, show_default=True,
+              help="--from-source local: how often to ask qstat whether the job has finished.")
 @click.option("--container", type=click.Path(path_type=Path), default=None,
               help="--submit sge: Singularity image (default: sge.json).")
 @click.option("--src-dir", type=click.Path(path_type=Path), default=None,
@@ -812,7 +1095,7 @@ def _submit_to_cluster(
               help="Harmonise the inputs as stage 0 did before predicting. Omit only when the "
                    "inputs are already harmonised (e.g. nnUNet_raw/.../imagesTr).")
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write the prediction to this file. Single input only.")
+              help="Directory to copy the predictions into, one file per case. Always a directory — a single image is written inside it like any other.")
 @click.option("--nnunet-raw", type=click.Path(path_type=Path), default=None,
               help="Defaults to sge.json's topbrain_paths (see --config-dir).")
 @click.option("--nnunet-preprocessed", type=click.Path(path_type=Path), default=None,
@@ -871,7 +1154,8 @@ def main(
     repair_gaps_mm: float | None, repair_adjacency: bool, repair_lateral: bool,
     repair_close_radius: int,
     device: str | None, num_processes: int, workers: int, skip_prediction: bool,
-    submit: str = "local", container: Path | None = None, src_dir: Path | None = None,
+    submit: str = "local", from_source: str | None = None, poll_seconds: float = 30.0,
+    container: Path | None = None, src_dir: Path | None = None,
     sge_project: str | None = None, sge_h_vmem: str | None = None,
     remote_host: str | None = None, remote_user: str | None = None,
     emit_script: Path | None = None, dry_run: bool = False, no_remote: bool = False,
@@ -906,8 +1190,10 @@ def main(
         return
     if not inputs and input_dir is None:
         raise click.UsageError("Give at least one --input file or directory (or --input-dir).")
+    source = resolve_from_source(from_source, submit)
     if str(submit).lower() == "sge":
         _submit_to_cluster(
+            from_source=source, poll_seconds=poll_seconds,
             container=container, src_dir=src_dir, sge_project=sge_project,
             sge_h_vmem=sge_h_vmem, remote_host=remote_host, remote_user=remote_user,
             emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
