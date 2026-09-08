@@ -299,7 +299,17 @@ def stage_inputs(
             f"directory instead."
         )
 
+    # Emptied, not merely created. The workspace is keyed on the run name, so it is the same
+    # directory every time this model is used, and nnU-Net predicts *the folder* rather than the
+    # files it was handed: leftovers from an earlier run become extra cases in this one. That is
+    # how a single-image job reported "staged 1 case(s)" and then predicted 51.
     workspace = Path(workspace)
+    if workspace.exists():
+        stale = sorted(workspace.glob("*.nii.gz"))
+        if stale:
+            log.info("Clearing %d volume(s) left in %s by an earlier run.",
+                     len(stale), workspace)
+        shutil.rmtree(workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     ct_window = tuple(ct_window) if ct_window else cfg.DEFAULT_CT_WINDOW
     mr_percentiles = tuple(mr_percentiles) if mr_percentiles else cfg.DEFAULT_MR_PERCENTILES
@@ -620,6 +630,16 @@ def run_infer(
     )
 
     if not skip_prediction:
+        # Same reasoning as the input workspace: post-processing walks this folder, so a
+        # previous run's predictions would be cleaned, scored and reported as if they belonged
+        # to this one. Only cleared when we are about to repredict -- --skip-prediction exists
+        # precisely to re-post-process what is already here.
+        if raw_dir.exists():
+            stale = sorted(raw_dir.glob("*.nii.gz"))
+            if stale:
+                log.info("Clearing %d prediction(s) from a previous run in %s.",
+                         len(stale), raw_dir)
+            shutil.rmtree(raw_dir)
         raw_dir.mkdir(parents=True, exist_ok=True)
         nnunet_run.predict(
             predict_dir, raw_dir,
