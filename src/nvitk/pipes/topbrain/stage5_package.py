@@ -35,6 +35,7 @@ from nvitk.pipes.topbrain import config as cfg
 from nvitk.pipes.topbrain import labels as lbl
 from nvitk.pipes.topbrain.stage2_train import resolve_trained_run
 from nvitk.pipes.topbrain.util import losses as loss_util
+from nvitk.pipes.topbrain.util import postproc
 from nvitk.pipes.topbrain.util.paths import DATASET_IDS, DATASET_SUFFIXES, STAGE5_PACKAGE_DIR
 from nvitk.pipes.topbrain.util.sge_stage import build_stage_command, submit_stage_job
 
@@ -119,6 +120,10 @@ def run_package(
     tag: str = "latest",
     build: bool = False,
     save: bool = False,
+    postprocess: str | None = None,
+    min_volume_mm3: float = 5.0,
+    repair_gaps_mm: float | None = None,
+    repair_close_radius: int = 0,
 ) -> Path:
     """Assemble (and optionally build) the submission container; returns the context directory."""
     loss = loss or cfg.DEFAULT_LOSS
@@ -177,6 +182,15 @@ def run_package(
         ),
     )
 
+    # ---- 3b. The post-processing the container will apply ---------------------
+    # Written as data rather than hard-coded in inference.py: the point is that the selection
+    # stage 3 measured is provably the one that ships.
+    spec = postproc.spec_from_options(
+        postprocess=postprocess, min_volume_mm3=min_volume_mm3,
+        repair_gaps_mm=repair_gaps_mm, repair_close_radius=repair_close_radius,
+    )
+    postproc.write_container_config(context, spec)
+
     # ---- 4. Trained weights --------------------------------------------------
     copied = collect_model(run_dir, context / "model", folds=folds, checkpoint=checkpoint)
 
@@ -215,6 +229,7 @@ def run_package(
                 "trainer": trainer, "loss": loss,
                 "plans_identifier": plans_identifier, "configuration": configuration_name,
                 "run_dir": str(run_dir), "folds": copied, "checkpoint": checkpoint,
+                "postprocess": spec.as_dict(),
             "trainer": trainer, "architecture": architecture,
             "bundled_nnunet": "in-tree build (released nnunetv2 not installed)",
                 "image": image, "context": str(context),
@@ -311,12 +326,22 @@ def submit_sge(
 @click.option("--checkpoint", type=str, default=CHECKPOINT_NAME, show_default=True)
 @click.option("--name", type=str, default="topbrain-ta36", show_default=True)
 @click.option("--tag", type=str, default="latest", show_default=True)
+@click.option("--postprocess", type=str, default=None,
+              help="Post-processing the container will apply: a comma list of "
+                   "islands,largest,bridge,adjacency,lateral — or 'none'/'all'. Baked into the "
+                   "image as data, so what shipped is what was measured. Default: islands.")
+@click.option("--min-volume-mm3", type=float, default=5.0, show_default=True)
+@click.option("--repair-gaps-mm", type=float, default=None,
+              help="Gap ceiling for the 'bridge' step.")
+@click.option("--repair-close-radius", type=int, default=0, show_default=True)
 @click.option("--build", is_flag=True, default=False, help="Run 'docker build'.")
 @click.option("--save", is_flag=True, default=False,
               help="Build, then write a tar.gz for upload to Grand Challenge.")
 def main(
     nnunet_results: Path, results_root: Path, label_set: str, loss: str | None,
-    architecture: str | None, plans_identifier: str | None, configuration_name: str | None, folds: str,
+    architecture: str | None, plans_identifier: str | None,
+    postprocess: str | None, min_volume_mm3: float,
+    repair_gaps_mm: float | None, repair_close_radius: int, configuration_name: str | None, folds: str,
     checkpoint: str, name: str, tag: str, build: bool, save: bool,
 ) -> None:
     """CLI entry point: assemble (and optionally build) the submission container."""
@@ -330,6 +355,8 @@ def main(
         configuration_name=configuration_name,
         folds=parse_folds(folds), checkpoint=checkpoint, name=name, tag=tag,
         build=build, save=save,
+        postprocess=postprocess, min_volume_mm3=min_volume_mm3,
+        repair_gaps_mm=repair_gaps_mm, repair_close_radius=repair_close_radius,
     )
 
 

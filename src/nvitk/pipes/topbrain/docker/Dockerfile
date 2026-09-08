@@ -29,6 +29,7 @@ COPY --chown=algorithm:algorithm nnunetv2 /opt/algorithm/nnunetv2
 # nvitk itself, then the trained weights and the entry point.
 COPY --chown=algorithm:algorithm nvitk /opt/algorithm/nvitk
 COPY --chown=algorithm:algorithm model /opt/algorithm/model
+COPY --chown=algorithm:algorithm postprocess.json /opt/algorithm/postprocess.json
 COPY --chown=algorithm:algorithm inference.py /opt/algorithm/inference.py
 
 ENV PYTHONPATH=/opt/algorithm

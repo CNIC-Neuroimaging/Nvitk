@@ -243,6 +243,95 @@ def container_mount_points(extra: Sequence[tuple[Path, str]] = ()) -> tuple[str,
     )
 
 
+def run_driver_script(
+    emit_blocks: Any,
+    *,
+    title: str,
+    basename: str,
+    emit_script: Path | None = None,
+    dry_run: bool = False,
+    no_remote: bool = False,
+    remote_host: str | None = None,
+    remote_user: str | None = None,
+    credentials: tuple[str, str, str] | None = None,
+) -> list[str]:
+    """Write one bash driver containing every ``qsub`` block, then run it where ``qsub`` exists.
+
+    A workstation has no ``qsub``, so submitting from here cannot work directly. Every cluster
+    pipeline in this repo solves it the same way: build a single driver script, then execute it
+    on a login node, so the ``-hold_jid`` chain is resolved on the cluster rather than here.
+
+    *emit_blocks* is called with the open script handle and writes the stage blocks -- the only
+    part that differs between a multi-stage chain and a single inference job.
+
+    Returns
+    -------
+    list of str
+        Submitted job ids parsed from the driver's output; empty for a dry run.
+    """
+    import shutil
+    import subprocess
+    from datetime import datetime
+
+    from nvitk.cluster.remote_submit import prompt_ssh_credentials, run_sge_script_ssh_capture
+    from nvitk.cluster.sge import write_script_header
+    from nvitk.cluster.sge_chunk import parse_sge_submission_job_ids
+    from nvitk.cluster.sge_remote import publish_sge_driver_script, resolve_sge_script_paths
+    from nvitk.pipes.topbrain import config as cfg
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    local_script, remote_script = resolve_sge_script_paths(
+        Path(emit_script) if emit_script is not None else None,
+        remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
+        default_basename=f"{basename}_{stamp}.sh",
+    )
+    with open(local_script, "w", encoding="utf-8") as handle:
+        write_script_header(
+            handle, log_dir=cfg.SGE_LOG_DIR, err_dir=cfg.SGE_ERR_DIR, title=title,
+        )
+        emit_blocks(handle)
+    log.info("  local script : %s", local_script)
+    log.info("  cluster path : %s", remote_script)
+
+    if dry_run:
+        log.ok(f"--dry-run: submission script written, nothing submitted -> {local_script}")
+        return []
+    if no_remote:
+        log.ok(f"--no-remote: run it yourself on the login node:\n    bash {remote_script}")
+        return []
+
+    if shutil.which("qsub"):
+        log.info("qsub found on this host; running the driver script locally.")
+        completed = subprocess.run(
+            ["bash", str(local_script)], check=False, capture_output=True, text=True
+        )
+        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
+    else:
+        host, user, password = credentials or prompt_ssh_credentials(
+            remote_host=remote_host, remote_user=remote_user,
+            host_aliases=pth.CLUSTER_HOST_ALIASES,
+        )
+        cluster_path = publish_sge_driver_script(
+            local_script, remote_script, host=host, user=user, password=password,
+        )
+        exit_code, stdout, stderr = run_sge_script_ssh_capture(
+            host, user, password, cluster_path, local_script_path=local_script,
+        )
+
+    if stdout.strip():
+        log.info("submission output:\n%s", stdout.strip()[-4000:])
+    if stderr.strip():
+        log.warning("submission stderr:\n%s", stderr.strip()[-4000:])
+    if exit_code != 0:
+        raise RuntimeError(
+            f"The submission script exited with code {exit_code}. Nothing may have been "
+            f"queued; check the output above and {local_script}."
+        )
+    job_ids = parse_sge_submission_job_ids(stdout, stderr)
+    log.ok(f"submitted {len(job_ids)} job(s): {', '.join(job_ids) or '(none parsed)'}")
+    return job_ids
+
+
 def to_container_path(paths: TopBrainPaths, host_path: Path | str) -> Path | None:
     """Rewrite a host path that already lives under a fixed mount into its container path.
 
@@ -481,6 +570,7 @@ __all__ = [
     "find_unbound_paths",
     "host_binds",
     "plan_data_binds",
+    "run_driver_script",
     "to_container_path",
     "quote_path",
     "resolve_container",

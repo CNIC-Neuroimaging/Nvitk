@@ -114,14 +114,21 @@ def main() -> int:
     mask_image = sitk.ReadImage(str(produced[0]))
     mask = sitk.GetArrayFromImage(mask_image)
 
-    cleaned = to_numpy(
-        postprocess_labelmap(
-            mask,
-            labels=sorted(lbl.label_map("ta36")),
-            spacing=tuple(reversed(mask_image.GetSpacing())),  # sitk arrays are (z, y, x)
-            min_volume_mm3=5.0,
-        )
-    ).astype(np.uint8)
+    # The selection is read from postprocess.json, which stage 5 wrote beside this file, rather
+    # than hard-coded: the whole point is that the pipeline the submission applies is the one
+    # that was measured in stage 3, not a second copy of it that can drift.
+    from nvitk.pipes.topbrain.util import postproc
+
+    spec = postproc.read_container_config(Path(__file__).resolve().parent)
+    label_set = os.environ.get("TOPBRAIN_LABEL_SET", "ta36")
+    print(f"[topbrain] {spec.describe()}", flush=True)
+    cleaned, _report = postproc.apply_postprocess(
+        mask,
+        label_set=label_set,
+        spec=spec,
+        spacing=tuple(reversed(mask_image.GetSpacing())),  # sitk arrays are (z, y, x)
+    )
+    cleaned = to_numpy(cleaned).astype(np.uint8)
 
     output = sitk.GetImageFromArray(cleaned)
     output.CopyInformation(image)

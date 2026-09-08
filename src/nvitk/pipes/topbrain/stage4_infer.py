@@ -78,6 +78,7 @@ from nvitk.pipes.topbrain.util.sge_stage import (
     quote_path,
     submit_stage_job,
 )
+from nvitk.pipes.topbrain.util import postproc
 from nvitk.segmentation.vessel_postprocess import postprocess_labelmap
 from nvitk.segmentation.vessel_topology import RepairReport, repair_topology
 
@@ -255,6 +256,7 @@ def postprocess_folder(
     repair_lateral: bool = False,
     repair_close_radius: int = 0,
     repair_fragment_fraction: float | None = None,
+    spec: Any = None,
 ) -> tuple[int, dict[str, Any]]:
     """Post-process every prediction in *source_dir*; returns ``(count, repair_summary)``.
 
@@ -281,6 +283,17 @@ def postprocess_folder(
         log.warning("No predictions to post-process under %s", source_dir)
         return 0, {}
 
+    if spec is not None:
+        # A selection given explicitly wins over the individual flags: it is what stage 3
+        # measured and what stage 5 will bake into the container, and having two ways to say
+        # the same thing is how those three drift apart.
+        repair_gaps_mm = spec.bridge_gaps_mm if spec.has("bridge") else None
+        repair_adjacency = spec.has("adjacency")
+        repair_lateral = spec.has("lateral")
+        repair_close_radius = spec.close_radius
+        min_volume_mm3 = spec.min_volume_mm3 if spec.has("islands") else None
+        largest_only = spec.has("largest")
+        log.info("%s", spec.describe())
     neighbours = lbl.valid_neighbours(label_set) if repair_adjacency else None
     pairs = lbl.lateral_pairs(label_set) if repair_lateral else None
     repairing = repair_gaps_mm is not None or repair_adjacency or repair_lateral
@@ -358,6 +371,7 @@ def model_input_channels(model: models.TrainedModel, nnunet_results: Path) -> in
 
 
 def run_infer(
+    postprocess: str | None = None,
     *,
     input_dir: Path | None = None,
     inputs: Sequence[Path] = (),
@@ -508,6 +522,10 @@ def run_infer(
         repair_adjacency=repair_adjacency,
         repair_lateral=repair_lateral,
         repair_close_radius=repair_close_radius,
+        spec=postproc.spec_from_options(
+            postprocess=postprocess, min_volume_mm3=min_volume_mm3,
+            repair_gaps_mm=repair_gaps_mm, repair_close_radius=repair_close_radius,
+        ) if postprocess is not None else None,
     )
 
     if output is not None:
@@ -555,13 +573,54 @@ def run_infer(
 # ---------------------------------------------------------------------------
 
 
+def _cluster_path(path: Path | str) -> Path:
+    """A user-supplied path as the job will see it.
+
+    Under a fixed mount it is translated (``/corpus/...``); otherwise it keeps its host path and
+    :func:`_user_data_paths` asks for an identity bind.
+    """
+    from nvitk.pipes.topbrain.util.sge_stage import to_container_path
+
+    cluster, _ = pth.layout_auto()
+    inside = to_container_path(cluster, path)
+    return inside if inside is not None else Path(path)
+
+
+def _user_data_paths(**options: Any) -> list[Path]:
+    """Images and output directory that need their own bind mount."""
+    from nvitk.pipes.topbrain.util.sge_stage import to_container_path
+
+    cluster, _ = pth.layout_auto()
+    candidates = [*(options.get("inputs") or ()), options.get("input_dir")]
+    if options.get("output"):
+        # The output directory is what the job will *create*, so it usually does not exist yet
+        # and binding it would fail. Bind the nearest existing ancestor instead: the job then
+        # makes the leaf inside a directory the container can already see.
+        target = Path(options["output"])
+        while not target.exists() and target != target.parent:
+            target = target.parent
+        candidates.append(target)
+    return [
+        Path(c) for c in candidates
+        if c is not None and to_container_path(cluster, c) is None
+    ]
+
+
 def _worker_argv(
-    *, label_set: str, loss: str, folds: Sequence[int | str], plans_identifier: str | None,
-    configuration_name: str | None, checkpoint_name: str, min_volume_mm3: float | None,
-    largest_only: bool, device: str, num_processes: int, workers: int,
-    skip_prediction: bool, backend: str, input_subdir: str = "imagesTr_topbrain",
+    *, label_set: str = "ta36", loss: str | None = None,
+    folds: Sequence[int | str] | None = None, plans_identifier: str | None = None,
+    configuration_name: str | None = None, checkpoint_name: str = "checkpoint_final.pth",
+    min_volume_mm3: float | None = 5.0,
+    largest_only: bool = False, device: str = "cuda", num_processes: int = 3,
+    workers: int = 1, skip_prediction: bool = False, backend: str = "gpu",
+    input_subdir: str = "imagesTr_topbrain",
     repair_gaps_mm: float | None = None, repair_adjacency: bool = False,
     repair_lateral: bool = False, repair_close_radius: int = 0,
+    inputs: Sequence[Path] = (), input_dir: Path | None = None,
+    model: str | None = None, modality: str | None = None,
+    output: Path | None = None, output_name: str | None = None,
+    no_postprocess: bool = False, postprocess: str | None = None,
+    **_ignored: Any,
 ) -> list[str]:
     """Worker argv for stage 5, built against the container-side layout."""
     from nvitk.cluster.sge import python_module_argv
@@ -570,15 +629,19 @@ def _worker_argv(
     argv = [
         *python_module_argv("nvitk.pipes.topbrain.stage4_infer"),
         *sge_backend_cli_args(backend),
-        "--input-dir", quote_path(inside.challenge_root / input_subdir),
+        # An interactive run names its own images; the master's runs predict the release's
+        # training folder. Cluster paths either way -- translated when they already sit under a
+        # fixed mount, bind-mounted when they do not (see _user_data_paths).
+        "--input-dir", quote_path(
+            _cluster_path(input_dir) if input_dir else inside.challenge_root / input_subdir
+        ),
         "--nnunet-raw", quote_path(inside.nnunet_raw),
         "--nnunet-preprocessed", quote_path(inside.nnunet_preprocessed),
         "--nnunet-results", quote_path(inside.nnunet_results),
         "--results-root", quote_path(inside.results_root),
         "--label-set", label_set,
-        "--loss", quote_path(loss),
         "--checkpoint-name", checkpoint_name,
-        "--device", device,
+        "--device", device or torch_device_for_backend(backend),
         "--num-processes", str(int(num_processes)),
         "--workers", str(int(workers)),
     ]
@@ -593,6 +656,28 @@ def _worker_argv(
         argv.extend(["--configuration", quote_path(configuration_name)])
     if min_volume_mm3 is None:
         argv.append("--no-postprocess")
+    # A None here becomes a cryptic join error three frames away; say which flag it was.
+    missing = [argv[i - 1] for i, a in enumerate(argv) if a is None]
+    if missing:
+        raise ValueError(f"stage4 worker argv: no value for {', '.join(missing)}.")
+    if loss:
+        # Optional interactively: --model resolves the trainer from stage 2's provenance, and a
+        # literal "None" here would build a run directory name that does not exist.
+        argv.extend(["--loss", quote_path(str(loss))])
+    if postprocess:
+        argv.extend(["--postprocess", quote_path(str(postprocess))])
+    if no_postprocess:
+        argv.append("--no-postprocess")
+    for path in inputs:
+        argv.extend(["-i", quote_path(_cluster_path(path))])
+    if model:
+        argv.extend(["--model", quote_path(str(model))])
+    if modality:
+        argv.extend(["--modality", quote_path(str(modality))])
+    if output:
+        argv.extend(["--output", quote_path(_cluster_path(output))])
+    if output_name:
+        argv.extend(["--output-name", quote_path(str(output_name))])
     else:
         argv.extend(["--min-volume-mm3", str(float(min_volume_mm3))])
     if largest_only:
@@ -614,6 +699,7 @@ def build_sge_command(*, paths, container: Path, src_dir: Path | None = None, **
     """Host shell command for the stage 5 SGE task."""
     return build_stage_command(
         "stage4", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**options),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
@@ -627,6 +713,7 @@ def submit_sge(
     """Emit or submit the stage 5 SGE job."""
     return submit_stage_job(
         "stage4", _worker_argv(**options), paths=paths, container=container, src_dir=src_dir,
+        data_paths=_user_data_paths(**options),
         backend=options.get("backend", "gpu"),
         request_gpu=options.get("device", "cuda") != "cpu",
         job_suffix=options.get("label_set", ""),
@@ -634,6 +721,79 @@ def submit_sge(
     )
 
 
+def _submit_to_cluster(
+    *,
+    container: Path | None,
+    src_dir: Path | None,
+    sge_project: str | None,
+    sge_h_vmem: str | None,
+    remote_host: str | None,
+    remote_user: str | None,
+    emit_script: Path | None,
+    dry_run: bool,
+    no_remote: bool,
+    options: dict,
+) -> list[str]:
+    """Send one inference job to the cluster, the same way the master pipeline does.
+
+    The images and the output directory are the *cluster's* paths, and both are bind-mounted
+    when they fall outside the fixed roots -- an inference run is usually pointed at data the
+    pipeline did not choose.
+    """
+    from nvitk.pipes.topbrain import config as cfg
+    from nvitk.pipes.topbrain.util.sge_backend import (
+        set_sge_h_vmem_override, set_sge_project_override,
+    )
+    from nvitk.pipes.topbrain.util.sge_stage import run_driver_script
+
+    set_sge_project_override(sge_project)
+    set_sge_h_vmem_override(sge_h_vmem)
+
+    image = container or cfg.CONTAINER_PATH
+    if image is None:
+        raise click.UsageError(
+            "--submit sge needs a container: pass --container, or set "
+            "pipelines.topbrain.default_sge_container_root in sge.json."
+        )
+    cluster, _origin = pth.layout_auto()
+    label_set = options.get("label_set") or "ta36"
+
+    def _emit(handle: TextIO) -> None:
+        submit_sge(paths=cluster, container=Path(image), src_dir=src_dir,
+                   dry_run=True, emit=handle, **options)
+
+    try:
+        return run_driver_script(
+            _emit,
+            title=f"topbrain inference label_set={label_set}",
+            basename=f"submit_topbrain_infer_{label_set}",
+            emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
+            remote_host=remote_host, remote_user=remote_user,
+        )
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@click.option("--submit", type=click.Choice(["local", "sge"], case_sensitive=False),
+              default="local", show_default=True,
+              help="Where inference runs. 'sge' builds a driver script and executes it on a "
+                   "login node, exactly as the master pipeline does — useful when the images "
+                   "or the model live where this host cannot reach them.")
+@click.option("--container", type=click.Path(path_type=Path), default=None,
+              help="--submit sge: Singularity image (default: sge.json).")
+@click.option("--src-dir", type=click.Path(path_type=Path), default=None,
+              help="--submit sge: nvitk checkout to bind into the job.")
+@click.option("--sge-project", type=str, default=None,
+              help="--submit sge: SGE project (-P), overriding sge.json.")
+@click.option("--sge-h-vmem", type=str, default=None,
+              help="--submit sge: memory limit (-l h_vmem), overriding sge.json.")
+@click.option("--remote-host", type=str, default=None)
+@click.option("--remote-user", type=str, default=None)
+@click.option("--emit-script", "emit_script", type=click.Path(path_type=Path), default=None)
+@click.option("--dry-run", is_flag=True, default=False,
+              help="--submit sge: write the submission script and stop.")
+@click.option("--no-remote", is_flag=True, default=False,
+              help="--submit sge: write the script but do not run it.")
 @click.command("topbrain-stage4-infer")
 @config_dir_click_option()
 @backend_click_option(default="gpu")
@@ -673,9 +833,14 @@ def submit_sge(
 @click.option("--configuration", "configuration_name", type=str, default=None)
 @click.option("--checkpoint-name", type=str, default="checkpoint_final.pth", show_default=True)
 @click.option("--output-name", type=str, default=None)
+@click.option("--postprocess", type=str, default=None,
+              help="Which post-processing steps to apply: a comma list of "
+                   "islands,largest,bridge,adjacency,lateral — or 'none' for the raw argmax, "
+                   "or 'all'. Supersedes the individual --repair-* switches. Default: islands.")
 @click.option("--min-volume-mm3", type=float, default=5.0, show_default=True,
               help="Drop connected components smaller than this, per class.")
-@click.option("--no-postprocess", is_flag=True, default=False)
+@click.option("--no-postprocess", is_flag=True, default=False,
+              help="Shorthand for --postprocess none.")
 @click.option("--largest-only", is_flag=True, default=False,
               help="Also reduce each class to its single largest component.")
 @click.option("--repair-gaps-mm", type=float, default=None,
@@ -706,7 +871,11 @@ def main(
     repair_gaps_mm: float | None, repair_adjacency: bool, repair_lateral: bool,
     repair_close_radius: int,
     device: str | None, num_processes: int, workers: int, skip_prediction: bool,
-    backend: str = "gpu",
+    submit: str = "local", container: Path | None = None, src_dir: Path | None = None,
+    sge_project: str | None = None, sge_h_vmem: str | None = None,
+    remote_host: str | None = None, remote_user: str | None = None,
+    emit_script: Path | None = None, dry_run: bool = False, no_remote: bool = False,
+    postprocess: str | None = None, backend: str = "gpu",
 ) -> None:
     """CLI entry point: predict on one or more images with a selected model."""
     from nvitk.pipes.topbrain.stage2_train import parse_folds
@@ -737,7 +906,30 @@ def main(
         return
     if not inputs and input_dir is None:
         raise click.UsageError("Give at least one --input file or directory (or --input-dir).")
+    if str(submit).lower() == "sge":
+        _submit_to_cluster(
+            container=container, src_dir=src_dir, sge_project=sge_project,
+            sge_h_vmem=sge_h_vmem, remote_host=remote_host, remote_user=remote_user,
+            emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
+            options=dict(
+                inputs=list(inputs), input_dir=input_dir, model=model, modality=modality,
+                output=output, output_name=output_name, label_set=label_set, loss=loss,
+                architecture=architecture, folds=parse_folds(folds) if folds else None,
+                plans_identifier=plans_identifier, configuration_name=configuration_name,
+                checkpoint_name=checkpoint_name, min_volume_mm3=min_volume_mm3,
+                largest_only=largest_only, no_postprocess=no_postprocess,
+                postprocess=postprocess, repair_gaps_mm=repair_gaps_mm,
+                repair_adjacency=repair_adjacency, repair_lateral=repair_lateral,
+                repair_close_radius=repair_close_radius, device=device,
+                num_processes=num_processes, workers=workers,
+                skip_prediction=skip_prediction, backend=backend,
+            ),
+        )
+        return
+
     run_infer(
+        # --no-postprocess is the shorthand for the same thing, kept so existing commands work.
+        postprocess="none" if no_postprocess else postprocess,
         inputs=list(inputs), input_dir=input_dir, model=model, modality=modality,
         output=output,
         nnunet_raw=nnunet_raw, nnunet_preprocessed=nnunet_preprocessed,

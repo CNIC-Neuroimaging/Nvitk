@@ -57,6 +57,7 @@ from nvitk.measure.segmentation_metrics import (
     paired_comparison,
 )
 from nvitk.pipes.topbrain import labels as lbl
+from nvitk.pipes.topbrain.util import postproc
 from nvitk.pipes.topbrain.util.paths import STAGE3_EVAL_DIR, parse_case_id
 from nvitk.pipes.topbrain.util.sge_backend import sge_backend_cli_args
 from nvitk.pipes.topbrain.util.sge_stage import (
@@ -234,9 +235,12 @@ def format_comparison(rows: Sequence[PairedComparison], *, baseline_name: str) -
     return "\n".join(lines)
 
 
-def _write_comparison_csv(rows: Sequence[PairedComparison], output_dir: Path) -> None:
-    """Write the paired comparison as a CSV beside the metrics."""
-    path = output_dir / "comparison_vs_baseline.csv"
+def _write_comparison_csv(
+    rows: Sequence[PairedComparison], output_dir: Path,
+    name: str = "comparison_vs_baseline.csv",
+) -> None:
+    """Write a paired comparison as a CSV beside the metrics."""
+    path = output_dir / name
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([
@@ -289,6 +293,7 @@ def run_evaluate(
     skip_neighbours: bool = False,
     baseline: Path | None = None,
     splits_path: Path | None = None,
+    postprocess: str | None = None,
 ) -> Path:
     """Score every prediction and write the reports; returns the output directory.
 
@@ -318,11 +323,16 @@ def run_evaluate(
         len(pairs), label_set, len(labels), len(sideroad),
     )
 
-    cases: list[CaseMetrics] = []
-    for case_id, reference_path, prediction_path in pairs:
-        reference = imread(reference_path)
-        prediction = imread(prediction_path)
-        metrics = evaluate_case(
+    # With post-processing selected, every case is scored twice — once raw, once cleaned — so
+    # the comparison is paired on the same cases and the same references. Scoring only the
+    # cleaned masks would tell you how good they are, not what the cleaning bought.
+    spec = postproc.spec_from_options(postprocess=postprocess) if postprocess else None
+    if spec is not None and spec.enabled:
+        log.info("%s (raw masks scored alongside, for the comparison)", spec.describe())
+
+    def _score(case_id, reference, prediction):
+        """Metrics for one prediction against its reference."""
+        return evaluate_case(
             reference, prediction,
             case_id=case_id,
             labels=labels,
@@ -331,6 +341,19 @@ def run_evaluate(
             valid_neighbours=neighbours,
             iou_threshold=iou_threshold,
         )
+
+    cases: list[CaseMetrics] = []
+    raw_cases: list[CaseMetrics] = []
+    for case_id, reference_path, prediction_path in pairs:
+        reference = imread(reference_path)
+        prediction = imread(prediction_path)
+        if spec is not None and spec.enabled:
+            raw_cases.append(_score(case_id, reference, prediction))
+            prediction, _ = postproc.apply_postprocess(
+                prediction, label_set=label_set, spec=spec,
+                spacing=reference.spacing, affine=getattr(reference, "affine", None),
+            )
+        metrics = _score(case_id, reference, prediction)
         cases.append(metrics)
         log.step(
             f"{case_id}: dice={metrics.aggregate.get('class_avg_dice', float('nan')):.4f} "
@@ -365,6 +388,14 @@ def run_evaluate(
             {case.case_id: case.aggregate for case in cases},
         )
 
+    # ---- Raw vs post-processed, paired on the same cases ---------------------
+    postprocess_comparison: list[PairedComparison] = []
+    if raw_cases:
+        postprocess_comparison = paired_comparison(
+            {c.case_id: c.aggregate for c in raw_cases},
+            {c.case_id: c.aggregate for c in cases},
+        )
+
     report = {
         "stage": "stage3",
         "created": datetime.now().isoformat(timespec="seconds"),
@@ -380,12 +411,21 @@ def run_evaluate(
         "fold_spread": spread,
         "baseline": str(baseline) if baseline is not None else None,
         "comparison_vs_baseline": [row.as_dict() for row in comparison],
+        "postprocess": spec.as_dict() if spec is not None else None,
+        "cohort_raw": aggregate_cases(raw_cases) if raw_cases else None,
+        "comparison_raw_vs_postprocessed": [
+            row.as_dict() for row in postprocess_comparison
+        ],
         "per_case": [c.as_dict() for c in cases],
     }
     (output_dir / "metrics.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     _write_csvs(cases, output_dir, label_map)
     if comparison:
         _write_comparison_csv(comparison, output_dir)
+    if postprocess_comparison:
+        _write_comparison_csv(
+            postprocess_comparison, output_dir, name="comparison_raw_vs_postprocessed.csv"
+        )
     (output_dir / "topbrain_stage3.json").write_text(
         json.dumps({k: v for k, v in report.items() if k != "per_case"}, indent=2) + "\n",
         encoding="utf-8",
@@ -410,6 +450,11 @@ def run_evaluate(
             values.get("class_avg_b0_error", float("nan")),
             values.get("class_avg_hd95", float("nan")),
         )
+    if postprocess_comparison:
+        for line in format_comparison(
+            postprocess_comparison, baseline_name="the raw masks"
+        ).splitlines():
+            log.info("  %s", line)
     if comparison:
         for line in format_comparison(comparison, baseline_name=str(baseline)).splitlines():
             log.info("  %s", line)
@@ -425,7 +470,7 @@ def _worker_argv(
     *, label_set: str, prediction_subdir: str | None = None, run_name: str | None = None,
     folds_spec: str = "0,1,2,3,4",
     iou_threshold: float | None = None, skip_neighbours: bool = False,
-    baseline: str | None = None, backend: str = "cpu",
+    baseline: str | None = None, postprocess: str | None = None, backend: str = "cpu",
 ) -> list[str]:
     """Worker argv for stage 3, built against the container-side layout."""
     from nvitk.cluster.sge import python_module_argv
@@ -451,6 +496,8 @@ def _worker_argv(
         argv.extend(["--iou-threshold", str(float(iou_threshold))])
     if skip_neighbours:
         argv.append("--skip-neighbours")
+    if postprocess:
+        argv.extend(["--postprocess", quote_path(str(postprocess))])
     if baseline:
         # A bare name is resolved against the container's own stage3 directory; an absolute
         # host path would not exist inside the container.
@@ -517,13 +564,17 @@ def submit_sge(
 @click.option("--baseline", type=click.Path(path_type=Path), default=None,
               help="A previous stage 3 run (directory or metrics.json) to compare against case "
                    "by case — normally the --from-scratch control run.")
+@click.option("--postprocess", type=str, default=None,
+              help="Score the predictions after these post-processing steps: a comma list of "
+                   "islands,largest,bridge,adjacency,lateral — or 'none'/'all'. The raw masks "
+                   "are scored too, and the report pairs the two case by case.")
 @click.option("--splits", "splits_path", type=click.Path(path_type=Path), default=None,
               help="splits_final.json for the per-fold spread (default: beside the references).")
 def main(
     predictions_from: str, prediction_dir: Path | None, nnunet_results: Path | None,
     train_run_name: str | None, folds: str, reference_dir: Path, results_root: Path,
     label_set: str, run_name: str | None, iou_threshold: float | None, skip_neighbours: bool,
-    baseline: Path | None, splits_path: Path | None,
+    baseline: Path | None, splits_path: Path | None, postprocess: str | None = None,
 ) -> None:
     """CLI entry point: score predictions against reference masks."""
     from nvitk.pipes.topbrain.stage2_train import dataset_name_for, parse_folds
@@ -548,6 +599,7 @@ def main(
         raise click.UsageError("--predictions-from folder needs --prediction-dir.")
 
     run_evaluate(
+        postprocess=postprocess,
         prediction_dir=prediction_dir, partial_folds=partial, reference_dir=reference_dir,
         results_root=results_root, label_set=label_set, run_name=run_name or train_run_name,
         iou_threshold=iou_threshold, skip_neighbours=skip_neighbours,

@@ -503,22 +503,10 @@ def _submit_via_login_node(
     list of str
         Submitted SGE job ids, parsed from the driver's output. Empty when nothing was run.
     """
-    import shutil
-    import subprocess
-    from datetime import datetime
+    from nvitk.pipes.topbrain.util.sge_stage import run_driver_script
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    local_script, remote_script = resolve_sge_script_paths(
-        Path(emit_script) if emit_script is not None else None,
-        remote_scripts_dir=cfg.SGE_SCRIPTS_DIR,
-        default_basename=f"submit_topbrain_{label_set}_{stamp}.sh",
-    )
-
-    with open(local_script, "w", encoding="utf-8") as handle:
-        write_script_header(
-            handle, log_dir=cfg.SGE_LOG_DIR, err_dir=cfg.SGE_ERR_DIR,
-            title=f"topbrain label_set={label_set} loss={loss} stages={','.join(selected)}",
-        )
+    def _emit(handle: TextIO) -> None:
+        """Write every stage's qsub block, plus the TensorBoard job when one is asked for."""
         _run_sge(active, selected, options, container=container, src_dir=src_dir,
                  base_hold=base_hold, dry_run=True, emit=handle,
                  parallel_folds=parallel_folds)
@@ -526,49 +514,17 @@ def _submit_via_login_node(
             local=local, cluster=active, container=container, src_dir=src_dir,
             dry_run=True, emit=handle, **tensorboard,
         )
-    log.info("  local script : %s", local_script)
-    log.info("  cluster path : %s", remote_script)
 
-    if dry_run:
-        log.ok(f"--dry-run: submission script written, nothing submitted -> {local_script}")
-        return []
-    if no_remote:
-        log.ok(f"--no-remote: run it yourself on the login node:\n    bash {remote_script}")
-        return []
-
-    if shutil.which("qsub"):
-        log.info("qsub found on this host; running the driver script locally.")
-        completed = subprocess.run(
-            ["bash", str(local_script)], check=False, capture_output=True, text=True
+    try:
+        return run_driver_script(
+            _emit,
+            title=f"topbrain label_set={label_set} loss={loss} stages={','.join(selected)}",
+            basename=f"submit_topbrain_{label_set}",
+            emit_script=emit_script, dry_run=dry_run, no_remote=no_remote,
+            remote_host=remote_host, remote_user=remote_user, credentials=credentials,
         )
-        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
-    else:
-        # Already resolved by the caller when TensorBoard will need the same session; asking
-        # for one password twice in one command is the kind of thing people work around badly.
-        host, user, password = credentials or prompt_ssh_credentials(
-            remote_host=remote_host, remote_user=remote_user,
-            host_aliases=pth.CLUSTER_HOST_ALIASES,
-        )
-        cluster_path = publish_sge_driver_script(
-            local_script, remote_script, host=host, user=user, password=password,
-        )
-        exit_code, stdout, stderr = run_sge_script_ssh_capture(
-            host, user, password, cluster_path, local_script_path=local_script,
-        )
-
-    if stdout.strip():
-        log.info("submission output:\n%s", stdout.strip()[-4000:])
-    if stderr.strip():
-        log.warning("submission stderr:\n%s", stderr.strip()[-4000:])
-    if exit_code != 0:
-        raise click.ClickException(
-            f"The submission script exited with code {exit_code}. Nothing may have been "
-            f"queued; check the output above and {local_script}."
-        )
-
-    job_ids = parse_sge_submission_job_ids(stdout, stderr)
-    log.ok(f"submitted {len(job_ids)} job(s): {', '.join(job_ids) or '(none parsed)'}")
-    return job_ids
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @click.command("nvitk-topbrain")
