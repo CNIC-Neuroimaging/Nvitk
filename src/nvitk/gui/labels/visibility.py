@@ -11,8 +11,14 @@ from nvitk.core.array import to_numpy
 _NVITK_LABEL_SOURCE_KEY = "nvitk_label_source"
 _NVITK_VISIBLE_IDS_KEY = "nvitk_visible_ids"
 _NVITK_COLOR_BACKUP_KEY = "nvitk_label_color_backup"
+_NVITK_COLORMAP_KEY = "nvitk_label_colormap"
 NVITK_LAYER_METADATA_KEYS = frozenset(
-    {_NVITK_LABEL_SOURCE_KEY, _NVITK_VISIBLE_IDS_KEY, _NVITK_COLOR_BACKUP_KEY}
+    {
+        _NVITK_LABEL_SOURCE_KEY,
+        _NVITK_VISIBLE_IDS_KEY,
+        _NVITK_COLOR_BACKUP_KEY,
+        _NVITK_COLORMAP_KEY,
+    }
 )
 _MAX_LABEL_LIKE_IDS = 64
 
@@ -309,6 +315,128 @@ def _apply_labels_color_visibility(layer: Any, selected_ids: list[int]) -> None:
     _apply_label_color_dict(layer, color_dict)
 
 
+#: Colormaps offered for recolouring a whole label set, grouped by what they suit.
+#: Qualitative maps cycle a fixed set of hues, so adjacent ids stay distinguishable
+#: however many there are; sequential maps ramp across the ids, which reads as an
+#: order and suits labels that have one (vertebrae, cortical depth).
+LABEL_COLORMAPS: tuple[tuple[str, str], ...] = (
+    ("Napari default", ""),
+    ("tab10 — 10 distinct hues", "tab10"),
+    ("tab20 — 20 distinct hues", "tab20"),
+    ("Set1 — bold", "Set1"),
+    ("Set3 — pastel", "Set3"),
+    ("Paired — light/dark pairs", "Paired"),
+    ("Dark2 — muted", "Dark2"),
+    ("hsv — maximal spread", "hsv"),
+    ("viridis — sequential", "viridis"),
+    ("turbo — sequential", "turbo"),
+    ("plasma — sequential", "plasma"),
+    ("cividis — colour-blind safe", "cividis"),
+)
+
+#: Qualitative maps are indexed by position modulo their length; anything else is
+#: sampled evenly across the ids.
+_CYCLIC_COLORMAPS = frozenset(
+    {"tab10", "tab20", "tab20b", "tab20c", "Set1", "Set2", "Set3", "Paired", "Dark2", "Accent"}
+)
+
+
+def label_colormap_colors(label_ids: list[int], colormap: str) -> dict[int, np.ndarray]:
+    """RGBA for each id in *label_ids*, sampled from the named Matplotlib colormap.
+
+    Qualitative maps cycle so neighbouring ids never collide; continuous maps are
+    sampled evenly across the set so the ramp spans it exactly.
+    """
+    from matplotlib import colormaps
+
+    cmap = colormaps[str(colormap)]
+    ids = [int(x) for x in label_ids]
+    out: dict[int, np.ndarray] = {}
+    cyclic = str(colormap) in _CYCLIC_COLORMAPS
+    span = max(len(ids) - 1, 1)
+    for position, lid in enumerate(ids):
+        raw = cmap(position % cmap.N) if cyclic else cmap(position / span)
+        out[lid] = _normalize_rgba(np.asarray(raw, dtype=np.float32))
+    return out
+
+
+def apply_label_colormap(
+    layer: Any,
+    colormap: str,
+    *,
+    selected_ids: list[int] | None = None,
+) -> int:
+    """Recolour every label id on *layer* from *colormap*; returns how many changed.
+
+    An empty *colormap* drops nvitk's colours entirely and hands the layer back to
+    Napari's own cyclic label colours.
+
+    The new colours go into the same backup :func:`apply_label_visibility` reads,
+    so they survive hiding and re-showing ids — the point of a colormap is lost if
+    unticking a label resets the set.
+    """
+    if not supports_per_label_color(layer):
+        raise TypeError("Per-label colours require a Napari Labels layer.")
+
+    all_ids = unique_layer_labels(label_source_data(layer))
+    if not all_ids:
+        return 0
+
+    meta = _layer_metadata(layer)
+    if not str(colormap or "").strip():
+        # Back to Napari's own colours: drop the backup and the live filter key so
+        # nothing re-applies the colours we are discarding.
+        meta.pop(_NVITK_COLOR_BACKUP_KEY, None)
+        meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
+        meta.pop(_NVITK_COLORMAP_KEY, None)
+        layer.metadata = meta
+        _reset_to_napari_colormap(layer)
+        if selected_ids is not None:
+            apply_label_visibility(layer, list(selected_ids))
+        return len(all_ids)
+
+    colors = label_colormap_colors(all_ids, colormap)
+    meta[_NVITK_COLOR_BACKUP_KEY] = dict(colors)
+    meta[_NVITK_COLORMAP_KEY] = str(colormap)
+    # Force apply_label_visibility past its "already showing these ids" shortcut,
+    # which would otherwise skip pushing the new colours.
+    meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
+    layer.metadata = meta
+
+    if selected_ids is not None:
+        apply_label_visibility(layer, list(selected_ids))
+    else:
+        _apply_label_color_dict(layer, colors)
+    return len(colors)
+
+
+def stored_label_colormap(layer: Any | None) -> str:
+    """Colormap key last applied to *layer*, or ``""`` for Napari's own colours.
+
+    Empty is also the answer once any label has been recoloured by hand, since the
+    set no longer matches the colormap it started from.
+    """
+    if layer is None:
+        return ""
+    return str(_layer_metadata(layer).get(_NVITK_COLORMAP_KEY) or "")
+
+
+def _reset_to_napari_colormap(layer: Any) -> None:
+    """Restore Napari's built-in cyclic label colormap on *layer*."""
+    try:
+        from napari.utils.colormaps import label_colormap
+
+        layer.colormap = label_colormap(49, seed=0.5)
+        return
+    except Exception:
+        pass
+    if hasattr(layer, "color"):
+        try:
+            layer.color = {}
+        except Exception:
+            pass
+
+
 def get_label_color(layer: Any, label_id: int) -> np.ndarray:
     """Return RGBA (float 0–1) for *label_id*, matching Napari's displayed color."""
     lid = int(label_id)
@@ -360,6 +488,8 @@ def set_label_color(
     backup = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
     backup[lid] = color
     meta[_NVITK_COLOR_BACKUP_KEY] = backup
+    # One hand-picked colour means the set is no longer a plain colormap.
+    meta.pop(_NVITK_COLORMAP_KEY, None)
     # Force visibility re-apply so the live colormap picks up the backup.
     meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
     layer.metadata = meta
@@ -482,6 +612,7 @@ def restore_label_visibility(
     meta = _layer_metadata(layer)
     meta.pop(_NVITK_VISIBLE_IDS_KEY, None)
 
+    meta.pop(_NVITK_COLORMAP_KEY, None)
     backup = meta.pop(_NVITK_COLOR_BACKUP_KEY, None)
     if backup is not None and supports_per_label_color(layer):
         restored = {int(k): _normalize_rgba(v) for k, v in dict(backup).items()}
@@ -499,7 +630,9 @@ def restore_label_visibility(
 
 
 __all__ = [
+    "LABEL_COLORMAPS",
     "NVITK_LAYER_METADATA_KEYS",
+    "apply_label_colormap",
     "apply_label_visibility",
     "copy_layer_metadata_for_output",
     "ensure_label_source",
@@ -507,9 +640,11 @@ __all__ = [
     "get_label_color",
     "infer_target_mode",
     "is_label_like_layer",
+    "label_colormap_colors",
     "label_source_data",
     "layer_in_viewer",
     "restore_label_visibility",
+    "stored_label_colormap",
     "set_label_color",
     "stored_visible_ids",
     "supports_per_label_color",

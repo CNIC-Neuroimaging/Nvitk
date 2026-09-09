@@ -58,6 +58,7 @@ from nvitk.stats.frame_ops import (
     DEFAULT_IQR_K,
     FILTER_OPS,
     TRANSFORM_LABELS,
+    default_derived_name,
     FilterRule,
 )
 
@@ -65,7 +66,14 @@ from nvitk.stats.interactive import COLUMN_PLOT_KINDS
 from nvitk.stats.qc_filters import available_presets
 
 from .constants import MAX_CATEGORICAL_LEVELS, TABLE_ROW_CAP
-from .theme import COLOR_ACCENT, COLOR_MUTED, muted_label_style
+from .theme import (
+    COLOR_ACCENT,
+    COLOR_FAINT,
+    COLOR_MUTED,
+    COLOR_TEXT,
+    clear_layout,
+    muted_label_style,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -505,11 +513,7 @@ class FilterChipBar(QWidget):
         self._rules = list(rules)
         by_index = {i: entry for i, entry in enumerate(report)}
 
-        while self._host_layout.count():
-            item = self._host_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._host_layout)
 
         if not self._rules:
             hint = QLabel("No filters — right-click a column header to add one.")
@@ -554,8 +558,8 @@ class FilterChipBar(QWidget):
         remove.clicked.connect(lambda _=False, i=index: self._on_remove(i))
         lay.addWidget(remove)
 
-        border = "#666" if skipped else COLOR_ACCENT
-        color = COLOR_MUTED if skipped else "#e0e0e0"
+        border = COLOR_FAINT if skipped else COLOR_ACCENT
+        color = COLOR_MUTED if skipped else COLOR_TEXT
         chip.setStyleSheet(
             f"QWidget {{ border: 1px solid {border}; border-radius: 10px; }} "
             f"QLabel {{ border: none; color: {color}; font-weight: normal; }}"
@@ -754,6 +758,26 @@ class AnalysisFrameView(QWidget):
 
         frame = self._model.frame()
         numeric = column in frame.columns and pd.api.types.is_numeric_dtype(frame[column])
+
+        # Centering is the transform reached for most often — it is what makes an
+        # intercept, and any lower-order term under an interaction, interpretable
+        # — so it gets its own entry instead of living inside the submenu.
+        centered_name = default_derived_name(column, "center")
+        center = menu.addAction(
+            f"Centre “{column}” → {centered_name}",
+            lambda: self.transformRequested.emit(column, "center"),
+        )
+        center.setEnabled(numeric and centered_name not in frame.columns)
+        if not numeric:
+            center.setToolTip("Centering applies to numeric columns only.")
+        elif centered_name in frame.columns:
+            center.setToolTip(f"“{centered_name}” already exists.")
+        else:
+            center.setToolTip(
+                f"Add {centered_name} = {column} − mean({column}), leaving the slope "
+                "unchanged and moving the intercept to the sample mean."
+            )
+
         transform_menu = menu.addMenu("Add derived column")
         transform_menu.setEnabled(numeric)
         for key, label in TRANSFORM_LABELS.items():

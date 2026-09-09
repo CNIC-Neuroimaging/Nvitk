@@ -607,11 +607,24 @@ def _numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
 
 
+def _center(series: pd.Series) -> pd.Series:
+    """Subtract the mean, ignoring NaN — the ``age_at_mri`` → ``age_c`` transform.
+
+    Centering leaves a regression's slope untouched and moves its intercept to the
+    sample mean, which is what makes an intercept (and any lower-order term under
+    an interaction) interpretable. Unlike :func:`_zscore` it does not rescale, so
+    the coefficient stays in the covariate's own units.
+    """
+    num = _numeric(series)
+    return num - num.mean(skipna=True)
+
+
 # Out-of-domain inputs are masked to NaN *before* the transform, so no entry can produce ±inf.
 TRANSFORMS: dict[str, Callable[[pd.Series], pd.Series]] = {
     "log": lambda s: np.log(_numeric(s).where(_numeric(s) > 0)),
     "log1p": lambda s: np.log1p(_numeric(s).where(_numeric(s) > -1)),
     "sqrt": lambda s: np.sqrt(_numeric(s).where(_numeric(s) >= 0)),
+    "center": _center,
     "zscore": _zscore,
     "inverse": lambda s: 1.0 / _numeric(s).where(_numeric(s) != 0),
     "rank": lambda s: _numeric(s).rank(method="average"),
@@ -621,6 +634,7 @@ TRANSFORM_LABELS: dict[str, str] = {
     "log": "log (natural)",
     "log1p": "log1p",
     "sqrt": "square root",
+    "center": "centre (x − mean)",
     "zscore": "z-score",
     "inverse": "inverse (1/x)",
     "rank": "rank",
@@ -640,6 +654,7 @@ _SAFE_NAMESPACE: dict[str, Any] = {
     "where": np.where,
     "minimum": np.minimum,
     "maximum": np.maximum,
+    "center": _center,
     "mean": np.nanmean,
     "std": np.nanstd,
     "median": np.nanmedian,
@@ -651,7 +666,14 @@ _SAFE_NAMESPACE: dict[str, Any] = {
 
 
 def default_derived_name(source: str, transform: str) -> str:
-    """Conventional name for a canned transform, e.g. ``("pi", "log") -> "log_pi"``."""
+    """Conventional name for a canned transform, e.g. ``("pi", "log") -> "log_pi"``.
+
+    Centering is the exception: a centred covariate is conventionally suffixed, so
+    ``("age", "center")`` gives ``age_c`` — the name the analysis frames already
+    use — rather than ``center_age``.
+    """
+    if transform == "center":
+        return f"{source}_c"
     return f"{transform}_{source}"
 
 

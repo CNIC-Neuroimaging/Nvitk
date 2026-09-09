@@ -80,30 +80,8 @@ class DicomTagsPanel(QWidget):
         self._table = QTableWidget(0, 2)
         self._table.setHorizontalHeaderLabels(["Tag", "Value"])
         self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.setAlternatingRowColors(False)
+        self._table.setAlternatingRowColors(True)
         self._table.setShowGrid(True)
-        self._table.setStyleSheet(
-            "QTableWidget {"
-            "  background-color: #2b2b2b;"
-            "  color: #e8e8e8;"
-            "  gridline-color: #454545;"
-            "  alternate-background-color: #2b2b2b;"
-            "}"
-            "QTableWidget::item {"
-            "  background-color: #2b2b2b;"
-            "  color: #e8e8e8;"
-            "}"
-            "QTableWidget::item:selected {"
-            "  background-color: #3d5a80;"
-            "  color: #ffffff;"
-            "}"
-            "QHeaderView::section {"
-            "  background-color: #353535;"
-            "  color: #e8e8e8;"
-            "  padding: 4px;"
-            "  border: 1px solid #454545;"
-            "}"
-        )
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.setSortingEnabled(True)

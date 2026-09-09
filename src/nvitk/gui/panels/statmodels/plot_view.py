@@ -47,6 +47,7 @@ from nvitk.gui.core.flow_layout import FlowRow
 
 from .constants import AXIS_SLIDER_MARGIN, AXIS_SLIDER_STEPS
 from .theme import COLOR_ERROR, muted_label_style, whiten_figure
+from nvitk.gui.core.design import clear_layout
 
 log = Logger()
 
@@ -302,11 +303,7 @@ class PlotPanel(QGroupBox):
 
         self._suspend_group_signal = True
         try:
-            while self._groups_layout.count():
-                item = self._groups_layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None:
-                    widget.deleteLater()
+            clear_layout(self._groups_layout)
             self._group_boxes = {}
 
             if not levels:
@@ -365,11 +362,7 @@ class PlotPanel(QGroupBox):
             self._plotly.clear()
             self._plotly.setParent(None)
         self._interactive = False
-        while self._host_layout.count():
-            item = self._host_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._host_layout)
         if self._fig is not None:
             try:
                 import matplotlib.pyplot as plt

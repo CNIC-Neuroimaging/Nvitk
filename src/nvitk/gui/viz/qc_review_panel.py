@@ -34,6 +34,12 @@ from nvitk.db.qvtpy_qc import (
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 from nvitk.core.logger import Logger
+from nvitk.gui.core.design import (
+    COLOR_BORDER_STRONG,
+    COLOR_MUTED,
+    COLOR_TEXT,
+    STATUS_COLORS,
+)
 
 log = Logger()
 
@@ -293,11 +299,11 @@ QC_METRIC_LABELS: dict[str, str] = {
 # Automatic-QC colouring
 # ──────────────────────────────────────────────────────────────────────────────
 #: Row tints for the automatic metrics, dark enough to keep the light table text readable.
-_QC_GOOD = QColor("#1e4620")
-_QC_WARN = QColor("#5a4a1e")
-_QC_BAD = QColor("#5a2424")
-_QC_NEUTRAL = QColor("#2b2b2b")
-_QC_UNKNOWN = QColor("#333333")
+_QC_GOOD = QColor(STATUS_COLORS["ok"])
+_QC_WARN = QColor(STATUS_COLORS["warn"])
+_QC_BAD = QColor(STATUS_COLORS["bad"])
+_QC_NEUTRAL = QColor(STATUS_COLORS["neutral"])
+_QC_UNKNOWN = QColor(STATUS_COLORS["unknown"])
 
 
 def qc_metric_colour(metric: str, value: Any) -> QColor:
@@ -507,36 +513,6 @@ class QcMeasurementsPanel(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         # Uniform row color — alternating rows hide light text on dark Napari UI.
         self._table.setAlternatingRowColors(False)
-        self._table.setStyleSheet(
-            "QTableWidget {"
-            "  background-color: #2b2b2b;"
-            "  color: #e8e8e8;"
-            "  gridline-color: #454545;"
-            "  alternate-background-color: #2b2b2b;"
-            "}"
-            # No ``background-color`` here on purpose. A stylesheet rule on ``::item`` overrides
-            # whatever ``QTableWidgetItem.setBackground`` sets, which silently disabled the
-            # automatic-QC row tinting — the values were applied, the paint just never used them.
-            # The widget-level rule above still gives the dark viewport.
-            "QTableWidget::item {"
-            "  color: #e8e8e8;"
-            "}"
-            "QTableWidget::item:selected {"
-            "  background-color: #3d5a80;"
-            "  color: #ffffff;"
-            "}"
-            "QHeaderView::section {"
-            "  background-color: #353535;"
-            "  color: #e8e8e8;"
-            "  padding: 4px;"
-            "  border: 1px solid #454545;"
-            "}"
-            "QComboBox, QLineEdit {"
-            "  background-color: #1e1e1e;"
-            "  color: #e8e8e8;"
-            "  border: 1px solid #555;"
-            "}"
-        )
 
         # Subject-level autoQC summary (clinical_measurements). Shown above the vessel table so
         # anterior/posterior split and the subject flag are visible without being vessel rows.
@@ -553,9 +529,9 @@ class QcMeasurementsPanel(QWidget):
             chip.setMinimumWidth(72)
             chip.setStyleSheet(
                 "QLabel {"
-                "  background-color: #333333;"
-                "  color: #e8e8e8;"
-                "  border: 1px solid #555;"
+                f"  background-color: {STATUS_COLORS['unknown']};"
+                f"  color: {COLOR_TEXT};"
+                f"  border: 1px solid {COLOR_BORDER_STRONG};"
                 "  border-radius: 4px;"
                 "  padding: 3px 8px;"
                 "}"
@@ -573,7 +549,7 @@ class QcMeasurementsPanel(QWidget):
                     "qc_subject_flag": "Subject flag",
                 }.get(metric, metric)
             )
-            heading.setStyleSheet("color: #9a9a9a; font-size: 11px;")
+            heading.setStyleSheet(f"color: {COLOR_MUTED}; font-size: 11px;")
             heading.setAlignment(Qt.AlignCenter)
             cell_lay.addWidget(heading)
             cell_lay.addWidget(chip)
@@ -592,7 +568,7 @@ class QcMeasurementsPanel(QWidget):
         colour_lay.addWidget(QLabel("Colour by"))
         colour_lay.addWidget(self._colour_by, stretch=1)
         self._colour_legend = QLabel("")
-        self._colour_legend.setStyleSheet("color: #9a9a9a;")
+        self._colour_legend.setStyleSheet(f"color: {COLOR_MUTED};")
         colour_lay.addWidget(self._colour_legend, stretch=2)
 
         self._btn_revise = QPushButton("Mark as revised")
@@ -669,8 +645,8 @@ class QcMeasurementsPanel(QWidget):
             chip.setStyleSheet(
                 "QLabel {"
                 f"  background-color: {colour.name()};"
-                "  color: #e8e8e8;"
-                "  border: 1px solid #555;"
+                f"  color: {COLOR_TEXT};"
+                f"  border: 1px solid {COLOR_BORDER_STRONG};"
                 "  border-radius: 4px;"
                 "  padding: 3px 8px;"
                 "  font-weight: 600;"
@@ -703,7 +679,7 @@ class QcMeasurementsPanel(QWidget):
                 value = subject_value
             else:
                 value = self._qc_value(by_region, row)
-            colour = qc_metric_colour(metric, value) if metric else QColor("#2b2b2b")
+            colour = qc_metric_colour(metric, value) if metric else QColor(STATUS_COLORS["neutral"])
             for column in (self.COL_REGION, self.COL_METRIC, self.COL_VALUE):
                 item = self._table.item(i, column)
                 if item is not None:

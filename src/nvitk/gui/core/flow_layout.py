@@ -26,6 +26,7 @@ from typing import Any
 
 from qtpy.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from qtpy.QtWidgets import QLayout, QSizePolicy, QStyle, QWidget
+from nvitk.gui.core.design import SPACE, SPACE_TIGHT
 
 
 class FlowLayout(QLayout):
@@ -201,7 +202,13 @@ class FlowRow(QWidget):
     Use :meth:`add` to append controls.
     """
 
-    def __init__(self, parent: Any = None, *, h_spacing: int = 6, v_spacing: int = 4) -> None:
+    def __init__(
+        self,
+        parent: Any = None,
+        *,
+        h_spacing: int = SPACE,
+        v_spacing: int = SPACE_TIGHT,
+    ) -> None:
         """Create an empty wrapping row."""
         super().__init__(parent)
         self._flow = FlowLayout(self, margin=0, h_spacing=h_spacing, v_spacing=v_spacing)

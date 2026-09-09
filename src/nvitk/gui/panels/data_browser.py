@@ -69,6 +69,7 @@ from nvitk.gui.pipeline.data_presets import (
     load_preset_roots,
 )
 from nvitk.gui.tools.runner import notify
+from nvitk.gui.core.design import clear_layout
 
 log = Logger()
 
@@ -746,11 +747,7 @@ class DataBrowserPanel(QWidget):
     def _rebuild_xnat_scan_filter_checkboxes(self, project_id: str, slots: list[str]) -> None:
         """Rebuild the scan-filter checkbox grid from *slots*, ordering the project's default
         sequences and pipeline resources first."""
-        while self._xnat_scan_filters_layout.count():
-            item = self._xnat_scan_filters_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._xnat_scan_filters_layout)
         self._xnat_scan_filter_checks.clear()
 
         if not slots:

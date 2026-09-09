@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import COLOR_BORDER_STRONG, COLOR_FAINT, clear_layout
 from nvitk.gui.labels.catalog import (
     all_schemas,
     get_schema,
@@ -29,11 +30,14 @@ from nvitk.gui.labels.catalog import (
     schema_keys,
 )
 from nvitk.gui.labels.visibility import (
+    LABEL_COLORMAPS,
+    apply_label_colormap,
     ensure_labels_layer,
     get_label_color,
     is_label_like_layer,
     label_source_data,
     set_label_color,
+    stored_label_colormap,
     stored_visible_ids,
     supports_per_label_color,
     unique_layer_labels,
@@ -68,9 +72,11 @@ def _qcolor_to_rgba(color: QColor) -> np.ndarray:
 def _swatch_stylesheet(rgba: np.ndarray) -> str:
     """Qt stylesheet giving a ``QToolButton`` a solid background swatch of color *rgba*."""
     c = _rgba_to_qcolor(rgba)
+    # Circular, so a colour swatch is never mistaken for the square checkbox
+    # indicator sitting right beside it.
     return (
         f"QToolButton {{ background-color: rgba({c.red()},{c.green()},{c.blue()},{c.alpha()}); "
-        f"border: 1px solid #666; border-radius: 3px; }}"
+        f"border: 1px solid {COLOR_BORDER_STRONG}; border-radius: 9px; }}"
     )
 
 
@@ -101,6 +107,18 @@ class LabelSelectorWidget(QGroupBox):
         self._btn_guess.setToolTip("Guess mapping from layer filename / metadata")
         schema_row.addWidget(self._btn_guess)
 
+        cmap_row = QHBoxLayout()
+        cmap_row.addWidget(QLabel("Colours:"))
+        self._cmap_combo = QComboBox()
+        self._cmap_combo.setToolTip(
+            "Recolour every label at once. Qualitative maps (tab10, Set1) keep "
+            "neighbouring ids distinct; sequential maps (viridis, turbo) ramp across "
+            "them, which suits labels that have an order."
+        )
+        for label, key in LABEL_COLORMAPS:
+            self._cmap_combo.addItem(label, key)
+        cmap_row.addWidget(self._cmap_combo, stretch=1)
+
         self._show_full = QCheckBox("Show full schema")
         self._show_full.setToolTip(
             "List every id in the mapping, not only ids present in the active layer"
@@ -127,6 +145,7 @@ class LabelSelectorWidget(QGroupBox):
         root = QVBoxLayout()
         root.addWidget(self._hint)
         root.addLayout(schema_row)
+        root.addLayout(cmap_row)
         root.addWidget(self._show_full)
         root.addLayout(btn_row)
         root.addWidget(self._scroll, stretch=1)
@@ -138,6 +157,7 @@ class LabelSelectorWidget(QGroupBox):
         self._schema_combo.currentIndexChanged.connect(self._on_schema_changed)
         self._show_full.toggled.connect(lambda _: self._refresh_current_layer())
         self._btn_guess.clicked.connect(self._guess_schema)
+        self._cmap_combo.currentIndexChanged.connect(self._on_colormap_changed)
 
         self._layer_ref: Any | None = None
         self._viewer: Any | None = None
@@ -235,7 +255,7 @@ class LabelSelectorWidget(QGroupBox):
         """Build a small clickable color swatch for label *lid*, opening the color editor on click."""
         btn = QToolButton()
         btn.setFixedSize(18, 18)
-        btn.setToolTip(f"Change color for label {lid}")
+        btn.setToolTip(f"Change the display colour of label {lid}")
         btn.setProperty("label_id", lid)
         rgba = get_label_color(layer, lid)
         btn.setStyleSheet(_swatch_stylesheet(rgba))
@@ -266,6 +286,48 @@ class LabelSelectorWidget(QGroupBox):
         if btn is not None:
             btn.setStyleSheet(_swatch_stylesheet(rgba))
 
+    def _on_colormap_changed(self, _index: int) -> None:
+        """Recolour the bound layer's whole label set from the chosen colormap."""
+        layer = self._layer_ref
+        if layer is None or not self._supports_color_edit(layer):
+            return
+        try:
+            layer = self._ensure_colorable_layer(layer)
+        except Exception as exc:  # noqa: BLE001
+            self._hint.setText(f"Could not recolour: {exc}")
+            return
+        colormap = str(self._cmap_combo.currentData() or "")
+        try:
+            count = apply_label_colormap(layer, colormap, selected_ids=self.selected_ids())
+        except Exception as exc:  # noqa: BLE001
+            self._hint.setText(f"Could not apply that colormap: {exc}")
+            return
+        self._sync_color_buttons(layer)
+        name = self._cmap_combo.currentText()
+        self._hint.setText(
+            f"Recoloured {count} label(s) from Napari's default palette."
+            if not colormap
+            else f"Recoloured {count} label(s) — {name}."
+        )
+
+    def _sync_color_buttons(self, layer: Any) -> None:
+        """Repaint each swatch from the layer's current colours."""
+        for lid, btn in self._color_buttons.items():
+            btn.setStyleSheet(_swatch_stylesheet(get_label_color(layer, int(lid))))
+
+    def colormap_key(self) -> str:
+        """Currently selected label colormap key (``""`` for Napari's own colours)."""
+        return str(self._cmap_combo.currentData() or "")
+
+    def set_colormap_key(self, key: str) -> None:
+        """Select a label colormap by key without re-applying it."""
+        idx = self._cmap_combo.findData(str(key))
+        if idx < 0:
+            return
+        self._cmap_combo.blockSignals(True)
+        self._cmap_combo.setCurrentIndex(idx)
+        self._cmap_combo.blockSignals(False)
+
     def refresh_from_layer(self, layer: Any | None) -> None:
         """Rebuild the checkbox list (and color swatches, if supported) for *layer*'s label ids under
         the current schema, promoting a discrete Image mask to Labels first when a viewer is bound."""
@@ -282,11 +344,7 @@ class LabelSelectorWidget(QGroupBox):
                 pass
 
         self._layer_ref = layer
-        while self._inner_layout.count():
-            item = self._inner_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
+        clear_layout(self._inner_layout)
         self._checks.clear()
         self._color_buttons.clear()
         self._layer_ids = []
@@ -310,7 +368,7 @@ class LabelSelectorWidget(QGroupBox):
         mapped = sum(1 for lid in ids if schema and schema.name_for(lid))
         schema_title = schema.title if schema else "Generic"
         color_hint = (
-            " — click the color square to edit"
+            " — click a colour dot to change it"
             if self._supports_color_edit(layer)
             else ""
         )
@@ -319,6 +377,10 @@ class LabelSelectorWidget(QGroupBox):
             + (f" ({mapped} named)" if schema and schema.id_to_name else "")
             + color_hint
         )
+
+        # The combo describes *this* layer, so a layer using Napari's own colours
+        # must not read as though a colormap were applied to it.
+        self.set_colormap_key(stored_label_colormap(layer))
 
         can_color = self._supports_color_edit(layer)
         # Each layer keeps its own selection: reuse whatever the live filter is
@@ -345,7 +407,7 @@ class LabelSelectorWidget(QGroupBox):
             cb.blockSignals(False)
             if self._show_full.isChecked() and not in_layer:
                 cb.setEnabled(False)
-                cb.setStyleSheet("color: gray;")
+                cb.setStyleSheet(f"color: {COLOR_FAINT};")
             self._wire_checkbox(cb)
             row_layout.addWidget(cb, stretch=1)
             self._inner_layout.addWidget(row)

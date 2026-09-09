@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from nvitk.gui.core.design import clear_layout
 from nvitk.gui.pipeline.stages import (
     PipelineStageDef,
     PipelineStageSpec,
@@ -200,11 +201,7 @@ class PipelineStageForm(QGroupBox):
         self._stage_rows.clear()
         self._param_fields.clear()
         self._pipeline_def = None
-        while self._stages_layout.count():
-            item = self._stages_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
+        clear_layout(self._stages_layout)
         while self._params_form.rowCount():
             self._params_form.removeRow(0)
 

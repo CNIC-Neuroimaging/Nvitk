@@ -769,15 +769,6 @@ def _attach_summary_dock(
     table.setAlternatingRowColors(False)
     table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
     table.horizontalHeader().setStretchLastSection(True)
-    table.setStyleSheet(
-        "QTableWidget {"
-        "  background-color: #2b2b2b; color: #e8e8e8; gridline-color: #454545;"
-        "}"
-        "QHeaderView::section {"
-        "  background-color: #353535; color: #e8e8e8; padding: 4px;"
-        "  border: 1px solid #454545;"
-        "}"
-    )
     if summary.empty:
         table.setColumnCount(1)
         table.setHorizontalHeaderLabels(["Info"])

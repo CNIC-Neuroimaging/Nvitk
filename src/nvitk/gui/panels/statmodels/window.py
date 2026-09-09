@@ -39,6 +39,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QDockWidget,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -47,6 +48,7 @@ from qtpy.QtWidgets import (
     QSlider,
     QSpinBox,
     QSplitter,
+    QTabWidget,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -219,6 +221,7 @@ from .measurements import FrameLoadWorker, MeasurementForm, MeasurementsWidget
 from .mediation_panel import MediationFormPanel, MediationWorker
 from .plot_view import PlotPanel
 from .report import ModelReportPanel
+from nvitk.gui.core.design import SPACE, SPACE_TIGHT
 from .theme import apply_dark_theme, muted_label_style
 
 log = Logger()
@@ -325,6 +328,12 @@ _MEDIATION_PLOTS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _style_splitter(split: QSplitter) -> None:
+    """Make a splitter's handle wide enough to grab, and stop panes collapsing to nothing."""
+    split.setHandleWidth(SPACE)
+    split.setChildrenCollapsible(False)
+
+
 class StatmodelsWindow(QMainWindow):
     """Floating / maximizable MixedLM and mediation explorer."""
 
@@ -386,63 +395,77 @@ class StatmodelsWindow(QMainWindow):
         self._load_worker: FrameLoadWorker | None = None
         self._mediation_worker: MediationWorker | None = None
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        # ── Napari-style shell ────────────────────────────────────────────
+        # The figure is the work; everything else is a tool around it. So the
+        # plot is the central widget and every control group is a dock the user
+        # can tab, move, float or close — instead of three fixed splitter rows
+        # that all competed with the figure for the same pixels.
+        self.setDockOptions(
+            QMainWindow.AnimatedDocks
+            | QMainWindow.AllowTabbedDocks
+            | QMainWindow.AllowNestedDocks
+        )
+        # Let the bottom dock (the dataframe) run the full width of the window.
+        self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
+        self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
 
-        self._top_split = QSplitter(Qt.Horizontal)
-        self._top_split.addWidget(self._build_data_panel(initial_pipeline_kind))
-        self._top_split.addWidget(_scrollable(self._build_model_panel()))
-        self._top_split.setSizes([760, 840])
-
-        self._output_split = QSplitter(Qt.Horizontal)
         self._plot = PlotPanel()
         self._plot.set_options_widget(self._build_plot_options())
         self._plot.set_map_options_widget(self._build_map_options())
         self._mediation_plot = self._plot.kind_combo()
+        self.setCentralWidget(self._plot)
+
         self._report = ModelReportPanel()
-        self._output_split.addWidget(self._plot)
-        self._output_split.addWidget(self._report)
-        self._output_split.setStretchFactor(0, 3)
-        self._output_split.setStretchFactor(1, 1)
-        self._output_split.setSizes([1150, 450])
 
-        self._bottom_split = QSplitter(Qt.Horizontal)
-        self._bottom_split.addWidget(self._build_covariate_box("Clinical covariates", "clinical"))
-        self._bottom_split.addWidget(self._build_covariate_box("Cognitive covariates", "cognitive"))
-        self._bottom_split.addWidget(self._build_frame_box())
-        self._bottom_split.setStretchFactor(0, 1)
-        self._bottom_split.setStretchFactor(1, 1)
-        self._bottom_split.setStretchFactor(2, 3)
-        self._bottom_split.setSizes([320, 320, 1000])
+        self._docks: dict[str, QDockWidget] = {}
+        data_dock = self._add_dock(
+            "data", "Data", self._build_data_panel(initial_pipeline_kind), Qt.LeftDockWidgetArea
+        )
+        model_dock = self._add_dock(
+            "model", "Model", _scrollable(self._build_model_panel()), Qt.LeftDockWidgetArea
+        )
+        covariates_dock = self._add_dock(
+            "covariates", "Covariates", self._build_covariates_panel(), Qt.LeftDockWidgetArea
+        )
+        # One column, three tabs: the left dock is a workflow, not three things
+        # to look at simultaneously.
+        self.tabifyDockWidget(data_dock, model_dock)
+        self.tabifyDockWidget(model_dock, covariates_dock)
+        data_dock.raise_()
+        # Tabs above the panel they switch, so the column reads top-down.
+        self.setTabPosition(Qt.LeftDockWidgetArea, QTabWidget.North)
+        for dock in (data_dock, model_dock, covariates_dock):
+            self._hide_title_bar_while_tabbed(dock)
 
-        self._main_split = QSplitter(Qt.Vertical)
-        for pane, stretch in (
-            (self._top_split, 0),
-            (self._output_split, 1),
-            (self._bottom_split, 0),
-        ):
-            self._main_split.addWidget(pane)
-            self._main_split.setStretchFactor(self._main_split.count() - 1, stretch)
-        # The figure is what the user reads; the controls rows get only what they need.
-        self._main_split.setSizes([230, 820, 210])
-        root.addWidget(self._main_split, stretch=1)
+        self._add_dock("results", "Results", self._report, Qt.RightDockWidgetArea)
+        self._add_dock(
+            "frame", "Analysis dataframe", self._build_frame_box(), Qt.BottomDockWidgetArea
+        )
 
-        status_row = QHBoxLayout()
+        self.resizeDocks(
+            [self._docks["data"], self._docks["results"]], [380, 400], Qt.Horizontal
+        )
+        self.resizeDocks([self._docks["frame"]], [260], Qt.Vertical)
+
+        self._build_menus()
+
+        status = self.statusBar()
         self._status = QLabel(f"Dataset: {self._repo.root}  |  qvtpy pipeline: {QVTPY_PIPELINE_ID}")
-        self._status.setWordWrap(True)
-        status_row.addWidget(self._status, stretch=1)
+        self._status.setWordWrap(False)
+        status.addWidget(self._status, 1)
 
-        # Collapse the controls and the dataframe when iterating on a plot, so the figure gets the
-        # whole window without having to drag three splitters back and forth.
+        # Collapse every dock when iterating on a plot, so the figure gets the
+        # whole window without closing panels one at a time.
         self._btn_focus = QPushButton("Focus plot")
         self._btn_focus.setCheckable(True)
         self._btn_focus.setToolTip(
-            "Collapse the controls and dataframe rows to give the plot the full window."
+            "Hide every panel and give the plot the whole window. Click again to bring them back."
         )
         self._btn_focus.toggled.connect(self._on_focus_plot)
-        status_row.addWidget(self._btn_focus)
-        root.addLayout(status_row)
+        status.addPermanentWidget(self._btn_focus)
+
+        # Snapshot the pristine arrangement for View → Reset panel layout.
+        self._default_dock_state = self.saveState()
 
         self._connect_signals()
         self._refresh_covariate_lists()
@@ -452,18 +475,102 @@ class StatmodelsWindow(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────────
     # Construction
     # ──────────────────────────────────────────────────────────────────────────
+    def _add_dock(self, key: str, title: str, widget: QWidget, area: Any) -> QDockWidget:
+        """Wrap *widget* in a named dock, add it to *area*, and register it under *key*."""
+        dock = QDockWidget(title, self)
+        # restoreState matches docks by object name; without one the saved
+        # layout silently fails to come back.
+        dock.setObjectName(f"statmodels_dock_{key}")
+        dock.setWidget(widget)
+        dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        dock.setFeatures(
+            QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+            | QDockWidget.DockWidgetClosable
+        )
+        self.addDockWidget(area, dock)
+        self._docks[key] = dock
+        return dock
+
+    def _hide_title_bar_while_tabbed(self, dock: QDockWidget) -> None:
+        """Drop a tabified dock's title bar, since its tab already names it.
+
+        The title bar comes back the moment the dock is floated, where it is the
+        only handle to drag it by. Docked, the tab serves that purpose.
+        """
+        empty = QWidget(dock)
+        empty.setFixedHeight(0)
+
+        def _sync(floating: bool) -> None:
+            """Show the real title bar only while the dock is floating."""
+            dock.setTitleBarWidget(None if floating else empty)
+
+        dock.topLevelChanged.connect(_sync)
+        _sync(dock.isFloating())
+
+    def _build_menus(self) -> None:
+        """A View menu that can bring a closed panel back, and reset the arrangement."""
+        view = self.menuBar().addMenu("&View")
+        for key, dock in self._docks.items():
+            action = dock.toggleViewAction()
+            action.setText(dock.windowTitle())
+            view.addAction(action)
+        view.addSeparator()
+        reset = view.addAction("Reset panel layout")
+        reset.setToolTip("Return every panel to its default position and size.")
+        reset.triggered.connect(self._reset_dock_layout)
+
+    def _encoded_dock_state(self) -> str:
+        """The current dock arrangement as base64, for the JSON config."""
+        try:
+            return bytes(self.saveState().toBase64()).decode("ascii")
+        except Exception:
+            return ""
+
+    def _restore_encoded_dock_state(self, encoded: Any) -> None:
+        """Restore a dock arrangement previously written by :meth:`_encoded_dock_state`."""
+        if not isinstance(encoded, str) or not encoded:
+            return
+        try:
+            from qtpy.QtCore import QByteArray
+
+            self.restoreState(QByteArray.fromBase64(encoded.encode("ascii")))
+        except Exception:
+            # A layout from another Qt build is not worth failing a config load over.
+            pass
+
+    def _reset_dock_layout(self) -> None:
+        """Put every dock back where it started."""
+        if self._default_dock_state is not None:
+            self.restoreState(self._default_dock_state)
+        for dock in self._docks.values():
+            dock.show()
+        self._docks["data"].raise_()
+
+    def _build_covariates_panel(self) -> QWidget:
+        """The two covariate lists stacked in one dock, since they are used together."""
+        split = QSplitter(Qt.Vertical)
+        _style_splitter(split)
+        split.addWidget(self._build_covariate_box("Clinical", "clinical"))
+        split.addWidget(self._build_covariate_box("Cognitive", "cognitive"))
+        split.setSizes([300, 300])
+        return split
+
     def _build_data_panel(self, initial_pipeline_kind: str) -> QWidget:
         """
-        Top-left: the primary measurement selector beside the measurement list.
+        The primary measurement selector above the measurement list.
 
-        Side by side rather than stacked — stacking them made the controls row about twice as tall
-        as it needed to be, and every pixel there comes straight out of the figure.
+        Stacked rather than side by side: this is a dock column now, so height is
+        the cheap axis and width is the scarce one. Side by side was the right
+        answer when it was a full-width row competing with the figure for height.
         """
-        split = QSplitter(Qt.Horizontal)
+        split = QSplitter(Qt.Vertical)
+        _style_splitter(split)
 
         box = QGroupBox("Data selection")
         box_lay = QVBoxLayout(box)
-        box_lay.setContentsMargins(6, 4, 6, 4)
+        box_lay.setContentsMargins(0, 0, 0, 0)
+        box_lay.setSpacing(SPACE_TIGHT)
         self._data_form = MeasurementForm(self._repo)
         self._data_form.apply_spec(MeasurementSpec(pipeline_kind=initial_pipeline_kind))
         box_lay.addWidget(self._data_form)
@@ -476,7 +583,7 @@ class StatmodelsWindow(QMainWindow):
         split.addWidget(self._measurements)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 1)
-        split.setSizes([420, 380])
+        split.setSizes([420, 320])
         return split
 
     def _build_model_panel(self) -> QWidget:
@@ -1190,11 +1297,18 @@ class StatmodelsWindow(QMainWindow):
         """Bottom row: a searchable, checkable covariate list."""
         box = QGroupBox(title)
         lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(SPACE_TIGHT)
         search = QLineEdit()
         search.setPlaceholderText("Search…")
         lay.addWidget(search)
         widget = QListWidget()
-        widget.setMinimumHeight(60)
+        widget.setMinimumHeight(90)
+        # Covariate names are long and descriptive; elide them to the pane width
+        # rather than making the user scroll sideways to read a checkbox row.
+        widget.setTextElideMode(Qt.ElideRight)
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setWordWrap(False)
         lay.addWidget(widget, stretch=1)
         search.textChanged.connect(lambda text, w=widget: filter_list_widget(w, text))
         if domain == "clinical":
@@ -1205,8 +1319,11 @@ class StatmodelsWindow(QMainWindow):
 
     def _build_frame_box(self) -> QWidget:
         """Bottom row: filter chips over the analysis dataframe, plus the derived-columns entry."""
-        box = QGroupBox("Analysis dataframe")
+        # No group box: the dock's own title bar already names this panel.
+        box = QWidget()
         lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(SPACE_TIGHT)
 
         self._chips = FilterChipBar()
         lay.addWidget(self._chips)
@@ -1318,15 +1435,21 @@ class StatmodelsWindow(QMainWindow):
         self.activateWindow()
 
     def _on_focus_plot(self, focused: bool) -> None:
-        """Collapse (or restore) the controls and dataframe rows around the plot."""
+        """Hide (or restore) every panel around the plot."""
         if focused:
-            self._restore_sizes = self._main_split.sizes()
-            total = sum(self._restore_sizes) or self.height()
-            self._main_split.setSizes([0, total, 0])
-            self._btn_focus.setText("Show controls")
+            # Remember the whole arrangement, not just which docks were open:
+            # restoring by state also brings back tab order and sizes.
+            self._focus_restore_state = self.saveState()
+            for dock in self._docks.values():
+                dock.hide()
+            self._btn_focus.setText("Show panels")
         else:
-            sizes = getattr(self, "_restore_sizes", None)
-            self._main_split.setSizes(sizes or [230, 820, 210])
+            state = getattr(self, "_focus_restore_state", None)
+            if state is not None:
+                self.restoreState(state)
+            else:
+                for dock in self._docks.values():
+                    dock.show()
             self._btn_focus.setText("Focus plot")
 
     def closeEvent(self, event: Any) -> None:
@@ -4589,12 +4712,7 @@ class StatmodelsWindow(QMainWindow):
             "show_ci": self._show_ci.isChecked(),
             "show_legend": self._plot.show_legend(),
             "plot_groups": self._plot.checked_levels(),
-            "splitters": {
-                "main": self._main_split.sizes(),
-                "top": self._top_split.sizes(),
-                "output": self._output_split.sizes(),
-                "bottom": self._bottom_split.sizes(),
-            },
+            "layout_state": self._encoded_dock_state(),
         }
 
     def _apply_config(self, cfg: dict[str, Any], *, allow_expressions: bool = True) -> None:
@@ -4791,15 +4909,10 @@ class StatmodelsWindow(QMainWindow):
             self._plot.set_show_legend(bool(cfg["show_legend"]))
         self._pending_plot_groups = cfg.get("plot_groups")
 
-        sizes = cfg.get("splitters") or {}
-        for key, splitter in (
-            ("main", self._main_split),
-            ("top", self._top_split),
-            ("output", self._output_split),
-            ("bottom", self._bottom_split),
-        ):
-            if isinstance(sizes.get(key), list) and sizes[key]:
-                splitter.setSizes([int(v) for v in sizes[key]])
+        # ``splitters`` is the pre-dock schema; those sizes no longer map onto
+        # anything, so a config written by an older build just keeps the default
+        # arrangement rather than failing to load.
+        self._restore_encoded_dock_state(cfg.get("layout_state"))
 
     def _on_save(self) -> None:
         """

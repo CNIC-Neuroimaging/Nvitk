@@ -26,6 +26,7 @@ from qtpy.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from nvitk.core.logger import Logger
 
 from .plotly_view import PlotlyView
+from nvitk.gui.core.design import clear_layout
 
 log = Logger()
 
@@ -97,11 +98,7 @@ class FigureHostMixin:
 
     def _clear_static(self) -> None:
         """Drop the current Matplotlib canvas and release its figure."""
-        while self._static_layout.count():
-            item = self._static_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._static_layout)
         if self._static_figure is not None:
             try:
                 import matplotlib.pyplot as plt

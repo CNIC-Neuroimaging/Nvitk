@@ -44,7 +44,15 @@ from qtpy.QtWidgets import (
 
 from nvitk.stats.mixedlm import significance_stars
 
-from .theme import COLOR_ACCENT, COLOR_MUTED, COLOR_WARN, SIGNIFICANCE_COLORS, muted_label_style
+from .theme import (
+    COLOR_ACCENT,
+    COLOR_MUTED,
+    COLOR_TEXT,
+    COLOR_WARN,
+    SIGNIFICANCE_COLORS,
+    clear_layout,
+    muted_label_style,
+)
 
 # Columns whose cells get the significance shading, keyed by the frame they appear in.
 _PVALUE_COLUMNS = {"p_value", "pval"}
@@ -225,7 +233,7 @@ class _StatChip(QFrame):
         caption.setStyleSheet(f"color: {COLOR_MUTED}; font-weight: normal; font-size: 10px;")
         body = QLabel(value)
         body.setStyleSheet(
-            f"color: {accent or '#e0e0e0'}; font-weight: bold; font-size: 13px; border: none;"
+            f"color: {accent or COLOR_TEXT}; font-weight: bold; font-size: 13px; border: none;"
         )
         lay.addWidget(caption)
         lay.addWidget(body)
@@ -238,7 +246,7 @@ class _StatChip(QFrame):
 # ──────────────────────────────────────────────────────────────────────────────
 # Report panel
 # ──────────────────────────────────────────────────────────────────────────────
-class ModelReportPanel(QGroupBox):
+class ModelReportPanel(QWidget):
     """
     Model info: a chip strip over Summary / Coefficients / Random effects / Raw tabs.
 
@@ -248,7 +256,7 @@ class ModelReportPanel(QGroupBox):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the chip strip, the warning banner and the tab widget."""
-        super().__init__("Model info", parent)
+        super().__init__(parent)
         lay = QVBoxLayout(self)
 
         self._chip_row = QHBoxLayout()
@@ -283,11 +291,7 @@ class ModelReportPanel(QGroupBox):
 
     def _set_chips(self, chips: Sequence[tuple[str, str, str | None]]) -> None:
         """Replace the chip strip with ``(title, value, accent)`` triples."""
-        while self._chip_row.count():
-            item = self._chip_row.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._chip_row)
         for title, value, accent in chips:
             self._chip_row.addWidget(_StatChip(title, value, accent=accent))
         self._chip_row.addStretch(1)

@@ -30,6 +30,7 @@ from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QSizePolicy,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -69,6 +70,7 @@ from .constants import (
     PIPELINE_KIND_TOF,
 )
 from .theme import COLOR_WARN, muted_label_style
+from nvitk.gui.core.design import SPACE, SPACE_TIGHT, clear_layout
 
 log = Logger()
 
@@ -99,6 +101,11 @@ class MeasurementForm(QWidget):
 
         lay = QFormLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setHorizontalSpacing(SPACE)
+        lay.setVerticalSpacing(SPACE_TIGHT)
+        # Fields take the width left over by the label column and elide their
+        # (long) catalog names, rather than being clipped by the pane edge.
+        lay.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self._pipeline_kind = QComboBox()
         for label, key in PIPELINE_KIND_ITEMS:
@@ -167,6 +174,14 @@ class MeasurementForm(QWidget):
         lay.addRow(self._regions_label, self._regions_host)
         lay.addRow(self._alias_label, self._alias)
         lay.addRow("", self._hint)
+
+        # Combos hold long catalog names. Expanding (not Ignored) keeps the
+        # minimum-contents floor: Ignored drops the minimum entirely and the
+        # form's field column collapses to nothing.
+        for combo in self.findChildren(QComboBox):
+            combo.setMinimumContentsLength(12)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self._alias.setVisible(show_alias)
         self._alias_label.setVisible(show_alias)
@@ -250,17 +265,21 @@ class MeasurementForm(QWidget):
         when nothing applies.
         """
         checked = {name for name, box in self._composite_boxes.items() if box.isChecked()}
-        while self._composites_layout.count():
-            item = self._composites_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        clear_layout(self._composites_layout)
         self._composite_boxes = {}
 
         available = composites_for(self._current_kind(), self._current_feature())
         for name, label in available:
             box = QCheckBox(label)
-            box.setToolTip(str(COMPOSITE_DEFINITIONS[name].get("description") or label))
+            box.setToolTip(
+                f"{label}\n\n"
+                + str(COMPOSITE_DEFINITIONS[name].get("description") or label)
+            )
+            # A checkbox cannot elide its caption, so its full text width becomes
+            # the form's — and the whole panel's — minimum. Let it shrink; the
+            # tooltip carries the full label.
+            box.setMinimumWidth(0)
+            box.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             box.setChecked(name in checked)
             box.stateChanged.connect(lambda *_: self.changed.emit())
             self._composites_layout.addWidget(box)

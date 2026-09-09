@@ -5,7 +5,22 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from qtpy.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from nvitk.gui.core.design import COLOR_MUTED, SPACE, SPACE_TIGHT
 
 from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
 from nvitk.gui.tools.orient_quick import build_orientation_quick_button
@@ -28,14 +43,101 @@ from nvitk.gui.tools.registry import (
 from nvitk.gui.tools.totalseg_selector import TotalSegRoiWidget
 
 
+#: Widest a parameter name may get before it wraps. magicgui lays each parameter
+#: out as ``[label | widget]``; without a cap, one long name (``"Reset affine to
+#: target codes (ignore wrong header)"``) sets the width of the entire dock and
+#: the value column falls off the right edge.
+_TOOL_LABEL_MAX_WIDTH = 150
+
+#: Height cap for the tool description caption.
+_TOOL_HELP_MAX_HEIGHT = 90
+
+#: Bounds for the tool form's scroll area; between them it sizes to its content.
+_TOOL_SCROLL_MIN_HEIGHT = 140
+_TOOL_SCROLL_MAX_HEIGHT = 460
+
+
 def _compact_magicgui_panel(native: QWidget) -> None:
-    """Keep tool controls compact; the parent scroll area caps total height."""
+    """Keep tool controls compact and inside the dock's width.
+
+    The parent scroll area caps total height; this caps the width, wrapping
+    parameter names and letting the value widgets shrink so a narrow dock shows
+    a whole form rather than a clipped one.
+    """
     lay = native.layout()
     if lay is None:
         return
     lay.setAlignment(Qt.AlignTop)
-    lay.setSpacing(6)
+    lay.setSpacing(SPACE_TIGHT)
     native.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+
+    _cap_form_labels(native)
+    for combo in native.findChildren(QComboBox):
+        combo.setMinimumContentsLength(8)
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    for edit in native.findChildren(QLineEdit):
+        edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    for box in native.findChildren(QCheckBox):
+        # A checkbox carries its own caption and cannot wrap it; elide instead of
+        # letting it dictate the dock width.
+        box.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        if not box.toolTip():
+            box.setToolTip(box.text())
+    for text in native.findChildren(QTextEdit):
+        text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+
+def _cap_form_labels(native: QWidget) -> None:
+    """Wrap magicgui's parameter names and stop them setting the panel's width.
+
+    magicgui aligns the label column by giving every label the *widest* label's
+    width as a hard ``minimumWidth``. That silently defeats a maximum width — Qt
+    resolves max < min in favour of min — so the floor has to be cleared first.
+    Re-applied whenever the form changes, because magicgui re-runs that alignment.
+    """
+    for label in native.findChildren(QLabel):
+        label.setWordWrap(True)
+        label.setMinimumWidth(0)
+        label.setMaximumWidth(_TOOL_LABEL_MAX_WIDTH)
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+
+def _style_operation_help(panel: Any) -> None:
+    """Show the tool description as a caption instead of a form field.
+
+    magicgui renders it as a labelled, bordered ``TextEdit`` that grows with the
+    text — for a wordy tool that pushes the actual parameters off the panel. Drop
+    the label and the well, cap the height, and let it read as help text.
+    """
+    widget = getattr(panel, "operation_help", None)
+    native = getattr(widget, "native", None)
+    if native is None:
+        return
+    native.setFrameShape(QFrame.NoFrame)
+    native.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    native.setStyleSheet(
+        f"QTextEdit {{ background: transparent; border: none; color: {COLOR_MUTED};"
+        " padding: 0; }"
+    )
+
+    def _fit_to_text() -> None:
+        """Size the caption to its wrapped text, up to the cap."""
+        height = int(native.document().size().height()) + 4
+        native.setFixedHeight(max(18, min(height, _TOOL_HELP_MAX_HEIGHT)))
+
+    # The document relays out whenever the text or the available width changes,
+    # so a short description never leaves a block of empty space behind it.
+    native.document().documentLayout().documentSizeChanged.connect(
+        lambda _size: _fit_to_text()
+    )
+    _fit_to_text()
+
+    # The row is [label | text]; the caption speaks for itself.
+    row = native.parentWidget()
+    if row is not None:
+        for label in row.findChildren(QLabel):
+            label.hide()
 
 
 def _show_label_picker(category: str, tool_id: str, layer: Any | None) -> bool:
@@ -72,7 +174,7 @@ def build_tools_dock(
     container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(6)
+    layout.setSpacing(SPACE)
 
     label_selector = LabelSelectorWidget()
     label_selector.set_viewer(viewer)
@@ -230,6 +332,7 @@ def build_tools_dock(
             totalseg_roi.set_task(task_val)
 
         _sync_sge_button()
+        _fit_timer.start()
 
         tool_panel.label_ids.visible = (not show_labels) and is_label_like_layer(layer)
         if hasattr(tool_panel, "correction_ids"):
@@ -272,8 +375,6 @@ def build_tools_dock(
     cow_layout = QVBoxLayout()
     cow_layout.setContentsMargins(0, 0, 0, 0)
     cow_layout.setSpacing(4)
-    from qtpy.QtWidgets import QLabel
-
     cow_status = QLabel("Mouse TOF CoW Stage 2: idle")
     cow_status.setWordWrap(True)
     cow_btn_row = QWidget()
@@ -369,13 +470,44 @@ def build_tools_dock(
     set_ui_hooks(status=lambda text: cow_status.setText(text), visibility=_sync_cow_row)
 
     _compact_magicgui_panel(tool_panel.native)
+    _style_operation_help(tool_panel)
     tool_scroll = QScrollArea()
     tool_scroll.setWidgetResizable(True)
     tool_scroll.setWidget(tool_panel.native)
     tool_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     tool_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-    tool_scroll.setMaximumHeight(440)
-    tool_scroll.setMinimumHeight(140)
+    tool_scroll.setMaximumHeight(_TOOL_SCROLL_MAX_HEIGHT)
+    tool_scroll.setMinimumHeight(_TOOL_SCROLL_MIN_HEIGHT)
+
+    _fit_timer = QTimer()
+    _fit_timer.setSingleShot(True)
+    _fit_timer.setInterval(0)
+
+    def _fit_tool_scroll() -> None:
+        """Give the tool form exactly the height it needs, up to the cap.
+
+        A ``QScrollArea`` reports a size hint of its own that can fall short of
+        the form inside it, which left the Run button below the fold while the
+        label picker underneath sat half empty. Each tool has a different set of
+        parameters, so this is recomputed whenever the form changes.
+        """
+        _cap_form_labels(tool_panel.native)
+        # A wrapped label's height depends on the width it ends up with, which is
+        # not settled until the form has been laid out at the viewport width — so
+        # ask for the height at that width when the layout can answer, and fall
+        # back to the plain hint when it cannot.
+        width = tool_scroll.viewport().width() or tool_scroll.width()
+        needed = tool_panel.native.sizeHint().height()
+        layout = tool_panel.native.layout()
+        if width > 0 and layout is not None and layout.hasHeightForWidth():
+            needed = max(needed, layout.heightForWidth(width))
+        tool_scroll.setMinimumHeight(
+            max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, _TOOL_SCROLL_MAX_HEIGHT))
+        )
+
+    # Widget visibility settles during the current event-loop pass, so measure
+    # the form on the next one.
+    _fit_timer.timeout.connect(_fit_tool_scroll)
 
     top_row = QWidget()
     top_row_layout = QHBoxLayout()

@@ -20,6 +20,7 @@ from nvitk.gui.io.napari_io import (
     open_paths_with_nvitk,
 )
 from nvitk.gui.core.spatial import attach_orientation_status, find_spatial_reference_layer, layer_spatial_kwargs
+from nvitk.gui.core.design import SPACE, SPACE_TIGHT, apply_theme, register_napari_theme
 from nvitk.gui.core.log_panel import build_log_dock_widget
 from nvitk.gui.tools.runner import notify
 from nvitk.gui.panels.dicom_tags import DicomTagsPanel, layer_has_dicom_tags
@@ -84,8 +85,16 @@ def run_app() -> None:
         QWidget,
     )
 
+    # Register before the viewer exists so its chrome is painted from the nvitk
+    # palette on the first frame, rather than flashing Napari's default dark.
+    theme_id = register_napari_theme()
+
     viewer = napari.Viewer(title="nvitk")
     _ = viewer.window
+    try:
+        viewer.theme = theme_id
+    except Exception:
+        pass
     install_nvitk_io(viewer)
     install_nvitk_layer_hooks(viewer)
 
@@ -420,7 +429,8 @@ def run_app() -> None:
 
     layers_layout = QVBoxLayout()
     layers_layout.setAlignment(Qt.AlignTop)
-    layers_layout.setSpacing(6)
+    layers_layout.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
+    layers_layout.setSpacing(SPACE)
     layers_layout.addWidget(orientation_label)
     layers_layout.addWidget(layer_list)
     layers_layout.addWidget(layers_panel.native)
@@ -431,8 +441,10 @@ def run_app() -> None:
 
     dock = QWidget()
     layout = QVBoxLayout()
-    layout.setContentsMargins(4, 4, 4, 4)
+    layout.setContentsMargins(SPACE, SPACE, SPACE, SPACE)
+    layout.setSpacing(SPACE)
     tabs = QTabWidget()
+    tabs.setDocumentMode(True)
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     tabs.addTab(tools_widget, "Tools")
     tabs.addTab(xnat_panel, data_tab_label)
@@ -445,7 +457,8 @@ def run_app() -> None:
     export_tab = QWidget()
     export_layout = QVBoxLayout()
     export_layout.setAlignment(Qt.AlignTop)
-    export_layout.setSpacing(6)
+    export_layout.setContentsMargins(SPACE_TIGHT, SPACE, SPACE_TIGHT, SPACE)
+    export_layout.setSpacing(SPACE)
     export_layout.addWidget(export_view_png_panel.native)
     export_layout.addWidget(export_view_gif_panel.native)
     export_layout.addWidget(save_panel.native)
@@ -456,8 +469,12 @@ def run_app() -> None:
     layout.addWidget(tabs, stretch=1)
     dock.setLayout(layout)
     dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    # One call restyles every widget in the dock, including the magicgui-built
+    # tool panels, so individual panels do not carry their own palettes.
+    apply_theme(dock)
     viewer.window.add_dock_widget(dock, area="right", name="nvitk")
     log_dock = build_log_dock_widget()
+    apply_theme(log_dock)
     viewer.window.add_dock_widget(log_dock, area="bottom", name="nvitk log")
 
     _refresh_layer_list(layer_list, viewer, app_state)

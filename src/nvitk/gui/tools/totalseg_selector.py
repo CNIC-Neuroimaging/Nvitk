@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
 )
 
 from nvitk.segmentation.total_segmentator.class_maps import AVAILABLE_TASKS, get_class_map
+from nvitk.gui.core.design import clear_layout
 
 _SUBSET_TASKS = frozenset({"total", "total_mr"})
 
@@ -55,11 +56,7 @@ class TotalSegRoiWidget(QGroupBox):
     def set_task(self, task: str) -> None:
         """Rebuild the checkbox list for *task*'s ROI class map, hiding this widget entirely for
         tasks that don't support ROI subsetting."""
-        while self._inner_layout.count():
-            item = self._inner_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
+        clear_layout(self._inner_layout)
         self._checks.clear()
         if task not in _SUBSET_TASKS:
             self.setVisible(False)
