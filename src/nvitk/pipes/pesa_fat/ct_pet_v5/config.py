@@ -131,10 +131,10 @@ SKELETON_SUBTRACT_FROM: tuple[str, ...] = (
     "TRAPECIOS",
 )
 
-# Muscle labels re-grown after skeleton subtraction, and by how many iterations.
-# Dilation is clipped against the skeleton, so it recovers soft-tissue border
-# voxels without walking back into the femur.
-MUSCLE_DILATE_AFTER_SKELETON: dict[str, int] = {
+# Muscle labels eroded after skeleton subtraction, and by how many iterations.
+# Shaving the border drops the voxels most contaminated by neighbouring bone and
+# fat, leaving a core the SUV statistics can trust.
+MUSCLE_ERODE_AFTER_SKELETON: dict[str, int] = {
     "CUADRICEPS_L": 1,
     "CUADRICEPS_R": 1,
 }
@@ -319,7 +319,7 @@ __all__ = [
     "CT_TASKS",
     "SKELETON_ROIS",
     "SKELETON_SUBTRACT_FROM",
-    "MUSCLE_DILATE_AFTER_SKELETON",
+    "MUSCLE_ERODE_AFTER_SKELETON",
     "MUSCLES_BIGGEST_CC_PER_SIDE",
     "MUSCLES_SIDE_MIN_RATIO",
     "SuvSpec",

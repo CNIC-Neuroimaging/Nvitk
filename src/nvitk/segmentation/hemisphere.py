@@ -42,8 +42,7 @@ def lr_axis_and_sign(affine: Any) -> tuple[int, int]:
     ``+1`` when increasing that index moves toward the subject's **right** (world
     +x in RAS) and ``-1`` when it moves toward their left.
     """
-    with using("cpu"):
-        rows = to_numpy(as_backend_array(affine)).astype(float)
+    rows = as_backend_array(affine).astype(float)
     if rows.shape != (4, 4):
         raise ValueError(f"affine must be 4x4; got {rows.shape}.")
     world_x = rows[0, :3]

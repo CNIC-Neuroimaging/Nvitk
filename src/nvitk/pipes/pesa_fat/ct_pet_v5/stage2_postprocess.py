@@ -24,8 +24,8 @@ v5 changes
 * The skeleton (union of the ``total`` bone classes in
   :data:`cfg.SKELETON_ROIS`) is subtracted from every muscle label, so bone
   marrow uptake stays out of the muscle SUV statistics. Trapezius keeps its
-  biggest component *per side* rather than overall, and quadriceps are dilated
-  back by one iteration afterwards (clipped against the skeleton).
+  biggest component *per side* rather than overall, and quadriceps are eroded by
+  one iteration afterwards.
 """
 
 from __future__ import annotations
@@ -287,34 +287,36 @@ def _subtract_skeleton(out_labels: Image, skeleton: Image | None) -> Image:
     return out_labels.with_data(arr)
 
 
-def _dilate_after_skeleton(out_labels: Image, skeleton: Image | None) -> Image:
-    """Re-grow :data:`cfg.MUSCLE_DILATE_AFTER_SKELETON` labels, clipped against bone.
+def _erode_after_skeleton(out_labels: Image) -> Image:
+    """Shave :data:`cfg.MUSCLE_ERODE_AFTER_SKELETON` labels by their configured iterations.
 
-    Dilation only claims voxels that are still background, so a muscle can regain
-    the soft-tissue border it lost to the subtraction without eating into a
-    neighbouring label or walking back into the bone it was just cleared from.
+    Runs after the skeleton subtraction, so the border being removed is the one
+    left behind once bone is gone -- the voxels most likely to be contaminated by
+    neighbouring tissue. A label that erosion would empty is kept intact instead,
+    since an empty mask yields no measurement at all.
     """
-    if not cfg.MUSCLE_DILATE_AFTER_SKELETON:
+    if not cfg.MUSCLE_ERODE_AFTER_SKELETON:
         return out_labels
     arr = as_backend_array(out_labels.data).copy()
-    bone = as_backend_array(skeleton.data) > 0 if skeleton is not None else None
-    for name, iterations in cfg.MUSCLE_DILATE_AFTER_SKELETON.items():
+    for name, iterations in cfg.MUSCLE_ERODE_AFTER_SKELETON.items():
         lid = MUSCLES_LABELS.get(name)
         if lid is None or int(iterations) <= 0:
             continue
         bin_mask = (arr == lid).astype(np.uint8)
         if not np.any(bin_mask):
             continue
-        grown = dilate(
+        shrunk = erode(
             out_labels.with_data(bin_mask),
             footprint=1,
             iterations=int(iterations),
             mode="binary",
         ).data > 0
-        gained = grown & (arr == 0)
-        if bone is not None:
-            gained &= ~bone
-        arr[gained] = lid
+        if not bool(np.any(shrunk)):
+            log.warning(
+                f"Eroding {name} by {int(iterations)} iteration(s) would empty it; keeping it as is."
+            )
+            continue
+        arr[(arr == lid) & ~shrunk] = 0
     return out_labels.with_data(arr)
 
 
@@ -598,10 +600,10 @@ def build_muscles_mask(total: Image, muscles: Image, skeleton: Image | None = No
     * ``trapezius`` (TS ID 14)                        -> bilateral TRAPECIOS
 
     With a *skeleton* mask (on the ``total`` grid) the bones are subtracted from
-    the labels in :data:`cfg.SKELETON_SUBTRACT_FROM`, and the labels in
-    :data:`cfg.MUSCLE_DILATE_AFTER_SKELETON` are then dilated back. Components
-    are resolved *before* the subtraction, so splitting a muscle around a bone
-    cannot cost it half its volume.
+    the labels in :data:`cfg.SKELETON_SUBTRACT_FROM`. The labels in
+    :data:`cfg.MUSCLE_ERODE_AFTER_SKELETON` are then eroded. Components are
+    resolved *before* the subtraction, so splitting a muscle around a bone cannot
+    cost it half its volume.
     """
     out = np.zeros_like(muscles.data, dtype=np.uint8)
 
@@ -644,7 +646,7 @@ def build_muscles_mask(total: Image, muscles: Image, skeleton: Image | None = No
 
     labels = _muscles_keep_biggest_cc_per_label(total, muscles.copy().with_data(out))
     labels = _subtract_skeleton(labels, skeleton)
-    return _dilate_after_skeleton(labels, skeleton)
+    return _erode_after_skeleton(labels)
 
 
 # ---------------------------------------------------------------------------

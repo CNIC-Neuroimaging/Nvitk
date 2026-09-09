@@ -92,4 +92,8 @@ log "installing pydicom (no-build-isolation, matching pixi's handling)..."
   "pydicom==3.0.1" \
   >>"$LOG" 2>&1
 
+log "installing pyvista deps (no-build-isolation, matching pixi's handling)..."
+"$PIP" install --no-cache-dir --no-build-isolation 'pyvista[notebook]' \
+  >>"$LOG" 2>&1
+
 log "done."
