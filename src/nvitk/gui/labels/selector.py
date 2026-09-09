@@ -34,6 +34,7 @@ from nvitk.gui.labels.visibility import (
     is_label_like_layer,
     label_source_data,
     set_label_color,
+    stored_visible_ids,
     supports_per_label_color,
     unique_layer_labels,
 )
@@ -83,6 +84,7 @@ class LabelSelectorWidget(QGroupBox):
         super().__init__("Label selection", parent)
         self._checks: list[QCheckBox] = []
         self._color_buttons: dict[int, QToolButton] = {}
+        self._layer_ids: list[int] = []
         self._schema_key = "generic"
         self._hint = QLabel("Choose a label mapping, then select labels below.")
         self._hint.setWordWrap(True)
@@ -287,6 +289,7 @@ class LabelSelectorWidget(QGroupBox):
                 w.deleteLater()
         self._checks.clear()
         self._color_buttons.clear()
+        self._layer_ids = []
 
         if layer is None:
             self._hint.setText("No layer selected.")
@@ -294,6 +297,7 @@ class LabelSelectorWidget(QGroupBox):
 
         schema = get_schema(self._schema_key)
         layer_ids = unique_layer_labels(label_source_data(layer))
+        self._layer_ids = list(layer_ids)
         if self._show_full.isChecked() and schema and schema.id_to_name:
             ids = sorted(set(schema.id_to_name.keys()) | set(layer_ids))
         else:
@@ -317,9 +321,13 @@ class LabelSelectorWidget(QGroupBox):
         )
 
         can_color = self._supports_color_edit(layer)
+        # Each layer keeps its own selection: reuse whatever the live filter is
+        # already showing for it, so switching layers does not reset the picker.
+        remembered = stored_visible_ids(layer)
         for lid in ids:
             text = schema.display(lid) if schema else f"Label {lid}"
             in_layer = lid in layer_ids
+            checked = in_layer if remembered is None else lid in remembered
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -333,7 +341,7 @@ class LabelSelectorWidget(QGroupBox):
             cb = QCheckBox(text)
             cb.setProperty("label_id", lid)
             cb.blockSignals(True)
-            cb.setChecked(in_layer)
+            cb.setChecked(checked)
             cb.blockSignals(False)
             if self._show_full.isChecked() and not in_layer:
                 cb.setEnabled(False)
@@ -375,6 +383,10 @@ class LabelSelectorWidget(QGroupBox):
             if cb.isChecked() and cb.isEnabled():
                 out.append(int(cb.property("label_id")))
         return sorted(out)
+
+    def available_ids(self) -> list[int]:
+        """Label ids actually present in the bound layer, as of the last refresh."""
+        return list(self._layer_ids)
 
     def selected_names(self) -> list[str]:
         """Human names for checked ids (falls back to ``Label_<id>``)."""

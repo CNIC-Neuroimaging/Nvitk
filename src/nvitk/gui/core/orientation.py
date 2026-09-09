@@ -68,6 +68,41 @@ def napari_dim_order_3d(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, 
     return (sup, *rest)
 
 
+def _displayed_block_is_invertible(affine: np.ndarray | None, displayed: tuple[int, ...]) -> bool:
+    """True if the affine sub-matrix over the *displayed* axes can be inverted.
+
+    Napari hands that sub-matrix to vispy, which inverts it; an axis-permuting
+    affine (an RSA-acquired volume, or a permuting reorientation) can make it
+    all-zeros in one row and vispy raises ``Singular matrix``.
+    """
+    if affine is None:
+        return True
+    try:
+        idx = list(displayed)
+        sub = np.asarray(affine, dtype=float)[np.ix_(idx, idx)]
+        return bool(abs(float(np.linalg.det(sub))) > 1e-12)
+    except Exception:
+        return True
+
+
+def dim_order_2d_for_display(affine: np.ndarray | None, ndim: int = 3) -> tuple[int, ...]:
+    """``dims.order`` for 2D display, preferring superior-first but keeping it renderable.
+
+    Superior-first (:func:`napari_dim_order_3d`) is used whenever Napari can invert
+    the resulting displayed block. When it cannot — a permuting affine — step the
+    first slider axis that does leave an invertible pair, so the layer renders
+    instead of crashing the canvas.
+    """
+    order = napari_dim_order_3d(affine, ndim)
+    if ndim < 3 or _displayed_block_is_invertible(affine, order[1:]):
+        return order
+    for slider in range(ndim):
+        rest = [i for i in range(ndim) if i != slider]
+        if _displayed_block_is_invertible(affine, tuple(rest)):
+            return (slider, rest[1], rest[0])
+    return order
+
+
 def layer_display_ndim(layer: Any) -> int:
     """*layer*'s displayed dimensionality, which for an RGB layer is one less than its array."""
     ndim = getattr(layer, "ndim", None)
@@ -362,6 +397,90 @@ def reorient_layer_for_view(layer: Any, target: str) -> tuple[str, str | None]:
     return current_codes, new_axes
 
 
+ORIENTATION_CODES: tuple[str, ...] = (
+    "RAS",
+    "LAS",
+    "LPS",
+    "RPS",
+    "RSA",
+    "LSA",
+    "RPI",
+    "LPI",
+    "RIA",
+    "LIA",
+)
+
+
+def layer_orientation_codes(layer: Any) -> str | None:
+    """*layer*'s current NIfTI axis codes (e.g. ``"RAS"``), or ``None`` without a usable affine."""
+    aff = getattr(layer, "affine", None)
+    if aff is None or getattr(layer, "data", None) is None:
+        return None
+    if int(getattr(layer.data, "ndim", 0)) < 3:
+        return None
+    try:
+        import nibabel as nib
+
+        return "".join(nib.orientations.aff2axcodes(to_numpy(aff).astype(float)))
+    except Exception:
+        return None
+
+
+def _reset_dims_order(viewer: Any, layer: Any) -> None:
+    """Put ``viewer.dims.order`` back to the natural axis order for *layer*'s ndim."""
+    try:
+        ndim = int(getattr(layer.data, "ndim", 0))
+        if ndim and len(tuple(viewer.dims.order)) == ndim:
+            viewer.dims.order = tuple(range(ndim))
+    except Exception:
+        pass
+
+
+def apply_target_orientation(viewer: Any, layer: Any, target: str) -> tuple[str, str]:
+    """Reorient *layer*'s Napari display to *target* axis codes and resync the viewer.
+
+    Wraps :func:`reorient_layer_for_view` with the metadata bookkeeping (axes,
+    affine, spacing) and dims/camera reset that keep the rest of the GUI in step,
+    so the Transform tool and the quick-access orientation button behave alike.
+
+    Returns ``(previous_codes, target_codes)``; the two are equal when the layer
+    was already in *target* and nothing changed.
+    """
+    target_codes = str(target).strip().upper()
+    current = layer_orientation_codes(layer)
+    if current == target_codes:
+        return target_codes, target_codes
+
+    # A permuting reorientation can leave the *displayed* 2x2 block of the new
+    # affine singular under a stale ``dims.order`` (vispy inverts that block and
+    # raises). Step through the natural order; ``configure_viewer_for_layer``
+    # below installs the right one for the new orientation.
+    _reset_dims_order(viewer, layer)
+
+    previous, new_axes = reorient_layer_for_view(layer, target_codes)
+    new_aff = np.asarray(to_numpy(layer.affine), dtype=float)
+    meta = dict(getattr(layer, "metadata", None) or {})
+    if new_axes:
+        meta["axes"] = new_axes
+    nv = dict(meta.get("nvitk_metadata") or {})
+    nv["affine"] = new_aff
+    nv["orientation"] = target_codes
+    for i, key in enumerate(("x_res", "y_res", "z_res")):
+        nv[key] = float(np.linalg.norm(new_aff[:3, i]))
+    nv["spacing"] = (nv["x_res"], nv["y_res"], nv["z_res"])
+    meta["nvitk_metadata"] = nv
+    meta["orientation"] = target_codes
+    layer.metadata = meta
+    if new_axes and len(new_axes) == int(layer.data.ndim):
+        layer.axis_labels = tuple(new_axes)
+    configure_viewer_for_layer(viewer, layer, configure_dims=True)
+    try:
+        viewer.reset_view()
+    except Exception:
+        pass
+    return previous, target_codes
+
+
 def _layer_display_scale(layer: Any, ndim: int) -> tuple[float, ...]:
     """*layer*'s per-axis display scale for the first *ndim* axes, or all-ones if unset/too short."""
     scale = getattr(layer, "scale", None)
@@ -456,7 +575,7 @@ def configure_viewer_for_layer(
             return
 
         if ndim == 3:
-            order = napari_dim_order_3d(aff_arr, ndim)
+            order = dim_order_2d_for_display(aff_arr, ndim)
             sup = order[0]
             viewer.dims.ndisplay = 2
             viewer.dims.order = order

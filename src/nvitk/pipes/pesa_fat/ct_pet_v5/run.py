@@ -216,12 +216,14 @@ def _build_python_cmd(
         shlex.quote(c_nifti),
         "--results-root",
         shlex.quote(c_out),
+        "--model-dir",
+        shlex.quote(c_model),
         "--log-level",
         log_level,
         "--no-exclude-ureter" if not exclude_ureter and stage == "stage2" else "",
     ]
     if stage == "stage1":
-        parts += ["--device", device, "--model-dir", shlex.quote(c_model)]
+        parts += ["--device", device]
         if overwrite:
             parts.append("--overwrite")
     else:

@@ -154,6 +154,24 @@ def _visibility_key(selected_ids: list[int]) -> tuple[int, ...]:
     return tuple(sorted(int(x) for x in selected_ids))
 
 
+def stored_visible_ids(layer: Any | None) -> tuple[int, ...] | None:
+    """Ids the live filter currently keeps visible on *layer*, or ``None`` if unfiltered.
+
+    An empty tuple is a real state ("nothing selected"), distinct from ``None``.
+    Used by the label picker to restore a layer's own selection when it becomes
+    active again, instead of falling back to "everything checked".
+    """
+    if layer is None:
+        return None
+    key = _layer_metadata(layer).get(_NVITK_VISIBLE_IDS_KEY)
+    if key is None:
+        return None
+    try:
+        return tuple(int(x) for x in key)
+    except (TypeError, ValueError):
+        return None
+
+
 def _apply_image_data_visibility(layer: Any, selected_ids: list[int]) -> None:
     """Zero out every voxel in an Image-layer mask whose value isn't in *selected_ids*, updating
     ``layer.data`` only if the filtered result actually differs from the current display."""
@@ -493,6 +511,7 @@ __all__ = [
     "layer_in_viewer",
     "restore_label_visibility",
     "set_label_color",
+    "stored_visible_ids",
     "supports_per_label_color",
     "unique_layer_labels",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -392,7 +393,7 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
     Shown in the viewer to clarify R/L, A/P, S/I along array axes 0, 1, 2.
     """
     layer_type = type(layer).__name__
-    if layer_type in ("Shapes", "Points", "Vectors", "Tracks", "Surface"):
+    if layer_type in NON_RASTER_LAYER_TYPES:
         return f"{getattr(layer, 'name', layer_type)} ({layer_type})"
 
     aff = layer_affine(layer)
@@ -416,7 +417,9 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
         return "Affine set (install nibabel for axis labels)"
 
     try:
-        codes = nib.orientations.aff2axcodes(aff[:3, :3])
+        # ``aff2axcodes`` wants the full affine: handing it the bare 3x3 rotation
+        # makes nibabel read it as a 2D affine and return only two axis codes.
+        codes = nib.orientations.aff2axcodes(aff[:4, :4])
     except Exception:
         return "Affine set — axis codes unavailable"
 
@@ -429,14 +432,16 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
         try:
             from nvitk.gui.core.orientation import (
                 axial_dim_order,
-                napari_dim_order_3d,
+                dim_order_2d_for_display,
                 superior_voxel_axis,
             )
 
             ndim = int(layer.data.ndim)
             sup = superior_voxel_axis(aff, ndim)
+            # Match the order the viewer actually installs, which for a permuting
+            # affine is not superior-first.
             order = (
-                napari_dim_order_3d(aff, 3)
+                dim_order_2d_for_display(aff, 3)
                 if ndim == 3
                 else axial_dim_order(aff, ndim)
             )
@@ -444,15 +449,107 @@ def orientation_text(layer: Any, viewer: Any | None = None) -> str:
             plane = ", ".join(
                 f"dim {d} ({codes[d] if d < len(codes) else '?'})" for d in in_plane
             )
-            text += f"  —  View: axial (scroll axis {order[0]} = {codes[sup]})  |  In-plane: {plane}"
+            scroll = order[0]
+            view = "axial" if scroll == sup else "non-axial"
+            scroll_code = codes[scroll] if scroll < len(codes) else "?"
+            text += (
+                f"  —  View: {view} (scroll axis {scroll} = {scroll_code})"
+                f"  |  In-plane: {plane}"
+            )
         except Exception:
             pass
     return text
 
 
-def format_layer_spatial_info(layer: Any) -> str:
-    """Human-readable spatial metadata for the active Napari layer."""
-    name = getattr(layer, "name", "?")
+# Layers whose ``data`` is a list of coordinates / vertices rather than a voxel
+# grid: per-axis spacing and extent are meaningless for them.
+NON_RASTER_LAYER_TYPES = frozenset({"Shapes", "Points", "Vectors", "Tracks", "Surface"})
+
+
+def _axis_labels(layer: Any, meta: dict[str, Any]) -> list[str | None]:
+    """Per-axis names for *layer*, one entry per array axis.
+
+    nvitk records axes as a compact string (``"XYZT"``), one character per axis;
+    Napari's ``axis_labels`` is a tuple of whole strings and defaults to numeric
+    placeholders (``"-2"``, ``"-1"``) that carry no meaning, which are dropped.
+    """
+    recorded = meta.get("axes")
+    if isinstance(recorded, str) and recorded:
+        return [ch for ch in recorded]
+    if recorded is not None:
+        return [str(a) or None for a in recorded]
+    labels = getattr(layer, "axis_labels", None)
+    if labels is None:
+        return []
+    out: list[str | None] = []
+    for raw in labels:
+        text = str(raw).strip()
+        # Napari numbers unnamed axes; those tell the reader nothing.
+        out.append(None if not text or text.lstrip("+-").isdigit() else text)
+    return out
+
+
+@dataclass(frozen=True)
+class AxisProperties:
+    """One array axis of a layer, with everything known about it side by side."""
+
+    index: int
+    size: int
+    label: str | None = None
+    code: str | None = None
+    spacing: float | None = None
+    extent: float | None = None
+    scale: float | None = None
+
+    @property
+    def direction_label(self) -> str | None:
+        """Anatomical meaning of this axis' code (e.g. ``"S+ = Superior"``)."""
+        return _axis_direction_label(self.code) if self.code else None
+
+
+@dataclass(frozen=True)
+class LayerSpatialProperties:
+    """Spatial description of a Napari layer, split into the fields a reader asks for."""
+
+    name: str
+    layer_type: str
+    shape: tuple[int, ...]
+    dtype: str | None
+    axes: list[AxisProperties]
+    orientation: str | None = None
+    origin: tuple[float, ...] | None = None
+    scale: tuple[float, ...] | None = None
+    direction: np.ndarray | None = None
+    affine: np.ndarray | None = None
+    affine_source: np.ndarray | None = None
+    source: str | None = None
+
+    @property
+    def is_raster(self) -> bool:
+        """True for voxel-grid layers (Image / Labels), false for point-like layers."""
+        return self.layer_type not in NON_RASTER_LAYER_TYPES
+
+    @property
+    def spacing(self) -> tuple[float, ...] | None:
+        """Per-axis voxel spacing in mm, or ``None`` when no axis carries one."""
+        vals = [ax.spacing for ax in self.axes]
+        return tuple(v for v in vals if v is not None) if any(v is not None for v in vals) else None
+
+    @property
+    def fov(self) -> tuple[float, ...] | None:
+        """Per-axis field of view in mm, or ``None`` when unknown."""
+        vals = [ax.extent for ax in self.axes]
+        return tuple(v for v in vals if v is not None) if any(v is not None for v in vals) else None
+
+
+def layer_spatial_properties(layer: Any) -> LayerSpatialProperties:
+    """Structured spatial metadata for *layer*.
+
+    The single source of truth behind both :func:`format_layer_spatial_info` and
+    the Image properties panel: most of this data is per-axis, so it is returned
+    per-axis rather than as parallel tuples the caller has to line up again.
+    """
+    name = str(getattr(layer, "name", "?"))
     data = getattr(layer, "data", None)
     shape = tuple(int(s) for s in data.shape) if data is not None else ()
     dtype = getattr(data, "dtype", None)
@@ -461,15 +558,20 @@ def format_layer_spatial_info(layer: Any) -> str:
     sp = layer_spacing(layer)
     scale = getattr(layer, "scale", None)
     scale_t = tuple(float(x) for x in scale) if scale is not None else None
-    axes = meta.get("axes") or getattr(layer, "axis_labels", None)
+
+    axis_labels = _axis_labels(layer, meta)
+
     orient = meta.get("orientation")
     if orient is None and aff is not None:
         try:
             import nibabel as nib
 
-            orient = "".join(nib.orientations.aff2axcodes(aff[:3, :3]))
+            # The full affine, not the bare 3x3: nibabel reads a 3x3 as a 2D
+            # affine and returns only two axis codes.
+            orient = "".join(nib.orientations.aff2axcodes(aff[:4, :4]))
         except Exception:
             orient = None
+
     origin = None
     direction = None
     if aff is not None:
@@ -479,50 +581,95 @@ def format_layer_spatial_info(layer: Any) -> str:
             nrm = float(np.linalg.norm(direction[:, i]))
             if nrm > 0:
                 direction[:, i] /= nrm
-    fov = None
-    if sp is not None and len(shape) >= len(sp):
-        fov = tuple(float(shape[i]) * float(sp[i]) for i in range(len(sp)))
 
-    lines = [
-        f"Layer: {name}",
-        f"shape: {shape}",
-        f"dtype: {dtype}",
-        f"axes: {axes!r}",
-        f"orientation: {orient!r}",
-        f"spacing (mm): {sp}",
-        f"fov (mm): {fov}",
-        f"origin: {origin}",
-        f"Napari scale: {scale_t}",
-        f"source: {meta.get('source')!r}",
-    ]
-    if direction is not None:
-        lines.append("direction:")
-        lines.append(np.array2string(np.asarray(direction, dtype=float), precision=4))
-    if aff is not None:
-        lines.append("affine:")
-        lines.append(np.array2string(np.asarray(aff, dtype=float), precision=6))
-    src = meta.get("affine_source")
-    if src is not None:
+    axes: list[AxisProperties] = []
+    raster = type(layer).__name__ not in NON_RASTER_LAYER_TYPES
+    ndim = len(shape)
+    # ``layer_spacing`` reports at most three axes, so a 4D+ layer (displayed
+    # scale-only by ``prepare_for_napari``) takes its per-axis step from ``scale``.
+    if ndim > 3 and scale_t is not None and len(scale_t) >= ndim:
+        per_axis = [float(scale_t[i]) for i in range(ndim)]
+    else:
+        per_axis = [
+            float(sp[i]) if sp is not None and i < len(sp) else None for i in range(ndim)
+        ]
+
+    for i, size in enumerate(shape if raster else ()):
+        label = axis_labels[i] if i < len(axis_labels) else None
+        # A time / channel step is not a millimetre spacing.
+        spatial = label is None or str(label).upper() in ("X", "Y", "Z")
+        spacing = per_axis[i] if spatial else None
+        axes.append(
+            AxisProperties(
+                index=i,
+                size=int(size),
+                label=label,
+                code=orient[i] if orient and i < len(orient) else None,
+                spacing=spacing,
+                extent=float(size) * spacing if spacing is not None else None,
+                scale=float(scale_t[i]) if scale_t is not None and i < len(scale_t) else None,
+            )
+        )
+
+    src_aff = None
+    raw_src = meta.get("affine_source")
+    if raw_src is not None:
         try:
-            src_a = to_numpy(src).astype(float)
-            if aff is None or not np.allclose(src_a, aff):
-                lines.append("affine_source (file):")
-                lines.append(np.array2string(src_a, precision=6))
+            candidate = to_numpy(raw_src).astype(float)
+            if aff is None or not np.allclose(candidate, aff):
+                src_aff = candidate
         except Exception:
-            pass
+            src_aff = None
+
+    source = meta.get("source")
+    return LayerSpatialProperties(
+        name=name,
+        layer_type=type(layer).__name__,
+        shape=shape,
+        dtype=str(dtype) if dtype is not None else None,
+        axes=axes,
+        orientation=orient,
+        origin=origin,
+        scale=scale_t,
+        direction=direction,
+        affine=aff,
+        affine_source=src_aff,
+        source=str(source) if source else None,
+    )
+
+
+def format_layer_spatial_info(layer: Any) -> str:
+    """Human-readable spatial metadata for the active Napari layer."""
+    props = layer_spatial_properties(layer)
+    axes_repr = "".join(ax.label or "?" for ax in props.axes) if props.axes else None
+    lines = [
+        f"Layer: {props.name}",
+        f"shape: {props.shape}",
+        f"dtype: {props.dtype}",
+        f"axes: {axes_repr!r}",
+        f"orientation: {props.orientation!r}",
+        f"spacing (mm): {props.spacing}",
+        f"fov (mm): {props.fov}",
+        f"origin: {props.origin}",
+        f"Napari scale: {props.scale}",
+        f"source: {props.source!r}",
+    ]
+    if props.direction is not None:
+        lines.append("direction:")
+        lines.append(np.array2string(np.asarray(props.direction, dtype=float), precision=4))
+    if props.affine is not None:
+        lines.append("affine:")
+        lines.append(np.array2string(np.asarray(props.affine, dtype=float), precision=6))
+    if props.affine_source is not None:
+        lines.append("affine_source (file):")
+        lines.append(np.array2string(props.affine_source, precision=6))
     return "\n".join(lines)
 
 
 def _layer_for_orientation_status(viewer: Any) -> Any | None:
     """Prefer a volume layer over Shapes/Points overlays for the status bar."""
     active = viewer.layers.selection.active
-    if active is not None and type(active).__name__ not in (
-        "Shapes",
-        "Points",
-        "Vectors",
-        "Tracks",
-        "Surface",
-    ):
+    if active is not None and type(active).__name__ not in NON_RASTER_LAYER_TYPES:
         return active
     for lyr in reversed(list(viewer.layers)):
         if type(lyr).__name__ in ("Image", "Labels"):

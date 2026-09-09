@@ -8,6 +8,7 @@ from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from nvitk.gui.tools.gpu_toggle import build_gpu_toggle_button
+from nvitk.gui.tools.orient_quick import build_orientation_quick_button
 from nvitk.gui.labels.catalog import guess_schema_from_layer, schema_for_totalsegmentator_task
 from nvitk.gui.labels.selector import LabelSelectorWidget
 from nvitk.gui.labels.visibility import (
@@ -80,7 +81,6 @@ def build_tools_dock(
     totalseg_roi = TotalSegRoiWidget()
     pipeline_form.setVisible(False)
     totalseg_roi.setVisible(False)
-    _filtered_layer = None
     _last_active_layer_id = None
 
     _visibility_timer = QTimer()
@@ -97,36 +97,26 @@ def build_tools_dock(
             return None
         return viewer.layers.selection.active or viewer.layers[-1]
 
-    def _restore_filtered_layer() -> None:
-        """Undo the live label-visibility filter on the currently filtered layer, if any."""
-        nonlocal _filtered_layer
-        if _filtered_layer is not None:
-            restore_label_visibility(_filtered_layer, viewer=viewer)
-            _filtered_layer = None
-
-    def _drop_filtered_layer(layer: Any | None) -> None:
-        """Drop live-filter state without touching a layer that is being removed."""
-        nonlocal _filtered_layer
-        if layer is not None and _filtered_layer is layer:
-            _filtered_layer = None
-
     def _apply_label_visibility() -> None:
-        """Filter the active label-like layer's display to only the checked label ids, restoring any
-        previously filtered layer first."""
-        nonlocal _filtered_layer
+        """Filter the picker's bound layer to the checked label ids.
+
+        Each filter is recorded on the layer itself, so a layer keeps the selection
+        it was given while other layers are active; checking every id present is
+        what clears it again.
+        """
         if not label_selector.isVisible():
-            _restore_filtered_layer()
             return
-        layer = _active_layer()
-        if _filtered_layer is not None and _filtered_layer is not layer:
-            restore_label_visibility(_filtered_layer, viewer=viewer)
-            _filtered_layer = None
+        layer = label_selector.current_layer()
         if layer is None or not is_label_like_layer(layer):
             return
         if not layer_in_viewer(layer, viewer):
             return
-        apply_label_visibility(layer, label_selector.selected_ids())
-        _filtered_layer = layer
+        ids = label_selector.selected_ids()
+        present = set(label_selector.available_ids())
+        if ids and present and set(ids) >= present:
+            restore_label_visibility(layer, viewer=viewer)
+            return
+        apply_label_visibility(layer, ids)
 
     def _schedule_label_visibility() -> None:
         """Debounce a call to :func:`_apply_label_visibility` via the visibility timer."""
@@ -134,7 +124,7 @@ def build_tools_dock(
 
     def _sync_label_picker_for_layer(layer: Any | None) -> None:
         """Lightweight update when the active layer changes (no full tool resync)."""
-        nonlocal _last_active_layer_id, _filtered_layer
+        nonlocal _last_active_layer_id
         layer_id = id(layer) if layer is not None else None
         if layer_id == _last_active_layer_id:
             return
@@ -144,10 +134,6 @@ def build_tools_dock(
         op = tool_panel.operation.value
         tid = tool_id_from_label(cat, op) or ""
         show_labels = _show_label_picker(cat, tid, layer)
-
-        if _filtered_layer is not None and _filtered_layer is not layer:
-            restore_label_visibility(_filtered_layer, viewer=viewer)
-            _filtered_layer = None
 
         label_selector.setVisible(show_labels)
         if show_labels and layer is not None:
@@ -164,9 +150,6 @@ def build_tools_dock(
             layer = label_selector.current_layer() or _active_layer()
             _last_active_layer_id = id(layer) if layer is not None else None
             _apply_label_visibility()
-            _filtered_layer = layer if is_label_like_layer(layer) else None
-        else:
-            _restore_filtered_layer()
 
         tool_panel.label_ids.visible = (not show_labels) and is_label_like_layer(layer)
         _update_aux_panel_layout(show_labels)
@@ -206,6 +189,7 @@ def build_tools_dock(
     def _sync_aux_panels() -> None:
         """Full resync of every auxiliary panel (label picker, pipeline form, TotalSeg ROI widget,
         cursor/CoW rows, SGE button) for the currently selected category/operation."""
+        nonlocal _last_active_layer_id
         cat = tool_panel.category.value
         op = tool_panel.operation.value
         tid = tool_id_from_label(cat, op) or ""
@@ -227,11 +211,8 @@ def build_tools_dock(
             label_selector.refresh_from_layer(layer)
             layer = label_selector.current_layer() or _active_layer()
             _apply_label_visibility()
-            nonlocal _filtered_layer, _last_active_layer_id
-            _filtered_layer = layer if is_label_like_layer(layer) else None
             _last_active_layer_id = id(layer) if layer is not None else None
         else:
-            _restore_filtered_layer()
             _last_active_layer_id = id(layer) if layer is not None else None
 
         is_pipeline = spec is not None and spec.run_mode == "pipeline"
@@ -396,7 +377,14 @@ def build_tools_dock(
     tool_scroll.setMaximumHeight(440)
     tool_scroll.setMinimumHeight(140)
 
-    layout.addWidget(build_gpu_toggle_button(), 0)
+    top_row = QWidget()
+    top_row_layout = QHBoxLayout()
+    top_row_layout.setContentsMargins(0, 0, 0, 0)
+    top_row_layout.setSpacing(6)
+    top_row_layout.addWidget(build_gpu_toggle_button(), 1)
+    top_row_layout.addWidget(build_orientation_quick_button(viewer), 1)
+    top_row.setLayout(top_row_layout)
+    layout.addWidget(top_row, 0)
 
     from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
     from nvitk.gui.sge.submit import submit_gui_sge
@@ -495,10 +483,10 @@ def build_tools_dock(
     @viewer.layers.events.removing.connect
     def _on_layer_removing(event: Any) -> None:
         """Avoid restoring/modifying a layer while Napari removes it from the list."""
+        nonlocal _last_active_layer_id
         _visibility_timer.stop()
         _active_sync_timer.stop()
         layer = _layer_from_removing_event(event)
-        _drop_filtered_layer(layer)
         if layer is not None and label_selector._layer_ref is layer:
             label_selector._layer_ref = None
             _last_active_layer_id = None

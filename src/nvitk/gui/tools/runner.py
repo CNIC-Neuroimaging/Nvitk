@@ -543,7 +543,7 @@ def run_gui_tool(
 
     if tool_id == "orient_volume":
         from nvitk.gui.core.spatial import orientation_text
-        from nvitk.gui.core.orientation import configure_viewer_for_layer
+        from nvitk.gui.core.orientation import apply_target_orientation
         from nvitk.io._common import orientation_codes_from_affine
 
         raw = layer_data_for_tool(layer.data)
@@ -565,30 +565,7 @@ def run_gui_tool(
         if current == target:
             notify(f"Layer is already {target}.")
             return None
-        from nvitk.gui.core.orientation import reorient_layer_for_view
-
-        previous, new_axes = reorient_layer_for_view(layer, target)
-        new_aff = np.asarray(to_numpy(layer.affine), dtype=float)
-        meta = dict(getattr(layer, "metadata", None) or {})
-        if new_axes:
-            meta["axes"] = new_axes
-        nv = dict(meta.get("nvitk_metadata") or {})
-        nv["affine"] = new_aff
-        nv["orientation"] = target
-        for i, key in enumerate(("x_res", "y_res", "z_res")):
-            nv[key] = float(np.linalg.norm(new_aff[:3, i]))
-        spacing = (nv["x_res"], nv["y_res"], nv["z_res"])
-        nv["spacing"] = spacing
-        meta["nvitk_metadata"] = nv
-        meta["orientation"] = target
-        layer.metadata = meta
-        if new_axes and len(new_axes) == int(layer.data.ndim):
-            layer.axis_labels = tuple(new_axes)
-        configure_viewer_for_layer(viewer, layer, configure_dims=True)
-        try:
-            viewer.reset_view()
-        except Exception:
-            pass
+        previous, _ = apply_target_orientation(viewer, layer, target)
         notify(f"Reoriented {previous} → {target}.")
         return None
 
@@ -1602,20 +1579,37 @@ def run_gui_tool(
         return None
 
     if tool_id == "seg_totalsegmentator":
-        from nvitk.io import imsave
+        from nvitk.io import imread, imsave
         from nvitk.segmentation.total_segmentator import run_totalsegmentator
 
-        out_dir = Path(str(params.get("output_dir") or "").strip() or tempfile.mkdtemp(prefix="nvitk_ts_"))
-        out_dir.mkdir(parents=True, exist_ok=True)
-        inp = out_dir / "input.nii.gz"
-        imsave(inp, img)
         task = str(params.get("task") or "total")
         roi = params.get("roi_subset")
-        notify(f"Running TotalSegmentator ({task})…")
+
+        # The run directory holds the exported input, the mask and statistics.json.
+        # With ``--ml`` TotalSegmentator treats ``-o`` as the multilabel NIfTI *file*,
+        # not a directory, so the mask needs its own path inside the run directory.
+        run_dir = Path(
+            str(params.get("output_dir") or "").strip()
+            or tempfile.mkdtemp(prefix="nvitk_ts_")
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        inp = run_dir / "input.nii.gz"
+        imsave(inp, img)
+        seg_path = run_dir / f"{task}_segmentation.nii.gz"
+
+        device = "gpu" if gpu_enabled() else "cpu"
+        notify(f"Running TotalSegmentator ({task}, {device}) → {seg_path}")
         if roi:
             gui_log(f"ROI subset ({len(roi)}): {', '.join(roi[:8])}{'…' if len(roi) > 8 else ''}")
         proc = run_totalsegmentator(
-            inp, out_dir, task, roi_subset=roi, capture_output=True, check=False
+            inp,
+            seg_path,
+            task,
+            device=device,
+            roi_subset=roi,
+            multilabel=True,
+            capture_output=True,
+            check=False,
         )
         if proc.stdout:
             for line in str(proc.stdout).splitlines():
@@ -1626,7 +1620,35 @@ def run_gui_tool(
         if proc.returncode != 0:
             notify(f"TotalSegmentator failed (code {proc.returncode})", error=True)
             return None
-        notify(f"TotalSegmentator finished. Output: {out_dir}")
+        if not seg_path.is_file():
+            notify(
+                f"TotalSegmentator finished (code 0) but wrote no mask at {seg_path}.",
+                error=True,
+            )
+            return None
+
+        # Module-level ``np`` is a CuPy proxy under the GPU backend; the mask read
+        # back from disk is a host array and stays one for Napari.
+        import numpy as numpy_host
+
+        seg_arr = to_numpy(imread(seg_path).data)
+        if not numpy_host.issubdtype(seg_arr.dtype, numpy_host.integer):
+            seg_arr = numpy_host.rint(seg_arr)
+        seg_arr = seg_arr.astype(numpy_host.int32, copy=False)
+        seg_layer = viewer.add_labels(
+            seg_arr,
+            opacity=0.6,
+            **_layer_kwargs_from(layer, f"totalseg_{task}"),
+        )
+        try:
+            seg_layer._nvitk_label_like = True
+        except Exception:
+            pass
+        n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
+        notify(
+            f"TotalSegmentator finished: {n_labels} label(s) loaded from {seg_path} "
+            f"(run directory {run_dir})."
+        )
         return None
 
     if tool_id == "seg_eicab":

@@ -194,6 +194,8 @@ def _build_python_cmd(
         shlex.quote(c_nifti),
         "--results-root",
         shlex.quote(c_out),
+        "--model-dir",
+        shlex.quote(c_model),
         "--log-level",
         log_level,
     ]
@@ -201,7 +203,6 @@ def _build_python_cmd(
         parts += [
             "--device", device,
             "--regions", shlex.quote(",".join(regions)),
-            "--model-dir", shlex.quote(c_model),
         ]
         if overwrite:
             parts.append("--overwrite")

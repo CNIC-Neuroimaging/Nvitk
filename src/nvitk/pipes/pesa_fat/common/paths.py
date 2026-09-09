@@ -254,13 +254,20 @@ def layout_local(
 
 
 def _cluster_path_from_config(key: str, *, fallback: Path | None) -> Path:
-    """Resolve a cluster path setting *key*: the raw ``sge.json`` value if set, else *fallback*, else
-    the hardcoded cluster default."""
+    """Resolve a cluster path setting *key*: an explicit *fallback* (a ``--*-root`` flag) wins,
+    else the raw ``sge.json`` value, else raise.
+
+    The flag is checked first so a fully-specified invocation never reads ``sge.json`` at all.
+    That is what lets SGE workers run inside the container, where no configuration directory is
+    mounted: every path they need is resolved on the submitting host at command-creation time
+    and passed on the command line. It also matches :func:`_local_path_from_config`, where an
+    explicit flag has always taken precedence.
+    """
+    if fallback is not None:
+        return Path(fallback)
     raw = _pipe_paths().get(key)
     if raw is not None and str(raw).strip():
         return Path(os.path.expanduser(str(raw).strip()))
-    if fallback is not None:
-        return Path(fallback)
     return Path(os.path.expanduser(str(config_paths.require(
         None,
         key=f"pipelines.{PIPELINE_PATHS_ID}.{key}",

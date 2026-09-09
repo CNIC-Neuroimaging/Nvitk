@@ -721,6 +721,12 @@ def run_subject(
 @click.option("--dicom-root", type=click.Path(path_type=Path), default=None)
 @click.option("--nifti-root", type=click.Path(path_type=Path), default=None)
 @click.option("--results-root", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--model-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Model root. Unused by this stage, but keeps BatchLayout resolvable without sge.json.",
+)
 @click.option("--log-level", default="INFO")
 @click.option(
     "--exclude-ureter/--no-exclude-ureter",
@@ -733,6 +739,7 @@ def main(
     dicom_root: Path | None,
     nifti_root: Path | None,
     results_root: Path | None,
+    model_dir: Path | None,
     backend: str,
     log_level: str,
     exclude_ureter: bool = True,
@@ -745,6 +752,7 @@ def main(
         dicom_root=dicom_root,
         nifti_root=nifti_root,
         results_root=results_root,
+        model_root=model_dir,
     )
     run_subject(subject, lay, backend=backend, exclude_ureter=exclude_ureter)
 
