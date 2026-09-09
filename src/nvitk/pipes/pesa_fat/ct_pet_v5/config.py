@@ -64,28 +64,89 @@ class CtTask:
     roi_subset: tuple[str, ...] = ()
 
 
+# Bone classes of the ``total`` model that make up the skeleton mask. TotalSegmentator
+# has no dedicated skeleton task, so the skeleton is assembled from these classes
+# rather than paid for with a second inference pass: every one of them lives in a
+# sub-model the ``total`` roi_subset below already runs, except the ribs part.
+SKELETON_ROIS: tuple[str, ...] = (
+    "sacrum",
+    *(f"vertebrae_{name}" for name in (
+        "S1",
+        "L5", "L4", "L3", "L2", "L1",
+        "T12", "T11", "T10", "T9", "T8", "T7", "T6", "T5", "T4", "T3", "T2", "T1",
+        "C7", "C6", "C5", "C4", "C3", "C2", "C1",
+    )),
+    *(f"rib_{side}_{i}" for side in ("left", "right") for i in range(1, 13)),
+    "sternum",
+    "costal_cartilages",
+    "humerus_left", "humerus_right",
+    "scapula_left", "scapula_right",
+    "clavicula_left", "clavicula_right",
+    "femur_left", "femur_right",
+    "hip_left", "hip_right",
+    "skull",
+)
+
+
+_TOTAL_ORGAN_ROIS: tuple[str, ...] = (
+    "vertebrae_L4",
+    "vertebrae_L3",
+    "spleen",
+    "kidney_right",
+    "kidney_left",
+    "liver",
+    "pancreas",
+    "autochthon_left",
+    "autochthon_right",
+    "small_bowel",
+    "colon",
+    "urinary_bladder",
+)
+
+
 CT_TASKS: tuple[CtTask, ...] = (
     CtTask(
         "total",
-        (
-            "vertebrae_L4",
-            "vertebrae_L3",
-            "spleen",
-            "kidney_right",
-            "kidney_left",
-            "liver",
-            "pancreas",
-            "autochthon_left",
-            "autochthon_right",
-            "small_bowel",
-            "colon",
-            "urinary_bladder",
-        ),
+        tuple(dict.fromkeys(_TOTAL_ORGAN_ROIS + SKELETON_ROIS)),
     ),
     CtTask("tissue_types"),
     CtTask("thigh_shoulder_muscles"),
     CtTask("body"),
 )
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 post-processing knobs
+# ---------------------------------------------------------------------------
+
+# Muscle labels the skeleton is subtracted from (bone marrow uptake would
+# otherwise contaminate their SUV statistics).
+SKELETON_SUBTRACT_FROM: tuple[str, ...] = (
+    "CUADRICEPS_L",
+    "CUADRICEPS_R",
+    "PARAVERTEBRAL_L",
+    "PARAVERTEBRAL_R",
+    "DELTOIDES_L",
+    "DELTOIDES_R",
+    "TRAPECIOS",
+)
+
+# Muscle labels re-grown after skeleton subtraction, and by how many iterations.
+# Dilation is clipped against the skeleton, so it recovers soft-tissue border
+# voxels without walking back into the femur.
+MUSCLE_DILATE_AFTER_SKELETON: dict[str, int] = {
+    "CUADRICEPS_L": 1,
+    "CUADRICEPS_R": 1,
+}
+
+# Muscle labels kept as the biggest connected component *per side* instead of a
+# single biggest component: trapezius is one bilateral label whose halves are
+# often disconnected, and a plain biggest-CC keep silently drops one of them.
+MUSCLES_BIGGEST_CC_PER_SIDE: tuple[str, ...] = ("TRAPECIOS",)
+
+# A side is dropped when its biggest component is smaller than this fraction of
+# the other side's, which keeps stray specks from standing in for a missing half.
+MUSCLES_SIDE_MIN_RATIO: float = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +317,11 @@ __all__ = [
     "PET_STEM",
     "CtTask",
     "CT_TASKS",
+    "SKELETON_ROIS",
+    "SKELETON_SUBTRACT_FROM",
+    "MUSCLE_DILATE_AFTER_SKELETON",
+    "MUSCLES_BIGGEST_CC_PER_SIDE",
+    "MUSCLES_SIDE_MIN_RATIO",
     "SuvSpec",
     "VolSpec",
     "SUV_STATS",

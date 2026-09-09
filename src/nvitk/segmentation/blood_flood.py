@@ -558,6 +558,7 @@ def blood_flood(
         connectivity=int(connectivity),
         erode_markers=bool(erode_markers),
     )
+
     info["n_tree_voxels"] = int(np.count_nonzero(tree))
     info["n_labeled"] = int(np.count_nonzero(labels))
     info["n_marker_voxels"] = int(np.count_nonzero(marks))

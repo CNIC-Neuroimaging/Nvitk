@@ -52,8 +52,20 @@ HotspotMode = Literal["top_percent", "top_k", "threshold"]
 log = logging.getLogger(__name__)
 
 
-def _add_orientation_axes(pl: Any) -> None:
-    """Viewport-corner RGB orientation widget (X=red, Y=green, Z=blue)."""
+def _add_orientation_axes(pl: Any, axcodes: str | None = None) -> None:
+    """Viewport-corner orientation widget.
+
+    With *axcodes* (the image's orientation codes) this is the anatomical marker:
+    a human figure posed in the scene's frame, with R/L, A/P and H/F letters on
+    the arrow ends. Without them -- or if the marker can't be built -- it falls
+    back to the plain RGB axes (X=red, Y=green, Z=blue).
+    """
+    if axcodes:
+        from nvitk.viz.orientation_marker import add_anatomical_orientation_widget
+
+        if add_anatomical_orientation_widget(pl, axcodes):
+            return
+        log.debug("Anatomical orientation marker unavailable for %r; using RGB axes.", axcodes)
     try:
         pl.add_axes(
             interactive=False,
@@ -183,6 +195,7 @@ def show_hotspots(
     scalar_bar_title: str = "SUV",
     show_min_max_text: bool = True,
     show_orientation_axes: bool = True,
+    orientation_axcodes: str | None = None,
 ) -> Any:
     """
     Render SUV hotspots inside a segmentation mask.
@@ -229,6 +242,10 @@ def show_hotspots(
         If True, when hotspots are still empty after any fallback, return a plotter
         showing only the ROI surface with a note (for batch HTML reports). If False
         (default), raise :class:`~nvitk.core.exceptions.ValidationError`.
+    orientation_axcodes
+        Orientation codes (``"RAS"``, ``"LPS"``, ...) describing the array axes, used
+        to pose the human figure and letter the arrows of the orientation marker.
+        Read from *suv* / *mask* when omitted.
 
     Returns
     -------
@@ -243,6 +260,12 @@ def show_hotspots(
         raise ValidationError(
             f"suv and mask must have the same shape; got {suv_arr.shape} vs {mask_arr.shape}."
         )
+
+    axcodes = orientation_axcodes
+    if axcodes is None:
+        from nvitk.viz.orientation_marker import axcodes_from_image
+
+        axcodes = axcodes_from_image(suv) or axcodes_from_image(mask)
 
     roi = _roi_mask(mask_arr, label_ids)
     hot = _select_hotspots(
@@ -291,7 +314,7 @@ def show_hotspots(
         pl.add_mesh(surf, color="white", opacity=float(mask_opacity), show_scalar_bar=False)
         pl.view_isometric()
         if show_orientation_axes:
-            _add_orientation_axes(pl)
+            _add_orientation_axes(pl, axcodes)
         if show:
             pl.show()
         return pl
@@ -356,7 +379,7 @@ def show_hotspots(
     )
     pl.view_isometric()
     if show_orientation_axes:
-        _add_orientation_axes(pl)
+        _add_orientation_axes(pl, axcodes)
 
     if show:
         pl.show()

@@ -11,6 +11,13 @@ Produces three per-subject, per-region label files under
                    T_PVM_L=5, T_PVM_R=6,
                    BN_L3=7, BN_L4=8
     LEGS.nii.gz    L_QM_L=1, L_QM_R=2
+
+Two inputs do not come from the region's FAT contrast:
+
+* the liver is taken from the WATER-contrast ``total_mr`` run
+  (``cfg.THORAX_WATER_STEM``), where it is far better defined than on FAT;
+* the LEGS quadriceps have the femur/hip skeleton (``cfg.SKELETON_ROIS_MR``)
+  subtracted, so bone marrow stays out of their fat-fraction statistics.
 """
 
 from __future__ import annotations
@@ -35,7 +42,7 @@ from nvitk.pipes.pesa_fat.dixon_v5.labels import (
     LEGS_LABELS,
     THORAX_LABELS,
 )
-from nvitk.segmentation.labels import biggest_cc, get_label
+from nvitk.segmentation.labels import biggest_cc, combine_labels, get_label
 from nvitk.segmentation.hull_edt import convex_hull_3d
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.types import Image
@@ -138,6 +145,59 @@ def _kidney_remove_pelvis(kidney: Image, *, dilate_iters: int = 1) -> Image:
     return kidney.with_data(cleaned.astype(np.uint8))
 
 
+def build_skeleton_mask(total_mr: Image | None) -> Image | None:
+    """Union of the :data:`cfg.SKELETON_ROIS_MR` bone classes, or ``None``.
+
+    ``None`` means there is nothing to subtract: either the region has no
+    ``total_mr`` output (a stage-1 run predating the bone ROIs) or the model
+    found none of those bones.
+    """
+    if total_mr is None:
+        log.warning(
+            "No 'total_mr' output for this region; skipping skeleton subtraction. "
+            "Re-run stage 1 so it segments cfg.SKELETON_ROIS_MR."
+        )
+        return None
+
+    ids = []
+    for name in cfg.SKELETON_ROIS_MR:
+        try:
+            ids.append(get_class_id(name, "total_mr"))
+        except ValueError:
+            log.debug(f"Skeleton ROI {name!r} is not a 'total_mr' class; skipping.")
+
+    present = [cid for cid in ids if bool(np.any(total_mr.data == cid))]
+    if not present:
+        log.warning("No skeleton bone labels found in 'total_mr'; nothing to subtract.")
+        return None
+
+    bone = combine_labels(total_mr, present, new_id=1)
+    return total_mr.with_data(bone.data.astype(np.uint8))
+
+
+def _subtract_skeleton(out_labels: Image, skeleton: Image | None, label_names: tuple[str, ...],
+                       labels_map: dict[str, int]) -> Image:
+    """Clear the named labels of *out_labels* wherever *skeleton* is positive."""
+    if skeleton is None:
+        return out_labels
+    if skeleton.data.shape != out_labels.data.shape:
+        log.warning(
+            f"Skeleton grid {tuple(skeleton.data.shape)} does not match the mask grid "
+            f"{tuple(out_labels.data.shape)}; skipping skeleton subtraction."
+        )
+        return out_labels
+    bone = skeleton.data > 0
+    if not bool(np.any(bone)):
+        return out_labels
+    arr = out_labels.data.copy()
+    for name in label_names:
+        lid = labels_map.get(name)
+        if lid is None:
+            continue
+        arr[(arr == lid) & bone] = 0
+    return out_labels.with_data(arr)
+
+
 # ---------------------------------------------------------------------------
 # Per-region mask builders
 # ---------------------------------------------------------------------------
@@ -160,11 +220,32 @@ def build_head_mask(head_total_mr: Image) -> Image:
 def build_thorax_mask(
     thorax_total_mr: Image,
     thorax_vertebrae_mr: Image,
+    thorax_total_mr_water: Image | None = None,
 ) -> Image:
-    """THORAX: liver, pancreas, kidneys L/R, paravertebral L/R and BN_L3/L4."""
+    """THORAX: liver, pancreas, kidneys L/R, paravertebral L/R and BN_L3/L4.
+
+    The liver comes from *thorax_total_mr_water* (the WATER-contrast ``total_mr``
+    run). Everything else comes from the FAT-contrast run. When the WATER output
+    is missing the liver falls back to the FAT run with a warning, so batches
+    segmented before the split still process.
+    """
     out = np.zeros_like(thorax_total_mr.data, dtype=np.uint8)
 
-    liver = _biggest_cc_or_empty(thorax_total_mr, get_class_id("liver", "total_mr"))
+    liver_source = thorax_total_mr_water
+    if liver_source is None:
+        log.warning(
+            f"{cfg.THORAX_WATER_STEM}.nii(.gz) not found; segmenting the liver from the FAT "
+            "contrast. Re-run stage 1 to get the WATER-based liver."
+        )
+        liver_source = thorax_total_mr
+    elif liver_source.data.shape != thorax_total_mr.data.shape:
+        log.warning(
+            f"WATER liver grid {tuple(liver_source.data.shape)} does not match the FAT grid "
+            f"{tuple(thorax_total_mr.data.shape)}; falling back to the FAT-contrast liver."
+        )
+        liver_source = thorax_total_mr
+
+    liver = _biggest_cc_or_empty(liver_source, get_class_id("liver", "total_mr"))
     pancreas = _biggest_cc_or_empty(thorax_total_mr, get_class_id("pancreas", "total_mr"))
     kidney_l = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_left", "total_mr"))
     kidney_r = _biggest_cc_or_empty(thorax_total_mr, get_class_id("kidney_right", "total_mr"))
@@ -201,8 +282,13 @@ def build_thorax_mask(
     return _muscles_keep_biggest_cc_per_label(thorax_total_mr, thorax_total_mr.with_data(out))
 
 
-def build_legs_mask(legs_muscles_mr: Image) -> Image:
-    """LEGS: quadriceps L/R (``L_QM_L`` / ``L_QM_R``, largest CC each)."""
+def build_legs_mask(legs_muscles_mr: Image, skeleton: Image | None = None) -> Image:
+    """LEGS: quadriceps L/R (``L_QM_L`` / ``L_QM_R``, largest CC each).
+
+    With a *skeleton* mask the femur/hip bones are subtracted from both
+    quadriceps. Components are resolved first, so splitting a muscle around the
+    femur cannot cost it half its volume.
+    """
     left = _biggest_cc_or_empty(
         legs_muscles_mr,
         get_class_id("quadriceps_femoris_left", "thigh_shoulder_muscles_mr"),
@@ -214,7 +300,8 @@ def build_legs_mask(legs_muscles_mr: Image) -> Image:
     out = np.zeros_like(legs_muscles_mr.data, dtype=np.uint8)
     out[left.data > 0] = LEGS_LABELS["L_QM_L"]
     out[right.data > 0] = LEGS_LABELS["L_QM_R"]
-    return _muscles_keep_biggest_cc_per_label(legs_muscles_mr, legs_muscles_mr.with_data(out))
+    labels = _muscles_keep_biggest_cc_per_label(legs_muscles_mr, legs_muscles_mr.with_data(out))
+    return _subtract_skeleton(labels, skeleton, cfg.SKELETON_SUBTRACT_FROM_LEGS, LEGS_LABELS)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +332,8 @@ def _process(segmentation_dir: Path, output_dir: Path) -> None:
             thorax_vert = thorax_total.with_data(
                 np.zeros_like(thorax_total.data, dtype=np.uint8)
             )
-        thorax_mask = build_thorax_mask(thorax_total, thorax_vert)
+        thorax_water = _imread_opt(thorax_dir, cfg.THORAX_WATER_STEM)
+        thorax_mask = build_thorax_mask(thorax_total, thorax_vert, thorax_water)
         imsave(str(output_dir / "THORAX.nii.gz"), thorax_mask, axes="XYZ")
     else:
         log.warning(f"THORAX/total_mr missing in {segmentation_dir} - skipping THORAX")
@@ -254,8 +342,11 @@ def _process(segmentation_dir: Path, output_dir: Path) -> None:
     legs_dir = segmentation_dir / f"{cfg.INPUT_PREFIX}_LEGS"
     legs_muscles = _imread_opt(legs_dir, "thigh_shoulder_muscles_mr")
     if legs_muscles is not None:
-        legs_mask = build_legs_mask(legs_muscles)
+        legs_skeleton = build_skeleton_mask(_imread_opt(legs_dir, "total_mr"))
+        legs_mask = build_legs_mask(legs_muscles, skeleton=legs_skeleton)
         imsave(str(output_dir / "LEGS.nii.gz"), legs_mask, axes="XYZ")
+        if legs_skeleton is not None:
+            imsave(str(output_dir / "LEGS_SKELETON.nii.gz"), legs_skeleton, axes="XYZ")
     else:
         log.warning(
             f"LEGS/thigh_shoulder_muscles_mr missing in {segmentation_dir} - skipping LEGS"

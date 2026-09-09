@@ -4,7 +4,9 @@ Runs the region-specific task plan (see :mod:`config`) for a single PESA*
 subject. For each ``(region, task)`` pair it reads the matching Dixon
 contrast (``DIXON_<REGION>_<SUFFIX>.nii[.gz]``) and writes the multilabel
 segmentation to
-``RESULTS/<batch>/res_segmentation_dixon/<SUBJECT>/DIXON_<REGION>/<task>.nii``.
+``RESULTS/<batch>/res_segmentation_dixon/<SUBJECT>/DIXON_<REGION>/<stem>.nii``
+(the stem is the task name unless the task overrides it, as the WATER-contrast
+liver run does).
 """
 
 from __future__ import annotations
@@ -87,13 +89,13 @@ def run_subject(
                 )
                 continue
 
-            out_file = out_dir / f"{task.name}.nii"
-            out_file_gz = out_dir / f"{task.name}.nii.gz"
+            out_file = out_dir / f"{task.stem}.nii"
+            out_file_gz = out_dir / f"{task.stem}.nii.gz"
             if not overwrite and (out_file.exists() or out_file_gz.exists()):
-                log.info(f"[{subject}] {region}/{task.name:<28} -> up to date")
+                log.info(f"[{subject}] {region}/{task.stem:<28} -> up to date")
                 continue
 
-            log.info(f"[{subject}] {region}/{task.name:<28} -> running")
+            log.info(f"[{subject}] {region}/{task.stem:<28} -> running ({task.name} on {task.input_suffix})")
             try:
                 run_totalsegmentator(
                     in_img,
@@ -108,7 +110,7 @@ def run_subject(
                     capture_output=False,
                 )
             except Exception as exc:
-                log.error(f"[{subject}] {region}/{task.name} failed: {exc}")
+                log.error(f"[{subject}] {region}/{task.stem} failed: {exc}")
 
     return out_dirs
 

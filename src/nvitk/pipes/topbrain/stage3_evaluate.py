@@ -281,6 +281,19 @@ def _write_csvs(cases: Sequence[CaseMetrics], output_dir: Path, label_map: dict[
     log.info("Wrote %s and %s", per_case.name, per_class.name)
 
 
+def _source_image(images_dir: Path, case_id: str):
+    """The volume a case was predicted from, or ``None`` when it is not where expected."""
+    from nvitk.io import imread
+
+    for candidate in (
+        Path(images_dir) / f"{case_id}_0000.nii.gz",
+        Path(images_dir) / f"{case_id}.nii.gz",
+    ):
+        if candidate.is_file():
+            return imread(candidate)
+    return None
+
+
 def run_evaluate(
     *,
     prediction_dir: Path,
@@ -294,6 +307,10 @@ def run_evaluate(
     baseline: Path | None = None,
     splits_path: Path | None = None,
     postprocess: str | None = None,
+    flood_hyst_low_factor: float = 3.0,
+    flood_hyst_high_factor: float = 0.5,
+    flood_thin_percentile: float | None = 55.0,
+    flood_thicken_iter: int = 0,
 ) -> Path:
     """Score every prediction and write the reports; returns the output directory.
 
@@ -326,7 +343,15 @@ def run_evaluate(
     # With post-processing selected, every case is scored twice — once raw, once cleaned — so
     # the comparison is paired on the same cases and the same references. Scoring only the
     # cleaned masks would tell you how good they are, not what the cleaning bought.
-    spec = postproc.spec_from_options(postprocess=postprocess) if postprocess else None
+    spec = postproc.spec_from_options(
+        postprocess=postprocess,
+        flood_hyst_low_factor=flood_hyst_low_factor,
+        flood_hyst_high_factor=flood_hyst_high_factor,
+        flood_thin_percentile=flood_thin_percentile,
+        flood_thicken_iter=flood_thicken_iter,
+    ) if postprocess else None
+    # The flood step reads the intensities. nnU-Net keeps them beside the labels it trained on.
+    images_dir = Path(reference_dir).parent / "imagesTr"
     if spec is not None and spec.enabled:
         log.info("%s (raw masks scored alongside, for the comparison)", spec.describe())
 
@@ -352,6 +377,7 @@ def run_evaluate(
             prediction, _ = postproc.apply_postprocess(
                 prediction, label_set=label_set, spec=spec,
                 spacing=reference.spacing, affine=getattr(reference, "affine", None),
+                intensity=_source_image(images_dir, case_id),
             )
         metrics = _score(case_id, reference, prediction)
         cases.append(metrics)
@@ -470,7 +496,8 @@ def _worker_argv(
     *, label_set: str, prediction_subdir: str | None = None, run_name: str | None = None,
     folds_spec: str = "0,1,2,3,4",
     iou_threshold: float | None = None, skip_neighbours: bool = False,
-    baseline: str | None = None, postprocess: str | None = None, backend: str = "cpu",
+    baseline: str | None = None, postprocess: str | None = None,
+    backend: str = "cpu", **options: Any,
 ) -> list[str]:
     """Worker argv for stage 3, built against the container-side layout."""
     from nvitk.cluster.sge import python_module_argv
@@ -498,6 +525,14 @@ def _worker_argv(
         argv.append("--skip-neighbours")
     if postprocess:
         argv.extend(["--postprocess", quote_path(str(postprocess))])
+        for flag, key in (
+            ("--flood-hyst-low-factor", "flood_hyst_low_factor"),
+            ("--flood-hyst-high-factor", "flood_hyst_high_factor"),
+            ("--flood-thin-percentile", "flood_thin_percentile"),
+            ("--flood-thicken-iter", "flood_thicken_iter"),
+        ):
+            if options.get(key) is not None:
+                argv.extend([flag, str(options[key])])
     if baseline:
         # A bare name is resolved against the container's own stage3 directory; an absolute
         # host path would not exist inside the container.
@@ -564,6 +599,16 @@ def submit_sge(
 @click.option("--baseline", type=click.Path(path_type=Path), default=None,
               help="A previous stage 3 run (directory or metrics.json) to compare against case "
                    "by case — normally the --from-scratch control run.")
+@click.option("--flood-hyst-low-factor", type=float, default=3.0, show_default=True,
+              help="Step 'flood': hysteresis low factor. Higher is stricter, so the vessel "
+                   "tree the labels grow into is smaller. The main lever on how much is added.")
+@click.option("--flood-hyst-high-factor", type=float, default=0.5, show_default=True,
+              help="Step 'flood': hysteresis high factor.")
+@click.option("--flood-thin-percentile", type=float, default=55.0, show_default=True,
+              help="Step 'flood': drop this percentile of the tree by vesselness (<0 off). "
+                   "The existing labels are protected and never thinned.")
+@click.option("--flood-thicken-iter", type=int, default=0, show_default=True,
+              help="Step 'flood': lumen thicken iterations inside a bright gate.")
 @click.option("--postprocess", type=str, default=None,
               help="Score the predictions after these post-processing steps: a comma list of "
                    "islands,largest,bridge,adjacency,lateral — or 'none'/'all'. The raw masks "
@@ -575,6 +620,10 @@ def main(
     train_run_name: str | None, folds: str, reference_dir: Path, results_root: Path,
     label_set: str, run_name: str | None, iou_threshold: float | None, skip_neighbours: bool,
     baseline: Path | None, splits_path: Path | None, postprocess: str | None = None,
+    flood_hyst_low_factor: float = 3.0, flood_hyst_high_factor: float = 0.5,
+    flood_thin_percentile: float = 55.0, flood_thicken_iter: int = 0,
+
+
 ) -> None:
     """CLI entry point: score predictions against reference masks."""
     from nvitk.pipes.topbrain.stage2_train import dataset_name_for, parse_folds
@@ -599,6 +648,10 @@ def main(
         raise click.UsageError("--predictions-from folder needs --prediction-dir.")
 
     run_evaluate(
+        flood_hyst_low_factor=flood_hyst_low_factor,
+        flood_hyst_high_factor=flood_hyst_high_factor,
+        flood_thin_percentile=None if flood_thin_percentile < 0 else flood_thin_percentile,
+        flood_thicken_iter=flood_thicken_iter,
         postprocess=postprocess,
         prediction_dir=prediction_dir, partial_folds=partial, reference_dir=reference_dir,
         results_root=results_root, label_set=label_set, run_name=run_name or train_run_name,

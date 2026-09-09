@@ -99,19 +99,21 @@ _DIXON_MASK_TO_LABELS: dict[str, dict[str, int]] = {
     "LEGS.nii": LEGS_LABELS,
 }
 
-_DIXON_OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
-    "H_PVM_L": [("total_mr", "autochthon_left")],
-    "H_PVM_R": [("total_mr", "autochthon_right")],
-    "LIVER": [("total_mr", "liver")],
-    "PANCREAS": [("total_mr", "pancreas")],
-    "KIDNEY_L": [("total_mr", "kidney_left")],
-    "KIDNEY_R": [("total_mr", "kidney_right")],
-    "T_PVM_L": [("total_mr", "autochthon_left")],
-    "T_PVM_R": [("total_mr", "autochthon_right")],
-    "BN_L3": [("vertebrae_mr", "vertebrae_L3")],
-    "BN_L4": [("vertebrae_mr", "vertebrae_L4")],
-    "L_QM_L": [("thigh_shoulder_muscles_mr", "quadriceps_femoris_left")],
-    "L_QM_R": [("thigh_shoulder_muscles_mr", "quadriceps_femoris_right")],
+# (stage-1 file stem, TS task for the class map, TS class). The stem differs from
+# the task for the WATER-contrast liver run, which stage 2 prefers over the FAT one.
+_DIXON_OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str, str]]] = {
+    "H_PVM_L": [("total_mr", "total_mr", "autochthon_left")],
+    "H_PVM_R": [("total_mr", "total_mr", "autochthon_right")],
+    "LIVER": [(dx_cfg.THORAX_WATER_STEM, "total_mr", "liver"), ("total_mr", "total_mr", "liver")],
+    "PANCREAS": [("total_mr", "total_mr", "pancreas")],
+    "KIDNEY_L": [("total_mr", "total_mr", "kidney_left")],
+    "KIDNEY_R": [("total_mr", "total_mr", "kidney_right")],
+    "T_PVM_L": [("total_mr", "total_mr", "autochthon_left")],
+    "T_PVM_R": [("total_mr", "total_mr", "autochthon_right")],
+    "BN_L3": [("vertebrae_mr", "vertebrae_mr", "vertebrae_L3")],
+    "BN_L4": [("vertebrae_mr", "vertebrae_mr", "vertebrae_L4")],
+    "L_QM_L": [("thigh_shoulder_muscles_mr", "thigh_shoulder_muscles_mr", "quadriceps_femoris_left")],
+    "L_QM_R": [("thigh_shoulder_muscles_mr", "thigh_shoulder_muscles_mr", "quadriceps_femoris_right")],
 }
 
 
@@ -195,8 +197,10 @@ def _load_raw_ts_mask_dixon(
     combined: np.ndarray | None = None
     ref_img: Image | None = None
     for name in output_label_names:
-        for task, ts_label in _DIXON_OUTPUT_LABEL_TO_TS.get(name, []):
-            seg_path = resolve_nii_optional(stage1_dir, task)
+        # Sources for one output label are ordered by preference, not unioned:
+        # LIVER lists the WATER-contrast run first and the FAT one as a fallback.
+        for stem, task, ts_label in _DIXON_OUTPUT_LABEL_TO_TS.get(name, []):
+            seg_path = resolve_nii_optional(stage1_dir, stem)
             if seg_path is None:
                 continue
             try:
@@ -211,6 +215,7 @@ def _load_raw_ts_mask_dixon(
                 combined = bin_np.copy()
             else:
                 combined |= bin_np
+            break
     if combined is None or ref_img is None:
         return None
     target_shape = tuple(int(v) for v in to_numpy(target.data).shape)

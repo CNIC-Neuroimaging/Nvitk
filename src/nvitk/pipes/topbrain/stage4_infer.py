@@ -361,6 +361,7 @@ def postprocess_folder(
     repair_close_radius: int = 0,
     repair_fragment_fraction: float | None = None,
     spec: Any = None,
+    image_dir: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Post-process every prediction in *source_dir*; returns ``(count, repair_summary)``.
 
@@ -413,9 +414,34 @@ def postprocess_folder(
         if repair_fragment_fraction is not None else {}
     )
 
+    def _source_image(case_id: str):
+        """The volume a prediction was made from, when the flood step needs it."""
+        if image_dir is None:
+            return None
+        for candidate in (
+            Path(image_dir) / f"{case_id}_0000.nii.gz",
+            Path(image_dir) / f"{case_id}.nii.gz",
+        ):
+            if candidate.is_file():
+                return imread(candidate)
+        log.warning("No source image for %s under %s; the flood step will be skipped.",
+                    case_id, image_dir)
+        return None
+
     def _one(path: Path) -> tuple[Path, RepairReport | None]:
         """Post-process one prediction, preserving its geometry."""
         image = imread(path)
+        if spec is not None and spec.has("flood"):
+            # The flood is the one step that reads the intensities, so it goes through the
+            # shared entry point with the image attached rather than the mask-only helpers.
+            cleaned, _report = postproc.apply_postprocess(
+                image, label_set=label_set, spec=spec,
+                spacing=image.spacing, affine=image.affine,
+                intensity=_source_image(path.name[: -len(".nii.gz")]),
+            )
+            out = destination_dir / path.name
+            imsave(out, cleaned.astype(np.uint8))
+            return out, None
         cleaned = postprocess_labelmap(
             image,
             labels=labels,
@@ -664,9 +690,14 @@ def run_infer(
         repair_adjacency=repair_adjacency,
         repair_lateral=repair_lateral,
         repair_close_radius=repair_close_radius,
+        image_dir=predict_dir,
         spec=postproc.spec_from_options(
             postprocess=postprocess, min_volume_mm3=min_volume_mm3,
             repair_gaps_mm=repair_gaps_mm, repair_close_radius=repair_close_radius,
+            flood_hyst_low_factor=flood_hyst_low_factor,
+            flood_hyst_high_factor=flood_hyst_high_factor,
+            flood_thin_percentile=flood_thin_percentile,
+            flood_thicken_iter=flood_thicken_iter,
         ) if postprocess is not None else None,
     )
 
@@ -826,6 +857,14 @@ def _worker_argv(
         argv.extend(["--loss", quote_path(str(loss))])
     if postprocess:
         argv.extend(["--postprocess", quote_path(str(postprocess))])
+        for flag, key in (
+            ("--flood-hyst-low-factor", "flood_hyst_low_factor"),
+            ("--flood-hyst-high-factor", "flood_hyst_high_factor"),
+            ("--flood-thin-percentile", "flood_thin_percentile"),
+            ("--flood-thicken-iter", "flood_thicken_iter"),
+        ):
+            if _ignored.get(key) is not None:
+                argv.extend([flag, str(_ignored[key])])
     if no_postprocess:
         argv.append("--no-postprocess")
     for path in inputs:
@@ -1136,6 +1175,16 @@ def _submit_to_cluster(
 @click.option("--configuration", "configuration_name", type=str, default=None)
 @click.option("--checkpoint-name", type=str, default="checkpoint_final.pth", show_default=True)
 @click.option("--output-name", type=str, default=None)
+@click.option("--flood-hyst-low-factor", type=float, default=3.0, show_default=True,
+              help="Step 'flood': hysteresis low factor. Higher is stricter, so the vessel "
+                   "tree the labels grow into is smaller. The main lever on how much is added.")
+@click.option("--flood-hyst-high-factor", type=float, default=0.5, show_default=True,
+              help="Step 'flood': hysteresis high factor.")
+@click.option("--flood-thin-percentile", type=float, default=55.0, show_default=True,
+              help="Step 'flood': drop this percentile of the tree by vesselness (<0 off). "
+                   "The existing labels are protected and never thinned.")
+@click.option("--flood-thicken-iter", type=int, default=0, show_default=True,
+              help="Step 'flood': lumen thicken iterations inside a bright gate.")
 @click.option("--postprocess", type=str, default=None,
               help="Which post-processing steps to apply: a comma list of "
                    "islands,largest,bridge,adjacency,lateral — or 'none' for the raw argmax, "
@@ -1179,7 +1228,10 @@ def main(
     sge_project: str | None = None, sge_h_vmem: str | None = None,
     remote_host: str | None = None, remote_user: str | None = None,
     emit_script: Path | None = None, dry_run: bool = False, no_remote: bool = False,
+    flood_hyst_low_factor: float = 3.0, flood_hyst_high_factor: float = 0.5,
+    flood_thin_percentile: float = 55.0, flood_thicken_iter: int = 0,
     postprocess: str | None = None, backend: str = "gpu",
+
 ) -> None:
     """CLI entry point: predict on one or more images with a selected model."""
     from nvitk.pipes.topbrain.stage2_train import parse_folds
@@ -1234,6 +1286,10 @@ def main(
         return
 
     run_infer(
+        flood_hyst_low_factor=flood_hyst_low_factor,
+        flood_hyst_high_factor=flood_hyst_high_factor,
+        flood_thin_percentile=None if flood_thin_percentile < 0 else flood_thin_percentile,
+        flood_thicken_iter=flood_thicken_iter,
         # --no-postprocess is the shorthand for the same thing, kept so existing commands work.
         postprocess="none" if no_postprocess else postprocess,
         inputs=list(inputs), input_dir=input_dir, model=model, modality=modality,

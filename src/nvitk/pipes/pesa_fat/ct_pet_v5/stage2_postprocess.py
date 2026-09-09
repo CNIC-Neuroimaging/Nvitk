@@ -13,6 +13,7 @@ Produces the following per-subject label files under
     MUSCLES.nii.gz  CUADRICEPS_L=1, CUADRICEPS_R=2, PARAVERTEBRAL_L=3,
                     PARAVERTEBRAL_R=4, DELTOIDES_L=5, DELTOIDES_R=6,
                     TRAPECIOS=7                                         (v5 hemisphere-split)
+    SKELETON.nii.gz SKELETON=1                                          (TS bone classes)
 
 v5 changes
 ----------
@@ -20,6 +21,11 @@ v5 changes
   (bilateral TS label 9) is split into L/R via
   :func:`nvitk.segmentation.hemisphere.split_lr_by_cc`. Trapezius (14)
   remains a single bilateral mask.
+* The skeleton (union of the ``total`` bone classes in
+  :data:`cfg.SKELETON_ROIS`) is subtracted from every muscle label, so bone
+  marrow uptake stays out of the muscle SUV statistics. Trapezius keeps its
+  biggest component *per side* rather than overall, and quadriceps are dilated
+  back by one iteration afterwards (clipped against the skeleton).
 """
 
 from __future__ import annotations
@@ -49,9 +55,10 @@ from nvitk.pipes.pesa_fat.ct_pet_v5.labels import (
     MO_LABELS,
     MUSCLES_LABELS,
     ORGANS_LABELS,
+    SKELETON_LABELS,
     FAT_BATCH_LABELS,
 )
-from nvitk.segmentation.hemisphere import split_lr_by_cc
+from nvitk.segmentation.hemisphere import lr_axis_and_sign, split_lr_by_cc
 from nvitk.segmentation.labels import biggest_cc, combine_labels, get_label
 from nvitk.segmentation.total_segmentator.class_maps import get_class_id
 from nvitk.segmentation.hull_edt import convex_hull_3d
@@ -153,16 +160,161 @@ def _vertebrae_l3_l4_labels(total: Image) -> Any:
     return total.with_data(out)
 
 
+def _mask_bbox_slices(binary: Any) -> tuple[slice, slice, slice]:
+    """Tight bounding box of *binary* as a 3-tuple of slices."""
+    bounds = []
+    for axis in range(3):
+        projection = np.any(binary, axis=tuple(a for a in range(3) if a != axis))
+        present = np.where(projection)[0]
+        bounds.append(slice(int(present[0]), int(present[-1]) + 1))
+    return tuple(bounds)
+
+
+def _biggest_cc_per_side(base_img: Image, binary: Any) -> Any:
+    """Largest connected component on each side of *binary*'s left-right centroid.
+
+    A plain biggest-CC keep silently deletes one half of a bilateral label whose
+    sides are not connected -- which is how trapezius usually comes out. Here each
+    component is assigned whole to the side its own centroid falls on, and the
+    largest component per side is kept, so a label connected across the midline
+    still survives intact as one component. The split point is the mask's
+    voxel-weighted centroid rather than its bounding-box midpoint, which a single
+    stray speck would drag off-centre.
+
+    A side is dropped when its component is smaller than
+    :data:`cfg.MUSCLES_SIDE_MIN_RATIO` of the other's, so specks cannot pose as a
+    missing half.
+    """
+    binary = (binary > 0)
+    if not bool(np.any(binary)):
+        return binary.astype(np.uint8)
+
+    affine = base_img.affine
+    if affine is None:
+        log.warning("No affine available; keeping a single biggest CC for the bilateral label.")
+        return (biggest_cc(base_img.with_data(binary.astype(np.uint8))).data > 0).astype(np.uint8)
+
+    axis, _sign = lr_axis_and_sign(affine)
+    # Everything below runs on the label's bounding box: whole-body grids are
+    # large and this only ever looks at one muscle.
+    box = _mask_bbox_slices(binary)
+    labeled, num = label_connected(binary[box].astype(np.uint8), connectivity=3)
+    if int(num) == 0:
+        return np.zeros_like(binary, dtype=np.uint8)
+
+    # Per-component voxel counts and summed left-right index, accumulated one
+    # slab at a time so no volume-sized coordinate array is ever allocated.
+    sizes = np.zeros(int(num) + 1, dtype=np.float64)
+    coord_sums = np.zeros(int(num) + 1, dtype=np.float64)
+    offset = box[axis].start
+    for i in range(labeled.shape[axis]):
+        slab = np.take(labeled, i, axis=axis)
+        counts = np.bincount(slab.ravel(), minlength=int(num) + 1).astype(np.float64)
+        sizes += counts
+        coord_sums += counts * float(i + offset)
+    sizes[0] = 0.0
+    coord_sums[0] = 0.0
+
+    midline = float(coord_sums.sum()) / float(sizes.sum())
+    centroids = coord_sums[1:] / np.maximum(sizes[1:], 1.0)
+
+    keep: list[int] = []
+    kept_sizes: list[float] = []
+    for on_side in (centroids <= midline, centroids > midline):
+        candidates = np.where(on_side, sizes[1:], 0.0)
+        best = int(np.argmax(candidates))
+        if float(candidates[best]) <= 0.0:
+            continue
+        keep.append(best + 1)
+        kept_sizes.append(float(candidates[best]))
+
+    largest = max(kept_sizes) if kept_sizes else 0.0
+    kept = np.zeros_like(labeled, dtype=bool)
+    for cc_id, size in zip(keep, kept_sizes):
+        if size < cfg.MUSCLES_SIDE_MIN_RATIO * largest:
+            continue
+        kept |= labeled == cc_id
+
+    out = np.zeros_like(binary)
+    out[box] = kept
+    return out.astype(np.uint8)
+
+
 def _muscles_keep_biggest_cc_per_label(base_img: Image, out_labels: Image) -> Image:
-    """Per muscle label ID, keep only the largest 3D connected component."""
+    """Per muscle label ID, keep only the largest 3D connected component.
+
+    Labels in :data:`cfg.MUSCLES_BIGGEST_CC_PER_SIDE` keep their largest
+    component on each side instead (see :func:`_biggest_cc_per_side`).
+    """
+    per_side_ids = {
+        MUSCLES_LABELS[name]
+        for name in cfg.MUSCLES_BIGGEST_CC_PER_SIDE
+        if name in MUSCLES_LABELS
+    }
     arr = as_backend_array(out_labels.data).copy()
     for lid in sorted(set(MUSCLES_LABELS.values())):
         bin_mask = (arr == lid).astype(np.uint8)
         if not np.any(bin_mask):
             continue
-        cc = biggest_cc(base_img.with_data(bin_mask)).data > 0
+        if lid in per_side_ids:
+            cc = _biggest_cc_per_side(base_img, bin_mask) > 0
+        else:
+            cc = biggest_cc(base_img.with_data(bin_mask)).data > 0
         arr[arr == lid] = 0
         arr[cc] = lid
+    return out_labels.with_data(arr)
+
+
+def _subtract_skeleton(out_labels: Image, skeleton: Image | None) -> Image:
+    """Clear :data:`cfg.SKELETON_SUBTRACT_FROM` labels wherever *skeleton* is positive."""
+    if skeleton is None:
+        return out_labels
+    if tuple(skeleton.data.shape) != tuple(out_labels.data.shape):
+        log.warning(
+            f"Skeleton grid {tuple(skeleton.data.shape)} does not match the muscle grid "
+            f"{tuple(out_labels.data.shape)}; skipping skeleton subtraction."
+        )
+        return out_labels
+    bone = as_backend_array(skeleton.data) > 0
+    if not bool(np.any(bone)):
+        return out_labels
+    arr = as_backend_array(out_labels.data).copy()
+    for name in cfg.SKELETON_SUBTRACT_FROM:
+        lid = MUSCLES_LABELS.get(name)
+        if lid is None:
+            continue
+        arr[(arr == lid) & bone] = 0
+    return out_labels.with_data(arr)
+
+
+def _dilate_after_skeleton(out_labels: Image, skeleton: Image | None) -> Image:
+    """Re-grow :data:`cfg.MUSCLE_DILATE_AFTER_SKELETON` labels, clipped against bone.
+
+    Dilation only claims voxels that are still background, so a muscle can regain
+    the soft-tissue border it lost to the subtraction without eating into a
+    neighbouring label or walking back into the bone it was just cleared from.
+    """
+    if not cfg.MUSCLE_DILATE_AFTER_SKELETON:
+        return out_labels
+    arr = as_backend_array(out_labels.data).copy()
+    bone = as_backend_array(skeleton.data) > 0 if skeleton is not None else None
+    for name, iterations in cfg.MUSCLE_DILATE_AFTER_SKELETON.items():
+        lid = MUSCLES_LABELS.get(name)
+        if lid is None or int(iterations) <= 0:
+            continue
+        bin_mask = (arr == lid).astype(np.uint8)
+        if not np.any(bin_mask):
+            continue
+        grown = dilate(
+            out_labels.with_data(bin_mask),
+            footprint=1,
+            iterations=int(iterations),
+            mode="binary",
+        ).data > 0
+        gained = grown & (arr == 0)
+        if bone is not None:
+            gained &= ~bone
+        arr[gained] = lid
     return out_labels.with_data(arr)
 
 
@@ -205,6 +357,33 @@ def build_mo_mask(total: Image) -> Image:
     out[l4n.data > 0] = MO_LABELS["L4"]
     out[l3n.data > 0] = MO_LABELS["L3"]
     return total.with_data(out)
+
+
+def build_skeleton_mask(total: Image) -> Image:
+    """SKELETON.nii.gz: union of the :data:`cfg.SKELETON_ROIS` bone classes.
+
+    Returns an empty mask (with a warning) when the ``total`` segmentation holds
+    none of them -- the sign of a stage-1 run that predates the skeleton ROIs.
+    """
+    ids = []
+    for name in cfg.SKELETON_ROIS:
+        try:
+            ids.append(get_class_id(name, "total"))
+        except ValueError:
+            log.debug(f"Skeleton ROI {name!r} is not a 'total' class; skipping.")
+
+    arr = as_backend_array(total.data)
+    present = [cid for cid in ids if bool(np.any(arr == cid))]
+    if not present:
+        log.warning(
+            "No skeleton bone labels found in the stage-1 'total' segmentation. "
+            "Re-run stage 1 so it saves cfg.SKELETON_ROIS; muscle masks are left "
+            "unchanged by the skeleton subtraction."
+        )
+        return total.with_data(np.zeros_like(arr, dtype=np.uint8))
+
+    bone = combine_labels(total, present, new_id=SKELETON_LABELS["SKELETON"])
+    return total.with_data(as_backend_array(bone.data).astype(np.uint8))
 
 
 def build_body_mask(body: Image) -> Image:
@@ -410,13 +589,19 @@ def build_organs_mask(total: Image) -> Image:
     return total.with_data(out)
 
 
-def build_muscles_mask(total: Image, muscles: Image) -> Image:
+def build_muscles_mask(total: Image, muscles: Image, skeleton: Image | None = None) -> Image:
     """Hemisphere-preserving MUSCLES.nii.gz.
 
     * ``quadriceps_femoris_left/right`` (TS IDs 1,2) -> CUADRICEPS_L/R
     * ``autochthon_left/right`` (TS IDs 86,87 in 'total')   -> PARAVERTEBRAL_L/R
     * ``deltoid`` (TS ID 9)                           -> split L/R via CC
     * ``trapezius`` (TS ID 14)                        -> bilateral TRAPECIOS
+
+    With a *skeleton* mask (on the ``total`` grid) the bones are subtracted from
+    the labels in :data:`cfg.SKELETON_SUBTRACT_FROM`, and the labels in
+    :data:`cfg.MUSCLE_DILATE_AFTER_SKELETON` are then dilated back. Components
+    are resolved *before* the subtraction, so splitting a muscle around a bone
+    cannot cost it half its volume.
     """
     out = np.zeros_like(muscles.data, dtype=np.uint8)
 
@@ -456,7 +641,10 @@ def build_muscles_mask(total: Image, muscles: Image) -> Image:
         muscles, get_class_id("trapezius", "thigh_shoulder_muscles"), missing="empty"
     ).data
     out[trap > 0] = MUSCLES_LABELS["TRAPECIOS"]
-    return _muscles_keep_biggest_cc_per_label(total, muscles.copy().with_data(out))
+
+    labels = _muscles_keep_biggest_cc_per_label(total, muscles.copy().with_data(out))
+    labels = _subtract_skeleton(labels, skeleton)
+    return _dilate_after_skeleton(labels, skeleton)
 
 
 # ---------------------------------------------------------------------------
@@ -470,8 +658,8 @@ def _imread(path_parent: Path, stem: str, axes: str = "XYZ") -> Image:
 
 
 def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_ureter: bool = True) -> None:
-    """Build and write the MO/FAT/FAT_BATCH/BODY/ORGANS/MUSCLES post-processed masks for one subject
-    from its TotalSegmentator outputs and PET volume."""
+    """Build and write the MO/FAT/FAT_BATCH/BODY/ORGANS/SKELETON/MUSCLES post-processed masks for
+    one subject from its TotalSegmentator outputs and PET volume."""
     total = _imread(segmentation_dir, "total")
     tissue_types = _imread(segmentation_dir, "tissue_types")
     muscles = _imread(segmentation_dir, "thigh_shoulder_muscles")
@@ -482,7 +670,8 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_
     fat, fat_batch = build_fat_mask(tissue_types, total, body, pet, exclude_ureter=exclude_ureter, output_dir=output_dir)
     bod = build_body_mask(body)
     organs = build_organs_mask(total)
-    muscles_out = build_muscles_mask(total, muscles)
+    skeleton = build_skeleton_mask(total)
+    muscles_out = build_muscles_mask(total, muscles, skeleton=skeleton)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     imsave(str(output_dir / "MO.nii.gz"), mo, axes="XYZ")
@@ -491,6 +680,7 @@ def _process(segmentation_dir: Path, nifti_dir: Path, output_dir: Path, exclude_
     imsave(str(output_dir / "BODY.nii.gz"), bod, axes="XYZ")
     imsave(str(output_dir / "ORGANS.nii.gz"), organs, axes="XYZ")
     imsave(str(output_dir / "MUSCLES.nii.gz"), muscles_out, axes="XYZ")
+    imsave(str(output_dir / "SKELETON.nii.gz"), skeleton, axes="XYZ")
 
 
 def run_subject(
@@ -500,7 +690,7 @@ def run_subject(
     backend: str = "cupy",
     exclude_ureter: bool = True,
 ) -> Path:
-    """Build the five stage-2 outputs for a single subject."""
+    """Build the stage-2 outputs for a single subject."""
     try:
         set_default_backend(backend, allow_fallback=True)
     except Exception as exc:

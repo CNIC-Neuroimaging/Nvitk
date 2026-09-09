@@ -52,6 +52,35 @@ class MrTask:
     name: str
     input_suffix: str                # FAT / WATER / ...
     roi_subset: tuple[str, ...] = ()
+    output_stem: str | None = None   # stage-1 file stem; defaults to ``name``
+
+    @property
+    def stem(self) -> str:
+        """Stage-1 output file stem (lets one task run twice on different contrasts)."""
+        return self.output_stem or self.name
+
+
+# Stage-1 file stem of the WATER-contrast ``total_mr`` run. The liver is
+# segmented on WATER rather than FAT, so it needs its own output next to the
+# FAT-contrast ``total_mr``.
+THORAX_WATER_STEM: str = "total_mr_water"
+
+# Classes taken from the WATER run instead of the FAT one.
+THORAX_WATER_ROIS: tuple[str, ...] = ("liver",)
+
+# Bone classes of ``total_mr`` forming the LEGS skeleton mask, subtracted from
+# the quadriceps in stage 2. As on CT there is no TotalSegmentator skeleton
+# task; these all live in the same total_mr sub-model, so this is one extra run
+# for the LEGS region rather than a dedicated model.
+SKELETON_ROIS_MR: tuple[str, ...] = (
+    "femur_left",
+    "femur_right",
+    "hip_left",
+    "hip_right",
+)
+
+# LEGS mask labels the skeleton is subtracted from.
+SKELETON_SUBTRACT_FROM_LEGS: tuple[str, ...] = ("L_QM_L", "L_QM_R")
 
 
 HEAD_TASKS = (
@@ -72,6 +101,14 @@ THORAX_TASKS = (
             "autochthon_right",
         ),
     ),
+    # Liver is segmented on WATER; stage 2 prefers this output over the FAT one,
+    # which is kept only as a fallback for batches segmented before this split.
+    MrTask(
+        "total_mr",
+        input_suffix="WATER",
+        roi_subset=THORAX_WATER_ROIS,
+        output_stem=THORAX_WATER_STEM,
+    ),
     MrTask("tissue_types_mr", input_suffix="FAT"),
     MrTask("body_mr", input_suffix="FAT"),
     MrTask("vertebrae_mr", input_suffix="WATER"),
@@ -79,6 +116,7 @@ THORAX_TASKS = (
 
 LEGS_TASKS = (
     MrTask("thigh_shoulder_muscles_mr", input_suffix="FAT"),
+    MrTask("total_mr", input_suffix="FAT", roi_subset=SKELETON_ROIS_MR),
     MrTask("tissue_types_mr", input_suffix="FAT"),
     MrTask("body_mr", input_suffix="FAT"),
 )
@@ -291,6 +329,10 @@ __all__ = [
     "INPUT_PREFIX",
     "INPUT_SUFFIXES",
     "MrTask",
+    "THORAX_WATER_STEM",
+    "THORAX_WATER_ROIS",
+    "SKELETON_ROIS_MR",
+    "SKELETON_SUBTRACT_FROM_LEGS",
     "HEAD_TASKS",
     "THORAX_TASKS",
     "LEGS_TASKS",

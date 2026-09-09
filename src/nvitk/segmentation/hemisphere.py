@@ -35,6 +35,22 @@ def _centroid_world_x(coords_voxel: np.ndarray, affine: np.ndarray) -> float:
         return float((affine @ homog)[0])
 
 
+def lr_axis_and_sign(affine: Any) -> tuple[int, int]:
+    """``(array_axis, sign)`` of the left-right axis for a voxel-to-RAS *affine*.
+
+    The returned axis is the array axis most aligned with world x; ``sign`` is
+    ``+1`` when increasing that index moves toward the subject's **right** (world
+    +x in RAS) and ``-1`` when it moves toward their left.
+    """
+    with using("cpu"):
+        rows = to_numpy(as_backend_array(affine)).astype(float)
+    if rows.shape != (4, 4):
+        raise ValueError(f"affine must be 4x4; got {rows.shape}.")
+    world_x = rows[0, :3]
+    axis = int(np.argmax(np.abs(world_x)))
+    return axis, (1 if float(world_x[axis]) >= 0 else -1)
+
+
 def split_lr_by_cc(mask: Image, *, n: int = 2, structure: Any = None) -> tuple[Image, Image]:
     """
     Split a bilateral binary *mask* into ``(left, right)`` images using connected components.
@@ -173,4 +189,4 @@ def split_lr_by_midline(mask: Image, *, plane_x: int | None = None) -> tuple[Ima
     )
 
 
-__all__ = ["split_lr_by_cc", "split_lr_by_midline"]
+__all__ = ["lr_axis_and_sign", "split_lr_by_cc", "split_lr_by_midline"]

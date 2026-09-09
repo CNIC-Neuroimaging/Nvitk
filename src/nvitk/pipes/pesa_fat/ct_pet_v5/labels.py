@@ -26,6 +26,9 @@ BODY_LABELS: dict[str, int] = {"BODY": 1}
 
 ORGANS_LABELS: dict[str, int] = {"HIGADO": 1, "BAZO": 2, "PANCREAS": 3}
 
+# Union of the TotalSegmentator bone classes listed in ``config.SKELETON_ROIS``.
+SKELETON_LABELS: dict[str, int] = {"SKELETON": 1}
+
 MUSCLES_LABELS: dict[str, int] = {
     "CUADRICEPS_L": 1,
     "CUADRICEPS_R": 2,
@@ -65,6 +68,7 @@ OUTPUT_LABEL_TO_TS: dict[str, list[tuple[str, str]]] = {
 
 __all__ = [
     "MO_LABELS",
+    "SKELETON_LABELS",
     "FAT_LABELS",
     "FAT_BATCH_LABELS",
     "BODY_LABELS",

@@ -33,8 +33,12 @@ from nvitk.pipes.topbrain import labels as lbl
 log = Logger()
 
 #: Step names, in the order they are applied. ``islands`` and ``largest`` are component
-#: clean-up; the rest are topology repair.
-STEPS: tuple[str, ...] = ("islands", "largest", "bridge", "adjacency", "lateral")
+#: clean-up; ``flood`` grows the labels along image evidence; the rest are topology repair.
+#:
+#: ``flood`` sits before ``bridge``: it closes gaps using the intensities, which is better
+#: evidence than the tube ``bridge`` draws between fragments, and whatever it adds is then still
+#: subject to the adjacency and laterality checks.
+STEPS: tuple[str, ...] = ("islands", "largest", "flood", "bridge", "adjacency", "lateral")
 
 #: What ``--postprocess`` does when it is not given: nnU-Net's argmax plus speckle removal.
 #: The topology steps stay opt-in because each can trade one metric for another.
@@ -54,6 +58,12 @@ class PostProcessSpec:
     bridge_radius: int = 1
     close_radius: int = 0
     max_fragment_fraction: float = 0.25
+    # ---- flood: a pass-through to blood_flood's own parameters, nothing more ----
+    flood_hyst_low_factor: float = 3.0
+    flood_hyst_high_factor: float = 0.5
+    flood_thin_percentile: float | None = 55.0
+    flood_thicken_iter: int = 0
+    flood_connectivity: int = 3
 
     @property
     def enabled(self) -> bool:
@@ -89,6 +99,11 @@ class PostProcessSpec:
                     f"bridge(<={self.bridge_gaps_mm} mm, r={self.bridge_radius}"
                     + (f", close={self.close_radius}" if self.close_radius else "")
                     + ")"
+                )
+            elif step == "flood":
+                parts.append(
+                    f"flood(low={self.flood_hyst_low_factor}, "
+                    f"thin={self.flood_thin_percentile})"
                 )
             elif step in ("adjacency", "lateral"):
                 parts.append(f"{step}(<={self.max_fragment_fraction:.0%} of host)")
@@ -135,6 +150,7 @@ def apply_postprocess(
     spec: PostProcessSpec,
     spacing: Sequence[float] | None = None,
     affine: Any = None,
+    intensity: Any = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Apply *spec* to one label map; returns ``(result, report)``.
 
@@ -157,6 +173,21 @@ def apply_postprocess(
         )
 
     report: dict[str, Any] = {"steps": list(spec.steps), "applied": True}
+
+    if spec.has("flood"):
+        if intensity is None:
+            # Not an error: every other step works on the mask alone, so a caller that cannot
+            # supply the image should still get the rest rather than nothing.
+            log.warning(
+                "Post-processing step 'flood' needs the source image and none was given; "
+                "skipping it. The other steps still ran."
+            )
+            report["flood"] = {"skipped": "no intensity image"}
+        else:
+            result, report["flood"] = _flood_step(
+                result, intensity, spec=spec, label_set=label_set
+            )
+
     if spec.has("bridge") or spec.has("adjacency") or spec.has("lateral"):
         result, repair = repair_topology(
             result,
@@ -173,10 +204,65 @@ def apply_postprocess(
     return result, report
 
 
+def _flood_step(
+    labelmap: Any, intensity: Any, *, spec: PostProcessSpec, label_set: str
+) -> tuple[Any, dict[str, Any]]:
+    """Grow the labels along vessel evidence with :func:`blood_flood`.
+
+    A plain pass-through: every parameter here is one blood_flood already had, so the step does
+    exactly what the GUI tool does and nothing else. The existing labelling is the marker set,
+    so the watershed is seeded from what is already there.
+    """
+    import numpy as np
+
+    from nvitk.core.array import as_backend_array, to_numpy
+    from nvitk.segmentation.blood_flood import blood_flood
+
+    labels_in = to_numpy(as_backend_array(
+        labelmap.data if hasattr(labelmap, "data") else labelmap
+    ))
+    image = to_numpy(as_backend_array(
+        intensity.data if hasattr(intensity, "data") else intensity
+    ))
+    if labels_in.shape != image.shape:
+        log.warning(
+            "flood: the image is %s and the mask is %s; skipping the step rather than "
+            "guessing an alignment.", image.shape, labels_in.shape,
+        )
+        return labelmap, {"skipped": "shape mismatch"}
+
+    outcome = blood_flood(
+        image,
+        labels_in,
+        hyst_low_factor=spec.flood_hyst_low_factor,
+        hyst_high_factor=spec.flood_hyst_high_factor,
+        thin_vesselness_percentile=spec.flood_thin_percentile,
+        thicken_iter=spec.flood_thicken_iter,
+        connectivity=spec.flood_connectivity,
+    )
+    # Where the flood assigned nothing, the input stands. A post-processing pass must never be
+    # able to erase the model's own output.
+    merged = np.where(outcome.labels != 0, outcome.labels, labels_in).astype(labels_in.dtype)
+    added = int((merged != 0).sum() - (labels_in != 0).sum())
+    log.info("flood: %+d voxel(s).", added)
+    report = {
+        "added_voxels": added,
+        "vesselness_mode": outcome.vesselness_mode,
+        "tree_voxels": outcome.info.get("n_tree_voxels"),
+        "tree_marker_cc": outcome.info.get("tree_marker_cc"),
+    }
+    source = labelmap if hasattr(labelmap, "with_data") else None
+    return (source.with_data(merged) if source is not None else merged), report
+
+
 def spec_from_options(**options: Any) -> PostProcessSpec:
     """Build a spec from CLI option values, tolerating absent keys."""
     return PostProcessSpec(
         steps=parse_steps(options.get("postprocess")),
+        flood_hyst_low_factor=float(options.get("flood_hyst_low_factor", 3.0) or 3.0),
+        flood_hyst_high_factor=float(options.get("flood_hyst_high_factor", 0.5) or 0.5),
+        flood_thin_percentile=options.get("flood_thin_percentile", 55.0),
+        flood_thicken_iter=int(options.get("flood_thicken_iter", 0) or 0),
         min_volume_mm3=options.get("min_volume_mm3", 5.0),
         bridge_gaps_mm=options.get("repair_gaps_mm") or 3.0,
         bridge_radius=int(options.get("repair_bridge_radius", 1) or 1),
