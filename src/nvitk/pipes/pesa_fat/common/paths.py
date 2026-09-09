@@ -53,10 +53,7 @@ _RESOLVERS: dict[str, lazy_config.Resolver] = {
     "LOCAL_DEFAULT_RESULTS_ROOT": lambda: _opt_root("local_results_root"),
     "LOCAL_DEFAULT_MODEL_ROOT": lambda: _opt_root("local_model_root"),
     "DEFAULT_NVITK_SRC_DIR": lambda: _sj.resolve_nvitk_src_dir(),
-    "DEFAULT_SGE_SCRIPTS_DIR": lambda: (
-        _opt_path(_sj.paths_section().get("sge_scripts_dir"))
-        or Path(tempfile.gettempdir()) / "nvitk-sge" / "scripts"
-    ),
+    "DEFAULT_SGE_SCRIPTS_DIR": lambda: _sge_scripts_dir(),
     "CLUSTER_HOST_ALIASES": lambda: _sj.merge_cluster_host_aliases(
         {}, _sj.paths_section(), _pipe_paths()
     ),
@@ -68,6 +65,19 @@ def _opt_path(value):
     if value is None or not str(value).strip():
         return None
     return Path(os.path.expanduser(str(value).strip()))
+
+
+def _sge_scripts_dir() -> Path:
+    """The configured SGE scripts directory, or a temp-dir fallback.
+
+    Kept as a function rather than inlined in :data:`_RESOLVERS` so code *inside* this
+    module can reach the value too: the lazy-config ``__getattr__`` only fires for
+    attribute access from other modules, never for a bare global lookup in here.
+    """
+    return (
+        _opt_path(_sj.paths_section().get("sge_scripts_dir"))
+        or Path(tempfile.gettempdir()) / "nvitk-sge" / "scripts"
+    )
 
 
 __getattr__, __dir__ = lazy_config.module_getattr(_RESOLVERS, module_name=__name__)
@@ -172,7 +182,7 @@ class BatchLayout:
 
 def default_submit_script_path(batch: str) -> Path:
     """Return ``SCRIPTS_CLUSTER/submit_<batch>.sh`` under :data:`DEFAULT_SGE_SCRIPTS_DIR`."""
-    return DEFAULT_SGE_SCRIPTS_DIR / f"submit_{batch}.sh"
+    return _sge_scripts_dir() / f"submit_{batch}.sh"
 
 
 def layout(
