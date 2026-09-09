@@ -436,8 +436,12 @@ def emit_array_job_block(
         f"{qsub_var}=(\n"
         f"  {qsub_lines}\n"
         f")\n"
-        f'{jid_var}=$(echo "${workercmd_var}" | "${{{qsub_var}[@]}}")\n'
-        f'echo "{job_name} -> ${jid_var}"\n'
+        f'{jid_var}_raw=$(echo "${workercmd_var}" | "${{{qsub_var}[@]}}")\n'
+        f'echo "{job_name} -> ${jid_var}_raw"\n'
+        # `qsub -terse` prints "<jid>.<first>-<last>:<step>" for an array job, but
+        # -hold_jid only accepts the bare job id -- passing the task spec makes the
+        # dependent job fail to submit with `denied: job "<jid>.1-3:1" not found`.
+        f'{jid_var}=${{{jid_var}_raw%%.*}}\n'
         f"\n"
     )
     return f"${jid_var}"
