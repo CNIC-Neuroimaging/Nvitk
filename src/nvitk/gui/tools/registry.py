@@ -1445,6 +1445,32 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         run_mode="notify",
     ),
     GuiToolSpec(
+        "volsim",
+        "Measure",
+        "Volume similarity (VOLSIM) vs reference",
+        (ParamSpec("reference_layer", "Reference mask/labels", "layer", ""),),
+        needs_reference_layer=True,
+        run_mode="notify",
+        description=(
+            "1 - |FN - FP| / (2·TP + FP + FN): how close the two masks are in size, "
+            "independently of whether they overlap. Two equal-volume masks score 1.0 "
+            "even when disjoint, so read it beside Dice, never instead of it."
+        ),
+    ),
+    GuiToolSpec(
+        "mcc",
+        "Measure",
+        "Matthews correlation (MCC) vs reference",
+        (ParamSpec("reference_layer", "Reference mask/labels", "layer", ""),),
+        needs_reference_layer=True,
+        run_mode="notify",
+        description=(
+            "Correlation over the whole confusion matrix, in [-1, 1]. Unlike Dice it "
+            "also has to get the background right, which makes it the more honest "
+            "score on a mask that is mostly background. 0 is chance agreement."
+        ),
+    ),
+    GuiToolSpec(
         "jaccard",
         "Measure",
         "Jaccard vs reference layer",
@@ -1538,6 +1564,11 @@ def tools_for_category(category: str) -> list[GuiToolSpec]:
     return [t for t in _TOOLS if t.category == category]
 
 
+def all_tools() -> tuple[GuiToolSpec, ...]:
+    """Every registered GUI tool, including the pipeline-backed ones."""
+    return _TOOLS
+
+
 def tool_by_id(tool_id: str) -> GuiToolSpec | None:
     """Look up a registered :class:`GuiToolSpec` by its id, or ``None`` if unregistered."""
     for t in _TOOLS:
@@ -1605,6 +1636,8 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "label_stats",
     "intensity_similarity",
     "dice",
+    "volsim",
+    "mcc",
     "jaccard",
     "voxel_metrics",
     "surface_metrics",

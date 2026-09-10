@@ -83,6 +83,43 @@ def volume_similarity(label_true: Any, label_pred: Any) -> float:
     return abs(n_pred - n_true) / n_true if n_true > 0 else 0.0
 
 
+def volsim(label_true: Any, label_pred: Any) -> float:
+    """Volume similarity (Taha & Hanbury): ``1 - |FN - FP| / (2·TP + FP + FN)``.
+
+    Bounded in ``[0, 1]``, 1.0 for identical volumes. Distinct from
+    :func:`volume_similarity` in this module, which is a relative volume
+    *difference* (0 = identical, unbounded above) — check which one you want.
+
+    Deliberately blind to overlap: two masks of equal size score 1.0 even when
+    disjoint. It answers "is the volume right?", not "is it in the right place",
+    so pair it with an overlap metric rather than reporting it alone.
+    """
+    c = confusion_counts(label_true, label_pred)
+    denominator = 2 * c["TP"] + c["FP"] + c["FN"]
+    if denominator == 0:
+        return 1.0
+    return 1.0 - abs(c["FN"] - c["FP"]) / float(denominator)
+
+
+def mcc(label_true: Any, label_pred: Any) -> float:
+    """Matthews correlation coefficient, in ``[-1, 1]``; 0.0 is chance agreement.
+
+    A correlation over the whole confusion matrix, so unlike Dice it also has to
+    get the true negatives right — which is what makes it informative on a mask
+    that is mostly background. Returns 0.0 where it is undefined (an all-one or
+    all-zero mask leaves a row or column of the matrix empty).
+    """
+    import math
+
+    c = confusion_counts(label_true, label_pred)
+    tp, tn, fp, fn = float(c["TP"]), float(c["TN"]), float(c["FP"]), float(c["FN"])
+    # Multiply as floats: these products overflow int64 on a large volume.
+    denominator = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
+    if denominator <= 0.0:
+        return 0.0
+    return (tp * tn - fp * fn) / math.sqrt(denominator)
+
+
 _METRICS: dict[str, Any] = {
     "TP": lambda t, p: confusion_counts(t, p)["TP"],
     "TN": lambda t, p: confusion_counts(t, p)["TN"],
@@ -95,6 +132,8 @@ _METRICS: dict[str, Any] = {
     "fpr": fpr,
     "fnr": fnr,
     "vs": volume_similarity,
+    "volsim": volsim,
+    "mcc": mcc,
 }
 
 
@@ -111,7 +150,8 @@ def voxel_metrics(
     ----------
     metrics
         Iterable of names from
-        ``{'TP','TN','FP','FN','dice','jaccard','precision','recall','fpr','fnr','vs'}``.
+        ``{'TP','TN','FP','FN','dice','jaccard','precision','recall','fpr','fnr',
+        'vs','volsim','mcc'}``.
         Default: all of them.
     """
     requested = tuple(_METRICS.keys()) if metrics is None else tuple(m for m in metrics)
@@ -138,6 +178,8 @@ __all__ = [
     "recall",
     "fpr",
     "fnr",
+    "mcc",
+    "volsim",
     "volume_similarity",
     "voxel_metrics",
 ]

@@ -544,6 +544,35 @@ def build_tools_dock(
     btn_ortho.clicked.connect(_open_ortho_views)
     layout.addWidget(btn_ortho, 0)
 
+    def _select_tool(tool_id: str) -> None:
+        """Point the tool form at *tool_id* and run it, from the command palette."""
+        from nvitk.gui.tools.registry import tool_by_id
+        from nvitk.gui.tools.runner import notify
+
+        spec = tool_by_id(tool_id)
+        if spec is None:
+            notify(f"Unknown tool {tool_id!r}.", error=True)
+            return
+        # Drive the existing form rather than bypassing it: the tool's parameters,
+        # label picker and reference-layer wiring all hang off these two combos.
+        tool_panel.category.value = spec.category
+        tool_panel.operation.value = spec.label
+        _sync_aux_panels()
+        notify(f"{spec.category} → {spec.label} selected. Set any parameters, then Run tool.")
+
+    from nvitk.gui.tools.palette import PALETTE_SHORTCUT_LABEL, install_command_palette
+
+    open_palette = install_command_palette(viewer, _select_tool)
+
+    btn_palette = QPushButton(f"Search tools…   {PALETTE_SHORTCUT_LABEL}")
+    btn_palette.setToolTip(
+        "Find any tool or quick image operation by typing part of its name.\n"
+        f"Shortcut: {PALETTE_SHORTCUT_LABEL}. Some desktops reserve that key for "
+        "themselves — this button always works."
+    )
+    btn_palette.clicked.connect(open_palette)
+    layout.addWidget(btn_palette, 0)
+
     from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
     from nvitk.gui.sge.submit import submit_gui_sge
 

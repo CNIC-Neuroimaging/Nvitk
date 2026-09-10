@@ -50,11 +50,18 @@ COLOR_DISABLED = "#767676"
 COLOR_BORDER = "#454545"
 COLOR_BORDER_STRONG = "#585858"
 
-COLOR_ACCENT = "#6fa8dc"
-COLOR_ACCENT_DEEP = "#3d6ea5"
+#: The one saturated colour in the interface: selection, focus, active state.
+COLOR_ACCENT = "#ffa400"
+#: Filled backgrounds behind light text (pressed buttons, selected rows), dark
+#: enough that white stays legible on it.
+COLOR_ACCENT_DEEP = "#b36f00"
 COLOR_OK = "#7bb47b"
 COLOR_WARN = "#e5a25b"
 COLOR_ERROR = "#e06c6c"
+
+#: Superior/Inferior chip colour. Anatomical axis colours are data, not chrome:
+#: they stay R/L-red, A/P-green, S/I-blue whatever the interface accent is.
+COLOR_AXIS_SI = "#6fa8dc"
 
 #: Anatomical direction → axis chip colour, so an orientation reads at a glance.
 AXIS_COLORS: dict[str, str] = {
@@ -62,8 +69,8 @@ AXIS_COLORS: dict[str, str] = {
     "L": COLOR_ERROR,
     "A": COLOR_OK,
     "P": COLOR_OK,
-    "S": COLOR_ACCENT,
-    "I": COLOR_ACCENT,
+    "S": COLOR_AXIS_SI,
+    "I": COLOR_AXIS_SI,
 }
 
 #: Backgrounds for a pass / warn / fail status chip or table row: dark enough to
@@ -646,7 +653,7 @@ def matrix_grid(matrix: Any, *, digits: int = 4, mark_last_column: bool = False)
             grid.addWidget(
                 cell(
                     fmt_number(arr[r, c], digits),
-                    color=COLOR_WARN if tinted else COLOR_TEXT,
+                    color=COLOR_ACCENT if tinted else COLOR_TEXT,
                     mono=True,
                     align=Qt.AlignRight,
                 ),
@@ -689,6 +696,7 @@ __all__ = [
     "AXIS_COLORS",
     "COLOR_ACCENT",
     "COLOR_ACCENT_DEEP",
+    "COLOR_AXIS_SI",
     "COLOR_BG",
     "COLOR_BORDER",
     "COLOR_BORDER_STRONG",

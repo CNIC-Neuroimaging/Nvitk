@@ -38,6 +38,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
+import math
+
 import numpy as np
 from scipy.ndimage import distance_transform_edt, label
 from skimage.morphology import skeletonize
@@ -91,6 +93,34 @@ def dice(reference: np.ndarray, prediction: np.ndarray) -> float:
     if ref_sum == 0 and pred_sum == 0:
         return 1.0
     return 2.0 * float(np.logical_and(reference, prediction).sum()) / float(ref_sum + pred_sum)
+
+
+def confusion_counts(
+    reference: np.ndarray,
+    prediction: np.ndarray,
+) -> tuple[int, int, int, int]:
+    """``(tp, fp, fn, tn)`` voxel counts for two boolean masks."""
+    ref = _as_array(reference).astype(bool, copy=False)
+    pred = _as_array(prediction).astype(bool, copy=False)
+    _check_pair(ref, pred)
+    tp = int(np.logical_and(ref, pred).sum())
+    fp = int(np.logical_and(~ref, pred).sum())
+    fn = int(np.logical_and(ref, ~pred).sum())
+    return tp, fp, fn, int(ref.size) - tp - fp - fn
+
+
+def volume_similarity(reference: np.ndarray, prediction: np.ndarray) -> float:
+    """Volume similarity (VOLSIM) of two boolean masks — see :func:`nvitk.measure.voxel.volsim`."""
+    from nvitk.measure.voxel import volsim
+
+    return float(volsim(reference, prediction))
+
+
+def matthews_corrcoef(reference: np.ndarray, prediction: np.ndarray) -> float:
+    """Matthews correlation coefficient — see :func:`nvitk.measure.voxel.mcc`."""
+    from nvitk.measure.voxel import mcc
+
+    return float(mcc(reference, prediction))
 
 
 def cl_dice(reference: np.ndarray, prediction: np.ndarray) -> float:
@@ -568,6 +598,9 @@ def aggregate_cases(cases: Sequence[CaseMetrics]) -> dict[str, float]:
 
 
 __all__ = [
+    "confusion_counts",
+    "matthews_corrcoef",
+    "volume_similarity",
     "HD95_MISSING_PENALTY",
     "METRIC_POLARITY",
     "CaseMetrics",

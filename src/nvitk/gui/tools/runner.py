@@ -42,6 +42,8 @@ _MEASURE_NOTIFY = frozenset({
     "intensity_similarity",
     "dice",
     "jaccard",
+    "volsim",
+    "mcc",
     "voxel_metrics",
     "surface_metrics",
 })
@@ -1080,6 +1082,16 @@ def run_gui_tool(
         ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
         val = jaccard(ref_img, mask_img)
         notify(f"Jaccard: {val:.6f}")
+        return None
+
+    if tool_id in ("volsim", "mcc"):
+        from nvitk.measure.voxel import mcc, volsim
+
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, proc_data)
+        fn = volsim if tool_id == "volsim" else mcc
+        label = "Volume similarity (VOLSIM)" if tool_id == "volsim" else "Matthews correlation (MCC)"
+        notify(f"{label}: {float(fn(ref_img, mask_img)):.6f}")
         return None
 
     if tool_id == "voxel_metrics":
@@ -3430,6 +3442,13 @@ def _measure_line(
         ref_name = str(params.get("reference_layer") or "").strip()
         ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
         return f"jaccard = {jaccard(ref_img, mask_img):.6f}"
+    if tool_id in ("volsim", "mcc"):
+        from nvitk.measure.voxel import mcc, volsim
+
+        ref_name = str(params.get("reference_layer") or "").strip()
+        ref_img, mask_img = _reference_and_mask_images(viewer, layer, ref_name, img.data)
+        fn = volsim if tool_id == "volsim" else mcc
+        return f"{tool_id} = {float(fn(ref_img, mask_img)):.6f}"
     if tool_id == "voxel_metrics":
         from nvitk.measure.voxel import voxel_metrics
 

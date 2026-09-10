@@ -252,7 +252,7 @@ class ImagePropertiesPanel(QWidget):
             domain = "voxel" if props.is_raster else "data"
             affine_card = Card(f"Affine  ({domain} → world)")
             affine_card.add(matrix_grid(props.affine, digits=6, mark_last_column=True))
-            note = cell("Amber column: translation (mm)", color=COLOR_MUTED)
+            note = cell("Highlighted column: translation (mm)", color=COLOR_MUTED)
             note.setStyleSheet(f"color: {COLOR_MUTED}; border: none; font-size: 10px;")
             affine_card.add(note)
             self._body_layout.addWidget(affine_card)
