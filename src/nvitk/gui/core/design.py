@@ -692,6 +692,27 @@ def style_figure(fig: Any) -> None:
                 text.set_color("#111111")
 
 
+def style_image_figure(fig: Any) -> None:
+    """Theme a Matplotlib figure that carries an image, for the dark chrome.
+
+    Greyscale is read against dark and these canvases sit inside Napari's own dark
+    viewer, so — unlike :func:`style_figure`, whose plots stay report-ready white —
+    an image figure takes the surrounding background.
+    """
+    fig.patch.set_facecolor(COLOR_BG)
+    suptitle = getattr(fig, "_suptitle", None)
+    if suptitle is not None:
+        suptitle.set_color(COLOR_TEXT)
+    for ax in fig.axes:
+        ax.set_facecolor(COLOR_WELL)
+        for spine in ax.spines.values():
+            spine.set_color(COLOR_BORDER)
+        ax.tick_params(colors=COLOR_MUTED, which="both")
+        ax.xaxis.label.set_color(COLOR_MUTED)
+        ax.yaxis.label.set_color(COLOR_MUTED)
+        ax.title.set_color(COLOR_TEXT)
+
+
 __all__ = [
     "AXIS_COLORS",
     "COLOR_ACCENT",
@@ -735,4 +756,5 @@ __all__ = [
     "register_napari_theme",
     "section_heading",
     "style_figure",
+    "style_image_figure",
 ]

@@ -79,6 +79,10 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "reference_layer",
         "barrier_layer",
         "centerline_barrier_layer",
+        "image_layer",
+        "wall_layer",
+        "centerline_layer",
+        "step_mm",
         "barrier_other_labels",
         "mask_barrier_dilation_vox",
         "centerline_barrier_dilation_vox",
@@ -249,44 +253,50 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
 _LAYER_NONE = "(none)"
 
 
+def _layer_param_names() -> tuple[str, ...]:
+    """Every parameter name any registered tool declares as ``kind="layer"``."""
+    from nvitk.gui.tools.registry import all_tools
+
+    names: list[str] = []
+    for spec in all_tools():
+        for param in spec.params:
+            if param.kind == "layer" and param.name not in names:
+                names.append(param.name)
+    return tuple(names)
+
+
 def _update_reference_layers(widget: Any, viewer: Any) -> None:
     """Refresh every reference/barrier/mask layer-picker widget on *widget* with the viewer's current
     layer names, adding a "(none)" option for the optional pickers and re-validating each widget's
     current selection against the new choice list."""
     names = [lyr.name for lyr in viewer.layers]
     optional_choices = [_LAYER_NONE, *names]
-    _optional_layer_attrs = (
-        "barrier_layer",
-        "centerline_barrier_layer",
-        "segmentation_layer",
-        "image2_layer",
-        "mask_layer",
-    )
-    for attr in (
+    # Which pickers must hold a real layer. Everything else that the registry
+    # declares as ``kind="layer"`` is optional and gains a "(none)" entry.
+    _required_layer_attrs = (
         "reference_layer",
-        "barrier_layer",
-        "centerline_barrier_layer",
         "ap_layer",
         "rl_layer",
         "fh_layer",
         "cd_layer",
-        "segmentation_layer",
         "organ_layer",
         "body_layer",
-        "image2_layer",
-        "mask_layer",
-    ):
+    )
+    # Taken from the registry rather than a hand-written list: a tool that adds a
+    # layer parameter would otherwise get a picker that is never populated, and
+    # the only symptom is a dropdown the user cannot select anything in.
+    for attr in _layer_param_names():
         ref = getattr(widget, attr, None)
         if ref is None:
             continue
-        if attr in _optional_layer_attrs:
-            ref.choices = optional_choices
-            if ref.value not in optional_choices:
-                ref.value = _LAYER_NONE
-        else:
+        if attr in _required_layer_attrs:
             ref.choices = names
             if names and ref.value not in names:
                 ref.value = names[0] if attr == "reference_layer" else ""
+        else:
+            ref.choices = optional_choices
+            if ref.value not in optional_choices:
+                ref.value = _LAYER_NONE
 
 
 def _prefill_vessel_cross_section_layers(widget: Any, viewer: Any) -> None:
@@ -385,6 +395,31 @@ def build_tool_panel(
             "widget_type": "ComboBox",
             "choices": [_LAYER_NONE],
             "value": _LAYER_NONE,
+        },
+        image_layer={
+            "label": "Intensity image",
+            "widget_type": "ComboBox",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
+        },
+        wall_layer={
+            "label": "Wall mask",
+            "widget_type": "ComboBox",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
+        },
+        centerline_layer={
+            "label": "Centerline layer",
+            "widget_type": "ComboBox",
+            "choices": [_LAYER_NONE],
+            "value": _LAYER_NONE,
+        },
+        step_mm={
+            "label": "Station spacing (mm)",
+            "min": 0.1,
+            "max": 5.0,
+            "step": 0.1,
+            "value": 0.5,
         },
         centerline_barrier_layer={
             "label": "Barrier centerline layer",
@@ -802,6 +837,10 @@ def build_tool_panel(
         reference_layer: str,
         barrier_layer: str,
         centerline_barrier_layer: str,
+        image_layer: str,
+        wall_layer: str,
+        centerline_layer: str,
+        step_mm: float,
         barrier_other_labels: bool,
         mask_barrier_dilation_vox: int,
         centerline_barrier_dilation_vox: int,

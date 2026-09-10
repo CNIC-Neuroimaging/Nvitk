@@ -456,6 +456,10 @@ def run_gui_tool(
         _run_viz_ortho_views(viewer, layer)
         return None
 
+    if tool_id == "viz_vessel_cpr":
+        _run_viz_vessel_cpr(viewer, layer, label_ids, params)
+        return None
+
     if tool_id == "lab_mouse_tof_cow":
         from nvitk.gui.lab.mouse_tof_cow import start_mouse_tof_cow
 
@@ -2711,6 +2715,112 @@ def _run_totalsegmentator(
     n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
     notify(f"TotalSegmentator finished: {n_labels} label(s) from {seg_path}.")
     return seg_arr
+
+
+def _run_viz_vessel_cpr(
+    viewer: Any,
+    layer: Any,
+    label_ids: list[int] | None,
+    params: dict[str, Any],
+) -> None:
+    """Flatten the selected vessels of the active lumen mask.
+
+    The active layer is the lumen: that is the one geometry the reformation cannot
+    do without, so it is the one the tool insists on. The image, a wall mask and
+    ready-made centerlines are optional and are resampled onto the lumen's grid.
+    """
+    from nvitk.gui.labels.visibility import is_label_like_layer
+    from nvitk.gui.viz.vessel_cpr_panel import install_vessel_cpr
+
+    if int(getattr(layer.data, "ndim", 0)) != 3:
+        raise ValueError(
+            "Vessel CPR needs a 3D lumen mask as the active layer "
+            f"(‘{getattr(layer, 'name', '?')}’ is "
+            f"{int(getattr(layer.data, 'ndim', 0))}D)."
+        )
+    if not is_label_like_layer(layer):
+        raise ValueError(
+            f"The active layer ‘{getattr(layer, 'name', '?')}’ is not a label layer. "
+            "Select the lumen mask, then pick the image under “Intensity image”."
+        )
+
+    lumen = coerce_label_output(layer_to_image(layer))
+    present = _unique_labels(lumen.data)
+    labels = [int(x) for x in (label_ids or [])] or list(present)
+    if not labels:
+        raise ValueError(f"‘{getattr(layer, 'name', '?')}’ has no non-zero labels to flatten.")
+    missing = [lab for lab in labels if lab not in present]
+    if missing:
+        raise ValueError(
+            "Selected label(s) "
+            f"{', '.join(str(m) for m in missing)} are not in "
+            f"‘{getattr(layer, 'name', '?')}’."
+        )
+
+    def _aligned(key: str, *, order: int, what: str):
+        """Resample the layer named by *key* onto the lumen grid, or ``None`` if unset."""
+        name = _layer_param(params, key)
+        if not name:
+            return None, None
+        other = _resolve_layer(viewer, name)
+        try:
+            _ref, on_grid, _ = align_mask_to_reference_layer(other, layer, order=order)
+        except ValueError as exc:
+            raise ValueError(f"{what} ‘{name}’ cannot be aligned to the lumen: {exc}") from exc
+        return other, on_grid
+
+    _img_layer, image_img = _aligned("image_layer", order=1, what="Image")
+    image = None if image_img is None else image_img.data
+
+    _wall_layer, wall_img = _aligned("wall_layer", order=0, what="Wall mask")
+    wall = None
+    if wall_img is not None:
+        wall = coerce_label_output(wall_img).data
+        # The wall is drawn per label alongside its lumen, so a wall that does not
+        # carry the selected ids cannot be matched up with them.
+        absent = [lab for lab in labels if lab not in _unique_labels(wall)]
+        if absent:
+            raise ValueError(
+                "Wall mask "
+                f"‘{_layer_param(params, 'wall_layer')}’ is missing label(s) "
+                f"{', '.join(str(a) for a in absent)}; it must carry at least the "
+                "labels selected on the lumen."
+            )
+
+    _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
+    centerlines = None if cl_img is None else coerce_label_output(cl_img).data
+
+    # Teardown of a previous run lives in this dict, so it has to outlast the call;
+    # a viewer built outside the app (a test, a script) may not carry one yet.
+    app_state = getattr(viewer, "_nvitk_app_state", None)
+    if not isinstance(app_state, dict):
+        app_state = {}
+        viewer._nvitk_app_state = app_state
+
+    panel = install_vessel_cpr(
+        viewer,
+        app_state,
+        lumen_layer=layer,
+        lumen_mask=lumen.data,
+        image=image,
+        wall_mask=wall,
+        labels=labels,
+        centerline_mask=centerlines,
+        step_mm=float(params.get("step_mm") or 0.5),
+    )
+    failed = panel.failure_reasons()
+    if failed:
+        notify(
+            "Vessel CPR: no centerline for "
+            + "; ".join(f"label {lab} — {why}" for lab, why in failed.items()),
+            error=True,
+        )
+        return
+    notify(
+        "Vessel CPR opened. Click a column of the flat image to inspect that station; "
+        "drag the orange control points (select mode) to retouch the centerline, or "
+        "brush the mask and the view re-renders."
+    )
 
 
 def _run_viz_ortho_views(viewer: Any, layer: Any) -> None:

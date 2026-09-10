@@ -79,6 +79,7 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "centerline_cut_junctions",
     "centerline_to_polyline",
     "viz_pet_hotspots",
+    "viz_vessel_cpr",
     "viz_ortho_views",
     "viz_flowshow",
     "viz_flow_streamlines",
@@ -718,6 +719,28 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "eICAB cluster (CLI)",
         (_OUTPUT_DIR,),
         run_mode="notify",
+    ),
+    GuiToolSpec(
+        "viz_vessel_cpr",
+        "Visualization",
+        "Vessel CPR (flattened vessel)",
+        (
+            ParamSpec("image_layer", "Intensity image (optional)", "layer", ""),
+            ParamSpec("wall_layer", "Wall mask (optional)", "layer", ""),
+            ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
+            ParamSpec("step_mm", "Station spacing (mm)", "float", 0.5, min=0.1, max=5.0),
+        ),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Straighten a vessel by curved planar reformation. The active layer is the "
+            "lumen mask and the label selection picks which vessels to flatten; the "
+            "image, a wall mask and ready-made centerlines are all optional. The image "
+            "is resampled along the centerline so the vessel is drawn flat left-to-right, "
+            "with the lumen and wall overlaid and the long axis in millimetres. Click a "
+            "column to see that station's true cross-section and where it is in 3D. "
+            "Centerlines are skeletonised from the mask when none is supplied."
+        ),
     ),
     GuiToolSpec(
         "viz_ortho_views",

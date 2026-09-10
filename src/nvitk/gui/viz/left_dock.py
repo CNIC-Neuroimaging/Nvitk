@@ -81,6 +81,20 @@ def attach_left_inspection_dock(
                 tab_target = existing_docks[candidate]
                 break
 
+    # Nothing named matched, but another panel may already be occupying the left
+    # edge — one added by ``add_dock_widget`` rather than by this helper, so it
+    # cannot be named in advance. Tabify with it. Re-splitting Napari's own docks
+    # around an existing arrangement tears that arrangement apart: the panel that
+    # got there first ends up the only one with usable geometry.
+    if tab_target is None:
+        napari_own = {id(controls), id(layer_list)}
+        for child in win.findChildren(QDockWidget):
+            if child is dock or id(child) in napari_own:
+                continue
+            if win.dockWidgetArea(child) == Qt.LeftDockWidgetArea:
+                tab_target = child
+                break
+
     if tab_target is not None:
         win.tabifyDockWidget(tab_target, dock)
         dock.show()
