@@ -705,7 +705,12 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "Segmentation",
         "TotalSegmentator (CLI)",
         (_OUTPUT_DIR, _TASK),
-        run_mode="notify",
+        needs_3d=True,
+        multilabel=True,
+        description=(
+            "Segment the active volume with TotalSegmentator and add the multilabel "
+            "mask as a Labels layer. Runs locally, or on the cluster via Run SGE."
+        ),
     ),
     GuiToolSpec(
         "seg_eicab",
@@ -1611,7 +1616,6 @@ SGE_BLOCKLIST: frozenset[str] = frozenset({
     "viz_pitc",
     "viz_pwv",
     "viz_tof_morphometrics",
-    "seg_totalsegmentator",
     "seg_eicab",
     "orient_volume",
     "reorient_volume",

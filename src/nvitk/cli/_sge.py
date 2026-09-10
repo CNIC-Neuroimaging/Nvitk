@@ -93,19 +93,28 @@ def submit_tool_job(
     output_root: Path,
     gpu: bool = False,
     emit: object | None = None,
+    models: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> str | None:
     """Submit (or, if *emit* is given, append to that script file handle instead of submitting) one
-    SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*."""
-    paths = cluster_paths(data_root=data_root, output_root=output_root)
+    SGE stage running *python_cmd* under Singularity, using default resources/binds for *gpu*.
+
+    *models* adds a ``-B`` bind for a weights directory the tool needs, and
+    *extra_env* exports additional variables inside the container — a tool whose
+    weights live outside ``image_tools`` (TotalSegmentator) needs both."""
+    paths = cluster_paths(data_root=data_root, output_root=output_root, models=models)
     paths.ensure_dirs()
     binds = SingularityBinds()
+    env = dict(sge_backend_env(binds.src, "cupy" if gpu else "numpy"))
+    if extra_env:
+        env.update({str(k): str(v) for k, v in extra_env.items()})
     spec = StageSpec(
         job_name=job_name,
         python_cmd=python_cmd,
         resources=default_resources(gpu=gpu),
         binds=binds,
         use_nv=gpu,
-        extra_env=sge_backend_env(binds.src, "cupy" if gpu else "numpy"),
+        extra_env=env,
     )
     return submit_stage(spec, paths, emit=emit)
 
@@ -117,11 +126,13 @@ def emit_submit_script(
     data_root: Path,
     output_root: Path,
     gpu: bool = False,
+    models: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> Path:
     """Write a qsub shell script at *script_path* containing one job stage per ``(job_name,
     python_cmd)`` in *stages*, sharing the header and cluster paths."""
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    paths = cluster_paths(data_root=data_root, output_root=output_root)
+    paths = cluster_paths(data_root=data_root, output_root=output_root, models=models)
     paths.ensure_dirs()
     with open(script_path, "w", encoding="utf-8") as fh:
         write_script_header(
@@ -138,6 +149,8 @@ def emit_submit_script(
                 output_root=output_root,
                 gpu=gpu,
                 emit=fh,
+                models=models,
+                extra_env=extra_env,
             )
     return script_path
 

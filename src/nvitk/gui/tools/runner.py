@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import re
 import shlex
 import shutil
@@ -1583,77 +1584,7 @@ def run_gui_tool(
         return None
 
     if tool_id == "seg_totalsegmentator":
-        from nvitk.io import imread, imsave
-        from nvitk.segmentation.total_segmentator import run_totalsegmentator
-
-        task = str(params.get("task") or "total")
-        roi = params.get("roi_subset")
-
-        # The run directory holds the exported input, the mask and statistics.json.
-        # With ``--ml`` TotalSegmentator treats ``-o`` as the multilabel NIfTI *file*,
-        # not a directory, so the mask needs its own path inside the run directory.
-        run_dir = Path(
-            str(params.get("output_dir") or "").strip()
-            or tempfile.mkdtemp(prefix="nvitk_ts_")
-        )
-        run_dir.mkdir(parents=True, exist_ok=True)
-        inp = run_dir / "input.nii.gz"
-        imsave(inp, img)
-        seg_path = run_dir / f"{task}_segmentation.nii.gz"
-
-        device = "gpu" if gpu_enabled() else "cpu"
-        notify(f"Running TotalSegmentator ({task}, {device}) → {seg_path}")
-        if roi:
-            gui_log(f"ROI subset ({len(roi)}): {', '.join(roi[:8])}{'…' if len(roi) > 8 else ''}")
-        proc = run_totalsegmentator(
-            inp,
-            seg_path,
-            task,
-            device=device,
-            roi_subset=roi,
-            multilabel=True,
-            capture_output=True,
-            check=False,
-        )
-        if proc.stdout:
-            for line in str(proc.stdout).splitlines():
-                gui_log(line)
-        if proc.stderr:
-            for line in str(proc.stderr).splitlines():
-                gui_log(line, error=True)
-        if proc.returncode != 0:
-            notify(f"TotalSegmentator failed (code {proc.returncode})", error=True)
-            return None
-        if not seg_path.is_file():
-            notify(
-                f"TotalSegmentator finished (code 0) but wrote no mask at {seg_path}.",
-                error=True,
-            )
-            return None
-
-        # Module-level ``np`` is a CuPy proxy under the GPU backend; the mask read
-        # back from disk is a host array and stays one for Napari.
-        import numpy as numpy_host
-
-        seg_arr = to_numpy(imread(seg_path).data)
-        if not numpy_host.issubdtype(seg_arr.dtype, numpy_host.integer):
-            seg_arr = numpy_host.rint(seg_arr)
-        seg_arr = seg_arr.astype(numpy_host.int32, copy=False)
-        seg_layer = viewer.add_labels(
-            seg_arr,
-            opacity=0.6,
-            **_layer_kwargs_from(layer, f"totalseg_{task}"),
-        )
-        try:
-            seg_layer._nvitk_label_like = True
-        except Exception:
-            pass
-        n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
-        notify(
-            f"TotalSegmentator finished: {n_labels} label(s) loaded from {seg_path} "
-            f"(run directory {run_dir})."
-        )
-        return None
+        return _run_totalsegmentator(img, viewer, layer, params)
 
     if tool_id == "seg_eicab":
         notify(
@@ -2677,6 +2608,97 @@ def _prepare_vessel_hemo_for_viz(
     if not regions:
         raise ValueError(f"No hemodynamics geometry available for root region {root_region!r}.")
     return hemo, regions, reference_layer
+
+
+def _totalseg_model_dir() -> Path | None:
+    """Weights directory from ``pipelines.totalsegmentator.default_sge_model_root``.
+
+    Inside the cluster container the weights are bind-mounted and there is no
+    internet to fall back on, so leaving ``TOTALSEG_HOME_DIR`` unset makes the job
+    fail on the node with what looks like a download error.
+    """
+    # Inside the cluster container the submit script has already exported
+    # TOTALSEG_HOME_DIR pointing at the bind mount. Overriding it with the host
+    # path from the config is exactly what broke the first cluster run.
+    if os.environ.get("TOTALSEG_HOME_DIR", "").strip():
+        return None
+    try:
+        from nvitk.segmentation.total_segmentator.config import MODELS_DIR
+
+        return Path(MODELS_DIR) if MODELS_DIR else None
+    except Exception:
+        return None
+
+
+def _run_totalsegmentator(
+    img: Image,
+    viewer: Any,
+    layer: Any,
+    params: dict[str, Any],
+) -> np.ndarray:
+    """Run TotalSegmentator on *img* and return the multilabel mask.
+
+    Returns the array rather than adding a layer, which is what lets the same code
+    serve the local run and the headless SGE worker — the worker's contract is one
+    array in, one array out. Always ``--ml``: a single multilabel mask is what the
+    label picker, the SGE retrieval and the Labels layer all expect.
+    """
+    import numpy as numpy_host
+
+    from nvitk.io import imread, imsave
+    from nvitk.segmentation.total_segmentator import run_totalsegmentator
+
+    task = str(params.get("task") or "total")
+    roi = params.get("roi_subset")
+
+    # The run directory holds the exported input, the mask and statistics.json.
+    # With ``--ml`` TotalSegmentator treats ``-o`` as the multilabel NIfTI *file*,
+    # not a directory, so the mask needs its own path inside the run directory.
+    run_dir = Path(
+        str(params.get("output_dir") or "").strip()
+        or tempfile.mkdtemp(prefix="nvitk_ts_")
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    inp = run_dir / "input.nii.gz"
+    imsave(inp, img)
+    seg_path = run_dir / f"{task}_segmentation.nii.gz"
+
+    device = "gpu" if gpu_enabled() else "cpu"
+    model_dir = _totalseg_model_dir()
+    notify(f"Running TotalSegmentator ({task}, {device}) → {seg_path}")
+    if roi:
+        gui_log(f"ROI subset ({len(roi)}): {', '.join(roi[:8])}{'…' if len(roi) > 8 else ''}")
+    proc = run_totalsegmentator(
+        inp,
+        seg_path,
+        task,
+        device=device,
+        roi_subset=roi,
+        multilabel=True,
+        model_dir=model_dir,
+        capture_output=True,
+        check=False,
+    )
+    if proc.stdout:
+        for line in str(proc.stdout).splitlines():
+            gui_log(line)
+    if proc.stderr:
+        for line in str(proc.stderr).splitlines():
+            gui_log(line, error=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"TotalSegmentator failed (code {proc.returncode}).")
+    if not seg_path.is_file():
+        raise RuntimeError(
+            f"TotalSegmentator finished (code 0) but wrote no mask at {seg_path}."
+        )
+
+    seg_arr = to_numpy(imread(seg_path).data)
+    if not numpy_host.issubdtype(seg_arr.dtype, numpy_host.integer):
+        seg_arr = numpy_host.rint(seg_arr)
+    seg_arr = seg_arr.astype(numpy_host.int32, copy=False)
+    n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
+    notify(f"TotalSegmentator finished: {n_labels} label(s) from {seg_path}.")
+    return seg_arr
 
 
 def _run_viz_ortho_views(viewer: Any, layer: Any) -> None:

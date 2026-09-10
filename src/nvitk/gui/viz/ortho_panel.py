@@ -72,6 +72,9 @@ _OVERLAY_OPACITY = 0.55
 #: updates re-upload volumes, so they are coalesced rather than run per step.
 _CANVAS_SYNC_MS = 90
 
+#: Largest volume for which a per-axis contiguous copy is worth its memory.
+_SLICE_CACHE_BUDGET = 512 * 1024 * 1024
+
 
 #: Anatomical opposite of each axis code.
 _OPPOSITE: dict[str, str] = {"R": "L", "L": "R", "A": "P", "P": "A", "S": "I", "I": "S"}
@@ -191,6 +194,50 @@ def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
     return np.take(data, idx, axis=axis)
 
 
+class SliceCache:
+    """Serves 2D slices of a volume, keeping the slow axes contiguous.
+
+    A C-ordered volume gives axis 0 for free, but a slice along the last axis is a
+    strided gather over the whole array — around 40x slower on a 400x512x512 CT,
+    which is exactly why scrolling axial felt heavier than the others. Reordering
+    that axis into its own contiguous copy makes every axis equally cheap.
+
+    The copy is built lazily, on the first scroll of that axis, and only when it
+    fits :attr:`budget_bytes` — a large volume keeps the strided read rather than
+    silently doubling the session's memory.
+    """
+
+    def __init__(self, data: np.ndarray, *, budget_bytes: int = _SLICE_CACHE_BUDGET) -> None:
+        """Wrap *data*, reordering nothing until an axis is actually asked for."""
+        self._data = data
+        self._budget = int(budget_bytes)
+        self._reordered: dict[int, np.ndarray | None] = {}
+
+    def _fast_axis(self, axis: int) -> np.ndarray | None:
+        """A contiguous copy with *axis* first, or ``None`` if it is not worth making."""
+        if axis in self._reordered:
+            return self._reordered[axis]
+        arr = self._data
+        # Axis 0 of a C-ordered array is already contiguous; nothing to gain.
+        already_fast = axis == 0 and bool(arr.flags.c_contiguous)
+        if already_fast or arr.nbytes > self._budget:
+            self._reordered[axis] = None
+            return None
+        try:
+            self._reordered[axis] = np.ascontiguousarray(np.moveaxis(arr, axis, 0))
+        except (MemoryError, ValueError):
+            self._reordered[axis] = None
+        return self._reordered[axis]
+
+    def slice(self, axis: int, index: int) -> np.ndarray:
+        """The 2D slice at *index* along *axis*."""
+        fast = self._fast_axis(int(axis))
+        if fast is None:
+            return _slice_of(self._data, int(axis), int(index))
+        n = int(fast.shape[0])
+        return fast[int(np.clip(index, 0, max(n - 1, 0)))]
+
+
 def volume_contrast(data: np.ndarray, *, sample: int = 400_000) -> tuple[float, float]:
     """Robust display range for a volume, from a subsample of its finite voxels.
 
@@ -291,13 +338,15 @@ def slice_to_rgb(
     *,
     contrast: tuple[float, float] | None = None,
     lut: dict[int, np.ndarray] | None = None,
+    cache: SliceCache | None = None,
 ) -> np.ndarray:
     """Render one orthogonal slice of *layer* as an RGB uint8 image.
 
     With a *view*, the slice is transposed and flipped into that view's anatomical
     orientation; without one it is drawn in raw array-axis order.
     """
-    plane = _oriented(_slice_of(data, axis, index), axis, view)
+    raw = cache.slice(axis, index) if cache is not None else _slice_of(data, axis, index)
+    plane = _oriented(raw, axis, view)
     if is_label_like_layer(layer):
         return _label_rgb(plane, layer, lut)
     return _grayscale_rgb(plane, contrast)
@@ -708,10 +757,12 @@ class OrthoViewerPanel(QWidget):
         self._spacing: tuple[float, ...] = (1.0, 1.0, 1.0)
         self._contrast: tuple[float, float] | None = None
         self._lut: dict[int, np.ndarray] | None = None
+        self._cache: SliceCache | None = None
         self._overlay: Any | None = None
         self._overlay_data: np.ndarray | None = None
         self._overlay_lut: dict[int, np.ndarray] | None = None
         self._overlay_contrast: tuple[float, float] | None = None
+        self._overlay_cache: SliceCache | None = None
         #: Last slice index each view rendered, so an unchanged view is not redrawn.
         self._rendered: dict[int, int] = {}
 
@@ -837,6 +888,7 @@ class OrthoViewerPanel(QWidget):
         self._rendered = {}
         # Windowed once for the volume: per-slice percentiles both cost more and
         # make the same tissue change brightness as you scroll.
+        self._cache = SliceCache(self._data)
         if is_label_like_layer(layer):
             self._contrast = None
             self._lut = label_lut(layer, unique_layer_labels(self._data))
@@ -872,12 +924,13 @@ class OrthoViewerPanel(QWidget):
         index = self._position[view.axis]
         rgb = slice_to_rgb(
             self._layer, self._data, view.axis, index, view,
-            contrast=self._contrast, lut=self._lut,
+            contrast=self._contrast, lut=self._lut, cache=self._cache,
         )
         if self._overlay_data is not None and self._overlay_data.shape == self._data.shape:
             over = slice_to_rgb(
                 self._overlay, self._overlay_data, view.axis, index, view,
                 contrast=self._overlay_contrast, lut=self._overlay_lut,
+                cache=self._overlay_cache,
             )
             rgb = blend_overlay(rgb, over, _OVERLAY_OPACITY)
         return rgb
@@ -967,22 +1020,44 @@ class OrthoViewerPanel(QWidget):
         self._sync_planes()
         self._apply_clip()
 
+    def refresh_overlay_choices(self) -> None:
+        """Re-list the overlay candidates, keeping the current pick if it survives.
+
+        Called whenever the viewer's layer list changes: a mask produced *after*
+        the panel was opened would otherwise never appear, which left the picker
+        stuck on "none".
+        """
+        self._refresh_overlay_choices()
+
+    def _overlay_candidate(self, other: Any) -> bool:
+        """True if *other* can be drawn over the bound layer."""
+        if other is self._layer or self._data is None:
+            return False
+        if _PLANE_LAYER_SUFFIX in str(getattr(other, "name", "")):
+            return False
+        data = getattr(other, "data", None)
+        shape = getattr(data, "shape", None)
+        if shape is None:
+            # Multiscale layers hold a list of arrays; the first is the full grid.
+            try:
+                shape = getattr(data[0], "shape", None)
+            except (TypeError, IndexError, KeyError):
+                shape = None
+        if shape is None:
+            return False
+        # Same voxel grid, ignoring any leading singleton/time axes.
+        return tuple(int(v) for v in shape)[-3:] == tuple(int(v) for v in self._data.shape)[-3:]
+
     def _refresh_overlay_choices(self) -> None:
         """List the layers that could sit on top of the bound one."""
         previous = str(self._overlay_combo.currentData() or "")
         self._overlay_combo.blockSignals(True)
         self._overlay_combo.clear()
         self._overlay_combo.addItem("none", "")
-        shape = self._data.shape if self._data is not None else None
         for other in getattr(self._viewer, "layers", []) or []:
-            name = str(getattr(other, "name", ""))
-            if other is self._layer or _PLANE_LAYER_SUFFIX in name:
-                continue
-            data = getattr(other, "data", None)
-            # Only layers on the same voxel grid can be drawn over these slices.
-            if data is None or tuple(getattr(data, "shape", ())) != shape:
-                continue
-            self._overlay_combo.addItem(name, name)
+            if self._overlay_candidate(other):
+                name = str(getattr(other, "name", ""))
+                self._overlay_combo.addItem(name, name)
         index = self._overlay_combo.findData(previous)
         self._overlay_combo.setCurrentIndex(max(index, 0))
         self._overlay_combo.blockSignals(False)
@@ -994,6 +1069,7 @@ class OrthoViewerPanel(QWidget):
         self._overlay_data = None
         self._overlay_lut = None
         self._overlay_contrast = None
+        self._overlay_cache = None
         if not name:
             return
         layer = next(
@@ -1005,6 +1081,7 @@ class OrthoViewerPanel(QWidget):
         self._overlay_data = to_numpy(
             label_source_data(layer) if is_label_like_layer(layer) else layer.data
         )
+        self._overlay_cache = SliceCache(self._overlay_data)
         if is_label_like_layer(layer):
             self._overlay_lut = label_lut(layer, unique_layer_labels(self._overlay_data))
         else:
@@ -1091,7 +1168,13 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
             return
         panel.refresh_from_layer(active)
 
+    def _layers_changed(_event: Any = None) -> None:
+        """Keep the overlay picker in step with the viewer's layer list."""
+        panel.refresh_overlay_choices()
+
     viewer.layers.selection.events.active.connect(_refresh)
+    viewer.layers.events.inserted.connect(_layers_changed)
+    viewer.layers.events.removed.connect(_layers_changed)
     _refresh()
     return dock
 
@@ -1105,6 +1188,7 @@ __all__ = [
     "clear_clip",
     "blend_overlay",
     "clip_geometry",
+    "SliceCache",
     "label_lut",
     "open_ortho_views",
     "displayed_axes",

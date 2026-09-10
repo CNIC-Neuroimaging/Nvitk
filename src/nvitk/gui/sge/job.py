@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from nvitk.cli._sge import emit_submit_script
-from nvitk.cluster.sge import gui_sge_worker_argv
+from nvitk.cluster.sge import SingularityBinds, gui_sge_worker_argv
 from nvitk.gui.core.spatial import layer_to_image
 from nvitk.gui.tools.registry import params_for_tool
 from nvitk.io import imsave
@@ -185,6 +185,30 @@ def stage_job_locally(
     return staging, job
 
 
+def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
+    """Weights directory to bind for *tool_id*, and the env telling it where they landed.
+
+    ``image_tools`` carries the model root for the generic GUI tools, but
+    TotalSegmentator's weights are configured separately under
+    ``pipelines.totalsegmentator.default_sge_model_root``. Without this the job got
+    no ``-B`` for models at all, and ``TOTALSEG_HOME_DIR`` pointed at a *host* path
+    that does not exist inside the container — which is what made TotalSegmentator
+    try to create ``/models/imaging/...`` on the node and fail.
+    """
+    if str(tool_id) != "seg_totalsegmentator":
+        return None, {}
+    try:
+        from nvitk.segmentation.total_segmentator.config import MODELS_DIR
+    except Exception:
+        return None, {}
+    if not MODELS_DIR:
+        return None, {}
+    # The host directory is bound at ``SingularityBinds.models``; the tool must be
+    # pointed at that container path, never at the host one.
+    container_models = SingularityBinds().models.rstrip("/") or "/models"
+    return Path(MODELS_DIR), {"TOTALSEG_HOME_DIR": container_models}
+
+
 def emit_gui_sge_script(
     job: GuiSgeJob,
     *,
@@ -197,12 +221,15 @@ def emit_gui_sge_script(
     python_cmd = " ".join([*gui_sge_worker_argv(), "--job", job_arg])
     job_name = f"gui_{job.tool_id}"[:200]
     script_path = local_staging / "submit.sh"
+    models, extra_env = tool_models_binding(job.tool_id)
     emit_submit_script(
         script_path=script_path,
         stages=[(job_name, python_cmd)],
         data_root=Path(data_root),
         output_root=Path(output_root),
         gpu=job.gpu,
+        models=models,
+        extra_env=extra_env,
     )
     return script_path
 
@@ -216,4 +243,5 @@ __all__ = [
     "build_remote_paths",
     "emit_gui_sge_script",
     "stage_job_locally",
+    "tool_models_binding",
 ]
