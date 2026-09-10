@@ -449,6 +449,10 @@ def run_gui_tool(
         _run_viz_voxelwise_3d(viewer)
         return None
 
+    if tool_id == "viz_ortho_views":
+        _run_viz_ortho_views(viewer, layer)
+        return None
+
     if tool_id == "lab_mouse_tof_cow":
         from nvitk.gui.lab.mouse_tof_cow import start_mouse_tof_cow
 
@@ -2673,6 +2677,17 @@ def _prepare_vessel_hemo_for_viz(
     if not regions:
         raise ValueError(f"No hemodynamics geometry available for root region {root_region!r}.")
     return hemo, regions, reference_layer
+
+
+def _run_viz_ortho_views(viewer: Any, layer: Any) -> None:
+    """Open (or re-focus) the orthogonal-views dock on *layer*."""
+    from nvitk.gui.viz.ortho_panel import open_ortho_views
+
+    open_ortho_views(viewer, layer)
+    notify(
+        "Orthogonal views opened. Scroll or click a panel to move the crosshair; "
+        "tick “Show the three slices as planes in 3D” to see them on the canvas."
+    )
 
 
 def _run_viz_voxelwise_3d(viewer: Any) -> None:

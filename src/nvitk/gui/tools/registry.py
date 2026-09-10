@@ -79,6 +79,7 @@ TOOL_IDS_USING_LABEL_PICKER: frozenset[str] = frozenset({
     "centerline_cut_junctions",
     "centerline_to_polyline",
     "viz_pet_hotspots",
+    "viz_ortho_views",
     "viz_flowshow",
     "viz_flow_streamlines",
 })
@@ -712,6 +713,20 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         "eICAB cluster (CLI)",
         (_OUTPUT_DIR,),
         run_mode="notify",
+    ),
+    GuiToolSpec(
+        "viz_ortho_views",
+        "Visualization",
+        "Orthogonal views (axial / coronal / sagittal)",
+        (),
+        needs_3d=True,
+        run_mode="notify",
+        description=(
+            "Open the three orthogonal slice views of the active volume in one dock, "
+            "linked by a shared crosshair. From there the same three cuts can be shown "
+            "as planes in the 3D canvas, and the volume clipped at one of them to see "
+            "inside it."
+        ),
     ),
     GuiToolSpec(
         "viz_pet_hotspots",

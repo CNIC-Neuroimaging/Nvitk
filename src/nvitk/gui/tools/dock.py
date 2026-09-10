@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from qtpy.QtCore import Qt, QTimer
+from qtpy.QtCore import QEvent, QObject, Qt, QTimer
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -52,9 +52,11 @@ _TOOL_LABEL_MAX_WIDTH = 150
 #: Height cap for the tool description caption.
 _TOOL_HELP_MAX_HEIGHT = 90
 
-#: Bounds for the tool form's scroll area; between them it sizes to its content.
+#: Floor for the tool form's scroll area. Its ceiling is a share of the dock's
+#: own height rather than a constant, so maximising the window actually gives the
+#: form more room instead of leaving it pinned at a fixed size.
 _TOOL_SCROLL_MIN_HEIGHT = 140
-_TOOL_SCROLL_MAX_HEIGHT = 460
+_TOOL_SCROLL_HEIGHT_SHARE = 0.55
 
 
 def _compact_magicgui_panel(native: QWidget) -> None:
@@ -476,7 +478,6 @@ def build_tools_dock(
     tool_scroll.setWidget(tool_panel.native)
     tool_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     tool_scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-    tool_scroll.setMaximumHeight(_TOOL_SCROLL_MAX_HEIGHT)
     tool_scroll.setMinimumHeight(_TOOL_SCROLL_MIN_HEIGHT)
 
     _fit_timer = QTimer()
@@ -498,12 +499,15 @@ def build_tools_dock(
         # back to the plain hint when it cannot.
         width = tool_scroll.viewport().width() or tool_scroll.width()
         needed = tool_panel.native.sizeHint().height()
-        layout = tool_panel.native.layout()
-        if width > 0 and layout is not None and layout.hasHeightForWidth():
-            needed = max(needed, layout.heightForWidth(width))
-        tool_scroll.setMinimumHeight(
-            max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, _TOOL_SCROLL_MAX_HEIGHT))
-        )
+        form_layout = tool_panel.native.layout()
+        if width > 0 and form_layout is not None and form_layout.hasHeightForWidth():
+            needed = max(needed, form_layout.heightForWidth(width))
+        # The ceiling tracks the dock, so a taller window shows more of the form
+        # rather than handing every new pixel to the panel underneath.
+        available = container.height() or tool_scroll.height()
+        ceiling = max(_TOOL_SCROLL_MIN_HEIGHT, int(available * _TOOL_SCROLL_HEIGHT_SHARE))
+        tool_scroll.setMaximumHeight(ceiling)
+        tool_scroll.setMinimumHeight(max(_TOOL_SCROLL_MIN_HEIGHT, min(needed, ceiling)))
 
     # Widget visibility settles during the current event-loop pass, so measure
     # the form on the next one.
@@ -517,6 +521,28 @@ def build_tools_dock(
     top_row_layout.addWidget(build_orientation_quick_button(viewer), 1)
     top_row.setLayout(top_row_layout)
     layout.addWidget(top_row, 0)
+
+    btn_ortho = QPushButton("Orthogonal views")
+    btn_ortho.setToolTip(
+        "Open the axial / coronal / sagittal views of the active layer in their own "
+        "dock, with the 3D plane and see-inside controls."
+    )
+
+    def _open_ortho_views() -> None:
+        """Open (or re-focus) the orthogonal-views dock on the active layer."""
+        from nvitk.gui.tools.runner import log_tool_failure, notify
+
+        layer = _active_layer()
+        try:
+            from nvitk.gui.viz.ortho_panel import open_ortho_views
+
+            open_ortho_views(viewer, layer)
+        except Exception as exc:  # noqa: BLE001
+            log_tool_failure(exc)
+            notify(f"Could not open the orthogonal views: {exc}", error=True)
+
+    btn_ortho.clicked.connect(_open_ortho_views)
+    layout.addWidget(btn_ortho, 0)
 
     from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
     from nvitk.gui.sge.submit import submit_gui_sge
@@ -639,6 +665,18 @@ def build_tools_dock(
         from nvitk.gui.tools.panel import _update_reference_layers
 
         _update_reference_layers(tool_panel, viewer)
+
+    class _RefitOnResize(QObject):
+        """Re-run the tool-form fit whenever the dock changes height."""
+
+        def eventFilter(self, obj: Any, event: Any) -> bool:
+            """Schedule a refit on resize, without consuming the event."""
+            if event.type() == QEvent.Resize:
+                _fit_timer.start()
+            return False
+
+    _refit_filter = _RefitOnResize(container)
+    container.installEventFilter(_refit_filter)
 
     tool_panel.category.changed.connect(lambda e: _sync_aux_panels())
     tool_panel.operation.changed.connect(lambda e: _sync_aux_panels())

@@ -48,8 +48,13 @@ from nvitk.gui.core.flow_layout import FlowRow
 from .constants import AXIS_SLIDER_MARGIN, AXIS_SLIDER_STEPS
 from .theme import COLOR_ERROR, muted_label_style, whiten_figure
 from nvitk.gui.core.design import clear_layout
+from nvitk.gui.core.flow_layout import FlowRow
 
 log = Logger()
+
+
+#: Width below which an axis-limit slider group stops being usefully draggable.
+AXIS_SLIDER_GROUP_MIN_WIDTH = 190
 
 
 class PlotPanel(QGroupBox):
@@ -229,9 +234,13 @@ class PlotPanel(QGroupBox):
         )
         self._show_legend.stateChanged.connect(lambda *_: self.apply_legend_visibility())
 
-        grid = QHBoxLayout()
-        grid.setSpacing(4)
-        grid.addWidget(self._show_legend)
+        # Flow, not one horizontal line: a QHBoxLayout's minimum width is the sum of
+        # its children, and Qt enforces that as the *window's* minimum. Four sliders
+        # on one line put a 665 px floor under the plot pane, which the whole window
+        # then inherited. Each bound becomes its own group and the row wraps.
+        row = FlowRow()
+        row_flow = row.flow()
+        row_flow.addWidget(self._show_legend)
         self._axis_sliders: dict[str, QSlider] = {}
         self._axis_value_labels: dict[str, QLabel] = {}
         for axis, bound, text in (
@@ -246,19 +255,26 @@ class PlotPanel(QGroupBox):
             slider.setEnabled(False)
             slider.valueChanged.connect(self._on_axis_slider_changed)
             value_label = QLabel("—")
-            value_label.setMinimumWidth(64)
+            value_label.setMinimumWidth(56)
             value_label.setStyleSheet(muted_label_style())
             self._axis_sliders[key] = slider
             self._axis_value_labels[key] = value_label
-            grid.addWidget(QLabel(text))
-            grid.addWidget(slider, stretch=1)
-            grid.addWidget(value_label)
+
+            group = QWidget()
+            group_lay = QHBoxLayout(group)
+            group_lay.setContentsMargins(0, 0, 0, 0)
+            group_lay.setSpacing(4)
+            group_lay.addWidget(QLabel(text))
+            group_lay.addWidget(slider, stretch=1)
+            group_lay.addWidget(value_label)
+            group.setMinimumWidth(AXIS_SLIDER_GROUP_MIN_WIDTH)
+            row_flow.addWidget(group)
 
         self._btn_reset_axes = QPushButton("Reset")
         self._btn_reset_axes.setEnabled(False)
         self._btn_reset_axes.clicked.connect(self.reset_axes)
-        grid.addWidget(self._btn_reset_axes)
-        lay.addLayout(grid)
+        row_flow.addWidget(self._btn_reset_axes)
+        lay.addWidget(row)
         return box
 
     # ---- figure picker --------------------------------------------------------

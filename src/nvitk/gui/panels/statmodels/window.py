@@ -413,7 +413,11 @@ class StatmodelsWindow(QMainWindow):
         self._plot.set_options_widget(self._build_plot_options())
         self._plot.set_map_options_widget(self._build_map_options())
         self._mediation_plot = self._plot.kind_combo()
-        self.setCentralWidget(self._plot)
+        # Scrolled like the docks: the plot's own control boxes (groups list, axis
+        # limits, options) add up to a ~430 px floor, and as the central widget that
+        # floor became the window's. Scrolling keeps the window resizable to any
+        # screen; the figure still fills the pane whenever it fits.
+        self.setCentralWidget(_scrollable(self._plot))
 
         self._report = ModelReportPanel()
 
@@ -481,7 +485,10 @@ class StatmodelsWindow(QMainWindow):
         # restoreState matches docks by object name; without one the saved
         # layout silently fails to come back.
         dock.setObjectName(f"statmodels_dock_{key}")
-        dock.setWidget(widget)
+        # Scrolled, for the same reason the Napari dock tabs are: a dock passes its
+        # content's minimum size up to the window, and one tall panel then stops the
+        # window being resized down or made fullscreen.
+        dock.setWidget(_scrollable(widget))
         dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         dock.setFeatures(
             QDockWidget.DockWidgetMovable
@@ -1331,20 +1338,21 @@ class StatmodelsWindow(QMainWindow):
         self._frame_view = AnalysisFrameView()
         lay.addWidget(self._frame_view, stretch=1)
 
-        row = QHBoxLayout()
+        row = FlowRow()
+        row_flow = row.flow()
         self._btn_derived = QPushButton("Derived columns…")
         self._btn_derived.setToolTip(
             "Add transformed measurements (log, z-score, ratios, grouped bins) as real columns, "
             "usable as the model outcome, as predictors, as plot axes and as filter targets."
         )
-        row.addWidget(self._btn_derived)
+        row_flow.addWidget(self._btn_derived)
         self._btn_combinations = QPushButton("Region combinations…")
         self._btn_combinations.setToolTip(
             "Combine a measurement across regions — TCBF = RICA + LICA + BASI, or a mass-balance "
             "residual. Derived columns work within a row; these work across a subject's rows."
         )
         self._btn_combinations.clicked.connect(lambda: self._on_edit_combinations())
-        row.addWidget(self._btn_combinations)
+        row_flow.addWidget(self._btn_combinations)
         self._btn_reshape = QPushButton("Reshape → wide")
         self._btn_reshape.setToolTip(
             "Switch between one row per subject × region (long) and one row per subject with a "
@@ -1352,7 +1360,7 @@ class StatmodelsWindow(QMainWindow):
             "'lmca ~ lica' compares two columns of the same row. Every other engine wants long."
         )
         self._btn_reshape.clicked.connect(self._on_reshape_frame)
-        row.addWidget(self._btn_reshape)
+        row_flow.addWidget(self._btn_reshape)
         self._btn_melt = QPushButton("Melt by…")
         self._btn_melt.setToolTip(
             "Melt one measurement's per-region columns of a wide frame back into a 'territory' "
@@ -1363,18 +1371,18 @@ class StatmodelsWindow(QMainWindow):
         )
         self._btn_melt.clicked.connect(self._on_melt_frame)
         self._btn_melt.setEnabled(False)
-        row.addWidget(self._btn_melt)
+        row_flow.addWidget(self._btn_melt)
         self._btn_export = QPushButton("Export table…")
         self._btn_export.setToolTip(
             "Save exactly what this table shows — measurements joined, derived columns computed, "
             "filters applied. An .xlsx export adds a provenance sheet recording how the frame was "
             "built, so the numbers stay traceable."
         )
-        row.addWidget(self._btn_export)
+        row_flow.addWidget(self._btn_export)
         self._derived_label = QLabel("")
         self._derived_label.setStyleSheet(muted_label_style())
-        row.addWidget(self._derived_label, stretch=1)
-        lay.addLayout(row)
+        row_flow.addWidget(self._derived_label)
+        lay.addWidget(row)
         return box
 
     def _connect_signals(self) -> None:
@@ -1433,6 +1441,10 @@ class StatmodelsWindow(QMainWindow):
         self.showMaximized()
         self.raise_()
         self.activateWindow()
+
+    def plot_panel(self) -> Any:
+        """The plot panel itself, not the scroll area it is wrapped in."""
+        return self._plot
 
     def _on_focus_plot(self, focused: bool) -> None:
         """Hide (or restore) every panel around the plot."""

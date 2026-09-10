@@ -69,6 +69,28 @@ def _refresh_layer_list(widget: Any, viewer: Any, registry: dict[str, Any]) -> N
         widget.addItem(f"  {item.get('name', '?')}")
 
 
+def _scrollable_tab(widget: Any) -> Any:
+    """Wrap a dock tab so its content scrolls instead of setting the dock's floor.
+
+    A ``QTabWidget``'s minimum size is the largest of its pages, and a dock passes
+    that minimum up to the window: one tall panel (the data browser wants ~1000 px)
+    made the whole nvitk dock refuse to be shorter than it, so the window could
+    not be resized down and would not go fullscreen on a shorter screen.
+
+    ``widgetResizable`` keeps the page filling the tab whenever it fits, so tables
+    and canvases still expand — only content taller than the dock scrolls.
+    """
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QScrollArea
+
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    area.setWidget(widget)
+    return area
+
+
 def run_app() -> None:
     """Build and launch the nvitk Napari GUI: creates the viewer, installs nvitk's I/O hooks, and
     assembles the Tools/Data/QC/Statmodels/Layers/Export/Pipeline dock tabs."""
@@ -446,14 +468,14 @@ def run_app() -> None:
     tabs = QTabWidget()
     tabs.setDocumentMode(True)
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    tabs.addTab(tools_widget, "Tools")
-    tabs.addTab(xnat_panel, data_tab_label)
-    tabs.addTab(qc_panel, "QC")
-    tabs.addTab(statmodels_panel, "Statmodels")
-    tabs.addTab(image_props_panel, "Image properties")
-    dicom_tab_index = tabs.addTab(dicom_tags_panel, "DICOM tags")
-    tabs.addTab(mesh_panel.native, "Mesh")
-    tabs.addTab(layers_tab, "Layers")
+    tabs.addTab(_scrollable_tab(tools_widget), "Tools")
+    tabs.addTab(_scrollable_tab(xnat_panel), data_tab_label)
+    tabs.addTab(_scrollable_tab(qc_panel), "QC")
+    tabs.addTab(_scrollable_tab(statmodels_panel), "Statmodels")
+    tabs.addTab(_scrollable_tab(image_props_panel), "Image properties")
+    dicom_tab_index = tabs.addTab(_scrollable_tab(dicom_tags_panel), "DICOM tags")
+    tabs.addTab(_scrollable_tab(mesh_panel.native), "Mesh")
+    tabs.addTab(_scrollable_tab(layers_tab), "Layers")
     export_tab = QWidget()
     export_layout = QVBoxLayout()
     export_layout.setAlignment(Qt.AlignTop)
@@ -464,8 +486,8 @@ def run_app() -> None:
     export_layout.addWidget(save_panel.native)
     export_layout.addStretch(1)
     export_tab.setLayout(export_layout)
-    tabs.addTab(export_tab, "Export")
-    tabs.addTab(export_panel.native, "Pipeline")
+    tabs.addTab(_scrollable_tab(export_tab), "Export")
+    tabs.addTab(_scrollable_tab(export_panel.native), "Pipeline")
     layout.addWidget(tabs, stretch=1)
     dock.setLayout(layout)
     dock.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
