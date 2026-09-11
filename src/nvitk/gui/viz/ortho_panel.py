@@ -64,6 +64,12 @@ _PLANE_NAMES: dict[str, str] = {
 
 #: Name for the layer nvitk adds to the canvas for each 3D slice plane.
 _PLANE_LAYER_SUFFIX = "_ortho_plane"
+_BOX_LAYER_SUFFIX = "_ortho_box"
+
+#: One colour per array axis for the slice outlines, in axis order. Red / green /
+#: blue so an outline says which of the three cuts it is without a legend.
+BOX_AXIS_COLORS: tuple[str, str, str] = ("#ff4d4d", "#4dd964", "#4d9dff")
+_BOX_EDGE_WIDTH = 0.6
 
 #: How strongly an overlay is drawn over the base slice.
 _OVERLAY_OPACITY = 0.55
@@ -71,6 +77,12 @@ _OVERLAY_OPACITY = 0.55
 #: Delay before pushing a crosshair move to the 3D canvas. Plane and clipping
 #: updates re-upload volumes, so they are coalesced rather than run per step.
 _CANVAS_SYNC_MS = 90
+
+#: Zoom bounds and the factor one Ctrl+wheel notch applies. The floor is "fit to
+#: the view", which is what the panels do without a zoom at all.
+_MIN_ZOOM = 1.0
+_MAX_ZOOM = 12.0
+_ZOOM_STEP = 1.25
 
 #: Largest volume for which a per-axis contiguous copy is worth its memory.
 _SLICE_CACHE_BUDGET = 512 * 1024 * 1024
@@ -258,6 +270,26 @@ def volume_contrast(data: np.ndarray, *, sample: int = 400_000) -> tuple[float, 
     return (lo, hi) if hi > lo else (lo, lo + 1.0)
 
 
+def layer_contrast(layer: Any, data: np.ndarray) -> tuple[float, float] | None:
+    """The window to draw *layer* with — its own, when it has one.
+
+    Following the layer means the panels show what the Napari canvas shows: adjust
+    brightness on the layer controls and these views track it, instead of staying
+    on a percentile window computed once and disagreeing with the canvas from then
+    on. ``None`` for label layers, which are drawn through their colour table.
+    """
+    if is_label_like_layer(layer):
+        return None
+    limits = getattr(layer, "contrast_limits", None)
+    try:
+        lo, hi = float(limits[0]), float(limits[1])
+    except (TypeError, ValueError, IndexError):
+        return volume_contrast(data)
+    if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+        return (lo, hi)
+    return volume_contrast(data)
+
+
 def _grayscale_rgb(plane: np.ndarray, contrast: tuple[float, float] | None = None) -> np.ndarray:
     """Window a 2D intensity slice to RGB uint8 using *contrast* (or its own range)."""
     arr = np.asarray(plane, dtype=np.float32)
@@ -369,6 +401,11 @@ class SliceView(QWidget):
         self._aspect = 1.0
         self._cross: tuple[int, int] | None = None
         self._count = 1
+        #: Magnification over the fit-to-canvas size, and the normalised point of
+        #: the slice held at the canvas centre.
+        self._zoom = 1.0
+        self._pan = [0.5, 0.5]
+        self._drag_from: tuple[float, float] | None = None
 
         self._title = QLabel(view.title)
         self._title.setStyleSheet(
@@ -435,41 +472,90 @@ class SliceView(QWidget):
         self._cross = crosshair
         self._repaint()
 
+    def _geometry(self) -> tuple[int, int, float, float] | None:
+        """``(width, height, off_x, off_y)`` of the drawn slice inside the canvas.
+
+        One place, used by the painter and by the click mapping alike: the two
+        computing the transform separately is how a zoomed view ends up putting
+        the crosshair somewhere other than where it was clicked.
+        """
+        if self._rgb is None or self._rgb.size == 0:
+            return None
+        h, w = self._rgb.shape[:2]
+        target = self._canvas.size()
+        # Physical aspect: a 3 mm slice spacing must not be drawn as if isotropic.
+        fit_w = max(int(target.width()), 1)
+        fit_h = max(int(fit_w * (h * self._aspect) / max(w, 1)), 1)
+        if fit_h > target.height():
+            fit_h = max(int(target.height()), 1)
+            fit_w = max(int(fit_h * max(w, 1) / max(h * self._aspect, 1e-6)), 1)
+        scaled_w = max(int(fit_w * self._zoom), 1)
+        scaled_h = max(int(fit_h * self._zoom), 1)
+        # The panned-to point sits at the canvas centre.
+        off_x = target.width() / 2.0 - self._pan[0] * scaled_w
+        off_y = target.height() / 2.0 - self._pan[1] * scaled_h
+        if scaled_w <= target.width():
+            off_x = (target.width() - scaled_w) / 2.0
+        else:
+            off_x = min(0.0, max(off_x, target.width() - scaled_w))
+        if scaled_h <= target.height():
+            off_y = (target.height() - scaled_h) / 2.0
+        else:
+            off_y = min(0.0, max(off_y, target.height() - scaled_h))
+        return scaled_w, scaled_h, off_x, off_y
+
+    def set_zoom(self, zoom: float, *, about: tuple[float, float] | None = None) -> None:
+        """Set the magnification, keeping *about* (normalised) under the cursor."""
+        new_zoom = float(np.clip(zoom, _MIN_ZOOM, _MAX_ZOOM))
+        if about is not None and new_zoom > 1.0:
+            self._pan = [float(np.clip(v, 0.0, 1.0)) for v in about]
+        if new_zoom <= 1.0:
+            self._pan = [0.5, 0.5]
+        self._zoom = new_zoom
+        self._repaint()
+
+    def zoom(self) -> float:
+        """Current magnification."""
+        return float(self._zoom)
+
     def _repaint(self) -> None:
         """Scale the current slice into the canvas and draw the crosshairs on it."""
-        if self._rgb is None or self._rgb.size == 0:
+        from qtpy.QtGui import QColor, QPainter, QPen
+
+        geometry = self._geometry()
+        if geometry is None:
             self._canvas.setPixmap(QPixmap())
             self._canvas.setText("No slice")
             return
+        scaled_w, scaled_h, off_x, off_y = geometry
         rgb = np.ascontiguousarray(self._rgb, dtype=np.uint8)
         h, w = rgb.shape[:2]
         image = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-        pixmap = QPixmap.fromImage(image)
+        slice_map = QPixmap.fromImage(image).scaled(
+            scaled_w, scaled_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation
+        )
 
-        target = self._canvas.size()
-        # Physical aspect: a 3 mm slice spacing must not be drawn as if isotropic.
-        scaled_w = max(int(target.width()), 1)
-        scaled_h = max(int(scaled_w * (h * self._aspect) / max(w, 1)), 1)
-        if scaled_h > target.height():
-            scaled_h = max(int(target.height()), 1)
-            scaled_w = max(int(scaled_h * max(w, 1) / max(h * self._aspect, 1e-6)), 1)
-        pixmap = pixmap.scaled(scaled_w, scaled_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-
+        # Painted into a canvas-sized pixmap rather than handed over directly, so a
+        # zoomed slice is cropped by the view instead of resizing the widget.
+        canvas = QPixmap(self._canvas.size())
+        canvas.fill(QColor("#000000"))
+        painter = QPainter(canvas)
+        painter.drawPixmap(int(round(off_x)), int(round(off_y)), slice_map)
         if self._cross is not None:
-            from qtpy.QtGui import QColor, QPainter, QPen
-
-            painter = QPainter(pixmap)
             pen = QPen(QColor(COLOR_ACCENT))
             pen.setWidth(1)
             painter.setPen(pen)
             row, col = self._cross
-            y = int(round((row + 0.5) / max(h, 1) * pixmap.height()))
-            x = int(round((col + 0.5) / max(w, 1) * pixmap.width()))
-            painter.drawLine(0, y, pixmap.width(), y)
-            painter.drawLine(x, 0, x, pixmap.height())
-            painter.end()
-
-        self._canvas.setPixmap(pixmap)
+            y = int(round(off_y + (row + 0.5) / max(h, 1) * scaled_h))
+            x = int(round(off_x + (col + 0.5) / max(w, 1) * scaled_w))
+            painter.drawLine(0, y, canvas.width(), y)
+            painter.drawLine(x, 0, x, canvas.height())
+        if self._zoom > 1.0:
+            pen = QPen(QColor(COLOR_MUTED))
+            painter.setPen(pen)
+            painter.drawText(6, canvas.height() - 6, f"{self._zoom:.1f}x")
+        painter.end()
+        self._canvas.setPixmap(canvas)
 
     def resizeEvent(self, event: Any) -> None:
         """Re-scale the slice when the view is resized."""
@@ -485,32 +571,92 @@ class SliceView(QWidget):
         if obj is not self._canvas:
             return False
         if event.type() == QEvent.Wheel:
-            step = 1 if event.angleDelta().y() > 0 else -1
+            up = event.angleDelta().y() > 0
+            modifiers = event.modifiers()
+            # Ctrl+wheel zooms, plain wheel scrolls slices. Scrolling is the far
+            # commoner gesture here, so it keeps the unmodified wheel.
+            if modifiers & Qt.ControlModifier:
+                self.set_zoom(
+                    self._zoom * (_ZOOM_STEP if up else 1.0 / _ZOOM_STEP),
+                    about=self._normalised_at(event),
+                )
+                return True
+            step = 1 if up else -1
             self._slider.setValue(int(np.clip(self._slider.value() + step, 0, self._count - 1)))
             return True
-        if event.type() in (QEvent.MouseButtonPress, QEvent.MouseMove):
-            buttons = event.buttons()
-            if not buttons:
+        if event.type() == QEvent.MouseButtonDblClick:
+            self.set_zoom(1.0)
+            return True
+        if event.type() == QEvent.MouseButtonPress:
+            if self._is_pan(event):
+                self._drag_from = self._cursor_xy(event)
+                return True
+            self._emit_click(event)
+            return True
+        if event.type() == QEvent.MouseMove:
+            if self._drag_from is not None and self._is_pan(event):
+                self._pan_by(event)
+                return True
+            if not event.buttons():
                 return False
             self._emit_click(event)
             return True
+        if event.type() == QEvent.MouseButtonRelease:
+            self._drag_from = None
+            return False
         return False
+
+    @staticmethod
+    def _cursor_xy(event: Any) -> tuple[float, float]:
+        """Cursor position on the canvas, across the Qt spellings."""
+        pos = event.position() if hasattr(event, "position") else event.pos()
+        return float(pos.x()), float(pos.y())
+
+    @staticmethod
+    def _is_pan(event: Any) -> bool:
+        """True for the pan gesture: middle-drag, or shift with the left button."""
+        buttons = event.buttons()
+        if buttons & Qt.MiddleButton:
+            return True
+        return bool(buttons & Qt.LeftButton) and bool(event.modifiers() & Qt.ShiftModifier)
+
+    def _normalised_at(self, event: Any) -> tuple[float, float]:
+        """Where the cursor is in the slice, as fractions of its drawn size."""
+        geometry = self._geometry()
+        if geometry is None:
+            return (0.5, 0.5)
+        scaled_w, scaled_h, off_x, off_y = geometry
+        x, y = self._cursor_xy(event)
+        return (
+            float(np.clip((x - off_x) / max(scaled_w, 1), 0.0, 1.0)),
+            float(np.clip((y - off_y) / max(scaled_h, 1), 0.0, 1.0)),
+        )
+
+    def _pan_by(self, event: Any) -> None:
+        """Drag the zoomed slice under the canvas."""
+        geometry = self._geometry()
+        if geometry is None or self._drag_from is None:
+            return
+        scaled_w, scaled_h, _ox, _oy = geometry
+        x, y = self._cursor_xy(event)
+        self._pan[0] = float(np.clip(self._pan[0] - (x - self._drag_from[0]) / max(scaled_w, 1), 0.0, 1.0))
+        self._pan[1] = float(np.clip(self._pan[1] - (y - self._drag_from[1]) / max(scaled_h, 1), 0.0, 1.0))
+        self._drag_from = (x, y)
+        self._repaint()
 
     def _emit_click(self, event: Any) -> None:
         """Translate a click on the canvas into a crosshair position."""
-        pixmap = self._canvas.pixmap()
-        if pixmap is None or pixmap.isNull() or self._rgb is None:
+        geometry = self._geometry()
+        if geometry is None:
             return
+        scaled_w, scaled_h, off_x, off_y = geometry
         h, w = self._rgb.shape[:2]
-        # The pixmap is centred in the label, so undo that offset first.
-        off_x = (self._canvas.width() - pixmap.width()) / 2.0
-        off_y = (self._canvas.height() - pixmap.height()) / 2.0
-        pos = event.position() if hasattr(event, "position") else event.pos()
-        px, py = float(pos.x()) - off_x, float(pos.y()) - off_y
-        if not (0 <= px < pixmap.width() and 0 <= py < pixmap.height()):
+        x, y = self._cursor_xy(event)
+        px, py = x - off_x, y - off_y
+        if not (0 <= px < scaled_w and 0 <= py < scaled_h):
             return
-        col = int(np.clip(px / pixmap.width() * w, 0, w - 1))
-        row = int(np.clip(py / pixmap.height() * h, 0, h - 1))
+        col = int(np.clip(px / scaled_w * w, 0, w - 1))
+        row = int(np.clip(py / scaled_h * h, 0, h - 1))
         self.pixelPicked.emit(row, col)
 
 
@@ -647,6 +793,106 @@ def sync_ortho_planes(
     return out
 
 
+def _box_layer_name(source_name: str, axis: int) -> str:
+    """Name of the bounding-box outline layer for *axis*."""
+    return f"{source_name}{_BOX_LAYER_SUFFIX}_{axis}"
+
+
+def remove_ortho_boxes(viewer: Any, source_name: str) -> int:
+    """Drop any slice-outline layers belonging to *source_name*; returns how many."""
+    wanted = {_box_layer_name(source_name, a) for a in (0, 1, 2)}
+    removed = 0
+    for layer in list(getattr(viewer, "layers", []) or []):
+        if str(getattr(layer, "name", "")) in wanted:
+            try:
+                viewer.layers.remove(layer)
+                removed += 1
+            except Exception:
+                pass
+    return removed
+
+
+def slice_box_corners(axis: int, index: int, shape: tuple[int, ...]) -> np.ndarray:
+    """The four corners of the slice at *index* along *axis*, in voxel coordinates."""
+    others = [a for a in range(3) if a != int(axis)]
+    lo_a, hi_a = -0.5, float(shape[others[0]]) - 0.5
+    lo_b, hi_b = -0.5, float(shape[others[1]]) - 0.5
+    corners = np.zeros((4, 3), dtype=float)
+    corners[:, int(axis)] = float(index)
+    for k, (a, b) in enumerate(((lo_a, lo_b), (lo_a, hi_b), (hi_a, hi_b), (hi_a, lo_b))):
+        corners[k, others[0]] = a
+        corners[k, others[1]] = b
+    return corners
+
+
+def sync_ortho_boxes(
+    viewer: Any,
+    layer: Any,
+    position: tuple[int, int, int],
+    *,
+    axes: tuple[int, ...] = (0, 1, 2),
+) -> list[Any]:
+    """Outline each slice on the canvas instead of drawing the slice itself.
+
+    A plane-depicted Image re-uploads the whole volume to the GPU, and three of
+    them hide most of what is behind them. An outline says where the cut is
+    without obscuring the anatomy or costing a texture, which is what is wanted
+    when the 3D view is there to show the vessels rather than the slices.
+    """
+    from nvitk.gui.core.spatial import layer_spatial_kwargs
+
+    source_name = str(getattr(layer, "name", "volume"))
+    # Read the shape off the array, never through ``asarray``: the layer's data may
+    # live on the GPU, and materialising a whole volume on the host to learn how
+    # big it is costs a full copy per crosshair move.
+    data = getattr(layer, "data", None)
+    shape = getattr(data, "shape", None)
+    if shape is None:
+        # Multiscale layers hold a list of arrays; the first is the full grid.
+        try:
+            shape = data[0].shape
+        except (TypeError, IndexError, KeyError, AttributeError):
+            raise ValueError("Slice outlines need a layer with a 3D array.") from None
+    shape = tuple(int(v) for v in shape)[-3:]
+    if len(shape) != 3:
+        raise ValueError("Slice outlines need a 3D layer.")
+    by_name = {str(getattr(l, "name", "")): l for l in viewer.layers}
+    spatial = layer_spatial_kwargs(layer)
+
+    try:
+        previously_active = viewer.layers.selection.active
+    except Exception:
+        previously_active = None
+
+    out: list[Any] = []
+    for axis in axes:
+        name = _box_layer_name(source_name, axis)
+        corners = slice_box_corners(axis, int(position[axis]), shape)
+        existing = by_name.get(name)
+        colour = BOX_AXIS_COLORS[int(axis) % len(BOX_AXIS_COLORS)]
+        if existing is None:
+            existing = viewer.add_shapes(
+                [corners],
+                shape_type="polygon",
+                name=name,
+                edge_color=colour,
+                face_color="transparent",
+                edge_width=_BOX_EDGE_WIDTH,
+                **spatial,
+            )
+            existing.editable = False
+        else:
+            existing.data = [corners]
+        out.append(existing)
+
+    if previously_active is not None:
+        try:
+            viewer.layers.selection.active = previously_active
+        except Exception:
+            pass
+    return out
+
+
 def _scene_point(layer: Any, displayed: list[int], data_point: list[float]) -> np.ndarray:
     """A data-space point in vispy *scene* coordinates, the way Napari computes them.
 
@@ -763,6 +1009,10 @@ class OrthoViewerPanel(QWidget):
         self._overlay_lut: dict[int, np.ndarray] | None = None
         self._overlay_contrast: tuple[float, float] | None = None
         self._overlay_cache: SliceCache | None = None
+        #: ``(layer, callback)`` for the contrast subscriptions, so a rebind can
+        #: drop the previous one instead of stacking callbacks on old layers.
+        self._contrast_sub: tuple[Any, Any] | None = None
+        self._overlay_contrast_sub: tuple[Any, Any] | None = None
         #: Last slice index each view rendered, so an unchanged view is not redrawn.
         self._rendered: dict[int, int] = {}
 
@@ -820,13 +1070,30 @@ class OrthoViewerPanel(QWidget):
         card = Card("3D view")
         card.add_layout(card_overlay)
 
-        self._show_planes = QCheckBox("Show the three slices as planes in 3D")
+        self._show_planes = QCheckBox("Show the three slices in 3D")
         self._show_planes.setToolTip(
-            "Push the three cuts onto the Napari canvas as plane layers, so the 3D "
-            "view shows the same slices these panels do."
+            "Push the three cuts onto the Napari canvas, so the 3D view shows the "
+            "same slices these panels do."
         )
         self._show_planes.toggled.connect(self._on_show_planes)
         card.add(self._show_planes)
+
+        style_row = QHBoxLayout()
+        style_row.setSpacing(SPACE_TIGHT)
+        style_label = QLabel("As")
+        style_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        self._plane_style = QComboBox()
+        self._plane_style.addItem("slice image", "image")
+        self._plane_style.addItem("outline only", "box")
+        self._plane_style.setToolTip(
+            "“Slice image” draws the cut itself. “Outline only” draws just its "
+            "border — red, green and blue for the three axes — which leaves the "
+            "anatomy behind it visible and costs no texture upload."
+        )
+        self._plane_style.currentIndexChanged.connect(lambda _i: self._on_plane_style())
+        style_row.addWidget(style_label)
+        style_row.addWidget(self._plane_style, stretch=1)
+        card.add_layout(style_row)
 
         card.add(section_heading("See inside"))
         hint = QLabel(
@@ -893,8 +1160,9 @@ class OrthoViewerPanel(QWidget):
             self._contrast = None
             self._lut = label_lut(layer, unique_layer_labels(self._data))
         else:
-            self._contrast = volume_contrast(self._data)
+            self._contrast = layer_contrast(layer, self._data)
             self._lut = None
+        self._watch_contrast(layer)
         spacing = layer_spacing(layer)
         self._spacing = tuple(float(s) for s in (spacing or (1.0, 1.0, 1.0)))[:3]
         if len(self._spacing) < 3:
@@ -918,6 +1186,43 @@ class OrthoViewerPanel(QWidget):
         shape = " x ".join(str(int(s)) for s in self._data.shape)
         self._status.setText(f"{name} - {shape} voxels")
         self._redraw(force=True)
+
+    def _watch_contrast(self, layer: Any, *, overlay: bool = False) -> None:
+        """Redraw when *layer*'s window moves, and drop the previous subscription.
+
+        Without the unsubscribe the panel would keep redrawing for every layer it
+        has ever been pointed at, and each rebind would add another callback to
+        the same layer.
+        """
+        key = "_overlay_contrast_sub" if overlay else "_contrast_sub"
+        previous = getattr(self, key, None)
+        if previous is not None:
+            old_layer, callback = previous
+            try:
+                old_layer.events.contrast_limits.disconnect(callback)
+            except Exception:
+                pass
+            setattr(self, key, None)
+        if layer is None or is_label_like_layer(layer):
+            return
+
+        def _changed(_event: Any = None, _overlay: bool = overlay) -> None:
+            """Pick the layer's new window up and repaint."""
+            if _overlay:
+                if self._overlay is None or self._overlay_data is None:
+                    return
+                self._overlay_contrast = layer_contrast(self._overlay, self._overlay_data)
+            else:
+                if self._layer is None or self._data is None:
+                    return
+                self._contrast = layer_contrast(self._layer, self._data)
+            self._redraw(force=True)
+
+        try:
+            layer.events.contrast_limits.connect(_changed)
+            setattr(self, key, (layer, _changed))
+        except Exception:
+            pass
 
     def _render_view(self, view: AxisView) -> np.ndarray:
         """The RGB image for *view* at the current crosshair, overlay included."""
@@ -998,22 +1303,49 @@ class OrthoViewerPanel(QWidget):
         except Exception:
             pass
 
+    def _plane_mode(self) -> str:
+        """``"image"`` or ``"box"`` — how the cuts are drawn on the 3D canvas."""
+        return str(self._plane_style.currentData() or "image")
+
     def _on_show_planes(self, enabled: bool) -> None:
-        """Add or remove the 3D plane layers on the canvas."""
+        """Add or remove the 3D cut layers on the canvas."""
         if self._layer is None:
             return
         name = str(getattr(self._layer, "name", "volume"))
         if not enabled:
             remove_ortho_planes(self._viewer, name)
+            remove_ortho_boxes(self._viewer, name)
             return
         try:
-            sync_ortho_planes(self._viewer, self._layer, tuple(self._position))
+            self._draw_cuts()
             self._show_3d()
         except Exception as exc:  # noqa: BLE001
-            self._status.setText(f"Could not add 3D planes: {exc}")
+            self._status.setText(f"Could not add 3D cuts: {exc}")
             self._show_planes.blockSignals(True)
             self._show_planes.setChecked(False)
             self._show_planes.blockSignals(False)
+
+    def _on_plane_style(self) -> None:
+        """Swap between drawing the slices and outlining them."""
+        if self._layer is None or not self._show_planes.isChecked():
+            return
+        # Drop the other representation, or both would be on the canvas at once.
+        name = str(getattr(self._layer, "name", "volume"))
+        if self._plane_mode() == "box":
+            remove_ortho_planes(self._viewer, name)
+        else:
+            remove_ortho_boxes(self._viewer, name)
+        try:
+            self._draw_cuts()
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Could not redraw the 3D cuts: {exc}")
+
+    def _draw_cuts(self) -> None:
+        """Push the three cuts to the canvas in the selected style."""
+        if self._plane_mode() == "box":
+            sync_ortho_boxes(self._viewer, self._layer, tuple(self._position))
+        else:
+            sync_ortho_planes(self._viewer, self._layer, tuple(self._position))
 
     def _sync_canvas(self) -> None:
         """Push the crosshair to the 3D planes and the clip, once per settle."""
@@ -1085,39 +1417,50 @@ class OrthoViewerPanel(QWidget):
         if is_label_like_layer(layer):
             self._overlay_lut = label_lut(layer, unique_layer_labels(self._overlay_data))
         else:
-            self._overlay_contrast = volume_contrast(self._overlay_data)
+            self._overlay_contrast = layer_contrast(layer, self._overlay_data)
+        self._watch_contrast(layer, overlay=True)
 
     def _on_overlay_changed(self) -> None:
         """Rebind the overlay and redraw every view with it."""
+        # The layer being dropped keeps whatever cut it was given otherwise, and
+        # nothing in the panel would ever take it off again.
+        previous = self._overlay
         self._bind_overlay(str(self._overlay_combo.currentData() or ""))
+        if previous is not None and previous is not self._overlay:
+            clear_clip(previous)
         self._redraw(force=True)
+        self._apply_clip()
 
     def _sync_planes(self) -> None:
-        """Move the 3D planes to the crosshair, if they are showing."""
+        """Move the 3D cuts to the crosshair, if they are showing."""
         if self._layer is None or not self._show_planes.isChecked():
             return
         try:
-            sync_ortho_planes(self._viewer, self._layer, tuple(self._position))
+            self._draw_cuts()
         except Exception:
             pass
 
     def _apply_clip(self) -> None:
-        """Apply (or clear) the see-inside cut on the bound layer."""
+        """Apply (or clear) the see-inside cut on the bound layer and its overlay.
+
+        The overlay is cut with it. Cutting only the base leaves a segmentation
+        floating in front of the opened volume, covering the very interior the cut
+        was made to expose — and reading as if the mask extended past the tissue.
+        """
         if self._layer is None:
             return
         side = str(self._clip_side.currentData() or "off")
         axis_data = self._clip_axis.currentData()
         axis = int(axis_data) if axis_data is not None else 0
-        try:
-            apply_clip(
-                self._layer,
-                axis,
-                self._position[axis],
-                side,
-                displayed_axes(self._viewer),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._status.setText(f"Could not clip: {exc}")
+        displayed = displayed_axes(self._viewer)
+        targets = [self._layer]
+        if self._overlay is not None and self._overlay is not self._layer:
+            targets.append(self._overlay)
+        for target in targets:
+            try:
+                apply_clip(target, axis, self._position[axis], side, displayed)
+            except Exception as exc:  # noqa: BLE001
+                self._status.setText(f"Could not clip {getattr(target, 'name', '?')}: {exc}")
 
     def position(self) -> tuple[int, int, int]:
         """Current crosshair, as voxel indices in array-axis order."""

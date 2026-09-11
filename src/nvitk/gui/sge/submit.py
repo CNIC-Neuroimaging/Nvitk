@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -21,12 +22,37 @@ from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason, tool_by_i
 
 
 def _resolve_remote_job_root(user_root: str, job_id: str) -> str:
-    """Use ``{gui_sge_job_root}/{job_id}`` when the dialog still has the configured base."""
-    root = str(user_root or "").strip().rstrip("/")
-    base = sge_json.gui_sge_job_root()
-    if base and root == base.rstrip("/"):
-        return f"{base.rstrip('/')}/{job_id}"
-    return root
+    """``{root}/{job_id}`` — the staging directory for one GUI job.
+
+    The job id is always appended, not only when the dialog still holds the
+    configured base. Two launches sharing a directory would have the second
+    overwrite the first's ``input``/``output``, and the ``.done`` poll would then
+    import whichever landed last under the other job's name. Falls back to
+    ``paths.gui_sge_job_root`` when the dialog was left empty, so every GUI launch
+    lands under the one configured root.
+    """
+    root = str(user_root or "").strip().rstrip("/") or sge_json.gui_sge_job_root()
+    if not root:
+        raise ValueError(
+            "No remote job root. Set one in the dialog, or paths.gui_sge_job_root "
+            "in sge.json."
+        )
+    if root.rsplit("/", 1)[-1] == job_id:
+        return root
+    return f"{root.rstrip('/')}/{job_id}"
+
+
+def _resolve_remote_script_path(job_id: str, tool_id: str) -> str:
+    """Where this job's ``submit.sh`` lands in the configured scripts directory.
+
+    ``""`` when ``paths.sge_scripts_dir`` is unset, which leaves the script in the
+    job root as before rather than inventing a location for it.
+    """
+    base = sge_json.sge_scripts_dir()
+    if not base:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"gui_{tool_id}_{job_id}")
+    return f"{base.rstrip('/')}/{safe}.sh"
 
 
 def _require_paramiko() -> None:
@@ -181,14 +207,16 @@ def submit_gui_sge(
         )
         host = resolve_cluster_host(conn.host)
         notify(f"Uploading job {job.job_id} to {host}:{remote_job_root} …")
+        scripts_path = _resolve_remote_script_path(job.job_id, tool_id)
         upload_staged_job(
             host=conn.host,
             user=conn.user,
             password=conn.password,
             local_staging=staging,
             remote_job_root=remote_job_root,
+            remote_script_path=scripts_path or None,
         )
-        remote_script = Path(f"{remote_job_root.rstrip('/')}/submit.sh")
+        remote_script = Path(scripts_path or f"{remote_job_root.rstrip('/')}/submit.sh")
         notify(f"Submitting {remote_script} on {host} …")
         ok = run_sge_script_ssh(
             host,

@@ -346,8 +346,16 @@ def upload_staged_job(
     local_staging: Path,
     remote_job_root: str,
     port: int = 22,
+    remote_script_path: str | None = None,
 ) -> None:
-    """Upload a GUI job staging tree to the cluster job directory."""
+    """Upload a GUI job staging tree to the cluster job directory.
+
+    *remote_script_path* additionally places ``submit.sh`` there, which is how the
+    GUI keeps its driver scripts in the configured ``sge_scripts_dir`` alongside
+    every pipeline's rather than scattering one copy per job directory. The copy
+    inside the job root is kept as well: it is what makes a failed job
+    reproducible by hand from the directory that holds its inputs.
+    """
     upload_directory(
         host=host,
         user=user,
@@ -356,6 +364,17 @@ def upload_staged_job(
         remote_root=remote_job_root.rstrip("/"),
         port=port,
     )
+    if not remote_script_path:
+        return
+    script = Path(local_staging) / "submit.sh"
+    if not script.is_file():
+        return
+    destination = _normalize_remote_path(str(remote_script_path))
+    with sftp_session(host=host, user=user, password=password, port=port) as (_c, sftp):
+        parent = destination.rsplit("/", 1)[0]
+        if parent:
+            ensure_remote_dir(sftp, parent)
+        sftp.put(str(script), destination)
 
 
 def ssh_exec(

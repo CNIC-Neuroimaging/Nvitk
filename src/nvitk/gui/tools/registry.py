@@ -117,6 +117,28 @@ def _totalseg_task_choices() -> tuple[str, ...]:
         return ("total", "total_mr", "brain_structures", "body")
 
 
+def _topbrain_model_choices() -> tuple[str, ...]:
+    """Trained ToPBrain models, read from stage 2's provenance markers."""
+    try:
+        from nvitk.gui.tools.topbrain_models import model_choices
+
+        return model_choices()
+    except Exception:
+        return ("ta36",)
+
+
+def _topbrain_modality_choices() -> tuple[str, ...]:
+    """How to harmonise the input before predicting."""
+    try:
+        from nvitk.gui.tools.topbrain_models import MODALITY_CHOICES
+
+        return MODALITY_CHOICES
+    except Exception:
+        return ("auto", "mr", "ct", "already harmonised")
+
+
+_TOPBRAIN_MODELS = _topbrain_model_choices()
+
 _TASK = ParamSpec(
     "task",
     "TotalSegmentator task",
@@ -723,6 +745,63 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
         description=(
             "Segment the active volume with TotalSegmentator and add the multilabel "
             "mask as a Labels layer. Runs locally, or on the cluster via Run SGE."
+        ),
+    ),
+    GuiToolSpec(
+        "seg_topbrain",
+        "Segmentation",
+        "ToPBrain vessels (nnU-Net)",
+        (
+            ParamSpec(
+                "topbrain_model",
+                "Model",
+                "choice",
+                _TOPBRAIN_MODELS[0],
+                choices=_TOPBRAIN_MODELS,
+            ),
+            ParamSpec(
+                "topbrain_modality",
+                "Modality",
+                "choice",
+                "auto",
+                choices=_topbrain_modality_choices(),
+            ),
+            ParamSpec("topbrain_postprocess", "Post-process the prediction", "bool", True),
+            ParamSpec(
+                "topbrain_min_volume_mm3",
+                "Drop islands under (mm³)",
+                "float",
+                5.0,
+                min=0.0,
+                max=1000.0,
+            ),
+            ParamSpec("topbrain_largest_only", "Keep only the largest island per class", "bool", False),
+            ParamSpec(
+                "topbrain_repair_gaps_mm",
+                "Repair gaps up to (mm, 0 = off)",
+                "float",
+                0.0,
+                min=0.0,
+                max=20.0,
+            ),
+            ParamSpec("topbrain_folds", "Folds (blank = every finished fold)", "str", ""),
+            _OUTPUT_DIR,
+        ),
+        needs_3d=True,
+        multilabel=True,
+        description=(
+            "Segment the brain vasculature of the active volume with a trained "
+            "ToPBrain nnU-Net, and add the result as a multilabel Labels layer. The "
+            "model list is read from stage 2's provenance on whichever roots this "
+            "host can see, so it is what you can actually run — each entry shows the "
+            "class count, the loss and how many folds finished. “Modality” harmonises "
+            "the input the way training did; leave it on auto unless the volume is "
+            "already in nnU-Net raw form, in which case pick “already harmonised” "
+            "(predicting on unharmonised intensities is silently wrong, not an "
+            "error). Post-processing removes islands; gap repair is off by default "
+            "because it is a hypothesis about the failure mode and belongs tuned on "
+            "cross-validation. Runs on GPU when GPU computing is on, otherwise CPU, "
+            "or on the cluster via Run SGE."
         ),
     ),
     GuiToolSpec(

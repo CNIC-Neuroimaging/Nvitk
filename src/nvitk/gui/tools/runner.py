@@ -1602,6 +1602,9 @@ def run_gui_tool(
     if tool_id == "seg_totalsegmentator":
         return _run_totalsegmentator(img, viewer, layer, params)
 
+    if tool_id == "seg_topbrain":
+        return _run_topbrain(img, params)
+
     if tool_id == "seg_eicab":
         notify(
             "eICAB is cluster-oriented. Use: nvitk-eicab --help "
@@ -2740,6 +2743,92 @@ def _run_totalsegmentator(
     seg_arr = seg_arr.astype(numpy_host.int32, copy=False)
     n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
     notify(f"TotalSegmentator finished: {n_labels} label(s) from {seg_path}.")
+    return seg_arr
+
+
+def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
+    """Segment *img* with a trained ToPBrain nnU-Net and return the multilabel mask.
+
+    Returns the array rather than adding a layer, which is what lets the same code
+    serve the local run and the headless SGE worker — the worker's contract is one
+    array in, one array out, the same shape TotalSegmentator's branch has.
+
+    Roots come from :func:`layout_auto`, which prefers the cluster ones when they
+    are reachable. That matters on a workstation: the cluster storage is commonly
+    NFS-mounted at the same absolute paths and holds the models a job trained,
+    while the local roots are a separate working copy holding none of them.
+    """
+    import numpy as numpy_host
+
+    from nvitk.gui.tools.topbrain_models import (
+        host_layout,
+        modality_argument,
+        model_listing,
+        selector_from_choice,
+    )
+    from nvitk.io import imread, imsave
+    from nvitk.pipes.topbrain.stage4_infer import run_infer
+
+    model = selector_from_choice(params.get("topbrain_model"))
+    if not model:
+        raise ValueError("Pick a ToPBrain model.")
+    modality = modality_argument(params.get("topbrain_modality"))
+
+    run_dir = Path(
+        str(params.get("output_dir") or "").strip()
+        or tempfile.mkdtemp(prefix="nvitk_topbrain_")
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # stage_inputs takes files and directories interchangeably and does the
+    # <case>_0000 renaming itself, so one plain volume is all it needs.
+    case = run_dir / "case.nii.gz"
+    imsave(case, img)
+    out_dir = run_dir / "prediction"
+
+    paths, origin = host_layout()
+    device = "cuda" if gpu_enabled() else "cpu"
+    postprocess = bool(params.get("topbrain_postprocess", True))
+    folds = [f.strip() for f in str(params.get("topbrain_folds") or "").split(",") if f.strip()]
+    gaps = float(params.get("topbrain_repair_gaps_mm") or 0.0)
+
+    gui_log(model_listing())
+    notify(
+        f"Running ToPBrain ({model}, {device}, {origin} roots, "
+        f"modality {params.get('topbrain_modality') or 'auto'}) → {out_dir}"
+    )
+    produced = run_infer(
+        # "none" is what turns island removal off; the directory is still written,
+        # so the read-back below does not have to care which way this went.
+        "none" if not postprocess else None,
+        inputs=[case],
+        model=model,
+        modality=modality,
+        output=out_dir,
+        nnunet_raw=paths.nnunet_raw,
+        nnunet_preprocessed=paths.nnunet_preprocessed,
+        nnunet_results=paths.nnunet_results,
+        results_root=paths.results_root,
+        folds=folds,
+        min_volume_mm3=(
+            float(params.get("topbrain_min_volume_mm3") or 0.0) if postprocess else None
+        ),
+        largest_only=bool(params.get("topbrain_largest_only", False)) and postprocess,
+        repair_gaps_mm=(gaps if postprocess and gaps > 0 else None),
+        device=device,
+        workers=1,
+    )
+
+    masks = sorted(out_dir.glob("*.nii.gz")) or sorted(Path(produced).glob("*.nii.gz"))
+    if not masks:
+        raise RuntimeError(
+            f"ToPBrain finished but wrote no mask in {out_dir} or {produced}."
+        )
+    seg_arr = to_numpy(imread(masks[0]).data)
+    if not numpy_host.issubdtype(seg_arr.dtype, numpy_host.integer):
+        seg_arr = numpy_host.rint(seg_arr)
+    seg_arr = seg_arr.astype(numpy_host.int32, copy=False)
+    n_labels = int(numpy_host.count_nonzero(numpy_host.unique(seg_arr)))
+    notify(f"ToPBrain finished: {n_labels} label(s) from {masks[0]}.")
     return seg_arr
 
 

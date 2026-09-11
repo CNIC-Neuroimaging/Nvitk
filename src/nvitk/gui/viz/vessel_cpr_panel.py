@@ -32,7 +32,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from nvitk.core.array import to_numpy
+from nvitk.core.array import as_backend_array, to_numpy
 from nvitk.core.backend import setup, using
 from nvitk.gui.core.design import (
     COLOR_MUTED,
@@ -41,7 +41,7 @@ from nvitk.gui.core.design import (
     style_image_figure,
 )
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
-from nvitk.transform.cpr import resample_centerline
+from nvitk.transform.cpr import cut_direction, resample_centerline
 from nvitk.viz.vessel_cpr import (
     DEFAULT_JOIN_GAP_VOX,
     DEFAULT_N_RAY,
@@ -97,6 +97,14 @@ _SETTLE_MS = 350
 #: of zero millimetres.
 _MIN_STEP_MM = 0.01
 
+#: A drag shorter than this is a click that wandered, not a correction.
+_MIN_DRAG_MM = 0.25
+
+#: How far along the vessel a correction reaches, as a standard deviation in
+#: millimetres. A centerline is smooth, so pulling one station and leaving its
+#: neighbours put would produce a kink the reformation would then cut across.
+_EDIT_REACH_MM = 4.0
+
 MIN_STATIONS = 8
 MAX_STATIONS = 20_000
 
@@ -136,7 +144,10 @@ class VesselCprPanel(QWidget):
         self._on_station: Any = None
         self._on_reset: Any = None
         self._on_stations: Any = None
+        self._on_projection_edit: Any = None
         self._syncing = False
+        #: ``(station, offset_mm)`` where a centerline drag began.
+        self._drag: tuple[int, float] | None = None
         self._vessel: VesselCpr | None = None
         self._edited = False
         self._failures: dict[int, str] = {}
@@ -244,6 +255,24 @@ class VesselCprPanel(QWidget):
         self._btn_render.setToolTip("Resample after editing the centerline or a mask.")
         self._btn_render.clicked.connect(lambda: self._emit_change())
 
+        self._overlay_style = QComboBox()
+        self._overlay_style.addItem("filled", "filled")
+        self._overlay_style.addItem("contour", "contour")
+        self._overlay_style.setToolTip(
+            "“Filled” tints the lumen and wall. “Contour” outlines them instead, "
+            "which leaves the image underneath readable — a calcified plaque or a "
+            "thrombus is hidden by the tint that is meant to mark it."
+        )
+        self._overlay_style.currentIndexChanged.connect(lambda _i: self.redraw())
+
+        self._edit_projection = QCheckBox("Edit on image")
+        self._edit_projection.setToolTip(
+            "Drag across the flat image to pull the centerline sideways there. The "
+            "vertical axis is millimetres from the centerline, so the drag distance "
+            "is the correction. Off, a click picks a station instead."
+        )
+        self._edit_projection.setStyleSheet(f"color: {STATION_COLOR};")
+
         self._settle = QTimer(self)
         self._settle.setSingleShot(True)
         self._settle.setInterval(_SETTLE_MS)
@@ -284,6 +313,9 @@ class VesselCprPanel(QWidget):
         toggles.setSpacing(SPACE_TIGHT)
         for box in (self._show_lumen, self._show_wall, self._show_center, self._show_profile):
             toggles.addWidget(box)
+        toggles.addWidget(self._overlay_style)
+        toggles.addSpacing(SPACE_TIGHT)
+        toggles.addWidget(self._edit_projection)
         toggles.addStretch(1)
         toggles.addWidget(self._btn_reset)
         toggles.addWidget(self._btn_render)
@@ -305,8 +337,9 @@ class VesselCprPanel(QWidget):
             self._cpr_canvas = FigureCanvasQTAgg(self._cpr_fig)
             self._cpr_canvas.setMinimumHeight(220)
             self._cpr_canvas.setMinimumWidth(320)
-            self._cpr_canvas.mpl_connect("button_press_event", self._on_canvas_click)
+            self._cpr_canvas.mpl_connect("button_press_event", self._on_canvas_press)
             self._cpr_canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
+            self._cpr_canvas.mpl_connect("button_release_event", self._on_canvas_release)
 
             self._xs_fig = Figure(figsize=(2.6, 2.6), dpi=96)
             self._xs_ax = self._xs_fig.add_subplot(111)
@@ -351,12 +384,14 @@ class VesselCprPanel(QWidget):
         on_station: Any = None,
         on_reset: Any = None,
         on_stations: Any = None,
+        on_projection_edit: Any = None,
     ) -> None:
         """Register what to call when the controls move."""
         self._on_change = on_change
         self._on_station = on_station
         self._on_reset = on_reset
         self._on_stations = on_stations
+        self._on_projection_edit = on_projection_edit
 
     def _emit_reset(self) -> None:
         """Ask the installer to throw this vessel's centerline edits away."""
@@ -416,16 +451,42 @@ class VesselCprPanel(QWidget):
                 return None
             return int(np.clip(np.searchsorted(arc, float(event.xdata)), 0, arc.size - 1))
 
-    def _on_canvas_click(self, event: Any) -> None:
-        """Clicking a column of the flat image selects that station."""
+    def _on_canvas_press(self, event: Any) -> None:
+        """Start a centerline drag, or pick a station when not editing."""
         station = self._station_at(event)
-        if station is not None:
+        if station is None:
+            return
+        if self._edit_projection.isChecked() and event.inaxes is self._cpr_ax:
+            # The vertical axis is millimetres from the centerline, so where the
+            # press lands *is* the starting offset — no separate reference needed.
+            self._drag = (station, float(event.ydata))
+            return
+        self._station.setValue(station)
+
+    def _on_canvas_release(self, event: Any) -> None:
+        """Finish a centerline drag and hand the correction to the installer."""
+        drag = self._drag
+        self._drag = None
+        if drag is None or event.inaxes is not self._cpr_ax or event.ydata is None:
+            return
+        station, start = drag
+        offset = float(event.ydata) - float(start)
+        if abs(offset) < _MIN_DRAG_MM:
+            # A click that happened to be inside the image, not a correction.
             self._station.setValue(station)
+            return
+        if self._on_projection_edit is not None:
+            self._on_projection_edit(int(station), offset)
 
     def _on_canvas_motion(self, event: Any) -> None:
         """Read out the calibre under the cursor without committing to a station."""
         station = self._station_at(event)
         if station is None or self._vessel is None:
+            return
+        if self._drag is not None and event.ydata is not None:
+            self._station_label.setText(
+                f"pull {float(event.ydata) - self._drag[1]:+.2f} mm at station {self._drag[0]}"
+            )
             return
         with using("cpu"):
             arc = to_numpy(self._vessel.cpr.arc_length_mm)
@@ -579,10 +640,11 @@ class VesselCprPanel(QWidget):
             vmax=vmax,
         )
 
+        contour = str(self._overlay_style.currentData() or "filled") == "contour"
         if self._show_wall.isChecked() and vessel.wall is not None:
-            self._overlay(ax, to_numpy(vessel.wall).T, extent, WALL_RGB, 0.35)
+            self._draw_mask(ax, to_numpy(vessel.wall).T, extent, WALL_RGB, arc, ray, contour)
         if self._show_lumen.isChecked():
-            self._overlay(ax, to_numpy(vessel.lumen).T, extent, LUMEN_RGB, 0.35)
+            self._draw_mask(ax, to_numpy(vessel.lumen).T, extent, LUMEN_RGB, arc, ray, contour)
         if self._show_center.isChecked():
             ax.axhline(0.0, color=CENTERLINE_COLOR, lw=0.8, alpha=0.9)
 
@@ -623,6 +685,36 @@ class VesselCprPanel(QWidget):
         ax.set_ylabel("Ø mm", fontsize=8)
         ax.tick_params(labelsize=7)
         ax.grid(True, axis="y", alpha=0.15, lw=0.5)
+
+    @staticmethod
+    def _draw_mask(
+        ax: Any,
+        mask: Any,
+        extent: list[float],
+        rgb: tuple,
+        arc: Any,
+        ray: Any,
+        contour: bool,
+    ) -> None:
+        """Mark a mask on the flat image, filled or as an outline."""
+        if not contour:
+            VesselCprPanel._overlay(ax, mask, extent, rgb, 0.35)
+            return
+        with using("cpu"):
+            arr = to_numpy(mask)
+            if not arr.any():
+                return
+            # Contour wants the axes' own coordinates, not the pixel grid, so the
+            # outline lands on the same millimetres the image is drawn in.
+            x = to_numpy(arc)[: arr.shape[1]]
+            y = to_numpy(ray)[: arr.shape[0]]
+        if x.size < 2 or y.size < 2:
+            return
+        colour = "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in rgb)
+        ax.contour(
+            x, y, (arr > 0).astype(float)[: y.size, : x.size],
+            levels=[0.5], colors=[colour], linewidths=1.0,
+        )
 
     @staticmethod
     def _overlay(ax: Any, mask: Any, extent: list[float], rgb: tuple, alpha: float) -> None:
@@ -1093,6 +1185,44 @@ def install_vessel_cpr(
         _derive_centerlines()
         _render()
 
+    def _edit_from_projection(station: int, offset_mm: float) -> None:
+        """Pull the centerline *offset_mm* sideways at *station*.
+
+        The flat image's vertical axis is millimetres along the cut direction, so a
+        drag on it is already a displacement in the plane the reformation was cut
+        in — no unprojection needed. The pull falls off along the vessel over
+        :data:`_EDIT_REACH_MM`, because moving one station alone leaves a kink the
+        next reformation would cut straight across.
+        """
+        label = panel.selected_label()
+        if label is None:
+            return
+        samples = state["edited"].get(int(label)) or state["samples"].get(int(label))
+        if samples is None:
+            return
+        try:
+            direction = cut_direction(samples, panel.angle_deg())
+            arc = as_backend_array(samples.arc_length_mm).astype(float, copy=False)
+            here = float(to_numpy(arc)[int(station)])
+            reach = max(float(_EDIT_REACH_MM), float(state["step_mm"]))
+            weight = np.exp(-((arc - here) ** 2) / (2.0 * reach * reach))
+            moved_mm = (
+                as_backend_array(samples.points_mm).astype(float, copy=False)
+                + float(offset_mm) * weight[:, None] * direction
+            )
+            scale = as_backend_array(samples.spacing).astype(float, copy=False)
+            state["edited"][int(label)] = resample_centerline(
+                moved_mm / scale,
+                state["spacing"],
+                step_mm=state["step_mm"],
+                smooth=0.0,
+            )
+        except Exception:
+            return
+        # Handles belong to the curve the user just changed, not the old one.
+        state["handles_stale"] = True
+        _render()
+
     def _reset_centerline() -> None:
         """Throw away this vessel's control-point edits and re-derive it."""
         label = panel.selected_label()
@@ -1109,6 +1239,7 @@ def install_vessel_cpr(
         on_station=_show_station,
         on_reset=_reset_centerline,
         on_stations=_set_stations,
+        on_projection_edit=_edit_from_projection,
     )
 
     if lumen_layer is not None:

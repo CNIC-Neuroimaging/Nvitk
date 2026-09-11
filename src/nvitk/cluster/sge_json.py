@@ -54,6 +54,19 @@ def gui_sge_job_root() -> str:
     return str(raw).strip().rstrip("/")
 
 
+def sge_scripts_dir() -> str:
+    """Cluster directory holding submitted driver scripts (``paths.sge_scripts_dir``).
+
+    The pipelines already resolve this key for their own ``submit_*.sh``; the GUI
+    reads the same one so every cluster launch leaves its script in one place
+    instead of one copy per job directory.
+    """
+    raw = paths_section().get("sge_scripts_dir")
+    if raw is None or not str(raw).strip():
+        return ""
+    return str(raw).strip().rstrip("/")
+
+
 def resolve_nvitk_container(
     *, pipe: Mapping[str, Any] | None = None, fallback: Path | None = None
 ) -> Path | None:

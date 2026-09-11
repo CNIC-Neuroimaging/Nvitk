@@ -188,25 +188,62 @@ def stage_job_locally(
 def tool_models_binding(tool_id: str) -> tuple[Path | None, dict[str, str]]:
     """Weights directory to bind for *tool_id*, and the env telling it where they landed.
 
-    ``image_tools`` carries the model root for the generic GUI tools, but
-    TotalSegmentator's weights are configured separately under
-    ``pipelines.totalsegmentator.default_sge_model_root``. Without this the job got
+    ``image_tools`` carries the model root for the generic GUI tools, but the
+    model-driven segmenters keep their weights elsewhere and each needs its own
+    bind. TotalSegmentator's are under
+    ``pipelines.totalsegmentator.default_sge_model_root``; without this the job got
     no ``-B`` for models at all, and ``TOTALSEG_HOME_DIR`` pointed at a *host* path
     that does not exist inside the container — which is what made TotalSegmentator
-    try to create ``/models/imaging/...`` on the node and fail.
+    try to create ``/models/imaging/...`` on the node and fail. ToPBrain's are
+    under ``pipelines.topbrain_paths.cluster_model_root``.
     """
-    if str(tool_id) != "seg_totalsegmentator":
-        return None, {}
-    try:
-        from nvitk.segmentation.total_segmentator.config import MODELS_DIR
-    except Exception:
-        return None, {}
-    if not MODELS_DIR:
-        return None, {}
-    # The host directory is bound at ``SingularityBinds.models``; the tool must be
-    # pointed at that container path, never at the host one.
-    container_models = SingularityBinds().models.rstrip("/") or "/models"
-    return Path(MODELS_DIR), {"TOTALSEG_HOME_DIR": container_models}
+    tid = str(tool_id)
+    if tid == "seg_totalsegmentator":
+        try:
+            from nvitk.segmentation.total_segmentator.config import MODELS_DIR
+        except Exception:
+            return None, {}
+        if not MODELS_DIR:
+            return None, {}
+        # The host directory is bound at ``SingularityBinds.models``; the tool must
+        # be pointed at that container path, never at the host one.
+        container_models = SingularityBinds().models.rstrip("/") or "/models"
+        return Path(MODELS_DIR), {"TOTALSEG_HOME_DIR": container_models}
+
+    if tid == "seg_topbrain":
+        # Inference reads four roots: stage 2's provenance markers, and nnU-Net's
+        # results/raw/preprocessed. ``model_root`` is the *pre-training* checkpoint
+        # tree and is not one of them, so binding that would put the job one
+        # directory away from everything it needs.
+        #
+        # Their common ancestor is bound instead, and each root is exported as the
+        # path it landed on inside the container. Deriving those from the host
+        # paths rather than assuming a tree shape means a reorganised results
+        # directory does not quietly point the job at nothing.
+        try:
+            from nvitk.pipes.topbrain.util.paths import layout_cluster
+
+            paths = layout_cluster()
+            roots = {
+                "TOPBRAIN_RESULTS_ROOT": Path(paths.results_root),
+                "TOPBRAIN_NNUNET_RESULTS": Path(paths.nnunet_results),
+                "TOPBRAIN_NNUNET_RAW": Path(paths.nnunet_raw),
+                "TOPBRAIN_NNUNET_PREPROCESSED": Path(paths.nnunet_preprocessed),
+            }
+            common = Path(os.path.commonpath([str(v) for v in roots.values()]))
+        except Exception:
+            return None, {}
+        if str(common) in ("", "/"):
+            # No useful shared parent — binding "/" is not something to do quietly.
+            return None, {}
+        container = SingularityBinds().models.rstrip("/") or "/models"
+        env = {}
+        for name, host in roots.items():
+            rel = host.relative_to(common)
+            env[name] = container if str(rel) == "." else f"{container}/{rel}"
+        return common, env
+
+    return None, {}
 
 
 def emit_gui_sge_script(

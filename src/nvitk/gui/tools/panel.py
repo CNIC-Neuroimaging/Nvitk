@@ -103,6 +103,13 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
         "input_already_smoothed",
         "working_dir",
         "task",
+        "topbrain_model",
+        "topbrain_modality",
+        "topbrain_postprocess",
+        "topbrain_min_volume_mm3",
+        "topbrain_largest_only",
+        "topbrain_repair_gaps_mm",
+        "topbrain_folds",
         "correction_ids",
         "plane_x",
         "seed_z",
@@ -256,6 +263,19 @@ def _set_param_visibility(widget: Any, tool_id: str) -> None:
 
 
 _LAYER_NONE = "(none)"
+
+
+def _topbrain_choices() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """``(models, modalities)`` for the ToPBrain pickers, with safe fallbacks."""
+    try:
+        from nvitk.gui.tools.topbrain_models import MODALITY_CHOICES, model_choices
+
+        return model_choices(), MODALITY_CHOICES
+    except Exception:
+        return ("ta36",), ("auto", "mr", "ct", "already harmonised")
+
+
+_TOPBRAIN_MODEL_CHOICES, _TOPBRAIN_MODALITY_CHOICES = _topbrain_choices()
 
 
 def _layer_param_names() -> tuple[str, ...]:
@@ -484,6 +504,35 @@ def build_tool_panel(
             "label": "TotalSegmentator task",
             "value": "total",
         },
+        topbrain_model={
+            "label": "Model",
+            "widget_type": "ComboBox",
+            "choices": list(_TOPBRAIN_MODEL_CHOICES),
+            "value": _TOPBRAIN_MODEL_CHOICES[0],
+        },
+        topbrain_modality={
+            "label": "Modality",
+            "widget_type": "ComboBox",
+            "choices": list(_TOPBRAIN_MODALITY_CHOICES),
+            "value": "auto",
+        },
+        topbrain_postprocess={"label": "Post-process the prediction", "value": True},
+        topbrain_min_volume_mm3={
+            "label": "Drop islands under (mm³)",
+            "min": 0.0,
+            "max": 1000.0,
+            "step": 1.0,
+            "value": 5.0,
+        },
+        topbrain_largest_only={"label": "Keep only the largest island per class", "value": False},
+        topbrain_repair_gaps_mm={
+            "label": "Repair gaps up to (mm, 0 = off)",
+            "min": 0.0,
+            "max": 20.0,
+            "step": 0.5,
+            "value": 0.0,
+        },
+        topbrain_folds={"label": "Folds (blank = every finished fold)", "value": ""},
         correction_ids={"label": "ICA label ids (e.g. 1,2)", "value": "1,2"},
         plane_x={"label": "Midline X (voxel, 0=auto)", "min": 0, "value": 0},
         seed_z={"label": "Seed Z", "min": 0, "value": 0},
@@ -886,6 +935,13 @@ def build_tool_panel(
         input_already_smoothed: bool,
         working_dir: str,
         task: str,
+        topbrain_model: str,
+        topbrain_modality: str,
+        topbrain_postprocess: bool,
+        topbrain_min_volume_mm3: float,
+        topbrain_largest_only: bool,
+        topbrain_repair_gaps_mm: float,
+        topbrain_folds: str,
         correction_ids: str,
         plane_x: int,
         seed_z: int,
