@@ -23,6 +23,7 @@ from nvitk.transform.cpr import (
     cpr_sample,
     cpr_sample_mask,
     cross_section_at,
+    polar_coords,
     resample_centerline,
 )
 
@@ -30,6 +31,17 @@ setup(globals())
 
 #: Centerlines shorter than this are noise rather than vessels.
 MIN_CENTERLINE_POINTS = 8
+
+#: Default reach when joining a vessel's centerline pieces to each other. A
+#: segmentation of one artery routinely arrives in several components — a signal
+#: dropout at a bend, a clip artefact, a centerline traced per sub-segment — and
+#: without joining them only the largest piece is reformatted.
+DEFAULT_JOIN_GAP_VOX = 8
+
+#: How far outside the lumen a supplied centerline voxel may sit and still count.
+#: Nearest-neighbour resampling onto another grid moves a one-voxel-wide curve by
+#: up to a voxel, which is enough to put most of it outside a thin vessel.
+CENTERLINE_TOLERANCE_VOX = 2
 
 #: Default distance either side of the centerline that a reformation covers.
 DEFAULT_RAY_MM = 10.0
@@ -49,6 +61,7 @@ class VesselCpr:
     wall: Any | None
     radius_mm: Any
     samples: CenterlineSamples
+    diameter: Any = None
 
     @property
     def length_mm(self) -> float:
@@ -61,12 +74,16 @@ class VesselCpr:
         return self.samples.n_stations
 
     def diameter_mm(self) -> Any:
-        """Lumen width at each station, measured off the reformation itself.
+        """Area-equivalent lumen diameter at each station.
 
-        Counts lumen samples across each row rather than doubling the distance
-        transform, so it reflects what the image actually shows — including a
-        stenosis the centerline passes straight through.
+        Falls back to counting lumen samples across each reformation row when no
+        area measurement was made. That fallback is quantised to the ray's sample
+        step and is measured along one cut direction only, so it reads as a
+        staircase on a vessel whose true calibre varies smoothly — prefer the
+        measured value.
         """
+        if self.diameter is not None:
+            return as_backend_array(self.diameter)
         lumen = as_backend_array(self.lumen)
         ray = to_numpy(self.cpr.ray_mm)
         step = float(ray[1] - ray[0]) if ray.size > 1 else 1.0
@@ -137,6 +154,19 @@ class CenterlineUnavailable(RuntimeError):
         self.reason = str(reason)
 
 
+def _join_components(region: Any, *, max_gap: int) -> Any:
+    """Thread a mask's separate pieces together with one-voxel bridges.
+
+    Host-side, alongside the skeletonisation that follows it. ``tube_radius=0``
+    keeps each bridge one voxel wide: a fatter one reads as a junction cluster to
+    the graph walk and fragments the very path it was meant to join.
+    """
+    from nvitk.morphology.mst_bridge import bridge_binary_components_mst
+
+    joined = to_numpy(bridge_binary_components_mst(region > 0, max_gap=int(max_gap), tube_radius=0))
+    return (joined > 0).astype(np.int32)
+
+
 def _skeleton_points(binary: Any, label: int, *, centerline_mask: Any = None) -> Any:
     """Ordered centerline voxels for a 0/1 *binary* volume, or raise ``CenterlineUnavailable``.
 
@@ -166,6 +196,39 @@ def _skeleton_points(binary: Any, label: int, *, centerline_mask: Any = None) ->
     return points
 
 
+def upsample_plan(shape, spacing, *, factor: float) -> tuple[tuple, tuple]:
+    """Target ``(shape, spacing)`` for upsampling a grid by *factor*.
+
+    The spacing is derived from the shapes rather than by dividing by *factor*,
+    because a zoom aligns the first and last voxel *centres*: the physical extent
+    is preserved, so the new spacing is the old one scaled by the ratio of the
+    two grids' spans, and rounding the shape would otherwise leave it slightly off.
+    """
+    f = float(factor)
+    shape = tuple(int(n) for n in shape)
+    spacing = tuple(float(v) for v in spacing)
+    if f <= 1.0:
+        return shape, spacing
+    new_shape = tuple(max(int(round(n * f)), 1) for n in shape)
+    new_spacing = tuple(
+        s * (max(n - 1, 1) / max(m - 1, 1)) for s, n, m in zip(spacing, shape, new_shape)
+    )
+    return new_shape, new_spacing
+
+
+def upsample_volume(volume: Any, new_shape, *, order: int) -> Any:
+    """Resample *volume* onto *new_shape*.
+
+    ``order=1`` for intensities and ``order=0`` for labels — interpolating label
+    ids invents values that were never in the segmentation.
+    """
+    arr = as_backend_array(volume)
+    if tuple(arr.shape) == tuple(new_shape):
+        return arr
+    zoom = tuple(float(m) / float(n) for n, m in zip(arr.shape, new_shape))
+    return ndi.zoom(arr, zoom, order=int(order), mode="nearest")
+
+
 def centerline_for_label(
     lumen_mask: Any,
     label: int,
@@ -175,6 +238,7 @@ def centerline_for_label(
     step_mm: float = 0.5,
     smooth: float = 0.35,
     seed_normal: Any = None,
+    join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
 ) -> CenterlineSamples:
     """The centerline of one vessel, resampled and framed.
 
@@ -183,6 +247,11 @@ def centerline_for_label(
     single vessel is the vessel. A supplied centerline that does not land inside
     the label (a different grid, a one-voxel drift) falls back to skeletonising
     rather than losing the vessel.
+
+    One label's pieces are threaded together first, out to *join_gap_vox*. The
+    longest path runs through a single connected component, so a vessel that
+    arrives in two pieces would otherwise be reformatted from whichever piece is
+    longer and the rest of it silently dropped.
 
     Raises
     ------
@@ -204,13 +273,38 @@ def centerline_for_label(
 
         supplied = None
         if centerline_mask is not None:
-            supplied = (to_numpy(centerline_mask) > 0) & (binary > 0)
+            cl = to_numpy(centerline_mask)
+            own = cl == int(label)
+            if int(own.sum()) >= MIN_CENTERLINE_POINTS:
+                # The centerline layer carries this vessel's own id, so take it
+                # whole. Intersecting it with the lumen first is what throws most
+                # of a supplied curve away: a centerline resampled onto this grid,
+                # or drawn a little long, sits partly outside the mask.
+                supplied = own
+            else:
+                # Unlabelled (or differently labelled) centerlines: keep what lands
+                # in the lumen or within a voxel or two of it, rather than only
+                # what lands exactly inside.
+                near = ndi.binary_dilation(
+                    binary > 0, iterations=CENTERLINE_TOLERANCE_VOX, brute_force=True
+                )
+                supplied = (cl > 0) & to_numpy(near)
             if int(supplied.sum()) < MIN_CENTERLINE_POINTS:
                 # The supplied curve misses this vessel; skeletonise it instead.
                 supplied = None
 
         try:
-            points = _skeleton_points(binary, label, centerline_mask=supplied)
+            # Trace through the supplied curve's own extent when there is one.
+            # compute_centerlines intersects the centerline with the region it is
+            # given, so passing the lumen here would undo the tolerance above.
+            region = binary if supplied is None else supplied.astype(np.int32)
+            if int(join_gap_vox) > 0:
+                region = _join_components(region, max_gap=int(join_gap_vox))
+                if supplied is not None:
+                    # The join has to be visible on both, or the threads that
+                    # connect the pieces are intersected straight back out.
+                    supplied = region > 0
+            points = _skeleton_points(region, label, centerline_mask=supplied)
         except CenterlineUnavailable as exc:
             if centerline_mask is not None and supplied is None:
                 raise CenterlineUnavailable(
@@ -241,6 +335,7 @@ def centerlines_for_labels(
     step_mm: float = 0.5,
     smooth: float = 0.35,
     reasons: dict[int, str] | None = None,
+    join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
 ) -> dict[int, CenterlineSamples]:
     """A framed centerline per requested label.
 
@@ -263,6 +358,7 @@ def centerlines_for_labels(
                 centerline_mask=centerline_mask,
                 step_mm=step_mm,
                 smooth=smooth,
+                join_gap_vox=join_gap_vox,
             )
         except CenterlineUnavailable as exc:
             if reasons is not None:
@@ -309,7 +405,60 @@ def build_vessel_cpr(
         wall=wall,
         radius_mm=station_radius_mm(binary, samples),
         samples=samples,
+        diameter=station_area_diameter_mm(binary, samples, ray_mm=ray_mm),
     )
+
+
+#: Rays cast around each station, and samples along each ray, for the area
+#: measurement. 72 rays is one every 5 degrees; 128 radial samples over a 10 mm
+#: ray puts the boundary search step well under a tenth of a millimetre.
+DEFAULT_N_ANGLE = 72
+DEFAULT_N_RADIUS = 128
+_AREA_EPS = 1e-9
+
+
+def station_area_diameter_mm(
+    binary_mask: Any,
+    samples: CenterlineSamples,
+    *,
+    ray_mm: float = DEFAULT_RAY_MM,
+    n_angle: int = DEFAULT_N_ANGLE,
+    n_radius: int = DEFAULT_N_RADIUS,
+) -> Any:
+    """Area-equivalent lumen diameter at each station, to sub-voxel precision.
+
+    Rays are cast outward from the centerline on the perpendicular plane and each
+    one is cut where the mask first falls below half. Cutting at the *first* gap
+    means a neighbouring vessel that happens to lie inside the ray is not counted,
+    and interpolating the crossing puts the boundary between samples instead of
+    snapping it to one — which is what makes this smooth where both the distance
+    transform and a row-count are quantised to the grid. The enclosed area is
+    reported as the diameter of the circle of equal area.
+    """
+    binary = (as_backend_array(binary_mask) > 0).astype(float)
+    coords = polar_coords(samples, ray_mm=ray_mm, n_angle=n_angle, n_radius=n_radius)
+    occ = ndi.map_coordinates(binary, coords, order=1, mode="constant", cval=0.0)
+
+    dr = float(ray_mm) / int(n_radius)
+    inside = (occ >= 0.5).astype(np.int8)
+    # cumprod stays 1 only while every sample so far has been inside, so the sum
+    # is the index of the first gap — the lumen boundary along that ray.
+    k = np.cumprod(inside, axis=2).sum(axis=2)
+
+    kc = np.clip(k, 1, int(n_radius) - 1)
+    lo = np.take_along_axis(occ, (kc - 1)[..., None], axis=2)[..., 0]
+    hi = np.take_along_axis(occ, kc[..., None], axis=2)[..., 0]
+    drop = lo - hi
+    safe = np.abs(drop) > _AREA_EPS
+    frac = np.clip(np.where(safe, (lo - 0.5) / np.where(safe, drop, 1.0), 0.0), 0.0, 1.0)
+
+    # radii[j] is (j + 1) * dr, so the last sample still inside — index k - 1 —
+    # sits at k * dr, and the crossing is that plus the interpolated fraction of
+    # the next step. Anchoring on (k - 1) instead costs a fixed dr of radius,
+    # which is a constant underestimate of the calibre at every station.
+    radius = np.where(k > 0, (k.astype(float) + frac) * dr, 0.0)
+    area = 0.5 * (radius**2).sum(axis=1) * (2.0 * np.pi / float(n_angle))
+    return 2.0 * np.sqrt(area / np.pi)
 
 
 def station_radius_mm(binary_mask: Any, samples: CenterlineSamples) -> Any:
@@ -318,10 +467,14 @@ def station_radius_mm(binary_mask: Any, samples: CenterlineSamples) -> Any:
     if not bool(to_numpy(mask.any())):
         return np.zeros((samples.n_stations,), dtype=float)
     dist = ndi.distance_transform_edt(mask, sampling=samples.spacing)
-    pts = np.rint(as_backend_array(samples.points_vox)).astype(int)
-    for axis in range(3):
-        pts[:, axis] = np.clip(pts[:, axis], 0, int(dist.shape[axis]) - 1)
-    return dist[pts[:, 0], pts[:, 1], pts[:, 2]].astype(float)
+    pts = as_backend_array(samples.points_vox).astype(float, copy=False)
+    # Trilinear, not nearest. Stations are spaced far finer than a voxel, so
+    # rounding to the containing voxel returns the same handful of distances over
+    # and over and a constant-calibre vessel comes out as a staircase.
+    coords = np.stack(
+        [np.clip(pts[:, k], 0.0, float(dist.shape[k]) - 1.0) for k in range(3)], axis=0
+    )
+    return ndi.map_coordinates(dist, coords, order=1, mode="nearest").astype(float)
 
 
 def vessel_cross_section(
@@ -374,7 +527,11 @@ def plane_corners(vessel: VesselCpr, station: int, *, ray_mm: float = DEFAULT_RA
 __all__ = [
     "DEFAULT_N_RAY",
     "DEFAULT_RAY_MM",
+    "CENTERLINE_TOLERANCE_VOX",
+    "DEFAULT_JOIN_GAP_VOX",
     "MIN_CENTERLINE_POINTS",
+    "upsample_plan",
+    "upsample_volume",
     "VesselCpr",
     "build_vessel_cpr",
     "CenterlineUnavailable",
@@ -383,6 +540,7 @@ __all__ = [
     "derive_wall",
     "labels_in",
     "plane_corners",
+    "station_area_diameter_mm",
     "station_radius_mm",
     "station_world_points",
     "vessel_cross_section",

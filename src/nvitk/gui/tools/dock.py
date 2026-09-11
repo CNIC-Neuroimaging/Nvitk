@@ -560,18 +560,18 @@ def build_tools_dock(
         _sync_aux_panels()
         notify(f"{spec.category} → {spec.label} selected. Set any parameters, then Run tool.")
 
-    from nvitk.gui.tools.palette import PALETTE_SHORTCUT_LABEL, install_command_palette
+    from nvitk.gui.tools.palette import (
+        CommandSearchBar,
+        build_commands,
+        install_command_palette,
+    )
 
     open_palette = install_command_palette(viewer, _select_tool)
 
-    btn_palette = QPushButton(f"Search tools…   {PALETTE_SHORTCUT_LABEL}")
-    btn_palette.setToolTip(
-        "Find any tool or quick image operation by typing part of its name.\n"
-        f"Shortcut: {PALETTE_SHORTCUT_LABEL}. Some desktops reserve that key for "
-        "themselves — this button always works."
-    )
-    btn_palette.clicked.connect(open_palette)
-    layout.addWidget(btn_palette, 0)
+    # The tab gets a real search field; the shortcut still opens the popup, which
+    # is what reaches the palette on a desktop whose window manager claims the key.
+    search_tools = CommandSearchBar(lambda: build_commands(viewer, _select_tool))
+    layout.addWidget(search_tools, 0)
 
     from nvitk.gui.tools.registry import is_sge_capable, sge_block_reason
     from nvitk.gui.sge.submit import submit_gui_sge

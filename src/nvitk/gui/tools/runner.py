@@ -2120,15 +2120,39 @@ def _run_centerline_to_polyline(
     # 0 / negative → keep all edges (None semantics).
     min_branch_points = None if min_bp <= 0 else min_bp
 
+    from nvitk.gui.viz.centerline import mask_is_thin
+
+    mode = str(params.get("skeletonize_mode") or "auto").strip().lower()
+    thin = mask_is_thin(arr)
+    if mode == "always":
+        reskel = True
+    elif mode == "never":
+        reskel = False
+    else:
+        # The graph builder wants a 1-voxel skeleton. Handing it a thicker mask
+        # makes every voxel look like a junction and the paths come back
+        # fragmented, so thin it unless it already is thin.
+        reskel = not thin
+
+    smooth_window = int(params.get("smooth_window") or 5)
     polylines = centerline_mask_to_polylines(
         arr,
         labels=labs,
         min_branch_points=min_branch_points,
-        reskeletonize=bool(params.get("reskeletonize", False)),
-        smooth=True,
+        reskeletonize=reskel,
+        smooth=smooth_window > 1,
+        smooth_window=smooth_window,
+        prune_spur_points=int(params.get("prune_spur_points") or 0),
+        bridge_max_gap=int(params.get("bridge_max_gap") or 0),
     )
     if not polylines:
-        notify("No centerline polylines extracted (empty or too short).", error=True)
+        hint = (
+            " The mask is thicker than one voxel — set “Skeletonize input” to "
+            "“always”."
+            if not thin and not reskel
+            else " Try raising “Bridge gaps” or lowering “Min branch points”."
+        )
+        notify(f"No centerline polylines extracted (empty or too short).{hint}", error=True)
         return
 
     src = str(getattr(layer, "name", "centerline") or "centerline")
@@ -2143,9 +2167,11 @@ def _run_centerline_to_polyline(
     n_labels = len({int(p["label"]) for p in polylines})
     n_main = sum(1 for p in polylines if p.get("role") == "main")
     n_branch = len(polylines) - n_main
+    thinned = " (input thinned first)" if reskel else ""
     notify(
         f"To polyline: {len(polylines)} path(s) from {n_labels} label(s) "
-        f"({n_main} main, {n_branch} branch) → '{getattr(shapes, 'name', layer_name)}'."
+        f"({n_main} main, {n_branch} branch){thinned} → "
+        f"'{getattr(shapes, 'name', layer_name)}'."
     )
 
 
@@ -2717,6 +2743,12 @@ def _run_totalsegmentator(
     return seg_arr
 
 
+#: Ceiling on an upsampled CPR grid. A x4 zoom is 64x the memory, and the three
+#: volumes are held at once, so an unguarded factor turns a routine run into an
+#: out-of-memory kill.
+_CPR_MAX_UPSAMPLED_VOXELS = 600_000_000
+
+
 def _run_viz_vessel_cpr(
     viewer: Any,
     layer: Any,
@@ -2790,6 +2822,33 @@ def _run_viz_vessel_cpr(
     _cl_layer, cl_img = _aligned("centerline_layer", order=0, what="Centerline layer")
     centerlines = None if cl_img is None else coerce_label_output(cl_img).data
 
+    lumen_data = lumen.data
+    spacing = None
+    factor = float(params.get("upsample") or 1.0)
+    if factor > 1.0:
+        from nvitk.gui.core.spatial import layer_spacing
+        from nvitk.viz.vessel_cpr import upsample_plan, upsample_volume
+
+        base = tuple((layer_spacing(layer) or (1.0, 1.0, 1.0))[:3])
+        new_shape, spacing = upsample_plan(lumen_data.shape, base, factor=factor)
+        n_vox = int(new_shape[0]) * int(new_shape[1]) * int(new_shape[2])
+        if n_vox > _CPR_MAX_UPSAMPLED_VOXELS:
+            raise ValueError(
+                f"Upsampling ×{factor:g} would make a "
+                f"{new_shape[0]}×{new_shape[1]}×{new_shape[2]} grid "
+                f"({n_vox / 1e6:.0f}M voxels, over the "
+                f"{_CPR_MAX_UPSAMPLED_VOXELS / 1e6:.0f}M limit). "
+                "Crop the volume or use a smaller factor."
+            )
+        # Labels nearest, intensity linear: interpolating ids invents labels.
+        lumen_data = upsample_volume(lumen_data, new_shape, order=0)
+        if image is not None:
+            image = upsample_volume(image, new_shape, order=1)
+        if wall is not None:
+            wall = upsample_volume(wall, new_shape, order=0)
+        if centerlines is not None:
+            centerlines = upsample_volume(centerlines, new_shape, order=0)
+
     # Teardown of a previous run lives in this dict, so it has to outlast the call;
     # a viewer built outside the app (a test, a script) may not carry one yet.
     app_state = getattr(viewer, "_nvitk_app_state", None)
@@ -2801,12 +2860,14 @@ def _run_viz_vessel_cpr(
         viewer,
         app_state,
         lumen_layer=layer,
-        lumen_mask=lumen.data,
+        lumen_mask=lumen_data,
         image=image,
+        spacing=spacing,
         wall_mask=wall,
         labels=labels,
         centerline_mask=centerlines,
         step_mm=float(params.get("step_mm") or 0.5),
+        join_gap_vox=int(params.get("join_gap_vox", 8) or 0),
     )
     failed = panel.failure_reasons()
     if failed:

@@ -204,6 +204,13 @@ def arc_lengths(points_mm: Any) -> Any:
     return np.concatenate([np.zeros(1, dtype=float), np.cumsum(steps)])
 
 
+#: How much finer than the requested station spacing the smoothing spline is read
+#: back at, and the ceiling on that. Eight samples per station makes the chord
+#: error of the linear resampling that follows negligible against voxel size.
+_SPLINE_OVERSAMPLE = 8
+_MAX_SPLINE_POINTS = 200_000
+
+
 def resample_uniform(points_mm: Any, *, step_mm: float) -> Any:
     """Resample a polyline to uniform *step_mm* spacing by arc length."""
     pts = as_backend_array(points_mm).astype(float, copy=False).reshape(-1, 3)
@@ -218,23 +225,30 @@ def resample_uniform(points_mm: Any, *, step_mm: float) -> Any:
     return np.stack([np.interp(target, s, pts[:, k]) for k in range(3)], axis=1)
 
 
-def _smooth_points(points_mm: Any, *, smooth: float) -> Any:
-    """Fit a smoothing spline through a polyline, falling back to the input."""
+def _smooth_points(points_mm: Any, *, smooth: float, n_out: int | None = None) -> Any:
+    """Fit a smoothing spline through a polyline, falling back to the input.
+
+    *n_out* is how many points the fitted curve is read back at. It has to be well
+    above the number of stations the caller will finally resample to: the spline is
+    evaluated into a polyline and then interpolated linearly, so reading it back at
+    the input's own resolution puts the voxel staircase straight back into a curve
+    the fit had just taken it out of.
+    """
     # CuPy has no splprep, so the fit runs on the host and comes back to the
     # active backend.
     with using("cpu"):
         pts = to_numpy(points_mm).astype(float, copy=False).reshape(-1, 3)
-        if pts.shape[0] < 4 or smooth <= 0:
+        n_in = int(pts.shape[0])
+        if n_in < 4 or smooth <= 0:
             return as_backend_array(pts)
         try:
             from scipy.interpolate import splev, splprep
 
             # s scales with the point count: a fixed s over-smooths a short
             # segment and leaves a long one as staircased as it started.
-            tck, _u = splprep(
-                pts.T, s=float(smooth) * pts.shape[0], k=min(3, pts.shape[0] - 1)
-            )
-            out = np.stack(splev(np.linspace(0.0, 1.0, pts.shape[0]), tck), axis=1)
+            tck, _u = splprep(pts.T, s=float(smooth) * n_in, k=min(3, n_in - 1))
+            n = max(int(n_out or n_in), n_in)
+            out = np.stack(splev(np.linspace(0.0, 1.0, n), tck), axis=1)
         except Exception:
             out = pts
     return as_backend_array(out)
@@ -262,7 +276,19 @@ def resample_centerline(
         raise ValueError("A centerline needs at least two points.")
 
     scale = as_backend_array(sp).astype(float, copy=False)
-    mm = _smooth_points(vox * scale, smooth=smooth)
+    raw_mm = vox * scale
+    # Read the fitted curve back far finer than the station spacing so the uniform
+    # resampling that follows interpolates *along* the spline instead of chording
+    # across it. Without this the curve is only ever as fine as the skeleton was,
+    # and asking for 0.2 mm stations on 0.5 mm voxels buys nothing.
+    span = float(to_numpy(arc_lengths(raw_mm)[-1]))
+    dense = int(
+        min(
+            max(span / max(float(step_mm), _EPS) * _SPLINE_OVERSAMPLE, vox.shape[0]),
+            _MAX_SPLINE_POINTS,
+        )
+    )
+    mm = _smooth_points(raw_mm, smooth=smooth, n_out=dense)
     mm = resample_uniform(mm, step_mm=step_mm)
 
     tangents = _tangents(mm)
@@ -346,6 +372,33 @@ def cpr_coords(samples: CenterlineSamples, *, angle_deg: float, ray_mm: float, n
     offsets = np.linspace(-float(ray_mm), float(ray_mm), int(n_ray))
     # (stations, ray, 3) in mm, then back to voxels for sampling.
     pts_mm = centers_mm[:, None, :] + offsets[None, :, None] * direction[:, None, :]
+    pts_vox = pts_mm / scale
+    return np.stack([pts_vox[..., 0], pts_vox[..., 1], pts_vox[..., 2]], axis=0)
+
+
+def polar_coords(
+    samples: CenterlineSamples, *, ray_mm: float, n_angle: int, n_radius: int
+) -> Any:
+    """``(3, stations, angles, radii)`` voxel coordinates of the perpendicular discs.
+
+    One grid for every station at once, so a whole vessel's cross-sections are a
+    single ``map_coordinates`` call. Radii start one step out from the centerline,
+    which is the ray's origin and carries no area.
+    """
+    centers_mm = as_backend_array(samples.points_mm).astype(float, copy=False)
+    u = as_backend_array(samples.u).astype(float, copy=False)
+    v = as_backend_array(samples.v).astype(float, copy=False)
+    scale = as_backend_array(samples.spacing).astype(float, copy=False)
+
+    radii = np.linspace(
+        float(ray_mm) / int(n_radius), float(ray_mm), int(n_radius)
+    )
+    angles = np.linspace(0.0, 2.0 * np.pi, int(n_angle), endpoint=False)
+    dirs = (
+        np.cos(angles)[None, :, None] * u[:, None, :]
+        + np.sin(angles)[None, :, None] * v[:, None, :]
+    )
+    pts_mm = centers_mm[:, None, None, :] + radii[None, None, :, None] * dirs[:, :, None, :]
     pts_vox = pts_mm / scale
     return np.stack([pts_vox[..., 0], pts_vox[..., 1], pts_vox[..., 2]], axis=0)
 
@@ -471,6 +524,7 @@ __all__ = [
     "CprResult",
     "arc_lengths",
     "cpr_coords",
+    "polar_coords",
     "cpr_sample",
     "cpr_sample_mask",
     "cross_section_at",

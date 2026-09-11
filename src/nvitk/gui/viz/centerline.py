@@ -252,6 +252,26 @@ POLYLINE_SHAPES_META = "nvitk_centerline_polylines"
 DEFAULT_POLYLINE_LAYER = "Centerline polylines"
 
 
+def mask_is_thin(mask: np.ndarray) -> bool:
+    """True when *mask* is already a 1-voxel-wide skeleton.
+
+    A voxel with more than two 26-neighbours is a junction to the graph builder.
+    In a thin skeleton those are the real bifurcations and are rare; in a mask
+    two or more voxels wide almost every voxel qualifies, the whole thing
+    collapses into one junction cluster, and every chain between two members of
+    the same cluster is dropped as a within-blob edge — which is why a thick mask
+    comes back fragmented, or empty.
+    """
+    from nvitk.morphology.polyline_graph import skeleton_graph
+
+    coords = np.argwhere(to_numpy(mask) > 0).astype(np.float32)
+    if coords.shape[0] < 3:
+        return True
+    _nodes, _adj, deg = skeleton_graph(coords)
+    branchy = sum(1 for d in deg.values() if int(d) > 2)
+    return branchy <= max(2, int(0.15 * len(deg)))
+
+
 def centerline_mask_to_polylines(
     centerline: np.ndarray,
     *,
@@ -260,6 +280,8 @@ def centerline_mask_to_polylines(
     reskeletonize: bool = False,
     smooth: bool = True,
     smooth_window: int = 5,
+    prune_spur_points: int = 0,
+    bridge_max_gap: int = 0,
 ) -> list[dict[str, Any]]:
     """Convert a labeled centerline mask into connected branch polylines.
 
@@ -293,6 +315,28 @@ def centerline_mask_to_polylines(
     # When the input is already a 1-voxel skeleton, pass it as centerline_mask
     # so we do not re-skeletonize (preserves every root voxel). Thick masks can
     # opt into reskeletonize.
+    spur = max(0, int(prune_spur_points))
+    bridge = max(0, int(bridge_max_gap))
+    if bridge > 0:
+        # compute_connected_centerline_tree only bridges on the path where it
+        # skeletonizes for itself; a mask handed straight through as the
+        # centerline skips that, so bridge it here and keep both routes honest.
+        from nvitk.morphology.mst_bridge import bridge_binary_components_mst
+
+        joined = arr.copy()
+        for lid in labs:
+            roi = arr == int(lid)
+            if not bool(roi.any()):
+                continue
+            # tube_radius=0: the bridge joins a *centerline*, so it has to stay
+            # one voxel wide. The default dilates it into a blob, which then
+            # reads as a junction cluster and fragments the very path it joined.
+            grown = to_numpy(
+                bridge_binary_components_mst(roi, max_gap=bridge, tube_radius=0)
+            ) > 0
+            joined[grown & (joined == 0)] = int(lid)
+        arr = joined
+
     tree = compute_connected_centerline_tree(
         arr.astype(np.int32, copy=False),
         centerline_mask=None if reskeletonize else arr,
@@ -300,7 +344,9 @@ def centerline_mask_to_polylines(
         min_points=2,
         min_edge_points=int(min_edge),
         keep_all_components=True,
-        prune_short_spurs=False,
+        prune_short_spurs=spur > 0,
+        prune_spur_points=max(spur, 2),
+        bridge_max_gap=bridge,
     )
 
     out: list[dict[str, Any]] = []
@@ -310,7 +356,7 @@ def centerline_mask_to_polylines(
             poly = np.asarray(pts, dtype=np.float64)
             if poly.ndim != 2 or poly.shape[0] < 2 or poly.shape[1] < 3:
                 continue
-            if smooth and poly.shape[0] >= 3:
+            if smooth and int(smooth_window) > 1 and poly.shape[0] >= 3:
                 poly = to_numpy(
                     smooth_centerline_polyline(poly, window=int(smooth_window))
                 ).astype(np.float64, copy=False)

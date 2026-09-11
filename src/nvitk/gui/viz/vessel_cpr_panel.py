@@ -24,7 +24,9 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QDoubleSpinBox,
     QSlider,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -41,6 +43,7 @@ from nvitk.gui.core.design import (
 from nvitk.gui.viz.left_dock import attach_left_inspection_dock
 from nvitk.transform.cpr import resample_centerline
 from nvitk.viz.vessel_cpr import (
+    DEFAULT_JOIN_GAP_VOX,
     DEFAULT_N_RAY,
     DEFAULT_RAY_MM,
     VesselCpr,
@@ -84,6 +87,19 @@ N_CONTROL_POINTS = 24
 #: run on every event of a drag or a brush stroke.
 _RERENDER_MS = 250
 
+#: Bounds on the station count offered in the panel. The floor is the shortest
+#: run a frame can be built along; the ceiling keeps a typo from asking for a
+#: reformation with more rows than the volume has voxels.
+#: How long the controls sit still before a typed or dragged value is acted on.
+_SETTLE_MS = 350
+
+#: Floor on the station spacing, so a huge station count cannot ask for a step
+#: of zero millimetres.
+_MIN_STEP_MM = 0.01
+
+MIN_STATIONS = 8
+MAX_STATIONS = 20_000
+
 
 def _is_left_mouse_button(event: Any) -> bool:
     """True for a left-click, across the button spellings Napari emits."""
@@ -118,7 +134,11 @@ class VesselCprPanel(QWidget):
         super().__init__(parent)
         self._on_change: Any = None
         self._on_station: Any = None
+        self._on_reset: Any = None
+        self._on_stations: Any = None
+        self._syncing = False
         self._vessel: VesselCpr | None = None
+        self._edited = False
         self._failures: dict[int, str] = {}
 
         self._status = QLabel("Run the tool on a vessel mask to flatten it.")
@@ -130,25 +150,67 @@ class VesselCprPanel(QWidget):
         self._vessel_combo.setMinimumWidth(160)
         self._vessel_combo.currentIndexChanged.connect(lambda _i: self._emit_change())
 
-        self._angle = QSlider(Qt.Horizontal)
-        self._angle.setRange(0, 179)
-        self._angle.setMinimumWidth(110)
-        self._angle.setToolTip(
+        angle_tip = (
             "Rotate the cutting plane around the centerline. An eccentric narrowing "
             "can hide at one angle and be obvious at another."
         )
-        self._angle_label = QLabel("0°")
-        self._angle_label.setMinimumWidth(38)
-        self._angle.valueChanged.connect(self._on_angle_moved)
+        self._angle = QSlider(Qt.Horizontal)
+        self._angle.setRange(0, 179)
+        self._angle.setMinimumWidth(110)
+        self._angle.setToolTip(angle_tip)
+        self._angle_spin = QSpinBox()
+        self._angle_spin.setRange(0, 179)
+        self._angle_spin.setSuffix("°")
+        self._angle_spin.setToolTip(angle_tip)
+        self._angle_spin.setKeyboardTracking(False)
 
+        ray_tip = "How far either side of the centerline the flat view reaches."
         self._ray = QSlider(Qt.Horizontal)
         self._ray.setRange(2, 40)
         self._ray.setValue(int(DEFAULT_RAY_MM))
         self._ray.setMinimumWidth(110)
-        self._ray.setToolTip("How far either side of the centerline the flat view reaches.")
-        self._ray_label = QLabel(f"{int(DEFAULT_RAY_MM)} mm")
-        self._ray_label.setMinimumWidth(48)
-        self._ray.valueChanged.connect(self._on_ray_moved)
+        self._ray.setToolTip(ray_tip)
+        self._ray_spin = QDoubleSpinBox()
+        self._ray_spin.setRange(2.0, 40.0)
+        self._ray_spin.setDecimals(1)
+        self._ray_spin.setSingleStep(0.5)
+        self._ray_spin.setValue(float(DEFAULT_RAY_MM))
+        self._ray_spin.setSuffix(" mm")
+        self._ray_spin.setToolTip(ray_tip)
+        self._ray_spin.setKeyboardTracking(False)
+
+        self._stations_spin = QSpinBox()
+        self._stations_spin.setRange(MIN_STATIONS, MAX_STATIONS)
+        self._stations_spin.setValue(0)
+        self._stations_spin.setEnabled(False)
+        self._stations_spin.setKeyboardTracking(False)
+        self._stations_spin.setToolTip(
+            "How many stations the vessel is cut into. More stations sample the "
+            "centerline more finely; the spacing in millimetres follows from the "
+            "vessel's length."
+        )
+
+        # Sliders and boxes drive each other, and only the settled value starts a
+        # resample: dragging a slider or typing a number would otherwise reformat
+        # the whole volume once per intermediate value.
+        self._angle.valueChanged.connect(
+            lambda v: self._sync(self._angle_spin, int(v))
+        )
+        self._angle_spin.valueChanged.connect(
+            lambda v: self._sync(self._angle, int(v))
+        )
+        self._ray.valueChanged.connect(
+            lambda v: self._sync(self._ray_spin, float(v))
+        )
+        self._ray_spin.valueChanged.connect(
+            lambda v: self._sync(self._ray, int(round(float(v))))
+        )
+        for widget in (self._angle, self._ray):
+            widget.sliderReleased.connect(self._emit_change)
+        for box in (self._angle_spin, self._ray_spin):
+            box.editingFinished.connect(self._emit_change)
+            box.valueChanged.connect(lambda _v: self._defer_change())
+        self._stations_spin.valueChanged.connect(self._on_stations_changed)
 
         self._station = QSlider(Qt.Horizontal)
         self._station.setRange(0, 0)
@@ -182,6 +244,19 @@ class VesselCprPanel(QWidget):
         self._btn_render.setToolTip("Resample after editing the centerline or a mask.")
         self._btn_render.clicked.connect(lambda: self._emit_change())
 
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(_SETTLE_MS)
+        self._settle.timeout.connect(self._emit_change)
+
+        self._btn_reset = QPushButton("Reset centerline")
+        self._btn_reset.setToolTip(
+            "Discard the control-point edits for this vessel and re-derive its "
+            "centerline from the mask."
+        )
+        self._btn_reset.setEnabled(False)
+        self._btn_reset.clicked.connect(lambda: self._emit_reset())
+
         root = QVBoxLayout(self)
         root.setSpacing(SPACE_TIGHT)
         root.addWidget(self._status)
@@ -195,11 +270,14 @@ class VesselCprPanel(QWidget):
         geometry.addSpacing(SPACE_TIGHT)
         geometry.addWidget(self._caption("Angle"))
         geometry.addWidget(self._angle, stretch=1)
-        geometry.addWidget(self._angle_label)
+        geometry.addWidget(self._angle_spin)
         geometry.addSpacing(SPACE_TIGHT)
         geometry.addWidget(self._caption("Ray"))
         geometry.addWidget(self._ray, stretch=1)
-        geometry.addWidget(self._ray_label)
+        geometry.addWidget(self._ray_spin)
+        geometry.addSpacing(SPACE_TIGHT)
+        geometry.addWidget(self._caption("Stations"))
+        geometry.addWidget(self._stations_spin)
         root.addLayout(geometry)
 
         toggles = QHBoxLayout()
@@ -207,6 +285,7 @@ class VesselCprPanel(QWidget):
         for box in (self._show_lumen, self._show_wall, self._show_center, self._show_profile):
             toggles.addWidget(box)
         toggles.addStretch(1)
+        toggles.addWidget(self._btn_reset)
         toggles.addWidget(self._btn_render)
         root.addLayout(toggles)
 
@@ -219,8 +298,8 @@ class VesselCprPanel(QWidget):
 
             # Flat vessel over its calibre profile, sharing the arc-length axis so a
             # narrowing on the profile sits directly under the place it happens.
-            self._cpr_fig = Figure(figsize=(7.5, 3.4), dpi=96)
-            grid = self._cpr_fig.add_gridspec(2, 1, height_ratios=(3.0, 1.0), hspace=0.08)
+            self._cpr_fig = Figure(figsize=(7.5, 3.4), dpi=96, layout="constrained")
+            grid = self._cpr_fig.add_gridspec(2, 1, height_ratios=(3.0, 1.0))
             self._cpr_ax = self._cpr_fig.add_subplot(grid[0])
             self._profile_ax = self._cpr_fig.add_subplot(grid[1], sharex=self._cpr_ax)
             self._cpr_canvas = FigureCanvasQTAgg(self._cpr_fig)
@@ -265,30 +344,65 @@ class VesselCprPanel(QWidget):
 
     # ── wiring ───────────────────────────────────────────────────────────────
 
-    def set_callbacks(self, *, on_change: Any = None, on_station: Any = None) -> None:
+    def set_callbacks(
+        self,
+        *,
+        on_change: Any = None,
+        on_station: Any = None,
+        on_reset: Any = None,
+        on_stations: Any = None,
+    ) -> None:
         """Register what to call when the controls move."""
         self._on_change = on_change
         self._on_station = on_station
+        self._on_reset = on_reset
+        self._on_stations = on_stations
+
+    def _emit_reset(self) -> None:
+        """Ask the installer to throw this vessel's centerline edits away."""
+        if self._on_reset is not None:
+            self._on_reset()
+
+    def set_edited(self, edited: bool) -> None:
+        """Show whether the vessel on screen is running on a retouched centerline."""
+        self._edited = bool(edited)
+        self._btn_reset.setEnabled(bool(edited))
+
+    def _sync(self, widget: QWidget, value: Any) -> None:
+        """Mirror a value onto the partner widget without it echoing back."""
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        finally:
+            self._syncing = False
+
+    def _defer_change(self) -> None:
+        """Resample once the controls settle, rather than on every step of a drag."""
+        if self._angle.isSliderDown() or self._ray.isSliderDown():
+            return
+        self._settle.start()
 
     def _emit_change(self) -> None:
         """Ask the installer to resample with the current settings."""
+        self._settle.stop()
         if self._on_change is not None:
             self._on_change()
+
+    def _on_stations_changed(self, value: int) -> None:
+        """Re-cut the vessel into *value* stations."""
+        if self._syncing or not self._stations_spin.isEnabled():
+            return
+        if self._on_stations is not None:
+            self._on_stations(int(value))
 
     def _emit_station(self, station: int) -> None:
         """Tell the installer the current station moved."""
         if self._on_station is not None:
             self._on_station(int(station))
-
-    def _on_angle_moved(self, value: int) -> None:
-        """Update the readout, then resample at the new angle."""
-        self._angle_label.setText(f"{int(value)}°")
-        self._emit_change()
-
-    def _on_ray_moved(self, value: int) -> None:
-        """Update the readout, then resample at the new ray length."""
-        self._ray_label.setText(f"{int(value)} mm")
-        self._emit_change()
 
     def _station_at(self, event: Any) -> int | None:
         """The station index under a mouse *event* on either arc-length axis."""
@@ -324,11 +438,11 @@ class VesselCprPanel(QWidget):
 
     def angle_deg(self) -> float:
         """Current cutting angle."""
-        return float(self._angle.value())
+        return float(self._angle_spin.value())
 
     def ray_mm(self) -> float:
         """Current ray half-length in millimetres."""
-        return float(self._ray.value())
+        return float(self._ray_spin.value())
 
     def station(self) -> int:
         """Current station index."""
@@ -370,6 +484,7 @@ class VesselCprPanel(QWidget):
                 )
             self._status.setText(message or "No vessel to show.")
             self._station_label.setText("—")
+            self._stations_spin.setEnabled(False)
             self._station.blockSignals(True)
             self._station.setRange(0, 0)
             self._station.blockSignals(False)
@@ -382,12 +497,25 @@ class VesselCprPanel(QWidget):
             self._station.setValue(max(vessel.n_stations - 1, 0))
         self._station.blockSignals(False)
 
+        self._syncing = True
+        try:
+            self._stations_spin.setEnabled(True)
+            self._stations_spin.setValue(
+                int(min(max(vessel.n_stations, MIN_STATIONS), MAX_STATIONS))
+            )
+        finally:
+            self._syncing = False
+
         diameters = to_numpy(vessel.diameter_mm())
         narrowest = float(diameters.min()) if diameters.size else float("nan")
+        step = vessel.length_mm / max(vessel.n_stations - 1, 1)
         text = (
             f"{vessel.name} — {vessel.length_mm:.1f} mm long, "
-            f"{vessel.n_stations} stations, narrowest {narrowest:.1f} mm"
+            f"{vessel.n_stations} stations ({step:.2f} mm apart), "
+            f"narrowest {narrowest:.1f} mm"
         )
+        if self._edited:
+            text += "  ·  centerline retouched"
         if vessel.cpr.fold_warning:
             text += f"  ·  {vessel.cpr.fold_warning}"
         if self._failures:
@@ -466,7 +594,6 @@ class VesselCprPanel(QWidget):
         ax.tick_params(labelsize=7, labelbottom=False)
         self._draw_profile(vessel, arc, station)
         style_image_figure(self._cpr_fig)
-        self._cpr_fig.tight_layout(pad=0.3)
         self._cpr_canvas.draw_idle()
 
     def _draw_profile(self, vessel: VesselCpr, arc: Any, station: int) -> None:
@@ -590,6 +717,18 @@ def _control_point_indices(n_stations: int, n_wanted: int = N_CONTROL_POINTS) ->
         )
 
 
+def _grid_ratio(layer_data: Any, mask: Any) -> Any:
+    """Per-axis factor taking *mask*-grid voxel coordinates back to *layer_data*'s."""
+    with using("cpu"):
+        base = tuple(int(v) for v in getattr(layer_data, "shape", ()) or ())[:3]
+        fine = tuple(int(v) for v in getattr(mask, "shape", ()) or ())[:3]
+        if len(base) != 3 or len(fine) != 3 or base == fine:
+            return np.ones((3,), dtype=float)
+        return np.array(
+            [max(b - 1, 1) / max(f - 1, 1) for b, f in zip(base, fine)], dtype=float
+        )
+
+
 def install_vessel_cpr(
     viewer: Any,
     app_state: dict[str, Any],
@@ -602,6 +741,7 @@ def install_vessel_cpr(
     centerline_mask: Any = None,
     spacing=None,
     step_mm: float = 0.5,
+    join_gap_vox: int = DEFAULT_JOIN_GAP_VOX,
 ) -> VesselCprPanel:
     """Flatten the requested vessels and wire the panel, overlays and edits.
 
@@ -633,12 +773,21 @@ def install_vessel_cpr(
         "wall": None if wall_mask is None else to_numpy(wall_mask),
         "spacing": sp,
         "step_mm": float(step_mm),
+        "join_gap_vox": int(join_gap_vox),
         "labels": labels,
         "centerline_mask": None if centerline_mask is None else to_numpy(centerline_mask),
         "spatial": layer_spatial_kwargs(lumen_layer),
+        # Overlays are added with the lumen layer's own scale/affine, so points
+        # computed on an upsampled grid have to come back to the layer's voxel
+        # coordinates first. A zoom aligns first and last voxel centres, so the
+        # ratio is over the spans, not the sizes.
+        "overlay_scale": _grid_ratio(getattr(lumen_layer, "data", None), mask),
         "lumen_layer": lumen_layer,
         "samples": {},
         "vessel": None,
+        "handles": None,
+        "handles_stale": True,
+        "suspend_edit": False,
         "edited": {},
     }
 
@@ -649,6 +798,7 @@ def install_vessel_cpr(
 
     def _derive_centerlines() -> None:
         """(Re)derive centerlines for the requested labels."""
+        state["handles_stale"] = True
         reasons: dict[int, str] = {}
         state["samples"] = centerlines_for_labels(
             state["mask"],
@@ -657,9 +807,30 @@ def install_vessel_cpr(
             centerline_mask=state["centerline_mask"],
             step_mm=state["step_mm"],
             reasons=reasons,
+            join_gap_vox=state["join_gap_vox"],
         )
         panel.set_failure_reasons(reasons)
         panel.set_vessels([(lab, vessel_name(lab)) for lab in state["samples"]])
+
+    def _keep_selection(fn) -> None:
+        """Run *fn*, then put the viewer's active layer back where it was.
+
+        Adding a layer makes it active in Napari, so an overlay refresh would
+        otherwise steal the selection from whatever the user was working on.
+        """
+        try:
+            keep = viewer.layers.selection.active
+        except Exception:
+            keep = None
+        try:
+            fn()
+        finally:
+            if keep is not None:
+                try:
+                    if keep in list(viewer.layers):
+                        viewer.layers.selection.active = keep
+                except Exception:
+                    pass
 
     def _render() -> None:
         """Resample the selected vessel and refresh the panel and overlays."""
@@ -677,6 +848,7 @@ def install_vessel_cpr(
             _clear_overlays()
             return
         # An edited centerline replaces the derived one for that vessel.
+        panel.set_edited(int(label) in state["edited"])
         samples = state["edited"].get(label, samples)
         vessel = build_vessel_cpr(
             state["image"],
@@ -690,7 +862,7 @@ def install_vessel_cpr(
         )
         state["vessel"] = vessel
         panel.show_vessel(vessel)
-        _update_overlays(vessel)
+        _keep_selection(lambda: _update_overlays(vessel))
         _show_station(panel.station())
 
     def _show_station(station: int) -> None:
@@ -708,81 +880,142 @@ def install_vessel_cpr(
         panel.show_cross_section(
             image_xs, mask_xs, title=f"{at:.1f} mm along — lumen {here:.1f} mm"
         )
-        _update_station_overlays(vessel, station)
+        _keep_selection(lambda: _update_station_overlays(vessel, station))
         panel.redraw()
 
     # ── overlays ─────────────────────────────────────────────────────────────
 
+    def _layer_coords(points_vox: Any) -> Any:
+        """Fine-grid voxel coordinates as the lumen layer's, for a Napari overlay."""
+        with using("cpu"):
+            return (to_numpy(points_vox) * to_numpy(state["overlay_scale"])).astype(
+                "float32", copy=False
+            )
+
+    def _grid_coords(points_layer_vox: Any) -> Any:
+        """The inverse: points read back off an overlay, onto the working grid."""
+        with using("cpu"):
+            return to_numpy(points_layer_vox).astype(float, copy=False) / to_numpy(
+                state["overlay_scale"]
+            )
+
     def _clear_overlays() -> None:
         """Remove every overlay layer the panel owns."""
+        state["handles"] = None
         _remove_layers_named(viewer, OVERLAY_LAYERS)
 
+    def _existing(name: str) -> Any:
+        """The overlay layer called *name* if it is still in the viewer."""
+        for lyr in getattr(viewer, "layers", []) or []:
+            if str(getattr(lyr, "name", "")) == name:
+                return lyr
+        return None
+
     def _update_overlays(vessel: VesselCpr) -> None:
-        """Draw the centerline and its draggable control points in 3D."""
+        """Draw the centerline and its draggable control points in 3D.
+
+        The layers are updated in place rather than dropped and re-added. Re-adding
+        them costs the user their work twice over: Napari selects a newly added
+        layer, so the selection jumps to whichever overlay went in last, and a
+        fresh Points layer comes up in pan/zoom — so the select tool the drag
+        needs is gone the moment the drag is acted on.
+        """
         # Napari layers hold host arrays.
-        pts = to_numpy(vessel.samples.points_vox).astype("float32", copy=False)
+        pts = _layer_coords(vessel.samples.points_vox)
         spatial = state["spatial"]
-        _remove_layers_named(viewer, (CPR_CENTERLINE, CPR_CONTROL_POINTS))
+
+        line = _existing(CPR_CENTERLINE)
         try:
-            line = viewer.add_shapes(
-                [pts],
-                shape_type="path",
-                name=CPR_CENTERLINE,
-                edge_color=CENTERLINE_COLOR,
-                edge_width=0.4,
-                **spatial,
-            )
-            line.editable = False
+            if line is None:
+                line = viewer.add_shapes(
+                    [pts],
+                    shape_type="path",
+                    name=CPR_CENTERLINE,
+                    edge_color=CENTERLINE_COLOR,
+                    edge_width=0.4,
+                    **spatial,
+                )
+                line.editable = False
+            else:
+                line.data = [pts]
         except Exception:
             pass
+
+        handles = _existing(CPR_CONTROL_POINTS)
+        idx = _control_point_indices(vessel.n_stations)
+        # Handles follow a centerline that was re-derived, but not one the user is
+        # in the middle of editing: snapping them onto the resampled curve after
+        # every drag would tug each point away from where it was just put.
+        refresh = (
+            bool(state.get("handles_stale"))
+            or state.get("control_label") != vessel.label
+            or handles is None
+            or int(getattr(handles.data, "shape", (0,))[0]) != int(idx.size)
+        )
+        state["suspend_edit"] = True
         try:
-            idx = _control_point_indices(vessel.n_stations)
-            handles = viewer.add_points(
-                pts[idx],
-                name=CPR_CONTROL_POINTS,
-                size=1.6,
-                face_color=STATION_COLOR,
-                border_width=0,
-                **spatial,
-            )
-            state["control_indices"] = idx
-            state["control_label"] = vessel.label
-            # Napari Points are draggable in select mode; that is the editing
-            # gesture, so no custom mouse handling is needed here.
-            handles.events.data.connect(_on_control_points_moved)
-            state["handles"] = handles
+            if handles is None:
+                handles = viewer.add_points(
+                    pts[idx],
+                    name=CPR_CONTROL_POINTS,
+                    size=1.6,
+                    face_color=STATION_COLOR,
+                    border_width=0,
+                    **spatial,
+                )
+                # Napari Points are draggable in select mode; that is the editing
+                # gesture, so no custom mouse handling is needed here.
+                handles.events.data.connect(_on_control_points_moved)
+            elif refresh:
+                handles.data = pts[idx]
         except Exception:
-            pass
+            handles = None
+        finally:
+            state["suspend_edit"] = False
+        state["handles_stale"] = False
+        state["control_indices"] = idx
+        state["control_label"] = vessel.label
+        state["handles"] = handles
 
     def _update_station_overlays(vessel: VesselCpr, station: int) -> None:
         """Move the station marker and the cross-section plane in 3D."""
         spatial = state["spatial"]
-        _remove_layers_named(viewer, (CPR_STATION, CPR_PLANE))
-        pts = to_numpy(vessel.samples.points_vox).astype("float32", copy=False)
+        pts = _layer_coords(vessel.samples.points_vox)
         idx = int(max(0, min(int(station), pts.shape[0] - 1)))
+
+        marker = _existing(CPR_STATION)
         try:
-            marker = viewer.add_points(
-                pts[idx][None, :],
-                name=CPR_STATION,
-                size=2.4,
-                face_color="#ffa400",
-                border_width=0,
-                **spatial,
-            )
-            marker.editable = False
+            if marker is None:
+                marker = viewer.add_points(
+                    pts[idx][None, :],
+                    name=CPR_STATION,
+                    size=2.4,
+                    face_color=STATION_COLOR,
+                    border_width=0,
+                    **spatial,
+                )
+                marker.editable = False
+            else:
+                marker.data = pts[idx][None, :]
         except Exception:
             pass
+
+        corners = _layer_coords(plane_corners(vessel, idx, ray_mm=panel.ray_mm()))
+        square = _existing(CPR_PLANE)
         try:
-            square = viewer.add_shapes(
-                [plane_corners(vessel, idx, ray_mm=panel.ray_mm())],
-                shape_type="polygon",
-                name=CPR_PLANE,
-                edge_color="#ffa400",
-                face_color="transparent",
-                edge_width=0.3,
-                **spatial,
-            )
-            square.editable = False
+            if square is None:
+                square = viewer.add_shapes(
+                    [corners],
+                    shape_type="polygon",
+                    name=CPR_PLANE,
+                    edge_color=STATION_COLOR,
+                    face_color="transparent",
+                    edge_width=0.3,
+                    **spatial,
+                )
+                square.editable = False
+            else:
+                square.data = [corners]
         except Exception:
             pass
 
@@ -790,11 +1023,13 @@ def install_vessel_cpr(
 
     def _on_control_points_moved(_event: Any = None) -> None:
         """Re-fit the centerline through the moved handles, then re-render."""
+        if state.get("suspend_edit"):
+            return
         handles = state.get("handles")
         label = state.get("control_label")
         if handles is None or label is None:
             return
-        moved = to_numpy(handles.data).astype(float, copy=False)
+        moved = _grid_coords(handles.data)
         if moved.shape[0] < 2:
             return
         try:
@@ -815,14 +1050,66 @@ def install_vessel_cpr(
         layer = state.get("lumen_layer")
         if layer is None:
             return
-        state["mask"] = to_numpy(layer.data)
+        fresh = to_numpy(layer.data)
+        if tuple(fresh.shape) != tuple(state["mask"].shape):
+            from nvitk.viz.vessel_cpr import upsample_volume
+
+            fresh = to_numpy(upsample_volume(fresh, state["mask"].shape, order=0))
+        state["mask"] = fresh
         # Geometry may have changed under the centerline, so re-derive it too.
         state["edited"].clear()
         _derive_centerlines()
         timer.start()
 
+    def _set_stations(count: int) -> None:
+        """Re-cut the current vessel into *count* stations.
+
+        The station count is the spacing seen from the other side: the vessel's
+        length is fixed, so asking for more stations is asking for a finer step.
+        Edited centerlines are re-resampled through their own points rather than
+        discarded — a retouch should survive a change of resolution.
+        """
+        label = panel.selected_label()
+        samples = None
+        if label is not None:
+            samples = state["edited"].get(int(label)) or state["samples"].get(int(label))
+        if samples is None:
+            return
+        length = float(samples.length_mm)
+        if length <= 0.0:
+            return
+        state["step_mm"] = max(length / max(int(count) - 1, 1), _MIN_STEP_MM)
+
+        for lab, edited in list(state["edited"].items()):
+            try:
+                state["edited"][lab] = resample_centerline(
+                    edited.points_vox,
+                    state["spacing"],
+                    step_mm=state["step_mm"],
+                    smooth=0.0,
+                )
+            except Exception:
+                state["edited"].pop(lab, None)
+        _derive_centerlines()
+        _render()
+
+    def _reset_centerline() -> None:
+        """Throw away this vessel's control-point edits and re-derive it."""
+        label = panel.selected_label()
+        if label is None:
+            return
+        state["edited"].pop(int(label), None)
+        panel.set_edited(False)
+        _derive_centerlines()
+        _render()
+
     timer.timeout.connect(_render)
-    panel.set_callbacks(on_change=_render, on_station=_show_station)
+    panel.set_callbacks(
+        on_change=_render,
+        on_station=_show_station,
+        on_reset=_reset_centerline,
+        on_stations=_set_stations,
+    )
 
     if lumen_layer is not None:
         try:

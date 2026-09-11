@@ -1,4 +1,4 @@
-"""Alt+Space command palette: type a few letters, run any nvitk tool.
+"""Alt+F command palette: type a few letters, run any nvitk tool.
 
 The tool registry has grown past a hundred entries across a dozen categories, and
 finding one means remembering which category it lives under. This indexes every
@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QCompleter,
     QDialog,
     QLineEdit,
     QListWidget,
@@ -269,13 +270,117 @@ def build_commands(viewer: Any, run_tool: Callable[[str], None]) -> list[Command
     return commands
 
 
-#: Qt's name for the Windows / Super key is ``Meta``. "Win+Space" and
-#: "Super+Space" both parse to an *empty* key sequence, which binds nothing and
-#: fails silently — hence the spelling here and the check in the installer.
-PALETTE_SHORTCUT = "Meta+Space"
+#: Opens the palette from anywhere in the Napari window.
+PALETTE_SHORTCUT = "Alt+F"
 
-#: What to call that key in the interface, where "Meta" means nothing to anyone.
-PALETTE_SHORTCUT_LABEL = "Win+Space"
+#: What to call that key in the interface. Same spelling here, but the two are
+#: kept apart because Qt's name for a modifier and the one a user recognises do
+#: not always agree — the Windows key, for one, is "Meta" to Qt.
+PALETTE_SHORTCUT_LABEL = "Alt+F"
+
+
+class CommandSearchBar(QLineEdit):
+    """Inline tool search, ranked the same way the palette ranks.
+
+    A completer rather than a second popup list: this sits in the Tools tab and
+    should behave like the search field it looks like. Qt filters a completer's
+    model by prefix, which would miss “thresh” finding *Binarize*, so the model is
+    re-ranked on every keystroke through :func:`rank_commands` and the completer
+    is left matching everything in the order it is given.
+    """
+
+    def __init__(self, provider: Callable[[], list[Command]], parent: Any = None) -> None:
+        """Build the field; *provider* returns the current commands when asked."""
+        super().__init__(parent)
+        from qtpy.QtCore import QStringListModel
+
+        self._provider = provider
+        self._commands: list[Command] = []
+        self._by_title: dict[str, Command] = {}
+
+        self.setPlaceholderText(f"Search tools…   {PALETTE_SHORTCUT_LABEL}")
+        self.setClearButtonEnabled(True)
+        self.setToolTip(
+            "Find any tool or quick image operation by typing part of its name. "
+            f"{PALETTE_SHORTCUT_LABEL} opens the same search as a popup."
+        )
+
+        self._model = QStringListModel(self)
+
+        outer = self
+
+        class _RankedCompleter(QCompleter):
+            """Re-ranks the model on each keystroke instead of prefix-filtering."""
+
+            def splitPath(self, path: str) -> list[str]:
+                """Refresh the model for *path*, then match everything in it."""
+                outer._rerank(str(path))
+                return [""]
+
+        self._completer = _RankedCompleter(self._model, self)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self._completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+        self._completer.setMaxVisibleItems(12)
+        self._completer.activated.connect(self._run_title)
+        self.setCompleter(self._completer)
+
+    def _rerank(self, query: str) -> None:
+        """Refresh the completion model with the best matches for *query*."""
+        try:
+            self._commands = list(self._provider() or [])
+        except Exception:
+            self._commands = []
+        ranked = rank_commands(self._commands, query)
+        # Titles repeat across groups (two "Threshold"s), so the group is shown
+        # and is part of the key the choice is looked up by — except where the
+        # title already opens with it, which is how the tool entries are built.
+        self._by_title = {}
+        labels: list[str] = []
+        for command in ranked:
+            label = command.title
+            group = command.group
+            if group and not label.lower().startswith(f"{group.lower()}:"):
+                label = f"{label}  ·  {group}"
+            self._by_title.setdefault(label, command)
+            labels.append(label)
+        self._model.setStringList(labels)
+
+    def _run_title(self, label: str) -> None:
+        """Run whatever the user picked, then clear the field."""
+        command = self._by_title.get(str(label))
+        self.clear()
+        if command is not None and command.run is not None:
+            command.run()
+
+
+def _free_menu_mnemonic(window: Any, shortcut: str) -> str:
+    """Drop a menu-bar mnemonic that would fight *shortcut* for the same Alt+key.
+
+    Qt compiles ``&File`` into a shortcut of its own, so binding Alt+F for the
+    palette leaves two shortcuts on one key. Qt calls that ambiguous and
+    alternates between them press after press, which reads as the palette opening
+    every *other* time. The menu keeps its label and its place; it just stops
+    answering to Alt+F. Returns the title it changed, or ``""``.
+    """
+    from qtpy.QtWidgets import QMenuBar
+
+    parts = str(shortcut).split("+")
+    if len(parts) != 2 or parts[0].strip().lower() != "alt":
+        return ""
+    letter = parts[1].strip().lower()
+    if len(letter) != 1:
+        return ""
+    for bar in window.findChildren(QMenuBar):
+        for action in bar.actions():
+            text = str(action.text())
+            index = text.find("&")
+            if index < 0 or index + 1 >= len(text):
+                continue
+            if text[index + 1].lower() != letter:
+                continue
+            action.setText(text[:index] + text[index + 1 :])
+            return text
+    return ""
 
 
 def install_command_palette(
@@ -317,13 +422,15 @@ def install_command_palette(
 
         gui_log(
             f"Command palette: {shortcut!r} is not a key sequence Qt understands "
-            "(the Windows key is spelled 'Meta'). Use the search button instead.",
+            "(the Windows key is spelled 'Meta'). Use the Tools tab search bar "
+            "instead.",
             error=True,
         )
         return _open
 
     try:
         parent = viewer.window._qt_window
+        _free_menu_mnemonic(parent, shortcut)
         hotkey = QShortcut(sequence, parent)
         hotkey.setContext(Qt.ApplicationShortcut)
         hotkey.activated.connect(_open)
@@ -335,6 +442,7 @@ def install_command_palette(
 
 
 __all__ = [
+    "CommandSearchBar",
     "MAX_RESULTS",
     "PALETTE_SHORTCUT",
     "PALETTE_SHORTCUT_LABEL",

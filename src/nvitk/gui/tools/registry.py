@@ -337,16 +337,28 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
                 min=0,
                 max=5000,
             ),
-            ParamSpec("reskeletonize", "Re-skeletonize mask (thick masks only)", "bool", False),
+            ParamSpec(
+                "skeletonize_mode",
+                "Skeletonize input",
+                "choice",
+                "auto",
+                choices=("auto", "always", "never"),
+            ),
+            ParamSpec("prune_spur_points", "Prune spurs under N points (0 = off)", "int", 0, min=0, max=200),
+            ParamSpec("bridge_max_gap", "Bridge gaps up to N voxels (0 = off)", "int", 0, min=0, max=50),
+            ParamSpec("smooth_window", "Smoothing window (1 = off)", "int", 5, min=1, max=20),
             ParamSpec("edge_width", "Path line width", "float", 0.35, min=0.05, max=5.0),
         ),
         needs_3d=True,
         run_mode="notify",
         description=(
-            "Convert a complete centerline mask into smoothed Napari path shapes. "
-            "Per label: longest main path plus every unique branch edge through "
-            "bifurcations (no dropped corridors). Optional min branch points is "
-            "the only length prune (0 = keep all)."
+            "Convert a centerline mask into smoothed Napari path shapes. Per label: "
+            "longest main path plus every unique branch edge through bifurcations "
+            "(no dropped corridors). The graph is built on 1-voxel-thin skeletons; a "
+            "thicker mask makes every voxel look like a junction and the paths come "
+            "out fragmented, so “auto” thins it first when it is not already thin. "
+            "Bridging reconnects a mask broken into pieces; spur pruning drops "
+            "skeletonisation whiskers; min branch points is the only length prune."
         ),
     ),
     GuiToolSpec(
@@ -729,6 +741,8 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             ParamSpec("wall_layer", "Wall mask (optional)", "layer", ""),
             ParamSpec("centerline_layer", "Centerlines (optional)", "layer", ""),
             ParamSpec("step_mm", "Station spacing (mm)", "float", 0.5, min=0.1, max=5.0),
+            ParamSpec("upsample", "Upsample image + mask (1 = off)", "float", 1.0, min=1.0, max=4.0),
+            ParamSpec("join_gap_vox", "Join vessel pieces up to N voxels (0 = off)", "int", 8, min=0, max=50),
         ),
         needs_3d=True,
         run_mode="notify",
@@ -739,7 +753,9 @@ _TOOLS: tuple[GuiToolSpec, ...] = (
             "is resampled along the centerline so the vessel is drawn flat left-to-right, "
             "with the lumen and wall overlaid and the long axis in millimetres. Click a "
             "column to see that station's true cross-section and where it is in 3D. "
-            "Centerlines are skeletonised from the mask when none is supplied."
+            "Centerlines are skeletonised from the mask when none is supplied, and a "
+            "vessel that arrives in several disconnected pieces is threaded back "
+            "together first so the whole of it is reformatted."
         ),
     ),
     GuiToolSpec(
