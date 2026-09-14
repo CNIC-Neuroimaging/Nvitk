@@ -668,6 +668,8 @@ def build_corpus(
     corpus_modality: str = "both",
     overwrite: bool,
     workers: int,
+    ct_window: Sequence[float] | None = None,
+    mr_percentiles: Sequence[float] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Build the unlabeled nnssl collection; returns ``(pretrain_data.json, provenance)``."""
     # nnssl binds its roots at import time, so the environment must be set up first.
@@ -695,6 +697,10 @@ def build_corpus(
         overwrite=overwrite,
         workers=workers,
         only_modality=None if corpus_modality == "both" else corpus_modality,
+        # The corpus must be windowed exactly like the labelled data: the encoder is pre-trained
+        # here and fine-tuned there, and a different clip point is a domain gap nothing later
+        # corrects.
+        ct_window=ct_window, mr_percentiles=mr_percentiles,
     )
 
     pretrain_json = dataset_dir / "pretrain_data.json"
@@ -870,6 +876,7 @@ def run_dataprep(
     if "corpus" in targets:
         _, corpus_meta = build_corpus(
             paths=paths, sources=corpus_sources, harmonize=harmonize_corpus,
+            ct_window=ct_window, mr_percentiles=mr_percentiles,
             corpus_modality=corpus_modality,
             overwrite=overwrite, workers=workers,
         )
@@ -923,6 +930,10 @@ def _worker_argv(**options) -> list[str]:
         argv.append("--no-challenge")
     if options.get("overwrite"):
         argv.append("--overwrite")
+    if options.get("ct_window"):
+        argv.extend(["--ct-window", *[str(float(v)) for v in options["ct_window"]]])
+    if options.get("mr_percentiles"):
+        argv.extend(["--mr-percentiles", *[str(float(v)) for v in options["mr_percentiles"]]])
     if options.get("ct_context_window"):
         argv.extend(["--ct-context-window",
                      *[str(float(v)) for v in options["ct_context_window"]]])
@@ -1016,7 +1027,9 @@ def submit_sge(
 @click.option("--no-challenge", is_flag=True, default=False,
               help="Exclude the challenge cases; train only on --extra-train cohorts.")
 @click.option("--corpus-source", "corpus_sources", multiple=True,
-              help="Unlabeled corpus source: 'name:modality=/path[:glob]'. Repeatable.")
+              help="Unlabeled corpus source: a built-in name ('topbrain', 'topaneu=/root', "
+                   "'pesa_tof=/root', 'bo_large_ia=/root') or 'name:modality=/path[:glob]'. "
+                   "Repeatable.")
 @click.option("--num-folds", type=int, default=None)
 @click.option("--seed", type=int, default=None, help="Patient-grouped fold assignment seed.")
 @click.option("--ct-window", type=float, nargs=2, default=None, help="CT clip window in HU.")

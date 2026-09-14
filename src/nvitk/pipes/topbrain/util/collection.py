@@ -56,8 +56,14 @@ class CorpusSource:
     modality: str
     """``ct``/``mr``, or ``auto`` to read it from the :attr:`subject_regex` ``modality`` group."""
 
-    pattern: str = "**/*.nii.gz"
-    """Glob, relative to :attr:`root`."""
+    pattern: str | tuple[str, ...] = "**/*.nii.gz"
+    """Glob (or several), relative to :attr:`root`.
+
+    A tuple is for cohorts whose wanted volumes live in sibling directories that no single glob
+    separates from the unwanted ones -- ``bo_large_ia`` keeps its images in ``internal_Tr*`` and
+    ``external_cta_img`` beside annotation directories that must not be swept in. Matches are
+    unioned and de-duplicated, so overlapping globs cannot contribute a volume twice.
+    """
 
     subject_regex: str | None = None
     """Regex over the root-relative path with a ``subject`` group (and optionally ``modality``).
@@ -115,6 +121,23 @@ BUILTIN_SOURCES: dict[str, dict[str, Any]] = {
         # subject, so the repeat index is deliberately left out of the key.
         "subject_template": "{center}_{pid}",
     },
+    # BO-Large-IA: ~1400 CTA volumes. 
+    # The release keeps its images in numbered batch directories beside annotation directories and
+    # CSV manifests, so the globs name the image batches explicitly rather than sweeping the
+    # tree -- an annotation volume pulled in as an image would be pre-trained on as anatomy.
+    "bo_large_ia": {
+        "pattern": (
+            "internal_Tr*/*.nii.gz",     # internal_Tr01 .. internal_Tr12
+            "internal_Ts*/*.nii.gz",     # internal_Ts01, internal_Ts02
+            "external_cta_img/*.nii.gz",
+        ),
+        "modality": "ct",
+        # The batch directory is not part of the subject: the numbering is global across them
+        # (Tr01 holds Tr0001-Tr0099, Tr02 holds Tr0100-Tr0199), so the stem alone is unique, and
+        # the internal and external cohorts use different prefixes. Deliberately permissive
+        # about the stem so a batch whose naming differs is not silently dropped.
+        "subject_regex": r"/(?P<subject>[^/]+)\.nii(?:\.gz)?$",
+    },
     # PESA-Brain TOF-MRA: same modality family as the MRA track.
     "pesa_tof": {
         "pattern": "*/TOF/*.nii.gz",
@@ -153,7 +176,12 @@ def parse_source_spec(spec: str, *, challenge_root: Path | None = None) -> Corpu
 
         topbrain                        # built-in, rooted at the challenge release
         pesa_tof=/path/to/NIFTI         # built-in layout, explicit root
+        bo_large_ia=/path/to/release    # built-in, multi-glob layout
         name:modality=/path[:glob]      # arbitrary cohort
+
+    A ``:glob`` suffix overrides the built-in pattern with a single glob. Built-ins that need
+    several (``bo_large_ia``) therefore cannot be narrowed that way -- take them whole, or
+    declare an arbitrary cohort per directory.
 
     Raises
     ------
@@ -191,6 +219,24 @@ def parse_source_spec(spec: str, *, challenge_root: Path | None = None) -> Corpu
     )
 
 
+def source_patterns(pattern: str | Sequence[str]) -> tuple[str, ...]:
+    """Normalise :attr:`CorpusSource.pattern` to a tuple of globs."""
+    return (pattern,) if isinstance(pattern, str) else tuple(pattern)
+
+
+def _matching_paths(root: Path, pattern: str | Sequence[str]) -> list[Path]:
+    """Every file under *root* matching any glob in *pattern*, de-duplicated and sorted.
+
+    Sorting is over the union rather than per glob, so the corpus order does not depend on which
+    glob happened to find a volume -- the collection is written in this order and a stable one
+    keeps successive builds comparable.
+    """
+    seen: set[Path] = set()
+    for glob in source_patterns(pattern):
+        seen.update(root.glob(glob))
+    return sorted(seen)
+
+
 def iter_source_volumes(source: CorpusSource) -> Iterator[CorpusVolume]:
     """Yield the volumes of *source* in sorted order.
 
@@ -206,7 +252,7 @@ def iter_source_volumes(source: CorpusSource) -> Iterator[CorpusVolume]:
 
     regex = re.compile(source.subject_regex) if source.subject_regex else None
     found = 0
-    for path in sorted(root.glob(source.pattern)):
+    for path in _matching_paths(root, source.pattern):
         if not path.name.endswith(SUPPORTED_SUFFIXES):
             continue
         relative = path.relative_to(root).as_posix()
@@ -259,10 +305,18 @@ def iter_source_volumes(source: CorpusSource) -> Iterator[CorpusVolume]:
         )
 
 
-def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool = False) -> Path:
+def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool = False,
+                     ct_window: Sequence[float] | None = None,
+                     mr_percentiles: Sequence[float] | None = None) -> Path:
     """Write an intensity-harmonised copy of *volume* under *corpus_root*; returns its path.
 
     Geometry is untouched — harmonisation is a voxelwise intensity map.
+
+    The windows must be the ones stage 0 applies to the labelled data. Only the *clipping* they
+    do survives nnU-Net's per-image z-score — an affine intensity map leaves a z-score unchanged
+    — but clipping does survive, so a corpus windowed differently pre-trains the encoder on a
+    saturation pattern the segmentation data never shows it. ``None`` keeps
+    :func:`~nvitk.normalization.harmonize_modality`'s own defaults.
     """
     destination = Path(corpus_root) / volume.source / volume.subject_id / volume.name
     if destination.is_file() and not overwrite:
@@ -270,7 +324,11 @@ def harmonize_volume(volume: CorpusVolume, corpus_root: Path, *, overwrite: bool
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     image = imread(volume.path)
-    harmonised = harmonize_modality(image, volume.modality)
+    harmonised = harmonize_modality(
+        image, volume.modality,
+        **({"ct_window": ct_window} if ct_window else {}),
+        **({"mr_percentiles": mr_percentiles} if mr_percentiles else {}),
+    )
     imsave(destination, harmonised)
     return destination
 
@@ -285,6 +343,8 @@ def build_collection(
     overwrite: bool = False,
     workers: int = 1,
     only_modality: str | None = None,
+    ct_window: Sequence[float] | None = None,
+    mr_percentiles: Sequence[float] | None = None,
 ) -> tuple[Any, list[CorpusVolume]]:
     """Build an nnssl ``Collection`` from *sources*.
 
@@ -321,7 +381,10 @@ def build_collection(
 
         def _harmonize(volume: CorpusVolume) -> Path:
             """Harmonise one volume onto the shared intensity range."""
-            return harmonize_volume(volume, corpus_root, overwrite=overwrite)
+            return harmonize_volume(
+                volume, corpus_root, overwrite=overwrite,
+                ct_window=ct_window, mr_percentiles=mr_percentiles,
+            )
 
         written = map_in_thread_pool(_harmonize, volumes, max_workers=int(workers))
     else:

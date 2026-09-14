@@ -128,6 +128,7 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
             include_challenge=o["include_challenge"],
             corpus_sources=list(o["corpus_sources"]), corpus_modality=o["corpus_modality"], num_folds=o["num_folds"], seed=o["seed"],
             overwrite=o["overwrite"], workers=o["workers"], backend=o["backend"],
+            ct_window=o["ct_window"], mr_percentiles=o["mr_percentiles"],
             ct_context_window=o["ct_context_window"],
             mr_context_percentiles=o["mr_context_percentiles"],
         ),
@@ -565,9 +566,17 @@ def _submit_via_login_node(
               help="Exclude the challenge cases from the training set.")
 @click.option("--corpus-source", "corpus_sources", multiple=True,
               help="Unlabeled corpus source: a built-in name ('topbrain', 'topaneu=/root', "
-                   "'pesa_tof=/root') or 'name:modality=/path[:glob]'. Repeatable.")
+                   "'pesa_tof=/root', 'bo_large_ia=/root') or 'name:modality=/path[:glob]'. "
+                   "Repeatable.")
 @click.option("--num-folds", type=int, default=None)
 @click.option("--seed", type=int, default=None)
+@click.option("--ct-window", type=float, nargs=2, default=None,
+              help="CT clip window in HU for the main channel (default -100 1500). Applied to "
+                   "the labelled data AND to the pre-training corpus, so the encoder is "
+                   "pre-trained on the intensities it is later fine-tuned on. Changes the "
+                   "dataset and the corpus, so both must be rebuilt with --overwrite.")
+@click.option("--mr-percentiles", type=float, nargs=2, default=None,
+              help="MR robust percentiles for the main channel (default 0.5 99.5).")
 @click.option("--ct-context-window", type=float, nargs=2, default=None,
               help="Add a second input channel with a wide CT window (e.g. -100 900) beside "
                    "the narrow vessel window, restoring the anatomical context the narrow one "
@@ -893,7 +902,7 @@ def main(**kw: Any) -> None:
         **{k: kw[k] for k in (
             "dataprep_target", "modality", "extra_train", "extra_train_only", "binary_sources",
             "corpus_sources", "corpus_modality", "num_folds", "seed",
-            "ct_context_window", "mr_context_percentiles",
+            "ct_window", "mr_percentiles", "ct_context_window", "mr_context_percentiles",
             "pretrain_source", "checkpoint_name", "bundle_name", "ssl_loss", "ssl_loss_config",
             "ssl_patch_size", "ssl_batch_size", "ssl_epochs", "ssl_lr", "init_checkpoint_name",
             "ssl_skip_planning", "ssl_skip_preprocessing", "ssl_continue",
