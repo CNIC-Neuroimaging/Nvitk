@@ -16,7 +16,7 @@ instead of only at its surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 from qtpy.QtCore import Qt, QTimer, Signal
@@ -48,6 +48,7 @@ from nvitk.gui.core.design import (
 )
 from nvitk.gui.core.orientation import layer_orientation_codes
 from nvitk.gui.core.spatial import layer_spacing
+from nvitk.gui.viz.left_dock import install_expand_button
 from nvitk.gui.labels.visibility import (
     get_label_color,
     is_label_like_layer,
@@ -83,6 +84,11 @@ _CANVAS_SYNC_MS = 90
 _MIN_ZOOM = 1.0
 _MAX_ZOOM = 12.0
 _ZOOM_STEP = 1.25
+
+#: How close to a crosshair line a press must be to grab it, and how far from the
+#: centre it must be for that grab to mean "rotate" rather than "move".
+_HANDLE_TOL_PX = 10.0
+_HANDLE_MIN_FRACTION = 0.55
 
 #: Largest volume for which a per-axis contiguous copy is worth its memory.
 _SLICE_CACHE_BUDGET = 512 * 1024 * 1024
@@ -197,6 +203,118 @@ def _axis_views(layer: Any) -> list[AxisView]:
         )
     views.sort(key=lambda v: (_PLANE_ORDER.get(v.title.split(" ")[0], 3), v.axis))
     return views
+
+
+def _unit(vector: np.ndarray) -> np.ndarray:
+    """*vector* scaled to unit length, or unchanged when it is degenerate."""
+    norm = float(np.linalg.norm(vector))
+    return vector / norm if norm > 1e-12 else vector
+
+
+@dataclass(frozen=True)
+class PlaneFrame:
+    """One view's plane: unit row/column directions and its normal, in millimetres.
+
+    Millimetres, not voxels: on anisotropic spacing a rotation applied to raw
+    array-axis vectors shears the plane rather than turning it, and the angle the
+    user dragged is not the angle they get.
+    """
+
+    row: np.ndarray
+    col: np.ndarray
+    normal: np.ndarray
+
+    def is_close_to(self, other: PlaneFrame, tol: float = 1e-9) -> bool:
+        """True when this frame is the same plane and orientation as *other*."""
+        return bool(
+            np.allclose(self.row, other.row, atol=tol)
+            and np.allclose(self.col, other.col, atol=tol)
+            and np.allclose(self.normal, other.normal, atol=tol)
+        )
+
+
+def base_frame(view: AxisView, spacing: Sequence[float]) -> PlaneFrame:
+    """The axis-aligned frame *view* starts from, in millimetre space."""
+    sp = np.asarray(spacing, dtype=float)[:3]
+    row = np.zeros(3)
+    row[view.rows] = -1.0 if view.flip_rows else 1.0
+    col = np.zeros(3)
+    col[view.cols] = -1.0 if view.flip_cols else 1.0
+    row_mm = _unit(row * sp)
+    col_mm = _unit(col * sp)
+    return PlaneFrame(row_mm, col_mm, _unit(np.cross(row_mm, col_mm)))
+
+
+def rotation_about(axis_mm: np.ndarray, angle_rad: float) -> np.ndarray:
+    """Rodrigues rotation matrix turning by *angle_rad* about a unit axis."""
+    k = _unit(np.asarray(axis_mm, dtype=float))
+    kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    return np.eye(3) + np.sin(angle_rad) * kx + (1.0 - np.cos(angle_rad)) * (kx @ kx)
+
+
+def rotate_frame(frame: PlaneFrame, axis_mm: np.ndarray, angle_rad: float) -> PlaneFrame:
+    """*frame* turned about *axis_mm*, re-normalised against drift."""
+    rot = rotation_about(axis_mm, float(angle_rad))
+    return PlaneFrame(
+        _unit(rot @ frame.row), _unit(rot @ frame.col), _unit(rot @ frame.normal)
+    )
+
+
+def oblique_slice(
+    data: np.ndarray,
+    *,
+    center_vox: Sequence[float],
+    anchor_px: tuple[float, float],
+    frame: PlaneFrame,
+    shape: tuple[int, int],
+    steps_mm: tuple[float, float],
+    spacing: Sequence[float],
+    order: int = 1,
+) -> np.ndarray:
+    """Sample the plane *frame* through *center_vox* onto a ``shape`` pixel grid.
+
+    *anchor_px* is the pixel that lands on *center_vox*. Anchoring on the
+    crosshair rather than a corner is what makes an unrotated frame reproduce the
+    axis-aligned slice exactly, and keeps the crosshair still on screen while the
+    plane turns under it.
+    """
+    from scipy.ndimage import map_coordinates
+
+    height, width = int(shape[0]), int(shape[1])
+    sp = np.asarray(spacing, dtype=float)[:3]
+    centre = np.asarray(center_vox, dtype=float)[:3]
+    # A step of one pixel is steps_mm along the frame direction, converted back
+    # into voxel indices by the spacing.
+    step_row = float(steps_mm[0]) * np.asarray(frame.row, dtype=float) / sp
+    step_col = float(steps_mm[1]) * np.asarray(frame.col, dtype=float) / sp
+    rows = (np.arange(height, dtype=float) - float(anchor_px[0]))[:, None, None]
+    cols = (np.arange(width, dtype=float) - float(anchor_px[1]))[None, :, None]
+    coords = centre[None, None, :] + rows * step_row[None, None, :] + cols * step_col[None, None, :]
+    return map_coordinates(
+        data, np.moveaxis(coords, 2, 0), order=int(order), mode="constant", cval=0.0
+    )
+
+
+def line_direction_px(
+    view_frame: PlaneFrame,
+    other_normal: np.ndarray,
+    steps_mm: tuple[float, float],
+) -> tuple[float, float] | None:
+    """``(d_row, d_col)`` of another plane's trace across this view, in pixels.
+
+    Two planes meet along ``cross(n_a, n_b)``; drawn on this view that is the line
+    marking where the other view is cutting. ``None`` when the planes are parallel
+    and there is no trace to draw.
+    """
+    direction = np.cross(np.asarray(view_frame.normal, float), np.asarray(other_normal, float))
+    if float(np.linalg.norm(direction)) <= 1e-9:
+        return None
+    d_row = float(np.dot(direction, view_frame.row)) / max(float(steps_mm[0]), 1e-9)
+    d_col = float(np.dot(direction, view_frame.col)) / max(float(steps_mm[1]), 1e-9)
+    if abs(d_row) < 1e-12 and abs(d_col) < 1e-12:
+        return None
+    norm = float(np.hypot(d_row, d_col))
+    return (d_row / norm, d_col / norm)
 
 
 def _slice_of(data: np.ndarray, axis: int, index: int) -> np.ndarray:
@@ -392,6 +510,8 @@ class SliceView(QWidget):
     #: (row, column) pixel in the *rendered* slice when the user clicks in it.
     #: The panel maps it back through the view's orientation.
     pixelPicked = Signal(int, int)
+    #: (line index, screen angle in radians) while a crosshair end is dragged.
+    handleDragged = Signal(int, float)
 
     def __init__(self, view: AxisView, parent: QWidget | None = None) -> None:
         """Build the titled image canvas and its slice slider."""
@@ -406,6 +526,11 @@ class SliceView(QWidget):
         self._zoom = 1.0
         self._pan = [0.5, 0.5]
         self._drag_from: tuple[float, float] | None = None
+        #: ``(d_row, d_col, colour)`` per crosshair line. Empty means the plain
+        #: horizontal/vertical cross, which is what an unrotated view shows.
+        self._lines: list[tuple[float, float, str]] = []
+        #: Index of the line whose end is being dragged, if any.
+        self._rotating: int | None = None
 
         self._title = QLabel(view.title)
         self._title.setStyleSheet(
@@ -471,6 +596,69 @@ class SliceView(QWidget):
         """Move the crosshair without re-uploading the slice image."""
         self._cross = crosshair
         self._repaint()
+
+    def set_lines(self, lines: list[tuple[float, float, str]]) -> None:
+        """Set the crosshair line directions, in pixel space, with their colours."""
+        self._lines = list(lines or [])
+        self._repaint()
+
+    def _line_geometry(self) -> list[tuple[float, float, float, float, str]] | None:
+        """Each crosshair line as ``(cx, cy, d_x, d_y, colour)`` in canvas pixels."""
+        geometry = self._geometry()
+        if geometry is None or self._cross is None or self._rgb is None:
+            return None
+        scaled_w, scaled_h, off_x, off_y = geometry
+        h, w = self._rgb.shape[:2]
+        row, col = self._cross
+        cx = off_x + (col + 0.5) / max(w, 1) * scaled_w
+        cy = off_y + (row + 0.5) / max(h, 1) * scaled_h
+        out = []
+        entries = self._lines or [(1.0, 0.0, COLOR_ACCENT), (0.0, 1.0, COLOR_ACCENT)]
+        for d_row, d_col, colour in entries:
+            # Pixel directions scale with the drawn size, so a rotated line keeps
+            # its angle on screen whatever the zoom or the aspect correction.
+            dx = float(d_col) * scaled_w / max(w, 1)
+            dy = float(d_row) * scaled_h / max(h, 1)
+            norm = float(np.hypot(dx, dy))
+            if norm <= 1e-9:
+                continue
+            out.append((cx, cy, dx / norm, dy / norm, colour))
+        return out
+
+    def _handle_at(self, event: Any) -> int | None:
+        """Index of the crosshair line whose end is under the cursor, if any."""
+        lines = self._line_geometry()
+        if not lines:
+            return None
+        x, y = self._cursor_xy(event)
+        reach = max(self._canvas.width(), self._canvas.height()) / 2.0
+        best, best_distance = None, _HANDLE_TOL_PX
+        for index, (cx, cy, dx, dy, _colour) in enumerate(lines):
+            vx, vy = x - cx, y - cy
+            along = vx * dx + vy * dy
+            # Only the ends grab: near the middle the same drag has to keep
+            # meaning "move the crosshair", which is the commoner gesture.
+            if abs(along) < _HANDLE_MIN_FRACTION * reach:
+                continue
+            across = abs(vx * dy - vy * dx)
+            if across < best_distance:
+                best, best_distance = index, across
+        return best
+
+    def _screen_angle(self, event: Any) -> float:
+        """Angle of the cursor about the crosshair, in the slice's pixel frame."""
+        geometry = self._geometry()
+        if geometry is None or self._cross is None or self._rgb is None:
+            return 0.0
+        scaled_w, scaled_h, off_x, off_y = geometry
+        h, w = self._rgb.shape[:2]
+        row, col = self._cross
+        x, y = self._cursor_xy(event)
+        # Back into the slice's own pixel units, so the angle does not depend on
+        # the zoom or on the aspect correction the canvas applies.
+        d_col = (x - off_x) / max(scaled_w, 1) * w - (col + 0.5)
+        d_row = (y - off_y) / max(scaled_h, 1) * h - (row + 0.5)
+        return float(np.arctan2(d_row, d_col))
 
     def _geometry(self) -> tuple[int, int, float, float] | None:
         """``(width, height, off_x, off_y)`` of the drawn slice inside the canvas.
@@ -541,15 +729,23 @@ class SliceView(QWidget):
         canvas.fill(QColor("#000000"))
         painter = QPainter(canvas)
         painter.drawPixmap(int(round(off_x)), int(round(off_y)), slice_map)
-        if self._cross is not None:
-            pen = QPen(QColor(COLOR_ACCENT))
+        for cx, cy, dx, dy, colour in self._line_geometry() or []:
+            pen = QPen(QColor(colour))
             pen.setWidth(1)
             painter.setPen(pen)
-            row, col = self._cross
-            y = int(round(off_y + (row + 0.5) / max(h, 1) * scaled_h))
-            x = int(round(off_x + (col + 0.5) / max(w, 1) * scaled_w))
-            painter.drawLine(0, y, canvas.width(), y)
-            painter.drawLine(x, 0, x, canvas.height())
+            reach = float(canvas.width() + canvas.height())
+            painter.drawLine(
+                int(round(cx - dx * reach)), int(round(cy - dy * reach)),
+                int(round(cx + dx * reach)), int(round(cy + dy * reach)),
+            )
+            # Mark the ends that can be grabbed, so the gesture is discoverable.
+            handle = _HANDLE_MIN_FRACTION * max(canvas.width(), canvas.height()) / 2.0
+            for sign in (-1.0, 1.0):
+                painter.drawEllipse(
+                    int(round(cx + sign * dx * handle)) - 3,
+                    int(round(cy + sign * dy * handle)) - 3,
+                    6, 6,
+                )
         if self._zoom > 1.0:
             pen = QPen(QColor(COLOR_MUTED))
             painter.setPen(pen)
@@ -591,6 +787,10 @@ class SliceView(QWidget):
             if self._is_pan(event):
                 self._drag_from = self._cursor_xy(event)
                 return True
+            handle = self._handle_at(event)
+            if handle is not None:
+                self._rotating = handle
+                return True
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseMove:
@@ -599,10 +799,14 @@ class SliceView(QWidget):
                 return True
             if not event.buttons():
                 return False
+            if self._rotating is not None:
+                self.handleDragged.emit(int(self._rotating), self._screen_angle(event))
+                return True
             self._emit_click(event)
             return True
         if event.type() == QEvent.MouseButtonRelease:
             self._drag_from = None
+            self._rotating = None
             return False
         return False
 
@@ -1015,6 +1219,11 @@ class OrthoViewerPanel(QWidget):
         self._overlay_contrast_sub: tuple[Any, Any] | None = None
         #: Last slice index each view rendered, so an unchanged view is not redrawn.
         self._rendered: dict[int, int] = {}
+        #: One plane per view. Equal to the axis-aligned base until a crosshair
+        #: end is dragged, which is what keeps the fast slicing path in use for
+        #: the overwhelmingly common case.
+        self._frames: list[PlaneFrame] = []
+        self._base_frames: list[PlaneFrame] = []
 
         # Pushing planes and clipping planes to the canvas re-uploads volumes, which
         # is far too heavy to do on every step of a scroll. Coalesce them.
@@ -1036,6 +1245,9 @@ class OrthoViewerPanel(QWidget):
             view.sliceChanged.connect(self._on_slice_changed)
             view.pixelPicked.connect(
                 lambda row, col, index=cell: self._on_pixel_picked(index, row, col)
+            )
+            view.handleDragged.connect(
+                lambda line, angle, index=cell: self._on_handle_dragged(index, line, angle)
             )
             grid.addWidget(view, row, col)
             self._slice_views.append(view)
@@ -1120,10 +1332,18 @@ class OrthoViewerPanel(QWidget):
         btn_row.setSpacing(SPACE_TIGHT)
         self._btn_centre = QPushButton("Centre crosshair")
         self._btn_centre.clicked.connect(self._centre_crosshair)
+        self._btn_reset_orient = QPushButton("Reset orientation")
+        self._btn_reset_orient.setToolTip(
+            "Put the three planes back on the volume's own axes, undoing any "
+            "rotation made by dragging the crosshair ends."
+        )
+        self._btn_reset_orient.setEnabled(False)
+        self._btn_reset_orient.clicked.connect(self._reset_orientation)
         self._btn_3d = QPushButton("3D canvas")
         self._btn_3d.setToolTip("Switch the Napari canvas to its 3D view.")
         self._btn_3d.clicked.connect(self._show_3d)
         btn_row.addWidget(self._btn_centre)
+        btn_row.addWidget(self._btn_reset_orient)
         btn_row.addWidget(self._btn_3d)
         card.add_layout(btn_row)
         card.body().addStretch(1)
@@ -1173,6 +1393,10 @@ class OrthoViewerPanel(QWidget):
             self._position = [
                 int(np.clip(p, 0, int(n) - 1)) for p, n in zip(self._position, self._data.shape)
             ]
+
+        self._base_frames = [base_frame(view, self._spacing) for view in self._views]
+        if not same_layer or len(self._frames) != len(self._base_frames):
+            self._frames = list(self._base_frames)
 
         self._clip_axis.blockSignals(True)
         self._clip_axis.clear()
@@ -1224,19 +1448,68 @@ class OrthoViewerPanel(QWidget):
         except Exception:
             pass
 
-    def _render_view(self, view: AxisView) -> np.ndarray:
+    def is_oblique(self) -> bool:
+        """True when any plane has been turned off the volume's axes."""
+        return not all(
+            frame.is_close_to(base)
+            for frame, base in zip(self._frames, self._base_frames)
+        )
+
+    def _plane_steps(self, view: AxisView) -> tuple[float, float]:
+        """Pixel size of a view, in millimetres down and across."""
+        return (float(self._spacing[view.rows]), float(self._spacing[view.cols]))
+
+    def _resample(self, view: AxisView, index: int, data: np.ndarray, order: int) -> np.ndarray:
+        """The 2D plane for *view*, obliquely if its frame has been turned."""
+        frame = self._frames[index]
+        shape = (int(data.shape[view.rows]), int(data.shape[view.cols]))
+        return oblique_slice(
+            data,
+            center_vox=self._position,
+            anchor_px=view.to_pixel(self._position, data.shape),
+            frame=frame,
+            shape=shape,
+            steps_mm=self._plane_steps(view),
+            spacing=self._spacing,
+            order=order,
+        )
+
+    def _render_view(self, view: AxisView, view_index: int = 0) -> np.ndarray:
         """The RGB image for *view* at the current crosshair, overlay included."""
         index = self._position[view.axis]
-        rgb = slice_to_rgb(
-            self._layer, self._data, view.axis, index, view,
-            contrast=self._contrast, lut=self._lut, cache=self._cache,
-        )
-        if self._overlay_data is not None and self._overlay_data.shape == self._data.shape:
-            over = slice_to_rgb(
-                self._overlay, self._overlay_data, view.axis, index, view,
-                contrast=self._overlay_contrast, lut=self._overlay_lut,
-                cache=self._overlay_cache,
+        if not self.is_oblique():
+            rgb = slice_to_rgb(
+                self._layer, self._data, view.axis, index, view,
+                contrast=self._contrast, lut=self._lut, cache=self._cache,
             )
+        else:
+            # Labels are sampled nearest: interpolating ids invents labels that
+            # were never segmented, and the colour table would then show them.
+            plane = self._resample(
+                view, view_index, self._data, 0 if self._lut is not None else 1
+            )
+            rgb = (
+                _label_rgb(plane, self._layer, self._lut)
+                if self._lut is not None
+                else _grayscale_rgb(plane, self._contrast)
+            )
+        if self._overlay_data is not None and self._overlay_data.shape == self._data.shape:
+            if not self.is_oblique():
+                over = slice_to_rgb(
+                    self._overlay, self._overlay_data, view.axis, index, view,
+                    contrast=self._overlay_contrast, lut=self._overlay_lut,
+                    cache=self._overlay_cache,
+                )
+            else:
+                over_plane = self._resample(
+                    view, view_index, self._overlay_data,
+                    0 if self._overlay_lut is not None else 1,
+                )
+                over = (
+                    _label_rgb(over_plane, self._overlay, self._overlay_lut)
+                    if self._overlay_lut is not None
+                    else _grayscale_rgb(over_plane, self._overlay_contrast)
+                )
             rgb = blend_overlay(rgb, over, _OVERLAY_OPACITY)
         return rgb
 
@@ -1248,16 +1521,21 @@ class OrthoViewerPanel(QWidget):
         """
         if self._data is None or self._layer is None:
             return
-        for widget, view in zip(self._slice_views, self._views):
+        oblique = self.is_oblique()
+        self._btn_reset_orient.setEnabled(oblique)
+        for position, (widget, view) in enumerate(zip(self._slice_views, self._views)):
             widget._view = view
-            widget._title.setText(view.title)
+            widget._title.setText(view.title + ("  ·  oblique" if oblique else ""))
             index = self._position[view.axis]
             crosshair = view.to_pixel(self._position, self._data.shape)
-            if force or self._rendered.get(view.axis) != index:
+            widget.set_lines(self._crosshair_lines(position))
+            # A turned plane moves with the crosshair in every direction, so the
+            # "same index, skip the redraw" shortcut no longer holds.
+            if force or oblique or self._rendered.get(view.axis) != index:
                 self._rendered[view.axis] = index
                 aspect = self._spacing[view.rows] / max(self._spacing[view.cols], 1e-6)
                 widget.set_slice(
-                    self._render_view(view),
+                    self._render_view(view, position),
                     index=index,
                     count=int(self._data.shape[view.axis]),
                     aspect=aspect,
@@ -1286,6 +1564,85 @@ class OrthoViewerPanel(QWidget):
         self._position[row_axis] = row_value
         self._position[col_axis] = col_value
         self._redraw()
+        self._canvas_timer.start()
+
+    def _crosshair_lines(self, view_index: int) -> list[tuple[float, float, str]]:
+        """Where the other two planes cut across this view, with their colours.
+
+        Each line is coloured like the view it belongs to — the same red / green /
+        blue the 3D outlines use — so dragging one says which plane is about to
+        turn without having to watch all three.
+        """
+        if not self._frames or view_index >= len(self._frames):
+            return []
+        frame = self._frames[view_index]
+        steps = self._plane_steps(self._views[view_index])
+        out: list[tuple[float, float, str]] = []
+        for other in self._other_views(view_index):
+            direction = line_direction_px(frame, self._frames[other].normal, steps)
+            if direction is None:
+                continue
+            colour = BOX_AXIS_COLORS[self._views[other].axis % len(BOX_AXIS_COLORS)]
+            out.append((direction[0], direction[1], colour))
+        return out
+
+    def _other_views(self, view_index: int) -> list[int]:
+        """The two view positions whose planes are drawn as lines on *view_index*."""
+        return [i for i in range(len(self._frames)) if i != int(view_index)]
+
+    def _on_handle_dragged(self, view_index: int, line: int, screen_angle: float) -> None:
+        """Turn the other two planes about this view's normal, following the drag.
+
+        Only the other two move: the view being dragged in has to stay still, or
+        the line would run away from the cursor that is steering it — which is
+        also what makes this read as reorienting the volume rather than spinning
+        the picture.
+        """
+        if self._data is None or view_index >= len(self._frames):
+            return
+        others = self._other_views(view_index)
+        if line >= len(others):
+            return
+        frame = self._frames[view_index]
+        steps = self._plane_steps(self._views[view_index])
+        other_normal = self._frames[others[line]].normal
+        trace = np.cross(np.asarray(frame.normal, float), np.asarray(other_normal, float))
+        if float(np.linalg.norm(trace)) <= 1e-9:
+            return
+        # The cursor angle is measured in *pixels*, and a pixel is not square on
+        # anisotropic spacing — so it is converted back through the two step sizes
+        # before being turned into a direction in the plane. Solving the angle on
+        # screen instead would under- or over-rotate by the aspect ratio.
+        target = (
+            float(np.sin(screen_angle)) * steps[0] * np.asarray(frame.row, float)
+            + float(np.cos(screen_angle)) * steps[1] * np.asarray(frame.col, float)
+        )
+        if float(np.linalg.norm(target)) <= 1e-9:
+            return
+        # Turning the other planes about this one's normal turns their trace by
+        # exactly the same angle, so the signed angle from trace to target *is*
+        # the rotation to apply.
+        angle = float(
+            np.arctan2(
+                float(np.dot(np.cross(trace, target), frame.normal)),
+                float(np.dot(trace, target)),
+            )
+        )
+        # A line has no head or tail: steer to the nearer of its two ends.
+        angle = (angle + np.pi / 2.0) % np.pi - np.pi / 2.0
+        if abs(angle) < 1e-9:
+            return
+        for other in others:
+            self._frames[other] = rotate_frame(self._frames[other], frame.normal, angle)
+        self._redraw(force=True)
+        self._canvas_timer.start()
+
+    def _reset_orientation(self) -> None:
+        """Put every plane back on the volume's own axes."""
+        if not self._base_frames:
+            return
+        self._frames = list(self._base_frames)
+        self._redraw(force=True)
         self._canvas_timer.start()
 
     def _centre_crosshair(self) -> None:
@@ -1497,6 +1854,9 @@ def attach_ortho_dock(viewer: Any, panel: OrthoViewerPanel) -> Any:
 
     apply_theme(panel)
     dock = viewer.window.add_dock_widget(panel, area="left", name="Orthogonal views")
+    # The same pop-out-and-fill control the inspection docks carry; this one is
+    # added by Napari rather than by that helper, so it needs asking for.
+    install_expand_button(dock, "Orthogonal views")
     panel._nvitk_dock = dock
 
     def _refresh(_event: Any = None) -> None:

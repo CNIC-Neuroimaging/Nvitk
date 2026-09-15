@@ -507,13 +507,17 @@ def cross_section_at(
     u_vox = as_backend_array(samples.u).astype(float, copy=False)[idx] / scale
     v_vox = as_backend_array(samples.v).astype(float, copy=False)[idx] / scale
     center = as_backend_array(samples.points_vox).astype(float, copy=False)[idx]
-    radius_vox = float(ray_mm) / min(samples.spacing)
+    # One grid step moves ``u_vox * spacing`` = one *millimetre*, because u is a
+    # unit millimetre vector divided by the spacing. So the half-size is ray_mm
+    # directly. Dividing it by the spacing again — as this did — asks for a field
+    # of view 1/spacing times too wide, which on 0.4 mm voxels showed 44 mm of
+    # background around a vessel the caller had asked to see 20 mm of.
     return oblique_slice(
         volume,
         center_xyz=center,
         u_xyz=u_vox,
         v_xyz=v_vox,
-        radius_vox=radius_vox,
+        radius_vox=float(ray_mm),
         res=int(res),
         order=int(order),
     )

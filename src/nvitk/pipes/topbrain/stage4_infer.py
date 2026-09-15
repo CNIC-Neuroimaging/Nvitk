@@ -247,6 +247,47 @@ def case_id_for(path: Path) -> str:
     return stem[: -len("_0000")] if stem.endswith("_0000") else stem
 
 
+#: nnU-Net names a staged volume ``<case>_<4-digit channel>.nii.gz``.
+_CHANNEL_NAME = re.compile(r"^(?P<case>.+)_(?P<channel>\d{4})$")
+
+
+def channel_parts(path: Path) -> tuple[str, int] | None:
+    """``(case_id, channel)`` when *path* carries nnU-Net's channel tag, else ``None``."""
+    stem = Path(path).name
+    for suffix in (".nii.gz", ".nii"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    match = _CHANNEL_NAME.match(stem)
+    if match is None:
+        return None
+    return match.group("case"), int(match.group("channel"))
+
+
+def prepared_dataset(
+    inputs: Sequence[Path], volumes: Sequence[Path], expected_channels: int
+) -> list[str] | None:
+    """Case ids when *inputs* is one directory already in nnU-Net's shape, else ``None``.
+
+    Every case must carry channels ``0..expected_channels-1`` and nothing else. A
+    directory holding only some of a multi-channel model's channels would predict
+    on a missing input rather than fail, which is the kind of wrong that looks
+    like a bad model.
+    """
+    if len(inputs) != 1 or not Path(inputs[0]).is_dir():
+        return None
+    parts = [channel_parts(v) for v in volumes]
+    if not parts or any(part is None for part in parts):
+        return None
+    wanted = set(range(max(int(expected_channels), 1)))
+    by_case: dict[str, set[int]] = {}
+    for case, channel in parts:  # type: ignore[misc]
+        by_case.setdefault(case, set()).add(channel)
+    if any(channels != wanted for channels in by_case.values()):
+        return None
+    return sorted(by_case)
+
+
 def stage_inputs(
     inputs: Sequence[Path],
     workspace: Path,
@@ -282,21 +323,26 @@ def stage_inputs(
     volumes = expand_inputs(inputs)
 
     # ---- Fast path: already exactly what the predictor wants -----------------
-    already_named = all(v.name.endswith("_0000.nii.gz") for v in volumes)
-    single_dir = len(inputs) == 1 and Path(inputs[0]).is_dir()
-    if modality is None and already_named and single_dir:
-        log.info(
-            "Predicting directly on %d volume(s) in %s (assumed already harmonised).",
-            len(volumes), inputs[0],
-        )
-        return Path(inputs[0]), [case_id_for(v) for v in volumes]
+    # Every channel the model wants, named the way it wants them. This is the only
+    # route a multi-channel model has, so it has to accept ``_0001`` and friends —
+    # matching only ``_0000`` is what made the refusal below un-actionable.
+    if modality is None:
+        prepared = prepared_dataset(inputs, volumes, expected_channels)
+        if prepared is not None:
+            log.info(
+                "Predicting directly on %d case(s) x %d channel(s) in %s "
+                "(assumed already harmonised).",
+                len(prepared), max(int(expected_channels), 1), inputs[0],
+            )
+            return Path(inputs[0]), prepared
 
     if expected_channels > 1:
         raise ValueError(
-            f"This model expects {expected_channels} input channels, which staging cannot "
-            f"build from single files — channel 1 is a second intensity window produced by "
-            f"stage 0. Point --input at a prepared {expected_channels}-channel dataset "
-            f"directory instead."
+            f"This model expects {expected_channels} input channels. Staging from single "
+            f"files only builds channel 0 — the rest are further intensity windows produced "
+            f"by stage 0. Point --input at a directory holding "
+            f"{expected_channels} channels per case, named "
+            f"<case>_0000.nii.gz .. <case>_{expected_channels - 1:04d}.nii.gz."
         )
 
     # Emptied, not merely created. The workspace is keyed on the run name, so it is the same

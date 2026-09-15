@@ -2746,6 +2746,72 @@ def _run_totalsegmentator(
     return seg_arr
 
 
+def _topbrain_channels(model: str, paths: Any) -> int:
+    """Input channels *model* was trained on, or 1 when its dataset.json is unreadable."""
+    from nvitk.pipes.topbrain.stage4_infer import model_input_channels
+    from nvitk.pipes.topbrain.util.models import resolve_model
+
+    try:
+        trained = resolve_model(paths.results_root, model)
+        return max(int(model_input_channels(trained, paths.nnunet_results)), 1)
+    except Exception:
+        # A model that cannot be resolved here fails in run_infer with a better
+        # message than anything this function could raise.
+        return 1
+
+
+def _topbrain_ct_windows(channels: int) -> tuple[tuple[float, float], ...]:
+    """The HU window per input channel, refusing to invent one it was not given."""
+    from nvitk.pipes.topbrain import config as cfg
+
+    windows = tuple(cfg.DEFAULT_CT_WINDOWS)
+    if len(windows) < int(channels):
+        raise ValueError(
+            f"This model wants {channels} input channels but only "
+            f"{len(windows)} CT window(s) are configured "
+            f"(topbrain config DEFAULT_CT_WINDOWS). Guessing the rest would feed "
+            f"the model an intensity range it was never trained on."
+        )
+    return windows[: int(channels)]
+
+
+def _stage_topbrain_channels(
+    img: Image, stage_dir: Path, *, channels: int, modality: str | None
+) -> Path:
+    """Write one harmonised channel per input the model wants; returns the directory.
+
+    Each channel is the same volume under a different intensity window, which is
+    what stage 0 produced for training. Only CT is built this way — an MR model
+    with several channels would be some other recipe, and windowing TOF by
+    Hounsfield units is meaningless.
+    """
+    from nvitk.normalization import window_ct
+    from nvitk.pipes.topbrain.stage4_infer import detect_modality
+
+    resolved = str(modality or "auto").strip().lower()
+    if resolved == "auto":
+        resolved = str(detect_modality(img) or "ct").lower()
+    if resolved not in ("ct", "cta"):
+        raise ValueError(
+            f"This model expects {channels} input channels, which are CT intensity "
+            f"windows, but the input was resolved as {resolved!r}. Pick the matching "
+            f"single-channel model, or set Modality to CT if this really is a CTA."
+        )
+
+    from nvitk.io import imsave
+
+    windows = _topbrain_ct_windows(channels)
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    for index, window in enumerate(windows):
+        imsave(
+            stage_dir / f"case_{index:04d}.nii.gz",
+            window_ct(img, window=window).astype(np.float32),
+        )
+    return stage_dir
+
+
 def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
     """Segment *img* with a trained ToPBrain nnU-Net and return the multilabel mask.
 
@@ -2779,19 +2845,40 @@ def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
         or tempfile.mkdtemp(prefix="nvitk_topbrain_")
     )
     run_dir.mkdir(parents=True, exist_ok=True)
-    # stage_inputs takes files and directories interchangeably and does the
-    # <case>_0000 renaming itself, so one plain volume is all it needs.
-    case = run_dir / "case.nii.gz"
-    imsave(case, img)
     out_dir = run_dir / "prediction"
 
     paths, origin = host_layout()
+    channels = _topbrain_channels(model, paths)
+    if channels > 1:
+        # A multi-channel model is fed several intensity windows of the same
+        # volume. Staging builds channel 0 only, so the channels are written here
+        # and the prepared directory handed over already harmonised.
+        stage_dir = _stage_topbrain_channels(
+            img, run_dir / "input", channels=channels, modality=modality
+        )
+        infer_inputs: list[Path] = [stage_dir]
+        infer_modality = None
+    else:
+        # stage_inputs takes files and directories interchangeably and does the
+        # <case>_0000 renaming itself, so one plain volume is all it needs.
+        case = run_dir / "case.nii.gz"
+        imsave(case, img)
+        infer_inputs = [case]
+        infer_modality = modality
     device = "cuda" if gpu_enabled() else "cpu"
     postprocess = bool(params.get("topbrain_postprocess", True))
     folds = [f.strip() for f in str(params.get("topbrain_folds") or "").split(",") if f.strip()]
     gaps = float(params.get("topbrain_repair_gaps_mm") or 0.0)
 
     gui_log(model_listing())
+    if channels > 1:
+        gui_log(
+            f"{model}: {channels} input channels, windowed at "
+            + ", ".join(
+                f"[{lo:g}, {hi:g}] HU"
+                for lo, hi in _topbrain_ct_windows(channels)
+            )
+        )
     notify(
         f"Running ToPBrain ({model}, {device}, {origin} roots, "
         f"modality {params.get('topbrain_modality') or 'auto'}) → {out_dir}"
@@ -2800,9 +2887,9 @@ def _run_topbrain(img: Image, params: dict[str, Any]) -> np.ndarray:
         # "none" is what turns island removal off; the directory is still written,
         # so the read-back below does not have to care which way this went.
         "none" if not postprocess else None,
-        inputs=[case],
+        inputs=infer_inputs,
         model=model,
-        modality=modality,
+        modality=infer_modality,
         output=out_dir,
         nnunet_raw=paths.nnunet_raw,
         nnunet_preprocessed=paths.nnunet_preprocessed,
@@ -2890,7 +2977,7 @@ def _run_viz_vessel_cpr(
             raise ValueError(f"{what} ‘{name}’ cannot be aligned to the lumen: {exc}") from exc
         return other, on_grid
 
-    _img_layer, image_img = _aligned("image_layer", order=1, what="Image")
+    image_layer, image_img = _aligned("image_layer", order=1, what="Image")
     image = None if image_img is None else image_img.data
 
     _wall_layer, wall_img = _aligned("wall_layer", order=0, what="Wall mask")
@@ -2951,6 +3038,7 @@ def _run_viz_vessel_cpr(
         lumen_layer=layer,
         lumen_mask=lumen_data,
         image=image,
+        image_layer=image_layer,
         spacing=spacing,
         wall_mask=wall,
         labels=labels,

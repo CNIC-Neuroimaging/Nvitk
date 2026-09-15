@@ -1,16 +1,16 @@
 # ToPBrain / ToPAneu TA36 algorithm container for Grand Challenge.
 #
-# Built by `nvitk-topbrain --stages stage7`, which copies the trained nnU-Net model directory
-# in as `model/` beforehand. Kept deliberately thin: no network access at run time, weights
-# baked in, and the same nvitk post-processing the offline pipeline uses.
+# Built by `nvitk-topbrain --stages stage5`, which lays the trained nnU-Net runs out as
+# `model/<modality>/` beforehand and writes `models.json` describing them. Kept deliberately
+# thin: no network access at run time, weights baked in, and only the algorithm code the
+# offline pipeline uses. One image serves both the CT and the MR socket.
 FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     nnUNet_raw=/tmp/nnunet_raw \
     nnUNet_preprocessed=/tmp/nnunet_preprocessed \
-    nnUNet_results=/tmp/nnunet_results \
-    TOPBRAIN_MODEL_DIR=/opt/algorithm/model
+    nnUNet_results=/tmp/nnunet_results
 
 # Grand Challenge runs containers as a non-root user.
 RUN groupadd -r algorithm && useradd -m -r -g algorithm algorithm
@@ -26,9 +26,13 @@ RUN python -m pip install --no-cache-dir -r /opt/algorithm/requirements.txt
 # model.
 COPY --chown=algorithm:algorithm nnunetv2 /opt/algorithm/nnunetv2
 
-# nvitk itself, then the trained weights and the entry point.
-COPY --chown=algorithm:algorithm nvitk /opt/algorithm/nvitk
+# The slim algorithm package (harmonisation + component clean-up). nvitk is deliberately not
+# copied in: the image needs three functions from it, and the whole library is 151 MB.
+COPY --chown=algorithm:algorithm topbrain_algo /opt/algorithm/topbrain_algo
+# model/ holds one subdirectory per modality (model/ct, model/mr); models.json maps each
+# socket to one of them along with its channel count and the windows stage 0 applied.
 COPY --chown=algorithm:algorithm model /opt/algorithm/model
+COPY --chown=algorithm:algorithm models.json /opt/algorithm/models.json
 COPY --chown=algorithm:algorithm postprocess.json /opt/algorithm/postprocess.json
 COPY --chown=algorithm:algorithm inference.py /opt/algorithm/inference.py
 

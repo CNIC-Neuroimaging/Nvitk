@@ -15,6 +15,7 @@ unambiguous, and the panel re-renders when the mask changes.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from qtpy.QtCore import Qt, QTimer
@@ -100,6 +101,17 @@ _MIN_STEP_MM = 0.01
 #: A drag shorter than this is a click that wandered, not a correction.
 _MIN_DRAG_MM = 0.25
 
+#: The angle ring is drawn this many lumen radii out, so it clears the wall.
+_RING_OVER_LUMEN = 2.4
+#: How close to the ring a press must be, as a fraction of its radius.
+_RING_GRAB_FRACTION = 0.22
+#: Cross-section zoom bounds and the factor one Ctrl+wheel notch applies.
+_MIN_XS_ZOOM = 1.0
+_MAX_XS_ZOOM = 10.0
+_XS_ZOOM_STEP = 1.25
+#: Floor on the half-width shown, so a deep zoom cannot collapse the axes.
+_MIN_XS_HALF_MM = 0.25
+
 #: How far along the vessel a correction reaches, as a standard deviation in
 #: millimetres. A centerline is smooth, so pulling one station and leaving its
 #: neighbours put would produce a kink the reformation would then cut across.
@@ -148,6 +160,15 @@ class VesselCprPanel(QWidget):
         self._syncing = False
         #: ``(station, offset_mm)`` where a centerline drag began.
         self._drag: tuple[int, float] | None = None
+        #: Layer whose window the intensities are drawn with, and its subscription.
+        self._contrast_layer: Any = None
+        self._contrast_sub: tuple[Any, Any] | None = None
+        #: Last cross-section drawn, so it can be repainted without re-sampling.
+        self._xs_last: tuple[Any, Any, str, float, float] | None = None
+        #: Half-width of the cross-section view in mm; 0 means "fit the data".
+        self._xs_zoom = 1.0
+        #: True while the angle ring is being dragged.
+        self._angle_drag = False
         self._vessel: VesselCpr | None = None
         self._edited = False
         self._failures: dict[int, str] = {}
@@ -256,8 +277,8 @@ class VesselCprPanel(QWidget):
         self._btn_render.clicked.connect(lambda: self._emit_change())
 
         self._overlay_style = QComboBox()
-        self._overlay_style.addItem("filled", "filled")
         self._overlay_style.addItem("contour", "contour")
+        self._overlay_style.addItem("filled", "filled")
         self._overlay_style.setToolTip(
             "“Filled” tints the lumen and wall. “Contour” outlines them instead, "
             "which leaves the image underneath readable — a calcified plaque or a "
@@ -346,6 +367,10 @@ class VesselCprPanel(QWidget):
             self._xs_canvas = FigureCanvasQTAgg(self._xs_fig)
             self._xs_canvas.setMinimumWidth(180)
             self._xs_canvas.setMinimumHeight(180)
+            self._xs_canvas.mpl_connect("button_press_event", self._on_xs_press)
+            self._xs_canvas.mpl_connect("motion_notify_event", self._on_xs_motion)
+            self._xs_canvas.mpl_connect("button_release_event", self._on_xs_release)
+            self._xs_canvas.mpl_connect("scroll_event", self._on_xs_scroll)
 
             for fig in (self._cpr_fig, self._xs_fig):
                 style_image_figure(fig)
@@ -368,6 +393,54 @@ class VesselCprPanel(QWidget):
         root.addLayout(station_row)
 
     # ── layout helpers ───────────────────────────────────────────────────────
+
+    def set_contrast_source(self, layer: Any) -> None:
+        """Draw with *layer*'s own window, and follow it when it moves."""
+        previous = getattr(self, "_contrast_sub", None)
+        if previous is not None:
+            old_layer, callback = previous
+            try:
+                old_layer.events.contrast_limits.disconnect(callback)
+            except Exception:
+                pass
+        self._contrast_sub = None
+        self._contrast_layer = layer
+        if layer is None:
+            return
+
+        def _changed(_event: Any = None) -> None:
+            """Repaint both canvases at the layer's new window."""
+            self.redraw()
+            self._redraw_cross_section()
+
+        try:
+            layer.events.contrast_limits.connect(_changed)
+            self._contrast_sub = (layer, _changed)
+        except Exception:
+            pass
+
+    def contrast_limits(self) -> tuple[float, float] | None:
+        """The window to draw intensities with, or ``None`` to stretch per image."""
+        layer = getattr(self, "_contrast_layer", None)
+        if layer is None:
+            return None
+        try:
+            lo, hi = (float(v) for v in layer.contrast_limits)
+        except (TypeError, ValueError):
+            return None
+        return (lo, hi) if hi > lo else None
+
+    def set_wall_supplied(self, supplied: bool) -> None:
+        """Show the wall band by default only when a real wall mask was given."""
+        self._show_wall.blockSignals(True)
+        self._show_wall.setChecked(bool(supplied))
+        self._show_wall.blockSignals(False)
+        self._show_wall.setToolTip(
+            "Wall segmentation." if supplied
+            else "No wall mask was supplied; this band is dilated from the lumen, "
+                 "so it says where a wall of that thickness would be, not where "
+                 "one is."
+        )
 
     def _caption(self, text: str) -> QLabel:
         """A muted field caption for the control bar."""
@@ -598,6 +671,7 @@ class VesselCprPanel(QWidget):
             if ax is not None:
                 ax.clear()
                 ax.set_axis_off()
+        self._xs_last = None
         for fig, canvas in ((self._cpr_fig, self._cpr_canvas), (self._xs_fig, self._xs_canvas)):
             if canvas is not None:
                 style_image_figure(fig)
@@ -618,14 +692,18 @@ class VesselCprPanel(QWidget):
             image = to_numpy(vessel.cpr.image).T
             arc = to_numpy(vessel.cpr.arc_length_mm)
             ray = to_numpy(vessel.cpr.ray_mm)
-            finite = image[np.isfinite(image)]
-            # Percentile limits: a single bright voxel would otherwise flatten the
-            # whole vessel to mid-grey.
-            vmin, vmax = (
-                (float(np.percentile(finite, 1.0)), float(np.percentile(finite, 99.0)))
-                if finite.size
-                else (0.0, 1.0)
-            )
+            limits = self.contrast_limits()
+            if limits is not None:
+                vmin, vmax = limits
+            else:
+                finite = image[np.isfinite(image)]
+                # No layer to follow: percentile limits, because a single bright
+                # voxel would otherwise flatten the whole vessel to mid-grey.
+                vmin, vmax = (
+                    (float(np.percentile(finite, 1.0)), float(np.percentile(finite, 99.0)))
+                    if finite.size
+                    else (0.0, 1.0)
+                )
         if not vmax > vmin:
             vmin, vmax = None, None
         extent = [float(arc[0]), float(arc[-1]), float(ray[0]), float(ray[-1])]
@@ -728,11 +806,25 @@ class VesselCprPanel(QWidget):
             rgba[..., 3] = (arr > 0).astype(float) * float(alpha)
         ax.imshow(rgba, aspect="auto", origin="lower", extent=extent, interpolation="nearest")
 
-    def show_cross_section(self, image: Any, mask: Any = None, *, title: str = "") -> None:
-        """Draw the perpendicular cross-section at the current station."""
+    def show_cross_section(
+        self,
+        image: Any,
+        mask: Any = None,
+        *,
+        title: str = "",
+        ray_mm: float = DEFAULT_RAY_MM,
+        lumen_mm: float = 0.0,
+    ) -> None:
+        """Draw the perpendicular cross-section, with the angle ring over it."""
         self._station_label.setText(title or "—")
-        if self._xs_ax is None or self._xs_canvas is None:
+        self._xs_last = (image, mask, title, float(ray_mm), float(lumen_mm))
+        self._redraw_cross_section()
+
+    def _redraw_cross_section(self) -> None:
+        """Repaint the stored cross-section, at the current window and zoom."""
+        if self._xs_ax is None or self._xs_canvas is None or self._xs_last is None:
             return
+        image, mask, title, ray, lumen = self._xs_last
         ax = self._xs_ax
         ax.clear()
         ax.set_axis_off()
@@ -745,15 +837,123 @@ class VesselCprPanel(QWidget):
                     overlay = np.zeros((*m.shape, 4), dtype=float)
                     overlay[..., 0] = LUMEN_RGB[0]
                     overlay[..., 3] = (m > 0).astype(float) * 0.35
+        # Drawn in millimetres, which is what lets the ring and the lumen be
+        # compared by eye and what the drag reads its angle out of.
+        extent = [-ray, ray, -ray, ray]
         if arr.size:
-            ax.imshow(arr, cmap="gray", origin="lower", interpolation="nearest")
+            limits = self.contrast_limits()
+            ax.imshow(
+                arr, cmap="gray", origin="lower", extent=extent,
+                interpolation="nearest",
+                vmin=None if limits is None else limits[0],
+                vmax=None if limits is None else limits[1],
+            )
             if overlay is not None:
-                ax.imshow(overlay, origin="lower", interpolation="nearest")
+                ax.imshow(overlay, origin="lower", extent=extent, interpolation="nearest")
+        self._draw_angle_ring(ax, ray, lumen)
+        half = max(ray / max(self._xs_zoom, 1e-6), _MIN_XS_HALF_MM)
+        ax.set_xlim(-half, half)
+        ax.set_ylim(-half, half)
+        ax.set_aspect("equal")
         if title:
             ax.set_title(title, fontsize=8)
         style_image_figure(self._xs_fig)
         self._xs_fig.tight_layout(pad=0.2)
         self._xs_canvas.draw_idle()
+
+    def _ring_radius(self, ray_mm: float, lumen_mm: float) -> float:
+        """Radius of the angle ring: clear of the wall, inside the field of view.
+
+        *lumen_mm* is a diameter, so it is halved first — scaling the diameter put
+        the ring at nearly five lumen radii, far enough out that the angle could
+        not be judged against the vessel it belongs to.
+        """
+        wanted = max(float(lumen_mm), 0.0) / 2.0 * _RING_OVER_LUMEN
+        return min(max(wanted, 0.2 * float(ray_mm)), 0.88 * float(ray_mm))
+
+    def _draw_angle_ring(self, ax: Any, ray_mm: float, lumen_mm: float) -> None:
+        """Mark the centerline, and show the cut angle as a draggable ring."""
+        from matplotlib.patches import Circle
+
+        radius = self._ring_radius(ray_mm, lumen_mm)
+        theta = math.radians(self.angle_deg())
+        ax.add_patch(
+            Circle(
+                (0.0, 0.0), radius, fill=False,
+                edgecolor=STATION_COLOR, lw=1.0, alpha=0.75, linestyle=(0, (4, 3)),
+            )
+        )
+        # The reformation cuts along this direction, so the two arms are where the
+        # flat image's left and right edges come from.
+        dx, dy = math.cos(theta), math.sin(theta)
+        for sign in (1.0, -1.0):
+            ax.plot(
+                [0.0, sign * dx * radius], [0.0, sign * dy * radius],
+                color=STATION_COLOR, lw=1.2,
+            )
+        ax.plot([sign * dx * radius for sign in (1.0, -1.0)],
+                [sign * dy * radius for sign in (1.0, -1.0)],
+                linestyle="none", marker="o", markersize=4,
+                color=STATION_COLOR, markeredgecolor="none")
+        # The centerline itself: the one point the whole reformation hangs off.
+        ax.plot([0.0], [0.0], marker="+", markersize=7, color=CENTERLINE_COLOR, mew=1.2)
+
+    # ── cross-section interaction ────────────────────────────────────────────
+
+    def _xs_radius_at(self, event: Any) -> float | None:
+        """Distance of a cross-section event from the centerline, in millimetres."""
+        if event.inaxes is not self._xs_ax or event.xdata is None or event.ydata is None:
+            return None
+        return math.hypot(float(event.xdata), float(event.ydata))
+
+    def _on_xs_press(self, event: Any) -> None:
+        """Grab the angle ring when the press lands near it."""
+        if self._xs_last is None:
+            return
+        radius = self._xs_radius_at(event)
+        if radius is None:
+            return
+        ring = self._ring_radius(self._xs_last[3], self._xs_last[4])
+        if abs(radius - ring) <= max(ring * _RING_GRAB_FRACTION, _MIN_XS_HALF_MM):
+            self._angle_drag = True
+            self._set_angle_from(event)
+
+    def _on_xs_motion(self, event: Any) -> None:
+        """Turn the cutting plane while the ring is held."""
+        if self._angle_drag:
+            self._set_angle_from(event)
+
+    def _on_xs_release(self, _event: Any = None) -> None:
+        """Commit the new angle once the ring is let go."""
+        if not self._angle_drag:
+            return
+        self._angle_drag = False
+        self._emit_change()
+
+    def _set_angle_from(self, event: Any) -> None:
+        """Point the cut at the cursor, and redraw the ring without resampling."""
+        if event.inaxes is not self._xs_ax or event.xdata is None or event.ydata is None:
+            return
+        # The cut is a line, not an arrow: 0 and 180 degrees are the same plane.
+        degrees = math.degrees(math.atan2(float(event.ydata), float(event.xdata))) % 180.0
+        self._sync(self._angle, int(round(degrees)))
+        self._sync(self._angle_spin, int(round(degrees)))
+        self._redraw_cross_section()
+
+    def _on_xs_scroll(self, event: Any) -> None:
+        """Ctrl+wheel zooms the cross-section about the centerline."""
+        if event.inaxes is not self._xs_ax:
+            return
+        modifiers = getattr(event, "modifiers", None) or ()
+        if "ctrl" not in modifiers and "control" not in modifiers:
+            return
+        step = _XS_ZOOM_STEP if getattr(event, "button", "") == "up" else 1.0 / _XS_ZOOM_STEP
+        self._xs_zoom = min(max(self._xs_zoom * step, _MIN_XS_ZOOM), _MAX_XS_ZOOM)
+        self._redraw_cross_section()
+
+    def xs_zoom(self) -> float:
+        """Current cross-section magnification."""
+        return float(self._xs_zoom)
 
 
 def attach_vessel_cpr_dock(viewer: Any, panel: VesselCprPanel) -> Any:
@@ -828,6 +1028,7 @@ def install_vessel_cpr(
     lumen_layer: Any,
     lumen_mask: Any,
     image: Any = None,
+    image_layer: Any = None,
     wall_mask: Any = None,
     labels=None,
     centerline_mask: Any = None,
@@ -854,6 +1055,13 @@ def install_vessel_cpr(
     )
 
     panel = VesselCprPanel()
+    # Follow the image layer's window, so the flat vessel and the cross-section
+    # show the same greys the canvas does instead of a percentile stretch that
+    # disagrees with it the moment the brightness is touched.
+    panel.set_contrast_source(image_layer)
+    # A wall the caller did not supply is derived from the lumen — a stand-in for
+    # a segmentation, not a measurement of one — so it starts hidden.
+    panel.set_wall_supplied(wall_mask is not None)
     dock = attach_vessel_cpr_dock(viewer, panel)
 
     state: dict[str, Any] = {
@@ -970,7 +1178,11 @@ def install_vessel_cpr(
         width = to_numpy(vessel.diameter_mm())
         here = float(width[station]) if station < width.size else float("nan")
         panel.show_cross_section(
-            image_xs, mask_xs, title=f"{at:.1f} mm along — lumen {here:.1f} mm"
+            image_xs,
+            mask_xs,
+            title=f"{at:.1f} mm along — lumen {here:.1f} mm",
+            ray_mm=panel.ray_mm(),
+            lumen_mm=0.0 if here != here else here,
         )
         _keep_selection(lambda: _update_station_overlays(vessel, station))
         panel.redraw()

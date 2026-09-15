@@ -213,8 +213,11 @@ def _stage_options(**o: Any) -> dict[str, dict[str, Any]]:
         st.STAGE_PACKAGE: dict(
             label_set=o["label_set"], loss=o["loss"],
             # As above: resolved from stage 2's provenance, not assembled from the bundle name.
-            plans_identifier=None, configuration_name=None, folds=list(o["folds"]),
-            checkpoint="checkpoint_final.pth", name="topbrain-ta36", tag="latest",
+            plans_identifier=None, configuration_name=None,
+            # None for both: stage 5 packages every fold each run has, and resolves the
+            # checkpoint per model (final when every fold has one, else best).
+            folds=None, checkpoint=None, layout="split",
+            name="topbrain-ta36", tag="latest",
             build=False, save=False, backend=o["backend"],
         ),
         st.STAGE_SELFTRAIN: dict(

@@ -59,6 +59,17 @@ DEFAULT_FOLD_SEED: int = 12345
 #: the very contrast the hardest two classes depend on.
 DEFAULT_CT_WINDOW: tuple[float, float] = (300.0, 600.0)
 
+#: CTA windows for a multi-channel CT model, one per input channel, in Hounsfield
+#: units and each mapped onto [0, 1]. Channel 0 is wide enough to carry the
+#: surrounding anatomy; channel 1 is :data:`DEFAULT_CT_WINDOW`, the contrast
+#: window a single-channel model is given. Two views of the same volume is what
+#: lets the net separate contrast-filled lumen from the bone it runs through
+#: without either saturating.
+DEFAULT_CT_WINDOWS: tuple[tuple[float, float], ...] = (
+    (-50.0, 1100.0),
+    (300.0, 600.0),
+)
+
 #: Percentiles used to robust-scale MRA. TOF has no standardised scale and a hard floor at 0,
 #: so a fixed window is meaningless and percentiles are used instead.
 DEFAULT_MR_PERCENTILES: tuple[float, float] = (0.5, 99.5)
